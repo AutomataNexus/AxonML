@@ -7,11 +7,6 @@
 https://localhost/api/v1/bridge/datasets
 ```
 
-Or via Tailscale:
-```
-http://127.0.0.1:8000/api/v1/bridge/datasets
-```
-
 ---
 
 ## Built-in Datasets
@@ -304,7 +299,6 @@ let resp = client
 ## Contact / Server Info
 
 - **API Server:** localhost
-- **Tailscale IP:** 127.0.0.1
 - **Port:** 8000
 - **Health Check:** GET /health
 
