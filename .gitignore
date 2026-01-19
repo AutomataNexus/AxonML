@@ -72,7 +72,8 @@ venv/
 
 # Data files (large datasets)
 data/
-datasets/
+/datasets/
+!/crates/*/src/datasets/
 *.csv
 *.json
 !Cargo.json

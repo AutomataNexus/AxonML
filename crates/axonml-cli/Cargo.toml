@@ -23,6 +23,7 @@ documentation.workspace = true
 keywords = ["machine-learning", "deep-learning", "cli", "neural-network", "ai"]
 categories = ["command-line-utilities", "science", "development-tools"]
 description = "Command-line interface for the Axonml ML framework"
+readme = "README.md"
 
 [[bin]]
 name = "axonml"

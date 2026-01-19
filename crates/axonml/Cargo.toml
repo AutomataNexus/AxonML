@@ -6,6 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "A complete ML/AI framework in pure Rust - PyTorch-equivalent functionality"
+readme = "README.md"
 
 [features]
 default = ["full"]

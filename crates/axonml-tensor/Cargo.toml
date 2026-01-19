@@ -18,6 +18,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "N-dimensional tensor operations for the Axonml ML framework"
+readme = "README.md"
 keywords = ["tensor", "ndarray", "machine-learning", "linear-algebra"]
 categories = ["science", "mathematics"]
 

@@ -23,6 +23,7 @@ documentation.workspace = true
 keywords = ["profiling", "machine-learning", "performance", "memory", "benchmark"]
 categories = ["development-tools::profiling", "science"]
 description = "Profiling tools for the Axonml ML framework"
+readme = "README.md"
 
 [dependencies]
 # Internal crates

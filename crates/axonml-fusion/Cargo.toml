@@ -18,6 +18,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Kernel fusion optimization for the Axonml ML framework"
+readme = "README.md"
 keywords = ["kernel-fusion", "optimization", "machine-learning", "performance"]
 categories = ["science", "mathematics"]
 
