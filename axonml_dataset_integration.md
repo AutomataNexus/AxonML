@@ -7,11 +7,6 @@
 https://nexusconnectbridge.automatanexus.com/api/v1/bridge/datasets
 ```
 
-Or via Tailscale:
-```
-http://100.85.154.94:8000/api/v1/bridge/datasets
-```
-
 ---
 
 ## Built-in Datasets
@@ -304,7 +299,6 @@ let resp = client
 ## Contact / Server Info
 
 - **API Server:** nexusconnectbridge.automatanexus.com
-- **Tailscale IP:** 100.85.154.94
 - **Port:** 8000
 - **Health Check:** GET /health
 
