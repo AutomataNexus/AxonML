@@ -1,5 +1,7 @@
 # Axonml
 
+![AxonML](https://raw.githubusercontent.com/AutomataNexus/AxonML/main/AxonML-logo.png)
+
 > A complete, PyTorch-equivalent machine learning framework written in pure Rust.
 
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
