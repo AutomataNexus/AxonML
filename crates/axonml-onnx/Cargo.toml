@@ -1,0 +1,54 @@
+# =============================================================================
+# Axonml ONNX - ONNX Import/Export for ML Models
+# =============================================================================
+#
+# Provides ONNX (Open Neural Network Exchange) support for Axonml models,
+# enabling interoperability with PyTorch, TensorFlow, and other frameworks.
+#
+# @version 0.1.0
+# @author AutomataNexus Development Team
+# =============================================================================
+
+[package]
+name = "axonml-onnx"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ONNX import/export support for the Axonml ML framework"
+keywords = ["onnx", "machine-learning", "deep-learning", "neural-network", "model-conversion"]
+categories = ["science", "mathematics"]
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+# Internal crates
+axonml-core = { path = "../axonml-core" }
+axonml-tensor = { path = "../axonml-tensor" }
+axonml-nn = { path = "../axonml-nn" }
+
+# ONNX parsing
+prost = "0.13"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Collections
+indexmap = "2.0"
+
+# Byte manipulation
+bytemuck = { workspace = true }
+
+[build-dependencies]
+prost-build = "0.13"
+
+[dev-dependencies]
+tempfile = "3.0"

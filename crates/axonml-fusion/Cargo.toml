@@ -1,0 +1,40 @@
+# =============================================================================
+# Axonml Fusion - Kernel Fusion for Performance Optimization
+# =============================================================================
+#
+# Provides kernel fusion support for combining multiple operations into
+# single optimized kernels, reducing memory bandwidth and improving throughput.
+#
+# @version 0.1.0
+# @author AutomataNexus Development Team
+# =============================================================================
+
+[package]
+name = "axonml-fusion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Kernel fusion optimization for the Axonml ML framework"
+keywords = ["kernel-fusion", "optimization", "machine-learning", "performance"]
+categories = ["science", "mathematics"]
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+# Internal crates
+axonml-core = { path = "../axonml-core" }
+axonml-tensor = { path = "../axonml-tensor" }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Parallel processing
+rayon = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

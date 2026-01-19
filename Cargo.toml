@@ -1,0 +1,126 @@
+# =============================================================================
+# Axonml - Complete Rust ML/AI Framework
+# =============================================================================
+#
+# A PyTorch-equivalent machine learning framework written in pure Rust.
+# Provides tensors, automatic differentiation, neural networks, and more.
+#
+# @version 0.1.0
+# @author AutomataNexus Development Team
+# @license MIT OR Apache-2.0
+# =============================================================================
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/axonml-core",
+    "crates/axonml-tensor",
+    "crates/axonml-autograd",
+    "crates/axonml-nn",
+    "crates/axonml-optim",
+    "crates/axonml-data",
+    "crates/axonml-vision",
+    "crates/axonml-audio",
+    "crates/axonml-text",
+    "crates/axonml-distributed",
+    "crates/axonml-serialize",
+    "crates/axonml-onnx",
+    "crates/axonml-quant",
+    "crates/axonml-fusion",
+    "crates/axonml-profile",
+    "crates/axonml-llm",
+    "crates/axonml-jit",
+    "crates/axonml-cli",
+    "crates/axonml-tui",
+    "crates/axonml",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["AutomataNexus Development Team"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/automatanexus/axonml"
+homepage = "https://github.com/automatanexus/axonml"
+documentation = "https://docs.rs/axonml"
+keywords = ["machine-learning", "deep-learning", "neural-network", "tensor", "ai"]
+categories = ["science", "mathematics", "algorithms"]
+
+[workspace.dependencies]
+# Internal crates
+axonml-core = { path = "crates/axonml-core", version = "0.1.0" }
+axonml-tensor = { path = "crates/axonml-tensor", version = "0.1.0" }
+axonml-autograd = { path = "crates/axonml-autograd", version = "0.1.0" }
+axonml-nn = { path = "crates/axonml-nn", version = "0.1.0" }
+axonml-optim = { path = "crates/axonml-optim", version = "0.1.0" }
+axonml-data = { path = "crates/axonml-data", version = "0.1.0" }
+axonml-vision = { path = "crates/axonml-vision", version = "0.1.0" }
+axonml-audio = { path = "crates/axonml-audio", version = "0.1.0" }
+axonml-text = { path = "crates/axonml-text", version = "0.1.0" }
+axonml-distributed = { path = "crates/axonml-distributed", version = "0.1.0" }
+axonml-serialize = { path = "crates/axonml-serialize", version = "0.1.0" }
+axonml-onnx = { path = "crates/axonml-onnx", version = "0.1.0" }
+axonml-quant = { path = "crates/axonml-quant", version = "0.1.0" }
+axonml-fusion = { path = "crates/axonml-fusion", version = "0.1.0" }
+axonml-profile = { path = "crates/axonml-profile", version = "0.1.0" }
+axonml-llm = { path = "crates/axonml-llm", version = "0.1.0" }
+axonml-jit = { path = "crates/axonml-jit", version = "0.1.0" }
+
+# External dependencies
+thiserror = "1.0"
+num-traits = "0.2"
+rand = "0.8"
+rand_distr = "0.4"
+rayon = "1.10"
+parking_lot = "0.12"
+smallvec = "1.13"
+bytemuck = { version = "1.14", features = ["derive"] }
+half = { version = "2.4", features = ["bytemuck", "num-traits"] }
+sysinfo = "0.32"
+matrixmultiply = "0.3"
+rustc-hash = "2.1"
+
+# GPU backends
+cudarc = { version = "0.12", features = ["cuda-version-from-build-system"] }
+wgpu = "23.0"
+ash = "0.38"
+gpu-allocator = "0.27"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+prost = "0.13"
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+toml = "0.8"
+indicatif = "0.17"
+console = "0.15"
+colored = "2.1"
+walkdir = "2.5"
+tempfile = "3.10"
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+
+# W&B integration
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+dirs = "5.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.10", features = ["v4"] }
+
+# Testing
+approx = "0.5"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1
