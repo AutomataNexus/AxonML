@@ -6,6 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "JIT compilation for Axonml tensor operations"
+readme = "README.md"
 
 [dependencies]
 axonml-core = { workspace = true }

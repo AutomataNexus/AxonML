@@ -18,6 +18,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Core abstractions for the Axonml ML framework"
+readme = "README.md"
 keywords = ["tensor", "machine-learning", "device", "memory"]
 categories = ["science", "mathematics"]
 

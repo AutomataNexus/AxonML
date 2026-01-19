@@ -6,6 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Computer vision utilities for the Axonml ML framework"
+readme = "README.md"
 
 [dependencies]
 axonml-core.workspace = true
