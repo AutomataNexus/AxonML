@@ -1,0 +1,13 @@
+[package]
+name = "axonml-autograd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Automatic differentiation engine for Axonml ML framework"
+
+[dependencies]
+axonml-core.workspace = true
+axonml-tensor.workspace = true
+parking_lot.workspace = true

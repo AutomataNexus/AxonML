@@ -1,0 +1,36 @@
+# =============================================================================
+# Axonml Tensor - N-Dimensional Array Operations
+# =============================================================================
+#
+# Provides the core Tensor type and all tensor operations including creation,
+# arithmetic, broadcasting, indexing, and linear algebra operations.
+#
+# @version 0.1.0
+# @author AutomataNexus Development Team
+# =============================================================================
+
+[package]
+name = "axonml-tensor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "N-dimensional tensor operations for the Axonml ML framework"
+keywords = ["tensor", "ndarray", "machine-learning", "linear-algebra"]
+categories = ["science", "mathematics"]
+
+[features]
+default = ["std"]
+std = ["axonml-core/std"]
+
+[dependencies]
+axonml-core.workspace = true
+num-traits.workspace = true
+rand.workspace = true
+rand_distr.workspace = true
+smallvec.workspace = true
+
+[dev-dependencies]
+approx.workspace = true

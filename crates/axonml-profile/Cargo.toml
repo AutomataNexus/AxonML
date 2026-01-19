@@ -1,0 +1,47 @@
+# =============================================================================
+# Axonml Profile - Profiling Tools for Axonml ML Framework
+# =============================================================================
+#
+# Provides memory profiling, compute profiling, and bottleneck detection
+# for neural network training and inference.
+#
+# @version 0.1.0
+# @author AutomataNexus Development Team
+# @license MIT OR Apache-2.0
+# =============================================================================
+
+[package]
+name = "axonml-profile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords = ["profiling", "machine-learning", "performance", "memory", "benchmark"]
+categories = ["development-tools::profiling", "science"]
+description = "Profiling tools for the Axonml ML framework"
+
+[dependencies]
+# Internal crates
+axonml-core = { workspace = true }
+axonml-tensor = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Threading
+parking_lot = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }
+
+[features]
+default = []
+chrome-trace = []  # Chrome trace format export

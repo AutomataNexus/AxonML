@@ -1,0 +1,97 @@
+# =============================================================================
+# Axonml CLI - Command Line Interface for Axonml ML Framework
+# =============================================================================
+#
+# Provides a unified CLI for project scaffolding, training, evaluation,
+# model management, and deployment of Axonml ML models.
+#
+# @version 0.1.0
+# @author AutomataNexus Development Team
+# @license MIT OR Apache-2.0
+# =============================================================================
+
+[package]
+name = "axonml-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords = ["machine-learning", "deep-learning", "cli", "neural-network", "ai"]
+categories = ["command-line-utilities", "science", "development-tools"]
+description = "Command-line interface for the Axonml ML framework"
+
+[[bin]]
+name = "axonml"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+axonml-core = { workspace = true }
+axonml-tensor = { workspace = true }
+axonml-autograd = { workspace = true }
+axonml-nn = { workspace = true }
+axonml-optim = { workspace = true }
+axonml-data = { workspace = true }
+axonml-vision = { workspace = true }
+axonml-serialize = { workspace = true }
+axonml-tui = { path = "../axonml-tui" }
+
+# CLI framework
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+
+# Configuration
+toml = "0.8"
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Async runtime (for serve command)
+tokio = { version = "1.0", features = ["full"], optional = true }
+
+# Progress and output
+indicatif = "0.17"
+console = "0.15"
+colored = "2.1"
+
+# File operations
+walkdir = "2.5"
+tempfile = "3.10"
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = "1.0"
+
+# Random (for simulation)
+rand = { workspace = true }
+
+# System info (for bench/gpu commands)
+num_cpus = "1.16"
+sysinfo = { workspace = true }
+
+# GPU detection and compute
+wgpu = { workspace = true }
+pollster = "0.4"
+bytemuck = { workspace = true }
+
+# Directory operations (for hub, kaggle)
+dirs = { workspace = true }
+
+# W&B integration (optional)
+reqwest = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+
+[features]
+default = ["wandb"]
+serve = ["tokio"]
+wandb = ["reqwest", "chrono", "uuid"]
+kaggle = ["reqwest"]
+dataset-api = ["reqwest"]
+hub-download = ["reqwest"]

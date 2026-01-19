@@ -1,0 +1,11 @@
+# Clippy configuration for Ferrite ML Framework
+# These settings reflect intentional design choices for an ML/tensor library
+
+# Allow more arguments for complex tensor operations
+too-many-arguments-threshold = 12
+
+# Single-char names are standard in math/tensor code (x, y, n, i, j, k)
+single-char-binding-names-threshold = 8
+
+# ML frameworks target 64-bit systems
+cognitive-complexity-threshold = 50
