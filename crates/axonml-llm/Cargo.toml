@@ -23,6 +23,7 @@ documentation.workspace = true
 keywords = ["llm", "bert", "gpt", "transformer", "machine-learning"]
 categories = ["science", "algorithms"]
 description = "Large Language Model architectures for the Axonml ML framework"
+readme = "README.md"
 
 [dependencies]
 # Internal crates

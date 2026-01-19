@@ -18,6 +18,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "ONNX import/export support for the Axonml ML framework"
+readme = "README.md"
 keywords = ["onnx", "machine-learning", "deep-learning", "neural-network", "model-conversion"]
 categories = ["science", "mathematics"]
 

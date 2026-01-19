@@ -18,6 +18,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Model quantization for the Axonml ML framework"
+readme = "README.md"
 keywords = ["quantization", "machine-learning", "deep-learning", "int8", "int4"]
 categories = ["science", "mathematics"]
 
