@@ -1,0 +1,46 @@
+# =============================================================================
+# Axonml Quant - Model Quantization for ML Inference
+# =============================================================================
+#
+# Provides quantization support for reducing model size and improving
+# inference performance. Supports INT8, INT4, and other quantization formats.
+#
+# @version 0.1.0
+# @author AutomataNexus Development Team
+# =============================================================================
+
+[package]
+name = "axonml-quant"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Model quantization for the Axonml ML framework"
+keywords = ["quantization", "machine-learning", "deep-learning", "int8", "int4"]
+categories = ["science", "mathematics"]
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+# Internal crates
+axonml-core = { path = "../axonml-core" }
+axonml-tensor = { path = "../axonml-tensor" }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Byte manipulation
+bytemuck = { workspace = true }
+
+# Half precision
+half = { workspace = true }
+
+# Parallel processing
+rayon = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

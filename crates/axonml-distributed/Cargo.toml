@@ -1,0 +1,14 @@
+[package]
+name = "axonml-distributed"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Distributed training utilities for the Axonml ML framework"
+
+[dependencies]
+axonml-core.workspace = true
+axonml-tensor.workspace = true
+axonml-autograd.workspace = true
+axonml-nn.workspace = true

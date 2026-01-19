@@ -1,0 +1,14 @@
+[package]
+name = "axonml-data"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Data loading utilities for the Axonml ML framework"
+
+[dependencies]
+axonml-core.workspace = true
+axonml-tensor.workspace = true
+rand = "0.8"
+rayon = "1.8"

@@ -1,0 +1,28 @@
+[package]
+name = "axonml-vision"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Computer vision utilities for the Axonml ML framework"
+
+[dependencies]
+axonml-core.workspace = true
+axonml-tensor.workspace = true
+axonml-data.workspace = true
+axonml-nn.workspace = true
+axonml-autograd.workspace = true
+rand = "0.8"
+byteorder = "1.5"
+flate2 = "1.0"
+dirs.workspace = true
+
+[features]
+default = []
+download = ["reqwest"]
+
+[dependencies.reqwest]
+version = "0.12"
+features = ["blocking"]
+optional = true

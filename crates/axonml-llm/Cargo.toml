@@ -1,0 +1,49 @@
+# =============================================================================
+# Axonml LLM - Large Language Model Architectures
+# =============================================================================
+#
+# Provides implementations of transformer-based language models including
+# BERT, GPT-2, and building blocks for custom LLM architectures.
+#
+# @version 0.1.0
+# @author AutomataNexus Development Team
+# @license MIT OR Apache-2.0
+# =============================================================================
+
+[package]
+name = "axonml-llm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords = ["llm", "bert", "gpt", "transformer", "machine-learning"]
+categories = ["science", "algorithms"]
+description = "Large Language Model architectures for the Axonml ML framework"
+
+[dependencies]
+# Internal crates
+axonml-core = { workspace = true }
+axonml-tensor = { workspace = true }
+axonml-autograd = { workspace = true }
+axonml-nn = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Randomness
+rand = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }
+
+[features]
+default = []
+pretrained = []  # Load pretrained weights

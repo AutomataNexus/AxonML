@@ -1,0 +1,56 @@
+# =============================================================================
+# Axonml Core - Foundation Layer
+# =============================================================================
+#
+# Core abstractions for the Axonml ML framework including device management,
+# memory storage, data types, and backend implementations.
+#
+# @version 0.1.0
+# @author AutomataNexus Development Team
+# =============================================================================
+
+[package]
+name = "axonml-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core abstractions for the Axonml ML framework"
+keywords = ["tensor", "machine-learning", "device", "memory"]
+categories = ["science", "mathematics"]
+
+[features]
+default = ["std"]
+std = []
+cuda = ["dep:cudarc"]
+vulkan = ["dep:ash", "dep:gpu-allocator"]
+metal = ["dep:metal", "dep:objc"]
+wgpu = ["dep:wgpu", "dep:pollster"]
+
+[dependencies]
+thiserror.workspace = true
+num-traits.workspace = true
+bytemuck.workspace = true
+half.workspace = true
+parking_lot.workspace = true
+smallvec.workspace = true
+sysinfo.workspace = true
+matrixmultiply.workspace = true
+
+# GPU backends (optional)
+cudarc = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }
+ash = { workspace = true, optional = true }
+gpu-allocator = { workspace = true, optional = true }
+
+# Async for wgpu
+pollster = { version = "0.4", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = { version = "0.29", optional = true }
+objc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+approx.workspace = true

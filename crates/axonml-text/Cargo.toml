@@ -1,0 +1,16 @@
+[package]
+name = "axonml-text"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Text processing utilities for the Axonml ML framework"
+
+[dependencies]
+axonml-core.workspace = true
+axonml-tensor.workspace = true
+axonml-data.workspace = true
+axonml-nn.workspace = true
+axonml-autograd.workspace = true
+rand = "0.8"

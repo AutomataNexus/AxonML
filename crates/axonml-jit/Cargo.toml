@@ -1,0 +1,23 @@
+[package]
+name = "axonml-jit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "JIT compilation for Axonml tensor operations"
+
+[dependencies]
+axonml-core = { workspace = true }
+axonml-tensor = { workspace = true }
+
+# Cranelift JIT backend
+cranelift = "0.111"
+cranelift-jit = "0.111"
+cranelift-module = "0.111"
+cranelift-native = "0.111"
+target-lexicon = "0.12"
+
+# Utilities
+parking_lot = "0.12"
+rustc-hash = "2.0"

@@ -1,0 +1,48 @@
+[package]
+name = "axonml"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "A complete ML/AI framework in pure Rust - PyTorch-equivalent functionality"
+
+[features]
+default = ["full"]
+# Core features (always included)
+core = ["dep:axonml-core", "dep:axonml-tensor", "dep:axonml-autograd"]
+# Neural network features
+nn = ["core", "dep:axonml-nn", "dep:axonml-optim"]
+# Data loading
+data = ["core", "dep:axonml-data"]
+# Vision processing
+vision = ["nn", "data", "dep:axonml-vision"]
+# Text processing
+text = ["nn", "data", "dep:axonml-text"]
+# Audio processing
+audio = ["nn", "data", "dep:axonml-audio"]
+# Distributed training
+distributed = ["nn", "dep:axonml-distributed"]
+# Profiling tools
+profile = ["core", "dep:axonml-profile"]
+# LLM architectures (BERT, GPT-2)
+llm = ["nn", "dep:axonml-llm"]
+# JIT compilation
+jit = ["core", "dep:axonml-jit"]
+# Full feature set
+full = ["core", "nn", "data", "vision", "text", "audio", "distributed", "profile", "llm", "jit"]
+
+[dependencies]
+axonml-core = { workspace = true, optional = true }
+axonml-tensor = { workspace = true, optional = true }
+axonml-autograd = { workspace = true, optional = true }
+axonml-nn = { workspace = true, optional = true }
+axonml-optim = { workspace = true, optional = true }
+axonml-data = { workspace = true, optional = true }
+axonml-vision = { workspace = true, optional = true }
+axonml-text = { workspace = true, optional = true }
+axonml-audio = { workspace = true, optional = true }
+axonml-distributed = { workspace = true, optional = true }
+axonml-profile = { workspace = true, optional = true }
+axonml-llm = { workspace = true, optional = true }
+axonml-jit = { workspace = true, optional = true }
