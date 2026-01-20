@@ -2,7 +2,7 @@
 
 <p align="center">
   <!-- Logo placeholder -->
-  <img src="../../assets/logo.png" alt="AxonML Logo" width="200" height="200" />
+  <img src="https://raw.githubusercontent.com/AutomataNexus/AxonML/main/AxonML-logo.png" alt="AxonML Logo" width="200" height="200" />
 </p>
 
 <p align="center">
