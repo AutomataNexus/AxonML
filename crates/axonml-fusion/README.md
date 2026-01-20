@@ -1,117 +1,173 @@
 # axonml-fusion
 
-[![Crates.io](https://img.shields.io/crates/v/axonml-fusion.svg)](https://crates.io/crates/axonml-fusion)
-[![Docs.rs](https://docs.rs/axonml-fusion/badge.svg)](https://docs.rs/axonml-fusion)
-[![Downloads](https://img.shields.io/crates/d/axonml-fusion.svg)](https://crates.io/crates/axonml-fusion)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <!-- Logo placeholder -->
+  <img src="../../assets/logo.png" alt="AxonML Logo" width="200" height="200" />
+</p>
 
-> Kernel fusion optimization for the [Axonml](https://github.com/AutomataNexus/AxonML) machine learning framework.
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust: 1.75+"></a>
+  <a href="https://crates.io/crates/axonml-fusion"><img src="https://img.shields.io/badge/crates.io-0.1.0-green.svg" alt="Version: 0.1.0"></a>
+  <a href="https://github.com/axonml/axonml"><img src="https://img.shields.io/badge/part%20of-AxonML-blueviolet.svg" alt="Part of AxonML"></a>
+</p>
 
 ## Overview
 
-`axonml-fusion` provides automatic kernel fusion to reduce memory bandwidth and improve performance. Fuses common operation patterns like MatMul+Bias+Activation into single optimized kernels.
+`axonml-fusion` provides kernel fusion support for combining multiple operations into single optimized kernels. By reducing memory bandwidth requirements and kernel launch overhead, fusion significantly improves performance for neural network inference and training workloads.
 
 ## Features
 
-### Fusion Patterns
-- **FusedLinear** - MatMul + Bias + Activation
-- **FusedConv** - Convolution + BatchNorm + Activation
-- **FusedElementwise** - Chains of element-wise operations
-- **FusedAttention** - QKV projection + attention + output
+- **Pattern Detection**: Automatic detection of fusible operation patterns in computational graphs
+- **Linear Fusion**: Fused MatMul + Bias + Activation operations (ReLU, GELU, Sigmoid, Tanh, SiLU)
+- **Elementwise Fusion**: Chain multiple elementwise operations into single memory-efficient kernels
+- **Graph Optimizer**: Configurable fusion optimizer with conservative and aggressive modes
+- **Builder Pattern**: Fluent API for constructing fused elementwise operation chains
+- **Performance Statistics**: Track fusions applied, operations eliminated, and estimated speedup
+- **Parallel Execution**: Leverages Rayon for parallel tensor operations
 
-### Benefits
-- **Up to 2x speedup** for memory-bound operations
-- **Reduced memory traffic** - Fewer intermediate tensors
-- **Automatic pattern detection** - No manual optimization needed
+## Modules
 
-## Installation
-
-```toml
-[dependencies]
-axonml-fusion = "0.1"
-```
+| Module | Description |
+|--------|-------------|
+| `patterns` | Fusion pattern definitions and detection algorithms for MatMul, Conv, and Elementwise patterns |
+| `elementwise` | Fused elementwise operations with builder pattern for chaining Add, Mul, ReLU, Sigmoid, etc. |
+| `linear` | Fused linear layer operations combining MatMul + Bias + Activation |
+| `optimizer` | Graph fusion optimizer with configurable passes and statistics tracking |
+| `error` | Error types and Result alias for fusion operations |
 
 ## Usage
 
-### Automatic Fusion
-
-```rust
-use axonml_fusion::optimize_graph;
-
-let model = create_model();
-
-// Automatically detect and apply fusions
-let optimized = optimize_graph(&model)?;
-
-// Benchmark improvement
-let original_time = benchmark(&model);
-let optimized_time = benchmark(&optimized);
-println!("Speedup: {:.2}x", original_time / optimized_time);
-```
-
-### FusedLinear
-
-```rust
-use axonml_fusion::FusedLinear;
-
-// Fuses: y = relu(x @ W + b)
-let layer = FusedLinear::new(784, 256)
-    .activation(Activation::ReLU);
-
-// Single kernel instead of 3 separate operations
-let output = layer.forward(&input);
-```
-
-### FusedElementwise
-
-```rust
-use axonml_fusion::FusedElementwise;
-
-// Fuses: y = (x + 1) * 2 - 0.5
-let fused = FusedElementwise::new()
-    .add(1.0)
-    .mul(2.0)
-    .sub(0.5);
-
-let output = fused.forward(&input);
-```
-
-### Pattern Detection
-
-```rust
-use axonml_fusion::{FusionOptimizer, FusionPattern};
-
-let optimizer = FusionOptimizer::new()
-    .enable(FusionPattern::LinearBiasRelu)
-    .enable(FusionPattern::ConvBnRelu)
-    .enable(FusionPattern::ElementwiseChain);
-
-let optimized = optimizer.optimize(&model)?;
-
-// Print detected patterns
-for pattern in optimizer.detected_patterns() {
-    println!("Found: {:?}", pattern);
-}
-```
-
-## Supported Patterns
-
-| Pattern | Operations | Speedup |
-|---------|------------|---------|
-| LinearBiasRelu | MatMul + Bias + ReLU | ~1.5x |
-| LinearBiasGelu | MatMul + Bias + GELU | ~1.5x |
-| ConvBnRelu | Conv2d + BatchNorm + ReLU | ~1.8x |
-| ElementwiseChain | Multiple element-wise ops | ~2x |
-| SoftmaxCrossEntropy | Softmax + CrossEntropy | ~1.3x |
-
-## Part of Axonml
+Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = "0.1"  # Includes fusion
+axonml-fusion = "0.1.0"
+```
+
+### Fused Linear Operations
+
+```rust
+use axonml_fusion::{fuse_matmul_bias_relu, FusedLinear, Activation};
+use axonml_tensor::Tensor;
+
+// Create weight and bias tensors
+let weight = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2])?;
+let bias = Tensor::from_vec(vec![0.5, 0.5], &[2])?;
+
+// Create fused MatMul + Bias + ReLU operation
+let fused = fuse_matmul_bias_relu(&weight, &bias)?;
+
+// Execute fused operation
+let input = Tensor::from_vec(vec![1.0, 1.0], &[2])?;
+let output = fused.forward(&input)?;
+```
+
+### Fused Elementwise Operations
+
+```rust
+use axonml_fusion::{FusedElementwise, fused_scale_bias_relu};
+
+// Build a fused elementwise chain using the builder
+let fused = FusedElementwise::builder()
+    .mul(2.0)      // Scale by 2
+    .add(1.0)      // Add bias
+    .relu()        // Apply ReLU
+    .build();
+
+let output = fused.forward(&input)?;
+
+// Or use convenience functions
+let scale_bias_relu = fused_scale_bias_relu(2.0, 1.0);
+```
+
+### Graph Optimization
+
+```rust
+use axonml_fusion::{optimize_graph, FusionConfig, OpType};
+
+// Define operation sequence
+let ops = vec![
+    OpType::MatMul,
+    OpType::Add,
+    OpType::Relu,
+    OpType::Add,
+    OpType::Mul,
+];
+
+// Optimize with default configuration
+let (patterns, stats) = optimize_graph(&ops, None)?;
+
+println!("Fusions applied: {}", stats.fusions_applied);
+println!("Operations eliminated: {}", stats.ops_eliminated);
+println!("Estimated speedup: {:.2}x", stats.estimated_speedup);
+```
+
+### Custom Fusion Configuration
+
+```rust
+use axonml_fusion::{FusionOptimizer, FusionConfig};
+
+// Create conservative configuration
+let config = FusionConfig::conservative();
+
+// Or customize specific settings
+let config = FusionConfig {
+    fuse_elementwise: true,
+    fuse_linear: true,
+    fuse_conv: false,
+    min_elementwise_chain: 3,
+    aggressive: false,
+};
+
+let mut optimizer = FusionOptimizer::with_config(config);
+let patterns = optimizer.analyze(&ops);
+```
+
+## Supported Fusion Patterns
+
+| Pattern | Operations | Estimated Speedup |
+|---------|------------|-------------------|
+| MatMul + Bias | MatMul, Add | 1.2x |
+| MatMul + Bias + ReLU | MatMul, Add, ReLU | 1.3x |
+| MatMul + Bias + GELU | MatMul, Add, GELU | 1.3x |
+| Conv + BatchNorm | Conv, BatchNorm | 1.3x |
+| Conv + BatchNorm + ReLU | Conv, BatchNorm, ReLU | 1.4x |
+| Elementwise Chain | Multiple elementwise ops | 2.0x |
+| Add + ReLU | Add, ReLU | 1.8x |
+| Mul + Add (FMA) | Mul, Add | 1.5x |
+
+## Elementwise Operations
+
+The `FusedElementwise` builder supports:
+
+- `add(f32)` - Add constant
+- `mul(f32)` - Multiply by constant
+- `relu()` - ReLU activation
+- `leaky_relu(f32)` - Leaky ReLU with alpha
+- `sigmoid()` - Sigmoid activation
+- `tanh()` - Hyperbolic tangent
+- `exp()` - Exponential
+- `log()` - Natural logarithm
+- `sqrt()` - Square root
+- `square()` - Square
+- `clamp(f32, f32)` - Clamp to range
+- `neg()` - Negation
+- `abs()` - Absolute value
+
+## Tests
+
+Run the test suite:
+
+```bash
+cargo test -p axonml-fusion
 ```
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- MIT License
+- Apache License, Version 2.0
+
+at your option.

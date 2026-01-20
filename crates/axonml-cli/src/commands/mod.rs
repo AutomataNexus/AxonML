@@ -8,6 +8,7 @@
 pub mod analyze;
 pub mod bench;
 pub mod convert;
+pub mod dashboard;
 pub mod data;
 pub mod dataset;
 pub mod eval;
