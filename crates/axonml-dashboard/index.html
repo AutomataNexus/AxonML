@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AxonML - Machine Learning Dashboard">
+    <meta name="theme-color" content="#14b8a6">
+
+    <title>AxonML Dashboard</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
+
+    <!-- Styles -->
+    <link data-trunk rel="css" href="assets/styles.css">
+
+    <!-- Preload fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- WASM bundle -->
+    <link data-trunk rel="rust" data-wasm-opt="z">
+</head>
+<body>
+    <!-- Loading spinner shown while WASM loads -->
+    <div id="loading" class="loading-container">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading AxonML Dashboard...</p>
+        </div>
+    </div>
+
+    <!-- App will be mounted here -->
+    <div id="app"></div>
+
+    <noscript>
+        <div class="noscript-warning">
+            <h1>JavaScript Required</h1>
+            <p>AxonML Dashboard requires JavaScript to be enabled. Please enable JavaScript in your browser settings.</p>
+        </div>
+    </noscript>
+
+    <script>
+        // Remove loading spinner when WASM is ready
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                var loading = document.getElementById('loading');
+                if (loading) {
+                    loading.style.opacity = '0';
+                    setTimeout(function() {
+                        loading.style.display = 'none';
+                    }, 300);
+                }
+            }, 500);
+        });
+    </script>
+</body>
+</html>

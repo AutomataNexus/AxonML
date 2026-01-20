@@ -119,6 +119,18 @@ pub enum Commands {
 
     /// Dataset management (NexusConnectBridge)
     Dataset(DatasetArgs),
+
+    /// Start the AxonML dashboard and API server
+    Start(StartArgs),
+
+    /// Stop running AxonML services
+    Stop(StopArgs),
+
+    /// Check status of AxonML services
+    Status(StatusArgs),
+
+    /// View logs from AxonML services
+    Logs(LogsArgs),
 }
 
 // =============================================================================
@@ -1542,4 +1554,92 @@ pub struct DatasetDownloadArgs {
     /// Output directory
     #[arg(short, long)]
     pub output: Option<String>,
+}
+
+// =============================================================================
+// Dashboard/Server Commands
+// =============================================================================
+
+/// Arguments for the `start` command
+#[derive(Parser, Debug)]
+pub struct StartArgs {
+    /// Start only the API server (backend)
+    #[arg(long, conflicts_with = "dashboard")]
+    pub server: bool,
+
+    /// Start only the dashboard (frontend)
+    #[arg(long, conflicts_with = "server")]
+    pub dashboard: bool,
+
+    /// API server port
+    #[arg(long, default_value = "3000")]
+    pub port: u16,
+
+    /// Dashboard port
+    #[arg(long, default_value = "8080")]
+    pub dashboard_port: u16,
+
+    /// Host to bind to
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+
+    /// Run in foreground (don't daemonize)
+    #[arg(short, long)]
+    pub foreground: bool,
+
+    /// Path to config file
+    #[arg(short, long)]
+    pub config: Option<String>,
+}
+
+/// Arguments for the `stop` command
+#[derive(Parser, Debug)]
+pub struct StopArgs {
+    /// Stop only the API server
+    #[arg(long, conflicts_with = "dashboard")]
+    pub server: bool,
+
+    /// Stop only the dashboard
+    #[arg(long, conflicts_with = "server")]
+    pub dashboard: bool,
+
+    /// Force stop (SIGKILL instead of SIGTERM)
+    #[arg(short, long)]
+    pub force: bool,
+}
+
+/// Arguments for the `status` command
+#[derive(Parser, Debug)]
+pub struct StatusArgs {
+    /// Show detailed status information
+    #[arg(short, long)]
+    pub detailed: bool,
+
+    /// Output format (text, json)
+    #[arg(short, long, default_value = "text")]
+    pub format: String,
+}
+
+/// Arguments for the `logs` command
+#[derive(Parser, Debug)]
+pub struct LogsArgs {
+    /// Show only server logs
+    #[arg(long, conflicts_with = "dashboard")]
+    pub server: bool,
+
+    /// Show only dashboard logs
+    #[arg(long, conflicts_with = "server")]
+    pub dashboard: bool,
+
+    /// Number of lines to show
+    #[arg(short, long, default_value = "50")]
+    pub lines: usize,
+
+    /// Follow logs in real-time
+    #[arg(short, long)]
+    pub follow: bool,
+
+    /// Filter logs by level (error, warn, info, debug, trace)
+    #[arg(long)]
+    pub level: Option<String>,
 }

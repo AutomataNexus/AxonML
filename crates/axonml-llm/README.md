@@ -1,228 +1,227 @@
 # axonml-llm
 
-[![Crates.io](https://img.shields.io/crates/v/axonml-llm.svg)](https://crates.io/crates/axonml-llm)
-[![Docs.rs](https://docs.rs/axonml-llm/badge.svg)](https://docs.rs/axonml-llm)
-[![Downloads](https://img.shields.io/crates/d/axonml-llm.svg)](https://crates.io/crates/axonml-llm)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+<!-- Logo placeholder -->
+<p align="center">
+  <img src="../../assets/logo.png" alt="AxonML Logo" width="200">
+</p>
 
-> Large language model architectures for the [Axonml](https://github.com/AutomataNexus/AxonML) machine learning framework.
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust 1.75+"></a>
+  <a href="https://crates.io/crates/axonml-llm"><img src="https://img.shields.io/badge/crates.io-0.1.0-green.svg" alt="Crate Version"></a>
+  <a href="https://github.com/AutomataNexus/AxonML"><img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML"></a>
+</p>
+
+---
 
 ## Overview
 
-`axonml-llm` provides implementations of popular large language model architectures including BERT, GPT-2, LLaMA, and more. Includes tokenizers, pretrained weights loading, and optimized inference with KV-cache.
+`axonml-llm` provides implementations of popular transformer-based large language model architectures for the AxonML framework. This crate includes complete implementations of BERT and GPT-2 models, along with modular building blocks for constructing custom LLM architectures.
+
+Built on top of `axonml-tensor` and `axonml-autograd`, this crate enables training and inference of transformer models entirely in pure Rust.
+
+---
 
 ## Features
 
-### Architectures
-- **BERT** - Bidirectional encoder (base, large)
-- **GPT-2** - Autoregressive decoder (small, medium, large, xl)
-- **LLaMA** - Meta's LLaMA architecture
-- **Mistral** - Mistral 7B architecture
-- **Phi** - Microsoft Phi models
+- **BERT Implementation** - Full Bidirectional Encoder Representations from Transformers with support for sequence classification, masked language modeling, and custom heads.
 
-### Inference Optimizations
-- **KV-cache** - Cached key-value for fast generation
-- **Flash Attention** - Memory-efficient attention
-- **Grouped Query Attention** - GQA support
-- **Rotary Embeddings** - RoPE position encoding
+- **GPT-2 Implementation** - Complete Generative Pre-trained Transformer 2 with all model sizes (Small, Medium, Large, XL) and language modeling head.
 
-### Tokenization
-- **BPE tokenizer** - Byte-pair encoding
-- **WordPiece** - BERT-style tokenization
-- **SentencePiece** - Universal tokenizer
-- **Tiktoken** - OpenAI-compatible tokenization
+- **Multi-Head Attention** - Efficient multi-head self-attention and causal self-attention implementations with configurable heads and dimensions.
 
-### Utilities
-- **Weight loading** - Load from HuggingFace, GGUF, SafeTensors
-- **Quantization** - INT8/INT4 inference
-- **Streaming** - Token-by-token generation
-- **Batched inference** - Process multiple sequences
+- **Transformer Building Blocks** - Modular encoder and decoder blocks with layer normalization, feed-forward networks, and residual connections.
 
-## Installation
+- **Embedding Layers** - Token embeddings, learned positional embeddings, sinusoidal positional encodings, and BERT/GPT-2 combined embeddings.
 
-```toml
-[dependencies]
-axonml-llm = "0.1"
-```
+- **Text Generation** - Comprehensive generation utilities including greedy decoding, temperature sampling, top-k/top-p filtering, and beam search.
+
+- **Configurable Architectures** - Pre-defined configurations for BERT-base, BERT-large, GPT-2 Small/Medium/Large/XL, and tiny variants for testing.
+
+---
+
+## Modules
+
+| Module | Description |
+|--------|-------------|
+| `attention` | Multi-head self-attention and causal self-attention mechanisms |
+| `bert` | BERT model with classification and masked LM variants |
+| `config` | Configuration structs for BERT, GPT-2, and base transformers |
+| `embedding` | Token, positional, and combined embedding layers |
+| `error` | Error types and result definitions for LLM operations |
+| `generation` | Text generation utilities, sampling strategies, and beam search |
+| `gpt2` | GPT-2 model with language modeling head |
+| `transformer` | Encoder/decoder blocks, layer norm, and feed-forward networks |
+
+---
 
 ## Usage
 
-### Text Generation with GPT-2
-
-```rust
-use axonml_llm::{GPT2, GPT2Tokenizer, GenerationConfig};
-
-// Load model and tokenizer
-let model = GPT2::from_pretrained("gpt2")?;
-let tokenizer = GPT2Tokenizer::from_pretrained("gpt2")?;
-
-// Encode input
-let input_ids = tokenizer.encode("The future of AI is")?;
-
-// Generate
-let config = GenerationConfig {
-    max_new_tokens: 50,
-    temperature: 0.7,
-    top_p: 0.9,
-    ..Default::default()
-};
-
-let output_ids = model.generate(&input_ids, &config)?;
-let text = tokenizer.decode(&output_ids)?;
-
-println!("{}", text);
-```
-
-### BERT for Classification
-
-```rust
-use axonml_llm::{BertForSequenceClassification, BertTokenizer};
-
-// Load fine-tuned model
-let model = BertForSequenceClassification::from_pretrained(
-    "bert-base-uncased",
-    num_labels: 2,
-)?;
-let tokenizer = BertTokenizer::from_pretrained("bert-base-uncased")?;
-
-// Tokenize
-let encoding = tokenizer.encode_pair(
-    "This movie was great!",
-    None,
-    max_length: 512,
-)?;
-
-// Classify
-let logits = model.forward(&encoding.input_ids, &encoding.attention_mask)?;
-let prediction = logits.argmax(-1);
-```
-
-### LLaMA with Quantization
-
-```rust
-use axonml_llm::{LlamaForCausalLM, LlamaTokenizer};
-use axonml_quant::QuantFormat;
-
-// Load quantized model (INT4)
-let model = LlamaForCausalLM::from_pretrained("meta-llama/Llama-2-7b")?
-    .quantize(QuantFormat::Q4_0)?;
-
-let tokenizer = LlamaTokenizer::from_pretrained("meta-llama/Llama-2-7b")?;
-
-// Generate with KV-cache
-let mut kv_cache = model.create_kv_cache();
-
-let input_ids = tokenizer.encode("Hello, how are you?")?;
-let output = model.generate_with_cache(&input_ids, &mut kv_cache, 100)?;
-```
-
-### Streaming Generation
-
-```rust
-use axonml_llm::{GPT2, GenerationConfig};
-
-let model = GPT2::from_pretrained("gpt2-medium")?;
-let tokenizer = GPT2Tokenizer::from_pretrained("gpt2-medium")?;
-
-let input_ids = tokenizer.encode("Once upon a time")?;
-
-// Stream tokens one by one
-for token in model.generate_stream(&input_ids, &config) {
-    let text = tokenizer.decode_single(token?)?;
-    print!("{}", text);
-    std::io::stdout().flush()?;
-}
-```
-
-### Embeddings with BERT
-
-```rust
-use axonml_llm::{BertModel, BertTokenizer};
-
-let model = BertModel::from_pretrained("bert-base-uncased")?;
-let tokenizer = BertTokenizer::from_pretrained("bert-base-uncased")?;
-
-let encoding = tokenizer.encode("Hello world")?;
-
-// Get embeddings
-let output = model.forward(&encoding.input_ids, &encoding.attention_mask)?;
-
-// Use [CLS] token embedding for sentence representation
-let sentence_embedding = output.last_hidden_state.select(1, 0);
-
-// Or use mean pooling
-let mean_embedding = output.last_hidden_state.mean(1);
-```
-
-### Load GGUF Models
-
-```rust
-use axonml_llm::{load_gguf, GGUFModel};
-
-// Load GGUF format (llama.cpp compatible)
-let model = load_gguf("model.gguf")?;
-
-let input_ids = vec![1, 15043, 29892, 920, 526, 366, 29973];
-let output = model.generate(&input_ids, max_tokens: 100)?;
-```
-
-## Supported Models
-
-| Model | Sizes | Features |
-|-------|-------|----------|
-| BERT | base, large | Embeddings, Classification, QA |
-| GPT-2 | small, medium, large, xl | Generation |
-| LLaMA | 7B, 13B, 70B | Generation, Chat |
-| LLaMA 2 | 7B, 13B, 70B | Generation, Chat |
-| Mistral | 7B | Generation, Chat |
-| Phi-2 | 2.7B | Generation |
-
-## API Reference
-
-### GenerationConfig
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `max_new_tokens` | 20 | Maximum tokens to generate |
-| `temperature` | 1.0 | Sampling temperature |
-| `top_p` | 1.0 | Nucleus sampling threshold |
-| `top_k` | 50 | Top-k sampling |
-| `repetition_penalty` | 1.0 | Penalty for repeated tokens |
-| `do_sample` | true | Use sampling vs greedy |
-
-### Tokenizer Methods
-
-| Method | Description |
-|--------|-------------|
-| `encode(text)` | Text to token IDs |
-| `decode(ids)` | Token IDs to text |
-| `encode_pair(a, b)` | Encode sentence pair |
-| `vocab_size()` | Vocabulary size |
-
-## CLI Usage
-
-```bash
-# Generate text
-axonml llm generate --model gpt2 --prompt "Hello world"
-
-# Interactive chat
-axonml llm chat --model llama-2-7b-chat
-
-# Convert model to GGUF
-axonml llm convert model.safetensors --format gguf -o model.gguf
-
-# Benchmark inference
-axonml llm benchmark --model gpt2 --batch-size 8
-```
-
-## Part of Axonml
+Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = { version = "0.1", features = ["llm"] }
+axonml-llm = "0.1.0"
 ```
+
+### GPT-2 Text Generation
+
+```rust
+use axonml_llm::{GPT2LMHead, GPT2Config};
+use axonml_tensor::Tensor;
+
+// Create a GPT-2 model
+let config = GPT2Config::small();
+let model = GPT2LMHead::new(&config);
+
+// Input token IDs
+let input_ids = Tensor::from_vec(vec![50256u32, 1, 2, 3], &[1, 4]).unwrap();
+
+// Generate text with sampling
+let output = model.generate(&input_ids, 50, 0.8, Some(50));
+println!("Generated tokens: {:?}", output.to_vec());
+
+// Or use greedy decoding
+let greedy_output = model.generate_greedy(&input_ids, 50);
+```
+
+### BERT for Sequence Classification
+
+```rust
+use axonml_llm::{BertForSequenceClassification, BertConfig};
+use axonml_tensor::Tensor;
+
+// Create BERT for binary classification
+let config = BertConfig::base();
+let model = BertForSequenceClassification::new(&config, 2);
+
+// Input token IDs
+let input_ids = Tensor::from_vec(vec![101u32, 2054, 2003, 1996, 102], &[1, 5]).unwrap();
+
+// Get classification logits
+let logits = model.forward_classification(&input_ids);
+println!("Logits shape: {:?}", logits.data().shape());
+```
+
+### Custom Transformer Encoder
+
+```rust
+use axonml_llm::{TransformerEncoder, MultiHeadSelfAttention};
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
+
+// Build a custom encoder stack
+let encoder = TransformerEncoder::new(
+    6,          // num_layers
+    512,        // hidden_size
+    8,          // num_heads
+    2048,       // intermediate_size
+    0.1,        // dropout
+    1e-12,      // layer_norm_eps
+    "gelu",     // activation
+    false,      // pre_norm
+);
+
+// Forward pass
+let input = Variable::new(Tensor::randn(&[2, 128, 512]), false);
+let output = encoder.forward(&input);
+```
+
+### Generation Configuration
+
+```rust
+use axonml_llm::{GenerationConfig, TextGenerator};
+
+// Configure generation parameters
+let config = GenerationConfig::nucleus_sampling(0.95, 0.8)
+    .with_max_tokens(100)
+    .with_repetition_penalty(1.2)
+    .with_eos_token(50256);
+
+let generator = TextGenerator::new(config);
+
+// Use with model logits
+let next_token = generator.get_next_token(&logits, &generated_so_far);
+```
+
+### BERT for Masked Language Modeling
+
+```rust
+use axonml_llm::{BertForMaskedLM, BertConfig};
+use axonml_tensor::Tensor;
+
+// Create BERT for MLM
+let config = BertConfig::base();
+let model = BertForMaskedLM::new(&config);
+
+// Input with [MASK] token
+let input_ids = Tensor::from_vec(
+    vec![101u32, 2054, 103, 1996, 102], // 103 = [MASK]
+    &[1, 5]
+).unwrap();
+
+// Get MLM logits
+let logits = model.forward_mlm(&input_ids);
+// Shape: [batch, seq_len, vocab_size]
+```
+
+---
+
+## Model Configurations
+
+### BERT Configurations
+
+| Config | Hidden Size | Layers | Heads | Parameters |
+|--------|-------------|--------|-------|------------|
+| `BertConfig::tiny()` | 128 | 2 | 2 | ~4M |
+| `BertConfig::base()` | 768 | 12 | 12 | ~110M |
+| `BertConfig::large()` | 1024 | 24 | 16 | ~340M |
+
+### GPT-2 Configurations
+
+| Config | Embedding Dim | Layers | Heads | Parameters |
+|--------|---------------|--------|-------|------------|
+| `GPT2Config::tiny()` | 128 | 2 | 2 | ~4M |
+| `GPT2Config::small()` | 768 | 12 | 12 | ~117M |
+| `GPT2Config::medium()` | 1024 | 24 | 16 | ~345M |
+| `GPT2Config::large()` | 1280 | 36 | 20 | ~774M |
+| `GPT2Config::xl()` | 1600 | 48 | 25 | ~1.5B |
+
+---
+
+## Generation Strategies
+
+| Strategy | Method | Description |
+|----------|--------|-------------|
+| Greedy | `GenerationConfig::greedy()` | Always selects highest probability token |
+| Sampling | `GenerationConfig::sampling(temp)` | Temperature-controlled sampling |
+| Top-K | `GenerationConfig::top_k_sampling(k, temp)` | Sample from top-k tokens |
+| Nucleus | `GenerationConfig::nucleus_sampling(p, temp)` | Sample from top-p probability mass |
+| Beam Search | `GenerationConfig::beam_search(beams)` | Beam search decoding |
+
+---
+
+## Tests
+
+Run the test suite:
+
+```bash
+cargo test -p axonml-llm
+```
+
+Run with verbose output:
+
+```bash
+cargo test -p axonml-llm -- --nocapture
+```
+
+---
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- MIT License
+- Apache License, Version 2.0
+
+at your option.

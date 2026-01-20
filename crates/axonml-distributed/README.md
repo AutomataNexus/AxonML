@@ -1,163 +1,212 @@
 # axonml-distributed
 
-[![Crates.io](https://img.shields.io/crates/v/axonml-distributed.svg)](https://crates.io/crates/axonml-distributed)
-[![Docs.rs](https://docs.rs/axonml-distributed/badge.svg)](https://docs.rs/axonml-distributed)
-[![Downloads](https://img.shields.io/crates/d/axonml-distributed.svg)](https://crates.io/crates/axonml-distributed)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <!-- Logo placeholder -->
+  <img src="../../assets/logo.png" alt="AxonML Logo" width="200" height="200" />
+</p>
 
-> Distributed training utilities for the [Axonml](https://github.com/AutomataNexus/AxonML) machine learning framework.
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
+  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/part%20of-AxonML-purple.svg" alt="Part of AxonML">
+</p>
 
 ## Overview
 
-`axonml-distributed` provides multi-GPU and multi-node training capabilities including data parallelism, communication primitives, and process group management.
+`axonml-distributed` provides distributed training utilities for the AxonML machine learning framework. It includes backend abstractions for communication, process group management, DistributedDataParallel (DDP) wrappers for multi-GPU training, and high-level communication primitives like all-reduce, broadcast, and gather operations.
 
 ## Features
 
-### Data Parallelism
-- **DistributedDataParallel (DDP)** - Synchronous data parallel training
-- **Gradient averaging** - Automatic gradient synchronization
-- **Bucket gradient reduction** - Optimized communication
+- **Backend Abstraction** - Pluggable communication backend trait with mock implementation for testing
+- **Process Groups** - Manage distributed processes with rank and world size information
+- **DistributedDataParallel (DDP)** - Wrap models for automatic gradient synchronization across processes
+- **Collective Operations** - All-reduce, broadcast, all-gather, reduce-scatter, and barrier primitives
+- **Gradient Bucketing** - Efficient gradient accumulation and synchronization with configurable bucket sizes
+- **Multiple Reduce Operations** - Sum, product, min, max, and average reduction strategies
+- **Model Parallel Utilities** - Tensor scattering and gathering for model parallelism
 
-### Communication Primitives
-- **All-reduce** - Sum/average across all processes
-- **Broadcast** - Send from one to all
-- **All-gather** - Gather from all to all
-- **Reduce-scatter** - Reduce and scatter
-- **Barrier** - Synchronization point
+## Modules
 
-### Process Management
-- **ProcessGroup** - Group of distributed processes
-- **Rank/World size** - Process identification
-- **Backend abstraction** - NCCL, Gloo, MPI
+| Module | Description |
+|--------|-------------|
+| `backend` | Communication backend trait and MockBackend implementation for testing |
+| `process_group` | ProcessGroup and World abstractions for managing distributed processes |
+| `ddp` | DistributedDataParallel wrapper, GradientBucket, and GradientSynchronizer |
+| `comm` | High-level communication utilities (all_reduce, broadcast, gather, etc.) |
 
-## Installation
+## Usage
+
+Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-distributed = "0.1"
+axonml-distributed = "0.1.0"
 ```
-
-## Usage
 
 ### Basic DDP Training
 
 ```rust
-use axonml_distributed::{init_process_group, DistributedDataParallel};
+use axonml_distributed::prelude::*;
+use axonml_nn::Linear;
 
-// Initialize distributed environment
-init_process_group("nccl", "env://")?;  // Backend, init method
+// Initialize distributed world
+let world = World::mock();  // Use mock for testing
 
-let rank = get_rank();
-let world_size = get_world_size();
-println!("Process {}/{}", rank, world_size);
+// Create model and wrap in DDP
+let model = Linear::new(10, 5);
+let mut ddp = DistributedDataParallel::new(model, world.default_group().clone());
 
-// Wrap model in DDP
-let model = create_model().to_device(rank);
-let ddp_model = DistributedDataParallel::new(model);
+// Synchronize parameters from rank 0 at start of training
+ddp.sync_parameters();
 
-// Training loop (gradients auto-synchronized)
-for batch in dataloader.iter() {
-    let output = ddp_model.forward(&batch.data);
-    let loss = compute_loss(&output, &batch.targets);
+// Training loop
+ddp.train();
+for batch in data_loader.iter() {
+    let output = ddp.forward(&input);
+    // ... compute loss and backward ...
 
-    optimizer.zero_grad();
-    loss.backward();  // Gradients synchronized here
-    optimizer.step();
+    // Synchronize gradients across all processes
+    ddp.sync_gradients();
+
+    // ... optimizer step ...
 }
 ```
 
 ### Communication Primitives
 
 ```rust
-use axonml_distributed::{all_reduce, broadcast, barrier, ReduceOp};
+use axonml_distributed::prelude::*;
 
-// All-reduce: sum tensor across all processes
-let mut tensor = randn(&[100, 100]);
-all_reduce(&mut tensor, ReduceOp::Sum);  // tensor = sum of all
+let pg = ProcessGroup::mock();
 
-// Broadcast: send from rank 0 to all
-let mut tensor = if rank == 0 { randn(&[100]) } else { zeros(&[100]) };
-broadcast(&mut tensor, 0);  // All ranks now have rank 0's tensor
+// All-reduce operations
+let mut tensor = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap();
+all_reduce_sum(&mut tensor, &pg);
+all_reduce_mean(&mut tensor, &pg);
 
-// Barrier: wait for all processes
-barrier();
+// Broadcast from rank 0
+broadcast(&mut tensor, &pg);
+
+// All-gather across processes
+let gathered = all_gather(&tensor, &pg);
+
+// Barrier synchronization
+barrier(&pg);
+
+// Query process information
+let my_rank = rank(&pg);
+let total_processes = world_size(&pg);
+let is_main = is_main_process(&pg);
 ```
 
-### Distributed DataLoader
+### Gradient Synchronization
 
 ```rust
-use axonml_distributed::DistributedSampler;
-use axonml_data::DataLoader;
+use axonml_distributed::prelude::*;
 
-// Each process gets different subset of data
-let sampler = DistributedSampler::new(dataset.len(), world_size, rank)
-    .shuffle(true);
+let pg = ProcessGroup::mock();
 
-let dataloader = DataLoader::new(dataset, batch_size)
-    .sampler(sampler);
+// Synchronize multiple gradients
+let mut gradients = vec![
+    Tensor::from_vec(vec![0.1, 0.2], &[2]).unwrap(),
+    Tensor::from_vec(vec![0.3, 0.4, 0.5], &[3]).unwrap(),
+];
+sync_gradients(&mut gradients, &pg);
 
-for epoch in 0..num_epochs {
-    sampler.set_epoch(epoch);  // Different shuffle each epoch
-    for batch in dataloader.iter() {
-        // Each rank processes different batch
-    }
+// Or synchronize a single gradient
+let mut grad = Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap();
+sync_gradient(&mut grad, &pg);
+```
+
+### Gradient Bucketing
+
+```rust
+use axonml_distributed::prelude::*;
+
+// Create gradient bucket for efficient all-reduce
+let mut bucket = GradientBucket::new(1000);  // 1000 element capacity
+
+let grad1 = Tensor::from_vec(vec![0.1, 0.2], &[2]).unwrap();
+let grad2 = Tensor::from_vec(vec![0.3, 0.4, 0.5], &[3]).unwrap();
+
+bucket.add(&grad1);
+bucket.add(&grad2);
+
+// All-reduce the flattened bucket data
+let pg = ProcessGroup::mock();
+pg.backend().all_reduce(bucket.data_mut(), ReduceOp::Average);
+
+// Extract synchronized gradients
+let synced_grads = bucket.extract();
+```
+
+### Custom Synchronization Strategy
+
+```rust
+use axonml_distributed::prelude::*;
+
+let mut sync = GradientSynchronizer::new(
+    GradSyncStrategy::Synchronous,
+    25_000_000  // ~100MB bucket size for f32
+);
+
+sync.prepare(10);  // 10 parameters
+
+// Add gradients during backward pass
+let grad = Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap();
+sync.add_gradient(0, &grad);
+
+// Synchronize all buckets
+let pg = ProcessGroup::mock();
+sync.sync_all(&pg);
+
+sync.clear();
+```
+
+### Multi-Backend Setup
+
+```rust
+use axonml_distributed::prelude::*;
+use std::sync::Arc;
+
+// Create multiple mock backends (simulates multi-process)
+let backends = MockBackend::create_world(4);
+
+// Each process creates its ProcessGroup
+for backend in backends {
+    let pg = ProcessGroup::new(Arc::new(backend));
+    println!("Rank {} of {}", pg.rank(), pg.world_size());
 }
 ```
 
-### Multi-GPU Launch
+### Process Subgroups
 
-```bash
-# Launch 4 GPU training
-torchrun --nproc_per_node=4 train.rs
+```rust
+use axonml_distributed::prelude::*;
 
-# Or with environment variables
-WORLD_SIZE=4 RANK=0 LOCAL_RANK=0 ./train
-WORLD_SIZE=4 RANK=1 LOCAL_RANK=1 ./train
-# ...
+let world = World::mock();
+
+// Create a subgroup with specific ranks
+let subgroup = world.new_group(vec![0, 1]);
+assert!(subgroup.contains(0));
+assert_eq!(subgroup.size(), 2);
 ```
 
-## API Reference
+## Tests
 
-### Functions
+Run the test suite:
 
-| Function | Description |
-|----------|-------------|
-| `init_process_group(backend, init_method)` | Initialize distributed |
-| `get_rank()` | Current process rank |
-| `get_world_size()` | Total number of processes |
-| `get_local_rank()` | Rank on current node |
-| `is_initialized()` | Check if initialized |
-| `destroy_process_group()` | Cleanup |
-
-### Communication
-
-| Function | Description |
-|----------|-------------|
-| `all_reduce(tensor, op)` | Reduce across all |
-| `broadcast(tensor, src)` | Broadcast from src |
-| `all_gather(tensors, tensor)` | Gather to all |
-| `reduce(tensor, dst, op)` | Reduce to dst |
-| `scatter(tensor, tensors, src)` | Scatter from src |
-| `barrier()` | Synchronize all |
-
-### ReduceOp
-
-| Op | Description |
-|----|-------------|
-| `Sum` | Element-wise sum |
-| `Product` | Element-wise product |
-| `Min` | Element-wise minimum |
-| `Max` | Element-wise maximum |
-| `Average` | Sum / world_size |
-
-## Part of Axonml
-
-```toml
-[dependencies]
-axonml = { version = "0.1", features = ["distributed"] }
+```bash
+cargo test -p axonml-distributed
 ```
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- MIT License ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
+- Apache License, Version 2.0 ([LICENSE-APACHE](../../LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+
+at your option.

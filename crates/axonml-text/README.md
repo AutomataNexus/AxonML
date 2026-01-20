@@ -1,131 +1,156 @@
 # axonml-text
 
-[![Crates.io](https://img.shields.io/crates/v/axonml-text.svg)](https://crates.io/crates/axonml-text)
-[![Docs.rs](https://docs.rs/axonml-text/badge.svg)](https://docs.rs/axonml-text)
-[![Downloads](https://img.shields.io/crates/d/axonml-text.svg)](https://crates.io/crates/axonml-text)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <!-- Logo placeholder -->
+  <img src="../../assets/logo.png" alt="AxonML Logo" width="200" height="200" />
+</p>
 
-> NLP utilities for the [Axonml](https://github.com/AutomataNexus/AxonML) machine learning framework.
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
+  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/part%20of-AxonML-purple.svg" alt="Part of AxonML">
+</p>
 
 ## Overview
 
-`axonml-text` provides text processing utilities including tokenizers, vocabulary management, and text datasets for natural language processing tasks.
+`axonml-text` provides natural language processing utilities for the AxonML machine learning framework. It includes vocabulary management, multiple tokenization strategies, and dataset implementations for common NLP tasks like text classification, language modeling, and sequence-to-sequence learning.
 
 ## Features
 
-### Tokenizers
-- **WhitespaceTokenizer** - Split on whitespace
-- **CharTokenizer** - Character-level tokenization
-- **BPETokenizer** - Byte-pair encoding
+- **Vocabulary Management** - Token-to-index mapping with special tokens (PAD, UNK, BOS, EOS, MASK) and frequency-based filtering
+- **Multiple Tokenizers** - Whitespace, character-level, word-punctuation, n-gram, BPE, and unigram tokenization strategies
+- **Text Classification Datasets** - Build datasets from labeled text samples with automatic vocabulary construction
+- **Language Modeling Datasets** - Create next-token prediction datasets with configurable sequence lengths
+- **Synthetic Datasets** - Pre-built sentiment and seq2seq datasets for testing and prototyping
+- **Prelude Module** - Convenient re-exports for common imports
 
-### Vocabulary
-- **Vocabulary** - Token to index mapping
-- **Special tokens** - PAD, UNK, BOS, EOS, MASK
-- **Frequency filtering** - Min/max frequency cutoffs
+## Modules
 
-### Datasets
-- **SyntheticSentimentDataset** - Sentiment classification
-
-## Installation
-
-```toml
-[dependencies]
-axonml-text = "0.1"
-```
+| Module | Description |
+|--------|-------------|
+| `vocab` | Vocabulary management with token-to-index mapping and special token support |
+| `tokenizer` | Tokenizer trait and implementations (Whitespace, Char, WordPunct, NGram, BPE, Unigram) |
+| `datasets` | Dataset implementations for text classification, language modeling, and seq2seq tasks |
 
 ## Usage
 
-### Whitespace Tokenizer
-
-```rust
-use axonml_text::tokenizers::WhitespaceTokenizer;
-use axonml_text::Vocabulary;
-
-let tokenizer = WhitespaceTokenizer::new();
-
-// Build vocabulary from corpus
-let texts = vec!["hello world", "hello rust"];
-let vocab = Vocabulary::build_from_texts(&texts, &tokenizer)
-    .min_freq(1)
-    .max_size(10000)
-    .add_special_tokens(&["<pad>", "<unk>"]);
-
-// Tokenize and encode
-let tokens = tokenizer.tokenize("hello world");  // ["hello", "world"]
-let ids = vocab.encode(&tokens);                  // [2, 3]
-```
-
-### BPE Tokenizer
-
-```rust
-use axonml_text::tokenizers::BPETokenizer;
-
-let tokenizer = BPETokenizer::new()
-    .vocab_size(8000)
-    .train(&corpus);
-
-let tokens = tokenizer.tokenize("unbelievable");  // ["un", "believ", "able"]
-let ids = tokenizer.encode("hello world");
-let text = tokenizer.decode(&ids);
-```
-
-### Sentiment Dataset
-
-```rust
-use axonml_text::datasets::SyntheticSentimentDataset;
-use axonml_data::DataLoader;
-
-let dataset = SyntheticSentimentDataset::new(true, 10000);  // train, samples
-let dataloader = DataLoader::new(dataset, 32).shuffle(true);
-
-for (text_ids, label) in dataloader.iter() {
-    // text_ids: [32, max_len] padded token ids
-    // label: [32] (0=negative, 1=positive)
-}
-```
-
-### Text Preprocessing
-
-```rust
-use axonml_text::preprocessing::{lowercase, remove_punctuation, pad_sequence};
-
-let text = "Hello, World!";
-let processed = lowercase(&remove_punctuation(text));  // "hello world"
-
-// Pad sequences to same length
-let sequences = vec![vec![1, 2, 3], vec![1, 2]];
-let padded = pad_sequence(&sequences, 0, 5);  // [[1,2,3,0,0], [1,2,0,0,0]]
-```
-
-## API Reference
-
-### Tokenizers
-
-| Tokenizer | Description |
-|-----------|-------------|
-| `WhitespaceTokenizer` | Split on whitespace |
-| `CharTokenizer` | Character-level |
-| `BPETokenizer` | Byte-pair encoding |
-
-### Vocabulary Methods
-
-| Method | Description |
-|--------|-------------|
-| `build_from_texts()` | Build from corpus |
-| `encode(tokens)` | Tokens to indices |
-| `decode(ids)` | Indices to tokens |
-| `get_id(token)` | Get single token ID |
-| `get_token(id)` | Get token from ID |
-| `size()` | Vocabulary size |
-
-## Part of Axonml
+Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = { version = "0.1", features = ["text"] }
+axonml-text = "0.1.0"
+```
+
+### Building a Vocabulary
+
+```rust
+use axonml_text::prelude::*;
+
+// Build vocabulary from text with minimum frequency threshold
+let text = "the quick brown fox jumps over the lazy dog";
+let vocab = Vocab::from_text(text, 1);
+
+// Or create with special tokens
+let mut vocab = Vocab::with_special_tokens();
+vocab.add_token("hello");
+vocab.add_token("world");
+
+// Encode and decode
+let indices = vocab.encode(&["hello", "world"]);
+let tokens = vocab.decode(&indices);
+```
+
+### Tokenization
+
+```rust
+use axonml_text::prelude::*;
+
+// Whitespace tokenizer
+let tokenizer = WhitespaceTokenizer::new();
+let tokens = tokenizer.tokenize("Hello World");  // ["Hello", "World"]
+
+// Character-level tokenizer
+let char_tokenizer = CharTokenizer::new();
+let chars = char_tokenizer.tokenize("Hi!");  // ["H", "i", "!"]
+
+// Word-punctuation tokenizer
+let wp_tokenizer = WordPunctTokenizer::lowercase();
+let tokens = wp_tokenizer.tokenize("Hello, World!");  // ["hello", ",", "world", "!"]
+
+// N-gram tokenizer
+let bigrams = NGramTokenizer::word_ngrams(2);
+let tokens = bigrams.tokenize("one two three");  // ["one two", "two three"]
+
+// BPE tokenizer
+let mut bpe = BasicBPETokenizer::new();
+bpe.train("low lower lowest newer newest", 10);
+let tokens = bpe.tokenize("lowest");
+```
+
+### Text Classification Dataset
+
+```rust
+use axonml_text::prelude::*;
+
+let samples = vec![
+    ("good movie".to_string(), 1),
+    ("bad movie".to_string(), 0),
+    ("great film".to_string(), 1),
+    ("terrible movie".to_string(), 0),
+];
+
+let tokenizer = WhitespaceTokenizer::new();
+let dataset = TextDataset::from_samples(&samples, &tokenizer, 1, 10);
+
+// Use with DataLoader
+let loader = DataLoader::new(dataset, 16);
+for batch in loader.iter() {
+    // batch.data: [batch_size, max_length]
+    // batch.target: [batch_size, num_classes]
+}
+```
+
+### Language Modeling Dataset
+
+```rust
+use axonml_text::prelude::*;
+
+let text = "one two three four five six seven eight nine ten";
+let dataset = LanguageModelDataset::from_text(text, 3, 1);
+
+let (input, target) = dataset.get(0).unwrap();
+// input: [seq_length] - tokens at positions 0..seq_length
+// target: [seq_length] - tokens at positions 1..seq_length+1
+```
+
+### Synthetic Datasets
+
+```rust
+use axonml_text::prelude::*;
+
+// Sentiment dataset for testing
+let sentiment = SyntheticSentimentDataset::small();  // 100 samples
+let sentiment = SyntheticSentimentDataset::train();  // 10000 samples
+
+// Seq2seq copy/reverse task
+let seq2seq = SyntheticSeq2SeqDataset::copy_task(100, 5, 50);
+```
+
+## Tests
+
+Run the test suite:
+
+```bash
+cargo test -p axonml-text
 ```
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- MIT License ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
+- Apache License, Version 2.0 ([LICENSE-APACHE](../../LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+
+at your option.

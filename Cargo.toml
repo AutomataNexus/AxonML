@@ -32,6 +32,8 @@ members = [
     "crates/axonml-jit",
     "crates/axonml-cli",
     "crates/axonml-tui",
+    "crates/axonml-server",
+    "crates/axonml-dashboard",
     "crates/axonml",
 ]
 

@@ -1,14 +1,17 @@
-# Axonml
+<div align="center">
+  <img src="https://raw.githubusercontent.com/AutomataNexus/AxonML/main/AxonML-logo.png" alt="AxonML Logo" width="400"/>
 
-![AxonML](https://raw.githubusercontent.com/AutomataNexus/AxonML/main/AxonML-logo.png)
+  <h1>AxonML</h1>
 
-> A complete, PyTorch-equivalent machine learning framework written in pure Rust.
+  <p><strong>A complete, PyTorch-equivalent machine learning framework written in pure Rust.</strong></p>
 
-[![Crates.io](https://img.shields.io/crates/v/axonml.svg)](https://crates.io/crates/axonml)
-[![Docs.rs](https://docs.rs/axonml/badge.svg)](https://docs.rs/axonml)
-[![Downloads](https://img.shields.io/crates/d/axonml.svg)](https://crates.io/crates/axonml)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+  [![Crates.io](https://img.shields.io/crates/v/axonml.svg)](https://crates.io/crates/axonml)
+  [![Docs.rs](https://docs.rs/axonml/badge.svg)](https://docs.rs/axonml)
+  [![Downloads](https://img.shields.io/crates/d/axonml.svg)](https://crates.io/crates/axonml)
+  [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
+  [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+
+</div>
 
 ## Overview
 
@@ -107,6 +110,20 @@ Axonml (named after axons - the nerve fibers that transmit signals between neuro
   - Dataset statistics and graphs
   - File browser for models and datasets
 
+- **Web Dashboard** (`axonml-dashboard`)
+  - Modern Leptos/WASM web frontend
+  - Real-time training monitoring with WebSocket
+  - Model registry and version management
+  - Inference endpoint deployment
+  - Multi-factor authentication (TOTP, WebAuthn)
+
+- **API Server** (`axonml-server`)
+  - Axum-based REST API backend
+  - JWT authentication with refresh tokens
+  - Training run management
+  - Model registry and deployment
+  - Prometheus metrics export
+
 ### Axonml CLI
 
 The Axonml CLI provides a unified command-line interface for the entire ML workflow:
@@ -199,6 +216,14 @@ axonml dataset info mnist                    # Show dataset details
 axonml dataset search "classification"       # Search datasets
 axonml dataset download cifar-10             # Download dataset
 axonml dataset sources                       # List data sources
+
+# Dashboard & Server Management
+axon start                                   # Start dashboard + API server
+axon start --server                          # Start only API server on :3000
+axon start --dashboard                       # Start only dashboard on :8080
+axon stop                                    # Stop all services
+axon status                                  # Check service status
+axon logs -f                                 # Follow logs in real-time
 ```
 
 ### Weights & Biases Integration
@@ -256,6 +281,59 @@ axonml tui --model model.axonml --data ./data/
 | `Enter` | Select / Open |
 | `?` | Show help overlay |
 | `q` | Quit |
+
+### Web Dashboard
+
+The AxonML Web Dashboard provides a modern browser-based interface for ML operations:
+
+```bash
+# Start the full stack (dashboard + API server)
+axon start
+
+# Start only the API server
+axon start --server --port 3000
+
+# Start only the dashboard
+axon start --dashboard --dashboard-port 8080
+
+# Check status
+axon status
+
+# View logs
+axon logs -f
+```
+
+**Features:**
+- **Dashboard Overview** - Real-time stats on training runs, models, and endpoints
+- **Training Runs** - Start, monitor, and manage training with live metrics
+- **Model Registry** - Upload, version, and manage trained models
+- **Inference Endpoints** - Deploy models for serving predictions
+- **Settings** - User profile, security settings, MFA configuration
+
+**Authentication:**
+- JWT-based authentication with refresh tokens
+- Multi-factor authentication (TOTP authenticator apps)
+- WebAuthn support for hardware security keys
+- Recovery codes for account recovery
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    axonml-dashboard                          │
+│              Leptos/WASM Frontend (CSR)                      │
+├─────────────────────────────────────────────────────────────┤
+│  Dashboard │ Training │ Models │ Inference │ Settings       │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                         HTTP/WebSocket
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                      axonml-server                           │
+│                    Axum REST + WS API                        │
+├─────────────────────────────────────────────────────────────┤
+│  Auth  │  Training  │  Models  │  Inference  │  Metrics     │
+└─────────────────────────────────────────────────────────────┘
+```
 
 - **Pretrained Model Hub** (`axonml-vision/hub`)
   - Download pretrained weights (ResNet, VGG)
@@ -454,6 +532,12 @@ let n = t.narrow(1, 0, 2).unwrap();
 |                           axonml-tui                              |
 |  Interactive terminal dashboard for models, data, training graphs  |
 +--------------------------------------------------------------------+
+|                        axonml-dashboard                            |
+|  Leptos/WASM Web UI: Training, Models, Inference, Settings         |
++--------------------------------------------------------------------+
+|                         axonml-server                              |
+|  Axum REST API: Auth, Training Runs, Model Registry, Metrics       |
++--------------------------------------------------------------------+
 ```
 
 ## Building from Source
@@ -521,6 +605,8 @@ Axonml/
 │   ├── axonml-llm/        # LLM architectures (BERT, GPT-2)
 │   ├── axonml-cli/        # Command line interface
 │   ├── axonml-tui/        # Terminal user interface
+│   ├── axonml-dashboard/  # Leptos/WASM web dashboard
+│   ├── axonml-server/     # Axum API server
 │   └── axonml/            # Main umbrella crate
 ├── docs/                   # Per-module documentation
 └── examples/               # Working examples

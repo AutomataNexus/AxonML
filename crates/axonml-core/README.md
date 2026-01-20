@@ -1,239 +1,120 @@
 # axonml-core
 
-[![Crates.io](https://img.shields.io/crates/v/axonml-core.svg)](https://crates.io/crates/axonml-core)
-[![Docs.rs](https://docs.rs/axonml-core/badge.svg)](https://docs.rs/axonml-core)
-[![Downloads](https://img.shields.io/crates/d/axonml-core.svg)](https://crates.io/crates/axonml-core)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <!-- Logo placeholder -->
+  <img src="../../assets/logo.png" alt="AxonML Logo" width="200" height="200" />
+</p>
 
-> Core foundation layer for the [Axonml](https://github.com/AutomataNexus/AxonML) machine learning framework.
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/rust-1.75%2B-orange.svg" alt="Rust 1.75+">
+  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML">
+</p>
 
 ## Overview
 
-`axonml-core` provides the foundational abstractions that underpin the entire Axonml machine learning framework. It handles device management, memory storage, data types, error handling, and backend implementations. This is the lowest-level crate in the Axonml stack - all other crates build on top of it.
+**axonml-core** is the foundational layer of the AxonML machine learning framework. It provides core abstractions for device management, memory storage, data types, and pluggable backend implementations that underpin all tensor operations across CPU and GPU devices.
 
 ## Features
 
-### Device Abstraction
-- **Multi-backend support** - CPU, CUDA, Vulkan, Metal, WebGPU
-- **Unified API** - Same code works across all devices
-- **Device queries** - Check capabilities, memory, compute units
-- **Device transfer** - Move data between devices seamlessly
+- **Device Abstraction** - Unified interface for managing compute devices including CPU, CUDA, Vulkan, Metal, and WebGPU backends with seamless tensor transfer between devices.
 
-### Storage Management
-- **Reference-counted memory** - Efficient sharing without copies
-- **Copy-on-write semantics** - Automatic optimization for memory efficiency
-- **Aligned allocations** - SIMD-friendly memory layout
-- **Custom allocators** - Pluggable allocation strategies
+- **Type-Safe Data Types** - Comprehensive type system supporting f16, f32, f64, i8, i16, i32, i64, u8, u32, u64, and bool with automatic type promotion rules.
 
-### Data Types
-- **Floating point** - f32, f64, f16 (half), bf16 (bfloat16)
-- **Integer** - i8, i16, i32, i64, u8, u16, u32, u64
-- **Boolean** - bool for masks and conditions
-- **Type traits** - Scalar, Numeric, Float for generic programming
+- **Efficient Memory Storage** - Reference-counted storage with zero-copy slicing, automatic memory cleanup, and device-agnostic operations.
 
-### Error Handling
-- **Typed errors** - ShapeError, DeviceError, AllocationError, etc.
-- **Result type** - Consistent error propagation
-- **Descriptive messages** - Clear error diagnostics
+- **Pluggable Backend Architecture** - Extensible backend system with a common `Backend` trait enabling device-agnostic tensor operations.
 
-## Installation
+- **Memory Allocator** - Flexible allocator trait with default CPU implementation and support for custom memory pools.
 
-Add to your `Cargo.toml`:
+- **Device Capabilities** - Query device capabilities including memory, f16/f64 support, and compute capability for optimal resource utilization.
 
-```toml
-[dependencies]
-axonml-core = "0.1"
-```
+## Modules
 
-Or with specific features:
-
-```toml
-[dependencies]
-axonml-core = { version = "0.1", features = ["cuda", "vulkan"] }
-```
+| Module | Description |
+|--------|-------------|
+| `device` | Device abstraction (CPU, CUDA, Vulkan, Metal, WebGPU) with availability checking and capability queries |
+| `dtype` | Data type definitions with `Scalar`, `Numeric`, and `Float` traits for type-safe operations |
+| `storage` | Reference-counted memory storage with views, slicing, and device transfer |
+| `allocator` | Memory allocation traits and default CPU allocator implementation |
+| `backends` | Device-specific backend implementations for compute operations |
+| `error` | Comprehensive error types for shape mismatches, device errors, and memory allocation failures |
 
 ## Usage
 
-### Basic Device Operations
+Add this to your `Cargo.toml`:
 
-```rust
-use axonml_core::{Device, DType};
-
-// Default CPU device
-let cpu = Device::Cpu;
-println!("Using device: {:?}", cpu);
-
-// Check if CUDA is available (when feature enabled)
-#[cfg(feature = "cuda")]
-{
-    let cuda = Device::Cuda(0);
-    println!("CUDA device 0: {:?}", cuda);
-}
+```toml
+[dependencies]
+axonml-core = "0.1.0"
 ```
 
-### Storage Creation and Management
+### Basic Example
 
 ```rust
-use axonml_core::{Device, Storage};
+use axonml_core::{Device, DType, Storage};
 
-// Create zeroed storage
-let zeros = Storage::<f32>::zeros(1024, Device::Cpu);
-println!("Created {} elements", zeros.len());
+// Check device availability
+let device = Device::Cpu;
+assert!(device.is_available());
+
+// Create storage on CPU
+let storage = Storage::<f32>::zeros(1024, device);
+assert_eq!(storage.len(), 1024);
 
 // Create storage from data
 let data = vec![1.0f32, 2.0, 3.0, 4.0];
 let storage = Storage::from_vec(data, Device::Cpu);
 
-// Access data
-let slice = storage.as_slice();
-println!("First element: {}", slice[0]);
-
-// Mutable access (copy-on-write if shared)
-let mut storage = storage;
-let slice_mut = storage.as_slice_mut();
-slice_mut[0] = 42.0;
+// Create a view (zero-copy slice)
+let view = storage.slice(1, 2).unwrap();
+assert_eq!(view.len(), 2);
 ```
 
-### Data Type System
+### Device Capabilities
+
+```rust
+use axonml_core::Device;
+
+let device = Device::Cpu;
+let caps = device.capabilities();
+
+println!("Device: {}", caps.name);
+println!("Total Memory: {} bytes", caps.total_memory);
+println!("Supports f16: {}", caps.supports_f16);
+println!("Supports f64: {}", caps.supports_f64);
+```
+
+### Data Types
 
 ```rust
 use axonml_core::{DType, Scalar, Numeric, Float};
 
-// Check data type properties
-let dtype = DType::F32;
-println!("Size: {} bytes", dtype.size_of());
-println!("Is float: {}", dtype.is_float());
-println!("Is signed: {}", dtype.is_signed());
+// Query dtype properties
+assert!(DType::F32.is_float());
+assert_eq!(DType::F32.size_of(), 4);
 
-// Generic programming with type traits
-fn process_numeric<T: Numeric>(values: &[T]) -> T {
-    values.iter().fold(T::zero(), |acc, &x| acc + x)
-}
-
-fn process_float<T: Float>(values: &[T]) -> T {
-    let sum: T = values.iter().fold(T::zero(), |acc, &x| acc + x);
-    sum / T::from_usize(values.len())
+// Use type traits
+fn process<T: Float>(data: &[T]) -> T {
+    data.iter().fold(T::ZERO, |acc, &x| acc + x)
 }
 ```
 
-### Custom Allocators
+## Tests
 
-```rust
-use axonml_core::{Allocator, DefaultAllocator, Device};
+Run the test suite:
 
-// Use the default allocator
-let allocator = DefaultAllocator::new();
-
-// Allocate aligned memory
-let layout = std::alloc::Layout::from_size_align(1024, 64).unwrap();
-let ptr = allocator.allocate(layout, Device::Cpu).unwrap();
-
-// ... use memory ...
-
-// Deallocate when done
-unsafe { allocator.deallocate(ptr, layout, Device::Cpu); }
-```
-
-### Error Handling
-
-```rust
-use axonml_core::{Error, Result, Device, Storage};
-
-fn create_large_storage() -> Result<Storage<f32>> {
-    // This might fail if not enough memory
-    let storage = Storage::<f32>::zeros(1_000_000_000, Device::Cpu);
-    Ok(storage)
-}
-
-match create_large_storage() {
-    Ok(storage) => println!("Created storage with {} elements", storage.len()),
-    Err(Error::Allocation(msg)) => eprintln!("Allocation failed: {}", msg),
-    Err(e) => eprintln!("Other error: {}", e),
-}
-```
-
-## API Reference
-
-### Modules
-
-| Module | Description |
-|--------|-------------|
-| `device` | Device enumeration and capabilities |
-| `storage` | Memory storage with reference counting |
-| `dtype` | Data types and numeric traits |
-| `error` | Error types and Result alias |
-| `allocator` | Memory allocation traits and implementations |
-| `backends` | Backend-specific implementations |
-
-### Key Types
-
-| Type | Description |
-|------|-------------|
-| `Device` | Enum representing compute devices (Cpu, Cuda, Vulkan, etc.) |
-| `Storage<T>` | Reference-counted memory storage for type T |
-| `DType` | Enum representing data types (F32, F64, I32, etc.) |
-| `Error` | Error type for all core operations |
-| `Result<T>` | Type alias for `std::result::Result<T, Error>` |
-| `Allocator` | Trait for custom memory allocators |
-
-### Traits
-
-| Trait | Description |
-|-------|-------------|
-| `Scalar` | Base trait for all scalar types |
-| `Numeric` | Trait for numeric types (supports arithmetic) |
-| `Float` | Trait for floating-point types |
-
-## Feature Flags
-
-| Feature | Description | Default |
-|---------|-------------|---------|
-| `std` | Enable standard library support | Yes |
-| `cuda` | Enable CUDA/cuBLAS backend | No |
-| `vulkan` | Enable Vulkan compute backend | No |
-| `metal` | Enable Metal backend (macOS/iOS) | No |
-| `wgpu` | Enable WebGPU backend | No |
-
-## Architecture
-
-```
-axonml-core
-├── device.rs      # Device enum and capabilities
-├── storage.rs     # Reference-counted memory storage
-├── dtype.rs       # Data types and numeric traits
-├── error.rs       # Error types
-├── allocator.rs   # Memory allocation
-└── backends/
-    ├── cpu.rs     # CPU backend implementation
-    ├── cuda.rs    # CUDA backend (feature-gated)
-    └── vulkan.rs  # Vulkan backend (feature-gated)
-```
-
-## Part of Axonml
-
-This crate is part of the [Axonml](https://crates.io/crates/axonml) machine learning framework. The dependency hierarchy is:
-
-```
-axonml-core (this crate)
-    └── axonml-tensor
-        └── axonml-autograd
-            └── axonml-nn
-                └── axonml (umbrella)
-```
-
-For most use cases, depend on the main `axonml` crate which re-exports everything:
-
-```toml
-[dependencies]
-axonml = "0.1"
+```bash
+cargo test -p axonml-core
 ```
 
 ## License
 
 Licensed under either of:
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+- Apache License, Version 2.0 ([LICENSE-APACHE](../../LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.

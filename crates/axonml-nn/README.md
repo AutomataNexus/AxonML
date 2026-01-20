@@ -1,69 +1,66 @@
 # axonml-nn
 
-[![Crates.io](https://img.shields.io/crates/v/axonml-nn.svg)](https://crates.io/crates/axonml-nn)
-[![Docs.rs](https://docs.rs/axonml-nn/badge.svg)](https://docs.rs/axonml-nn)
-[![Downloads](https://img.shields.io/crates/d/axonml-nn.svg)](https://crates.io/crates/axonml-nn)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <!-- Logo placeholder -->
+  <img src="../../assets/logo.png" alt="AxonML Logo" width="200" height="200" />
+</p>
 
-> Neural network modules for the [Axonml](https://github.com/AutomataNexus/AxonML) machine learning framework.
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/rust-1.75%2B-orange.svg" alt="Rust 1.75+">
+  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML">
+</p>
 
 ## Overview
 
-`axonml-nn` provides PyTorch-style neural network building blocks for the Axonml framework. It includes layers, activation functions, loss functions, and container modules that can be combined to build complex neural network architectures.
+**axonml-nn** provides neural network building blocks for the AxonML framework. It includes layers, activation functions, loss functions, and utilities for constructing and training deep learning models with a PyTorch-like API.
 
 ## Features
 
-### Layer Types
-- **Linear** - Fully connected layers with bias
-- **Conv1d/Conv2d** - 1D and 2D convolutions with padding, stride, dilation
-- **MaxPool/AvgPool** - Pooling layers for downsampling
-- **BatchNorm/LayerNorm** - Normalization layers
-- **Dropout** - Regularization via random zeroing
+- **Module Trait** - Core interface for all neural network components with parameter management and train/eval modes.
 
-### Recurrent Layers
-- **RNN** - Vanilla recurrent neural network
-- **LSTM** - Long Short-Term Memory
-- **GRU** - Gated Recurrent Unit
+- **Comprehensive Layers** - Linear, Conv1d/Conv2d, RNN/LSTM/GRU, Embedding, BatchNorm, LayerNorm, Dropout, and MultiHeadAttention.
 
-### Attention
-- **MultiHeadAttention** - Transformer-style attention mechanism
-- **Embedding** - Learnable embedding tables
+- **Activation Functions** - ReLU, Sigmoid, Tanh, GELU, SiLU, ELU, LeakyReLU, Softmax, and LogSoftmax.
 
-### Activations
-- **ReLU, LeakyReLU, ELU** - Rectified linear variants
-- **Sigmoid, Tanh** - Classic activations
-- **GELU, SiLU/Swish** - Modern smooth activations
-- **Softmax, LogSoftmax** - Probability outputs
+- **Loss Functions** - MSELoss, CrossEntropyLoss, BCELoss, BCEWithLogitsLoss, NLLLoss, L1Loss, and SmoothL1Loss.
 
-### Loss Functions
-- **MSELoss** - Mean squared error for regression
-- **CrossEntropyLoss** - Classification with softmax
-- **BCELoss/BCEWithLogitsLoss** - Binary classification
-- **L1Loss** - Mean absolute error
-- **NLLLoss** - Negative log likelihood
+- **Weight Initialization** - Xavier/Glorot, Kaiming/He, orthogonal, sparse, and custom initialization schemes.
 
-### Containers
-- **Sequential** - Chain modules in sequence
-- **ModuleList** - List of modules
-- **ModuleDict** - Dictionary of named modules
+- **Sequential Container** - Easy model composition by chaining layers together.
 
-## Installation
+## Modules
+
+| Module | Description |
+|--------|-------------|
+| `module` | Core `Module` trait and `ModuleList` container for neural network components |
+| `parameter` | `Parameter` wrapper for learnable weights with gradient tracking |
+| `sequential` | `Sequential` container for chaining modules in order |
+| `layers` | Neural network layers (Linear, Conv, RNN, Attention, Norm, Pooling, Embedding, Dropout) |
+| `activation` | Activation function modules (ReLU, Sigmoid, Tanh, GELU, etc.) |
+| `loss` | Loss function modules (MSE, CrossEntropy, BCE, etc.) |
+| `init` | Weight initialization functions (Xavier, Kaiming, orthogonal, etc.) |
+| `functional` | Stateless functional versions of operations |
+
+## Usage
+
+Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-nn = "0.1"
+axonml-nn = "0.1.0"
 ```
-
-## Usage
 
 ### Building a Simple MLP
 
 ```rust
-use axonml_nn::{Sequential, Linear, ReLU, Module};
-use axonml_tensor::randn;
+use axonml_nn::prelude::*;
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
 
-// Build a 3-layer MLP
+// Build model using Sequential
 let model = Sequential::new()
     .add(Linear::new(784, 256))
     .add(ReLU)
@@ -71,268 +68,168 @@ let model = Sequential::new()
     .add(ReLU)
     .add(Linear::new(128, 10));
 
+// Create input
+let input = Variable::new(
+    Tensor::from_vec(vec![0.5; 784], &[1, 784]).unwrap(),
+    false
+);
+
 // Forward pass
-let input = randn::<f32>(&[32, 784]);  // Batch of 32
-let output = model.forward(&input);     // Shape: [32, 10]
+let output = model.forward(&input);
+assert_eq!(output.shape(), vec![1, 10]);
+
+// Get all parameters
+let params = model.parameters();
+println!("Total parameters: {}", model.num_parameters());
 ```
 
 ### Convolutional Neural Network
 
 ```rust
-use axonml_nn::{Sequential, Conv2d, MaxPool2d, Linear, ReLU, Flatten, Module};
-
-let cnn = Sequential::new()
-    // Conv block 1: 1 -> 32 channels
-    .add(Conv2d::new(1, 32, 3).padding(1))
-    .add(ReLU)
-    .add(MaxPool2d::new(2))
-
-    // Conv block 2: 32 -> 64 channels
-    .add(Conv2d::new(32, 64, 3).padding(1))
-    .add(ReLU)
-    .add(MaxPool2d::new(2))
-
-    // Classifier
-    .add(Flatten)
-    .add(Linear::new(64 * 7 * 7, 128))
-    .add(ReLU)
-    .add(Linear::new(128, 10));
-
-// Input: [batch, channels, height, width]
-let images = randn::<f32>(&[16, 1, 28, 28]);
-let logits = cnn.forward(&images);  // Shape: [16, 10]
-```
-
-### LSTM for Sequence Processing
-
-```rust
-use axonml_nn::{LSTM, Linear, Module};
-use axonml_tensor::randn;
-
-// LSTM: input_size=100, hidden_size=256, num_layers=2
-let lstm = LSTM::new(100, 256, 2)
-    .bidirectional(true)
-    .dropout(0.1);
-
-let classifier = Linear::new(512, 10);  // 256*2 for bidirectional
-
-// Input: [seq_len, batch, features]
-let sequence = randn::<f32>(&[50, 32, 100]);
-
-// Get LSTM output
-let (output, (h_n, c_n)) = lstm.forward(&sequence, None);
-// output: [50, 32, 512], h_n: [4, 32, 256], c_n: [4, 32, 256]
-
-// Use last hidden state for classification
-let last_hidden = h_n.select(0, -1);  // Last layer
-let logits = classifier.forward(&last_hidden);
-```
-
-### Multi-Head Attention
-
-```rust
-use axonml_nn::{MultiHeadAttention, Module};
-use axonml_tensor::randn;
-
-// 8 attention heads, 512 embedding dimension
-let attention = MultiHeadAttention::new(512, 8)
-    .dropout(0.1);
-
-// Self-attention
-let x = randn::<f32>(&[32, 100, 512]);  // [batch, seq, embed]
-let (attn_output, attn_weights) = attention.forward(&x, &x, &x, None);
-// attn_output: [32, 100, 512]
-```
-
-### Using Normalization
-
-```rust
-use axonml_nn::{Linear, BatchNorm1d, LayerNorm, ReLU, Sequential, Module};
-
-// BatchNorm for MLPs
-let mlp_with_bn = Sequential::new()
-    .add(Linear::new(784, 256))
-    .add(BatchNorm1d::new(256))
-    .add(ReLU)
-    .add(Linear::new(256, 10));
-
-// LayerNorm for Transformers
-let layer_norm = LayerNorm::new(&[512]);  // Normalize last dim
-```
-
-### Dropout for Regularization
-
-```rust
-use axonml_nn::{Linear, Dropout, ReLU, Sequential, Module};
+use axonml_nn::prelude::*;
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
 
 let model = Sequential::new()
-    .add(Linear::new(784, 256))
+    .add(Conv2d::new(1, 32, 3))      // [B, 1, 28, 28] -> [B, 32, 26, 26]
     .add(ReLU)
-    .add(Dropout::new(0.5))  // 50% dropout
-    .add(Linear::new(256, 10));
+    .add(MaxPool2d::new(2))          // -> [B, 32, 13, 13]
+    .add(Conv2d::new(32, 64, 3))     // -> [B, 64, 11, 11]
+    .add(ReLU)
+    .add(MaxPool2d::new(2));         // -> [B, 64, 5, 5]
 
-// Set training mode (dropout active)
-model.train();
-let train_output = model.forward(&input);
-
-// Set eval mode (dropout disabled)
-model.eval();
-let eval_output = model.forward(&input);
+let input = Variable::new(
+    Tensor::from_vec(vec![0.5; 784], &[1, 1, 28, 28]).unwrap(),
+    false
+);
+let features = model.forward(&input);
 ```
 
-### Computing Loss
+### Recurrent Neural Network
 
 ```rust
-use axonml_nn::{CrossEntropyLoss, MSELoss, Module};
-use axonml_tensor::{randn, Tensor};
-
-// Classification loss
-let ce_loss = CrossEntropyLoss::new();
-let logits = randn::<f32>(&[32, 10]);
-let targets = Tensor::<i64>::from_vec((0..32).map(|i| i % 10).collect(), &[32]).unwrap();
-let loss = ce_loss.forward(&logits, &targets);
-
-// Regression loss
-let mse_loss = MSELoss::new();
-let predictions = randn::<f32>(&[32, 1]);
-let targets = randn::<f32>(&[32, 1]);
-let loss = mse_loss.forward(&predictions, &targets);
-```
-
-### Accessing Parameters
-
-```rust
-use axonml_nn::{Linear, Module};
-
-let layer = Linear::new(100, 50);
-
-// Get all parameters (for optimizer)
-let params = layer.parameters();
-println!("Number of parameters: {}", params.len());
-
-// Get named parameters
-for (name, param) in layer.named_parameters() {
-    println!("{}: shape {:?}", name, param.shape());
-}
-
-// Count total parameters
-let total: usize = params.iter().map(|p| p.numel()).sum();
-println!("Total parameters: {}", total);
-```
-
-### Custom Module
-
-```rust
-use axonml_nn::{Module, Linear, ReLU, Parameter};
-use axonml_tensor::Tensor;
+use axonml_nn::prelude::*;
 use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
 
-struct MyModule {
-    fc1: Linear,
-    fc2: Linear,
-}
+// LSTM for sequence modeling
+let lstm = LSTM::new(
+    64,   // input_size
+    128,  // hidden_size
+    2     // num_layers
+);
 
-impl MyModule {
-    fn new(in_features: usize, hidden: usize, out_features: usize) -> Self {
-        Self {
-            fc1: Linear::new(in_features, hidden),
-            fc2: Linear::new(hidden, out_features),
-        }
-    }
-}
-
-impl Module for MyModule {
-    fn forward(&self, x: &Tensor<f32>) -> Tensor<f32> {
-        let h = self.fc1.forward(x).relu();
-        self.fc2.forward(&h)
-    }
-
-    fn parameters(&self) -> Vec<Parameter> {
-        let mut params = self.fc1.parameters();
-        params.extend(self.fc2.parameters());
-        params
-    }
-}
+// Input: [batch, seq_len, input_size]
+let input = Variable::new(
+    Tensor::from_vec(vec![0.5; 640], &[2, 5, 64]).unwrap(),
+    false
+);
+let output = lstm.forward(&input);  // [2, 5, 128]
 ```
 
-## API Reference
+### Transformer Attention
 
-### Layers
+```rust
+use axonml_nn::prelude::*;
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
 
-| Layer | Description |
-|-------|-------------|
-| `Linear` | Fully connected layer: y = xW + b |
-| `Conv1d` | 1D convolution for sequences |
-| `Conv2d` | 2D convolution for images |
-| `Conv3d` | 3D convolution for volumes |
-| `ConvTranspose2d` | Transposed convolution (upsampling) |
+let attention = MultiHeadAttention::new(
+    512,  // embed_dim
+    8     // num_heads
+);
 
-### Pooling
-
-| Layer | Description |
-|-------|-------------|
-| `MaxPool1d/2d/3d` | Max pooling |
-| `AvgPool1d/2d/3d` | Average pooling |
-| `AdaptiveMaxPool2d` | Adaptive max pool to target size |
-| `AdaptiveAvgPool2d` | Adaptive avg pool to target size |
-
-### Normalization
-
-| Layer | Description |
-|-------|-------------|
-| `BatchNorm1d/2d/3d` | Batch normalization |
-| `LayerNorm` | Layer normalization |
-| `GroupNorm` | Group normalization |
-| `InstanceNorm2d` | Instance normalization |
-
-### Recurrent
-
-| Layer | Description |
-|-------|-------------|
-| `RNN` | Vanilla RNN |
-| `LSTM` | Long Short-Term Memory |
-| `GRU` | Gated Recurrent Unit |
-
-### Attention
-
-| Layer | Description |
-|-------|-------------|
-| `MultiHeadAttention` | Multi-head self/cross attention |
-| `Embedding` | Learnable lookup table |
-
-### Activations
-
-| Activation | Formula |
-|------------|---------|
-| `ReLU` | max(0, x) |
-| `LeakyReLU` | max(αx, x) |
-| `ELU` | x if x>0, α(e^x-1) otherwise |
-| `Sigmoid` | 1/(1+e^-x) |
-| `Tanh` | tanh(x) |
-| `GELU` | x·Φ(x) |
-| `SiLU` | x·σ(x) |
-| `Softmax` | e^x / Σe^x |
+// Input: [batch, seq_len, embed_dim]
+let input = Variable::new(
+    Tensor::from_vec(vec![0.5; 5120], &[2, 5, 512]).unwrap(),
+    false
+);
+let output = attention.forward(&input);  // [2, 5, 512]
+```
 
 ### Loss Functions
 
-| Loss | Use Case |
-|------|----------|
-| `MSELoss` | Regression |
-| `L1Loss` | Robust regression |
-| `CrossEntropyLoss` | Multi-class classification |
-| `BCELoss` | Binary classification |
-| `BCEWithLogitsLoss` | Binary with numerical stability |
-| `NLLLoss` | When using LogSoftmax |
+```rust
+use axonml_nn::prelude::*;
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
 
-## Part of Axonml
+// Cross Entropy Loss for classification
+let logits = Variable::new(
+    Tensor::from_vec(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0], &[2, 3]).unwrap(),
+    true
+);
+let targets = Variable::new(
+    Tensor::from_vec(vec![2.0, 0.0], &[2]).unwrap(),
+    false
+);
 
-This crate is part of the [Axonml](https://crates.io/crates/axonml) ML framework.
+let loss_fn = CrossEntropyLoss::new();
+let loss = loss_fn.compute(&logits, &targets);
+loss.backward();
 
-```toml
-[dependencies]
-axonml = "0.1"  # Includes axonml-nn
+// MSE Loss for regression
+let mse = MSELoss::new();
+let pred = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(), true);
+let target = Variable::new(Tensor::from_vec(vec![1.5, 2.5], &[2]).unwrap(), false);
+let loss = mse.compute(&pred, &target);
+```
+
+### Weight Initialization
+
+```rust
+use axonml_nn::init::*;
+
+// Xavier/Glorot initialization
+let weights = xavier_uniform(256, 128);
+let weights = xavier_normal(256, 128);
+
+// Kaiming/He initialization (for ReLU networks)
+let weights = kaiming_uniform(256, 128);
+let weights = kaiming_normal(256, 128);
+
+// Other initializations
+let zeros_tensor = zeros(&[3, 3]);
+let ones_tensor = ones(&[3, 3]);
+let eye_tensor = eye(4);
+let ortho_tensor = orthogonal(64, 64);
+```
+
+### Training/Evaluation Mode
+
+```rust
+use axonml_nn::prelude::*;
+
+let mut model = Sequential::new()
+    .add(Linear::new(10, 5))
+    .add(Dropout::new(0.5))
+    .add(Linear::new(5, 2));
+
+// Training mode (dropout active)
+model.train();
+assert!(model.is_training());
+
+// Evaluation mode (dropout disabled)
+model.eval();
+assert!(!model.is_training());
+
+// Zero gradients before backward pass
+model.zero_grad();
+```
+
+## Tests
+
+Run the test suite:
+
+```bash
+cargo test -p axonml-nn
 ```
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](../../LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.

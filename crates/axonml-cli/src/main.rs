@@ -28,6 +28,10 @@
 //! - `axonml kaggle` - Kaggle dataset integration
 //! - `axonml hub` - Pretrained model hub
 //! - `axonml dataset` - Dataset management (NexusConnectBridge)
+//! - `axonml start` - Start dashboard and API server
+//! - `axonml stop` - Stop running services
+//! - `axonml status` - Check service status
+//! - `axonml logs` - View service logs
 //!
 //! @version 0.1.0
 //! @author `AutomataNexus` Development Team
@@ -135,6 +139,10 @@ fn run() -> CliResult<()> {
         Commands::Kaggle(args) => execute_kaggle(args),
         Commands::Hub(args) => execute_hub(args),
         Commands::Dataset(args) => execute_dataset(args),
+        Commands::Start(args) => commands::dashboard::execute_start(args),
+        Commands::Stop(args) => commands::dashboard::execute_stop(args),
+        Commands::Status(args) => commands::dashboard::execute_status(args),
+        Commands::Logs(args) => commands::dashboard::execute_logs(args),
     }
 }
 
