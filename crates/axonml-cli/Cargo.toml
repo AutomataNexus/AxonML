@@ -29,6 +29,10 @@ readme = "README.md"
 name = "axonml"
 path = "src/main.rs"
 
+[[bin]]
+name = "axon"
+path = "src/main.rs"
+
 [dependencies]
 # Internal crates
 axonml-core = { workspace = true }
@@ -79,6 +83,10 @@ bytemuck = { workspace = true }
 
 # Directory operations (for hub, kaggle)
 dirs = { workspace = true }
+
+# Unix process management (for dashboard commands)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 # W&B integration (optional)
 reqwest = { workspace = true, optional = true }

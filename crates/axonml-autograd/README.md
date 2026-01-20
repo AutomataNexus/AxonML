@@ -1,288 +1,207 @@
 # axonml-autograd
 
-[![Crates.io](https://img.shields.io/crates/v/axonml-autograd.svg)](https://crates.io/crates/axonml-autograd)
-[![Docs.rs](https://docs.rs/axonml-autograd/badge.svg)](https://docs.rs/axonml-autograd)
-[![Downloads](https://img.shields.io/crates/d/axonml-autograd.svg)](https://crates.io/crates/axonml-autograd)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <!-- Logo placeholder -->
+  <img src="../../assets/logo.png" alt="AxonML Logo" width="200" height="200" />
+</p>
 
-> Automatic differentiation engine for the [Axonml](https://github.com/AutomataNexus/AxonML) machine learning framework.
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/rust-1.75%2B-orange.svg" alt="Rust 1.75+">
+  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML">
+</p>
 
 ## Overview
 
-`axonml-autograd` provides reverse-mode automatic differentiation (backpropagation) for the Axonml framework. It enables gradient computation through arbitrary computational graphs, which is essential for training neural networks. The implementation follows PyTorch's design philosophy with dynamic graph construction.
+**axonml-autograd** provides reverse-mode automatic differentiation (backpropagation) for computing gradients of tensor operations. This is the foundation for training neural networks using gradient descent optimization in the AxonML framework.
 
 ## Features
 
-### Core Capabilities
-- **Dynamic computational graphs** - Build graphs on-the-fly during forward pass
-- **Reverse-mode autodiff** - Efficient gradient computation via backpropagation
-- **Gradient accumulation** - Support for gradient accumulation across batches
-- **Higher-order gradients** - Compute gradients of gradients (experimental)
+- **Dynamic Computational Graph** - Build computational graphs dynamically during the forward pass, enabling flexible model architectures.
 
-### Variable System
-- **Gradient tracking** - Automatic tracking of operations requiring gradients
-- **Leaf detection** - Distinguish leaf variables from intermediate results
-- **Gradient retention** - Option to retain gradients for non-leaf variables
-- **In-place operation detection** - Safety checks for in-place modifications
+- **Reverse-Mode Autodiff** - Efficient backpropagation through the graph to compute gradients for all learnable parameters.
 
-### Context Managers
-- **no_grad** - Disable gradient computation for inference
-- **enable_grad** - Re-enable gradients within no_grad context
-- **set_grad_enabled** - Programmatic gradient control
+- **Gradient Accumulation** - Automatic gradient accumulation for parameters used multiple times in the computation.
 
-## Installation
+- **No-Grad Context** - Temporarily disable gradient tracking for inference or evaluation with `no_grad()` and `NoGradGuard`.
 
-```toml
-[dependencies]
-axonml-autograd = "0.1"
-```
+- **Inference Mode** - Optimized inference mode for production deployment with `inference_mode()`.
+
+- **Gradient Checking** - Built-in numerical gradient verification using finite differences for debugging.
+
+## Modules
+
+| Module | Description |
+|--------|-------------|
+| `variable` | `Variable` struct wrapping tensors with gradient tracking and differentiable operations |
+| `graph` | Computational graph management with topological ordering for backpropagation |
+| `backward` | Backward pass implementation traversing the graph in reverse order |
+| `grad_fn` | `GradientFunction` trait and implementations for all differentiable operations |
+| `no_grad` | Context managers for disabling gradient computation (`NoGradGuard`, `InferenceModeGuard`) |
+| `functions` | Gradient implementations for arithmetic, activation, loss, and linear algebra operations |
 
 ## Usage
 
-### Basic Gradient Computation
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+axonml-autograd = "0.1.0"
+```
+
+### Basic Example
+
+```rust
+use axonml_autograd::{Variable, no_grad};
+use axonml_tensor::Tensor;
+
+// Create variables with gradient tracking
+let x = Variable::new(
+    Tensor::from_vec(vec![2.0, 3.0], &[2]).unwrap(),
+    true  // requires_grad = true
+);
+
+// Forward pass builds computational graph
+let y = x.pow(2.0);  // y = x^2
+let loss = y.sum();  // scalar loss
+
+// Backward pass computes gradients
+loss.backward();
+
+// Access gradients: dy/dx = 2x = [4.0, 6.0]
+let grad = x.grad().unwrap();
+println!("Gradient: {:?}", grad.to_vec());
+```
+
+### Chained Operations
 
 ```rust
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
 
-// Create a variable with gradient tracking
-let x = Variable::new(
-    Tensor::<f32>::from_vec(vec![2.0, 3.0], &[2]).unwrap(),
-    true  // requires_grad = true
-);
+let a = Variable::new(Tensor::from_vec(vec![2.0], &[1]).unwrap(), true);
+let b = Variable::new(Tensor::from_vec(vec![3.0], &[1]).unwrap(), true);
 
-// Compute y = x^2
-let y = x.pow(2.0);
+// Build complex computation
+let c = &a * &b;      // c = a * b
+let d = c.pow(2.0);   // d = c^2 = (a*b)^2
+let loss = d.sum();
 
-// Compute z = sum(y) = x[0]^2 + x[1]^2
-let z = y.sum();
+loss.backward();
 
-// Backward pass computes gradients
-z.backward();
-
-// Access gradients: dz/dx = 2x = [4.0, 6.0]
-let grad = x.grad().unwrap();
-println!("Gradient: {:?}", grad);
+// dc/da = b = 3.0, dd/dc = 2c = 12.0, dL/da = 36.0
+println!("dL/da = {:?}", a.grad().unwrap().to_vec());
+// dc/db = a = 2.0, dd/dc = 2c = 12.0, dL/db = 24.0
+println!("dL/db = {:?}", b.grad().unwrap().to_vec());
 ```
 
-### Multi-Variable Gradients
+### No-Grad Context
 
 ```rust
-use axonml_autograd::Variable;
-use axonml_tensor::{Tensor, randn};
+use axonml_autograd::{Variable, no_grad, NoGradGuard};
+use axonml_tensor::Tensor;
 
-let a = Variable::new(randn::<f32>(&[3, 4]), true);
-let b = Variable::new(randn::<f32>(&[4, 5]), true);
+let x = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(), true);
 
-// z = sum(a @ b)
-let c = a.matmul(&b).unwrap();
-let z = c.sum();
-
-// Compute gradients for both a and b
-z.backward();
-
-let grad_a = a.grad().unwrap();  // Shape: [3, 4]
-let grad_b = b.grad().unwrap();  // Shape: [4, 5]
-```
-
-### Disabling Gradients for Inference
-
-```rust
-use axonml_autograd::{Variable, no_grad};
-use axonml_tensor::randn;
-
-let x = Variable::new(randn::<f32>(&[10, 10]), true);
-
-// Inside no_grad, operations don't track gradients
-no_grad(|| {
-    let y = x.relu();
-    let z = y.sum();
-    // z.backward() would fail here - no graph was built
-    println!("Inference result: {}", z.data().sum());
+// Using closure
+let output = no_grad(|| {
+    // No gradient tracking here
+    x.relu()
 });
 
-// Outside no_grad, gradients are tracked again
-let y = x.relu();
-let z = y.sum();
-z.backward();  // This works
-```
-
-### Gradient Accumulation
-
-```rust
-use axonml_autograd::Variable;
-use axonml_tensor::randn;
-
-let weights = Variable::new(randn::<f32>(&[100, 10]), true);
-
-// Accumulate gradients over multiple mini-batches
-for batch in mini_batches {
-    let output = weights.matmul(&batch).unwrap();
-    let loss = output.sum();
-    loss.backward();  // Gradients accumulate
+// Using guard
+{
+    let _guard = NoGradGuard::new();
+    // No gradient tracking in this scope
+    let y = x.sigmoid();
 }
-
-// Gradients now contain sum of all batch gradients
-let accumulated_grad = weights.grad().unwrap();
-
-// Zero gradients before next accumulation cycle
-weights.zero_grad();
+// Gradient tracking restored here
 ```
 
-### Complex Computation Graphs
+### Loss Functions
 
 ```rust
 use axonml_autograd::Variable;
-use axonml_tensor::randn;
+use axonml_tensor::Tensor;
 
-let x = Variable::new(randn::<f32>(&[5, 5]), true);
+let predictions = Variable::new(
+    Tensor::from_vec(vec![0.5, 1.5, 2.5], &[3]).unwrap(),
+    true
+);
+let targets = Variable::new(
+    Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(),
+    false
+);
 
-// Complex expression with multiple paths
-let a = x.relu();
-let b = x.sigmoid();
-let c = &a + &b;           // Both paths contribute
-let d = c.pow(2.0);
-let e = d.mean().unwrap();
+// MSE Loss
+let loss = predictions.mse_loss(&targets);
+loss.backward();
 
-e.backward();
-
-// Gradient flows through both relu and sigmoid paths
-let grad = x.grad().unwrap();
+// Binary Cross Entropy
+let probs = Variable::new(Tensor::from_vec(vec![0.7, 0.3], &[2]).unwrap(), true);
+let labels = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[2]).unwrap(), false);
+let bce_loss = probs.binary_cross_entropy(&labels);
 ```
 
-### Detaching from Graph
+### Matrix Operations with Gradients
 
 ```rust
 use axonml_autograd::Variable;
-use axonml_tensor::randn;
+use axonml_tensor::Tensor;
 
-let x = Variable::new(randn::<f32>(&[5, 5]), true);
-let y = x.pow(2.0);
+// Linear layer: y = xW + b
+let x = Variable::new(Tensor::from_vec(vec![1.0; 6], &[2, 3]).unwrap(), false);
+let w = Variable::new(Tensor::from_vec(vec![0.1; 12], &[3, 4]).unwrap(), true);
+let b = Variable::new(Tensor::from_vec(vec![0.0; 4], &[4]).unwrap(), true);
 
-// Detach creates a new variable with no gradient history
-let y_detached = y.detach();
+let y = x.matmul(&w).add_var(&b);
+let loss = y.sum();
+loss.backward();
 
-// Operations on detached variable don't track gradients
-let z = y_detached.sum();
-// z.backward() would fail - y_detached has no graph
+// Gradients available for w and b
+println!("dL/dW shape: {:?}", w.grad().unwrap().shape());
+println!("dL/db shape: {:?}", b.grad().unwrap().shape());
 ```
 
-### Checking Gradient Requirements
+### Gradient Checking
 
 ```rust
-use axonml_autograd::Variable;
-use axonml_tensor::randn;
+use axonml_autograd::{Variable, backward::{numerical_gradient, gradcheck}};
+use axonml_tensor::Tensor;
 
-let x = Variable::new(randn::<f32>(&[5]), true);
-let y = Variable::new(randn::<f32>(&[5]), false);
+let x = Variable::new(Tensor::from_vec(vec![2.0, 3.0], &[2]).unwrap(), true);
 
-println!("x requires grad: {}", x.requires_grad());  // true
-println!("y requires grad: {}", y.requires_grad());  // false
+// Compute numerical gradient
+let numerical = numerical_gradient(
+    |v| v.pow(2.0).sum(),
+    &x,
+    1e-5  // epsilon
+);
 
-// Operations between grad and non-grad variables
-let z = &x + &y;
-println!("z requires grad: {}", z.requires_grad());  // true (inherits from x)
+// Compare with analytical gradient
+let y = x.pow(2.0).sum();
+y.backward();
+let analytical = x.grad().unwrap();
+
+// Verify gradients match
+assert!(gradcheck(&analytical, &numerical, 1e-3, 1e-3));
 ```
 
-## Supported Operations
+## Tests
 
-### Arithmetic
-| Operation | Forward | Backward |
-|-----------|---------|----------|
-| Add | `a + b` | `da = 1, db = 1` |
-| Sub | `a - b` | `da = 1, db = -1` |
-| Mul | `a * b` | `da = b, db = a` |
-| Div | `a / b` | `da = 1/b, db = -a/b²` |
-| Pow | `a.pow(n)` | `da = n * a^(n-1)` |
-| Neg | `-a` | `da = -1` |
+Run the test suite:
 
-### Matrix Operations
-| Operation | Forward | Backward |
-|-----------|---------|----------|
-| MatMul | `a.matmul(b)` | `da = grad @ b.T, db = a.T @ grad` |
-| Transpose | `a.t()` | `da = grad.t()` |
-
-### Reductions
-| Operation | Forward | Backward |
-|-----------|---------|----------|
-| Sum | `a.sum()` | `da = ones_like(a)` |
-| Mean | `a.mean()` | `da = ones_like(a) / numel` |
-| Sum Dim | `a.sum_dim(d)` | `da = broadcast(grad)` |
-
-### Activations
-| Operation | Forward | Backward |
-|-----------|---------|----------|
-| ReLU | `max(0, x)` | `da = (x > 0)` |
-| Sigmoid | `1/(1+e^-x)` | `da = σ(x)(1-σ(x))` |
-| Tanh | `tanh(x)` | `da = 1 - tanh²(x)` |
-| GELU | `x*Φ(x)` | `da = Φ(x) + x*φ(x)` |
-| Softmax | `e^x / Σe^x` | Jacobian-vector product |
-
-### Shape Operations
-| Operation | Forward | Backward |
-|-----------|---------|----------|
-| Reshape | `a.reshape(s)` | `da = grad.reshape(a.shape)` |
-| Squeeze | `a.squeeze(d)` | `da = grad.unsqueeze(d)` |
-| Unsqueeze | `a.unsqueeze(d)` | `da = grad.squeeze(d)` |
-
-## API Reference
-
-### Core Types
-
-| Type | Description |
-|------|-------------|
-| `Variable<T>` | Tensor wrapper with gradient tracking |
-| `GradFn` | Gradient function for backward pass |
-| `Graph` | Computational graph structure |
-
-### Variable Methods
-
-| Method | Description |
-|--------|-------------|
-| `new(tensor, requires_grad)` | Create new variable |
-| `data()` | Access underlying tensor |
-| `grad()` | Get computed gradient |
-| `backward()` | Compute gradients |
-| `zero_grad()` | Reset gradients to zero |
-| `detach()` | Create detached copy |
-| `requires_grad()` | Check if tracking gradients |
-| `is_leaf()` | Check if leaf variable |
-
-### Context Functions
-
-| Function | Description |
-|----------|-------------|
-| `no_grad(f)` | Execute closure without gradient tracking |
-| `enable_grad(f)` | Re-enable gradients in no_grad context |
-| `set_grad_enabled(bool)` | Set gradient computation state |
-| `is_grad_enabled()` | Check if gradients are enabled |
-
-## Architecture
-
-```
-axonml-autograd
-├── variable.rs    # Variable struct and operations
-├── graph.rs       # Computational graph management
-├── backward.rs    # Backward pass implementation
-├── grad_fn.rs     # Gradient function traits
-├── no_grad.rs     # Context managers
-└── functions/
-    ├── basic.rs       # Add, Mul, etc.
-    ├── activation.rs  # ReLU, Sigmoid, etc.
-    ├── loss.rs        # Loss function gradients
-    └── linalg.rs      # MatMul, etc.
-```
-
-## Part of Axonml
-
-This crate is part of the [Axonml](https://crates.io/crates/axonml) ML framework.
-
-```toml
-[dependencies]
-axonml = "0.1"  # Includes axonml-autograd
+```bash
+cargo test -p axonml-autograd
 ```
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](../../LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.

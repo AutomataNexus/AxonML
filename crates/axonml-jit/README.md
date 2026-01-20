@@ -1,169 +1,191 @@
 # axonml-jit
 
-[![Crates.io](https://img.shields.io/crates/v/axonml-jit.svg)](https://crates.io/crates/axonml-jit)
-[![Docs.rs](https://docs.rs/axonml-jit/badge.svg)](https://docs.rs/axonml-jit)
-[![Downloads](https://img.shields.io/crates/d/axonml-jit.svg)](https://crates.io/crates/axonml-jit)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <!-- Logo placeholder -->
+  <img src="../../assets/logo.png" alt="AxonML Logo" width="200" height="200" />
+</p>
 
-> Just-in-time compilation for the [Axonml](https://github.com/AutomataNexus/AxonML) machine learning framework.
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust: 1.75+"></a>
+  <a href="https://crates.io/crates/axonml-jit"><img src="https://img.shields.io/badge/crates.io-0.1.0-green.svg" alt="Version: 0.1.0"></a>
+  <a href="https://github.com/axonml/axonml"><img src="https://img.shields.io/badge/part%20of-AxonML-blueviolet.svg" alt="Part of AxonML"></a>
+</p>
 
 ## Overview
 
-`axonml-jit` provides JIT compilation capabilities to optimize model execution at runtime. Traces computational graphs and generates optimized code for your specific hardware and input patterns.
+`axonml-jit` provides Just-In-Time compilation for tensor operations, enabling significant performance improvements through operation tracing, graph optimization, and compiled function caching. It builds computation graphs from traced operations and optimizes them before execution.
 
 ## Features
 
-### Tracing
-- **Graph tracing** - Record operations during forward pass
-- **Dynamic shapes** - Handle variable-sized inputs
-- **Control flow** - Support for conditionals and loops
+- **Operation Tracing**: Record tensor operations to build computation graphs automatically
+- **Graph Optimization**: Constant folding, dead code elimination, algebraic simplification, and CSE
+- **Function Caching**: LRU cache for compiled functions with configurable size
+- **Comprehensive IR**: Rich intermediate representation supporting 40+ tensor operations
+- **Shape Inference**: Automatic shape propagation including broadcast semantics
+- **Native Compilation**: Prepared for Cranelift code generation (interpreter fallback available)
+- **Thread-Local Tracing**: Safe concurrent tracing with thread-local state
 
-### Compilation
-- **LLVM backend** - Native code generation
-- **Cranelift backend** - Fast compilation, cross-platform
-- **WASM target** - Compile models for web deployment
+## Modules
 
-### Optimizations
-- **Operator fusion** - Combine multiple ops into one
-- **Memory planning** - Minimize allocations
-- **Constant folding** - Evaluate constant expressions
-- **Dead code elimination** - Remove unused operations
-
-## Installation
-
-```toml
-[dependencies]
-axonml-jit = "0.1"
-```
+| Module | Description |
+|--------|-------------|
+| `ir` | Graph-based intermediate representation with Node, Op, Shape, and DataType definitions |
+| `trace` | Operation tracing functionality with TracedValue and Tracer for graph construction |
+| `optimize` | Optimization passes including constant folding, DCE, CSE, and algebraic simplification |
+| `codegen` | JIT compiler and compiled function execution with interpreter fallback |
+| `cache` | Function cache with LRU eviction and graph hashing |
+| `error` | Error types and Result alias for JIT operations |
 
 ## Usage
 
-### Basic Tracing
-
-```rust
-use axonml_jit::{trace, JitModule};
-
-let model = create_model();
-let sample_input = randn(&[1, 784]);
-
-// Trace the model
-let traced = trace(&model, &sample_input)?;
-
-// Run traced model (optimized)
-let output = traced.forward(&input);
-```
-
-### JIT Compilation
-
-```rust
-use axonml_jit::{JitCompiler, Backend};
-
-let compiler = JitCompiler::new(Backend::Cranelift);
-
-// Compile traced module
-let compiled = compiler.compile(&traced)?;
-
-// Much faster execution
-let output = compiled.forward(&input);
-
-// Benchmark
-let traced_time = benchmark(|| traced.forward(&input));
-let compiled_time = benchmark(|| compiled.forward(&input));
-println!("Speedup: {:.2}x", traced_time / compiled_time);
-```
-
-### Export to WASM
-
-```rust
-use axonml_jit::{JitCompiler, Backend};
-
-let compiler = JitCompiler::new(Backend::Wasm);
-let wasm_module = compiler.compile(&traced)?;
-
-// Save as .wasm file
-wasm_module.save("model.wasm")?;
-
-// Use in browser with wasm-bindgen
-```
-
-### Dynamic Shapes
-
-```rust
-use axonml_jit::{trace_dynamic, DynamicDim};
-
-// Mark batch dimension as dynamic
-let traced = trace_dynamic(
-    &model,
-    &[(DynamicDim::Dynamic, 784)],  // (batch, features)
-)?;
-
-// Works with any batch size
-let out1 = traced.forward(&randn(&[1, 784]));
-let out32 = traced.forward(&randn(&[32, 784]));
-let out128 = traced.forward(&randn(&[128, 784]));
-```
-
-### Optimization Levels
-
-```rust
-use axonml_jit::{JitCompiler, OptLevel};
-
-let compiler = JitCompiler::new(Backend::LLVM)
-    .opt_level(OptLevel::O3)       // Maximum optimization
-    .enable_fusion(true)           // Operator fusion
-    .enable_vectorization(true);   // SIMD vectorization
-
-let compiled = compiler.compile(&traced)?;
-```
-
-## API Reference
-
-### Functions
-
-| Function | Description |
-|----------|-------------|
-| `trace(model, input)` | Trace model with sample input |
-| `trace_dynamic(model, shape)` | Trace with dynamic dimensions |
-| `script(model)` | Convert model to script (preserves control flow) |
-
-### JitCompiler Methods
-
-| Method | Description |
-|--------|-------------|
-| `new(backend)` | Create compiler with backend |
-| `opt_level(level)` | Set optimization level |
-| `compile(traced)` | Compile traced module |
-| `enable_fusion(bool)` | Enable/disable operator fusion |
-
-### Backend Options
-
-| Backend | Description |
-|---------|-------------|
-| `LLVM` | Maximum performance, slower compile |
-| `Cranelift` | Fast compile, good performance |
-| `Wasm` | WebAssembly output |
-
-## CLI Usage
-
-```bash
-# Trace and compile a model
-axonml jit compile model.axonml -o model.jit
-
-# Export to WASM
-axonml jit compile model.axonml --target wasm -o model.wasm
-
-# Benchmark JIT vs eager
-axonml jit benchmark model.axonml --input sample.tensor
-```
-
-## Part of Axonml
+Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = { version = "0.1", features = ["jit"] }
+axonml-jit = "0.1.0"
+```
+
+### Basic Tracing and Compilation
+
+```rust
+use axonml_jit::{trace, JitCompiler};
+
+// Trace operations to build a computation graph
+let graph = trace(|tracer| {
+    let a = tracer.input("a", &[2, 3]);
+    let b = tracer.input("b", &[2, 3]);
+    let c = a.add(&b);
+    let d = c.mul_scalar(2.0);
+    tracer.output("result", d)
+});
+
+// Compile the graph
+let compiler = JitCompiler::new();
+let compiled = compiler.compile(&graph)?;
+
+// Execute with real data
+let a_data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+let b_data = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+let result = compiled.run(&[("a", &a_data), ("b", &b_data)])?;
+```
+
+### Traced Operations
+
+```rust
+use axonml_jit::trace;
+
+let graph = trace(|tracer| {
+    let x = tracer.input("x", &[4, 4]);
+
+    // Unary operations
+    let y = x.relu()
+             .mul_scalar(2.0)
+             .add_scalar(1.0);
+
+    // Activation functions
+    let z = y.sigmoid().tanh().gelu();
+
+    // Reductions
+    let mean = z.mean_axis(1, true);
+
+    // Shape operations
+    let reshaped = mean.reshape(&[-1]);
+
+    tracer.output("output", reshaped)
+});
+```
+
+### Custom Optimization
+
+```rust
+use axonml_jit::{Optimizer, OptimizationPass, JitCompiler};
+
+// Create optimizer with custom passes
+let mut optimizer = Optimizer::new();
+optimizer.add_pass(OptimizationPass::ConstantFolding);
+optimizer.add_pass(OptimizationPass::AlgebraicSimplification);
+optimizer.add_pass(OptimizationPass::DeadCodeElimination);
+optimizer.add_pass(OptimizationPass::CommonSubexpressionElimination);
+
+// Apply optimizations
+let optimized_graph = optimizer.optimize(graph);
+
+// Compile optimized graph
+let compiler = JitCompiler::with_optimizer(optimizer);
+let compiled = compiler.compile(&graph)?;
+```
+
+### Cache Management
+
+```rust
+use axonml_jit::JitCompiler;
+
+let compiler = JitCompiler::new();
+
+// Compile multiple graphs
+let _ = compiler.compile(&graph1)?;
+let _ = compiler.compile(&graph2)?;
+
+// Check cache statistics
+let stats = compiler.cache_stats();
+println!("Cached functions: {}", stats.entries);
+println!("Cache utilization: {:.1}%", stats.utilization());
+
+// Clear cache if needed
+compiler.clear_cache();
+```
+
+## Supported Operations
+
+### Binary Operations
+- `add`, `sub`, `mul`, `div`, `pow`, `max`, `min`
+
+### Unary Operations
+- `neg`, `abs`, `sqrt`, `exp`, `log`, `sin`, `cos`, `tanh`
+
+### Activations
+- `relu`, `sigmoid`, `gelu`, `silu`
+
+### Scalar Operations
+- `add_scalar`, `mul_scalar`
+
+### Reductions
+- `sum`, `mean`, `sum_axis`, `mean_axis`
+
+### Shape Operations
+- `reshape`, `transpose`, `squeeze`, `unsqueeze`
+
+### Matrix Operations
+- `matmul`
+
+### Comparison Operations
+- `gt`, `lt`, `eq`, `where`
+
+## Optimization Passes
+
+| Pass | Description |
+|------|-------------|
+| `ConstantFolding` | Evaluate constant expressions at compile time |
+| `DeadCodeElimination` | Remove nodes that do not contribute to outputs |
+| `AlgebraicSimplification` | Simplify expressions (x * 1 = x, x + 0 = x, etc.) |
+| `CommonSubexpressionElimination` | Reuse identical subexpressions |
+| `ElementwiseFusion` | Fuse consecutive elementwise operations |
+| `StrengthReduction` | Replace expensive ops with cheaper equivalents |
+
+## Tests
+
+Run the test suite:
+
+```bash
+cargo test -p axonml-jit
 ```
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- MIT License
+- Apache License, Version 2.0
+
+at your option.

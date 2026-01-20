@@ -1,304 +1,192 @@
 # axonml-vision
 
-[![Crates.io](https://img.shields.io/crates/v/axonml-vision.svg)](https://crates.io/crates/axonml-vision)
-[![Docs.rs](https://docs.rs/axonml-vision/badge.svg)](https://docs.rs/axonml-vision)
-[![Downloads](https://img.shields.io/crates/d/axonml-vision.svg)](https://crates.io/crates/axonml-vision)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <img src="../../assets/logo.png" alt="AxonML Logo" width="200"/>
+</p>
 
-> Computer vision utilities for the [Axonml](https://github.com/AutomataNexus/AxonML) machine learning framework.
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust"></a>
+  <a href="https://crates.io/crates/axonml-vision"><img src="https://img.shields.io/badge/crates.io-0.1.0-green.svg" alt="Version"></a>
+  <a href="https://github.com/axonml/axonml"><img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML"></a>
+</p>
 
 ## Overview
 
-`axonml-vision` provides image processing utilities, transforms, datasets, and pre-built model architectures for computer vision tasks. Inspired by torchvision, it includes everything needed for image classification, object detection, and more.
+**axonml-vision** provides computer vision functionality for the AxonML framework. It includes image-specific transforms, loaders for common vision datasets (MNIST, CIFAR), pre-defined neural network architectures, and a model hub for pretrained weights.
 
 ## Features
 
-### Image Transforms
-- **Resize** - Resize images to target size
-- **CenterCrop/RandomCrop** - Crop operations
-- **RandomHorizontalFlip/VerticalFlip** - Flip augmentations
-- **ColorJitter** - Brightness, contrast, saturation, hue
-- **Normalize** - Channel-wise normalization
-- **ToTensor** - Convert images to tensors
+- **Image Transforms** - Comprehensive augmentation including `Resize`, `CenterCrop`, `RandomHorizontalFlip`, `RandomVerticalFlip`, `RandomRotation`, `ColorJitter`, `Grayscale`, `ImageNormalize`, and `Pad`
+- **Vision Datasets** - Loaders for MNIST, Fashion-MNIST, CIFAR-10, CIFAR-100, and synthetic variants for testing
+- **Neural Network Models** - Pre-defined architectures including LeNet, SimpleCNN, MLP, ResNet (18/34), VGG (11/13/16/19), and Vision Transformer (ViT)
+- **Model Hub** - Download, cache, and load pretrained weights with checksum verification
+- **Bilinear Interpolation** - High-quality image resizing for 2D, 3D, and 4D tensors
+- **ImageNet Normalization** - Built-in presets for ImageNet, MNIST, and CIFAR normalization
 
-### Datasets
-- **SyntheticMNIST** - 28x28 grayscale digit recognition
-- **SyntheticCIFAR** - 32x32 color image classification
-- **ImageFolder** - Load images from directory structure
+## Modules
 
-### Model Architectures
-- **LeNet** - Classic CNN for MNIST
-- **SimpleCNN** - Basic CNN for learning
-- **VGG** - VGG-11, VGG-13, VGG-16, VGG-19
-- **ResNet** - ResNet-18, ResNet-34, ResNet-50, ResNet-101
-- **ViT** - Vision Transformer
-
-### Pretrained Models
-- **Model Hub** - Download pretrained weights
-- **Transfer Learning** - Fine-tune on custom data
-
-## Installation
-
-```toml
-[dependencies]
-axonml-vision = "0.1"
-```
+| Module | Description |
+|--------|-------------|
+| `transforms` | Image-specific data augmentation and preprocessing transforms |
+| `datasets` | Loaders for MNIST, CIFAR, and synthetic vision datasets |
+| `models` | Pre-defined neural network architectures (LeNet, ResNet, VGG, ViT) |
+| `hub` | Pretrained model weights management (download, cache, load) |
 
 ## Usage
 
-### Image Transforms
-
-```rust
-use axonml_vision::transforms::{
-    Compose, Resize, CenterCrop, ToTensor, Normalize,
-    RandomHorizontalFlip, ColorJitter
-};
-
-// Training transforms with augmentation
-let train_transform = Compose::new()
-    .add(Resize::new(256))
-    .add(RandomCrop::new(224))
-    .add(RandomHorizontalFlip::new(0.5))
-    .add(ColorJitter::new(0.2, 0.2, 0.2, 0.1))
-    .add(ToTensor::new())
-    .add(Normalize::new(
-        &[0.485, 0.456, 0.406],  // ImageNet mean
-        &[0.229, 0.224, 0.225]   // ImageNet std
-    ));
-
-// Validation transforms (no augmentation)
-let val_transform = Compose::new()
-    .add(Resize::new(256))
-    .add(CenterCrop::new(224))
-    .add(ToTensor::new())
-    .add(Normalize::new(
-        &[0.485, 0.456, 0.406],
-        &[0.229, 0.224, 0.225]
-    ));
-```
-
-### Loading MNIST
-
-```rust
-use axonml_vision::datasets::SyntheticMNIST;
-use axonml_data::DataLoader;
-
-// Load training and test sets
-let train_dataset = SyntheticMNIST::new(true, 60000);   // train=true
-let test_dataset = SyntheticMNIST::new(false, 10000);   // train=false
-
-let train_loader = DataLoader::new(train_dataset, 64)
-    .shuffle(true);
-
-let test_loader = DataLoader::new(test_dataset, 64)
-    .shuffle(false);
-
-// Training loop
-for (images, labels) in train_loader.iter() {
-    // images: [64, 1, 28, 28]
-    // labels: [64]
-    let output = model.forward(&images);
-    // ...
-}
-```
-
-### Loading CIFAR-10
-
-```rust
-use axonml_vision::datasets::SyntheticCIFAR;
-use axonml_data::DataLoader;
-
-// CIFAR-10: 10 classes, 32x32 color images
-let train_dataset = SyntheticCIFAR::new(true, 50000);
-let test_dataset = SyntheticCIFAR::new(false, 10000);
-
-let train_loader = DataLoader::new(train_dataset, 128)
-    .shuffle(true)
-    .num_workers(4);
-```
-
-### ImageFolder Dataset
-
-```rust
-use axonml_vision::datasets::ImageFolder;
-use axonml_vision::transforms::{Compose, Resize, ToTensor};
-
-// Directory structure:
-// data/
-//   train/
-//     cat/
-//       cat1.jpg
-//       cat2.jpg
-//     dog/
-//       dog1.jpg
-//       dog2.jpg
-
-let transform = Compose::new()
-    .add(Resize::new(224))
-    .add(ToTensor::new());
-
-let dataset = ImageFolder::new("data/train", transform);
-println!("Classes: {:?}", dataset.classes());  // ["cat", "dog"]
-println!("Samples: {}", dataset.len());
-```
-
-### Using LeNet for MNIST
-
-```rust
-use axonml_vision::models::LeNet;
-use axonml_nn::Module;
-use axonml_optim::{Adam, Optimizer};
-
-// LeNet for 28x28 grayscale images, 10 classes
-let model = LeNet::new(1, 10);  // in_channels=1, num_classes=10
-
-let mut optimizer = Adam::new(model.parameters(), 0.001);
-
-for epoch in 0..10 {
-    for (images, labels) in train_loader.iter() {
-        let output = model.forward(&images);
-        let loss = cross_entropy(&output, &labels);
-
-        optimizer.zero_grad();
-        loss.backward();
-        optimizer.step();
-    }
-}
-```
-
-### ResNet for Image Classification
-
-```rust
-use axonml_vision::models::{resnet18, resnet50};
-use axonml_nn::Module;
-
-// ResNet-18 for ImageNet (1000 classes)
-let model = resnet18(1000);
-
-// ResNet-50 for custom dataset (100 classes)
-let model = resnet50(100);
-
-// Forward pass: [batch, 3, 224, 224] -> [batch, num_classes]
-let images = load_batch();  // [16, 3, 224, 224]
-let logits = model.forward(&images);  // [16, 1000]
-```
-
-### VGG Networks
-
-```rust
-use axonml_vision::models::{vgg11, vgg16, vgg19};
-
-let model = vgg16(1000);  // VGG-16 for ImageNet
-
-// With batch normalization
-let model = vgg16_bn(1000);
-```
-
-### Vision Transformer (ViT)
-
-```rust
-use axonml_vision::models::ViT;
-
-// ViT-Base: patch_size=16, embed_dim=768, depth=12, heads=12
-let model = ViT::new(
-    224,    // image_size
-    16,     // patch_size
-    1000,   // num_classes
-    768,    // embed_dim
-    12,     // depth
-    12,     // num_heads
-);
-
-let images = load_batch();  // [16, 3, 224, 224]
-let logits = model.forward(&images);  // [16, 1000]
-```
-
-### Pretrained Models (Hub)
-
-```rust
-use axonml_vision::models::{resnet50, load_pretrained};
-
-// Load pretrained ResNet-50
-let model = resnet50(1000);
-load_pretrained(&model, "resnet50")?;
-
-// Fine-tune on custom dataset
-// Replace last layer for new number of classes
-let model = replace_fc(model, 10);  // 10 classes
-
-// Freeze backbone, only train new classifier
-freeze_layers(&model, "layer4");
-```
-
-### Data Augmentation Pipeline
-
-```rust
-use axonml_vision::transforms::*;
-
-// Heavy augmentation for training
-let augmentation = Compose::new()
-    .add(RandomResizedCrop::new(224, (0.08, 1.0), (0.75, 1.33)))
-    .add(RandomHorizontalFlip::new(0.5))
-    .add(ColorJitter::new(0.4, 0.4, 0.4, 0.1))
-    .add(RandomGrayscale::new(0.2))
-    .add(ToTensor::new())
-    .add(Normalize::imagenet())
-    .add(RandomErasing::new(0.25));  // Cutout augmentation
-```
-
-## API Reference
-
-### Transforms
-
-| Transform | Description |
-|-----------|-------------|
-| `Resize(size)` | Resize to size (preserves aspect) |
-| `CenterCrop(size)` | Crop center region |
-| `RandomCrop(size)` | Random crop |
-| `RandomResizedCrop` | Random crop + resize |
-| `RandomHorizontalFlip(p)` | Flip with probability p |
-| `RandomVerticalFlip(p)` | Vertical flip |
-| `ColorJitter` | Random color adjustments |
-| `RandomGrayscale(p)` | Convert to grayscale |
-| `RandomRotation(degrees)` | Random rotation |
-| `ToTensor` | Convert to tensor [C, H, W] |
-| `Normalize(mean, std)` | Channel normalization |
-| `RandomErasing(p)` | Random rectangle erasing |
-
-### Datasets
-
-| Dataset | Description | Shape |
-|---------|-------------|-------|
-| `SyntheticMNIST` | Handwritten digits | [1, 28, 28] |
-| `SyntheticCIFAR` | CIFAR-10/100 images | [3, 32, 32] |
-| `ImageFolder` | Load from directories | Variable |
-
-### Models
-
-| Model | Parameters | Top-1 Acc* |
-|-------|------------|------------|
-| `LeNet` | 62K | MNIST: 99% |
-| `VGG-11` | 133M | 69.0% |
-| `VGG-16` | 138M | 71.6% |
-| `VGG-19` | 144M | 72.4% |
-| `ResNet-18` | 11.7M | 69.8% |
-| `ResNet-34` | 21.8M | 73.3% |
-| `ResNet-50` | 25.6M | 76.1% |
-| `ResNet-101` | 44.5M | 77.4% |
-| `ViT-Base` | 86M | 77.9% |
-
-*ImageNet Top-1 accuracy (pretrained weights)
-
-## Part of Axonml
-
-This crate is part of the [Axonml](https://crates.io/crates/axonml) ML framework.
+Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = { version = "0.1", features = ["vision"] }
+axonml-vision = "0.1.0"
+```
+
+### Loading Datasets
+
+```rust
+use axonml_vision::prelude::*;
+
+// Synthetic MNIST for testing
+let train_data = SyntheticMNIST::train();
+let test_data = SyntheticMNIST::test();
+
+// Synthetic CIFAR-10
+let cifar = SyntheticCIFAR::small();
+
+// Get a sample
+let (image, label) = train_data.get(0).unwrap();
+assert_eq!(image.shape(), &[1, 28, 28]);  // MNIST: 1 channel, 28x28
+assert_eq!(label.shape(), &[10]);          // One-hot encoded
+```
+
+### Image Transforms
+
+```rust
+use axonml_vision::{Resize, CenterCrop, RandomHorizontalFlip, ImageNormalize};
+use axonml_data::{Compose, Transform};
+
+// Build transform pipeline
+let transform = Compose::empty()
+    .add(Resize::new(256, 256))
+    .add(CenterCrop::new(224, 224))
+    .add(RandomHorizontalFlip::new())
+    .add(ImageNormalize::imagenet());
+
+let output = transform.apply(&image);
+assert_eq!(output.shape(), &[3, 224, 224]);
+```
+
+### Normalization Presets
+
+```rust
+use axonml_vision::ImageNormalize;
+
+// ImageNet normalization
+let normalize = ImageNormalize::imagenet();
+// mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+
+// MNIST normalization
+let normalize = ImageNormalize::mnist();
+// mean=[0.1307], std=[0.3081]
+
+// CIFAR-10 normalization
+let normalize = ImageNormalize::cifar10();
+// mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]
+```
+
+### Using Vision Models
+
+```rust
+use axonml_vision::{LeNet, MLP, SimpleCNN};
+use axonml_vision::models::{resnet18, vgg16};
+use axonml_nn::Module;
+use axonml_autograd::Variable;
+
+// LeNet for MNIST
+let model = LeNet::new();
+let input = Variable::new(batched_image, false);  // [N, 1, 28, 28]
+let output = model.forward(&input);               // [N, 10]
+
+// MLP for flattened images
+let model = MLP::for_mnist();  // 784 -> 256 -> 128 -> 10
+
+// ResNet18 for ImageNet
+let model = resnet18(1000);
+let output = model.forward(&input);  // [N, 1000]
+
+// VGG16
+let model = vgg16(1000, true);  // with batch normalization
+```
+
+### Full Training Pipeline
+
+```rust
+use axonml_vision::prelude::*;
+use axonml_data::DataLoader;
+use axonml_optim::{Adam, Optimizer};
+use axonml_nn::{CrossEntropyLoss, Module};
+
+// Create dataset and dataloader
+let dataset = SyntheticMNIST::train();
+let loader = DataLoader::new(dataset, 32).shuffle(true);
+
+// Create model and optimizer
+let model = LeNet::new();
+let mut optimizer = Adam::new(model.parameters(), 0.001);
+let loss_fn = CrossEntropyLoss::new();
+
+// Training loop
+for batch in loader.iter() {
+    let input = Variable::new(batch.data, true);
+    let target = batch.targets;
+
+    optimizer.zero_grad();
+    let output = model.forward(&input);
+    let loss = loss_fn.compute(&output, &target);
+    loss.backward();
+    optimizer.step();
+}
+```
+
+### Model Hub for Pretrained Weights
+
+```rust
+use axonml_vision::hub::{download_weights, load_state_dict, list_models, model_info};
+
+// List available models
+let models = list_models();
+for model in models {
+    println!("{}: {} classes, {:.1}MB", model.name, model.num_classes,
+             model.size_bytes as f64 / 1_000_000.0);
+}
+
+// Get model info
+if let Some(info) = model_info("resnet18") {
+    println!("Accuracy: {:.2}%", info.accuracy);
+}
+
+// Download and load weights
+let path = download_weights("resnet18", false)?;
+let state_dict = load_state_dict(&path)?;
+
+// Load into model
+// model.load_state_dict(state_dict);
+```
+
+## Tests
+
+Run the test suite:
+
+```bash
+cargo test -p axonml-vision
 ```
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](../../LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT License ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.

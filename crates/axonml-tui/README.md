@@ -1,210 +1,194 @@
-# axonml-tui
+<p align="center">
+  <img src="../../assets/axonml-logo.png" alt="AxonML Logo" width="200"/>
+</p>
 
-[![Crates.io](https://img.shields.io/crates/v/axonml-tui.svg)](https://crates.io/crates/axonml-tui)
-[![Downloads](https://img.shields.io/crates/d/axonml-tui.svg)](https://crates.io/crates/axonml-tui)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+<h1 align="center">axonml-tui</h1>
 
-> Terminal user interface for the [Axonml](https://github.com/AutomataNexus/AxonML) machine learning framework.
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust: 1.75+"></a>
+  <a href="https://crates.io/crates/axonml-tui"><img src="https://img.shields.io/badge/crates.io-0.1.0-green.svg" alt="Crates.io: 0.1.0"></a>
+  <a href="https://github.com/automatanexus/axonml"><img src="https://img.shields.io/badge/part%20of-AxonML-teal.svg" alt="Part of AxonML"></a>
+</p>
+
+---
 
 ## Overview
 
-`axonml-tui` provides an interactive terminal interface for monitoring training progress, visualizing metrics, and managing experiments. Built with [ratatui](https://github.com/ratatui-org/ratatui) for a beautiful, responsive terminal experience.
+**axonml-tui** is a comprehensive terminal user interface for the AxonML machine learning framework. It provides real-time visualization of neural network architectures, dataset statistics, training progress, loss curves, and a file browser for navigating models and datasets - all from the comfort of your terminal.
+
+---
 
 ## Features
 
-### Training Monitor
-- **Real-time metrics** - Loss, accuracy, learning rate
-- **Progress bars** - Epoch and batch progress
-- **Live plots** - ASCII charts of training curves
-- **GPU monitoring** - Memory and utilization graphs
+- **Model Architecture Visualization** - View layer structures, parameter counts, shapes, and trainable status with interactive navigation
+- **Dataset Explorer** - Analyze class distributions, feature statistics, data splits, and preview dataset metadata
+- **Real-Time Training Monitor** - Track epochs, batches, loss/accuracy metrics with sparkline trends and ETA estimation
+- **Interactive Graphs** - Visualize loss curves, accuracy charts, and learning rate schedules with switchable chart types
+- **File Browser** - Navigate directories, preview model and dataset files, with support for multiple formats
+- **Help System** - Comprehensive keyboard shortcut reference organized by category
+- **Themeable UI** - NexusForge-inspired color scheme with teal, terracotta, and cream accents
 
-### Experiment Management
-- **Run tracking** - Track multiple experiments
-- **Compare runs** - Side-by-side comparison
-- **Hyperparameter view** - See config for each run
-- **Checkpoint browser** - Manage saved checkpoints
+---
 
-### Model Inspection
-- **Architecture view** - Layer-by-layer breakdown
-- **Parameter count** - Per-layer parameter stats
-- **Memory estimate** - Activation memory requirements
-- **Graph visualization** - ASCII computation graph
+## Modules
 
-### Interactive Controls
-- **Pause/resume** - Control training
-- **Adjust LR** - Change learning rate on-the-fly
-- **Save checkpoint** - Manual checkpoint save
-- **Early stop** - Stop training early
+| Module | Description |
+|--------|-------------|
+| `app` | Main application state, tab management, and navigation logic |
+| `event` | Keyboard input handling and event routing to views |
+| `theme` | NexusForge color palette and style presets (teal, terracotta, cream) |
+| `ui` | Core rendering logic for header, content, footer, and help overlay |
+| `views::model` | Neural network architecture display with layer details |
+| `views::data` | Dataset statistics, class distribution, and feature tables |
+| `views::training` | Real-time training progress with gauges and sparklines |
+| `views::graphs` | Loss, accuracy, and learning rate chart rendering |
+| `views::files` | Tree-based file browser with preview pane |
+| `views::help` | Keyboard shortcut reference organized by category |
 
-## Installation
-
-```bash
-cargo install axonml-tui
-```
+---
 
 ## Usage
 
-### Launch Training Monitor
-
-```bash
-# Start TUI and attach to training
-axonml-tui monitor --run ./runs/experiment_1
-
-# Or launch with training
-axonml-tui train config.toml
-```
-
-### Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `q` | Quit |
-| `p` | Pause/Resume training |
-| `s` | Save checkpoint |
-| `Tab` | Switch panels |
-| `↑/↓` | Scroll |
-| `+/-` | Adjust learning rate |
-| `l` | Toggle log panel |
-| `g` | Toggle GPU stats |
-| `h` | Show help |
-
-### Training Dashboard
-
-```
-┌─ Training Progress ─────────────────────────────────────────────┐
-│ Epoch: 45/100  [████████████████████░░░░░░░░░░░░░░░] 45%       │
-│ Batch: 128/500 [█████████░░░░░░░░░░░░░░░░░░░░░░░░░░] 26%       │
-│ ETA: 2h 34m                                                     │
-├─ Metrics ───────────────────────────────────────────────────────┤
-│ Loss: 0.2341 ↓  Accuracy: 92.4% ↑  LR: 0.0001                  │
-├─ Loss Curve ────────────────────────────────────────────────────┤
-│ 2.0 │*                                                          │
-│     │ **                                                        │
-│ 1.0 │   ***                                                     │
-│     │      ****                                                 │
-│ 0.0 │          **************************************           │
-│     └──────────────────────────────────────────────────         │
-│       0        25        50        75       100                 │
-├─ GPU ───────────────────────────────────────────────────────────┤
-│ GPU 0: [████████████████████░░░░░░░] 68%  Mem: 6.2/8.0 GB       │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Model Inspector
-
-```bash
-# View model architecture
-axonml-tui inspect model.axonml
-```
-
-```
-┌─ Model Architecture ────────────────────────────────────────────┐
-│ Layer               │ Type      │ Params    │ Output Shape      │
-├─────────────────────┼───────────┼───────────┼───────────────────┤
-│ conv1               │ Conv2d    │ 9,408     │ [B, 64, 112, 112] │
-│ bn1                 │ BatchNorm │ 128       │ [B, 64, 112, 112] │
-│ relu                │ ReLU      │ 0         │ [B, 64, 112, 112] │
-│ maxpool             │ MaxPool2d │ 0         │ [B, 64, 56, 56]   │
-│ layer1.0.conv1      │ Conv2d    │ 36,864    │ [B, 64, 56, 56]   │
-│ ...                 │ ...       │ ...       │ ...               │
-├─────────────────────┴───────────┴───────────┴───────────────────┤
-│ Total Parameters: 11,689,512 (44.6 MB)                          │
-│ Trainable Parameters: 11,689,512                                │
-│ Estimated Memory: 512 MB @ batch_size=32                        │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Experiment Comparison
-
-```bash
-# Compare multiple runs
-axonml-tui compare run1/ run2/ run3/
-```
-
-```
-┌─ Experiment Comparison ─────────────────────────────────────────┐
-│                    │ run1        │ run2        │ run3          │
-├────────────────────┼─────────────┼─────────────┼───────────────┤
-│ Model              │ resnet18    │ resnet34    │ resnet50      │
-│ LR                 │ 0.001       │ 0.001       │ 0.0001        │
-│ Batch Size         │ 32          │ 32          │ 64            │
-│ Best Val Acc       │ 91.2%       │ 93.4%       │ 94.1%         │
-│ Final Loss         │ 0.312       │ 0.245       │ 0.198         │
-│ Training Time      │ 2h 15m      │ 4h 32m      │ 8h 45m        │
-│ Status             │ Completed   │ Completed   │ Running       │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Programmatic Integration
-
-```rust
-use axonml_tui::{TrainingMonitor, MonitorConfig};
-
-let monitor = TrainingMonitor::new(MonitorConfig {
-    update_interval: Duration::from_millis(100),
-    show_gpu_stats: true,
-    ..Default::default()
-});
-
-// In training loop
-for epoch in 0..num_epochs {
-    for (batch_idx, batch) in dataloader.iter().enumerate() {
-        // ... training code ...
-
-        monitor.update(|state| {
-            state.epoch = epoch;
-            state.batch = batch_idx;
-            state.loss = loss.item();
-            state.accuracy = accuracy;
-            state.lr = optimizer.learning_rate();
-        });
-    }
-}
-
-monitor.finish();
-```
-
-## Themes
-
-```bash
-# Use dark theme (default)
-axonml-tui --theme dark monitor
-
-# Use light theme
-axonml-tui --theme light monitor
-
-# Use minimal theme (less decoration)
-axonml-tui --theme minimal monitor
-```
-
-## Configuration
-
-Create `~/.config/axonml/tui.toml`:
-
-```toml
-[display]
-theme = "dark"
-refresh_rate = 100  # ms
-show_gpu = true
-
-[charts]
-history_length = 1000
-smooth = true
-
-[colors]
-loss = "red"
-accuracy = "green"
-lr = "yellow"
-```
-
-## Part of Axonml
+Add `axonml-tui` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = { version = "0.1", features = ["tui"] }
+axonml-tui = "0.1.0"
 ```
+
+### Basic Example
+
+```rust
+use axonml_tui::run;
+
+fn main() -> std::io::Result<()> {
+    // Launch the TUI with no pre-loaded files
+    run(None, None)
+}
+```
+
+### Loading a Model on Startup
+
+```rust
+use axonml_tui::run;
+use std::path::PathBuf;
+
+fn main() -> std::io::Result<()> {
+    let model_path = PathBuf::from("models/mnist_classifier.axonml");
+    run(Some(model_path), None)
+}
+```
+
+### Loading Both Model and Dataset
+
+```rust
+use axonml_tui::run;
+use std::path::PathBuf;
+
+fn main() -> std::io::Result<()> {
+    let model_path = PathBuf::from("models/resnet.axonml");
+    let data_path = PathBuf::from("datasets/cifar10");
+    run(Some(model_path), Some(data_path))
+}
+```
+
+---
+
+## Keyboard Shortcuts
+
+### Global
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Switch between views |
+| `1` - `5` | Jump to specific view (Model, Data, Training, Graphs, Files) |
+| `?` | Toggle help overlay |
+| `q` | Quit application |
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| `j` / `Down` | Move selection down |
+| `k` / `Up` | Move selection up |
+| `h` / `Left` | Collapse / Previous panel |
+| `l` / `Right` | Expand / Next panel |
+| `Enter` | Select / Open |
+
+### Model View
+
+| Key | Action |
+|-----|--------|
+| `d` | Toggle detailed layer view |
+| `Enter` | View layer details |
+
+### Training View
+
+| Key | Action |
+|-----|--------|
+| `p` | Pause / Resume training |
+| `r` | Refresh training data |
+
+### Graphs View
+
+| Key | Action |
+|-----|--------|
+| `<` / `>` | Switch chart type (Loss / Accuracy / LR) |
+| `z` | Toggle zoom mode |
+
+### Files View
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Open file / Toggle directory |
+| `Backspace` / `u` | Go to parent directory |
+| `~` | Go to home directory |
+
+---
+
+## Supported File Formats
+
+| Category | Extensions |
+|----------|------------|
+| Models | `.axonml`, `.onnx`, `.pt`, `.pth`, `.safetensors`, `.h5`, `.keras` |
+| Datasets | `.npz`, `.npy`, `.csv`, `.parquet`, `.arrow`, `.tfrecord` |
+| Config | `.toml`, `.yaml`, `.yml`, `.json` |
+
+---
+
+## Tests
+
+Run the test suite:
+
+```bash
+cargo test -p axonml-tui
+```
+
+Run with verbose output:
+
+```bash
+cargo test -p axonml-tui -- --nocapture
+```
+
+---
+
+## Dependencies
+
+- **ratatui** - Terminal UI framework
+- **crossterm** - Cross-platform terminal manipulation
+- **tokio** - Async runtime
+- **serde** / **serde_json** - Serialization
+- **chrono** - Time handling
+- **dirs** - File system utilities
+
+---
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](../../LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT License ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.

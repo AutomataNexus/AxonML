@@ -1,0 +1,38 @@
+# Trunk configuration for AxonML Dashboard
+
+[build]
+# Target directory for build artifacts
+target = "target"
+
+# Public URL path
+public_url = "/"
+
+# Release mode
+release = false
+
+[serve]
+# Development server address
+address = "127.0.0.1"
+
+# Development server port
+port = 8080
+
+# Open browser on serve
+open = false
+
+# Proxy API requests to backend
+[[proxy]]
+rewrite = "/api/"
+backend = "http://127.0.0.1:3000/api/"
+
+[watch]
+# Watch for changes
+watch = "."
+
+# Ignore patterns
+ignore = [
+    "target",
+    "dist",
+    ".git",
+    "*.md",
+]
