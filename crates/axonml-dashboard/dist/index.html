@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AxonML - Machine Learning Dashboard">
+    <meta name="theme-color" content="#14b8a6">
+
+    <title>AxonML Dashboard</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/assets/AxonML-logo.png">
+
+    <!-- Logo asset -->
+    
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/styles-92d78beb08a3a2e4.css" integrity="sha384-sfSf7nagnjhdmP70kBzbHU5FSvgr7ZeqeBkfVrT73C0ie1Uzow+KLnUGq8dr55nY"/>
+
+    <!-- Preload fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- WASM bundle -->
+    
+<script type="module">
+import init, * as bindings from '/axonml-dashboard-9d81a820984835a9.js';
+const wasm = await init({ module_or_path: '/axonml-dashboard-9d81a820984835a9_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+<link rel="modulepreload" href="/axonml-dashboard-9d81a820984835a9.js" crossorigin="anonymous" integrity="sha384-6hdfk5avcPoLHDes3UKmdZypLhh/0jNnRTNKohwx6Kr6752kxao89zdaJbY6I4cp"><link rel="preload" href="/axonml-dashboard-9d81a820984835a9_bg.wasm" crossorigin="anonymous" integrity="sha384-Nb8tYcSc4ewxo4OtCeYsb6Fy25iDfyu10OKw5gsymMTbzPkDLGtH8baOeZTx3N8G" as="fetch" type="application/wasm"></head>
+<body>
+    <!-- Loading spinner shown while WASM loads -->
+    <div id="loading" class="loading-container">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading AxonML Dashboard...</p>
+        </div>
+    </div>
+
+    <!-- App will be mounted here -->
+    <div id="app"></div>
+
+    <noscript>
+        <div class="noscript-warning">
+            <h1>JavaScript Required</h1>
+            <p>AxonML Dashboard requires JavaScript to be enabled. Please enable JavaScript in your browser settings.</p>
+        </div>
+    </noscript>
+
+    <script>
+        // Remove loading spinner when WASM is ready
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                var loading = document.getElementById('loading');
+                if (loading) {
+                    loading.style.opacity = '0';
+                    setTimeout(function() {
+                        loading.style.display = 'none';
+                    }, 300);
+                }
+            }, 500);
+        });
+    </script>
+</body>
+</html>
