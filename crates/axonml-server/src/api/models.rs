@@ -5,7 +5,7 @@
 use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};
 use crate::db::models::{
-    Endpoint, EndpointStatus, Model, ModelRepository, ModelVersion, NewEndpoint, NewModel,
+    Endpoint, Model, ModelRepository, ModelVersion, NewEndpoint, NewModel,
     NewModelVersion,
 };
 use axum::{
@@ -213,7 +213,7 @@ pub async fn get_model(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Model not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Model not found".to_string()))?;
 
     // Check ownership
     if model.user_id != user.id && user.role != "admin" {
@@ -237,7 +237,7 @@ pub async fn update_model(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Model not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Model not found".to_string()))?;
 
     if model.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
@@ -264,7 +264,7 @@ pub async fn delete_model(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Model not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Model not found".to_string()))?;
 
     if model.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
@@ -294,7 +294,7 @@ pub async fn list_versions(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Model not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Model not found".to_string()))?;
 
     if model.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
@@ -324,7 +324,7 @@ pub async fn upload_version(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Model not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Model not found".to_string()))?;
 
     if model.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
@@ -433,7 +433,7 @@ pub async fn get_version(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Model not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Model not found".to_string()))?;
 
     if model.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
@@ -461,7 +461,7 @@ pub async fn delete_version(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Model not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Model not found".to_string()))?;
 
     if model.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
@@ -497,13 +497,14 @@ pub async fn download_version(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Model not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Model not found".to_string()))?;
 
     if model.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
     }
 
-    let ver = repo
+    // Verify version exists
+    let _ver = repo
         .get_version_by_number(&id, version)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
@@ -531,20 +532,20 @@ pub async fn download_version(
     let file_name = file_path
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("model.bin");
+        .unwrap_or("model.bin")
+        .to_string();
 
     let file_data = tokio::fs::read(&file_path)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
+    let content_disposition = format!("attachment; filename=\"{}\"", file_name);
+
     Ok((
         StatusCode::OK,
         [
-            (header::CONTENT_TYPE, "application/octet-stream"),
-            (
-                header::CONTENT_DISPOSITION,
-                &format!("attachment; filename=\"{}\"", file_name),
-            ),
+            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+            (header::CONTENT_DISPOSITION, content_disposition),
         ],
         file_data,
     ))
@@ -564,7 +565,7 @@ pub async fn deploy_version(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Model not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Model not found".to_string()))?;
 
     if model.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);

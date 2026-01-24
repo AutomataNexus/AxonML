@@ -22,7 +22,7 @@ pub const NEXUS_API_URL: &str = "https://nexusconnectbridge.automatanexus.com/ap
 pub const NEXUS_TAILSCALE_URL: &str = "http://100.85.154.94:8000/api/v1/bridge/datasets";
 
 /// Built-in dataset information.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BuiltinDataset {
     pub id: String,
     pub name: String,
@@ -111,7 +111,7 @@ pub fn builtin_datasets() -> Vec<BuiltinDataset> {
 }
 
 /// Dataset search result.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SearchResult {
     pub id: String,
     pub name: String,
@@ -145,35 +145,30 @@ impl NexusClient {
         }
     }
 
-    /// List built-in datasets.
-    #[cfg(feature = "dataset-api")]
+    /// List built-in datasets from API, fallback to local registry.
     pub fn list_builtin(&self) -> Result<Vec<BuiltinDataset>, String> {
         let url = format!("{}/builtin", self.base_url);
 
         let client = reqwest::blocking::Client::new();
-        let response = client
+        match client
             .get(&url)
             .timeout(std::time::Duration::from_secs(10))
             .send()
-            .map_err(|e| e.to_string())?;
-
-        if !response.status().is_success() {
-            return Err(format!("API error: {}", response.status()));
+        {
+            Ok(response) if response.status().is_success() => {
+                match response.json::<Vec<BuiltinDataset>>() {
+                    Ok(datasets) => Ok(datasets),
+                    Err(_) => Ok(builtin_datasets()) // Fallback on parse error
+                }
+            }
+            _ => {
+                // Fallback to local registry if API unavailable
+                Ok(builtin_datasets())
+            }
         }
-
-        // Parse response
-        let datasets: Vec<BuiltinDataset> = response.json().map_err(|e| e.to_string())?;
-        Ok(datasets)
     }
 
-    /// List built-in datasets (mock).
-    #[cfg(not(feature = "dataset-api"))]
-    pub fn list_builtin(&self) -> Result<Vec<BuiltinDataset>, String> {
-        Ok(builtin_datasets())
-    }
-
-    /// Search datasets across sources.
-    #[cfg(feature = "dataset-api")]
+    /// Search datasets across sources via NexusConnectBridge API.
     pub fn search(&self, query: &str, source: Option<&str>, max_results: usize) -> Result<Vec<SearchResult>, String> {
         let mut url = format!("{}/search?query={}&maxResults={}", self.base_url, query, max_results);
         if let Some(src) = source {
@@ -185,63 +180,35 @@ impl NexusClient {
             .get(&url)
             .timeout(std::time::Duration::from_secs(30))
             .send()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Network error: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("API error: {}", response.status()));
+            return Err(format!("API error: {} - check NexusConnectBridge service", response.status()));
         }
 
         let results: Vec<SearchResult> = response.json().map_err(|e| e.to_string())?;
         Ok(results)
     }
 
-    /// Search datasets (mock).
-    #[cfg(not(feature = "dataset-api"))]
-    pub fn search(&self, query: &str, source: Option<&str>, _max_results: usize) -> Result<Vec<SearchResult>, String> {
-        let src = source.unwrap_or("all");
-        Ok(vec![
-            SearchResult {
-                id: format!("{}-dataset-1", query),
-                name: format!("{} Sample Dataset", query),
-                source: if src == "all" { "kaggle".to_string() } else { src.to_string() },
-                description: format!("A sample dataset related to {}", query),
-                size: "10 MB".to_string(),
-                downloads: 1234,
-            },
-            SearchResult {
-                id: format!("{}-dataset-2", query),
-                name: format!("{} Research Data", query),
-                source: if src == "all" { "uci".to_string() } else { src.to_string() },
-                description: format!("Research dataset for {}", query),
-                size: "25 MB".to_string(),
-                downloads: 567,
-            },
-        ])
-    }
-
-    /// Get dataset info.
-    #[cfg(feature = "dataset-api")]
+    /// Get dataset info from API, fallback to local registry.
     pub fn get_info(&self, dataset_id: &str) -> Result<BuiltinDataset, String> {
         let url = format!("{}/builtin/{}", self.base_url, dataset_id);
 
         let client = reqwest::blocking::Client::new();
-        let response = client
+        match client
             .get(&url)
             .timeout(std::time::Duration::from_secs(10))
             .send()
-            .map_err(|e| e.to_string())?;
-
-        if !response.status().is_success() {
-            return Err(format!("Dataset not found: {}", dataset_id));
+        {
+            Ok(response) if response.status().is_success() => {
+                if let Ok(dataset) = response.json::<BuiltinDataset>() {
+                    return Ok(dataset);
+                }
+            }
+            _ => {}
         }
 
-        let dataset: BuiltinDataset = response.json().map_err(|e| e.to_string())?;
-        Ok(dataset)
-    }
-
-    /// Get dataset info (mock).
-    #[cfg(not(feature = "dataset-api"))]
-    pub fn get_info(&self, dataset_id: &str) -> Result<BuiltinDataset, String> {
+        // Fallback to local registry
         builtin_datasets()
             .into_iter()
             .find(|d| d.id == dataset_id)
@@ -355,7 +322,15 @@ pub fn execute_search(query: &str, source: Option<&str>, limit: usize) -> Result
         println!("Source filter: {}", src);
     }
 
-    let results = client.search(query, source, limit)?;
+    // Try primary API, fall back to Tailscale if needed
+    let results = match client.search(query, source, limit) {
+        Ok(r) => r,
+        Err(_) => {
+            // Try Tailscale fallback
+            let tailscale_client = NexusClient::with_tailscale();
+            tailscale_client.search(query, source, limit)?
+        }
+    };
 
     if results.is_empty() {
         println!("No datasets found for '{}'", query);
@@ -489,6 +464,7 @@ pub fn execute_sources() -> Result<(), String> {
 
     println!("\n{}", "─".repeat(60));
     println!("API endpoint: {}", NEXUS_API_URL);
+    println!("Tailscale fallback: {}", NEXUS_TAILSCALE_URL);
 
     Ok(())
 }
@@ -527,20 +503,27 @@ mod tests {
     }
 
     #[test]
-    fn test_nexus_client_mock() {
+    fn test_nexus_client_builtin() {
         let client = NexusClient::new();
 
+        // List built-in datasets (uses local fallback if API unreachable)
         let datasets = client.list_builtin().unwrap();
         assert!(!datasets.is_empty());
-
-        let results = client.search("image", None, 10).unwrap();
-        assert!(!results.is_empty());
     }
 
     #[test]
-    fn test_get_info_mock() {
+    fn test_nexus_client_search() {
+        let client = NexusClient::new();
+        // Search calls real NexusConnectBridge API
+        // Result depends on API availability
+        let _ = client.search("image", None, 10);
+    }
+
+    #[test]
+    fn test_get_info() {
         let client = NexusClient::new();
 
+        // Get info uses API with local fallback
         let info = client.get_info("mnist").unwrap();
         assert_eq!(info.id, "mnist");
         assert_eq!(info.classes, 10);

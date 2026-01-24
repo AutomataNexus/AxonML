@@ -13,6 +13,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tower;
 
 /// Authenticated user extracted from JWT
 #[derive(Debug, Clone)]
@@ -34,7 +35,8 @@ impl From<Claims> for AuthUser {
     }
 }
 
-/// Auth layer for Axum
+/// Auth layer for Axum (tower Layer implementation)
+#[derive(Clone)]
 pub struct AuthLayer {
     jwt: Arc<JwtAuth>,
 }
@@ -42,6 +44,67 @@ pub struct AuthLayer {
 impl AuthLayer {
     pub fn new(jwt: Arc<JwtAuth>) -> Self {
         Self { jwt }
+    }
+
+    /// Get the JWT auth instance
+    pub fn jwt(&self) -> &Arc<JwtAuth> {
+        &self.jwt
+    }
+}
+
+impl<S> tower::Layer<S> for AuthLayer {
+    type Service = AuthService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        AuthService {
+            inner,
+            jwt: self.jwt.clone(),
+        }
+    }
+}
+
+/// Auth service wrapper for tower
+#[derive(Clone)]
+pub struct AuthService<S> {
+    inner: S,
+    jwt: Arc<JwtAuth>,
+}
+
+impl<S, ReqBody> tower::Service<Request<ReqBody>> for AuthService<S>
+where
+    S: tower::Service<Request<ReqBody>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    ReqBody: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut request: Request<ReqBody>) -> Self::Future {
+        let jwt = self.jwt.clone();
+        let mut inner = self.inner.clone();
+
+        Box::pin(async move {
+            // Try to get authorization header and validate
+            if let Some(auth_header) = request
+                .headers()
+                .get(AUTHORIZATION)
+                .and_then(|h| h.to_str().ok())
+            {
+                if let Some(token) = JwtAuth::extract_from_header(auth_header) {
+                    if let Ok(claims) = jwt.validate_access_token(token) {
+                        let user = AuthUser::from(claims);
+                        request.extensions_mut().insert(user);
+                    }
+                }
+            }
+
+            inner.call(request).await
+        })
     }
 }
 
@@ -73,8 +136,14 @@ impl IntoResponse for AuthError {
             AuthError::UserNotFound => {
                 (StatusCode::NOT_FOUND, "user_not_found", "User not found")
             }
+            AuthError::NotFound(msg) => {
+                (StatusCode::NOT_FOUND, "not_found", msg.as_str())
+            }
             AuthError::Unauthorized => {
                 (StatusCode::FORBIDDEN, "unauthorized", "Unauthorized access")
+            }
+            AuthError::Forbidden(msg) => {
+                (StatusCode::FORBIDDEN, "forbidden", msg.as_str())
             }
             AuthError::Internal(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", msg.as_str())

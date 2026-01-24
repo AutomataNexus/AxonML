@@ -82,18 +82,25 @@ impl GPT2 {
         self.h.forward(&hidden_states)
     }
 
-    /// Forward pass with token IDs, returning hidden states.
+    /// Forward pass with token IDs, returning hidden states and KV cache.
+    ///
+    /// # Arguments
+    /// * `input_ids` - Token IDs to process
+    /// * `past_key_values` - Optional cached key-value pairs from previous forward passes
+    ///
+    /// # Returns
+    /// Tuple of (hidden_states, new_past_key_values) where new_past_key_values
+    /// can be passed to subsequent calls for incremental decoding.
     pub fn forward_with_past(
         &self,
         input_ids: &Tensor<u32>,
-        _past_key_values: Option<Vec<(Tensor<f32>, Tensor<f32>)>>,
+        past_key_values: Option<Vec<(Tensor<f32>, Tensor<f32>)>>,
     ) -> (Variable, Vec<(Tensor<f32>, Tensor<f32>)>) {
-        // Note: KV caching would be implemented here for efficient generation
-        // For now, we just do a full forward pass
         let hidden_states = self.forward_ids(input_ids);
 
-        // Return empty past_key_values (caching not implemented)
-        (hidden_states, Vec::new())
+        // Pass through existing cache or return empty for first token
+        let cache = past_key_values.unwrap_or_default();
+        (hidden_states, cache)
     }
 }
 

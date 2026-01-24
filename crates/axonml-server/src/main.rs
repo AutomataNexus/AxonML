@@ -18,15 +18,16 @@ mod auth;
 mod api;
 mod training;
 mod inference;
+mod email;
 
 use api::{create_router, AppState};
-use auth::jwt::JwtAuth;
+use auth::JwtAuth;
 use clap::Parser;
 use config::Config;
 use db::{schema::Schema, Database};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{info, error, Level};
+use tracing::{info, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// AxonML Server - REST API for Machine Learning
@@ -74,6 +75,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ensure directories exist
     config.ensure_directories()?;
 
+    // Validate configuration and show warnings
+    for warning in config.validate_warnings() {
+        tracing::warn!("{}", warning);
+    }
+
+    // Strict validation in production (when not using default secret)
+    if std::env::var("AXONML_STRICT_CONFIG").is_ok() {
+        config.validate()?;
+    }
+
     info!("Data directory: {:?}", config.data_dir());
     info!("Models directory: {:?}", config.models_dir());
     info!("Runs directory: {:?}", config.runs_dir());
@@ -109,11 +120,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize JWT authentication
     let jwt = JwtAuth::new(&config.auth.jwt_secret, config.auth.jwt_expiry_hours);
 
+    // Initialize email service
+    let email_api_key = std::env::var("RESEND_API_KEY")
+        .unwrap_or_else(|_| "re_cQM9wxDs_4ELeERKQ4yAGDEHc9wiTqHUp".to_string());
+    let email = email::EmailService::new(email_api_key);
+
+    // Initialize inference server
+    let inference = inference::server::InferenceServer::new(inference::server::InferenceConfig::default());
+
+    // Initialize training tracker for real-time metrics broadcasting
+    let db_arc = Arc::new(db);
+    let tracker = training::tracker::TrainingTracker::new(db_arc.clone());
+
+    // Initialize model pool for managing loaded model instances (max 100 models, 5 minute idle timeout)
+    let model_pool = inference::pool::ModelPool::new(100, 300);
+
+    // Initialize inference metrics collector
+    let inference_metrics = inference::metrics::InferenceMetrics::new();
+
     // Create application state
     let state = AppState {
-        db: Arc::new(db),
+        db: db_arc,
         jwt: Arc::new(jwt),
         config: Arc::new(config.clone()),
+        email: Arc::new(email),
+        inference: Arc::new(inference),
+        tracker: Arc::new(tracker),
+        model_pool: Arc::new(model_pool),
+        inference_metrics: Arc::new(inference_metrics),
     };
 
     // Create router

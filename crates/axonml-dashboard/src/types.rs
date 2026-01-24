@@ -81,17 +81,18 @@ pub struct TotpSetupResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAuthnRegisterStart {
     pub challenge: String,
-    pub rp_id: String,
-    pub rp_name: String,
-    pub user_id: String,
-    pub user_name: String,
-    pub user_display_name: String,
+    pub rp_id: Option<String>,
+    pub rp_name: Option<String>,
+    pub user_id: Option<String>,
+    pub user_name: Option<String>,
+    pub user_display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAuthnAuthenticateStart {
     pub challenge: String,
-    pub rp_id: String,
+    pub rp_id: Option<String>,
+    #[serde(default)]
     pub allowed_credentials: Vec<String>,
 }
 

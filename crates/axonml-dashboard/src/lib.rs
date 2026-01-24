@@ -11,6 +11,7 @@ pub mod components;
 pub mod pages;
 pub mod state;
 pub mod types;
+pub mod utils;
 
 use auth::{LoginPage, RegisterPage, session::{SessionInitializer, ProtectedRoute}};
 use components::toast::ToastContainer;
@@ -21,6 +22,7 @@ use pages::{
     models::{ModelsListPage, ModelDetailPage, ModelUploadPage},
     inference::{InferenceOverviewPage, EndpointsListPage, EndpointDetailPage, InferenceMetricsPage},
     settings::{SettingsPage, ProfileSettingsPage, SecuritySettingsPage},
+    admin::{UserManagementPage, SystemStatsPage},
 };
 use auth::mfa_setup::{TotpSetupPage, WebAuthnSetupPage, RecoveryCodesPage};
 use state::provide_app_state;
@@ -134,6 +136,22 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // Admin routes
+                <Route path="/admin/users" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <UserManagementPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+                <Route path="/admin/system" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <SystemStatsPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+
                 // Settings routes
                 <Route path="/settings" view=|| view! {
                     <ProtectedRoute>
@@ -199,7 +217,7 @@ fn PublicOrDashboard() -> impl IntoView {
             fallback=|| view! {
                 <div class="page-loader">
                     <div class="page-loader-content">
-                        <img src="/assets/logo.svg" alt="AxonML" class="page-loader-logo" />
+                        <img src="/assets/AxonML-logo.png" alt="AxonML" class="page-loader-logo" />
                         <components::spinner::Spinner size=components::spinner::SpinnerSize::Lg />
                         <p>"Loading..."</p>
                     </div>

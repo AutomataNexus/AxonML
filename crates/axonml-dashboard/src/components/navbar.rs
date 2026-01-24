@@ -36,7 +36,7 @@ pub fn Navbar() -> impl IntoView {
                     <IconMenu />
                 </button>
                 <A href="/" class="navbar-brand">
-                    <img src="/assets/logo.svg" alt="AxonML" class="navbar-logo" />
+                    <img src="/assets/AxonML-logo.png" alt="AxonML" class="navbar-logo" />
                     <span class="navbar-title">"AxonML"</span>
                 </A>
             </div>
@@ -61,48 +61,20 @@ pub fn Navbar() -> impl IntoView {
                     }
                 >
                     <div class="navbar-actions">
-                        // Notifications dropdown placeholder
-                        <button class="btn btn-ghost">
-                            <IconActivity />
-                        </button>
-
-                        // User dropdown
-                        <div class="dropdown">
-                            <button class="btn btn-ghost user-button">
-                                <div class="avatar">
-                                    {move || user().map(|u| u.name.chars().next().unwrap_or('U').to_string()).unwrap_or_else(|| "U".to_string())}
-                                </div>
+                        // User info display
+                        <div class="user-display">
+                            <div class="avatar">
+                                {move || user().map(|u| u.name.chars().next().unwrap_or('U').to_string()).unwrap_or_else(|| "U".to_string())}
+                            </div>
+                            <div class="user-details">
                                 <span class="user-name">
                                     {move || user().map(|u| u.name.clone()).unwrap_or_default()}
                                 </span>
-                                <IconChevronDown size=IconSize::Sm />
-                            </button>
-                            <div class="dropdown-menu dropdown-menu-right">
-                                <div class="dropdown-header">
-                                    <div class="user-info">
-                                        <strong>{move || user().map(|u| u.name.clone()).unwrap_or_default()}</strong>
-                                        <span class="text-muted">{move || user().map(|u| u.email.clone()).unwrap_or_default()}</span>
-                                    </div>
-                                </div>
-                                <div class="dropdown-divider"></div>
-                                <A href="/settings/profile" class="dropdown-item">
-                                    <IconUser size=IconSize::Sm />
-                                    <span>"Profile"</span>
-                                </A>
-                                <A href="/settings/security" class="dropdown-item">
-                                    <IconShield size=IconSize::Sm />
-                                    <span>"Security"</span>
-                                </A>
-                                <A href="/settings" class="dropdown-item">
-                                    <IconSettings size=IconSize::Sm />
-                                    <span>"Settings"</span>
-                                </A>
-                                <div class="dropdown-divider"></div>
-                                <button class="dropdown-item text-danger" on:click={let f = logout_handler.clone(); move |e| f(e)}>
-                                    <IconLogout size=IconSize::Sm />
-                                    <span>"Sign Out"</span>
-                                </button>
+                                <span class="user-email">
+                                    {move || user().map(|u| u.email.clone()).unwrap_or_default()}
+                                </span>
                             </div>
+                            <IconChevronDown size=IconSize::Sm />
                         </div>
                     </div>
                 </Show>
@@ -118,7 +90,7 @@ pub fn PublicNavbar() -> impl IntoView {
         <nav class="navbar navbar-public">
             <div class="navbar-left">
                 <A href="/" class="navbar-brand">
-                    <img src="/assets/logo.svg" alt="AxonML" class="navbar-logo" />
+                    <img src="/assets/AxonML-logo.png" alt="AxonML" class="navbar-logo" />
                     <span class="navbar-title">"AxonML"</span>
                 </A>
             </div>
@@ -127,7 +99,7 @@ pub fn PublicNavbar() -> impl IntoView {
                 <div class="navbar-links">
                     <a href="#features" class="nav-link">"Features"</a>
                     <a href="#docs" class="nav-link">"Documentation"</a>
-                    <a href="https://github.com/yourusername/axonml" class="nav-link" target="_blank" rel="noopener">
+                    <a href="https://github.com/AutomataNexus/AxonML" class="nav-link" target="_blank" rel="noopener">
                         "GitHub"
                         <IconExternalLink size=IconSize::Sm />
                     </a>
