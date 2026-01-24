@@ -28,9 +28,9 @@ std = []
 
 [dependencies]
 # Internal crates
-axonml-core = { path = "../axonml-core" }
-axonml-tensor = { path = "../axonml-tensor" }
-axonml-nn = { path = "../axonml-nn" }
+axonml-core.workspace = true
+axonml-tensor.workspace = true
+axonml-nn.workspace = true
 
 # ONNX parsing
 prost = "0.13"
