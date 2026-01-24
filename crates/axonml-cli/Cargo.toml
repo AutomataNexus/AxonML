@@ -42,7 +42,7 @@ axonml-optim = { workspace = true }
 axonml-data = { workspace = true }
 axonml-vision = { workspace = true }
 axonml-serialize = { workspace = true }
-axonml-tui = { path = "../axonml-tui" }
+axonml-tui.workspace = true
 
 # CLI framework
 clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }

@@ -241,7 +241,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "axonml"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-audio",
  "axonml-autograd",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-audio"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-core",
  "axonml-data",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-autograd"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -319,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "approx",
  "ash",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-dashboard"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.21.7",
  "chrono",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-data"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-distributed"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -387,7 +387,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-fusion"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "approx",
  "axonml-core",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-jit"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-llm"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "approx",
  "axonml-autograd",
@@ -428,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-nn"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -439,7 +439,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-onnx"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-optim"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -466,7 +466,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-profile"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "approx",
  "axonml-core",
@@ -479,7 +479,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-quant"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "approx",
  "axonml-core",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-serialize"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-server"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -549,7 +549,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-tensor"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "approx",
  "axonml-core",
@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-text"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -573,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-tui"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -591,7 +591,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-vision"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
