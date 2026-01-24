@@ -8,11 +8,11 @@ pub mod webauthn;
 pub mod recovery;
 pub mod middleware;
 
-pub use jwt::{JwtAuth, Claims, TokenPair};
+pub use jwt::{JwtAuth, Claims};
 pub use totp::TotpAuth;
 pub use webauthn::WebAuthnAuth;
 pub use recovery::RecoveryAuth;
-pub use middleware::{AuthLayer, AuthUser};
+pub use middleware::{AuthUser, AuthLayer, auth_middleware, require_admin_middleware, require_mfa_middleware, optional_auth_middleware};
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -34,8 +34,12 @@ pub enum AuthError {
     InvalidMfaCode,
     #[error("User not found")]
     UserNotFound,
+    #[error("Not found: {0}")]
+    NotFound(String),
     #[error("Unauthorized")]
     Unauthorized,
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
     #[error("Internal error: {0}")]
     Internal(String),
 }

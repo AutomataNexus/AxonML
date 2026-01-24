@@ -7,6 +7,7 @@ use crate::api;
 use crate::state::use_app_state;
 use crate::types::*;
 use crate::components::{forms::*, icons::*, spinner::*, modal::*};
+use crate::utils::webauthn;
 
 /// TOTP Setup Page
 #[component]
@@ -265,11 +266,11 @@ pub fn TotpSetupPage() -> impl IntoView {
 /// WebAuthn Setup Page
 #[component]
 pub fn WebAuthnSetupPage() -> impl IntoView {
-    let _state = use_app_state(); // TODO: Use after WebAuthn impl complete
+    let state = use_app_state();
 
     let loading = create_rw_signal(false);
     let error = create_rw_signal::<Option<String>>(None);
-    let (success, _set_success) = create_signal(false); // TODO: Use after WebAuthn impl complete
+    let (success, set_success) = create_signal(false);
     let device_name = create_rw_signal(String::new());
 
     let start_registration = move |_| {
@@ -278,17 +279,65 @@ pub fn WebAuthnSetupPage() -> impl IntoView {
             return;
         }
 
+        // Check if WebAuthn is available
+        if !webauthn::is_webauthn_available() {
+            error.set(Some("WebAuthn is not supported in this browser".to_string()));
+            return;
+        }
+
         loading.set(true);
         error.set(None);
 
-        spawn_local(async move {
-            match api::auth::webauthn_register_start().await {
-                Ok(_challenge) => {
-                    // TODO: In a real implementation, use navigator.credentials.create()
-                    // with the challenge data, then set_success.set(true)
+        let name = device_name.get();
+        let user_id = state.user.get()
+            .map(|u| u.id.clone())
+            .unwrap_or_else(|| "user".to_string());
+        let user_email = state.user.get()
+            .map(|u| u.email.clone())
+            .unwrap_or_else(|| "user@example.com".to_string());
 
-                    // For now, show not implemented message
-                    error.set(Some("WebAuthn registration requires browser support. Coming soon!".to_string()));
+        spawn_local(async move {
+            // Step 1: Get challenge from server
+            match api::auth::webauthn_register_start().await {
+                Ok(challenge) => {
+                    // Step 2: Create credential using WebAuthn API
+                    let rp_id = web_sys::window()
+                        .and_then(|w| w.location().hostname().ok())
+                        .unwrap_or_else(|| "localhost".to_string());
+
+                    match webauthn::create_credential(
+                        &challenge.challenge,
+                        "AxonML",
+                        &rp_id,
+                        &challenge.user_id.unwrap_or(user_id),
+                        &user_email,
+                        &name,
+                    ).await {
+                        Ok(registration) => {
+                            // Step 3: Send credential to server for registration
+                            let finish_request = api::auth::WebAuthnRegisterFinishRequest {
+                                credential_id: registration.id,
+                                attestation_object: registration.attestation_object,
+                                client_data_json: registration.client_data_json,
+                                device_name: name,
+                            };
+
+                            match api::auth::webauthn_register_finish(&finish_request).await {
+                                Ok(_) => {
+                                    set_success.set(true);
+                                }
+                                Err(e) => {
+                                    error.set(Some(format!("Registration failed: {}", e.message)));
+                                }
+                            }
+                        }
+                        Err(webauthn::WebAuthnError::UserCancelled) => {
+                            error.set(Some("Registration cancelled".to_string()));
+                        }
+                        Err(e) => {
+                            error.set(Some(e.to_string()));
+                        }
+                    }
                 }
                 Err(e) => {
                     error.set(Some(e.message));

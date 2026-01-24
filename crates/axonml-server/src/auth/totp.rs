@@ -4,8 +4,8 @@
 
 use super::AuthError;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use image::Luma;
 use qrcode::QrCode;
+use qrcode::render::svg;
 use totp_rs::{Algorithm, Secret, TOTP};
 
 /// TOTP authentication handler
@@ -16,9 +16,11 @@ pub struct TotpAuth {
 /// TOTP setup response
 #[derive(Debug, Clone)]
 pub struct TotpSetup {
+    /// The secret in base32 encoding (used for verification)
     pub secret: String,
-    pub secret_base32: String,
+    /// QR code as a data URL (SVG format)
     pub qr_code_data_url: String,
+    /// Full OTPAuth URL for manual entry
     pub otpauth_url: String,
 }
 
@@ -38,18 +40,16 @@ impl TotpAuth {
 
     /// Create TOTP setup data including QR code
     pub fn setup(&self, user_email: &str) -> Result<TotpSetup, AuthError> {
-        let secret = Secret::generate_secret();
-        let secret_base32 = secret.to_encoded().to_string();
+        let secret = self.generate_secret();
 
-        let totp = self.create_totp(&secret_base32, user_email)?;
+        let totp = self.create_totp(&secret, user_email)?;
         let otpauth_url = totp.get_url();
 
         // Generate QR code
         let qr_code_data_url = self.generate_qr_code(&otpauth_url)?;
 
         Ok(TotpSetup {
-            secret: secret_base32.clone(),
-            secret_base32,
+            secret,
             qr_code_data_url,
             otpauth_url,
         })
@@ -63,27 +63,20 @@ impl TotpAuth {
         Ok(totp.check_current(code).unwrap_or(false))
     }
 
-    /// Generate a QR code as a data URL
+    /// Generate a QR code as a data URL (SVG format)
     fn generate_qr_code(&self, data: &str) -> Result<String, AuthError> {
         let code = QrCode::new(data.as_bytes())
             .map_err(|e| AuthError::Internal(format!("QR code generation failed: {}", e)))?;
 
-        let image = code.render::<Luma<u8>>().build();
+        let svg_string = code
+            .render()
+            .min_dimensions(200, 200)
+            .dark_color(svg::Color("#000000"))
+            .light_color(svg::Color("#ffffff"))
+            .build();
 
-        let mut png_bytes: Vec<u8> = Vec::new();
-        let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
-
-        encoder
-            .encode(
-                image.as_raw(),
-                image.width(),
-                image.height(),
-                image::ExtendedColorType::L8,
-            )
-            .map_err(|e| AuthError::Internal(format!("PNG encoding failed: {}", e)))?;
-
-        let base64_image = BASE64.encode(&png_bytes);
-        Ok(format!("data:image/png;base64,{}", base64_image))
+        let base64_svg = BASE64.encode(svg_string.as_bytes());
+        Ok(format!("data:image/svg+xml;base64,{}", base64_svg))
     }
 
     /// Create a TOTP instance for a user
@@ -131,8 +124,9 @@ mod tests {
         let setup = totp.setup("test@example.com").unwrap();
 
         assert!(!setup.secret.is_empty());
-        assert!(!setup.secret_base32.is_empty());
-        assert!(setup.qr_code_data_url.starts_with("data:image/png;base64,"));
+        // Base32 encoded secrets are typically 32 chars
+        assert!(setup.secret.len() >= 16);
+        assert!(setup.qr_code_data_url.starts_with("data:image/svg+xml;base64,"));
         assert!(setup.otpauth_url.contains("otpauth://totp/"));
         assert!(setup.otpauth_url.contains("AxonML"));
     }

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/AutomataNexus/AxonML/main/AxonML-logo.png" alt="AxonML Logo" width="400"/>
+  <img src="https://raw.githubusercontent.com/AutomataNexus/AxonML/main/AxonML-logo-new.png" alt="AxonML Logo" width="400"/>
 
   <h1>AxonML</h1>
 

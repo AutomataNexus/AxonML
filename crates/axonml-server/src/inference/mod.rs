@@ -5,7 +5,3 @@
 pub mod server;
 pub mod pool;
 pub mod metrics;
-
-pub use server::InferenceServer;
-pub use pool::ModelPool;
-pub use metrics::InferenceMetrics;

@@ -1,11 +1,14 @@
 //! User database operations for AxonML
 //!
-//! Provides CRUD operations for user management.
+//! Uses Aegis-DB Document Store for user management.
 
-use super::{Database, DbError};
+use super::{Database, DbError, DocumentQuery};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// Collection name for users
+const COLLECTION: &str = "axonml_users";
 
 /// User role enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -39,8 +42,18 @@ pub struct User {
     pub webauthn_credentials: Vec<serde_json::Value>,
     #[serde(default)]
     pub recovery_codes: Vec<String>,
+    #[serde(default = "default_email_pending")]
+    pub email_pending: bool,
+    #[serde(default)]
+    pub email_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_token: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+fn default_email_pending() -> bool {
+    true
 }
 
 /// New user creation data
@@ -72,6 +85,12 @@ pub struct UpdateUser {
     pub webauthn_credentials: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recovery_codes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_pending: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_verified: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_token: Option<String>,
 }
 
 /// User repository for database operations
@@ -87,7 +106,7 @@ impl<'a> UserRepository<'a> {
 
     /// Create a new user
     pub async fn create(&self, new_user: NewUser) -> Result<User, DbError> {
-        // Check if email already exists
+        // Check if email already exists using document store query
         let existing = self.find_by_email(&new_user.email).await?;
         if existing.is_some() {
             return Err(DbError::AlreadyExists(format!(
@@ -97,6 +116,7 @@ impl<'a> UserRepository<'a> {
         }
 
         let now = Utc::now();
+        let verification_token = Uuid::new_v4().to_string();
         let user = User {
             id: Uuid::new_v4().to_string(),
             email: new_user.email,
@@ -107,57 +127,68 @@ impl<'a> UserRepository<'a> {
             totp_secret: None,
             webauthn_credentials: vec![],
             recovery_codes: vec![],
+            email_pending: true,
+            email_verified: false,
+            verification_token: Some(verification_token),
             created_at: now,
             updated_at: now,
         };
 
         let user_json = serde_json::to_value(&user)?;
 
-        self.db.execute_with_params(
-            "INSERT INTO axonml_users (id, data) VALUES ($1, $2)",
-            vec![
-                serde_json::json!(&user.id),
-                user_json,
-            ],
-        ).await?;
+        // Insert using document store
+        self.db.doc_insert(COLLECTION, Some(&user.id), user_json).await?;
 
         Ok(user)
     }
 
     /// Find user by ID
     pub async fn find_by_id(&self, id: &str) -> Result<Option<User>, DbError> {
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_users WHERE id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
+        let doc = self.db.doc_get(COLLECTION, id).await?;
 
-        if result.rows.is_empty() {
-            return Ok(None);
+        match doc {
+            Some(data) => {
+                let user: User = serde_json::from_value(data)?;
+                Ok(Some(user))
+            }
+            None => Ok(None),
         }
-
-        let data = result.rows[0].get("data")
-            .ok_or_else(|| DbError::InvalidData("Missing data field".to_string()))?;
-
-        let user: User = serde_json::from_value(data.clone())?;
-        Ok(Some(user))
     }
 
     /// Find user by email
     pub async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_users WHERE data->>'email' = $1",
-            vec![serde_json::json!(email)],
-        ).await?;
+        // Use document store filter with $eq operator
+        let filter = serde_json::json!({
+            "email": { "$eq": email }
+        });
 
-        if result.rows.is_empty() {
-            return Ok(None);
+        let doc = self.db.doc_find_one(COLLECTION, filter).await?;
+
+        match doc {
+            Some(data) => {
+                let user: User = serde_json::from_value(data)?;
+                Ok(Some(user))
+            }
+            None => Ok(None),
         }
+    }
 
-        let data = result.rows[0].get("data")
-            .ok_or_else(|| DbError::InvalidData("Missing data field".to_string()))?;
+    /// Find user by name (username)
+    pub async fn find_by_name(&self, name: &str) -> Result<Option<User>, DbError> {
+        // Use document store filter with $eq operator
+        let filter = serde_json::json!({
+            "name": { "$eq": name }
+        });
 
-        let user: User = serde_json::from_value(data.clone())?;
-        Ok(Some(user))
+        let doc = self.db.doc_find_one(COLLECTION, filter).await?;
+
+        match doc {
+            Some(data) => {
+                let user: User = serde_json::from_value(data)?;
+                Ok(Some(user))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Update user
@@ -190,55 +221,52 @@ impl<'a> UserRepository<'a> {
         if let Some(recovery_codes) = update.recovery_codes {
             user.recovery_codes = recovery_codes;
         }
+        if let Some(email_pending) = update.email_pending {
+            user.email_pending = email_pending;
+        }
+        if let Some(email_verified) = update.email_verified {
+            user.email_verified = email_verified;
+        }
+        if let Some(verification_token) = update.verification_token {
+            user.verification_token = Some(verification_token);
+        }
 
         user.updated_at = Utc::now();
 
         let user_json = serde_json::to_value(&user)?;
 
-        self.db.execute_with_params(
-            "UPDATE axonml_users SET data = $2 WHERE id = $1",
-            vec![
-                serde_json::json!(id),
-                user_json,
-            ],
-        ).await?;
+        // Update using document store
+        self.db.doc_update(COLLECTION, id, user_json).await?;
 
         Ok(user)
     }
 
     /// Delete user
     pub async fn delete(&self, id: &str) -> Result<(), DbError> {
-        let affected = self.db.execute_with_params(
-            "DELETE FROM axonml_users WHERE id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
+        // Check if user exists first
+        let _ = self.find_by_id(id).await?
+            .ok_or_else(|| DbError::NotFound(format!("User {} not found", id)))?;
 
-        if affected == 0 {
-            return Err(DbError::NotFound(format!("User {} not found", id)));
-        }
+        self.db.doc_delete(COLLECTION, id).await?;
 
         Ok(())
     }
 
     /// List all users
     pub async fn list(&self, limit: Option<u32>, offset: Option<u32>) -> Result<Vec<User>, DbError> {
-        let limit = limit.unwrap_or(100);
-        let offset = offset.unwrap_or(0);
+        let query = DocumentQuery {
+            filter: None,
+            sort: Some(serde_json::json!({ "field": "created_at", "ascending": false })),
+            limit,
+            skip: offset,
+        };
 
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_users ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-            vec![
-                serde_json::json!(limit),
-                serde_json::json!(offset),
-            ],
-        ).await?;
+        let docs = self.db.doc_query(COLLECTION, query).await?;
 
         let mut users = Vec::new();
-        for row in result.rows {
-            if let Some(data) = row.get("data") {
-                let user: User = serde_json::from_value(data.clone())?;
-                users.push(user);
-            }
+        for doc in docs {
+            let user: User = serde_json::from_value(doc)?;
+            users.push(user);
         }
 
         Ok(users)
@@ -246,17 +274,16 @@ impl<'a> UserRepository<'a> {
 
     /// Count total users
     pub async fn count(&self) -> Result<u64, DbError> {
-        let result = self.db.query(
-            "SELECT COUNT(*) as count FROM axonml_users"
-        ).await?;
+        // Query all users and count them
+        let query = DocumentQuery {
+            filter: None,
+            sort: None,
+            limit: None,
+            skip: None,
+        };
 
-        if let Some(row) = result.rows.first() {
-            if let Some(count) = row.get("count") {
-                return Ok(count.as_u64().unwrap_or(0));
-            }
-        }
-
-        Ok(0)
+        let docs = self.db.doc_query(COLLECTION, query).await?;
+        Ok(docs.len() as u64)
     }
 
     /// Enable TOTP for user
@@ -281,13 +308,7 @@ impl<'a> UserRepository<'a> {
 
         let user_json = serde_json::to_value(&user)?;
 
-        self.db.execute_with_params(
-            "UPDATE axonml_users SET data = $2 WHERE id = $1",
-            vec![
-                serde_json::json!(id),
-                user_json,
-            ],
-        ).await?;
+        self.db.doc_update(COLLECTION, id, user_json).await?;
 
         Ok(user)
     }
@@ -316,13 +337,7 @@ impl<'a> UserRepository<'a> {
         user.updated_at = Utc::now();
         let user_json = serde_json::to_value(&user)?;
 
-        self.db.execute_with_params(
-            "UPDATE axonml_users SET data = $2 WHERE id = $1",
-            vec![
-                serde_json::json!(id),
-                user_json,
-            ],
-        ).await?;
+        self.db.doc_update(COLLECTION, id, user_json).await?;
 
         Ok(true)
     }
@@ -344,6 +359,9 @@ mod tests {
             totp_secret: None,
             webauthn_credentials: vec![],
             recovery_codes: vec![],
+            email_pending: true,
+            email_verified: false,
+            verification_token: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

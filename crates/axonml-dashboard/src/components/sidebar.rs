@@ -154,19 +154,52 @@ pub fn Sidebar() -> impl IntoView {
                     </SidebarSection>
                 </Show>
 
-                // Settings at bottom
+                // Spacer to push user section to bottom
                 <div class="sidebar-spacer"></div>
-                <SidebarSection label="Settings">
+
+                // Security badge separator
+                <Show when=move || !collapsed()>
+                    <div class="sidebar-badge">
+                        <IconShield size=IconSize::Sm />
+                        <span>"Secured by AutomataNexus"</span>
+                    </div>
+                </Show>
+
+                // User section at bottom
+                <div class="sidebar-user-section">
+                    <SidebarItem
+                        href="/settings/profile"
+                        label="Profile"
+                        icon=|| view! { <IconUser /> }
+                    />
+                    <SidebarItem
+                        href="/settings/security"
+                        label="Security"
+                        icon=|| view! { <IconShield /> }
+                    />
                     <SidebarItem
                         href="/settings"
                         label="Settings"
                         icon=|| view! { <IconSettings /> }
                     />
-                </SidebarSection>
+                </div>
             </div>
 
-            // Collapse toggle
+            // Sign Out and Collapse toggle
             <div class="sidebar-footer">
+                <button
+                    class="sidebar-item sidebar-logout"
+                    on:click=move |_| {
+                        let navigate = use_navigate();
+                        state.clear_auth();
+                        navigate("/login", Default::default());
+                    }
+                >
+                    <span class="sidebar-icon"><IconLogout /></span>
+                    <Show when=move || !collapsed()>
+                        <span class="sidebar-label">"Sign Out"</span>
+                    </Show>
+                </button>
                 <button
                     class="btn btn-ghost sidebar-toggle"
                     on:click=move |_| state_for_toggle.toggle_sidebar()

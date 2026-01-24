@@ -4,7 +4,8 @@
 
 use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};
-use crate::db::runs::{NewTrainingRun, RunConfig, RunRepository, RunStatus, TrainingMetrics};
+use crate::db::runs::{NewTrainingRun, RunConfig, RunRepository, RunStatus};
+use crate::training::websocket::MetricsStreamer;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -18,8 +19,6 @@ use chrono::Utc;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::broadcast;
 
 // ============================================================================
 // Request/Response Types
@@ -117,7 +116,7 @@ pub struct AppendLogRequest {
     pub level: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub timestamp: String,
     pub level: String,
@@ -222,6 +221,11 @@ pub async fn create_run(
     let logs_dir = state.config.runs_dir().join(&run.id);
     std::fs::create_dir_all(&logs_dir).ok();
 
+    // Start tracking the run for real-time metrics broadcasting
+    if let Err(e) = state.tracker.start_run(&run.id).await {
+        tracing::warn!(run_id = %run.id, error = %e, "Failed to start run tracking");
+    }
+
     Ok((
         StatusCode::CREATED,
         Json(RunResponse {
@@ -251,7 +255,7 @@ pub async fn get_run(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Run not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Run not found".to_string()))?;
 
     // Check ownership
     if run.user_id != user.id && user.role != "admin" {
@@ -295,10 +299,15 @@ pub async fn delete_run(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Run not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Run not found".to_string()))?;
 
     if run.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
+    }
+
+    // Stop tracking if still active
+    if state.tracker.is_tracking(&id).await {
+        let _ = state.tracker.stop_run(&id).await;
     }
 
     // Delete logs directory
@@ -310,6 +319,69 @@ pub async fn delete_run(
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Complete a training run (mark as finished)
+#[derive(Debug, Deserialize)]
+pub struct CompleteRunRequest {
+    #[serde(default)]
+    pub success: bool,
+}
+
+/// Complete a training run
+pub async fn complete_run(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+    Json(req): Json<CompleteRunRequest>,
+) -> Result<Json<RunResponse>, AuthError> {
+    let repo = RunRepository::new(&state.db);
+
+    // Check ownership
+    let run = repo
+        .find_by_id(&id)
+        .await
+        .map_err(|e| AuthError::Internal(e.to_string()))?
+        .ok_or(AuthError::NotFound("Run not found".to_string()))?;
+
+    if run.user_id != user.id && user.role != "admin" {
+        return Err(AuthError::Unauthorized);
+    }
+
+    // Complete the run via tracker (handles status update and broadcaster cleanup)
+    if let Err(e) = state.tracker.complete_run(&id, req.success).await {
+        tracing::warn!(run_id = %id, error = %e, "Failed to complete run tracking");
+    }
+
+    // Get updated run
+    let run = repo
+        .find_by_id(&id)
+        .await
+        .map_err(|e| AuthError::Internal(e.to_string()))?
+        .ok_or(AuthError::NotFound("Run not found".to_string()))?;
+
+    Ok(Json(RunResponse {
+        id: run.id,
+        user_id: run.user_id,
+        name: run.name,
+        model_type: run.model_type,
+        status: format!("{:?}", run.status).to_lowercase(),
+        config: serde_json::to_value(&run.config).unwrap_or_default(),
+        latest_metrics: run.latest_metrics.map(|m| MetricsResponse {
+            epoch: m.epoch,
+            step: m.step,
+            loss: m.loss,
+            accuracy: m.accuracy,
+            lr: m.lr,
+            gpu_util: m.gpu_util,
+            memory_mb: m.memory_mb,
+            custom: m.custom,
+            timestamp: m.timestamp.to_rfc3339(),
+        }),
+        started_at: run.started_at.to_rfc3339(),
+        completed_at: run.completed_at.map(|t| t.to_rfc3339()),
+        created_at: run.created_at.to_rfc3339(),
+    }))
 }
 
 /// Stop a training run
@@ -325,10 +397,15 @@ pub async fn stop_run(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Run not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Run not found".to_string()))?;
 
     if run.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
+    }
+
+    // Stop tracking the run
+    if let Err(e) = state.tracker.stop_run(&id).await {
+        tracing::warn!(run_id = %id, error = %e, "Failed to stop run tracking");
     }
 
     let run = repo
@@ -373,7 +450,7 @@ pub async fn get_metrics(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Run not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Run not found".to_string()))?;
 
     if run.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
@@ -416,33 +493,24 @@ pub async fn record_metrics(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Run not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Run not found".to_string()))?;
 
     if run.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
     }
 
-    let metrics = TrainingMetrics {
-        epoch: req.epoch,
-        step: req.step,
-        loss: req.loss,
-        accuracy: req.accuracy,
-        lr: req.lr,
-        gpu_util: req.gpu_util,
-        memory_mb: req.memory_mb,
-        custom: req.custom,
-        timestamp: Utc::now(),
-    };
-
-    // Record to time series
-    repo.record_metrics(&id, &metrics)
-        .await
-        .map_err(|e| AuthError::Internal(e.to_string()))?;
-
-    // Update latest metrics
-    repo.update_metrics(&id, metrics)
-        .await
-        .map_err(|e| AuthError::Internal(e.to_string()))?;
+    // Use the tracker to record metrics - this handles both storage AND broadcasting
+    state.tracker.record_metrics(
+        &id,
+        req.epoch,
+        req.step,
+        req.loss,
+        req.accuracy,
+        req.lr,
+        req.gpu_util,
+        req.memory_mb,
+        req.custom.clone(),
+    ).await.map_err(|e| AuthError::Internal(e))?;
 
     // Update status to running if pending
     if run.status == RunStatus::Pending {
@@ -467,7 +535,7 @@ pub async fn get_logs(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Run not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Run not found".to_string()))?;
 
     if run.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
@@ -502,7 +570,7 @@ pub async fn append_log(
         .find_by_id(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Run not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Run not found".to_string()))?;
 
     if run.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
@@ -549,16 +617,23 @@ pub async fn stream_metrics(
 
 /// Handle WebSocket connection for metrics streaming
 async fn handle_metrics_stream(socket: WebSocket, state: AppState, run_id: String) {
-    let (mut sender, mut receiver) = socket.split();
+    // Try to subscribe to the tracker's broadcast channel for this run
+    if let Some(receiver) = state.tracker.subscribe(&run_id).await {
+        // Use MetricsStreamer for efficient streaming
+        MetricsStreamer::stream(socket, receiver).await;
+    } else {
+        // Fall back to polling if run is not being tracked
+        handle_metrics_stream_polling(socket, state, run_id).await;
+    }
+}
 
-    // Create a broadcast channel for this run
-    let (tx, mut rx) = broadcast::channel::<MetricsResponse>(100);
-    let tx = Arc::new(tx);
+/// Fallback polling-based metrics streaming for runs not actively tracked
+async fn handle_metrics_stream_polling(socket: WebSocket, state: AppState, run_id: String) {
+    let (mut sender, mut receiver) = socket.split();
 
     // Spawn task to poll for new metrics
     let poll_state = state.clone();
     let poll_id = run_id.clone();
-    let poll_tx = tx.clone();
 
     let poll_handle = tokio::spawn(async move {
         let repo = RunRepository::new(&poll_state.db);
@@ -570,6 +645,12 @@ async fn handle_metrics_stream(socket: WebSocket, state: AppState, run_id: Strin
             // Check if run still exists and is running
             if let Ok(Some(run)) = repo.find_by_id(&poll_id).await {
                 if run.status != RunStatus::Running && run.status != RunStatus::Pending {
+                    // Send status update before breaking
+                    let status_json = MetricsStreamer::format_status(
+                        &format!("{:?}", run.status).to_lowercase(),
+                        run.completed_at.as_ref().map(|t| t.to_rfc3339()).as_deref(),
+                    );
+                    let _ = sender.send(Message::Text(status_json)).await;
                     break;
                 }
 
@@ -577,31 +658,13 @@ async fn handle_metrics_stream(socket: WebSocket, state: AppState, run_id: Strin
                 if let Some(metrics) = &run.latest_metrics {
                     if metrics.step > last_step {
                         last_step = metrics.step;
-                        let response = MetricsResponse {
-                            epoch: metrics.epoch,
-                            step: metrics.step,
-                            loss: metrics.loss,
-                            accuracy: metrics.accuracy,
-                            lr: metrics.lr,
-                            gpu_util: metrics.gpu_util,
-                            memory_mb: metrics.memory_mb,
-                            custom: metrics.custom.clone(),
-                            timestamp: metrics.timestamp.to_rfc3339(),
-                        };
-                        let _ = poll_tx.send(response);
+                        let json = MetricsStreamer::format_metrics(metrics);
+                        if sender.send(Message::Text(json)).await.is_err() {
+                            break;
+                        }
                     }
                 }
             } else {
-                break;
-            }
-        }
-    });
-
-    // Spawn task to send metrics to client
-    let send_handle = tokio::spawn(async move {
-        while let Ok(metrics) = rx.recv().await {
-            let json = serde_json::to_string(&metrics).unwrap_or_default();
-            if sender.send(Message::Text(json)).await.is_err() {
                 break;
             }
         }
@@ -620,5 +683,4 @@ async fn handle_metrics_stream(socket: WebSocket, state: AppState, run_id: Strin
 
     // Cleanup
     poll_handle.abort();
-    send_handle.abort();
 }

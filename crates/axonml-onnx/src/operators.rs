@@ -14,6 +14,116 @@ use crate::error::{OnnxError, OnnxResult};
 use std::fmt::Debug;
 
 // =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Performs reduction along specified axes.
+///
+/// # Arguments
+/// * `input` - Input tensor
+/// * `axes` - Axes to reduce along (can be negative for indexing from end)
+/// * `keepdims` - Whether to keep the reduced dimensions as size 1
+/// * `reduce_fn` - Function to reduce a slice of values to a single value
+fn reduce_along_axes<F>(
+    input: &Tensor<f32>,
+    axes: &[i64],
+    keepdims: bool,
+    reduce_fn: F,
+) -> OnnxResult<Tensor<f32>>
+where
+    F: Fn(&[f32]) -> f32,
+{
+    let shape = input.shape();
+    let ndim = shape.len();
+    let data = input.to_vec();
+
+    // Normalize negative axes
+    let mut norm_axes: Vec<usize> = axes
+        .iter()
+        .map(|&a| {
+            if a < 0 {
+                (ndim as i64 + a) as usize
+            } else {
+                a as usize
+            }
+        })
+        .collect();
+    norm_axes.sort_unstable();
+    norm_axes.dedup();
+
+    // Compute output shape
+    let mut output_shape: Vec<usize> = Vec::new();
+    for (i, &dim) in shape.iter().enumerate() {
+        if norm_axes.contains(&i) {
+            if keepdims {
+                output_shape.push(1);
+            }
+        } else {
+            output_shape.push(dim);
+        }
+    }
+
+    // Handle case where all dimensions are reduced
+    if output_shape.is_empty() {
+        output_shape.push(1);
+    }
+
+    // Compute strides
+    let mut strides = vec![1usize; ndim];
+    for i in (0..ndim.saturating_sub(1)).rev() {
+        strides[i] = strides[i + 1] * shape[i + 1];
+    }
+
+    // Group elements by output position and reduce
+    let output_numel: usize = output_shape.iter().product();
+    let mut output_data = vec![Vec::new(); output_numel];
+
+    for (flat_idx, &val) in data.iter().enumerate() {
+        // Convert flat index to multi-index
+        let mut multi_idx = vec![0usize; ndim];
+        let mut remaining = flat_idx;
+        for d in 0..ndim {
+            multi_idx[d] = remaining / strides[d];
+            remaining %= strides[d];
+        }
+
+        // Compute output index (zeroing reduced dims)
+        let mut out_multi_idx: Vec<usize> = Vec::new();
+        for (i, &idx) in multi_idx.iter().enumerate() {
+            if norm_axes.contains(&i) {
+                if keepdims {
+                    out_multi_idx.push(0);
+                }
+            } else {
+                out_multi_idx.push(idx);
+            }
+        }
+
+        // Convert output multi-index to flat index
+        let mut out_strides = vec![1usize; output_shape.len()];
+        for i in (0..output_shape.len().saturating_sub(1)).rev() {
+            out_strides[i] = out_strides[i + 1] * output_shape[i + 1];
+        }
+
+        let out_flat_idx: usize = out_multi_idx
+            .iter()
+            .zip(out_strides.iter())
+            .map(|(&i, &s)| i * s)
+            .sum();
+
+        if out_flat_idx < output_data.len() {
+            output_data[out_flat_idx].push(val);
+        }
+    }
+
+    // Apply reduction function
+    let reduced: Vec<f32> = output_data.iter().map(|v| reduce_fn(v)).collect();
+
+    Tensor::from_vec(reduced, &output_shape)
+        .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
+}
+
+// =============================================================================
 // Operator Trait
 // =============================================================================
 
@@ -726,14 +836,17 @@ impl OnnxOperator for ReduceSumOp {
 
         let axes = axes_from_input.or_else(|| self.axes.clone());
 
-        if axes.is_some() && !axes.as_ref().unwrap().is_empty() {
-            // Dimension-specific reduction not yet supported, fall back to full sum
-            // TODO: Implement dimension-specific reduction
-            Ok(vec![input.sum()])
-        } else {
-            // Sum all elements
-            Ok(vec![input.sum()])
+        if let Some(ref axes_vec) = axes {
+            if !axes_vec.is_empty() {
+                // Perform dimension-specific reduction
+                let result = reduce_along_axes(input, axes_vec, self.keepdims, |data| {
+                    data.iter().sum()
+                })?;
+                return Ok(vec![result]);
+            }
         }
+        // Sum all elements
+        Ok(vec![input.sum()])
     }
 
     fn name(&self) -> &str { "ReduceSum" }
@@ -759,8 +872,16 @@ impl OnnxOperator for ReduceMeanOp {
         let input = inputs.first().and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
-        // Dimension-specific reduction not yet supported, use global mean
-        // TODO: Implement dimension-specific reduction
+        if let Some(ref axes_vec) = self.axes {
+            if !axes_vec.is_empty() {
+                // Perform dimension-specific reduction
+                let result = reduce_along_axes(input, axes_vec, self.keepdims, |data| {
+                    if data.is_empty() { 0.0 } else { data.iter().sum::<f32>() / data.len() as f32 }
+                })?;
+                return Ok(vec![result]);
+            }
+        }
+        // Global mean
         input.mean()
             .map(|t| vec![t])
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
@@ -789,8 +910,16 @@ impl OnnxOperator for ReduceMaxOp {
         let input = inputs.first().and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
-        // Dimension-specific reduction not yet supported, use global max
-        // TODO: Implement dimension-specific reduction
+        if let Some(ref axes_vec) = self.axes {
+            if !axes_vec.is_empty() {
+                // Perform dimension-specific reduction
+                let result = reduce_along_axes(input, axes_vec, self.keepdims, |data| {
+                    data.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+                })?;
+                return Ok(vec![result]);
+            }
+        }
+        // Global max
         input.max()
             .map(|t| vec![t])
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
@@ -827,14 +956,112 @@ impl ConvOp {
 
 impl OnnxOperator for ConvOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let _input = inputs.first().and_then(|i| *i)
+        let input = inputs.first().and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("X".to_string()))?;
-        let _weight = inputs.get(1).and_then(|i| *i)
+        let weight = inputs.get(1).and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("W".to_string()))?;
-        let _bias = inputs.get(2).and_then(|i| *i);
+        let bias = inputs.get(2).and_then(|i| *i);
 
-        // TODO: Implement actual convolution using axonml-nn Conv2d
-        Err(OnnxError::UnsupportedOperator("Conv (full impl needed)".to_string()))
+        // Input shape: [batch, in_channels, height, width]
+        // Weight shape: [out_channels, in_channels/group, kernel_h, kernel_w]
+        let input_shape = input.shape();
+        let weight_shape = weight.shape();
+
+        if input_shape.len() != 4 || weight_shape.len() != 4 {
+            return Err(OnnxError::InvalidShape(
+                "Conv requires 4D input and weight tensors".to_string()
+            ));
+        }
+
+        let batch = input_shape[0];
+        let in_channels = input_shape[1];
+        let in_h = input_shape[2];
+        let in_w = input_shape[3];
+
+        let out_channels = weight_shape[0];
+        let kernel_h = self.kernel_shape.get(0).copied().unwrap_or(weight_shape[2] as i64) as usize;
+        let kernel_w = self.kernel_shape.get(1).copied().unwrap_or(weight_shape[3] as i64) as usize;
+
+        let stride_h = self.strides.get(0).copied().unwrap_or(1) as usize;
+        let stride_w = self.strides.get(1).copied().unwrap_or(1) as usize;
+
+        let pad_h_begin = self.pads.get(0).copied().unwrap_or(0) as usize;
+        let pad_w_begin = self.pads.get(1).copied().unwrap_or(0) as usize;
+        let pad_h_end = self.pads.get(2).copied().unwrap_or(pad_h_begin as i64) as usize;
+        let pad_w_end = self.pads.get(3).copied().unwrap_or(pad_w_begin as i64) as usize;
+
+        let dilation_h = self.dilations.get(0).copied().unwrap_or(1) as usize;
+        let dilation_w = self.dilations.get(1).copied().unwrap_or(1) as usize;
+
+        let group = self.group as usize;
+
+        // Calculate output dimensions
+        let out_h = (in_h + pad_h_begin + pad_h_end - dilation_h * (kernel_h - 1) - 1) / stride_h + 1;
+        let out_w = (in_w + pad_w_begin + pad_w_end - dilation_w * (kernel_w - 1) - 1) / stride_w + 1;
+
+        let input_data = input.to_vec();
+        let weight_data = weight.to_vec();
+        let bias_data = bias.map(|b| b.to_vec());
+
+        let mut output = vec![0.0f32; batch * out_channels * out_h * out_w];
+
+        let in_channels_per_group = in_channels / group;
+        let out_channels_per_group = out_channels / group;
+
+        // Perform grouped convolution
+        for b in 0..batch {
+            for g in 0..group {
+                for oc in 0..out_channels_per_group {
+                    let out_c = g * out_channels_per_group + oc;
+
+                    for oh in 0..out_h {
+                        for ow in 0..out_w {
+                            let mut sum = 0.0f32;
+
+                            for ic in 0..in_channels_per_group {
+                                let in_c = g * in_channels_per_group + ic;
+
+                                for kh in 0..kernel_h {
+                                    for kw in 0..kernel_w {
+                                        let ih = (oh * stride_h + kh * dilation_h) as isize - pad_h_begin as isize;
+                                        let iw = (ow * stride_w + kw * dilation_w) as isize - pad_w_begin as isize;
+
+                                        if ih >= 0 && ih < in_h as isize && iw >= 0 && iw < in_w as isize {
+                                            let input_idx = b * in_channels * in_h * in_w
+                                                + in_c * in_h * in_w
+                                                + ih as usize * in_w
+                                                + iw as usize;
+
+                                            let weight_idx = out_c * (in_channels_per_group * kernel_h * kernel_w)
+                                                + ic * kernel_h * kernel_w
+                                                + kh * kernel_w
+                                                + kw;
+
+                                            sum += input_data[input_idx] * weight_data[weight_idx];
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Add bias if present
+                            if let Some(ref bias) = bias_data {
+                                sum += bias[out_c];
+                            }
+
+                            let output_idx = b * out_channels * out_h * out_w
+                                + out_c * out_h * out_w
+                                + oh * out_w
+                                + ow;
+                            output[output_idx] = sum;
+                        }
+                    }
+                }
+            }
+        }
+
+        Tensor::from_vec(output, &[batch, out_channels, out_h, out_w])
+            .map(|t| vec![t])
+            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
     fn name(&self) -> &str { "Conv" }

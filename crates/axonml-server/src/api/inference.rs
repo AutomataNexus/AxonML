@@ -160,7 +160,7 @@ pub async fn get_endpoint(
         .get_endpoint(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Endpoint not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Endpoint not found".to_string()))?;
 
     Ok(Json(endpoint_to_response(endpoint)))
 }
@@ -190,13 +190,26 @@ pub async fn delete_endpoint(
 ) -> Result<StatusCode, AuthError> {
     let repo = ModelRepository::new(&state.db);
 
+    // Check if endpoint exists
+    let endpoint = repo.get_endpoint(&id)
+        .await
+        .map_err(|e| AuthError::Internal(e.to_string()))?
+        .ok_or(AuthError::NotFound("Endpoint not found".to_string()))?;
+
     // Stop endpoint first if running
-    if let Ok(Some(endpoint)) = repo.get_endpoint(&id).await {
-        if endpoint.status == EndpointStatus::Running {
-            repo.update_endpoint_status(&id, EndpointStatus::Stopped, None)
-                .await
-                .ok();
-        }
+    if endpoint.status == EndpointStatus::Running {
+        // Unload from inference server
+        let _ = state.inference.unload_model(&id).await;
+
+        // Remove from pool
+        let _ = state.model_pool.remove(&id).await;
+
+        // Remove metrics
+        state.inference_metrics.remove(&id).await;
+
+        repo.update_endpoint_status(&id, EndpointStatus::Stopped, None)
+            .await
+            .ok();
     }
 
     repo.delete_endpoint(&id)
@@ -214,17 +227,57 @@ pub async fn start_endpoint(
 ) -> Result<Json<EndpointResponse>, AuthError> {
     let repo = ModelRepository::new(&state.db);
 
+    // Check if endpoint exists first
+    let endpoint = repo
+        .get_endpoint(&id)
+        .await
+        .map_err(|e| AuthError::Internal(e.to_string()))?
+        .ok_or(AuthError::NotFound("Endpoint not found".to_string()))?;
+
     // Update status to starting
     repo.update_endpoint_status(&id, EndpointStatus::Starting, None)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-    // In a real implementation, we would:
-    // 1. Load the model into memory
-    // 2. Start a server on the specified port
-    // 3. Update status to running
+    // Get model version to find file path
+    let version = repo
+        .get_version(&endpoint.model_version_id)
+        .await
+        .map_err(|e| AuthError::Internal(e.to_string()))?
+        .ok_or(AuthError::Internal("Model version not found".to_string()))?;
 
-    // For now, just update status to running
+    // Get model info
+    let model = repo
+        .find_by_id(&version.model_id)
+        .await
+        .map_err(|e| AuthError::Internal(e.to_string()))?
+        .ok_or(AuthError::Internal("Model not found".to_string()))?;
+
+    // Load the model into the inference server
+    if let Err(e) = state.inference.load_model(
+        &id,
+        &model.id,
+        &version.id,
+        version.version,
+        &version.file_path,
+    ).await {
+        // Update status to error if loading fails
+        let endpoint = repo
+            .update_endpoint_status(&id, EndpointStatus::Error, Some(e.clone()))
+            .await
+            .map_err(|e| AuthError::Internal(e.to_string()))?;
+        return Ok(Json(endpoint_to_response(endpoint)));
+    }
+
+    // Add model to pool for capacity management
+    state.model_pool.add(&id, &model.id, &version.id, endpoint.replicas)
+        .await
+        .map_err(|e| AuthError::Internal(e))?;
+
+    // Initialize metrics tracking for this endpoint
+    state.inference_metrics.init(&id).await;
+
+    // Update status to running
     let endpoint = repo
         .update_endpoint_status(&id, EndpointStatus::Running, None)
         .await
@@ -241,10 +294,23 @@ pub async fn stop_endpoint(
 ) -> Result<Json<EndpointResponse>, AuthError> {
     let repo = ModelRepository::new(&state.db);
 
-    // In a real implementation, we would:
-    // 1. Stop the server
-    // 2. Unload the model from memory
+    // Check if endpoint exists first
+    let _ = repo
+        .get_endpoint(&id)
+        .await
+        .map_err(|e| AuthError::Internal(e.to_string()))?
+        .ok_or(AuthError::NotFound("Endpoint not found".to_string()))?;
 
+    // Unload the model from the inference server
+    let _ = state.inference.unload_model(&id).await;
+
+    // Remove from model pool
+    let _ = state.model_pool.remove(&id).await;
+
+    // Remove metrics tracking (preserves historical data in DB)
+    state.inference_metrics.remove(&id).await;
+
+    // Update status to stopped
     let endpoint = repo
         .update_endpoint_status(&id, EndpointStatus::Stopped, None)
         .await
@@ -265,14 +331,30 @@ pub async fn get_endpoint_metrics(
     repo.get_endpoint(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Endpoint not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Endpoint not found".to_string()))?;
 
+    // First, get live metrics from InferenceMetrics (if available)
+    let mut response = Vec::new();
+
+    if let Some(live_metrics) = state.inference_metrics.get(&id).await {
+        response.push(InferenceMetricsResponse {
+            requests_total: live_metrics.requests_total,
+            requests_success: live_metrics.requests_success,
+            requests_error: live_metrics.requests_error,
+            latency_p50: live_metrics.p50(),
+            latency_p95: live_metrics.p95(),
+            latency_p99: live_metrics.p99(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        });
+    }
+
+    // Then get historical metrics from database
     let metrics = repo
         .get_inference_metrics(&id, Some(1000))
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-    let response: Vec<InferenceMetricsResponse> = metrics
+    let historical: Vec<InferenceMetricsResponse> = metrics
         .into_iter()
         .map(|m| InferenceMetricsResponse {
             requests_total: m
@@ -307,6 +389,8 @@ pub async fn get_endpoint_metrics(
         })
         .collect();
 
+    response.extend(historical);
+
     Ok(Json(response))
 }
 
@@ -316,7 +400,6 @@ pub async fn predict(
     Path(name): Path<String>,
     Json(req): Json<PredictRequest>,
 ) -> Result<Json<PredictResponse>, AuthError> {
-    let start = std::time::Instant::now();
     let repo = ModelRepository::new(&state.db);
 
     // Find endpoint by name
@@ -324,12 +407,20 @@ pub async fn predict(
         .get_endpoint_by_name(&name)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
-        .ok_or(AuthError::Internal("Endpoint not found".to_string()))?;
+        .ok_or(AuthError::NotFound("Endpoint not found".to_string()))?;
 
     // Check if endpoint is running
     if endpoint.status != EndpointStatus::Running {
         return Err(AuthError::Internal("Endpoint is not running".to_string()));
     }
+
+    // Acquire a slot from the model pool for capacity management
+    state.model_pool.acquire(&endpoint.id)
+        .await
+        .map_err(|e| AuthError::Internal(e))?;
+
+    // Start timing the request using InferenceMetrics timer
+    let timer = state.inference_metrics.time_request(endpoint.id.clone());
 
     // Get model version
     let version = repo
@@ -338,37 +429,68 @@ pub async fn predict(
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or(AuthError::Internal("Model version not found".to_string()))?;
 
-    // In a real implementation, we would:
-    // 1. Load the model (or use cached version)
-    // 2. Preprocess inputs
-    // 3. Run inference
-    // 4. Postprocess outputs
-
-    // For now, return a mock response
-    let outputs = serde_json::json!({
-        "predictions": [0.1, 0.2, 0.7],
-        "labels": ["class_a", "class_b", "class_c"],
-        "note": "Mock prediction - actual model inference not implemented"
+    // Build input JSON with optional parameters
+    let mut input_json = serde_json::json!({
+        "inputs": req.inputs
     });
+    if let Some(params) = req.parameters {
+        input_json["parameters"] = params;
+    }
 
-    let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+    // Run inference using the inference server
+    let result = state.inference
+        .predict(&endpoint.id, input_json)
+        .await;
 
-    // Record metrics
-    repo.record_inference_metrics(
-        &endpoint.id,
-        1, // requests_total
-        1, // requests_success
-        0, // requests_error
-        latency_ms,
-        latency_ms,
-        latency_ms,
-    )
-    .await
-    .ok();
+    // Calculate latency from timer
+    let latency_ms = timer.elapsed().as_secs_f64() * 1000.0;
 
-    Ok(Json(PredictResponse {
-        outputs,
-        model_version: format!("v{}", version.version),
-        latency_ms,
-    }))
+    // Release the slot back to the pool
+    let _ = state.model_pool.release(&endpoint.id).await;
+
+    // Handle result and record metrics
+    match result {
+        Ok(outputs) => {
+            // Record success metrics
+            timer.finish_success().await;
+
+            // Also record to database for historical tracking
+            repo.record_inference_metrics(
+                &endpoint.id,
+                1, // requests_total
+                1, // requests_success
+                0, // requests_error
+                latency_ms,
+                latency_ms,
+                latency_ms,
+            )
+            .await
+            .ok();
+
+            Ok(Json(PredictResponse {
+                outputs,
+                model_version: format!("v{}", version.version),
+                latency_ms,
+            }))
+        }
+        Err(e) => {
+            // Record error metrics
+            timer.finish_error().await;
+
+            // Also record to database
+            repo.record_inference_metrics(
+                &endpoint.id,
+                1, // requests_total
+                0, // requests_success
+                1, // requests_error
+                latency_ms,
+                latency_ms,
+                latency_ms,
+            )
+            .await
+            .ok();
+
+            Err(AuthError::Internal(e))
+        }
+    }
 }

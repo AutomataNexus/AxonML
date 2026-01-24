@@ -27,8 +27,13 @@ pub enum HubError {
     ModelNotFound(String),
     /// Invalid weight format.
     InvalidFormat(String),
-    /// Checksum mismatch.
-    ChecksumMismatch { expected: String, actual: String },
+    /// Checksum mismatch between expected and actual hash.
+    ChecksumMismatch {
+        /// Expected checksum value.
+        expected: String,
+        /// Actual computed checksum.
+        actual: String,
+    },
 }
 
 impl std::fmt::Display for HubError {
@@ -226,285 +231,45 @@ pub fn download_weights(model_name: &str, force: bool) -> HubResult<PathBuf> {
         fs::create_dir_all(parent)?;
     }
 
-    // Download weights
+    // Download weights from pretrained model hub
     println!("Downloading {} weights ({:.1} MB)...", model_name, model_info.size_bytes as f64 / 1_000_000.0);
 
-    // Use reqwest for download (blocking)
-    #[cfg(feature = "download")]
-    {
-        let response = reqwest::blocking::get(&model_info.url)
-            .map_err(|e| HubError::NetworkError(e.to_string()))?;
+    let response = reqwest::blocking::get(&model_info.url)
+        .map_err(|e| HubError::NetworkError(e.to_string()))?;
 
-        if !response.status().is_success() {
-            return Err(HubError::NetworkError(format!(
-                "HTTP {}: {}",
-                response.status(),
-                model_info.url
-            )));
-        }
-
-        let bytes = response.bytes()
-            .map_err(|e| HubError::NetworkError(e.to_string()))?;
-
-        let mut file = File::create(&cache_path)?;
-        file.write_all(&bytes)?;
-
-        println!("Downloaded to {:?}", cache_path);
+    if !response.status().is_success() {
+        return Err(HubError::NetworkError(format!(
+            "HTTP {}: {}",
+            response.status(),
+            model_info.url
+        )));
     }
 
-    #[cfg(not(feature = "download"))]
-    {
-        // Fallback: create placeholder with synthetic weights
-        println!("Note: Download feature not enabled. Creating synthetic weights.");
-        create_synthetic_weights(model_name, &cache_path)?;
-    }
+    let bytes = response.bytes()
+        .map_err(|e| HubError::NetworkError(e.to_string()))?;
+
+    let mut file = File::create(&cache_path)?;
+    file.write_all(&bytes)?;
+
+    println!("Downloaded to {:?}", cache_path);
 
     Ok(cache_path)
 }
 
-/// Create synthetic weights for testing (when download is unavailable).
-fn create_synthetic_weights(model_name: &str, path: &PathBuf) -> HubResult<()> {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-
-    let state_dict = match model_name {
-        "resnet18" => create_resnet18_state_dict(&mut rng),
-        "resnet34" => create_resnet34_state_dict(&mut rng),
-        "vgg16" | "vgg16_bn" => create_vgg16_state_dict(&mut rng),
-        "vgg19" => create_vgg19_state_dict(&mut rng),
-        _ => return Err(HubError::ModelNotFound(model_name.to_string())),
-    };
-
-    save_state_dict(&state_dict, path)?;
-    Ok(())
-}
-
-/// Create synthetic ResNet18 state dict.
-fn create_resnet18_state_dict<R: rand::Rng>(rng: &mut R) -> StateDict {
-    let mut state = HashMap::new();
-
-    // Conv1: 3 -> 64, kernel 7x7
-    state.insert("conv1.weight".to_string(), random_tensor(rng, &[64, 3, 7, 7]));
-    state.insert("conv1.bias".to_string(), random_tensor(rng, &[64]));
-
-    // BN1
-    state.insert("bn1.weight".to_string(), ones_tensor(&[64]));
-    state.insert("bn1.bias".to_string(), zeros_tensor(&[64]));
-    state.insert("bn1.running_mean".to_string(), zeros_tensor(&[64]));
-    state.insert("bn1.running_var".to_string(), ones_tensor(&[64]));
-
-    // Layer 1: 2 blocks, 64 channels
-    for i in 0..2 {
-        add_basic_block_weights(&mut state, rng, &format!("layer1.{}", i), 64, 64);
-    }
-
-    // Layer 2: 2 blocks, 128 channels (first has downsample)
-    add_basic_block_weights(&mut state, rng, "layer2.0", 64, 128);
-    add_downsample_weights(&mut state, rng, "layer2.0.downsample", 64, 128);
-    add_basic_block_weights(&mut state, rng, "layer2.1", 128, 128);
-
-    // Layer 3: 2 blocks, 256 channels
-    add_basic_block_weights(&mut state, rng, "layer3.0", 128, 256);
-    add_downsample_weights(&mut state, rng, "layer3.0.downsample", 128, 256);
-    add_basic_block_weights(&mut state, rng, "layer3.1", 256, 256);
-
-    // Layer 4: 2 blocks, 512 channels
-    add_basic_block_weights(&mut state, rng, "layer4.0", 256, 512);
-    add_downsample_weights(&mut state, rng, "layer4.0.downsample", 256, 512);
-    add_basic_block_weights(&mut state, rng, "layer4.1", 512, 512);
-
-    // FC: 512 -> 1000
-    state.insert("fc.weight".to_string(), random_tensor(rng, &[1000, 512]));
-    state.insert("fc.bias".to_string(), random_tensor(rng, &[1000]));
-
-    state
-}
-
-/// Create synthetic ResNet34 state dict.
-fn create_resnet34_state_dict<R: rand::Rng>(rng: &mut R) -> StateDict {
-    let mut state = HashMap::new();
-
-    // Conv1
-    state.insert("conv1.weight".to_string(), random_tensor(rng, &[64, 3, 7, 7]));
-    state.insert("conv1.bias".to_string(), random_tensor(rng, &[64]));
-
-    // BN1
-    state.insert("bn1.weight".to_string(), ones_tensor(&[64]));
-    state.insert("bn1.bias".to_string(), zeros_tensor(&[64]));
-    state.insert("bn1.running_mean".to_string(), zeros_tensor(&[64]));
-    state.insert("bn1.running_var".to_string(), ones_tensor(&[64]));
-
-    // Layer 1: 3 blocks
-    for i in 0..3 {
-        add_basic_block_weights(&mut state, rng, &format!("layer1.{}", i), 64, 64);
-    }
-
-    // Layer 2: 4 blocks
-    add_basic_block_weights(&mut state, rng, "layer2.0", 64, 128);
-    add_downsample_weights(&mut state, rng, "layer2.0.downsample", 64, 128);
-    for i in 1..4 {
-        add_basic_block_weights(&mut state, rng, &format!("layer2.{}", i), 128, 128);
-    }
-
-    // Layer 3: 6 blocks
-    add_basic_block_weights(&mut state, rng, "layer3.0", 128, 256);
-    add_downsample_weights(&mut state, rng, "layer3.0.downsample", 128, 256);
-    for i in 1..6 {
-        add_basic_block_weights(&mut state, rng, &format!("layer3.{}", i), 256, 256);
-    }
-
-    // Layer 4: 3 blocks
-    add_basic_block_weights(&mut state, rng, "layer4.0", 256, 512);
-    add_downsample_weights(&mut state, rng, "layer4.0.downsample", 256, 512);
-    for i in 1..3 {
-        add_basic_block_weights(&mut state, rng, &format!("layer4.{}", i), 512, 512);
-    }
-
-    // FC
-    state.insert("fc.weight".to_string(), random_tensor(rng, &[1000, 512]));
-    state.insert("fc.bias".to_string(), random_tensor(rng, &[1000]));
-
-    state
-}
-
-/// Create synthetic VGG16 state dict.
-fn create_vgg16_state_dict<R: rand::Rng>(rng: &mut R) -> StateDict {
-    let mut state = HashMap::new();
-
-    // Features
-    let configs = [
-        (3, 64), (64, 64),       // Block 1
-        (64, 128), (128, 128),   // Block 2
-        (128, 256), (256, 256), (256, 256), // Block 3
-        (256, 512), (512, 512), (512, 512), // Block 4
-        (512, 512), (512, 512), (512, 512), // Block 5
-    ];
-
-    for (i, (in_c, out_c)) in configs.iter().enumerate() {
-        let prefix = format!("features.{}", i * 2); // Skip ReLU layers
-        state.insert(format!("{}.weight", prefix), random_tensor(rng, &[*out_c, *in_c, 3, 3]));
-        state.insert(format!("{}.bias", prefix), random_tensor(rng, &[*out_c]));
-    }
-
-    // Classifier
-    state.insert("classifier.0.weight".to_string(), random_tensor(rng, &[4096, 512 * 7 * 7]));
-    state.insert("classifier.0.bias".to_string(), random_tensor(rng, &[4096]));
-    state.insert("classifier.3.weight".to_string(), random_tensor(rng, &[4096, 4096]));
-    state.insert("classifier.3.bias".to_string(), random_tensor(rng, &[4096]));
-    state.insert("classifier.6.weight".to_string(), random_tensor(rng, &[1000, 4096]));
-    state.insert("classifier.6.bias".to_string(), random_tensor(rng, &[1000]));
-
-    state
-}
-
-/// Create synthetic VGG19 state dict.
-fn create_vgg19_state_dict<R: rand::Rng>(rng: &mut R) -> StateDict {
-    let mut state = HashMap::new();
-
-    // Features (VGG19 has more conv layers)
-    let configs = [
-        (3, 64), (64, 64),
-        (64, 128), (128, 128),
-        (128, 256), (256, 256), (256, 256), (256, 256),
-        (256, 512), (512, 512), (512, 512), (512, 512),
-        (512, 512), (512, 512), (512, 512), (512, 512),
-    ];
-
-    for (i, (in_c, out_c)) in configs.iter().enumerate() {
-        let prefix = format!("features.{}", i * 2);
-        state.insert(format!("{}.weight", prefix), random_tensor(rng, &[*out_c, *in_c, 3, 3]));
-        state.insert(format!("{}.bias", prefix), random_tensor(rng, &[*out_c]));
-    }
-
-    // Classifier
-    state.insert("classifier.0.weight".to_string(), random_tensor(rng, &[4096, 512 * 7 * 7]));
-    state.insert("classifier.0.bias".to_string(), random_tensor(rng, &[4096]));
-    state.insert("classifier.3.weight".to_string(), random_tensor(rng, &[4096, 4096]));
-    state.insert("classifier.3.bias".to_string(), random_tensor(rng, &[4096]));
-    state.insert("classifier.6.weight".to_string(), random_tensor(rng, &[1000, 4096]));
-    state.insert("classifier.6.bias".to_string(), random_tensor(rng, &[1000]));
-
-    state
-}
-
-fn add_basic_block_weights<R: rand::Rng>(
-    state: &mut StateDict,
-    rng: &mut R,
-    prefix: &str,
-    in_channels: usize,
-    out_channels: usize,
-) {
-    // Conv1
-    state.insert(
-        format!("{}.conv1.weight", prefix),
-        random_tensor(rng, &[out_channels, in_channels, 3, 3]),
-    );
-    state.insert(
-        format!("{}.conv1.bias", prefix),
-        random_tensor(rng, &[out_channels]),
-    );
-
-    // BN1
-    state.insert(format!("{}.bn1.weight", prefix), ones_tensor(&[out_channels]));
-    state.insert(format!("{}.bn1.bias", prefix), zeros_tensor(&[out_channels]));
-    state.insert(format!("{}.bn1.running_mean", prefix), zeros_tensor(&[out_channels]));
-    state.insert(format!("{}.bn1.running_var", prefix), ones_tensor(&[out_channels]));
-
-    // Conv2
-    state.insert(
-        format!("{}.conv2.weight", prefix),
-        random_tensor(rng, &[out_channels, out_channels, 3, 3]),
-    );
-    state.insert(
-        format!("{}.conv2.bias", prefix),
-        random_tensor(rng, &[out_channels]),
-    );
-
-    // BN2
-    state.insert(format!("{}.bn2.weight", prefix), ones_tensor(&[out_channels]));
-    state.insert(format!("{}.bn2.bias", prefix), zeros_tensor(&[out_channels]));
-    state.insert(format!("{}.bn2.running_mean", prefix), zeros_tensor(&[out_channels]));
-    state.insert(format!("{}.bn2.running_var", prefix), ones_tensor(&[out_channels]));
-}
-
-fn add_downsample_weights<R: rand::Rng>(
-    state: &mut StateDict,
-    rng: &mut R,
-    prefix: &str,
-    in_channels: usize,
-    out_channels: usize,
-) {
-    state.insert(
-        format!("{}.0.weight", prefix),
-        random_tensor(rng, &[out_channels, in_channels, 1, 1]),
-    );
-    state.insert(format!("{}.1.weight", prefix), ones_tensor(&[out_channels]));
-    state.insert(format!("{}.1.bias", prefix), zeros_tensor(&[out_channels]));
-    state.insert(format!("{}.1.running_mean", prefix), zeros_tensor(&[out_channels]));
-    state.insert(format!("{}.1.running_var", prefix), ones_tensor(&[out_channels]));
-}
-
-fn random_tensor<R: rand::Rng>(rng: &mut R, shape: &[usize]) -> Tensor<f32> {
-    let numel: usize = shape.iter().product();
-    let stddev = (2.0 / shape[0] as f32).sqrt();
-    let data: Vec<f32> = (0..numel)
-        .map(|_| rng.gen::<f32>() * stddev * 2.0 - stddev)
-        .collect();
-    Tensor::from_vec(data, shape).unwrap()
-}
-
-fn zeros_tensor(shape: &[usize]) -> Tensor<f32> {
-    let numel: usize = shape.iter().product();
-    Tensor::from_vec(vec![0.0; numel], shape).unwrap()
-}
-
-fn ones_tensor(shape: &[usize]) -> Tensor<f32> {
-    let numel: usize = shape.iter().product();
-    Tensor::from_vec(vec![1.0; numel], shape).unwrap()
-}
-
 /// Save state dict to file (simple binary format).
-fn save_state_dict(state: &StateDict, path: &PathBuf) -> HubResult<()> {
+///
+/// # Arguments
+/// * `state` - The state dictionary to save
+/// * `path` - Path where the file will be saved
+///
+/// # Example
+/// ```ignore
+/// use axonml_vision::hub::{save_state_dict, StateDict};
+/// let mut state = StateDict::new();
+/// // ... populate state dict ...
+/// save_state_dict(&state, &PathBuf::from("model.bin")).unwrap();
+/// ```
+pub fn save_state_dict(state: &StateDict, path: &PathBuf) -> HubResult<()> {
     use std::io::BufWriter;
 
     let file = File::create(path)?;
@@ -634,30 +399,41 @@ mod tests {
     }
 
     #[test]
-    fn test_synthetic_weights() {
-        use rand::SeedableRng;
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+    fn test_model_urls() {
+        let registry = model_registry();
+        for (name, model) in &registry {
+            assert!(!model.url.is_empty(), "Model {} has empty URL", name);
+            assert!(model.url.starts_with("https://"), "Model {} URL should be HTTPS", name);
+            assert!(model.size_bytes > 0, "Model {} has zero size", name);
+        }
+    }
 
-        let state = create_resnet18_state_dict(&mut rng);
-        assert!(state.contains_key("conv1.weight"));
-        assert!(state.contains_key("fc.weight"));
-
-        let conv1 = state.get("conv1.weight").unwrap();
-        assert_eq!(conv1.shape(), &[64, 3, 7, 7]);
+    #[test]
+    fn test_cached_path() {
+        let path = cached_path("resnet18");
+        assert!(path.to_string_lossy().contains("resnet18"));
+        assert!(path.to_string_lossy().ends_with(".safetensors"));
     }
 
     #[test]
     fn test_save_load_state_dict() {
-        use rand::SeedableRng;
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-
-        let state = create_resnet18_state_dict(&mut rng);
+        // Create a simple state dict for testing
+        let mut state = StateDict::new();
+        state.insert("layer.weight".to_string(), Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap());
+        state.insert("layer.bias".to_string(), Tensor::from_vec(vec![0.1, 0.2], &[2]).unwrap());
 
         let temp_path = std::env::temp_dir().join("test_weights.bin");
         save_state_dict(&state, &temp_path).unwrap();
 
         let loaded = load_state_dict(&temp_path).unwrap();
         assert_eq!(state.len(), loaded.len());
+
+        // Verify tensor shapes
+        let weight = loaded.get("layer.weight").unwrap();
+        assert_eq!(weight.shape(), &[2, 2]);
+
+        let bias = loaded.get("layer.bias").unwrap();
+        assert_eq!(bias.shape(), &[2]);
 
         // Clean up
         let _ = std::fs::remove_file(&temp_path);

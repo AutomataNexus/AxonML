@@ -198,10 +198,19 @@ pub mod auth {
         fetch_json_with_body(build_request("POST", "/auth/mfa/webauthn/register/start"), &serde_json::json!({})).await
     }
 
-    pub async fn webauthn_register_finish(credential: &serde_json::Value) -> ApiResult<()> {
+    /// WebAuthn registration finish request
+    #[derive(Debug, Clone, serde::Serialize)]
+    pub struct WebAuthnRegisterFinishRequest {
+        pub credential_id: String,
+        pub attestation_object: String,
+        pub client_data_json: String,
+        pub device_name: String,
+    }
+
+    pub async fn webauthn_register_finish(request: &WebAuthnRegisterFinishRequest) -> ApiResult<()> {
         fetch_empty_with_body(
             build_request("POST", "/auth/mfa/webauthn/register/finish"),
-            credential,
+            request,
         ).await
     }
 
@@ -212,12 +221,26 @@ pub mod auth {
         ).await
     }
 
-    pub async fn webauthn_authenticate_finish(mfa_token: &str, credential: &serde_json::Value) -> ApiResult<TokenPair> {
+    /// WebAuthn authentication finish request
+    #[derive(Debug, Clone, serde::Serialize)]
+    pub struct WebAuthnAuthFinishRequest {
+        pub credential_id: String,
+        pub authenticator_data: String,
+        pub client_data_json: String,
+        pub signature: String,
+        pub user_handle: Option<String>,
+    }
+
+    pub async fn webauthn_authenticate_finish(mfa_token: &str, request: &WebAuthnAuthFinishRequest) -> ApiResult<TokenPair> {
         fetch_json_with_body(
             build_request("POST", "/auth/mfa/webauthn/authenticate/finish"),
             &serde_json::json!({
                 "mfa_token": mfa_token,
-                "credential": credential
+                "credential_id": request.credential_id,
+                "authenticator_data": request.authenticator_data,
+                "client_data_json": request.client_data_json,
+                "signature": request.signature,
+                "user_handle": request.user_handle
             }),
         ).await
     }
