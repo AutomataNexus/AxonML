@@ -131,6 +131,45 @@ impl ModelPool {
         });
     }
 
+    /// Get entry info for an endpoint
+    pub async fn get_entry(&self, endpoint_id: &str) -> Option<PoolEntryInfo> {
+        let entries = self.entries.read().await;
+        entries.get(endpoint_id).map(|e| PoolEntryInfo {
+            endpoint_id: e.endpoint_id.clone(),
+            model_id: e.model_id.clone(),
+            version_id: e.version_id.clone(),
+            replicas: e.replicas,
+            current_load: e.current_load,
+            idle_time_secs: e.last_used.elapsed().as_secs(),
+        })
+    }
+
+    /// Get all entry infos
+    pub async fn list_entries(&self) -> Vec<PoolEntryInfo> {
+        let entries = self.entries.read().await;
+        entries.values().map(|e| PoolEntryInfo {
+            endpoint_id: e.endpoint_id.clone(),
+            model_id: e.model_id.clone(),
+            version_id: e.version_id.clone(),
+            replicas: e.replicas,
+            current_load: e.current_load,
+            idle_time_secs: e.last_used.elapsed().as_secs(),
+        }).collect()
+    }
+
+    /// Check if pool has capacity for an endpoint
+    pub async fn has_capacity(&self, endpoint_id: &str) -> bool {
+        let entries = self.entries.read().await;
+        entries.get(endpoint_id)
+            .map(|e| e.current_load < e.replicas)
+            .unwrap_or(false)
+    }
+
+    /// Get idle timeout in seconds
+    pub fn idle_timeout_secs(&self) -> u64 {
+        self.idle_timeout.as_secs()
+    }
+
     /// Get pool statistics
     pub async fn stats(&self) -> PoolStats {
         let entries = self.entries.read().await;
@@ -158,6 +197,17 @@ pub struct PoolStats {
     pub total_load: u32,
     pub total_capacity: u32,
     pub utilization: f64,
+}
+
+/// Pool entry info (safe to expose)
+#[derive(Debug, Clone)]
+pub struct PoolEntryInfo {
+    pub endpoint_id: String,
+    pub model_id: String,
+    pub version_id: String,
+    pub replicas: u32,
+    pub current_load: u32,
+    pub idle_time_secs: u64,
 }
 
 #[cfg(test)]

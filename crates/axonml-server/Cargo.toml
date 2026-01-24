@@ -15,6 +15,13 @@ name = "axonml-server"
 path = "src/main.rs"
 
 [dependencies]
+# AxonML crates for model inference
+axonml-core = { path = "../axonml-core" }
+axonml-tensor = { path = "../axonml-tensor" }
+axonml-autograd = { path = "../axonml-autograd" }
+axonml-nn = { path = "../axonml-nn" }
+axonml-serialize = { path = "../axonml-serialize" }
+
 # Web framework
 axum = { version = "0.7", features = ["ws", "multipart", "macros"] }
 axum-extra = { version = "0.9", features = ["typed-header"] }
@@ -59,6 +66,9 @@ dirs = "5.0"
 thiserror = "1.0"
 anyhow = "1.0"
 
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
 # HTTP client (for Aegis-DB connection)
 reqwest = { version = "0.12", features = ["json"] }
 
@@ -68,9 +78,13 @@ tokio-util = { version = "0.7", features = ["io"] }
 bytes = "1.5"
 
 # Image processing (for QR codes)
-image = { version = "0.25", default-features = false, features = ["png"] }
-qrcode = "0.13"
+qrcode = { version = "0.14", features = ["image"] }
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
+# Integration test dependencies (reuse from main deps)
+reqwest = { version = "0.12", features = ["json"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1", features = ["full", "test-util"] }

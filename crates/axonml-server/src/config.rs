@@ -61,6 +61,8 @@ pub struct AuthConfig {
     pub session_timeout_minutes: u64,
     #[serde(default)]
     pub require_mfa: bool,
+    #[serde(default = "default_allow_registration")]
+    pub allow_public_registration: bool,
 }
 
 /// Inference server configuration
@@ -86,12 +88,13 @@ fn default_host() -> String { "0.0.0.0".to_string() }
 fn default_port() -> u16 { 3000 }
 fn default_data_dir() -> String { "~/.axonml".to_string() }
 fn default_aegis_host() -> String { "localhost".to_string() }
-fn default_aegis_port() -> u16 { 9090 }
+fn default_aegis_port() -> u16 { 3020 }
 fn default_aegis_user() -> String { "demo".to_string() }
 fn default_aegis_pass() -> String { "demo".to_string() }
 fn default_jwt_secret() -> String { "CHANGE_ME_IN_PRODUCTION_USE_RANDOM_32_BYTES".to_string() }
 fn default_jwt_expiry() -> u64 { 24 }
 fn default_session_timeout() -> u64 { 30 }
+fn default_allow_registration() -> bool { true }
 fn default_port_start() -> u16 { 8100 }
 fn default_port_end() -> u16 { 8199 }
 fn default_max_endpoints() -> u32 { 10 }
@@ -137,6 +140,7 @@ impl Default for AuthConfig {
             jwt_expiry_hours: default_jwt_expiry(),
             session_timeout_minutes: default_session_timeout(),
             require_mfa: false,
+            allow_public_registration: default_allow_registration(),
         }
     }
 }
@@ -224,6 +228,44 @@ impl Config {
     pub fn aegis_url(&self) -> String {
         format!("http://{}:{}", self.aegis.host, self.aegis.port)
     }
+
+    /// Validate configuration for production use
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // Check if JWT secret is still the default
+        if self.auth.jwt_secret == default_jwt_secret() {
+            return Err(ConfigError::MissingConfig(
+                "jwt_secret is using the default value. Please set a secure random secret in production.".to_string()
+            ));
+        }
+
+        // Check if JWT secret is long enough
+        if self.auth.jwt_secret.len() < 32 {
+            return Err(ConfigError::MissingConfig(
+                "jwt_secret must be at least 32 characters long.".to_string()
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Validate configuration for production (returns warnings for non-critical issues)
+    pub fn validate_warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        if self.auth.jwt_secret == default_jwt_secret() {
+            warnings.push("WARNING: Using default JWT secret. Change this in production!".to_string());
+        }
+
+        if self.auth.allow_public_registration {
+            warnings.push("INFO: Public registration is enabled.".to_string());
+        }
+
+        if !self.auth.require_mfa {
+            warnings.push("INFO: MFA is not required for users.".to_string());
+        }
+
+        warnings
+    }
 }
 
 #[cfg(test)]
@@ -234,7 +276,7 @@ mod tests {
     fn test_default_config() {
         let config = Config::default();
         assert_eq!(config.server.port, 3000);
-        assert_eq!(config.aegis.port, 9090);
+        assert_eq!(config.aegis.port, 3020);
     }
 
     #[test]

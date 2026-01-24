@@ -160,7 +160,7 @@ pub fn PageLoader(
     view! {
         <div class="page-loader">
             <div class="page-loader-content">
-                <img src="/assets/logo.svg" alt="AxonML" class="page-loader-logo" />
+                <img src="/assets/AxonML-logo.png" alt="AxonML" class="page-loader-logo" />
                 <Spinner size=SpinnerSize::Lg />
                 <Show when=move || !text_empty>
                     <p class="loading-text">{text_stored.get_value()}</p>

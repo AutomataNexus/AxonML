@@ -20,7 +20,7 @@ flate2 = "1.0"
 dirs.workspace = true
 
 [features]
-default = []
+default = ["download"]
 download = ["reqwest"]
 
 [dependencies.reqwest]

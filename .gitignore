@@ -89,3 +89,4 @@ checkpoints/
 
 # Jupyter notebooks checkpoints
 .ipynb_checkpoints/
+axonml-server-bin

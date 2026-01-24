@@ -29,9 +29,8 @@ readme = "README.md"
 name = "axonml"
 path = "src/main.rs"
 
-[[bin]]
-name = "axon"
-path = "src/main.rs"
+# Note: 'axon' alias removed to avoid duplicate target warning
+# Users can create a shell alias: alias axon='axonml'
 
 [dependencies]
 # Internal crates
@@ -98,7 +97,7 @@ assert_cmd = "2.0"
 predicates = "3.1"
 
 [features]
-default = ["wandb"]
+default = ["wandb", "kaggle", "dataset-api", "hub-download"]
 serve = ["tokio"]
 wandb = ["reqwest", "chrono", "uuid"]
 kaggle = ["reqwest"]

@@ -103,7 +103,7 @@ pub fn ProfileSettingsPage() -> impl IntoView {
                                         <IconUpload size=IconSize::Sm />
                                         <span>"Upload"</span>
                                     </button>
-                                    <p class="form-helper">"Avatar upload coming soon"</p>
+                                    <p class="form-helper">"Contact admin to update avatar"</p>
                                 </div>
                             </div>
                         </div>

@@ -46,6 +46,7 @@ pub struct MfaToken {
 
 /// JWT authentication handler
 pub struct JwtAuth {
+    secret: String,
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
     access_expiry_hours: i64,
@@ -56,11 +57,27 @@ impl JwtAuth {
     /// Create a new JWT auth handler
     pub fn new(secret: &str, access_expiry_hours: u64) -> Self {
         Self {
+            secret: secret.to_string(),
             encoding_key: EncodingKey::from_secret(secret.as_bytes()),
             decoding_key: DecodingKey::from_secret(secret.as_bytes()),
             access_expiry_hours: access_expiry_hours as i64,
             refresh_expiry_days: 7, // Refresh tokens valid for 7 days
         }
+    }
+
+    /// Check if secret is configured (non-empty)
+    pub fn secret(&self) -> &str {
+        &self.secret
+    }
+
+    /// Get access token expiry in hours
+    pub fn access_expiry_hours(&self) -> i64 {
+        self.access_expiry_hours
+    }
+
+    /// Get refresh token expiry in days
+    pub fn refresh_expiry_days(&self) -> i64 {
+        self.refresh_expiry_days
     }
 
     /// Create an access token

@@ -1,11 +1,15 @@
 //! Training runs database operations for AxonML
 //!
-//! Provides CRUD operations for training runs and metrics.
+//! Uses Aegis-DB Document Store for run metadata and Time Series for metrics.
 
-use super::{Database, DbError};
+use super::{Database, DbError, DocumentQuery, TimeSeriesQuery};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
+
+/// Collection name for runs
+const COLLECTION: &str = "axonml_runs";
 
 /// Training run status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -112,33 +116,23 @@ impl<'a> RunRepository<'a> {
 
         let run_json = serde_json::to_value(&run)?;
 
-        self.db.execute_with_params(
-            "INSERT INTO axonml_runs (id, data) VALUES ($1, $2)",
-            vec![
-                serde_json::json!(&run.id),
-                run_json,
-            ],
-        ).await?;
+        // Insert using document store
+        self.db.doc_insert(COLLECTION, Some(&run.id), run_json).await?;
 
         Ok(run)
     }
 
     /// Find run by ID
     pub async fn find_by_id(&self, id: &str) -> Result<Option<TrainingRun>, DbError> {
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_runs WHERE id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
+        let doc = self.db.doc_get(COLLECTION, id).await?;
 
-        if result.rows.is_empty() {
-            return Ok(None);
+        match doc {
+            Some(data) => {
+                let run: TrainingRun = serde_json::from_value(data)?;
+                Ok(Some(run))
+            }
+            None => Ok(None),
         }
-
-        let data = result.rows[0].get("data")
-            .ok_or_else(|| DbError::InvalidData("Missing data field".to_string()))?;
-
-        let run: TrainingRun = serde_json::from_value(data.clone())?;
-        Ok(Some(run))
     }
 
     /// List runs for a user
@@ -149,38 +143,32 @@ impl<'a> RunRepository<'a> {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<TrainingRun>, DbError> {
-        let limit = limit.unwrap_or(100);
-        let offset = offset.unwrap_or(0);
+        let mut filter = serde_json::json!({
+            "user_id": { "$eq": user_id }
+        });
 
-        let result = if let Some(status) = status {
-            let status_str = serde_json::to_string(&status)?;
+        if let Some(s) = status {
+            let status_str = serde_json::to_string(&s)?;
             let status_str = status_str.trim_matches('"');
-            self.db.query_with_params(
-                "SELECT data FROM axonml_runs WHERE data->>'user_id' = $1 AND data->>'status' = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
-                vec![
-                    serde_json::json!(user_id),
-                    serde_json::json!(status_str),
-                    serde_json::json!(limit),
-                    serde_json::json!(offset),
-                ],
-            ).await?
-        } else {
-            self.db.query_with_params(
-                "SELECT data FROM axonml_runs WHERE data->>'user_id' = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-                vec![
-                    serde_json::json!(user_id),
-                    serde_json::json!(limit),
-                    serde_json::json!(offset),
-                ],
-            ).await?
+            filter.as_object_mut().unwrap().insert(
+                "status".to_string(),
+                serde_json::json!({ "$eq": status_str })
+            );
+        }
+
+        let query = DocumentQuery {
+            filter: Some(filter),
+            sort: Some(serde_json::json!({ "field": "created_at", "ascending": false })),
+            limit,
+            skip: offset,
         };
 
+        let docs = self.db.doc_query(COLLECTION, query).await?;
+
         let mut runs = Vec::new();
-        for row in result.rows {
-            if let Some(data) = row.get("data") {
-                let run: TrainingRun = serde_json::from_value(data.clone())?;
-                runs.push(run);
-            }
+        for doc in docs {
+            let run: TrainingRun = serde_json::from_value(doc)?;
+            runs.push(run);
         }
 
         Ok(runs)
@@ -193,36 +181,29 @@ impl<'a> RunRepository<'a> {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<TrainingRun>, DbError> {
-        let limit = limit.unwrap_or(100);
-        let offset = offset.unwrap_or(0);
-
-        let result = if let Some(status) = status {
-            let status_str = serde_json::to_string(&status)?;
+        let filter = if let Some(s) = status {
+            let status_str = serde_json::to_string(&s)?;
             let status_str = status_str.trim_matches('"');
-            self.db.query_with_params(
-                "SELECT data FROM axonml_runs WHERE data->>'status' = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-                vec![
-                    serde_json::json!(status_str),
-                    serde_json::json!(limit),
-                    serde_json::json!(offset),
-                ],
-            ).await?
+            Some(serde_json::json!({
+                "status": { "$eq": status_str }
+            }))
         } else {
-            self.db.query_with_params(
-                "SELECT data FROM axonml_runs ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-                vec![
-                    serde_json::json!(limit),
-                    serde_json::json!(offset),
-                ],
-            ).await?
+            None
         };
 
+        let query = DocumentQuery {
+            filter,
+            sort: Some(serde_json::json!({ "field": "created_at", "ascending": false })),
+            limit,
+            skip: offset,
+        };
+
+        let docs = self.db.doc_query(COLLECTION, query).await?;
+
         let mut runs = Vec::new();
-        for row in result.rows {
-            if let Some(data) = row.get("data") {
-                let run: TrainingRun = serde_json::from_value(data.clone())?;
-                runs.push(run);
-            }
+        for doc in docs {
+            let run: TrainingRun = serde_json::from_value(doc)?;
+            runs.push(run);
         }
 
         Ok(runs)
@@ -240,18 +221,12 @@ impl<'a> RunRepository<'a> {
 
         let run_json = serde_json::to_value(&run)?;
 
-        self.db.execute_with_params(
-            "UPDATE axonml_runs SET data = $2 WHERE id = $1",
-            vec![
-                serde_json::json!(id),
-                run_json,
-            ],
-        ).await?;
+        self.db.doc_update(COLLECTION, id, run_json).await?;
 
         Ok(run)
     }
 
-    /// Update latest metrics
+    /// Update latest metrics (stored in document)
     pub async fn update_metrics(&self, id: &str, metrics: TrainingMetrics) -> Result<TrainingRun, DbError> {
         let mut run = self.find_by_id(id).await?
             .ok_or_else(|| DbError::NotFound(format!("Run {} not found", id)))?;
@@ -260,101 +235,130 @@ impl<'a> RunRepository<'a> {
 
         let run_json = serde_json::to_value(&run)?;
 
-        self.db.execute_with_params(
-            "UPDATE axonml_runs SET data = $2 WHERE id = $1",
-            vec![
-                serde_json::json!(id),
-                run_json,
-            ],
-        ).await?;
+        self.db.doc_update(COLLECTION, id, run_json).await?;
 
         Ok(run)
     }
 
     /// Delete run
     pub async fn delete(&self, id: &str) -> Result<(), DbError> {
-        // Delete associated metrics first
-        self.db.execute_with_params(
-            "DELETE FROM axonml_metrics WHERE run_id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
+        // Check if run exists
+        let _ = self.find_by_id(id).await?
+            .ok_or_else(|| DbError::NotFound(format!("Run {} not found", id)))?;
 
-        // Delete the run
-        let affected = self.db.execute_with_params(
-            "DELETE FROM axonml_runs WHERE id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
+        // Note: Time series data is retained (metrics history remains for analysis)
+        // Delete the run document
+        self.db.doc_delete(COLLECTION, id).await?;
 
-        if affected == 0 {
-            return Err(DbError::NotFound(format!("Run {} not found", id)));
+        Ok(())
+    }
+
+    /// Record training metrics to time series
+    pub async fn record_metrics(&self, run_id: &str, metrics: &TrainingMetrics) -> Result<(), DbError> {
+        // Create tags for this run
+        let mut tags: HashMap<String, String> = HashMap::new();
+        tags.insert("run_id".to_string(), run_id.to_string());
+        tags.insert("epoch".to_string(), metrics.epoch.to_string());
+        tags.insert("step".to_string(), metrics.step.to_string());
+
+        // Record loss metric
+        if let Some(loss) = metrics.loss {
+            let mut loss_tags = tags.clone();
+            loss_tags.insert("metric".to_string(), "loss".to_string());
+            self.db.ts_write_one(
+                &format!("axonml.training.{}.loss", run_id),
+                loss,
+                loss_tags
+            ).await?;
+        }
+
+        // Record accuracy metric
+        if let Some(accuracy) = metrics.accuracy {
+            let mut acc_tags = tags.clone();
+            acc_tags.insert("metric".to_string(), "accuracy".to_string());
+            self.db.ts_write_one(
+                &format!("axonml.training.{}.accuracy", run_id),
+                accuracy,
+                acc_tags
+            ).await?;
+        }
+
+        // Record learning rate
+        if let Some(lr) = metrics.lr {
+            let mut lr_tags = tags.clone();
+            lr_tags.insert("metric".to_string(), "learning_rate".to_string());
+            self.db.ts_write_one(
+                &format!("axonml.training.{}.lr", run_id),
+                lr,
+                lr_tags
+            ).await?;
+        }
+
+        // Record GPU utilization
+        if let Some(gpu_util) = metrics.gpu_util {
+            let mut gpu_tags = tags.clone();
+            gpu_tags.insert("metric".to_string(), "gpu_util".to_string());
+            self.db.ts_write_one(
+                &format!("axonml.training.{}.gpu_util", run_id),
+                gpu_util,
+                gpu_tags
+            ).await?;
+        }
+
+        // Record memory usage
+        if let Some(memory_mb) = metrics.memory_mb {
+            let mut mem_tags = tags.clone();
+            mem_tags.insert("metric".to_string(), "memory_mb".to_string());
+            self.db.ts_write_one(
+                &format!("axonml.training.{}.memory_mb", run_id),
+                memory_mb,
+                mem_tags
+            ).await?;
         }
 
         Ok(())
     }
 
-    /// Record training metrics
-    pub async fn record_metrics(&self, run_id: &str, metrics: &TrainingMetrics) -> Result<(), DbError> {
-        let custom_json = serde_json::to_value(&metrics.custom)?;
-
-        self.db.execute_with_params(
-            r#"INSERT INTO axonml_metrics
-               (run_id, epoch, step, loss, accuracy, lr, gpu_util, memory_mb, custom_metrics, timestamp)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
-            vec![
-                serde_json::json!(run_id),
-                serde_json::json!(metrics.epoch),
-                serde_json::json!(metrics.step),
-                serde_json::json!(metrics.loss),
-                serde_json::json!(metrics.accuracy),
-                serde_json::json!(metrics.lr),
-                serde_json::json!(metrics.gpu_util),
-                serde_json::json!(metrics.memory_mb),
-                custom_json,
-                serde_json::json!(metrics.timestamp.to_rfc3339()),
-            ],
-        ).await?;
-
-        Ok(())
-    }
-
-    /// Get metrics history for a run
+    /// Get metrics history for a run from time series
     pub async fn get_metrics_history(
         &self,
         run_id: &str,
         limit: Option<u32>,
     ) -> Result<Vec<TrainingMetrics>, DbError> {
-        let limit = limit.unwrap_or(1000);
+        // Query loss metric time series
+        let query = TimeSeriesQuery {
+            metric: format!("axonml.training.{}.loss", run_id),
+            start: None,
+            end: None,
+            tags: None,
+            aggregation: None,
+            limit,
+        };
 
-        let result = self.db.query_with_params(
-            r#"SELECT epoch, step, loss, accuracy, lr, gpu_util, memory_mb, custom_metrics, timestamp
-               FROM axonml_metrics
-               WHERE run_id = $1
-               ORDER BY timestamp ASC
-               LIMIT $2"#,
-            vec![
-                serde_json::json!(run_id),
-                serde_json::json!(limit),
-            ],
-        ).await?;
+        let loss_points = self.db.ts_query(query).await?;
 
+        // Convert time series points back to TrainingMetrics
+        // This is a simplified version - in production you might want to join multiple metrics
         let mut metrics = Vec::new();
-        for row in result.rows {
-            let m = TrainingMetrics {
-                epoch: row.get("epoch").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                step: row.get("step").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                loss: row.get("loss").and_then(|v| v.as_f64()),
-                accuracy: row.get("accuracy").and_then(|v| v.as_f64()),
-                lr: row.get("lr").and_then(|v| v.as_f64()),
-                gpu_util: row.get("gpu_util").and_then(|v| v.as_f64()),
-                memory_mb: row.get("memory_mb").and_then(|v| v.as_f64()),
-                custom: row.get("custom_metrics").cloned().unwrap_or(serde_json::json!({})),
-                timestamp: row.get("timestamp")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(Utc::now),
-            };
-            metrics.push(m);
+        for point in loss_points {
+            let epoch = point.tags.get("epoch")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let step = point.tags.get("step")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+
+            metrics.push(TrainingMetrics {
+                epoch,
+                step,
+                loss: Some(point.value),
+                accuracy: None, // Would need separate query to get this
+                lr: None,
+                gpu_util: None,
+                memory_mb: None,
+                custom: serde_json::json!({}),
+                timestamp: point.timestamp,
+            });
         }
 
         Ok(metrics)
@@ -362,17 +366,19 @@ impl<'a> RunRepository<'a> {
 
     /// Get running runs count
     pub async fn count_running(&self) -> Result<u64, DbError> {
-        let result = self.db.query(
-            "SELECT COUNT(*) as count FROM axonml_runs WHERE data->>'status' = 'running'"
-        ).await?;
+        let filter = serde_json::json!({
+            "status": { "$eq": "running" }
+        });
 
-        if let Some(row) = result.rows.first() {
-            if let Some(count) = row.get("count") {
-                return Ok(count.as_u64().unwrap_or(0));
-            }
-        }
+        let query = DocumentQuery {
+            filter: Some(filter),
+            sort: None,
+            limit: None,
+            skip: None,
+        };
 
-        Ok(0)
+        let docs = self.db.doc_query(COLLECTION, query).await?;
+        Ok(docs.len() as u64)
     }
 }
 

@@ -28,14 +28,14 @@ pub fn LandingPage() -> impl IntoView {
                             "Get Started"
                             <IconArrowRight size=IconSize::Sm />
                         </A>
-                        <a href="https://github.com/yourusername/axonml" class="btn btn-secondary btn-lg" target="_blank">
+                        <a href="https://github.com/AutomataNexus/AxonML" class="btn btn-secondary btn-lg" target="_blank">
                             "View on GitHub"
                         </a>
                     </div>
                 </div>
                 <div class="hero-visual">
                     <div class="dashboard-preview">
-                        <img src="/assets/logo.svg" alt="AxonML Dashboard Preview" class="preview-image" />
+                        <img src="/assets/AxonML-logo.png" alt="AxonML Dashboard Preview" class="preview-image" />
                     </div>
                 </div>
             </section>
@@ -106,18 +106,61 @@ pub fn LandingPage() -> impl IntoView {
             // Footer
             <footer class="landing-footer">
                 <div class="footer-content">
-                    <div class="footer-brand">
-                        <img src="/assets/logo.svg" alt="AxonML" class="footer-logo" />
-                        <span>"AxonML"</span>
+                    <div class="footer-grid">
+                        // Brand & Description
+                        <div class="footer-brand-section">
+                            <div class="footer-brand">
+                                <img src="/assets/AxonML-logo.png" alt="AxonML" class="footer-logo" />
+                                <span>"AxonML"</span>
+                            </div>
+                            <p class="footer-description">
+                                "Machine learning made simple. Train, deploy, and monitor ML models with ease."
+                            </p>
+                            <div class="footer-social">
+                                <a href="https://github.com/AutomataNexus/AxonML" target="_blank" rel="noopener" class="social-link">
+                                    <IconGithub size=IconSize::Md />
+                                </a>
+                            </div>
+                        </div>
+
+                        // Product Links
+                        <div class="footer-section">
+                            <h4 class="footer-section-title">"Product"</h4>
+                            <div class="footer-links">
+                                <a href="#features">"Features"</a>
+                                <a href="#docs">"Documentation"</a>
+                                <a href="https://github.com/AutomataNexus/AxonML" target="_blank">"GitHub"</a>
+                            </div>
+                        </div>
+
+                        // Company Links
+                        <div class="footer-section">
+                            <h4 class="footer-section-title">"Company"</h4>
+                            <div class="footer-links">
+                                <a href="https://automatanexus.com">"AutomataNexus"</a>
+                                <a href="https://automatanexus.com/contact">"Contact"</a>
+                            </div>
+                        </div>
+
+                        // Related Products
+                        <div class="footer-section">
+                            <h4 class="footer-section-title">"Related Products"</h4>
+                            <div class="footer-links">
+                                <a href="https://aegis-db.automatanexus.com" target="_blank">"Aegis-DB"</a>
+                                <a href="https://automatanexus.com/products">"All Products"</a>
+                            </div>
+                        </div>
                     </div>
-                    <div class="footer-links">
-                        <a href="#features">"Features"</a>
-                        <a href="https://github.com/yourusername/axonml" target="_blank">"GitHub"</a>
-                        <a href="#docs">"Documentation"</a>
+
+                    <div class="footer-bottom">
+                        <p class="footer-copyright">
+                            "© 2026 AutomataNexus, LLC. Built with Rust, Leptos, and Aegis-DB."
+                        </p>
+                        <div class="footer-legal">
+                            <a href="https://automatanexus.com/privacy">"Privacy"</a>
+                            <a href="https://automatanexus.com/terms">"Terms"</a>
+                        </div>
                     </div>
-                    <p class="footer-copyright">
-                        "Built with Rust, Leptos, and Aegis-DB"
-                    </p>
                 </div>
             </footer>
         </div>

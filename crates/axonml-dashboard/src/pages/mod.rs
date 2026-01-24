@@ -6,6 +6,7 @@ pub mod training;
 pub mod models;
 pub mod inference;
 pub mod settings;
+pub mod admin;
 
 pub use landing::*;
 pub use dashboard::*;

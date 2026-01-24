@@ -106,8 +106,7 @@ impl KaggleClient {
         load_credentials().map(Self::new)
     }
 
-    /// Search for datasets.
-    #[cfg(feature = "kaggle")]
+    /// Search for datasets via Kaggle API.
     pub fn search_datasets(&self, query: &str, page: u32) -> Result<Vec<KaggleDataset>, String> {
         let url = format!(
             "{}/datasets/list?search={}&page={}",
@@ -118,43 +117,19 @@ impl KaggleClient {
         let response = client
             .get(&url)
             .basic_auth(&self.credentials.username, Some(&self.credentials.key))
+            .timeout(std::time::Duration::from_secs(30))
             .send()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Network error: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("API error: {}", response.status()));
+            return Err(format!("Kaggle API error: {} - verify credentials", response.status()));
         }
 
         let datasets: Vec<KaggleDataset> = response.json().map_err(|e| e.to_string())?;
         Ok(datasets)
     }
 
-    /// Search datasets (mock for when feature not enabled).
-    #[cfg(not(feature = "kaggle"))]
-    pub fn search_datasets(&self, query: &str, _page: u32) -> Result<Vec<KaggleDataset>, String> {
-        // Return mock results
-        Ok(vec![
-            KaggleDataset {
-                ref_name: format!("user/sample-{}-dataset", query),
-                title: format!("Sample {} Dataset", query),
-                size: "10 MB".to_string(),
-                download_count: 1234,
-                vote_count: 56,
-                last_updated: "2024-01-15".to_string(),
-            },
-            KaggleDataset {
-                ref_name: format!("user/{}-data", query),
-                title: format!("{} Data Collection", query),
-                size: "50 MB".to_string(),
-                download_count: 5678,
-                vote_count: 89,
-                last_updated: "2024-01-10".to_string(),
-            },
-        ])
-    }
-
-    /// Download a dataset.
-    #[cfg(feature = "kaggle")]
+    /// Download a dataset from Kaggle.
     pub fn download_dataset(&self, dataset_ref: &str, output_dir: &PathBuf) -> Result<PathBuf, String> {
         let url = format!(
             "{}/datasets/download/{}",
@@ -167,11 +142,12 @@ impl KaggleClient {
         let response = client
             .get(&url)
             .basic_auth(&self.credentials.username, Some(&self.credentials.key))
+            .timeout(std::time::Duration::from_secs(300))
             .send()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Network error: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("Download failed: {}", response.status()));
+            return Err(format!("Download failed: {} - check dataset reference", response.status()));
         }
 
         let filename = dataset_ref.replace('/', "_") + ".zip";
@@ -183,38 +159,21 @@ impl KaggleClient {
 
         Ok(output_path)
     }
-
-    /// Download dataset (mock).
-    #[cfg(not(feature = "kaggle"))]
-    pub fn download_dataset(&self, dataset_ref: &str, output_dir: &PathBuf) -> Result<PathBuf, String> {
-        fs::create_dir_all(output_dir).map_err(|e| e.to_string())?;
-
-        // Create a placeholder file
-        let filename = dataset_ref.replace('/', "_") + ".zip";
-        let output_path = output_dir.join(&filename);
-
-        let mut file = File::create(&output_path).map_err(|e| e.to_string())?;
-        file.write_all(b"# Placeholder - enable kaggle feature for real downloads")
-            .map_err(|e| e.to_string())?;
-
-        Ok(output_path)
-    }
 }
 
 /// Kaggle dataset information.
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "kaggle", derive(serde::Deserialize))]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct KaggleDataset {
-    #[cfg_attr(feature = "kaggle", serde(rename = "ref"))]
+    #[serde(rename = "ref")]
     pub ref_name: String,
     pub title: String,
-    #[cfg_attr(feature = "kaggle", serde(rename = "totalBytes", default))]
+    #[serde(rename = "totalBytes", default)]
     pub size: String,
-    #[cfg_attr(feature = "kaggle", serde(rename = "downloadCount", default))]
+    #[serde(rename = "downloadCount", default)]
     pub download_count: u64,
-    #[cfg_attr(feature = "kaggle", serde(rename = "voteCount", default))]
+    #[serde(rename = "voteCount", default)]
     pub vote_count: u64,
-    #[cfg_attr(feature = "kaggle", serde(rename = "lastUpdated", default))]
+    #[serde(rename = "lastUpdated", default)]
     pub last_updated: String,
 }
 
@@ -242,10 +201,12 @@ pub fn execute_login(username: &str, key: &str) -> Result<(), String> {
 
 /// Execute kaggle status command.
 pub fn execute_status() -> Result<(), String> {
-    if let Some(creds) = load_credentials() {
-        println!("{} Kaggle is configured", "✓".green());
-        println!("  Username: {}", creds.username);
-        println!("  Config: {:?}", kaggle_credentials_path());
+    if is_configured() {
+        if let Some(creds) = load_credentials() {
+            println!("{} Kaggle is configured", "✓".green());
+            println!("  Username: {}", creds.username);
+            println!("  Config: {:?}", kaggle_credentials_path());
+        }
     } else {
         println!("{} Kaggle is not configured", "✗".red());
         println!("  Run: axonml kaggle login --username <USER> --key <KEY>");
@@ -364,14 +325,12 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_search() {
+    fn test_kaggle_client_creation() {
         let creds = KaggleCredentials {
-            username: "test".to_string(),
-            key: "test_key".to_string(),
+            username: "test_user".to_string(),
+            key: "test_api_key".to_string(),
         };
-        let client = KaggleClient::new(creds);
-
-        let results = client.search_datasets("mnist", 1).unwrap();
-        assert!(!results.is_empty());
+        // Client creation succeeds - actual API calls require valid Kaggle credentials
+        let _client = KaggleClient::new(creds);
     }
 }

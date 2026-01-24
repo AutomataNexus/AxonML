@@ -64,6 +64,83 @@ struct KvGetResponse {
     value: Option<Value>,
 }
 
+/// Document insert response
+#[derive(Debug, Deserialize)]
+struct DocumentInsertResponse {
+    #[serde(default)]
+    success: bool,
+    #[serde(default)]
+    id: Option<String>,
+}
+
+/// Document get response
+#[derive(Debug, Deserialize)]
+struct DocumentGetResponse {
+    #[serde(default)]
+    data: Option<Value>,
+}
+
+/// Document query response
+#[derive(Debug, Deserialize)]
+struct DocumentQueryResponse {
+    #[serde(default)]
+    documents: Vec<Value>,
+}
+
+/// Document query request
+#[derive(Debug, Serialize, Default)]
+pub struct DocumentQuery {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip: Option<u32>,
+}
+
+/// Time series data point
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DataPoint {
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub value: f64,
+    #[serde(default)]
+    pub tags: std::collections::HashMap<String, String>,
+}
+
+/// Time series aggregation options
+#[derive(Debug, Serialize, Default)]
+pub struct TimeSeriesAggregation {
+    #[serde(rename = "type")]
+    pub agg_type: String,
+    pub interval: String,
+    pub function: String,
+}
+
+/// Time series query request
+#[derive(Debug, Serialize, Default)]
+pub struct TimeSeriesQuery {
+    pub metric: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<std::collections::HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregation: Option<TimeSeriesAggregation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// Time series query response
+#[derive(Debug, Deserialize)]
+struct TimeSeriesResponse {
+    #[serde(default)]
+    points: Vec<DataPoint>,
+}
+
 impl Database {
     /// Create a new database connection
     pub async fn new(config: &AegisConfig) -> Result<Self, DbError> {
@@ -221,6 +298,225 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    // ========================================================================
+    // Document Store Operations
+    // ========================================================================
+
+    /// Create a document collection
+    pub async fn create_collection(&self, name: &str) -> Result<(), DbError> {
+        let mut request = self.client
+            .post(format!("{}/api/v1/documents/collections", self.base_url))
+            .json(&serde_json::json!({ "name": name }));
+
+        if let Some(auth) = self.auth_header().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let resp = request.send().await?;
+
+        // 409 Conflict or "already exists" is fine
+        if resp.status().as_u16() == 409 {
+            return Ok(());
+        }
+
+        let body = resp.text().await.unwrap_or_default();
+        if body.contains("already exists") {
+            return Ok(());
+        }
+
+        Ok(())
+    }
+
+    /// Insert a document into a collection
+    pub async fn doc_insert(&self, collection: &str, id: Option<&str>, data: Value) -> Result<String, DbError> {
+        let mut request = self.client
+            .post(format!("{}/api/v1/documents/collections/{}/documents", self.base_url, collection))
+            .json(&serde_json::json!({
+                "id": id,
+                "document": data
+            }));
+
+        if let Some(auth) = self.auth_header().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let resp = request.send().await?;
+
+        if !resp.status().is_success() {
+            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(DbError::QueryFailed(error));
+        }
+
+        let result: DocumentInsertResponse = resp.json().await?;
+
+        // Check success flag if returned
+        if !result.success && result.id.is_none() {
+            return Err(DbError::InvalidData("Document insert failed".to_string()));
+        }
+
+        result.id.ok_or_else(|| DbError::InvalidData("No document ID returned".to_string()))
+    }
+
+    /// Get a document by ID
+    pub async fn doc_get(&self, collection: &str, id: &str) -> Result<Option<Value>, DbError> {
+        let mut request = self.client
+            .get(format!("{}/api/v1/documents/collections/{}/documents/{}", self.base_url, collection, id));
+
+        if let Some(auth) = self.auth_header().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let resp = request.send().await?;
+
+        if resp.status().as_u16() == 404 {
+            return Ok(None);
+        }
+
+        if !resp.status().is_success() {
+            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(DbError::QueryFailed(error));
+        }
+
+        let result: DocumentGetResponse = resp.json().await?;
+        Ok(result.data)
+    }
+
+    /// Update a document by ID
+    pub async fn doc_update(&self, collection: &str, id: &str, data: Value) -> Result<(), DbError> {
+        let mut request = self.client
+            .put(format!("{}/api/v1/documents/collections/{}/documents/{}", self.base_url, collection, id))
+            .json(&serde_json::json!({ "document": data }));
+
+        if let Some(auth) = self.auth_header().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let resp = request.send().await?;
+
+        if resp.status().as_u16() == 404 {
+            return Err(DbError::NotFound(format!("Document {} not found", id)));
+        }
+
+        if !resp.status().is_success() {
+            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(DbError::QueryFailed(error));
+        }
+
+        Ok(())
+    }
+
+    /// Delete a document by ID
+    pub async fn doc_delete(&self, collection: &str, id: &str) -> Result<(), DbError> {
+        let mut request = self.client
+            .delete(format!("{}/api/v1/documents/collections/{}/documents/{}", self.base_url, collection, id));
+
+        if let Some(auth) = self.auth_header().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let resp = request.send().await?;
+
+        if !resp.status().is_success() && resp.status().as_u16() != 404 {
+            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(DbError::QueryFailed(error));
+        }
+
+        Ok(())
+    }
+
+    /// Query documents in a collection with filter
+    pub async fn doc_query(&self, collection: &str, query: DocumentQuery) -> Result<Vec<Value>, DbError> {
+        let mut request = self.client
+            .post(format!("{}/api/v1/documents/collections/{}/query", self.base_url, collection))
+            .json(&query);
+
+        if let Some(auth) = self.auth_header().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let resp = request.send().await?;
+
+        if !resp.status().is_success() {
+            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(DbError::QueryFailed(error));
+        }
+
+        let result: DocumentQueryResponse = resp.json().await?;
+
+        // Extract the "data" field from each document wrapper
+        let documents: Vec<Value> = result.documents.into_iter()
+            .filter_map(|doc| doc.get("data").cloned())
+            .collect();
+
+        Ok(documents)
+    }
+
+    /// Find one document matching a filter
+    pub async fn doc_find_one(&self, collection: &str, filter: Value) -> Result<Option<Value>, DbError> {
+        let query = DocumentQuery {
+            filter: Some(filter),
+            limit: Some(1),
+            ..Default::default()
+        };
+
+        let docs = self.doc_query(collection, query).await?;
+        Ok(docs.into_iter().next())
+    }
+
+    // ========================================================================
+    // Time Series Operations
+    // ========================================================================
+
+    /// Write a single time series data point
+    pub async fn ts_write_one(&self, metric: &str, value: f64, tags: std::collections::HashMap<String, String>) -> Result<(), DbError> {
+        let point = DataPoint {
+            timestamp: chrono::Utc::now(),
+            value,
+            tags,
+        };
+
+        let mut request = self.client
+            .post(format!("{}/api/v1/timeseries/write", self.base_url))
+            .json(&serde_json::json!({
+                "metric": metric,
+                "points": [point]
+            }));
+
+        if let Some(auth) = self.auth_header().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let resp = request.send().await?;
+
+        if !resp.status().is_success() {
+            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(DbError::QueryFailed(error));
+        }
+
+        Ok(())
+    }
+
+    /// Query time series data
+    pub async fn ts_query(&self, query: TimeSeriesQuery) -> Result<Vec<DataPoint>, DbError> {
+        let mut request = self.client
+            .post(format!("{}/api/v1/timeseries/query", self.base_url))
+            .json(&query);
+
+        if let Some(auth) = self.auth_header().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let resp = request.send().await?;
+
+        if !resp.status().is_success() {
+            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(DbError::QueryFailed(error));
+        }
+
+        let result: TimeSeriesResponse = resp.json().await?;
+        Ok(result.points)
     }
 
     /// Check if database is healthy

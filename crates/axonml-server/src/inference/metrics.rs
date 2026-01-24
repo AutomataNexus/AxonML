@@ -102,6 +102,25 @@ impl EndpointMetrics {
         self.latencies.iter().sum::<f64>() / self.latencies.len() as f64
     }
 
+    /// Get uptime since metrics were created
+    pub fn uptime(&self) -> Duration {
+        self.created_at.elapsed()
+    }
+
+    /// Get endpoint ID
+    pub fn id(&self) -> &str {
+        &self.endpoint_id
+    }
+
+    /// Get latency histogram buckets for Prometheus-style metrics
+    pub fn latency_histogram(&self) -> Vec<LatencyBucket> {
+        let buckets = [1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0];
+        buckets.iter().map(|&le| {
+            let count = self.latencies.iter().filter(|&&l| l <= le).count() as u64;
+            LatencyBucket { le, count }
+        }).collect()
+    }
+
     /// Get requests per second
     pub fn rps(&self) -> f64 {
         let elapsed = self.created_at.elapsed().as_secs_f64();

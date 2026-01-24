@@ -196,7 +196,7 @@ pub fn ProtectedRoute(
             fallback=|| view! {
                 <div class="page-loader">
                     <div class="page-loader-content">
-                        <img src="/assets/logo.svg" alt="AxonML" class="page-loader-logo" />
+                        <img src="/assets/AxonML-logo.png" alt="AxonML" class="page-loader-logo" />
                         <crate::components::spinner::Spinner size=crate::components::spinner::SpinnerSize::Lg />
                         <p>"Loading..."</p>
                     </div>

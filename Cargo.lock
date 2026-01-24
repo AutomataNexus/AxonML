@@ -241,7 +241,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "axonml"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-audio",
  "axonml-autograd",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-audio"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-core",
  "axonml-data",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-autograd"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -319,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "approx",
  "ash",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-dashboard"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.21.7",
  "chrono",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-data"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-distributed"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -387,7 +387,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-fusion"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "approx",
  "axonml-core",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-jit"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-llm"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "approx",
  "axonml-autograd",
@@ -428,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-nn"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -439,7 +439,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-onnx"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-optim"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -466,7 +466,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-profile"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "approx",
  "axonml-core",
@@ -479,7 +479,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-quant"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "approx",
  "axonml-core",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-serialize"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -506,22 +506,27 @@ dependencies = [
 
 [[package]]
 name = "axonml-server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "argon2",
  "async-trait",
+ "axonml-autograd",
+ "axonml-core",
+ "axonml-nn",
+ "axonml-serialize",
+ "axonml-tensor",
  "axum",
  "axum-extra",
  "base64 0.21.7",
  "bytes",
  "chrono",
+ "clap",
  "config",
  "dirs",
  "futures",
  "http-body-util",
  "hyper",
- "image 0.25.9",
  "jsonwebtoken",
  "multer",
  "qrcode",
@@ -544,7 +549,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-tensor"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "approx",
  "axonml-core",
@@ -556,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-text"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -568,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-tui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -586,7 +591,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-vision"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -983,12 +988,6 @@ name = "collection_literals"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2550f75b8cfac212855f6b1885455df8eaee8fe8e246b647d69146142e016084"
-
-[[package]]
-name = "color_quant"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
 name = "colorchoice"
@@ -2442,18 +2441,6 @@ dependencies = [
 
 [[package]]
 name = "image"
-version = "0.24.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5690139d2f55868e080017335e4b94cb7414274c74f1669c84fb5feba2c9f69d"
-dependencies = [
- "bytemuck",
- "byteorder",
- "color_quant",
- "num-traits",
-]
-
-[[package]]
-name = "image"
 version = "0.25.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6506c6c10786659413faa717ceebcb8f70731c0a60cbae39795fdf114519c1a"
@@ -3727,11 +3714,11 @@ dependencies = [
 
 [[package]]
 name = "qrcode"
-version = "0.13.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "166f136dfdb199f98186f3649cf7a0536534a61417a1a30221b492b4fb60ce3f"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 dependencies = [
- "image 0.24.9",
+ "image",
 ]
 
 [[package]]
@@ -3747,7 +3734,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "221b7eace1aef8c95d65dbe09fb7a1a43d006045394a89afba6997721fcb7708"
 dependencies = [
  "base64 0.22.1",
- "image 0.25.9",
+ "image",
  "qrcodegen",
 ]
 

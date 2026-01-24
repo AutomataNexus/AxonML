@@ -1,11 +1,18 @@
 //! Model registry database operations for AxonML
 //!
-//! Provides CRUD operations for models, versions, and endpoints.
+//! Uses Aegis-DB Document Store for models, versions, and endpoints.
+//! Uses Aegis-DB Time Series for inference metrics.
 
-use super::{Database, DbError};
+use super::{Database, DbError, DocumentQuery, TimeSeriesQuery};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
+
+/// Collection names
+const MODELS_COLLECTION: &str = "axonml_models";
+const VERSIONS_COLLECTION: &str = "axonml_model_versions";
+const ENDPOINTS_COLLECTION: &str = "axonml_endpoints";
 
 /// Model data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +126,10 @@ impl<'a> ModelRepository<'a> {
         Self { db }
     }
 
+    // ========================================================================
+    // Model Operations
+    // ========================================================================
+
     /// Create a new model
     pub async fn create(&self, new_model: NewModel) -> Result<Model, DbError> {
         let now = Utc::now();
@@ -134,33 +145,22 @@ impl<'a> ModelRepository<'a> {
 
         let model_json = serde_json::to_value(&model)?;
 
-        self.db.execute_with_params(
-            "INSERT INTO axonml_models (id, data) VALUES ($1, $2)",
-            vec![
-                serde_json::json!(&model.id),
-                model_json,
-            ],
-        ).await?;
+        self.db.doc_insert(MODELS_COLLECTION, Some(&model.id), model_json).await?;
 
         Ok(model)
     }
 
     /// Find model by ID
     pub async fn find_by_id(&self, id: &str) -> Result<Option<Model>, DbError> {
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_models WHERE id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
+        let doc = self.db.doc_get(MODELS_COLLECTION, id).await?;
 
-        if result.rows.is_empty() {
-            return Ok(None);
+        match doc {
+            Some(data) => {
+                let model: Model = serde_json::from_value(data)?;
+                Ok(Some(model))
+            }
+            None => Ok(None),
         }
-
-        let data = result.rows[0].get("data")
-            .ok_or_else(|| DbError::InvalidData("Missing data field".to_string()))?;
-
-        let model: Model = serde_json::from_value(data.clone())?;
-        Ok(Some(model))
     }
 
     /// List models for a user
@@ -170,24 +170,23 @@ impl<'a> ModelRepository<'a> {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Model>, DbError> {
-        let limit = limit.unwrap_or(100);
-        let offset = offset.unwrap_or(0);
+        let filter = serde_json::json!({
+            "user_id": { "$eq": user_id }
+        });
 
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_models WHERE data->>'user_id' = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-            vec![
-                serde_json::json!(user_id),
-                serde_json::json!(limit),
-                serde_json::json!(offset),
-            ],
-        ).await?;
+        let query = DocumentQuery {
+            filter: Some(filter),
+            sort: Some(serde_json::json!({ "field": "created_at", "ascending": false })),
+            limit,
+            skip: offset,
+        };
+
+        let docs = self.db.doc_query(MODELS_COLLECTION, query).await?;
 
         let mut models = Vec::new();
-        for row in result.rows {
-            if let Some(data) = row.get("data") {
-                let model: Model = serde_json::from_value(data.clone())?;
-                models.push(model);
-            }
+        for doc in docs {
+            let model: Model = serde_json::from_value(doc)?;
+            models.push(model);
         }
 
         Ok(models)
@@ -199,23 +198,19 @@ impl<'a> ModelRepository<'a> {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Model>, DbError> {
-        let limit = limit.unwrap_or(100);
-        let offset = offset.unwrap_or(0);
+        let query = DocumentQuery {
+            filter: None,
+            sort: Some(serde_json::json!({ "field": "created_at", "ascending": false })),
+            limit,
+            skip: offset,
+        };
 
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_models ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-            vec![
-                serde_json::json!(limit),
-                serde_json::json!(offset),
-            ],
-        ).await?;
+        let docs = self.db.doc_query(MODELS_COLLECTION, query).await?;
 
         let mut models = Vec::new();
-        for row in result.rows {
-            if let Some(data) = row.get("data") {
-                let model: Model = serde_json::from_value(data.clone())?;
-                models.push(model);
-            }
+        for doc in docs {
+            let model: Model = serde_json::from_value(doc)?;
+            models.push(model);
         }
 
         Ok(models)
@@ -236,13 +231,7 @@ impl<'a> ModelRepository<'a> {
 
         let model_json = serde_json::to_value(&model)?;
 
-        self.db.execute_with_params(
-            "UPDATE axonml_models SET data = $2 WHERE id = $1",
-            vec![
-                serde_json::json!(id),
-                model_json,
-            ],
-        ).await?;
+        self.db.doc_update(MODELS_COLLECTION, id, model_json).await?;
 
         Ok(model)
     }
@@ -250,36 +239,29 @@ impl<'a> ModelRepository<'a> {
     /// Delete model and all versions
     pub async fn delete(&self, id: &str) -> Result<(), DbError> {
         // Delete all versions first
-        self.db.execute_with_params(
-            "DELETE FROM axonml_model_versions WHERE model_id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
+        let versions = self.list_versions(id).await?;
+        for version in versions {
+            self.db.doc_delete(VERSIONS_COLLECTION, &version.id).await?;
+        }
 
         // Delete the model
-        let affected = self.db.execute_with_params(
-            "DELETE FROM axonml_models WHERE id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
-
-        if affected == 0 {
-            return Err(DbError::NotFound(format!("Model {} not found", id)));
-        }
+        self.db.doc_delete(MODELS_COLLECTION, id).await?;
 
         Ok(())
     }
 
+    // ========================================================================
+    // Model Version Operations
+    // ========================================================================
+
     /// Create a new model version
     pub async fn create_version(&self, new_version: NewModelVersion) -> Result<ModelVersion, DbError> {
         // Get the next version number
-        let result = self.db.query_with_params(
-            "SELECT MAX((data->>'version')::int) as max_version FROM axonml_model_versions WHERE model_id = $1",
-            vec![serde_json::json!(&new_version.model_id)],
-        ).await?;
-
-        let next_version = result.rows.first()
-            .and_then(|r| r.get("max_version"))
-            .and_then(|v| v.as_i64())
-            .map(|v| v as u32 + 1)
+        let versions = self.list_versions(&new_version.model_id).await?;
+        let next_version = versions.iter()
+            .map(|v| v.version)
+            .max()
+            .map(|v| v + 1)
             .unwrap_or(1);
 
         let version = ModelVersion {
@@ -295,70 +277,61 @@ impl<'a> ModelRepository<'a> {
 
         let version_json = serde_json::to_value(&version)?;
 
-        self.db.execute_with_params(
-            "INSERT INTO axonml_model_versions (id, model_id, data) VALUES ($1, $2, $3)",
-            vec![
-                serde_json::json!(&version.id),
-                serde_json::json!(&version.model_id),
-                version_json,
-            ],
-        ).await?;
+        self.db.doc_insert(VERSIONS_COLLECTION, Some(&version.id), version_json).await?;
 
         Ok(version)
     }
 
     /// Get model version by ID
     pub async fn get_version(&self, id: &str) -> Result<Option<ModelVersion>, DbError> {
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_model_versions WHERE id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
+        let doc = self.db.doc_get(VERSIONS_COLLECTION, id).await?;
 
-        if result.rows.is_empty() {
-            return Ok(None);
+        match doc {
+            Some(data) => {
+                let version: ModelVersion = serde_json::from_value(data)?;
+                Ok(Some(version))
+            }
+            None => Ok(None),
         }
-
-        let data = result.rows[0].get("data")
-            .ok_or_else(|| DbError::InvalidData("Missing data field".to_string()))?;
-
-        let version: ModelVersion = serde_json::from_value(data.clone())?;
-        Ok(Some(version))
     }
 
     /// Get model version by model ID and version number
     pub async fn get_version_by_number(&self, model_id: &str, version: u32) -> Result<Option<ModelVersion>, DbError> {
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_model_versions WHERE model_id = $1 AND (data->>'version')::int = $2",
-            vec![
-                serde_json::json!(model_id),
-                serde_json::json!(version),
-            ],
-        ).await?;
+        let filter = serde_json::json!({
+            "model_id": { "$eq": model_id },
+            "version": { "$eq": version }
+        });
 
-        if result.rows.is_empty() {
-            return Ok(None);
+        let doc = self.db.doc_find_one(VERSIONS_COLLECTION, filter).await?;
+
+        match doc {
+            Some(data) => {
+                let ver: ModelVersion = serde_json::from_value(data)?;
+                Ok(Some(ver))
+            }
+            None => Ok(None),
         }
-
-        let data = result.rows[0].get("data")
-            .ok_or_else(|| DbError::InvalidData("Missing data field".to_string()))?;
-
-        let ver: ModelVersion = serde_json::from_value(data.clone())?;
-        Ok(Some(ver))
     }
 
     /// List versions for a model
     pub async fn list_versions(&self, model_id: &str) -> Result<Vec<ModelVersion>, DbError> {
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_model_versions WHERE model_id = $1 ORDER BY (data->>'version')::int DESC",
-            vec![serde_json::json!(model_id)],
-        ).await?;
+        let filter = serde_json::json!({
+            "model_id": { "$eq": model_id }
+        });
+
+        let query = DocumentQuery {
+            filter: Some(filter),
+            sort: Some(serde_json::json!({ "field": "version", "ascending": false })),
+            limit: None,
+            skip: None,
+        };
+
+        let docs = self.db.doc_query(VERSIONS_COLLECTION, query).await?;
 
         let mut versions = Vec::new();
-        for row in result.rows {
-            if let Some(data) = row.get("data") {
-                let version: ModelVersion = serde_json::from_value(data.clone())?;
-                versions.push(version);
-            }
+        for doc in docs {
+            let version: ModelVersion = serde_json::from_value(doc)?;
+            versions.push(version);
         }
 
         Ok(versions)
@@ -366,27 +339,18 @@ impl<'a> ModelRepository<'a> {
 
     /// Delete a model version
     pub async fn delete_version(&self, id: &str) -> Result<(), DbError> {
-        let affected = self.db.execute_with_params(
-            "DELETE FROM axonml_model_versions WHERE id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
-
-        if affected == 0 {
-            return Err(DbError::NotFound(format!("Version {} not found", id)));
-        }
-
-        Ok(())
+        self.db.doc_delete(VERSIONS_COLLECTION, id).await
     }
+
+    // ========================================================================
+    // Endpoint Operations
+    // ========================================================================
 
     /// Create an inference endpoint
     pub async fn create_endpoint(&self, new_endpoint: NewEndpoint) -> Result<Endpoint, DbError> {
         // Check if name already exists
-        let existing = self.db.query_with_params(
-            "SELECT id FROM axonml_endpoints WHERE data->>'name' = $1",
-            vec![serde_json::json!(&new_endpoint.name)],
-        ).await?;
-
-        if !existing.rows.is_empty() {
+        let existing = self.get_endpoint_by_name(&new_endpoint.name).await?;
+        if existing.is_some() {
             return Err(DbError::AlreadyExists(format!(
                 "Endpoint with name {} already exists",
                 new_endpoint.name
@@ -409,65 +373,56 @@ impl<'a> ModelRepository<'a> {
 
         let endpoint_json = serde_json::to_value(&endpoint)?;
 
-        self.db.execute_with_params(
-            "INSERT INTO axonml_endpoints (id, data) VALUES ($1, $2)",
-            vec![
-                serde_json::json!(&endpoint.id),
-                endpoint_json,
-            ],
-        ).await?;
+        self.db.doc_insert(ENDPOINTS_COLLECTION, Some(&endpoint.id), endpoint_json).await?;
 
         Ok(endpoint)
     }
 
     /// Get endpoint by ID
     pub async fn get_endpoint(&self, id: &str) -> Result<Option<Endpoint>, DbError> {
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_endpoints WHERE id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
+        let doc = self.db.doc_get(ENDPOINTS_COLLECTION, id).await?;
 
-        if result.rows.is_empty() {
-            return Ok(None);
+        match doc {
+            Some(data) => {
+                let endpoint: Endpoint = serde_json::from_value(data)?;
+                Ok(Some(endpoint))
+            }
+            None => Ok(None),
         }
-
-        let data = result.rows[0].get("data")
-            .ok_or_else(|| DbError::InvalidData("Missing data field".to_string()))?;
-
-        let endpoint: Endpoint = serde_json::from_value(data.clone())?;
-        Ok(Some(endpoint))
     }
 
     /// Get endpoint by name
     pub async fn get_endpoint_by_name(&self, name: &str) -> Result<Option<Endpoint>, DbError> {
-        let result = self.db.query_with_params(
-            "SELECT data FROM axonml_endpoints WHERE data->>'name' = $1",
-            vec![serde_json::json!(name)],
-        ).await?;
+        let filter = serde_json::json!({
+            "name": { "$eq": name }
+        });
 
-        if result.rows.is_empty() {
-            return Ok(None);
+        let doc = self.db.doc_find_one(ENDPOINTS_COLLECTION, filter).await?;
+
+        match doc {
+            Some(data) => {
+                let endpoint: Endpoint = serde_json::from_value(data)?;
+                Ok(Some(endpoint))
+            }
+            None => Ok(None),
         }
-
-        let data = result.rows[0].get("data")
-            .ok_or_else(|| DbError::InvalidData("Missing data field".to_string()))?;
-
-        let endpoint: Endpoint = serde_json::from_value(data.clone())?;
-        Ok(Some(endpoint))
     }
 
     /// List all endpoints
     pub async fn list_endpoints(&self) -> Result<Vec<Endpoint>, DbError> {
-        let result = self.db.query(
-            "SELECT data FROM axonml_endpoints ORDER BY created_at DESC"
-        ).await?;
+        let query = DocumentQuery {
+            filter: None,
+            sort: Some(serde_json::json!({ "field": "created_at", "ascending": false })),
+            limit: None,
+            skip: None,
+        };
+
+        let docs = self.db.doc_query(ENDPOINTS_COLLECTION, query).await?;
 
         let mut endpoints = Vec::new();
-        for row in result.rows {
-            if let Some(data) = row.get("data") {
-                let endpoint: Endpoint = serde_json::from_value(data.clone())?;
-                endpoints.push(endpoint);
-            }
+        for doc in docs {
+            let endpoint: Endpoint = serde_json::from_value(doc)?;
+            endpoints.push(endpoint);
         }
 
         Ok(endpoints)
@@ -489,13 +444,7 @@ impl<'a> ModelRepository<'a> {
 
         let endpoint_json = serde_json::to_value(&endpoint)?;
 
-        self.db.execute_with_params(
-            "UPDATE axonml_endpoints SET data = $2 WHERE id = $1",
-            vec![
-                serde_json::json!(id),
-                endpoint_json,
-            ],
-        ).await?;
+        self.db.doc_update(ENDPOINTS_COLLECTION, id, endpoint_json).await?;
 
         Ok(endpoint)
     }
@@ -520,38 +469,22 @@ impl<'a> ModelRepository<'a> {
 
         let endpoint_json = serde_json::to_value(&endpoint)?;
 
-        self.db.execute_with_params(
-            "UPDATE axonml_endpoints SET data = $2 WHERE id = $1",
-            vec![
-                serde_json::json!(id),
-                endpoint_json,
-            ],
-        ).await?;
+        self.db.doc_update(ENDPOINTS_COLLECTION, id, endpoint_json).await?;
 
         Ok(endpoint)
     }
 
     /// Delete endpoint
     pub async fn delete_endpoint(&self, id: &str) -> Result<(), DbError> {
-        // Delete associated metrics first
-        self.db.execute_with_params(
-            "DELETE FROM axonml_inference_metrics WHERE endpoint_id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
-
-        let affected = self.db.execute_with_params(
-            "DELETE FROM axonml_endpoints WHERE id = $1",
-            vec![serde_json::json!(id)],
-        ).await?;
-
-        if affected == 0 {
-            return Err(DbError::NotFound(format!("Endpoint {} not found", id)));
-        }
-
-        Ok(())
+        // Note: Time series inference metrics are retained for historical analysis
+        self.db.doc_delete(ENDPOINTS_COLLECTION, id).await
     }
 
-    /// Record inference metrics
+    // ========================================================================
+    // Inference Metrics (Time Series)
+    // ========================================================================
+
+    /// Record inference metrics to time series
     pub async fn record_inference_metrics(
         &self,
         endpoint_id: &str,
@@ -562,61 +495,106 @@ impl<'a> ModelRepository<'a> {
         latency_p95: f64,
         latency_p99: f64,
     ) -> Result<(), DbError> {
-        self.db.execute_with_params(
-            r#"INSERT INTO axonml_inference_metrics
-               (endpoint_id, requests_total, requests_success, requests_error, latency_p50, latency_p95, latency_p99, timestamp)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
-            vec![
-                serde_json::json!(endpoint_id),
-                serde_json::json!(requests_total),
-                serde_json::json!(requests_success),
-                serde_json::json!(requests_error),
-                serde_json::json!(latency_p50),
-                serde_json::json!(latency_p95),
-                serde_json::json!(latency_p99),
-                serde_json::json!(Utc::now().to_rfc3339()),
-            ],
+        let mut tags: HashMap<String, String> = HashMap::new();
+        tags.insert("endpoint_id".to_string(), endpoint_id.to_string());
+
+        // Record request metrics
+        let mut req_tags = tags.clone();
+        req_tags.insert("metric".to_string(), "requests_total".to_string());
+        self.db.ts_write_one(
+            &format!("axonml.inference.{}.requests_total", endpoint_id),
+            requests_total as f64,
+            req_tags
+        ).await?;
+
+        let mut success_tags = tags.clone();
+        success_tags.insert("metric".to_string(), "requests_success".to_string());
+        self.db.ts_write_one(
+            &format!("axonml.inference.{}.requests_success", endpoint_id),
+            requests_success as f64,
+            success_tags
+        ).await?;
+
+        let mut error_tags = tags.clone();
+        error_tags.insert("metric".to_string(), "requests_error".to_string());
+        self.db.ts_write_one(
+            &format!("axonml.inference.{}.requests_error", endpoint_id),
+            requests_error as f64,
+            error_tags
+        ).await?;
+
+        // Record latency metrics
+        let mut p50_tags = tags.clone();
+        p50_tags.insert("metric".to_string(), "latency_p50".to_string());
+        self.db.ts_write_one(
+            &format!("axonml.inference.{}.latency_p50", endpoint_id),
+            latency_p50,
+            p50_tags
+        ).await?;
+
+        let mut p95_tags = tags.clone();
+        p95_tags.insert("metric".to_string(), "latency_p95".to_string());
+        self.db.ts_write_one(
+            &format!("axonml.inference.{}.latency_p95", endpoint_id),
+            latency_p95,
+            p95_tags
+        ).await?;
+
+        let mut p99_tags = tags.clone();
+        p99_tags.insert("metric".to_string(), "latency_p99".to_string());
+        self.db.ts_write_one(
+            &format!("axonml.inference.{}.latency_p99", endpoint_id),
+            latency_p99,
+            p99_tags
         ).await?;
 
         Ok(())
     }
 
-    /// Get inference metrics history
+    /// Get inference metrics history from time series
     pub async fn get_inference_metrics(
         &self,
         endpoint_id: &str,
         limit: Option<u32>,
     ) -> Result<Vec<serde_json::Value>, DbError> {
-        let limit = limit.unwrap_or(1000);
+        // Query latency_p50 as the primary metric
+        let query = TimeSeriesQuery {
+            metric: format!("axonml.inference.{}.latency_p50", endpoint_id),
+            start: None,
+            end: None,
+            tags: None,
+            aggregation: None,
+            limit,
+        };
 
-        let result = self.db.query_with_params(
-            r#"SELECT requests_total, requests_success, requests_error, latency_p50, latency_p95, latency_p99, timestamp
-               FROM axonml_inference_metrics
-               WHERE endpoint_id = $1
-               ORDER BY timestamp DESC
-               LIMIT $2"#,
-            vec![
-                serde_json::json!(endpoint_id),
-                serde_json::json!(limit),
-            ],
-        ).await?;
+        let points = self.db.ts_query(query).await?;
 
-        Ok(result.rows)
+        // Convert to JSON for API compatibility
+        let metrics: Vec<serde_json::Value> = points.into_iter().map(|p| {
+            serde_json::json!({
+                "latency_p50": p.value,
+                "timestamp": p.timestamp.to_rfc3339()
+            })
+        }).collect();
+
+        Ok(metrics)
     }
 
     /// Count running endpoints
     pub async fn count_running_endpoints(&self) -> Result<u64, DbError> {
-        let result = self.db.query(
-            "SELECT COUNT(*) as count FROM axonml_endpoints WHERE data->>'status' = 'running'"
-        ).await?;
+        let filter = serde_json::json!({
+            "status": { "$eq": "running" }
+        });
 
-        if let Some(row) = result.rows.first() {
-            if let Some(count) = row.get("count") {
-                return Ok(count.as_u64().unwrap_or(0));
-            }
-        }
+        let query = DocumentQuery {
+            filter: Some(filter),
+            sort: None,
+            limit: None,
+            skip: None,
+        };
 
-        Ok(0)
+        let docs = self.db.doc_query(ENDPOINTS_COLLECTION, query).await?;
+        Ok(docs.len() as u64)
     }
 }
 

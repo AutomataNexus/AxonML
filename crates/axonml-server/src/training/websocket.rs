@@ -76,51 +76,49 @@ impl MetricsStreamer {
 
         // Send metrics as they arrive
         loop {
-            tokio::select! {
-                result = receiver.recv() => {
-                    match result {
-                        Ok(metrics) => {
-                            let message = MetricsMessage {
-                                msg_type: "metrics".to_string(),
-                                data: MetricsData {
-                                    epoch: metrics.epoch,
-                                    step: metrics.step,
-                                    loss: metrics.loss,
-                                    accuracy: metrics.accuracy,
-                                    lr: metrics.lr,
-                                    gpu_util: metrics.gpu_util,
-                                    memory_mb: metrics.memory_mb,
-                                    timestamp: metrics.timestamp.to_rfc3339(),
-                                },
-                            };
+            // Check if receiver task is finished
+            if recv_handle.is_finished() {
+                break;
+            }
 
-                            let json = serde_json::to_string(&message).unwrap_or_default();
-                            if sender.send(Message::Text(json)).await.is_err() {
-                                break;
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Closed) => {
-                            // Run completed, send status message
-                            let status = StatusMessage {
-                                msg_type: "status".to_string(),
-                                data: StatusData {
-                                    status: "completed".to_string(),
-                                    completed_at: Some(chrono::Utc::now().to_rfc3339()),
-                                },
-                            };
+            match receiver.recv().await {
+                Ok(metrics) => {
+                    let message = MetricsMessage {
+                        msg_type: "metrics".to_string(),
+                        data: MetricsData {
+                            epoch: metrics.epoch,
+                            step: metrics.step,
+                            loss: metrics.loss,
+                            accuracy: metrics.accuracy,
+                            lr: metrics.lr,
+                            gpu_util: metrics.gpu_util,
+                            memory_mb: metrics.memory_mb,
+                            timestamp: metrics.timestamp.to_rfc3339(),
+                        },
+                    };
 
-                            let json = serde_json::to_string(&status).unwrap_or_default();
-                            let _ = sender.send(Message::Text(json)).await;
-                            break;
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            // Missed some messages, continue
-                            continue;
-                        }
+                    let json = serde_json::to_string(&message).unwrap_or_default();
+                    if sender.send(Message::Text(json)).await.is_err() {
+                        break;
                     }
                 }
-                _ = recv_handle.is_finished() => {
+                Err(broadcast::error::RecvError::Closed) => {
+                    // Run completed, send status message
+                    let status = StatusMessage {
+                        msg_type: "status".to_string(),
+                        data: StatusData {
+                            status: "completed".to_string(),
+                            completed_at: Some(chrono::Utc::now().to_rfc3339()),
+                        },
+                    };
+
+                    let json = serde_json::to_string(&status).unwrap_or_default();
+                    let _ = sender.send(Message::Text(json)).await;
                     break;
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    // Missed some messages, continue
+                    continue;
                 }
             }
         }

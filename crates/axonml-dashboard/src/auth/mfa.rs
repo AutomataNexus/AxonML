@@ -5,6 +5,7 @@ use leptos::*;
 use crate::api;
 use crate::types::*;
 use crate::components::{forms::*, icons::*, spinner::*};
+use crate::utils::webauthn;
 
 /// MFA challenge page (shown when login requires MFA)
 #[component]
@@ -44,10 +45,10 @@ pub fn MfaChallengePage(
                 }
                 MfaMethod::Recovery => api::auth::use_recovery_code(&token, &code_val).await,
                 MfaMethod::WebAuthn => {
-                    // WebAuthn verification is handled separately
+                    // WebAuthn uses the dedicated WebAuthnAuthenticator component, not code input
                     Err(api::ApiClientError {
                         status: 400,
-                        message: "WebAuthn not implemented in this form".to_string(),
+                        message: "Use the security key button instead of entering a code".to_string(),
                     })
                 }
             };
@@ -181,27 +182,66 @@ pub fn WebAuthnAuthenticator(
     let start_auth = {
         let mfa_token = mfa_token.clone();
         move |_| {
+            // Check if WebAuthn is available
+            if !webauthn::is_webauthn_available() {
+                error.set(Some("WebAuthn is not supported in this browser".to_string()));
+                return;
+            }
+
             loading.set(true);
             error.set(None);
 
             let token = mfa_token.clone();
-            let _on_success = on_success.clone(); // TODO: Use after WebAuthn impl complete
+            let on_success = on_success.clone();
             let on_error = on_error.clone();
 
             spawn_local(async move {
                 // Step 1: Get challenge from server
                 match api::auth::webauthn_authenticate_start(&token).await {
-                    Ok(_challenge) => {
-                        // TODO: Step 2: Use Web Crypto API to get credential
-                        // This would involve navigator.credentials.get() with the challenge
-                        // Then call on_success with the token pair
-                        //
-                        // In a real implementation:
-                        // let credential = navigator.credentials.get(options).await;
-                        // let result = api::auth::webauthn_authenticate_finish(&token, credential).await;
-                        // on_success.call(result);
+                    Ok(challenge) => {
+                        // Step 2: Use WebAuthn API to get credential assertion
+                        let rp_id = web_sys::window()
+                            .and_then(|w| w.location().hostname().ok())
+                            .unwrap_or_else(|| "localhost".to_string());
 
-                        error.set(Some("WebAuthn authentication not yet implemented in WASM".to_string()));
+                        match webauthn::get_assertion(
+                            &challenge.challenge,
+                            &rp_id,
+                            &challenge.allowed_credentials,
+                        ).await {
+                            Ok(assertion) => {
+                                // Step 3: Send assertion to server for verification
+                                let finish_request = api::auth::WebAuthnAuthFinishRequest {
+                                    credential_id: assertion.id,
+                                    authenticator_data: assertion.authenticator_data,
+                                    client_data_json: assertion.client_data_json,
+                                    signature: assertion.signature,
+                                    user_handle: assertion.user_handle,
+                                };
+
+                                match api::auth::webauthn_authenticate_finish(&token, &finish_request).await {
+                                    Ok(token_pair) => {
+                                        on_success.call(token_pair);
+                                    }
+                                    Err(e) => {
+                                        error.set(Some(format!("Verification failed: {}", e.message)));
+                                        if let Some(cb) = on_error.as_ref() {
+                                            cb.call(e.message);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(webauthn::WebAuthnError::UserCancelled) => {
+                                error.set(Some("Authentication cancelled".to_string()));
+                            }
+                            Err(e) => {
+                                let msg = e.to_string();
+                                error.set(Some(msg.clone()));
+                                if let Some(cb) = on_error.as_ref() {
+                                    cb.call(msg);
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         let msg = e.message.clone();

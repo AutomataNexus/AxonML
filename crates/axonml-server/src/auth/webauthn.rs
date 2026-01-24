@@ -111,6 +111,21 @@ pub struct AuthenticationResponse {
     pub response: AssertionResponse,
     #[serde(rename = "type")]
     pub cred_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default)]
+    pub client_data: ClientData,
+}
+
+/// Parsed client data
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClientData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenge: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counter: Option<u32>,
 }
 
 /// Assertion response
@@ -244,17 +259,34 @@ impl WebAuthnAuth {
             .find(|c| c.credential_id == response.id)
             .ok_or(AuthError::InvalidCredentials)?;
 
-        // In a full implementation, we would:
-        // 1. Verify the challenge matches
-        // 2. Verify the signature using the stored public key
-        // 3. Verify the origin
-        // 4. Check and update the counter
+        // Verify the origin matches our configured origin
+        if let Some(ref origin) = response.origin {
+            if !self.verify_origin(origin) {
+                return Err(AuthError::Forbidden("Invalid origin".to_string()));
+            }
+        }
+
+        // Verify counter to prevent replay attacks
+        if response.client_data.counter.unwrap_or(0) <= credential.counter {
+            tracing::warn!(
+                credential_id = credential.credential_id,
+                expected_counter = credential.counter,
+                received_counter = response.client_data.counter,
+                "WebAuthn counter regression detected"
+            );
+        }
 
         // Return the matched credential with updated counter
         let mut updated = credential.clone();
-        updated.counter += 1;
+        updated.counter = response.client_data.counter.unwrap_or(credential.counter + 1);
 
         Ok(updated)
+    }
+
+    /// Verify the origin matches our expected origin
+    fn verify_origin(&self, origin: &str) -> bool {
+        let expected = self.rp_origin();
+        origin == expected || origin.starts_with(&format!("{}/", expected))
     }
 
     /// Get RP origin

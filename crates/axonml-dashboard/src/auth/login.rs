@@ -73,7 +73,7 @@ pub fn LoginPage() -> impl IntoView {
         <div class="auth-page">
             <div class="auth-container">
                 <div class="auth-header">
-                    <img src="/assets/logo.svg" alt="AxonML" class="auth-logo" />
+                    <img src="/assets/AxonML-logo.png" alt="AxonML" class="auth-logo" />
                     <h1 class="auth-title">"Welcome Back"</h1>
                     <p class="auth-subtitle">"Sign in to your AxonML account"</p>
                 </div>
@@ -108,9 +108,9 @@ pub fn LoginPage() -> impl IntoView {
 
                         <TextInput
                             value=email
-                            input_type=InputType::Email
-                            label="Email"
-                            placeholder="you@example.com"
+                            input_type=InputType::Text
+                            label="Email or Username"
+                            placeholder="you@example.com or username"
                             required=true
                             icon=view! { <IconUser size=IconSize::Sm /> }.into_view()
                         />
@@ -367,7 +367,7 @@ pub fn RegisterPage() -> impl IntoView {
         <div class="auth-page">
             <div class="auth-container">
                 <div class="auth-header">
-                    <img src="/assets/logo.svg" alt="AxonML" class="auth-logo" />
+                    <img src="/assets/AxonML-logo.png" alt="AxonML" class="auth-logo" />
                     <h1 class="auth-title">"Create Account"</h1>
                     <p class="auth-subtitle">"Get started with AxonML"</p>
                 </div>

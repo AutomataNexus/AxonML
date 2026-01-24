@@ -1,211 +1,77 @@
 //! Database schema initialization for AxonML
 //!
-//! Creates all required tables in Aegis-DB.
+//! Creates all required collections in Aegis-DB Document Store.
 
 use super::{Database, DbError};
 use tracing::info;
 
-/// Schema definitions for all AxonML tables
+/// Collection names used by AxonML
+pub const USERS_COLLECTION: &str = "axonml_users";
+pub const RUNS_COLLECTION: &str = "axonml_runs";
+pub const MODELS_COLLECTION: &str = "axonml_models";
+pub const VERSIONS_COLLECTION: &str = "axonml_model_versions";
+pub const ENDPOINTS_COLLECTION: &str = "axonml_endpoints";
+
+/// Schema definitions for all AxonML collections
 pub struct Schema;
 
 impl Schema {
-    /// Initialize all database tables
+    /// Initialize all database collections
     pub async fn init(db: &Database) -> Result<(), DbError> {
         info!("Initializing AxonML database schema...");
 
-        // Create users table
-        Self::create_users_table(db).await?;
-
-        // Create training runs table
-        Self::create_runs_table(db).await?;
-
-        // Create training metrics table
-        Self::create_metrics_table(db).await?;
-
-        // Create models table
-        Self::create_models_table(db).await?;
-
-        // Create model versions table
-        Self::create_model_versions_table(db).await?;
-
-        // Create endpoints table
-        Self::create_endpoints_table(db).await?;
-
-        // Create inference metrics table
-        Self::create_inference_metrics_table(db).await?;
+        // Create document store collections
+        Self::create_users_collection(db).await?;
+        Self::create_runs_collection(db).await?;
+        Self::create_models_collection(db).await?;
+        Self::create_model_versions_collection(db).await?;
+        Self::create_endpoints_collection(db).await?;
 
         info!("Database schema initialized successfully");
         Ok(())
     }
 
-    /// Create users table (document store)
-    async fn create_users_table(db: &Database) -> Result<(), DbError> {
-        db.execute(r#"
-            CREATE TABLE IF NOT EXISTS axonml_users (
-                id TEXT PRIMARY KEY,
-                data JSONB NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        "#).await?;
-
-        // Create index on email for faster lookups
-        db.execute(r#"
-            CREATE INDEX IF NOT EXISTS idx_users_email
-            ON axonml_users ((data->>'email'))
-        "#).await.ok(); // Ignore if already exists or not supported
-
-        info!("Created axonml_users table");
+    /// Create users collection
+    async fn create_users_collection(db: &Database) -> Result<(), DbError> {
+        db.create_collection(USERS_COLLECTION).await?;
+        info!("Created {} collection", USERS_COLLECTION);
         Ok(())
     }
 
-    /// Create training runs table (document store)
-    async fn create_runs_table(db: &Database) -> Result<(), DbError> {
-        db.execute(r#"
-            CREATE TABLE IF NOT EXISTS axonml_runs (
-                id TEXT PRIMARY KEY,
-                data JSONB NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        "#).await?;
-
-        // Index on user_id for filtering
-        db.execute(r#"
-            CREATE INDEX IF NOT EXISTS idx_runs_user
-            ON axonml_runs ((data->>'user_id'))
-        "#).await.ok();
-
-        // Index on status for filtering
-        db.execute(r#"
-            CREATE INDEX IF NOT EXISTS idx_runs_status
-            ON axonml_runs ((data->>'status'))
-        "#).await.ok();
-
-        info!("Created axonml_runs table");
+    /// Create training runs collection
+    async fn create_runs_collection(db: &Database) -> Result<(), DbError> {
+        db.create_collection(RUNS_COLLECTION).await?;
+        info!("Created {} collection", RUNS_COLLECTION);
         Ok(())
     }
 
-    /// Create training metrics table (time series)
-    async fn create_metrics_table(db: &Database) -> Result<(), DbError> {
-        db.execute(r#"
-            CREATE TABLE IF NOT EXISTS axonml_metrics (
-                run_id TEXT NOT NULL,
-                epoch INT NOT NULL,
-                step INT NOT NULL,
-                loss FLOAT,
-                accuracy FLOAT,
-                lr FLOAT,
-                gpu_util FLOAT,
-                memory_mb FLOAT,
-                custom_metrics JSONB,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (run_id, timestamp)
-            )
-        "#).await?;
-
-        // Index for faster run queries
-        db.execute(r#"
-            CREATE INDEX IF NOT EXISTS idx_metrics_run
-            ON axonml_metrics (run_id, timestamp)
-        "#).await.ok();
-
-        info!("Created axonml_metrics table");
+    /// Create models collection
+    async fn create_models_collection(db: &Database) -> Result<(), DbError> {
+        db.create_collection(MODELS_COLLECTION).await?;
+        info!("Created {} collection", MODELS_COLLECTION);
         Ok(())
     }
 
-    /// Create models table (document store)
-    async fn create_models_table(db: &Database) -> Result<(), DbError> {
-        db.execute(r#"
-            CREATE TABLE IF NOT EXISTS axonml_models (
-                id TEXT PRIMARY KEY,
-                data JSONB NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        "#).await?;
-
-        // Index on user_id
-        db.execute(r#"
-            CREATE INDEX IF NOT EXISTS idx_models_user
-            ON axonml_models ((data->>'user_id'))
-        "#).await.ok();
-
-        info!("Created axonml_models table");
+    /// Create model versions collection
+    async fn create_model_versions_collection(db: &Database) -> Result<(), DbError> {
+        db.create_collection(VERSIONS_COLLECTION).await?;
+        info!("Created {} collection", VERSIONS_COLLECTION);
         Ok(())
     }
 
-    /// Create model versions table (document store)
-    async fn create_model_versions_table(db: &Database) -> Result<(), DbError> {
-        db.execute(r#"
-            CREATE TABLE IF NOT EXISTS axonml_model_versions (
-                id TEXT PRIMARY KEY,
-                model_id TEXT NOT NULL,
-                data JSONB NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        "#).await?;
-
-        // Index on model_id for faster version lookups
-        db.execute(r#"
-            CREATE INDEX IF NOT EXISTS idx_versions_model
-            ON axonml_model_versions (model_id)
-        "#).await.ok();
-
-        info!("Created axonml_model_versions table");
-        Ok(())
-    }
-
-    /// Create inference endpoints table (document store)
-    async fn create_endpoints_table(db: &Database) -> Result<(), DbError> {
-        db.execute(r#"
-            CREATE TABLE IF NOT EXISTS axonml_endpoints (
-                id TEXT PRIMARY KEY,
-                data JSONB NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        "#).await?;
-
-        // Index on status
-        db.execute(r#"
-            CREATE INDEX IF NOT EXISTS idx_endpoints_status
-            ON axonml_endpoints ((data->>'status'))
-        "#).await.ok();
-
-        info!("Created axonml_endpoints table");
-        Ok(())
-    }
-
-    /// Create inference metrics table (time series)
-    async fn create_inference_metrics_table(db: &Database) -> Result<(), DbError> {
-        db.execute(r#"
-            CREATE TABLE IF NOT EXISTS axonml_inference_metrics (
-                endpoint_id TEXT NOT NULL,
-                requests_total INT DEFAULT 0,
-                requests_success INT DEFAULT 0,
-                requests_error INT DEFAULT 0,
-                latency_p50 FLOAT,
-                latency_p95 FLOAT,
-                latency_p99 FLOAT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (endpoint_id, timestamp)
-            )
-        "#).await?;
-
-        // Index for faster endpoint queries
-        db.execute(r#"
-            CREATE INDEX IF NOT EXISTS idx_inf_metrics_endpoint
-            ON axonml_inference_metrics (endpoint_id, timestamp)
-        "#).await.ok();
-
-        info!("Created axonml_inference_metrics table");
+    /// Create inference endpoints collection
+    async fn create_endpoints_collection(db: &Database) -> Result<(), DbError> {
+        db.create_collection(ENDPOINTS_COLLECTION).await?;
+        info!("Created {} collection", ENDPOINTS_COLLECTION);
         Ok(())
     }
 
     /// Create default admin user if not exists
     pub async fn create_default_admin(db: &Database, password_hash: &str) -> Result<(), DbError> {
-        let admin_exists = db.query(
-            "SELECT id FROM axonml_users WHERE id = 'admin'"
-        ).await?;
+        // Check if admin exists
+        let admin = db.doc_get(USERS_COLLECTION, "admin").await?;
 
-        if admin_exists.rows.is_empty() {
+        if admin.is_none() {
             let admin_data = serde_json::json!({
                 "id": "admin",
                 "email": "admin@axonml.local",
@@ -216,17 +82,14 @@ impl Schema {
                 "totp_secret": null,
                 "webauthn_credentials": [],
                 "recovery_codes": [],
+                "email_pending": false,
+                "email_verified": true,
+                "verification_token": null,
                 "created_at": chrono::Utc::now().to_rfc3339(),
                 "updated_at": chrono::Utc::now().to_rfc3339()
             });
 
-            db.execute_with_params(
-                "INSERT INTO axonml_users (id, data) VALUES ($1, $2)",
-                vec![
-                    serde_json::json!("admin"),
-                    admin_data,
-                ],
-            ).await?;
+            db.doc_insert(USERS_COLLECTION, Some("admin"), admin_data).await?;
 
             info!("Created default admin user");
         }
@@ -240,16 +103,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_schema_sql_validity() {
-        // Just verify the SQL strings are valid syntax (basic check)
-        let create_table = r#"
-            CREATE TABLE IF NOT EXISTS axonml_users (
-                id TEXT PRIMARY KEY,
-                data JSONB NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        "#;
-        assert!(create_table.contains("CREATE TABLE"));
-        assert!(create_table.contains("axonml_users"));
+    fn test_collection_names() {
+        assert_eq!(USERS_COLLECTION, "axonml_users");
+        assert_eq!(RUNS_COLLECTION, "axonml_runs");
+        assert_eq!(MODELS_COLLECTION, "axonml_models");
+        assert_eq!(VERSIONS_COLLECTION, "axonml_model_versions");
+        assert_eq!(ENDPOINTS_COLLECTION, "axonml_endpoints");
     }
 }
