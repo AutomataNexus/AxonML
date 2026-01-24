@@ -29,10 +29,10 @@ chrono = "0.4"
 dirs = "5.0"
 
 # Axonml crates
-axonml-core = { path = "../axonml-core" }
-axonml-tensor = { path = "../axonml-tensor" }
-axonml-nn = { path = "../axonml-nn" }
-axonml-serialize = { path = "../axonml-serialize" }
+axonml-core.workspace = true
+axonml-tensor.workspace = true
+axonml-nn.workspace = true
+axonml-serialize.workspace = true
 
 [dev-dependencies]
 tempfile = "3.0"

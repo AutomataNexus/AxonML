@@ -10,9 +10,9 @@ keywords = ["machine-learning", "serialization", "deep-learning"]
 categories = ["science", "data-structures"]
 
 [dependencies]
-axonml-core = { path = "../axonml-core" }
-axonml-tensor = { path = "../axonml-tensor" }
-axonml-nn = { path = "../axonml-nn" }
+axonml-core.workspace = true
+axonml-tensor.workspace = true
+axonml-nn.workspace = true
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
