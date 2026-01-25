@@ -241,7 +241,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "axonml"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-audio",
  "axonml-autograd",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-audio"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-core",
  "axonml-data",
@@ -271,7 +271,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-autograd"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-cli"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-core"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "approx",
  "ash",
@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-dashboard"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "base64 0.21.7",
  "chrono",
@@ -373,7 +373,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-data"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-distributed"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-fusion"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "approx",
  "axonml-core",
@@ -404,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-jit"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-llm"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "approx",
  "axonml-autograd",
@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-nn"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-onnx"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-optim"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-profile"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "approx",
  "axonml-core",
@@ -485,7 +485,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-quant"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "approx",
  "axonml-core",
@@ -498,7 +498,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-serialize"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-server"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "argon2",
@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-tensor"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "approx",
  "axonml-core",
@@ -575,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-text"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-tui"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -605,7 +605,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-vision"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -885,9 +885,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.53"
+version = "1.2.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "755d2fce177175ffca841e9a06afdb2c4ab0f593d53b4dee48147dfaade85932"
+checksum = "6354c81bbfd62d9cfa9cb3c773c2b7b2a3a482d569de977fd0e961f6e7c00583"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -2335,7 +2335,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -2564,6 +2564,15 @@ name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
 dependencies = [
  "either",
 ]
@@ -2844,9 +2853,9 @@ dependencies = [
 
 [[package]]
 name = "libm"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
@@ -3183,9 +3192,9 @@ dependencies = [
 
 [[package]]
 name = "num-conv"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51d515d32fb182ee37cda2ccdcb92950d6a3c2893aa280e540671c2cd0f3b1d9"
+checksum = "cf97ec579c3c42f953ef76dbf8d55ac91fb219dde70e49aa4a6b7d74e9919050"
 
 [[package]]
 name = "num-integer"
@@ -3641,9 +3650,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.105"
+version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "535d180e0ecab6268a3e718bb9fd44db66bbbc256257165fc699dadf70d16fe7"
+checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
 ]
@@ -3684,7 +3693,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "once_cell",
@@ -3704,7 +3713,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn",
@@ -3756,9 +3765,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.43"
+version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc74d9a594b72ae6656596548f56f667211f8a97b3d4c3d467150794690dc40a"
+checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
 dependencies = [
  "proc-macro2",
 ]
@@ -4558,9 +4567,9 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "socket2"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17129e116933cf371d018bb80ae557e889637989d8638274fb25622827b03881"
+checksum = "86f4aa3ad99f2088c990dfa82d367e19cb29268ed67c574d10d0a4bfe71f07e0"
 dependencies = [
  "libc",
  "windows-sys 0.60.2",
@@ -4814,9 +4823,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.45"
+version = "0.3.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9e442fc33d7fdb45aa9bfeb312c095964abdf596f7567261062b2a7107aaabd"
+checksum = "9da98b7d9b7dad93488a84b8248efc35352b0b2657397d4167e7ad67e5d535e5"
 dependencies = [
  "deranged",
  "itoa",
@@ -4829,15 +4838,15 @@ dependencies = [
 
 [[package]]
 name = "time-core"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b36ee98fd31ec7426d599183e8fe26932a8dc1fb76ddb6214d05493377d34ca"
+checksum = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
 
 [[package]]
 name = "time-macros"
-version = "0.2.25"
+version = "0.2.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71e552d1249bf61ac2a52db88179fd0673def1e1ad8243a00d9ec9ed71fee3dd"
+checksum = "78cc610bac2dcee56805c99642447d4c5dbde4d01f752ffea0199aee1f601dc4"
 dependencies = [
  "num-conv",
  "time-core",
@@ -5331,9 +5340,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.19.0"
+version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2e054861b4bd027cd373e18e8d8d8e6548085000e41290d95ce0c373a654b4a"
+checksum = "ee48d38b119b0cd71fe4141b30f5ba9c7c5d9f4e7a3a8b4a674e4b6ef789976f"
 dependencies = [
  "getrandom 0.3.4",
  "js-sys",
@@ -5728,6 +5737,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-core"
+version = "0.62.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
+dependencies = [
+ "windows-implement 0.60.2",
+ "windows-interface 0.59.3",
+ "windows-link",
+ "windows-result 0.4.1",
+ "windows-strings 0.5.1",
+]
+
+[[package]]
 name = "windows-implement"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5750,6 +5772,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-implement"
+version = "0.60.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "windows-interface"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5765,6 +5798,17 @@ name = "windows-interface"
 version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053c4c462dc91d3b1504c6fe5a726dd15e216ba718e84a0e46a88fbe5ded3515"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "windows-interface"
+version = "0.59.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6220,6 +6264,6 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.15"
+version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
+checksum = "02aae0f83f69aafc94776e879363e9771d7ecbffe2c7fbb6c14c5e00dfe88439"
