@@ -835,3 +835,115 @@ pub mod builtin_datasets {
         ).await
     }
 }
+
+// ============================================================================
+// Training Notebooks API
+// ============================================================================
+
+pub mod notebooks {
+    use super::*;
+
+    pub async fn list_notebooks() -> ApiResult<Vec<TrainingNotebook>> {
+        fetch_json(build_request("GET", "/notebooks")).await
+    }
+
+    pub async fn get_notebook(id: &str) -> ApiResult<TrainingNotebook> {
+        fetch_json(build_request("GET", &format!("/notebooks/{}", id))).await
+    }
+
+    pub async fn create_notebook(request: CreateNotebookRequest) -> ApiResult<TrainingNotebook> {
+        fetch_json_with_body(build_request("POST", "/notebooks"), &request).await
+    }
+
+    pub async fn update_notebook(id: &str, request: UpdateNotebookRequest) -> ApiResult<TrainingNotebook> {
+        fetch_json_with_body(build_request("PUT", &format!("/notebooks/{}", id)), &request).await
+    }
+
+    pub async fn delete_notebook(id: &str) -> ApiResult<()> {
+        fetch_empty(build_request("DELETE", &format!("/notebooks/{}", id))).await
+    }
+
+    pub async fn add_cell(notebook_id: &str, cell_type: &str, source: &str, position: Option<usize>) -> ApiResult<NotebookCell> {
+        fetch_json_with_body(
+            build_request("POST", &format!("/notebooks/{}/cells", notebook_id)),
+            &serde_json::json!({
+                "cell_type": cell_type,
+                "source": source,
+                "position": position
+            }),
+        ).await
+    }
+
+    pub async fn update_cell(notebook_id: &str, cell_id: &str, source: Option<&str>, cell_type: Option<&str>) -> ApiResult<NotebookCell> {
+        fetch_json_with_body(
+            build_request("PUT", &format!("/notebooks/{}/cells/{}", notebook_id, cell_id)),
+            &serde_json::json!({
+                "source": source,
+                "cell_type": cell_type
+            }),
+        ).await
+    }
+
+    pub async fn delete_cell(notebook_id: &str, cell_id: &str) -> ApiResult<()> {
+        fetch_empty(build_request("DELETE", &format!("/notebooks/{}/cells/{}", notebook_id, cell_id))).await
+    }
+
+    pub async fn execute_cell(notebook_id: &str, cell_id: &str) -> ApiResult<ExecuteCellResponse> {
+        fetch_json_with_body(
+            build_request("POST", &format!("/notebooks/{}/cells/{}/execute", notebook_id, cell_id)),
+            &serde_json::json!({}),
+        ).await
+    }
+
+    pub async fn ai_assist(notebook_id: &str, request: AiAssistRequest) -> ApiResult<AiAssistResponse> {
+        fetch_json_with_body(
+            build_request("POST", &format!("/notebooks/{}/ai-assist", notebook_id)),
+            &request,
+        ).await
+    }
+
+    pub async fn list_checkpoints(notebook_id: &str) -> ApiResult<Vec<NotebookCheckpoint>> {
+        fetch_json(build_request("GET", &format!("/notebooks/{}/checkpoints", notebook_id))).await
+    }
+
+    pub async fn save_checkpoint(notebook_id: &str, request: SaveCheckpointRequest) -> ApiResult<NotebookCheckpoint> {
+        fetch_json_with_body(
+            build_request("POST", &format!("/notebooks/{}/checkpoints", notebook_id)),
+            &request,
+        ).await
+    }
+
+    pub async fn get_best_checkpoint(notebook_id: &str, metric: &str, minimize: bool) -> ApiResult<Option<NotebookCheckpoint>> {
+        let path = format!("/notebooks/{}/checkpoints/best?metric={}&minimize={}", notebook_id, metric, minimize);
+        fetch_json(build_request("GET", &path)).await
+    }
+
+    pub async fn upload_model_version(notebook_id: &str, request: UploadModelVersionRequest) -> ApiResult<serde_json::Value> {
+        fetch_json_with_body(
+            build_request("POST", &format!("/notebooks/{}/upload-version", notebook_id)),
+            &request,
+        ).await
+    }
+
+    pub async fn import_notebook(content: &str, format: &str) -> ApiResult<TrainingNotebook> {
+        fetch_json_with_body(
+            build_request("POST", "/notebooks/import"),
+            &ImportNotebookRequest {
+                content: content.to_string(),
+                format: format.to_string(),
+            },
+        ).await
+    }
+
+    pub async fn export_notebook(id: &str, format: &str) -> ApiResult<ExportNotebookResponse> {
+        fetch_json(build_request("GET", &format!("/notebooks/{}/export?format={}", id, format))).await
+    }
+
+    pub async fn start_notebook(id: &str) -> ApiResult<TrainingNotebook> {
+        fetch_json(build_request("POST", &format!("/notebooks/{}/start", id))).await
+    }
+
+    pub async fn stop_notebook(id: &str) -> ApiResult<TrainingNotebook> {
+        fetch_json(build_request("POST", &format!("/notebooks/{}/stop", id))).await
+    }
+}

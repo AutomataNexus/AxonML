@@ -28,7 +28,7 @@ use std::ffi::CStr;
 use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(feature = "vulkan")]
-use ash::{ext::debug_utils, vk, Device, Entry, Instance};
+use ash::{vk, Device, Entry, Instance};
 
 #[cfg(feature = "vulkan")]
 use gpu_allocator::{
@@ -42,11 +42,11 @@ use gpu_allocator::{
 
 #[cfg(feature = "vulkan")]
 struct VulkanGlobalState {
-    entry: Entry,
     instance: Instance,
     physical_devices: Vec<vk::PhysicalDevice>,
     device_properties: Vec<vk::PhysicalDeviceProperties>,
     device_memory_properties: Vec<vk::PhysicalDeviceMemoryProperties>,
+    device_features: Vec<vk::PhysicalDeviceFeatures>,
 }
 
 #[cfg(feature = "vulkan")]
@@ -66,7 +66,7 @@ fn get_vulkan_state() -> Option<&'static VulkanGlobalState> {
 
 #[cfg(feature = "vulkan")]
 unsafe fn init_vulkan() -> Result<VulkanGlobalState, vk::Result> {
-    let entry = Entry::linked();
+    let entry = Entry::load().map_err(|_| vk::Result::ERROR_INITIALIZATION_FAILED)?;
 
     let app_info = vk::ApplicationInfo::default()
         .application_name(c"Axonml")
@@ -91,12 +91,20 @@ unsafe fn init_vulkan() -> Result<VulkanGlobalState, vk::Result> {
         .map(|&pd| instance.get_physical_device_memory_properties(pd))
         .collect();
 
+    let device_features: Vec<_> = physical_devices
+        .iter()
+        .map(|&pd| instance.get_physical_device_features(pd))
+        .collect();
+
+    // entry is only needed for instance creation, not stored
+    let _ = entry;
+
     Ok(VulkanGlobalState {
-        entry,
         instance,
         physical_devices,
         device_properties,
         device_memory_properties,
+        device_features,
     })
 }
 
@@ -146,10 +154,6 @@ impl VulkanBufferTracker {
 
     fn get(&self, id: u64) -> Option<&BufferInfo> {
         self.buffers.get(&id)
-    }
-
-    fn get_mut(&mut self, id: u64) -> Option<&mut BufferInfo> {
-        self.buffers.get_mut(&id)
     }
 }
 
@@ -320,6 +324,18 @@ impl VulkanBackend {
         self.device_index
     }
 
+    /// Returns the queue family index used for compute operations.
+    #[cfg(feature = "vulkan")]
+    pub fn queue_family_index(&self) -> u32 {
+        self.queue_family_index
+    }
+
+    /// Returns the physical device handle.
+    #[cfg(feature = "vulkan")]
+    pub fn physical_device(&self) -> vk::PhysicalDevice {
+        self.physical_device
+    }
+
     /// Creates a GPU buffer with the specified size.
     #[cfg(feature = "vulkan")]
     pub fn create_buffer(&self, size: u64, usage: vk::BufferUsageFlags) -> Option<u64> {
@@ -375,7 +391,7 @@ impl VulkanBackend {
         if let Some(info) = tracker.get(buffer_id) {
             if let Some(mapped) = info.allocation.mapped_ptr() {
                 unsafe {
-                    let dst = (mapped.as_ptr() as *mut u8).add(offset as usize);
+                    let dst = mapped.as_ptr().cast::<u8>().add(offset as usize);
                     std::ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len());
                 }
             }
@@ -538,7 +554,7 @@ impl VulkanBackend {
             let mut buffer_infos = Vec::new();
             let mut writes = Vec::new();
 
-            for (i, buffer_id) in buffers.iter().enumerate() {
+            for buffer_id in buffers.iter() {
                 if let Some(info) = tracker.get(*buffer_id) {
                     buffer_infos.push(vk::DescriptorBufferInfo {
                         buffer: info.buffer,
@@ -588,7 +604,7 @@ impl Drop for VulkanBackend {
 
             // Clean up buffers
             let mut tracker = self.buffer_tracker.lock().unwrap();
-            let buffer_ids: Vec<u64> = tracker.buffers.keys().cloned().collect();
+            let buffer_ids: Vec<u64> = tracker.buffers.keys().copied().collect();
             for id in buffer_ids {
                 if let Some(info) = tracker.remove(id) {
                     self.device.destroy_buffer(info.buffer, None);
@@ -633,8 +649,23 @@ impl Backend for VulkanBackend {
 
     fn capabilities(&self) -> DeviceCapabilities {
         let state = get_vulkan_state().unwrap();
-        let props = &state.device_properties[self.device_index];
-        let mem_props = &state.device_memory_properties[self.device_index];
+
+        // Use stored physical_device to query properties directly
+        let props = unsafe {
+            state
+                .instance
+                .get_physical_device_properties(self.physical_device)
+        };
+        let mem_props = unsafe {
+            state
+                .instance
+                .get_physical_device_memory_properties(self.physical_device)
+        };
+        let features = unsafe {
+            state
+                .instance
+                .get_physical_device_features(self.physical_device)
+        };
 
         let total_memory: usize = (0..mem_props.memory_heap_count as usize)
             .map(|i| mem_props.memory_heaps[i].size as usize)
@@ -651,7 +682,7 @@ impl Backend for VulkanBackend {
             total_memory,
             available_memory: 0, // Vulkan doesn't provide this directly
             supports_f16: true,  // Most modern GPUs support f16
-            supports_f64: props.limits.shader_float64 != 0,
+            supports_f64: features.shader_float64 != 0,
             max_threads_per_block: props.limits.max_compute_work_group_invocations as usize,
             compute_capability: None,
         }
@@ -747,9 +778,7 @@ impl Backend for VulkanBackend {
 /// Returns whether Vulkan is available on this system.
 #[cfg(feature = "vulkan")]
 pub fn is_available() -> bool {
-    get_vulkan_state()
-        .map(|s| !s.physical_devices.is_empty())
-        .unwrap_or(false)
+    get_vulkan_state().is_some_and(|s| !s.physical_devices.is_empty())
 }
 
 #[cfg(not(feature = "vulkan"))]
@@ -760,9 +789,7 @@ pub fn is_available() -> bool {
 /// Returns the number of available Vulkan devices.
 #[cfg(feature = "vulkan")]
 pub fn device_count() -> usize {
-    get_vulkan_state()
-        .map(|s| s.physical_devices.len())
-        .unwrap_or(0)
+    get_vulkan_state().map_or(0, |s| s.physical_devices.len())
 }
 
 #[cfg(not(feature = "vulkan"))]
@@ -807,6 +834,7 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
 
     let props = &state.device_properties[index];
     let mem_props = &state.device_memory_properties[index];
+    let features = &state.device_features[index];
 
     let total_memory: usize = (0..mem_props.memory_heap_count as usize)
         .map(|i| mem_props.memory_heaps[i].size as usize)
@@ -823,7 +851,7 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
         total_memory,
         available_memory: 0,
         supports_f16: true,
-        supports_f64: props.limits.shader_float64 != 0,
+        supports_f64: features.shader_float64 != 0,
         max_threads_per_block: props.limits.max_compute_work_group_invocations as usize,
         compute_capability: None,
     }
@@ -840,6 +868,20 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
         max_threads_per_block: 0,
         compute_capability: None,
     }
+}
+
+/// Waits for a Vulkan queue to become idle.
+/// The handle parameter is not used directly; synchronization is handled per-backend.
+#[cfg(feature = "vulkan")]
+pub fn queue_wait_idle(_handle: usize) {
+    // Queue synchronization is handled internally by the VulkanBackend
+    // This function exists for API compatibility with the GpuStream abstraction
+}
+
+/// Waits for a Vulkan queue to become idle (no-op when Vulkan is not available).
+#[cfg(not(feature = "vulkan"))]
+pub fn queue_wait_idle(_handle: usize) {
+    // No-op when Vulkan is not available
 }
 
 // =============================================================================

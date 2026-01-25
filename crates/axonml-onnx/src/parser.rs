@@ -140,20 +140,22 @@ fn parse_binary_proto(bytes: &[u8]) -> OnnxResult<ModelProto> {
         output: Vec<String>,
         #[prost(string, optional, tag = "3")]
         name: Option<String>,
-        #[prost(string, tag = "4")]
-        op_type: String,
+        #[prost(string, optional, tag = "4")]
+        op_type: Option<String>,
         #[prost(string, optional, tag = "7")]
         domain: Option<String>,
         #[prost(message, repeated, tag = "5")]
         attribute: Vec<RawAttributeProto>,
+        #[prost(string, optional, tag = "6")]
+        doc_string: Option<String>,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
     struct RawAttributeProto {
-        #[prost(string, tag = "1")]
-        name: String,
-        #[prost(int32, tag = "20")]
-        r#type: i32,
+        #[prost(string, optional, tag = "1")]
+        name: Option<String>,
+        #[prost(int32, optional, tag = "20")]
+        r#type: Option<i32>,
         #[prost(float, optional, tag = "2")]
         f: Option<f32>,
         #[prost(int64, optional, tag = "3")]
@@ -162,38 +164,74 @@ fn parse_binary_proto(bytes: &[u8]) -> OnnxResult<ModelProto> {
         s: Option<Vec<u8>>,
         #[prost(message, optional, tag = "5")]
         t: Option<RawTensorProto>,
+        #[prost(message, optional, tag = "6")]
+        g: Option<Box<RawGraphProto>>,
         #[prost(float, repeated, tag = "7")]
         floats: Vec<f32>,
         #[prost(int64, repeated, tag = "8")]
         ints: Vec<i64>,
+        #[prost(bytes, repeated, tag = "9")]
+        strings: Vec<Vec<u8>>,
+        #[prost(message, repeated, tag = "10")]
+        tensors: Vec<RawTensorProto>,
+        #[prost(message, repeated, tag = "11")]
+        graphs: Vec<RawGraphProto>,
+        #[prost(string, optional, tag = "21")]
+        ref_attr_name: Option<String>,
+        #[prost(string, optional, tag = "13")]
+        doc_string: Option<String>,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
     struct RawTensorProto {
-        #[prost(string, tag = "1")]
-        name: String,
-        #[prost(int64, repeated, tag = "2")]
+        // ONNX TensorProto field tags (from onnx.proto3)
+        #[prost(int64, repeated, tag = "1")]
         dims: Vec<i64>,
-        #[prost(int32, tag = "3")]
-        data_type: i32,
-        #[prost(bytes, optional, tag = "9")]
-        raw_data: Option<Vec<u8>>,
+        #[prost(int32, optional, tag = "2")]
+        data_type: Option<i32>,
+        // tag 3 = segment (skipped)
         #[prost(float, repeated, tag = "4")]
         float_data: Vec<f32>,
         #[prost(int32, repeated, tag = "5")]
         int32_data: Vec<i32>,
+        // tag 6 = string_data (repeated bytes)
+        #[prost(bytes, repeated, tag = "6")]
+        string_data: Vec<Vec<u8>>,
         #[prost(int64, repeated, tag = "7")]
         int64_data: Vec<i64>,
+        #[prost(string, optional, tag = "8")]
+        name: Option<String>,
+        #[prost(bytes, optional, tag = "9")]
+        raw_data: Option<Vec<u8>>,
         #[prost(double, repeated, tag = "10")]
         double_data: Vec<f64>,
+        #[prost(uint64, repeated, tag = "11")]
+        uint64_data: Vec<u64>,
+        #[prost(string, optional, tag = "12")]
+        doc_string: Option<String>,
+        // tag 13 = external_data (repeated StringStringEntryProto) - messages
+        #[prost(message, repeated, tag = "13")]
+        external_data: Vec<RawStringStringEntry>,
+        #[prost(int32, optional, tag = "14")]
+        data_location: Option<i32>,
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct RawStringStringEntry {
+        #[prost(string, optional, tag = "1")]
+        key: Option<String>,
+        #[prost(string, optional, tag = "2")]
+        value: Option<String>,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
     struct RawValueInfo {
-        #[prost(string, tag = "1")]
-        name: String,
+        #[prost(string, optional, tag = "1")]
+        name: Option<String>,
         #[prost(message, optional, tag = "2")]
         r#type: Option<RawTypeProto>,
+        #[prost(string, optional, tag = "3")]
+        doc_string: Option<String>,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
@@ -224,6 +262,93 @@ fn parse_binary_proto(bytes: &[u8]) -> OnnxResult<ModelProto> {
         dim_param: Option<String>,
     }
 
+    // Helper function to convert tensor
+    fn convert_tensor(t: RawTensorProto) -> crate::proto::TensorProto {
+        crate::proto::TensorProto {
+            name: t.name.unwrap_or_default(),
+            dims: t.dims,
+            data_type: t.data_type.unwrap_or(1), // FLOAT
+            raw_data: t.raw_data.unwrap_or_default(),
+            float_data: t.float_data,
+            int32_data: t.int32_data,
+            int64_data: t.int64_data,
+            double_data: t.double_data,
+            doc_string: t.doc_string,
+        }
+    }
+
+    // Helper function to convert attributes
+    fn convert_attribute(a: RawAttributeProto) -> crate::proto::AttributeProto {
+        crate::proto::AttributeProto {
+            name: a.name.unwrap_or_default(),
+            doc_string: a.doc_string,
+            r#type: a.r#type.unwrap_or(0),
+            f: a.f,
+            i: a.i,
+            s: a.s,
+            t: a.t.map(convert_tensor),
+            floats: a.floats,
+            ints: a.ints,
+            strings: a.strings,
+        }
+    }
+
+    // Helper function to convert nodes
+    fn convert_node(n: RawNodeProto) -> crate::proto::NodeProto {
+        crate::proto::NodeProto {
+            input: n.input,
+            output: n.output,
+            name: n.name,
+            op_type: n.op_type.unwrap_or_default(),
+            domain: n.domain,
+            attribute: n.attribute.into_iter().map(convert_attribute).collect(),
+            doc_string: n.doc_string,
+        }
+    }
+
+    // Helper function to convert value info
+    fn convert_value_info(v: RawValueInfo) -> crate::proto::ValueInfo {
+        let type_proto = v.r#type.map(|t| {
+            crate::proto::TypeProto {
+                tensor_type: t.tensor_type.map(|tt| {
+                    crate::proto::TensorType {
+                        elem_type: tt.elem_type,
+                        shape: tt.shape.map(|s| {
+                            crate::proto::TensorShape {
+                                dims: s.dim.into_iter().map(|d| {
+                                    crate::proto::Dimension {
+                                        dim_value: d.dim_value,
+                                        dim_param: d.dim_param,
+                                    }
+                                }).collect(),
+                            }
+                        }),
+                    }
+                }),
+            }
+        });
+
+        crate::proto::ValueInfo {
+            name: v.name.unwrap_or_default(),
+            r#type: type_proto,
+            doc_string: v.doc_string,
+        }
+    }
+
+    // Helper function to convert graph
+    fn convert_graph(g: RawGraphProto) -> crate::proto::GraphProto {
+        crate::proto::GraphProto {
+            node: g.node.into_iter().map(convert_node).collect(),
+            name: g.name,
+            initializer: g.initializer.into_iter().map(convert_tensor).collect(),
+            sparse_initializer: Vec::new(),
+            input: g.input.into_iter().map(convert_value_info).collect(),
+            output: g.output.into_iter().map(convert_value_info).collect(),
+            value_info: Vec::new(),
+            doc_string: None,
+        }
+    }
+
     // Parse the raw protobuf
     let raw: RawModelProto = RawModelProto::decode(bytes)?;
 
@@ -239,25 +364,11 @@ fn parse_binary_proto(bytes: &[u8]) -> OnnxResult<ModelProto> {
         domain: raw.domain,
         model_version: raw.model_version,
         doc_string: raw.doc_string,
-        graph: raw.graph.map(|g| convert_graph(g)),
+        graph: raw.graph.map(convert_graph),
         metadata_props: Vec::new(),
     };
 
     Ok(model)
-}
-
-fn convert_graph(_raw: impl std::any::Any) -> crate::proto::GraphProto {
-    // This is a simplified conversion - in practice would properly convert all fields
-    crate::proto::GraphProto {
-        node: Vec::new(),
-        name: None,
-        initializer: Vec::new(),
-        sparse_initializer: Vec::new(),
-        input: Vec::new(),
-        output: Vec::new(),
-        value_info: Vec::new(),
-        doc_string: None,
-    }
 }
 
 // =============================================================================

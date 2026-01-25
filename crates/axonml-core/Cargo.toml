@@ -39,6 +39,7 @@ parking_lot.workspace = true
 smallvec.workspace = true
 sysinfo.workspace = true
 matrixmultiply.workspace = true
+rayon.workspace = true
 
 # GPU backends (optional)
 cudarc = { workspace = true, optional = true }
