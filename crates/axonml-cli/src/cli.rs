@@ -131,6 +131,18 @@ pub enum Commands {
 
     /// View logs from AxonML services
     Logs(LogsArgs),
+
+    /// Login to AxonML server (sync with webapp)
+    #[cfg(feature = "server-sync")]
+    Login(LoginArgs),
+
+    /// Logout from AxonML server
+    #[cfg(feature = "server-sync")]
+    Logout,
+
+    /// Check sync status with server
+    #[cfg(feature = "server-sync")]
+    Sync(SyncArgs),
 }
 
 // =============================================================================
@@ -1642,4 +1654,38 @@ pub struct LogsArgs {
     /// Filter logs by level (error, warn, info, debug, trace)
     #[arg(long)]
     pub level: Option<String>,
+}
+
+// =============================================================================
+// Server Sync Commands
+// =============================================================================
+
+/// Arguments for the `login` command
+#[cfg(feature = "server-sync")]
+#[derive(Parser, Debug)]
+pub struct LoginArgs {
+    /// Username or email
+    #[arg(short, long)]
+    pub username: Option<String>,
+
+    /// Password (will prompt if not provided)
+    #[arg(short, long)]
+    pub password: Option<String>,
+
+    /// Server URL (defaults to http://localhost:3021)
+    #[arg(short, long)]
+    pub server: Option<String>,
+}
+
+/// Arguments for the `sync` command
+#[cfg(feature = "server-sync")]
+#[derive(Parser, Debug)]
+pub struct SyncArgs {
+    /// Check sync status only
+    #[arg(long)]
+    pub status: bool,
+
+    /// Force re-sync all data
+    #[arg(long)]
+    pub force: bool,
 }

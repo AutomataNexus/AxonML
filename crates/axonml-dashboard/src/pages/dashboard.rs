@@ -306,6 +306,7 @@ pub fn AppShell(children: Children) -> impl IntoView {
                 </main>
             </div>
             <crate::components::toast::ToastContainer />
+            <crate::components::terminal::Terminal />
         </div>
     }
 }

@@ -91,6 +91,8 @@ mod cli;
 mod commands;
 mod config;
 mod error;
+#[cfg(feature = "server-sync")]
+mod api_client;
 
 use cli::{Cli, Commands};
 use error::CliResult;
@@ -143,7 +145,20 @@ fn run() -> CliResult<()> {
         Commands::Stop(args) => commands::dashboard::execute_stop(args),
         Commands::Status(args) => commands::dashboard::execute_status(args),
         Commands::Logs(args) => commands::dashboard::execute_logs(args),
+        #[cfg(feature = "server-sync")]
+        Commands::Login(args) => execute_async(commands::sync::login(&args)),
+        #[cfg(feature = "server-sync")]
+        Commands::Logout => execute_async(commands::sync::logout()),
+        #[cfg(feature = "server-sync")]
+        Commands::Sync(args) => execute_async(commands::sync::sync(&args)),
     }
+}
+
+#[cfg(feature = "server-sync")]
+fn execute_async<F: std::future::Future<Output = CliResult<()>>>(future: F) -> CliResult<()> {
+    tokio::runtime::Runtime::new()
+        .map_err(|e| error::CliError::Other(e.to_string()))?
+        .block_on(future)
 }
 
 fn execute_kaggle(args: cli::KaggleArgs) -> CliResult<()> {

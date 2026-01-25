@@ -40,6 +40,8 @@ The CLI supports the full ML workflow from project initialization to model servi
 
 - **GPU Support** - Detect, benchmark, and manage GPU devices for accelerated training.
 
+- **Server Sync** - Sync CLI with the AxonML webapp - training runs, models, and datasets sync automatically between CLI and web interface.
+
 ---
 
 ## Modules
@@ -103,6 +105,9 @@ cargo build --release -p axonml-cli
 | `stop` | Stop running services |
 | `status` | Check service status |
 | `logs` | View service logs |
+| `login` | Login to AxonML server (sync with webapp) |
+| `logout` | Logout from AxonML server |
+| `sync` | Check/perform sync with server |
 
 ---
 
@@ -237,6 +242,23 @@ axonml kaggle search "image classification" --limit 20
 
 # Download Kaggle dataset
 axonml kaggle download username/dataset-name --output ./data
+```
+
+### Server Sync (CLI ↔ Webapp)
+
+```bash
+# Login to AxonML server
+axonml login
+axonml login --server http://myserver:3021
+
+# Check sync status
+axonml sync
+
+# Full sync (training runs, models, datasets)
+axonml sync --full
+
+# Logout and clear stored credentials
+axonml logout
 ```
 
 ### Dashboard & Server

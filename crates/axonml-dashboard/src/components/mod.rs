@@ -10,6 +10,7 @@ pub mod toast;
 pub mod spinner;
 pub mod forms;
 pub mod icons;
+pub mod terminal;
 
 pub use navbar::*;
 pub use sidebar::*;
@@ -21,3 +22,4 @@ pub use toast::*;
 pub use spinner::*;
 pub use forms::*;
 pub use icons::*;
+pub use terminal::*;
