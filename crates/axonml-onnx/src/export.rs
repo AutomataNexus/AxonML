@@ -420,7 +420,7 @@ pub fn export_feedforward(
     // Add layers
     let mut current_input = "input".to_string();
 
-    for (i, ((in_f, out_f), ((w_name, w_tensor), (b_name, b_tensor)))) in
+    for (i, ((_in_f, _out_f), ((w_name, w_tensor), (b_name, b_tensor)))) in
         layers.iter().zip(weights.iter().zip(biases.iter())).enumerate()
     {
         let output_name = if i == layers.len() - 1 {

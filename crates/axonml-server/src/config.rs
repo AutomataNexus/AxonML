@@ -24,6 +24,8 @@ pub struct Config {
     pub auth: AuthConfig,
     pub inference: InferenceConfig,
     pub dashboard: DashboardConfig,
+    #[serde(default)]
+    pub hub: HubConfig,
 }
 
 /// HTTP server configuration
@@ -83,6 +85,15 @@ pub struct DashboardConfig {
     pub port: u16,
 }
 
+/// Model Hub configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HubConfig {
+    #[serde(default = "default_hub_url")]
+    pub hub_url: String,
+    #[serde(default = "default_hub_cache_dir")]
+    pub cache_dir: String,
+}
+
 // Default value functions
 fn default_host() -> String { "0.0.0.0".to_string() }
 fn default_port() -> u16 { 3000 }
@@ -99,6 +110,8 @@ fn default_port_start() -> u16 { 8100 }
 fn default_port_end() -> u16 { 8199 }
 fn default_max_endpoints() -> u32 { 10 }
 fn default_dashboard_port() -> u16 { 8080 }
+fn default_hub_url() -> String { "https://hub.axonml.dev/v1".to_string() }
+fn default_hub_cache_dir() -> String { "~/.axonml/hub_cache".to_string() }
 
 impl Default for Config {
     fn default() -> Self {
@@ -108,6 +121,7 @@ impl Default for Config {
             auth: AuthConfig::default(),
             inference: InferenceConfig::default(),
             dashboard: DashboardConfig::default(),
+            hub: HubConfig::default(),
         }
     }
 }
@@ -159,6 +173,15 @@ impl Default for DashboardConfig {
     fn default() -> Self {
         Self {
             port: default_dashboard_port(),
+        }
+    }
+}
+
+impl Default for HubConfig {
+    fn default() -> Self {
+        Self {
+            hub_url: default_hub_url(),
+            cache_dir: default_hub_cache_dir(),
         }
     }
 }
@@ -215,12 +238,24 @@ impl Config {
         self.data_dir().join("logs")
     }
 
+    /// Get the hub cache directory
+    pub fn hub_cache_dir(&self) -> PathBuf {
+        let path = self.hub.cache_dir.replace("~",
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .to_str()
+                .unwrap_or(".")
+        );
+        PathBuf::from(path)
+    }
+
     /// Ensure all required directories exist
     pub fn ensure_directories(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(self.data_dir())?;
         std::fs::create_dir_all(self.models_dir())?;
         std::fs::create_dir_all(self.runs_dir())?;
         std::fs::create_dir_all(self.logs_dir())?;
+        std::fs::create_dir_all(self.hub_cache_dir())?;
         Ok(())
     }
 

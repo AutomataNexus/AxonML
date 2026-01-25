@@ -170,18 +170,17 @@ pub struct BertEmbedding {
 
 /// Simple layer norm implementation for embeddings.
 #[derive(Debug)]
-struct LayerNorm {
+pub struct LayerNorm {
     weight: Parameter,
     bias: Parameter,
     eps: f32,
-    dim: usize,
 }
 
 impl LayerNorm {
     fn new(dim: usize, eps: f32) -> Self {
         let weight = Parameter::new(ones::<f32>(&[dim]), true);
         let bias = Parameter::new(zeros::<f32>(&[dim]), true);
-        Self { weight, bias, eps, dim }
+        Self { weight, bias, eps }
     }
 
     fn forward(&self, x: &Variable) -> Variable {

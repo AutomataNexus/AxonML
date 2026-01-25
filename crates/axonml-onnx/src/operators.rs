@@ -1067,7 +1067,7 @@ impl OnnxOperator for ConvOp {
     fn name(&self) -> &str { "Conv" }
 }
 
-/// MaxPool operator
+/// MaxPool operator - 2D max pooling
 #[derive(Debug)]
 pub struct MaxPoolOp {
     kernel_shape: Vec<i64>,
@@ -1086,19 +1086,73 @@ impl MaxPoolOp {
 }
 
 impl OnnxOperator for MaxPoolOp {
-    fn execute(&self, _inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        Err(OnnxError::UnsupportedOperator("MaxPool (full impl needed)".to_string()))
+    fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
+        let x = inputs.first().and_then(|i| *i)
+            .ok_or_else(|| OnnxError::MissingAttribute("X".to_string()))?;
+
+        let shape = x.shape();
+        if shape.len() != 4 {
+            return Err(OnnxError::InvalidShape(format!(
+                "MaxPool requires 4D input [N,C,H,W], got {:?}", shape
+            )));
+        }
+
+        let (n, c, h, w) = (shape[0], shape[1], shape[2], shape[3]);
+        let kh = self.kernel_shape.get(0).copied().unwrap_or(2) as usize;
+        let kw = self.kernel_shape.get(1).copied().unwrap_or(2) as usize;
+        let sh = self.strides.get(0).copied().unwrap_or(1) as usize;
+        let sw = self.strides.get(1).copied().unwrap_or(1) as usize;
+        let pad_top = self.pads.get(0).copied().unwrap_or(0) as usize;
+        let pad_left = self.pads.get(1).copied().unwrap_or(0) as usize;
+        let pad_bottom = self.pads.get(2).copied().unwrap_or(0) as usize;
+        let pad_right = self.pads.get(3).copied().unwrap_or(0) as usize;
+
+        let out_h = (h + pad_top + pad_bottom - kh) / sh + 1;
+        let out_w = (w + pad_left + pad_right - kw) / sw + 1;
+
+        let x_data = x.to_vec();
+        let mut output = vec![f32::NEG_INFINITY; n * c * out_h * out_w];
+
+        for batch in 0..n {
+            for channel in 0..c {
+                for oh in 0..out_h {
+                    for ow in 0..out_w {
+                        let mut max_val = f32::NEG_INFINITY;
+
+                        for khi in 0..kh {
+                            for kwi in 0..kw {
+                                let ih = (oh * sh + khi) as isize - pad_top as isize;
+                                let iw = (ow * sw + kwi) as isize - pad_left as isize;
+
+                                if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
+                                    let idx = batch * c * h * w + channel * h * w + ih as usize * w + iw as usize;
+                                    max_val = max_val.max(x_data[idx]);
+                                }
+                            }
+                        }
+
+                        let out_idx = batch * c * out_h * out_w + channel * out_h * out_w + oh * out_w + ow;
+                        output[out_idx] = max_val;
+                    }
+                }
+            }
+        }
+
+        Tensor::from_vec(output, &[n, c, out_h, out_w])
+            .map(|t| vec![t])
+            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
     fn name(&self) -> &str { "MaxPool" }
 }
 
-/// AveragePool operator
+/// AveragePool operator - 2D average pooling
 #[derive(Debug)]
 pub struct AvgPoolOp {
     kernel_shape: Vec<i64>,
     strides: Vec<i64>,
     pads: Vec<i64>,
+    count_include_pad: bool,
 }
 
 impl AvgPoolOp {
@@ -1107,13 +1161,71 @@ impl AvgPoolOp {
             kernel_shape: node.get_ints("kernel_shape").map(|k| k.to_vec()).unwrap_or_default(),
             strides: node.get_ints("strides").map(|s| s.to_vec()).unwrap_or_else(|| vec![1, 1]),
             pads: node.get_ints("pads").map(|p| p.to_vec()).unwrap_or_else(|| vec![0, 0, 0, 0]),
+            count_include_pad: node.get_int("count_include_pad").unwrap_or(0) != 0,
         })
     }
 }
 
 impl OnnxOperator for AvgPoolOp {
-    fn execute(&self, _inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        Err(OnnxError::UnsupportedOperator("AveragePool (full impl needed)".to_string()))
+    fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
+        let x = inputs.first().and_then(|i| *i)
+            .ok_or_else(|| OnnxError::MissingAttribute("X".to_string()))?;
+
+        let shape = x.shape();
+        if shape.len() != 4 {
+            return Err(OnnxError::InvalidShape(format!(
+                "AveragePool requires 4D input [N,C,H,W], got {:?}", shape
+            )));
+        }
+
+        let (n, c, h, w) = (shape[0], shape[1], shape[2], shape[3]);
+        let kh = self.kernel_shape.get(0).copied().unwrap_or(2) as usize;
+        let kw = self.kernel_shape.get(1).copied().unwrap_or(2) as usize;
+        let sh = self.strides.get(0).copied().unwrap_or(1) as usize;
+        let sw = self.strides.get(1).copied().unwrap_or(1) as usize;
+        let pad_top = self.pads.get(0).copied().unwrap_or(0) as usize;
+        let pad_left = self.pads.get(1).copied().unwrap_or(0) as usize;
+        let pad_bottom = self.pads.get(2).copied().unwrap_or(0) as usize;
+        let pad_right = self.pads.get(3).copied().unwrap_or(0) as usize;
+
+        let out_h = (h + pad_top + pad_bottom - kh) / sh + 1;
+        let out_w = (w + pad_left + pad_right - kw) / sw + 1;
+
+        let x_data = x.to_vec();
+        let mut output = vec![0.0f32; n * c * out_h * out_w];
+
+        for batch in 0..n {
+            for channel in 0..c {
+                for oh in 0..out_h {
+                    for ow in 0..out_w {
+                        let mut sum = 0.0f32;
+                        let mut count = 0usize;
+
+                        for khi in 0..kh {
+                            for kwi in 0..kw {
+                                let ih = (oh * sh + khi) as isize - pad_top as isize;
+                                let iw = (ow * sw + kwi) as isize - pad_left as isize;
+
+                                if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
+                                    let idx = batch * c * h * w + channel * h * w + ih as usize * w + iw as usize;
+                                    sum += x_data[idx];
+                                    count += 1;
+                                } else if self.count_include_pad {
+                                    count += 1;
+                                }
+                            }
+                        }
+
+                        let out_idx = batch * c * out_h * out_w + channel * out_h * out_w + oh * out_w + ow;
+                        output[out_idx] = if count > 0 { sum / count as f32 } else { 0.0 };
+                    }
+                }
+            }
+        }
+
+        Tensor::from_vec(output, &[n, c, out_h, out_w])
+            .map(|t| vec![t])
+            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
     fn name(&self) -> &str { "AveragePool" }
@@ -1123,14 +1235,15 @@ impl OnnxOperator for AvgPoolOp {
 #[derive(Debug)]
 pub struct BatchNormOp {
     epsilon: f32,
-    momentum: f32,
+    /// Momentum is only used during training for updating running stats
+    _momentum: f32,
 }
 
 impl BatchNormOp {
     fn from_node(node: &NodeProto) -> OnnxResult<Self> {
         Ok(Self {
             epsilon: node.get_float("epsilon").unwrap_or(1e-5),
-            momentum: node.get_float("momentum").unwrap_or(0.9),
+            _momentum: node.get_float("momentum").unwrap_or(0.9),
         })
     }
 }

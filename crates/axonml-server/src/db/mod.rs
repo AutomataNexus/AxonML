@@ -6,6 +6,7 @@ pub mod schema;
 pub mod users;
 pub mod runs;
 pub mod models;
+pub mod datasets;
 
 use crate::config::AegisConfig;
 use reqwest::Client;

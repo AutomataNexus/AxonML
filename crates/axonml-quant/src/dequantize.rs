@@ -6,7 +6,6 @@
 //! @author AutomataNexus Development Team
 
 use axonml_tensor::Tensor;
-use half::f16;
 use rayon::prelude::*;
 
 use crate::error::{QuantError, QuantResult};

@@ -275,8 +275,8 @@ pub async fn login(
         return Err(AuthError::InvalidCredentials);
     }
 
-    // Check email verification status
-    if user.email_pending || !user.email_verified {
+    // Check email verification status (skip for admins)
+    if user.role != UserRole::Admin && (user.email_pending || !user.email_verified) {
         if user.email_pending && !user.email_verified {
             return Err(AuthError::Forbidden("Please verify your email address before logging in. Check your inbox for the verification link.".to_string()));
         } else if user.email_verified && user.email_pending {

@@ -42,6 +42,10 @@ fn default_limit() -> u32 {
 pub struct CreateRunRequest {
     pub name: String,
     pub model_type: String,
+    #[serde(default)]
+    pub model_version_id: Option<String>,
+    #[serde(default)]
+    pub dataset_id: Option<String>,
     pub config: RunConfigRequest,
 }
 
@@ -62,6 +66,10 @@ pub struct RunResponse {
     pub user_id: String,
     pub name: String,
     pub model_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_version_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dataset_id: Option<String>,
     pub status: String,
     pub config: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,6 +173,8 @@ pub async fn list_runs(
             user_id: r.user_id,
             name: r.name,
             model_type: r.model_type,
+            model_version_id: r.model_version_id,
+            dataset_id: r.dataset_id,
             status: format!("{:?}", r.status).to_lowercase(),
             config: serde_json::to_value(&r.config).unwrap_or_default(),
             latest_metrics: r.latest_metrics.map(|m| MetricsResponse {
@@ -212,6 +222,8 @@ pub async fn create_run(
             user_id: user.id,
             name: req.name,
             model_type: req.model_type,
+            model_version_id: req.model_version_id,
+            dataset_id: req.dataset_id,
             config,
         })
         .await
@@ -226,6 +238,13 @@ pub async fn create_run(
         tracing::warn!(run_id = %run.id, error = %e, "Failed to start run tracking");
     }
 
+    // Actually start the training execution
+    if let Err(e) = state.executor.start_training(run.clone()).await {
+        tracing::error!(run_id = %run.id, error = %e, "Failed to start training execution");
+    } else {
+        tracing::info!(run_id = %run.id, "Training execution started");
+    }
+
     Ok((
         StatusCode::CREATED,
         Json(RunResponse {
@@ -233,7 +252,9 @@ pub async fn create_run(
             user_id: run.user_id,
             name: run.name,
             model_type: run.model_type,
-            status: format!("{:?}", run.status).to_lowercase(),
+            model_version_id: run.model_version_id,
+            dataset_id: run.dataset_id,
+            status: "running".to_string(), // It's now actually running
             config: serde_json::to_value(&run.config).unwrap_or_default(),
             latest_metrics: None,
             started_at: run.started_at.to_rfc3339(),
@@ -267,6 +288,8 @@ pub async fn get_run(
         user_id: run.user_id,
         name: run.name,
         model_type: run.model_type,
+        model_version_id: run.model_version_id,
+        dataset_id: run.dataset_id,
         status: format!("{:?}", run.status).to_lowercase(),
         config: serde_json::to_value(&run.config).unwrap_or_default(),
         latest_metrics: run.latest_metrics.map(|m| MetricsResponse {
@@ -365,6 +388,8 @@ pub async fn complete_run(
         user_id: run.user_id,
         name: run.name,
         model_type: run.model_type,
+        model_version_id: run.model_version_id,
+        dataset_id: run.dataset_id,
         status: format!("{:?}", run.status).to_lowercase(),
         config: serde_json::to_value(&run.config).unwrap_or_default(),
         latest_metrics: run.latest_metrics.map(|m| MetricsResponse {
@@ -403,6 +428,11 @@ pub async fn stop_run(
         return Err(AuthError::Unauthorized);
     }
 
+    // Stop the actual training execution
+    if let Err(e) = state.executor.stop_run(&id).await {
+        tracing::warn!(run_id = %id, error = %e, "Failed to stop training execution (may have already completed)");
+    }
+
     // Stop tracking the run
     if let Err(e) = state.tracker.stop_run(&id).await {
         tracing::warn!(run_id = %id, error = %e, "Failed to stop run tracking");
@@ -418,6 +448,8 @@ pub async fn stop_run(
         user_id: run.user_id,
         name: run.name,
         model_type: run.model_type,
+        model_version_id: run.model_version_id,
+        dataset_id: run.dataset_id,
         status: format!("{:?}", run.status).to_lowercase(),
         config: serde_json::to_value(&run.config).unwrap_or_default(),
         latest_metrics: run.latest_metrics.map(|m| MetricsResponse {

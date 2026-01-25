@@ -23,7 +23,6 @@ pub fn Navbar() -> impl IntoView {
             navigate("/login", Default::default());
         }
     });
-    let logout_handler = on_logout.clone();
 
     let toggle_sidebar = move |_| {
         state.toggle_sidebar();
@@ -74,8 +73,11 @@ pub fn Navbar() -> impl IntoView {
                                     {move || user().map(|u| u.email.clone()).unwrap_or_default()}
                                 </span>
                             </div>
-                            <IconChevronDown size=IconSize::Sm />
                         </div>
+                        <button class="btn btn-ghost btn-sm" on:click={let on_logout = on_logout.clone(); move |e| on_logout(e)}>
+                            <IconLogout size=IconSize::Sm />
+                            <span>"Logout"</span>
+                        </button>
                     </div>
                 </Show>
             </div>

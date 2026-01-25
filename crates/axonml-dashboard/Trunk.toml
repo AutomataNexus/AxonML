@@ -8,8 +8,8 @@ public_url = "/"
 dist = "dist"
 
 [serve]
-# Development server addresses
-addresses = ["127.0.0.1"]
+# Development server addresses - 0.0.0.0 allows access from Windows host
+addresses = ["0.0.0.0"]
 
 # Development server port
 port = 8081

@@ -47,6 +47,10 @@ pub struct TrainingRun {
     pub user_id: String,
     pub name: String,
     pub model_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_version_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dataset_id: Option<String>,
     #[serde(default)]
     pub status: RunStatus,
     pub config: RunConfig,
@@ -84,6 +88,8 @@ pub struct NewTrainingRun {
     pub user_id: String,
     pub name: String,
     pub model_type: String,
+    pub model_version_id: Option<String>,
+    pub dataset_id: Option<String>,
     pub config: RunConfig,
 }
 
@@ -106,6 +112,8 @@ impl<'a> RunRepository<'a> {
             user_id: new_run.user_id,
             name: new_run.name,
             model_type: new_run.model_type,
+            model_version_id: new_run.model_version_id,
+            dataset_id: new_run.dataset_id,
             status: RunStatus::Pending,
             config: new_run.config,
             latest_metrics: None,

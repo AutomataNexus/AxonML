@@ -6,7 +6,7 @@
 //! @author AutomataNexus Development Team
 
 use crate::patterns::{FusionPattern, OpType, detect_patterns};
-use crate::error::{FusionError, FusionResult};
+use crate::error::FusionResult;
 
 // =============================================================================
 // Optimizer Configuration

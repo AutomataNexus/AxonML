@@ -408,7 +408,10 @@ pub fn FileInput(
     #[prop(optional, into)] class: String,
 ) -> impl IntoView {
     let (dragging, set_dragging) = create_signal(false);
-    let input_ref = create_node_ref::<html::Input>();
+
+    // Generate unique ID for the input using random number
+    let input_id = format!("file-input-{}", js_sys::Math::random().to_bits());
+    let input_id_for_label = input_id.clone();
 
     let label_empty = label.is_empty();
     let label_display = store_value(label);
@@ -417,21 +420,17 @@ pub fn FileInput(
     let helper_empty = helper_text.is_empty();
     let helper_display = store_value(helper_text);
 
-    let on_select_drop = on_select.clone();
+    let on_select_for_drop = on_select.clone();
 
     // Store error MaybeSignal for use in closures
     let error_stored = store_value(error);
 
-    let trigger_input = move |_| {
-        if let Some(input) = input_ref.get() {
-            input.click();
-        }
-    };
-
-    let on_file_select = move |e: web_sys::Event| {
+    let on_file_change = move |e: web_sys::Event| {
         let input: web_sys::HtmlInputElement = event_target(&e);
         if let Some(files) = input.files() {
-            on_select.call(files);
+            if files.length() > 0 {
+                on_select.call(files);
+            }
         }
     };
 
@@ -440,7 +439,9 @@ pub fn FileInput(
         set_dragging.set(false);
         if let Some(dt) = e.data_transfer() {
             if let Some(files) = dt.files() {
-                on_select_drop.call(files);
+                if files.length() > 0 {
+                    on_select_for_drop.call(files);
+                }
             }
         }
     };
@@ -448,21 +449,22 @@ pub fn FileInput(
     view! {
         <div class=format!("form-group {}", class)>
             <Show when=move || !label_empty>
-                <label class="form-label">
+                <span class="form-label">
                     {label_display.get_value()}
                     <Show when=move || required>
                         <span class="required-mark">"*"</span>
                     </Show>
-                </label>
+                </span>
             </Show>
 
-            <div
+            // Use label element to trigger file input - this is the standard HTML approach
+            <label
+                for=input_id_for_label
                 class=move || format!(
                     "file-dropzone {} {}",
                     if dragging.get() { "dragging" } else { "" },
                     if error_stored.with_value(|e| e.get().is_some()) { "has-error" } else { "" }
                 )
-                on:click=trigger_input
                 on:dragover=move |e: web_sys::DragEvent| {
                     e.prevent_default();
                     set_dragging.set(true);
@@ -472,13 +474,13 @@ pub fn FileInput(
             >
                 <input
                     type="file"
+                    id=input_id
                     class="file-input-hidden"
                     accept=accept
                     multiple=multiple
                     required=required
                     disabled=disabled
-                    node_ref=input_ref
-                    on:change=on_file_select
+                    on:change=on_file_change
                 />
                 <div class="dropzone-content">
                     <IconUpload size=IconSize::Xl class="text-muted".to_string() />
@@ -487,7 +489,7 @@ pub fn FileInput(
                         <p class="dropzone-hint">{move || format!("Accepted: {}", accept_display.get_value())}</p>
                     </Show>
                 </div>
-            </div>
+            </label>
 
             <Show when=move || error_stored.with_value(|e| e.get().is_some())>
                 <p class="form-error">{move || error_stored.with_value(|e| e.get().unwrap_or_default())}</p>

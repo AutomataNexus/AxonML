@@ -119,6 +119,35 @@ pub fn Sidebar() -> impl IntoView {
                     />
                 </SidebarSection>
 
+                // Datasets Section
+                <SidebarSection label="Datasets">
+                    <SidebarItem
+                        href="/datasets"
+                        label="My Datasets"
+                        icon=|| view! { <IconDatabase /> }
+                    />
+                    <SidebarItem
+                        href="/datasets/library"
+                        label="Dataset Library"
+                        icon=|| view! { <IconGrid /> }
+                    />
+                    <SidebarItem
+                        href="/datasets/kaggle"
+                        label="Kaggle"
+                        icon=|| view! { <IconGlobe /> }
+                    />
+                    <SidebarItem
+                        href="/datasets/upload"
+                        label="Upload"
+                        icon=|| view! { <IconUpload /> }
+                    />
+                    <SidebarItem
+                        href="/datasets/analyze"
+                        label="Analyze"
+                        icon=|| view! { <IconActivity /> }
+                    />
+                </SidebarSection>
+
                 // Inference Section
                 <SidebarSection label="Inference">
                     <SidebarItem
@@ -135,6 +164,29 @@ pub fn Sidebar() -> impl IntoView {
                         href="/inference/metrics"
                         label="Metrics"
                         icon=|| view! { <IconBarChart /> }
+                    />
+                </SidebarSection>
+
+                // Model Hub Section
+                <SidebarSection label="Hub">
+                    <SidebarItem
+                        href="/hub"
+                        label="Pretrained Models"
+                        icon=|| view! { <IconDownload /> }
+                    />
+                    <SidebarItem
+                        href="/hub/cache"
+                        label="Model Cache"
+                        icon=|| view! { <IconDatabase /> }
+                    />
+                </SidebarSection>
+
+                // System Section
+                <SidebarSection label="System">
+                    <SidebarItem
+                        href="/system"
+                        label="Hardware"
+                        icon=|| view! { <IconCpu /> }
                     />
                 </SidebarSection>
 
