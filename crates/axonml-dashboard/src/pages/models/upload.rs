@@ -243,8 +243,8 @@ pub fn ModelUploadPage() -> impl IntoView {
                         <FileInput
                             on_select=Callback::new(on_file_select)
                             label="Model File"
-                            accept=".pt,.pth,.onnx,.h5,.pb,.safetensors,.bin"
-                            helper_text="Supported formats: PyTorch (.pt, .pth), ONNX (.onnx), TensorFlow (.h5, .pb), SafeTensors (.safetensors)"
+                            accept=".py,.pt,.pth,.onnx,.h5,.pb,.safetensors,.bin,.pkl,.npy,.npz,.json,.yaml,.yml"
+                            helper_text="Supported formats: Python (.py), PyTorch (.pt, .pth), ONNX (.onnx), TensorFlow (.h5, .pb), SafeTensors, NumPy, configs"
                             required=true
                         />
 

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#14b8a6"/>
+      <stop offset="100%" style="stop-color:#0d9488"/>
+    </linearGradient>
+  </defs>
+  <!-- Neural network nodes -->
+  <circle cx="12" cy="14" r="4" fill="url(#gradient)"/>
+  <circle cx="12" cy="24" r="4" fill="url(#gradient)"/>
+  <circle cx="12" cy="34" r="4" fill="url(#gradient)"/>
+
+  <circle cx="24" cy="19" r="4" fill="url(#gradient)"/>
+  <circle cx="24" cy="29" r="4" fill="url(#gradient)"/>
+
+  <circle cx="36" cy="24" r="4" fill="url(#gradient)"/>
+
+  <!-- Connections -->
+  <path d="M16 14 L20 19" stroke="#14b8a6" stroke-width="1.5" opacity="0.6"/>
+  <path d="M16 14 L20 29" stroke="#14b8a6" stroke-width="1.5" opacity="0.4"/>
+  <path d="M16 24 L20 19" stroke="#14b8a6" stroke-width="1.5" opacity="0.5"/>
+  <path d="M16 24 L20 29" stroke="#14b8a6" stroke-width="1.5" opacity="0.5"/>
+  <path d="M16 34 L20 19" stroke="#14b8a6" stroke-width="1.5" opacity="0.4"/>
+  <path d="M16 34 L20 29" stroke="#14b8a6" stroke-width="1.5" opacity="0.6"/>
+
+  <path d="M28 19 L32 24" stroke="#14b8a6" stroke-width="1.5" opacity="0.6"/>
+  <path d="M28 29 L32 24" stroke="#14b8a6" stroke-width="1.5" opacity="0.6"/>
+</svg>

@@ -383,35 +383,9 @@ fn reduce_axis(
             idx %= strides[d];
         }
 
-        // Compute output index (skip axis)
-        let mut out_idx = 0;
-        let mut out_stride = 1;
-        for d in (0..shape.len()).rev() {
-            if d == axis {
-                continue;
-            }
-            out_idx += multi_idx[d] * out_stride;
-            let out_dim = if d > axis && !keepdim { d - 1 } else { d };
-            if out_dim + 1 < output_shape.len() {
-                out_stride *= output_shape[out_dim + 1];
-            }
-        }
-
-        if keepdim {
-            out_idx = 0;
-            out_stride = 1;
-            for d in (0..output_shape.len()).rev() {
-                if d == axis {
-                    out_stride *= output_shape[d];
-                    continue;
-                }
-                out_idx += multi_idx[d] * out_stride;
-                if d > 0 {
-                    out_stride *= output_shape[d - 1];
-                }
-            }
-            // Recalculate properly
-            out_idx = 0;
+        // Compute output index
+        let out_idx = if keepdim {
+            let mut out_idx = 0;
             let mut temp_strides = vec![1usize; output_shape.len()];
             for d in (0..output_shape.len() - 1).rev() {
                 temp_strides[d] = temp_strides[d + 1] * output_shape[d + 1];
@@ -420,8 +394,9 @@ fn reduce_axis(
                 let dim_idx = if d == axis { 0 } else { multi_idx[d] };
                 out_idx += dim_idx * temp_strides[d];
             }
+            out_idx
         } else {
-            out_idx = 0;
+            let mut out_idx = 0;
             let mut temp_strides = vec![1usize; output_shape.len()];
             if !output_shape.is_empty() {
                 for d in (0..output_shape.len() - 1).rev() {
@@ -438,7 +413,8 @@ fn reduce_axis(
                 }
                 out_d += 1;
             }
-        }
+            out_idx
+        };
 
         if out_idx < result.len() {
             result[out_idx] = op(result[out_idx], data[i]);

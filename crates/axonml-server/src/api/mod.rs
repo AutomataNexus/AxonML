@@ -5,8 +5,15 @@
 pub mod auth;
 pub mod training;
 pub mod models;
+pub mod datasets;
 pub mod inference;
 pub mod metrics;
+pub mod system;
+pub mod hub;
+pub mod tools;
+pub mod data;
+pub mod kaggle;
+pub mod builtin_datasets;
 
 use crate::auth::{JwtAuth, AuthLayer, auth_middleware, require_admin_middleware, require_mfa_middleware, optional_auth_middleware};
 use crate::config::Config;
@@ -15,6 +22,7 @@ use crate::inference::server::InferenceServer;
 use crate::inference::pool::ModelPool;
 use crate::inference::metrics::InferenceMetrics;
 use crate::training::tracker::TrainingTracker;
+use crate::training::executor::TrainingExecutor;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -24,6 +32,7 @@ use axum::{
 };
 use serde::Serialize;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
@@ -36,8 +45,10 @@ pub struct AppState {
     pub email: Arc<crate::email::EmailService>,
     pub inference: Arc<InferenceServer>,
     pub tracker: Arc<TrainingTracker>,
+    pub executor: Arc<TrainingExecutor>,
     pub model_pool: Arc<ModelPool>,
     pub inference_metrics: Arc<InferenceMetrics>,
+    pub metrics_history: Arc<Mutex<system::SystemMetricsHistory>>,
 }
 
 /// Create the main API router
@@ -115,6 +126,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/models/:id/versions/:version", delete(models::delete_version))
         .route("/api/models/:id/versions/:version/download", get(models::download_version))
         .route("/api/models/:id/versions/:version/deploy", post(models::deploy_version))
+        // Datasets
+        .route("/api/datasets", get(datasets::list_datasets))
+        .route("/api/datasets", post(datasets::upload_dataset))
+        .route("/api/datasets/:id", get(datasets::get_dataset))
+        .route("/api/datasets/:id", delete(datasets::delete_dataset))
         // Inference
         .route("/api/inference/endpoints", get(inference::list_endpoints))
         .route("/api/inference/endpoints", post(inference::create_endpoint))
@@ -128,6 +144,44 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/inference/predict/:name", post(inference::predict))
         // Metrics
         .route("/api/metrics", get(metrics::get_metrics))
+        // System
+        .route("/api/system/info", get(system::get_system_info))
+        .route("/api/system/gpus", get(system::list_gpus))
+        .route("/api/system/benchmark", post(system::run_benchmark))
+        .route("/api/system/metrics", get(system::get_realtime_metrics))
+        .route("/api/system/metrics/history", get(system::get_metrics_history))
+        .route("/api/system/correlation", get(system::get_correlation_data))
+        // Hub (Pretrained Models)
+        .route("/api/hub/models", get(hub::list_models))
+        .route("/api/hub/models/:name", get(hub::get_model_info))
+        .route("/api/hub/models/:name/download", post(hub::download_model))
+        .route("/api/hub/cache", get(hub::get_cache_info))
+        .route("/api/hub/cache", delete(hub::clear_cache))
+        .route("/api/hub/cache/:name", delete(hub::clear_cache))
+        // Model Tools
+        .route("/api/models/:model_id/versions/:version_id/inspect", get(tools::inspect_model))
+        .route("/api/models/:model_id/versions/:version_id/convert", post(tools::convert_model))
+        .route("/api/models/:model_id/versions/:version_id/quantize", post(tools::quantize_model))
+        .route("/api/models/:model_id/versions/:version_id/export", post(tools::export_model))
+        .route("/api/tools/quantization-types", get(tools::list_quantization_types))
+        // Data Analysis
+        .route("/api/data/:id/analyze", post(data::analyze_dataset))
+        .route("/api/data/:id/preview", post(data::preview_dataset))
+        .route("/api/data/:id/validate", post(data::validate_dataset))
+        .route("/api/data/:id/generate-config", post(data::generate_config))
+        // Kaggle Integration
+        .route("/api/kaggle/credentials", post(kaggle::save_credentials))
+        .route("/api/kaggle/credentials", delete(kaggle::delete_credentials))
+        .route("/api/kaggle/status", get(kaggle::get_status))
+        .route("/api/kaggle/search", get(kaggle::search_datasets))
+        .route("/api/kaggle/download", post(kaggle::download_dataset))
+        .route("/api/kaggle/downloaded", get(kaggle::list_downloaded))
+        // Built-in Datasets
+        .route("/api/builtin-datasets", get(builtin_datasets::list_datasets))
+        .route("/api/builtin-datasets/search", get(builtin_datasets::search_datasets))
+        .route("/api/builtin-datasets/sources", get(builtin_datasets::list_sources))
+        .route("/api/builtin-datasets/:id", get(builtin_datasets::get_dataset_info))
+        .route("/api/builtin-datasets/:id/prepare", post(builtin_datasets::prepare_dataset))
         .layer(middleware::from_fn_with_state(
             state.jwt.clone(),
             auth_middleware,

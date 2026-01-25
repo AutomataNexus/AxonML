@@ -9,7 +9,7 @@ use axonml_tensor::Tensor;
 use half::f16;
 use rayon::prelude::*;
 
-use crate::error::{QuantError, QuantResult};
+use crate::error::QuantResult;
 use crate::types::{QuantType, QuantizedTensor, QuantizedBlock, Q8Block, Q4Block, Q4_1Block};
 use crate::DEFAULT_BLOCK_SIZE;
 

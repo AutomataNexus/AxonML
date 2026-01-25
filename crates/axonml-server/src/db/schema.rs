@@ -11,6 +11,7 @@ pub const RUNS_COLLECTION: &str = "axonml_runs";
 pub const MODELS_COLLECTION: &str = "axonml_models";
 pub const VERSIONS_COLLECTION: &str = "axonml_model_versions";
 pub const ENDPOINTS_COLLECTION: &str = "axonml_endpoints";
+pub const DATASETS_COLLECTION: &str = "axonml_datasets";
 
 /// Schema definitions for all AxonML collections
 pub struct Schema;
@@ -26,6 +27,7 @@ impl Schema {
         Self::create_models_collection(db).await?;
         Self::create_model_versions_collection(db).await?;
         Self::create_endpoints_collection(db).await?;
+        Self::create_datasets_collection(db).await?;
 
         info!("Database schema initialized successfully");
         Ok(())
@@ -63,6 +65,13 @@ impl Schema {
     async fn create_endpoints_collection(db: &Database) -> Result<(), DbError> {
         db.create_collection(ENDPOINTS_COLLECTION).await?;
         info!("Created {} collection", ENDPOINTS_COLLECTION);
+        Ok(())
+    }
+
+    /// Create datasets collection
+    async fn create_datasets_collection(db: &Database) -> Result<(), DbError> {
+        db.create_collection(DATASETS_COLLECTION).await?;
+        info!("Created {} collection", DATASETS_COLLECTION);
         Ok(())
     }
 

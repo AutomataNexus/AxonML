@@ -17,6 +17,9 @@ pub fn NewTrainingPage() -> impl IntoView {
     // Form state
     let name = create_rw_signal(String::new());
     let model_type = create_rw_signal("neural_network".to_string());
+    let selected_model_id = create_rw_signal::<Option<String>>(None);
+    let selected_version_id = create_rw_signal::<Option<String>>(None);
+    let selected_dataset_id = create_rw_signal::<Option<String>>(None);
     let learning_rate = create_rw_signal(0.001f64);
     let batch_size = create_rw_signal(32f64);
     let epochs = create_rw_signal(100f64);
@@ -24,6 +27,59 @@ pub fn NewTrainingPage() -> impl IntoView {
     let loss_function = create_rw_signal("cross_entropy".to_string());
     let (loading, set_loading) = create_signal(false);
     let error = create_rw_signal::<Option<String>>(None);
+
+    // Load available models
+    let (models, set_models) = create_signal::<Vec<Model>>(vec![]);
+    let (versions, set_versions) = create_signal::<Vec<ModelVersion>>(vec![]);
+    let (models_loading, set_models_loading) = create_signal(true);
+
+    // Load available datasets
+    let (datasets, set_datasets) = create_signal::<Vec<Dataset>>(vec![]);
+    let (datasets_loading, set_datasets_loading) = create_signal(true);
+
+    // Fetch models and datasets on mount
+    create_effect(move |_| {
+        spawn_local(async move {
+            match api::models::list().await {
+                Ok(m) => set_models.set(m),
+                Err(_) => {}
+            }
+            set_models_loading.set(false);
+        });
+    });
+
+    create_effect(move |_| {
+        spawn_local(async move {
+            match api::datasets::list().await {
+                Ok(d) => set_datasets.set(d),
+                Err(_) => {}
+            }
+            set_datasets_loading.set(false);
+        });
+    });
+
+    // Fetch versions when model changes
+    create_effect(move |_| {
+        if let Some(model_id) = selected_model_id.get() {
+            spawn_local(async move {
+                match api::models::get_with_versions(&model_id).await {
+                    Ok(mwv) => {
+                        // Auto-select latest version before setting versions
+                        if let Some(latest) = mwv.model.latest_version {
+                            if let Some(v) = mwv.versions.iter().find(|v| v.version == latest) {
+                                selected_version_id.set(Some(v.id.clone()));
+                            }
+                        }
+                        set_versions.set(mwv.versions);
+                    }
+                    Err(_) => set_versions.set(vec![]),
+                }
+            });
+        } else {
+            set_versions.set(vec![]);
+            selected_version_id.set(None);
+        }
+    });
 
     // Store option lists for use in closures
     let model_types = store_value(vec![
@@ -68,6 +124,8 @@ pub fn NewTrainingPage() -> impl IntoView {
         let request = CreateRunRequest {
             name: name.get(),
             model_type: model_type.get(),
+            model_version_id: selected_version_id.get(),
+            dataset_id: selected_dataset_id.get(),
             config: TrainingConfig {
                 learning_rate: learning_rate.get(),
                 batch_size: batch_size.get() as u32,
@@ -116,10 +174,162 @@ pub fn NewTrainingPage() -> impl IntoView {
                 </Show>
 
                 <div class="form-sections">
+                    // Model Selection Section
+                    <div class="card form-section">
+                        <div class="card-header">
+                            <h2>"Select Model"</h2>
+                        </div>
+                        <div class="card-body">
+                            <Show when=move || models_loading.get()>
+                                <div class="loading-models">
+                                    <Spinner size=SpinnerSize::Sm />
+                                    <span>"Loading models..."</span>
+                                </div>
+                            </Show>
+                            <Show when=move || !models_loading.get()>
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label class="form-label">"Model" <span class="required">"*"</span></label>
+                                        <div class="select-wrapper">
+                                            <select
+                                                class="form-select"
+                                                required=true
+                                                on:change=move |e| {
+                                                    let val = event_target_value(&e);
+                                                    if val.is_empty() {
+                                                        selected_model_id.set(None);
+                                                    } else {
+                                                        selected_model_id.set(Some(val));
+                                                    }
+                                                }
+                                            >
+                                                <option value="" selected=move || selected_model_id.get().is_none()>
+                                                    "-- Select a model --"
+                                                </option>
+                                                {move || models.get().into_iter().map(|m| {
+                                                    let id = m.id.clone();
+                                                    let id_for_check = m.id.clone();
+                                                    view! {
+                                                        <option value=id selected=move || selected_model_id.get() == Some(id_for_check.clone())>
+                                                            {m.name}
+                                                        </option>
+                                                    }
+                                                }).collect_view()}
+                                            </select>
+                                            <IconChevronDown size=IconSize::Sm class="select-icon".to_string() />
+                                        </div>
+                                        <p class="form-helper">"Select the model you want to train"</p>
+                                    </div>
+
+                                    <Show when=move || selected_model_id.get().is_some() && !versions.get().is_empty()>
+                                        <div class="form-group">
+                                            <label class="form-label">"Version"</label>
+                                            <div class="select-wrapper">
+                                                <select
+                                                    class="form-select"
+                                                    on:change=move |e| {
+                                                        let val = event_target_value(&e);
+                                                        if val.is_empty() {
+                                                            selected_version_id.set(None);
+                                                        } else {
+                                                            selected_version_id.set(Some(val));
+                                                        }
+                                                    }
+                                                >
+                                                    {move || versions.get().into_iter().map(|v| {
+                                                        let id = v.id.clone();
+                                                        let id_for_check = v.id.clone();
+                                                        view! {
+                                                            <option value=id selected=move || selected_version_id.get() == Some(id_for_check.clone())>
+                                                                {format!("v{}", v.version)}
+                                                            </option>
+                                                        }
+                                                    }).collect_view()}
+                                                </select>
+                                                <IconChevronDown size=IconSize::Sm class="select-icon".to_string() />
+                                            </div>
+                                            <p class="form-helper">"Select which version to train"</p>
+                                        </div>
+                                    </Show>
+                                </div>
+                                <Show when=move || models.get().is_empty()>
+                                    <div class="empty-models">
+                                        <IconBox size=IconSize::Lg />
+                                        <p>"No models found. "</p>
+                                        <A href="/models/upload" class="btn btn-primary btn-sm">
+                                            "Upload a Model"
+                                        </A>
+                                    </div>
+                                </Show>
+                            </Show>
+                        </div>
+                    </div>
+
+                    // Dataset Selection Section
+                    <div class="card form-section">
+                        <div class="card-header">
+                            <h2>"Select Dataset"</h2>
+                        </div>
+                        <div class="card-body">
+                            <Show when=move || datasets_loading.get()>
+                                <div class="loading-models">
+                                    <Spinner size=SpinnerSize::Sm />
+                                    <span>"Loading datasets..."</span>
+                                </div>
+                            </Show>
+                            <Show when=move || !datasets_loading.get()>
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label class="form-label">"Dataset" <span class="required">"*"</span></label>
+                                        <div class="select-wrapper">
+                                            <select
+                                                class="form-select"
+                                                required=true
+                                                on:change=move |e| {
+                                                    let val = event_target_value(&e);
+                                                    if val.is_empty() {
+                                                        selected_dataset_id.set(None);
+                                                    } else {
+                                                        selected_dataset_id.set(Some(val));
+                                                    }
+                                                }
+                                            >
+                                                <option value="" selected=move || selected_dataset_id.get().is_none()>
+                                                    "-- Select a dataset --"
+                                                </option>
+                                                {move || datasets.get().into_iter().map(|d| {
+                                                    let id = d.id.clone();
+                                                    let id_for_check = d.id.clone();
+                                                    let info = format!("{} ({} samples)", d.name, d.num_samples.unwrap_or(0));
+                                                    view! {
+                                                        <option value=id selected=move || selected_dataset_id.get() == Some(id_for_check.clone())>
+                                                            {info}
+                                                        </option>
+                                                    }
+                                                }).collect_view()}
+                                            </select>
+                                            <IconChevronDown size=IconSize::Sm class="select-icon".to_string() />
+                                        </div>
+                                        <p class="form-helper">"Select the dataset to use for training"</p>
+                                    </div>
+                                </div>
+                                <Show when=move || datasets.get().is_empty()>
+                                    <div class="empty-models">
+                                        <IconDatabase size=IconSize::Lg />
+                                        <p>"No datasets found. "</p>
+                                        <A href="/datasets/upload" class="btn btn-primary btn-sm">
+                                            "Upload a Dataset"
+                                        </A>
+                                    </div>
+                                </Show>
+                            </Show>
+                        </div>
+                    </div>
+
                     // Basic Info Section
                     <div class="card form-section">
                         <div class="card-header">
-                            <h2>"Basic Information"</h2>
+                            <h2>"Run Configuration"</h2>
                         </div>
                         <div class="card-body">
                             <div class="form-grid">
@@ -167,7 +377,7 @@ pub fn NewTrainingPage() -> impl IntoView {
                                     <input
                                         type="number"
                                         class="form-input"
-                                        step="0.0001"
+                                        step="any"
                                         min="0.0000001"
                                         max="1"
                                         prop:value=move || learning_rate.get()
@@ -253,6 +463,24 @@ pub fn NewTrainingPage() -> impl IntoView {
                         <div class="card-body">
                             <div class="summary-grid">
                                 <div class="summary-item">
+                                    <span class="summary-label">"Model"</span>
+                                    <span class="summary-value">{move || {
+                                        match selected_model_id.get() {
+                                            Some(id) => models.get().iter().find(|m| m.id == id).map(|m| m.name.clone()).unwrap_or("Unknown".to_string()),
+                                            None => "Not selected".to_string()
+                                        }
+                                    }}</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="summary-label">"Dataset"</span>
+                                    <span class="summary-value">{move || {
+                                        match selected_dataset_id.get() {
+                                            Some(id) => datasets.get().iter().find(|d| d.id == id).map(|d| d.name.clone()).unwrap_or("Unknown".to_string()),
+                                            None => "Not selected".to_string()
+                                        }
+                                    }}</span>
+                                </div>
+                                <div class="summary-item">
                                     <span class="summary-label">"Run Name"</span>
                                     <span class="summary-value">{move || { let n = name.get(); if n.is_empty() { "Not set".to_string() } else { n } }}</span>
                                 </div>
@@ -289,7 +517,7 @@ pub fn NewTrainingPage() -> impl IntoView {
                     <button
                         type="submit"
                         class="btn btn-primary"
-                        disabled=move || loading.get() || name.get().trim().is_empty()
+                        disabled=move || loading.get() || name.get().trim().is_empty() || selected_model_id.get().is_none() || selected_dataset_id.get().is_none()
                     >
                         <Show when=move || loading.get() fallback=|| {
                             view! {
