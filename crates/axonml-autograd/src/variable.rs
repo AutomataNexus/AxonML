@@ -15,9 +15,9 @@ use parking_lot::RwLock;
 use axonml_tensor::Tensor;
 
 use crate::functions::{
-    AddBackward, DivBackward, MatMulBackward, MeanBackward, MulBackward, NegBackward, PowBackward,
-    ReluBackward, ReshapeBackward, SigmoidBackward, SubBackward, SumBackward, TanhBackward,
-    TransposeBackward,
+    AddBackward, DivBackward, MatMulBackward, MeanBackward, MulBackward, NarrowBackward, NegBackward,
+    PowBackward, ReluBackward, ReshapeBackward, SigmoidBackward, SubBackward, SumBackward,
+    TanhBackward, TransposeBackward,
 };
 use crate::grad_fn::{AccumulateGrad, GradAccumulator, GradFn};
 use crate::graph::{with_graph, GraphNode};
@@ -472,6 +472,29 @@ impl Variable {
     #[must_use] pub fn slice(&self, ranges: &[std::ops::Range<usize>]) -> Variable {
         let new_data = self.data().slice(ranges);
         Variable::new(new_data, self.requires_grad())
+    }
+
+    /// Narrows the variable along a dimension.
+    ///
+    /// Returns a view of the tensor containing elements from `start` to `start + length`
+    /// along the specified dimension. This operation preserves gradients for backpropagation.
+    #[must_use]
+    pub fn narrow(&self, dim: usize, start: usize, length: usize) -> Variable {
+        let input_shape = self.shape();
+        let new_data = self.data().narrow(dim, start, length).unwrap_or_else(|_| self.data().clone());
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(NarrowBackward::new(
+                self.grad_fn.clone(),
+                input_shape,
+                dim,
+                start,
+            ));
+            Variable::from_operation(new_data, grad_fn, true)
+        } else {
+            Variable::from_tensor(new_data)
+        }
     }
 
     /// Expands the variable to a new shape (broadcast).

@@ -103,6 +103,11 @@ pub fn Sidebar() -> impl IntoView {
                         label="New Run"
                         icon=|| view! { <IconPlus /> }
                     />
+                    <SidebarItem
+                        href="/training/notebooks"
+                        label="Notebooks"
+                        icon=|| view! { <IconFileText /> }
+                    />
                 </SidebarSection>
 
                 // Models Section

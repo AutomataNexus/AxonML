@@ -546,6 +546,8 @@ let n = t.narrow(1, 0, 2).unwrap();
 
 - Rust 1.75 or later
 - Cargo
+- Node.js (for PM2 process management)
+- Aegis-DB (document store database)
 
 ### Build
 
@@ -572,6 +574,55 @@ cargo test
 ```bash
 cargo bench
 ```
+
+## Server Deployment
+
+### PM2 Process Management
+
+AxonML server is managed via PM2 for automatic restarts and boot persistence.
+
+```bash
+# First-time setup
+cargo build --release -p axonml-server    # Build release binary
+sudo mkdir -p /var/log/axonml             # Create log directory
+sudo chown $USER:$USER /var/log/axonml
+
+# Initialize database (creates collections + users)
+./AxonML_DB_Init.sh --with-user
+
+# Start with PM2
+pm2 start ecosystem.config.js
+pm2 save                                   # Save process list
+pm2 startup                                # Enable boot persistence
+
+# Management
+pm2 status                                 # Check status
+pm2 logs axonml-server                     # View logs
+pm2 restart axonml-server                  # Restart server
+pm2 stop axonml-server                     # Stop server
+```
+
+### Database Initialization
+
+AxonML uses Aegis-DB as its document store.
+
+```bash
+# Initialize database (run once or to reinitialize)
+./AxonML_DB_Init.sh                        # Basic setup with admin user
+./AxonML_DB_Init.sh --with-user            # Also creates DevOps admin user
+
+# Default Users
+# Admin:  admin@axonml.local / admin
+# DevOps: DevOps@automatanexus.com / Invertedskynet2$
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RUST_LOG` | `info` | Log level (trace, debug, info, warn, error) |
+| `AEGIS_URL` | `http://127.0.0.1:7001` | Aegis-DB connection URL |
+| `RESEND_API_KEY` | - | Email service API key |
 
 ## Project Structure
 

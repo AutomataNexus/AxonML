@@ -137,22 +137,26 @@ impl GpuMemory {
     }
 
     /// Returns the raw pointer.
-    #[must_use] pub fn ptr(&self) -> *mut u8 {
+    #[must_use]
+    pub fn ptr(&self) -> *mut u8 {
         self.ptr
     }
 
     /// Returns the size in bytes.
-    #[must_use] pub fn size(&self) -> usize {
+    #[must_use]
+    pub fn size(&self) -> usize {
         self.size
     }
 
     /// Returns the device index.
-    #[must_use] pub fn device_index(&self) -> usize {
+    #[must_use]
+    pub fn device_index(&self) -> usize {
         self.device_index
     }
 
     /// Returns the backend type.
-    #[must_use] pub fn backend_type(&self) -> BackendType {
+    #[must_use]
+    pub fn backend_type(&self) -> BackendType {
         self.backend_type
     }
 }
@@ -174,7 +178,8 @@ pub struct GpuStream {
 
 impl GpuStream {
     /// Creates a new GPU stream.
-    #[must_use] pub fn new(handle: usize, device_index: usize, backend_type: BackendType) -> Self {
+    #[must_use]
+    pub fn new(handle: usize, device_index: usize, backend_type: BackendType) -> Self {
         Self {
             handle,
             device_index,
@@ -183,12 +188,14 @@ impl GpuStream {
     }
 
     /// Returns the stream handle.
-    #[must_use] pub fn handle(&self) -> usize {
+    #[must_use]
+    pub fn handle(&self) -> usize {
         self.handle
     }
 
     /// Returns the device index.
-    #[must_use] pub fn device_index(&self) -> usize {
+    #[must_use]
+    pub fn device_index(&self) -> usize {
         self.device_index
     }
 
@@ -213,7 +220,8 @@ impl GpuStream {
 // =============================================================================
 
 /// Returns the best available GPU backend.
-#[must_use] pub fn best_available_backend() -> BackendType {
+#[must_use]
+pub fn best_available_backend() -> BackendType {
     #[cfg(feature = "cuda")]
     if cuda::is_available() {
         return BackendType::Cuda;
@@ -238,7 +246,8 @@ impl GpuStream {
 }
 
 /// Returns the number of available GPUs across all backends.
-#[must_use] pub fn gpu_count() -> usize {
+#[must_use]
+pub fn gpu_count() -> usize {
     #[allow(unused_mut)]
     let mut count = 0_usize;
 

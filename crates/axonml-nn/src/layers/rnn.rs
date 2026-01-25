@@ -661,15 +661,82 @@ impl GRUCell {
     }
 }
 
+impl GRUCell {
+    /// Forward pass for a single time step with explicit hidden state.
+    ///
+    /// GRU equations:
+    /// r_t = sigmoid(W_ir @ x_t + b_ir + W_hr @ h_{t-1} + b_hr)
+    /// z_t = sigmoid(W_iz @ x_t + b_iz + W_hz @ h_{t-1} + b_hz)
+    /// n_t = tanh(W_in @ x_t + b_in + r_t * (W_hn @ h_{t-1} + b_hn))
+    /// h_t = (1 - z_t) * n_t + z_t * h_{t-1}
+    ///
+    /// All computations use Variable operations for proper gradient flow.
+    pub fn forward_step(&self, input: &Variable, hidden: &Variable) -> Variable {
+        let batch_size = input.shape()[0];
+        let hidden_size = self.hidden_size;
+
+        // Get weight matrices
+        let weight_ih = self.weight_ih.variable();
+        let weight_hh = self.weight_hh.variable();
+        let bias_ih = self.bias_ih.variable();
+        let bias_hh = self.bias_hh.variable();
+
+        // Compute input transformation: x @ W_ih^T + b_ih
+        // Shape: [batch, 3*hidden_size]
+        let weight_ih_t = Variable::new(weight_ih.data().t().unwrap(), weight_ih.requires_grad());
+        let ih = input.matmul(&weight_ih_t).add_var(&bias_ih);
+
+        // Compute hidden transformation: h @ W_hh^T + b_hh
+        // Shape: [batch, 3*hidden_size]
+        let weight_hh_t = Variable::new(weight_hh.data().t().unwrap(), weight_hh.requires_grad());
+        let hh = hidden.matmul(&weight_hh_t).add_var(&bias_hh);
+
+        // Use narrow to split into gates (preserves gradient flow)
+        // Each gate slice: [batch, hidden_size]
+        let ih_r = ih.narrow(1, 0, hidden_size);
+        let ih_z = ih.narrow(1, hidden_size, hidden_size);
+        let ih_n = ih.narrow(1, 2 * hidden_size, hidden_size);
+
+        let hh_r = hh.narrow(1, 0, hidden_size);
+        let hh_z = hh.narrow(1, hidden_size, hidden_size);
+        let hh_n = hh.narrow(1, 2 * hidden_size, hidden_size);
+
+        // Compute gates using Variable operations for gradient flow
+        // r = sigmoid(ih_r + hh_r)
+        let r = ih_r.add_var(&hh_r).sigmoid();
+
+        // z = sigmoid(ih_z + hh_z)
+        let z = ih_z.add_var(&hh_z).sigmoid();
+
+        // n = tanh(ih_n + r * hh_n)
+        let n = ih_n.add_var(&r.mul_var(&hh_n)).tanh();
+
+        // h_new = (1 - z) * n + z * h_prev
+        // Create ones for (1 - z)
+        let shape = [batch_size, hidden_size];
+        let ones = Variable::new(
+            Tensor::from_vec(vec![1.0f32; batch_size * hidden_size], &shape).unwrap(),
+            false,
+        );
+        let one_minus_z = ones.sub_var(&z);
+
+        // h_new = one_minus_z * n + z * h_prev
+        one_minus_z.mul_var(&n).add_var(&z.mul_var(hidden))
+    }
+}
+
+
 impl Module for GRUCell {
     fn forward(&self, input: &Variable) -> Variable {
         let batch_size = input.shape()[0];
 
-        // Simplified GRU forward - full implementation would compute r, z, n gates
-        Variable::new(
+        // Initialize hidden state to zeros
+        let hidden = Variable::new(
             zeros(&[batch_size, self.hidden_size]),
             input.requires_grad(),
-        )
+        );
+
+        self.forward_step(input, &hidden)
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -727,21 +794,56 @@ impl GRU {
 
 impl Module for GRU {
     fn forward(&self, input: &Variable) -> Variable {
-        // Simplified - returns zeros for now
         let shape = input.shape();
-        let (batch_size, seq_len) = if self.batch_first {
-            (shape[0], shape[1])
+        let (batch_size, seq_len, _input_size) = if self.batch_first {
+            (shape[0], shape[1], shape[2])
         } else {
-            (shape[1], shape[0])
+            (shape[1], shape[0], shape[2])
         };
 
-        let output_shape = if self.batch_first {
-            vec![batch_size, seq_len, self.hidden_size]
-        } else {
-            vec![seq_len, batch_size, self.hidden_size]
-        };
+        // Initialize hidden states for all layers as Variables (with gradients)
+        let mut hidden_states: Vec<Variable> = (0..self.num_layers)
+            .map(|_| {
+                Variable::new(
+                    zeros(&[batch_size, self.hidden_size]),
+                    input.requires_grad(),
+                )
+            })
+            .collect();
 
-        Variable::new(zeros(&output_shape), input.requires_grad())
+        // Collect output Variables for each time step
+        let mut output_vars: Vec<Variable> = Vec::with_capacity(seq_len);
+
+        // Process each time step
+        for t in 0..seq_len {
+            // Extract input for this time step using narrow (preserves gradients)
+            // input shape: [batch, seq, features]
+            // narrow to [batch, 1, features], then reshape to [batch, features]
+            // narrow gives [batch, 1, features], reshape to [batch, features]
+            let narrowed = input.narrow(1, t, 1);
+            let step_input = narrowed.reshape(&[batch_size, narrowed.data().numel() / batch_size]);
+
+            // Process through each layer
+            let mut layer_input = step_input;
+
+            for (layer_idx, cell) in self.cells.iter().enumerate() {
+                let new_hidden = cell.forward_step(&layer_input, &hidden_states[layer_idx]);
+
+                // Update hidden state for this layer (keeps gradient chain)
+                hidden_states[layer_idx] = new_hidden.clone();
+
+                // Output of this layer becomes input to next layer
+                layer_input = new_hidden;
+            }
+
+            // Store output from last layer for this time step
+            output_vars.push(layer_input);
+        }
+
+        // Stack outputs along the time dimension
+        // Each output_var has shape [batch, hidden_size]
+        // We need to combine them into [batch, seq, hidden_size]
+        self.stack_outputs(&output_vars, batch_size, seq_len)
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -750,6 +852,131 @@ impl Module for GRU {
 
     fn name(&self) -> &'static str {
         "GRU"
+    }
+}
+
+impl GRU {
+    /// Forward pass that returns the mean of all hidden states.
+    /// This is equivalent to processing then mean pooling, but with proper gradient flow.
+    pub fn forward_mean(&self, input: &Variable) -> Variable {
+        let shape = input.shape();
+        let (batch_size, seq_len, _input_size) = if self.batch_first {
+            (shape[0], shape[1], shape[2])
+        } else {
+            (shape[1], shape[0], shape[2])
+        };
+
+        // Initialize hidden states for all layers as Variables (with gradients)
+        let mut hidden_states: Vec<Variable> = (0..self.num_layers)
+            .map(|_| {
+                Variable::new(
+                    zeros(&[batch_size, self.hidden_size]),
+                    input.requires_grad(),
+                )
+            })
+            .collect();
+
+        // Accumulator for mean of outputs
+        let mut output_sum: Option<Variable> = None;
+
+        // Process each time step
+        for t in 0..seq_len {
+            // Extract input for this time step using narrow (preserves gradients)
+            // narrow gives [batch, 1, features], reshape to [batch, features]
+            let narrowed = input.narrow(1, t, 1);
+            let step_input = narrowed.reshape(&[batch_size, narrowed.data().numel() / batch_size]);
+
+            // Process through each layer
+            let mut layer_input = step_input;
+
+            for (layer_idx, cell) in self.cells.iter().enumerate() {
+                let new_hidden = cell.forward_step(&layer_input, &hidden_states[layer_idx]);
+                hidden_states[layer_idx] = new_hidden.clone();
+                layer_input = new_hidden;
+            }
+
+            // Accumulate output (last layer's hidden state)
+            output_sum = Some(match output_sum {
+                None => layer_input,
+                Some(acc) => acc.add_var(&layer_input),
+            });
+        }
+
+        // Return mean of all hidden states
+        match output_sum {
+            Some(sum) => sum.mul_scalar(1.0 / seq_len as f32),
+            None => Variable::new(zeros(&[batch_size, self.hidden_size]), false),
+        }
+    }
+
+    /// Forward pass that returns the last hidden state.
+    /// Good for sequence classification with proper gradient flow.
+    pub fn forward_last(&self, input: &Variable) -> Variable {
+        let shape = input.shape();
+        let (batch_size, seq_len, _input_size) = if self.batch_first {
+            (shape[0], shape[1], shape[2])
+        } else {
+            (shape[1], shape[0], shape[2])
+        };
+
+        // Initialize hidden states for all layers
+        let mut hidden_states: Vec<Variable> = (0..self.num_layers)
+            .map(|_| {
+                Variable::new(
+                    zeros(&[batch_size, self.hidden_size]),
+                    input.requires_grad(),
+                )
+            })
+            .collect();
+
+        // Process each time step
+        for t in 0..seq_len {
+            // narrow gives [batch, 1, features], reshape to [batch, features]
+            let narrowed = input.narrow(1, t, 1);
+            let step_input = narrowed.reshape(&[batch_size, narrowed.data().numel() / batch_size]);
+
+            let mut layer_input = step_input;
+
+            for (layer_idx, cell) in self.cells.iter().enumerate() {
+                let new_hidden = cell.forward_step(&layer_input, &hidden_states[layer_idx]);
+                hidden_states[layer_idx] = new_hidden.clone();
+                layer_input = new_hidden;
+            }
+        }
+
+        // Return last hidden state from last layer
+        hidden_states.pop().unwrap_or_else(|| Variable::new(zeros(&[batch_size, self.hidden_size]), false))
+    }
+
+    /// Stack output Variables into a single [batch, seq, hidden] tensor.
+    /// Note: This creates a new tensor without gradient connections to individual timesteps.
+    /// For gradient flow, use forward_mean() or forward_last() instead.
+    fn stack_outputs(&self, outputs: &[Variable], batch_size: usize, seq_len: usize) -> Variable {
+        if outputs.is_empty() {
+            return Variable::new(
+                zeros(&[batch_size, 0, self.hidden_size]),
+                false,
+            );
+        }
+
+        let output_shape = [batch_size, seq_len, self.hidden_size];
+        let requires_grad = outputs.iter().any(|o| o.requires_grad());
+
+        let mut stacked_data = vec![0.0f32; batch_size * seq_len * self.hidden_size];
+        for (t, out) in outputs.iter().enumerate() {
+            let out_data = out.data().to_vec();
+            for b in 0..batch_size {
+                for h in 0..self.hidden_size {
+                    let idx = b * seq_len * self.hidden_size + t * self.hidden_size + h;
+                    stacked_data[idx] = out_data[b * self.hidden_size + h];
+                }
+            }
+        }
+
+        Variable::new(
+            Tensor::from_vec(stacked_data, &output_shape).unwrap(),
+            requires_grad,
+        )
     }
 }
 

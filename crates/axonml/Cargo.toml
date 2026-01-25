@@ -30,8 +30,14 @@ profile = ["core", "dep:axonml-profile"]
 llm = ["nn", "dep:axonml-llm"]
 # JIT compilation
 jit = ["core", "dep:axonml-jit"]
+# ONNX import/export
+onnx = ["core", "dep:axonml-onnx"]
+# CUDA GPU acceleration
+cuda = ["axonml-core/cuda"]
+# WebGPU/Vulkan GPU acceleration
+wgpu = ["axonml-core/wgpu"]
 # Full feature set
-full = ["core", "nn", "data", "vision", "text", "audio", "distributed", "profile", "llm", "jit"]
+full = ["core", "nn", "data", "vision", "text", "audio", "distributed", "profile", "llm", "jit", "onnx"]
 
 [dependencies]
 axonml-core = { workspace = true, optional = true }
@@ -47,3 +53,4 @@ axonml-distributed = { workspace = true, optional = true }
 axonml-profile = { workspace = true, optional = true }
 axonml-llm = { workspace = true, optional = true }
 axonml-jit = { workspace = true, optional = true }
+axonml-onnx = { workspace = true, optional = true }

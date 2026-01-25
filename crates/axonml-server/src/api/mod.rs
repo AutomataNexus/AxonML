@@ -14,6 +14,7 @@ pub mod tools;
 pub mod data;
 pub mod kaggle;
 pub mod builtin_datasets;
+pub mod notebooks;
 
 use crate::auth::{JwtAuth, AuthLayer, auth_middleware, require_admin_middleware, require_mfa_middleware, optional_auth_middleware};
 use crate::config::Config;
@@ -23,6 +24,7 @@ use crate::inference::pool::ModelPool;
 use crate::inference::metrics::InferenceMetrics;
 use crate::training::tracker::TrainingTracker;
 use crate::training::executor::TrainingExecutor;
+use crate::llm::OllamaClient;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -49,6 +51,7 @@ pub struct AppState {
     pub model_pool: Arc<ModelPool>,
     pub inference_metrics: Arc<InferenceMetrics>,
     pub metrics_history: Arc<Mutex<system::SystemMetricsHistory>>,
+    pub ollama: Arc<OllamaClient>,
 }
 
 /// Create the main API router
@@ -182,6 +185,25 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/builtin-datasets/sources", get(builtin_datasets::list_sources))
         .route("/api/builtin-datasets/:id", get(builtin_datasets::get_dataset_info))
         .route("/api/builtin-datasets/:id/prepare", post(builtin_datasets::prepare_dataset))
+        // Training Notebooks
+        .route("/api/notebooks", get(notebooks::list_notebooks))
+        .route("/api/notebooks", post(notebooks::create_notebook))
+        .route("/api/notebooks/import", post(notebooks::import_notebook))
+        .route("/api/notebooks/:id", get(notebooks::get_notebook))
+        .route("/api/notebooks/:id", put(notebooks::update_notebook))
+        .route("/api/notebooks/:id", delete(notebooks::delete_notebook))
+        .route("/api/notebooks/:id/export", get(notebooks::export_notebook))
+        .route("/api/notebooks/:id/start", post(notebooks::start_notebook))
+        .route("/api/notebooks/:id/stop", post(notebooks::stop_notebook))
+        .route("/api/notebooks/:id/cells", post(notebooks::add_cell))
+        .route("/api/notebooks/:id/cells/:cell_id", put(notebooks::update_cell))
+        .route("/api/notebooks/:id/cells/:cell_id", delete(notebooks::delete_cell))
+        .route("/api/notebooks/:id/cells/:cell_id/execute", post(notebooks::execute_cell))
+        .route("/api/notebooks/:id/ai-assist", post(notebooks::ai_assist))
+        .route("/api/notebooks/:id/checkpoints", get(notebooks::list_checkpoints))
+        .route("/api/notebooks/:id/checkpoints", post(notebooks::save_checkpoint))
+        .route("/api/notebooks/:id/checkpoints/best", get(notebooks::get_best_checkpoint))
+        .route("/api/notebooks/:id/upload-version", post(notebooks::upload_model_version))
         .layer(middleware::from_fn_with_state(
             state.jwt.clone(),
             auth_middleware,

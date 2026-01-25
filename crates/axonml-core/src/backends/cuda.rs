@@ -5,21 +5,19 @@
 //!
 //! # Key Features
 //! - cuBLAS integration for linear algebra
-//! - Async execution with CUDA streams
 //! - Multi-GPU support
-//! - Unified memory support
 //!
 //! # Requirements
 //! - NVIDIA GPU with compute capability 3.5+
 //! - CUDA Toolkit 11.0+
 //!
-//! @version 0.1.0
+//! @version 0.2.0
 //! @author AutomataNexus Development Team
 
 #[cfg(feature = "cuda")]
-use cudarc::cublas::{sys::cublasOperation_t, CudaBlas, GemmConfig};
+use cudarc::cublas::{sys::cublasOperation_t, CudaBlas, Gemm, GemmConfig};
 #[cfg(feature = "cuda")]
-use cudarc::driver::{CudaDevice, CudaSlice, CudaStream, DevicePtr, DeviceRepr};
+use cudarc::driver::{CudaDevice, CudaSlice, DeviceRepr, ValidAsZeroBits};
 
 use super::Backend;
 use crate::device::DeviceCapabilities;
@@ -30,12 +28,14 @@ use std::sync::Arc;
 // =============================================================================
 
 /// CUDA backend for tensor operations on NVIDIA GPUs.
+///
+/// Note: CudaStream is not Send+Sync, so we don't store it in the struct.
+/// Instead, we use synchronous operations and the device's default stream.
 #[cfg(feature = "cuda")]
 pub struct CudaBackend {
     device_index: usize,
     device: Arc<CudaDevice>,
     blas: CudaBlas,
-    stream: CudaStream,
 }
 
 #[cfg(not(feature = "cuda"))]
@@ -43,6 +43,13 @@ pub struct CudaBackend {
 pub struct CudaBackend {
     device_index: usize,
 }
+
+// Implement Send and Sync for CudaBackend
+// Safe because CudaDevice and CudaBlas are internally synchronized
+#[cfg(feature = "cuda")]
+unsafe impl Send for CudaBackend {}
+#[cfg(feature = "cuda")]
+unsafe impl Sync for CudaBackend {}
 
 #[cfg(feature = "cuda")]
 impl std::fmt::Debug for CudaBackend {
@@ -57,16 +64,14 @@ impl CudaBackend {
     /// Creates a new CUDA backend for the specified device.
     #[cfg(feature = "cuda")]
     pub fn new(device_index: usize) -> Option<Self> {
+        // CudaDevice::new returns Result<Arc<CudaDevice>, _>
         let device = CudaDevice::new(device_index).ok()?;
-        let device = Arc::new(device);
         let blas = CudaBlas::new(device.clone()).ok()?;
-        let stream = device.fork_default_stream().ok()?;
 
         Some(Self {
             device_index,
             device,
             blas,
-            stream,
         })
     }
 
@@ -93,27 +98,36 @@ impl CudaBackend {
         &self.blas
     }
 
-    /// Returns the CUDA stream.
+    /// Allocates a typed buffer on the GPU initialized to zeros.
     #[cfg(feature = "cuda")]
-    pub fn stream(&self) -> &CudaStream {
-        &self.stream
+    pub fn alloc<T: DeviceRepr + ValidAsZeroBits>(
+        &self,
+        len: usize,
+    ) -> Result<CudaSlice<T>, CudaError> {
+        self.device.alloc_zeros(len).map_err(CudaError::from)
     }
 
-    /// Allocates a typed buffer on the GPU.
+    /// Allocates uninitialized memory on the GPU.
     #[cfg(feature = "cuda")]
-    pub fn alloc<T: DeviceRepr>(&self, len: usize) -> Result<CudaSlice<T>, CudaError> {
-        self.device.alloc_zeros(len).map_err(CudaError::from)
+    pub fn alloc_uninit<T: DeviceRepr>(&self, len: usize) -> Result<CudaSlice<T>, CudaError> {
+        unsafe { self.device.alloc(len).map_err(CudaError::from) }
     }
 
     /// Copies data from host to device.
     #[cfg(feature = "cuda")]
-    pub fn htod_copy<T: DeviceRepr>(&self, src: &[T]) -> Result<CudaSlice<T>, CudaError> {
+    pub fn htod_copy<T: DeviceRepr + Clone + Unpin>(
+        &self,
+        src: &[T],
+    ) -> Result<CudaSlice<T>, CudaError> {
         self.device.htod_copy(src.to_vec()).map_err(CudaError::from)
     }
 
     /// Copies data from device to host.
     #[cfg(feature = "cuda")]
-    pub fn dtoh_copy<T: DeviceRepr>(&self, src: &CudaSlice<T>) -> Result<Vec<T>, CudaError> {
+    pub fn dtoh_copy<T: DeviceRepr + Clone + Default + Unpin>(
+        &self,
+        src: &CudaSlice<T>,
+    ) -> Result<Vec<T>, CudaError> {
         self.device.dtoh_sync_copy(src).map_err(CudaError::from)
     }
 }
@@ -122,33 +136,27 @@ impl CudaBackend {
 // Backend Trait Implementation
 // =============================================================================
 
+#[cfg(feature = "cuda")]
 impl Backend for CudaBackend {
     fn name(&self) -> &'static str {
         "cuda"
     }
 
-    #[cfg(feature = "cuda")]
     fn is_available(&self) -> bool {
         true
     }
 
-    #[cfg(not(feature = "cuda"))]
-    fn is_available(&self) -> bool {
-        false
-    }
-
-    #[cfg(feature = "cuda")]
     fn capabilities(&self) -> DeviceCapabilities {
         // Query actual device properties
         let name = format!("CUDA Device {}", self.device_index);
 
-        // Get memory info
-        let (free, total) = self.device.mem_info().unwrap_or((0, 0));
+        // Get memory info via CUDA driver API
+        let (free, total) = cudarc::driver::result::mem_get_info().unwrap_or((0, 0));
 
         DeviceCapabilities {
             name,
-            total_memory: total as u64,
-            available_memory: free as u64,
+            total_memory: total,
+            available_memory: free,
             supports_f16: true,
             supports_f64: true,
             max_threads_per_block: 1024,
@@ -156,7 +164,73 @@ impl Backend for CudaBackend {
         }
     }
 
-    #[cfg(not(feature = "cuda"))]
+    fn allocate(&self, size: usize) -> *mut u8 {
+        match self.device.alloc_zeros::<u8>(size) {
+            Ok(slice) => {
+                // Get the raw device pointer
+                use cudarc::driver::DevicePtr;
+                let ptr = *slice.device_ptr() as *mut u8;
+                std::mem::forget(slice); // Don't drop, we're managing memory manually
+                ptr
+            }
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    fn deallocate(&self, ptr: *mut u8, size: usize) {
+        if !ptr.is_null() {
+            // Reconstruct the CudaSlice to properly free
+            unsafe {
+                let slice: CudaSlice<u8> = self.device.upgrade_device_ptr(ptr as u64, size);
+                drop(slice);
+            }
+        }
+    }
+
+    fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
+        if dst.is_null() || src.is_null() || size == 0 {
+            return;
+        }
+        unsafe {
+            let src_slice = std::slice::from_raw_parts(src, size);
+            let _ = cudarc::driver::result::memcpy_htod_sync(dst as u64, src_slice);
+        }
+    }
+
+    fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
+        if dst.is_null() || src.is_null() || size == 0 {
+            return;
+        }
+        unsafe {
+            let dst_slice = std::slice::from_raw_parts_mut(dst, size);
+            let _ = cudarc::driver::result::memcpy_dtoh_sync(dst_slice, src as u64);
+        }
+    }
+
+    fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
+        if dst.is_null() || src.is_null() || size == 0 {
+            return;
+        }
+        unsafe {
+            let _ = cudarc::driver::result::memcpy_dtod_sync(dst as u64, src as u64, size);
+        }
+    }
+
+    fn synchronize(&self) {
+        let _ = self.device.synchronize();
+    }
+}
+
+#[cfg(not(feature = "cuda"))]
+impl Backend for CudaBackend {
+    fn name(&self) -> &'static str {
+        "cuda"
+    }
+
+    fn is_available(&self) -> bool {
+        false
+    }
+
     fn capabilities(&self) -> DeviceCapabilities {
         DeviceCapabilities {
             name: format!("CUDA Device {} (unavailable)", self.device_index),
@@ -169,92 +243,18 @@ impl Backend for CudaBackend {
         }
     }
 
-    #[cfg(feature = "cuda")]
-    fn allocate(&self, size: usize) -> *mut u8 {
-        match self.device.alloc_zeros::<u8>(size) {
-            Ok(slice) => {
-                let ptr = *slice.device_ptr() as *mut u8;
-                std::mem::forget(slice); // Don't drop, we're managing memory manually
-                ptr
-            }
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    #[cfg(not(feature = "cuda"))]
     fn allocate(&self, _size: usize) -> *mut u8 {
         std::ptr::null_mut()
     }
 
-    #[cfg(feature = "cuda")]
-    fn deallocate(&self, ptr: *mut u8, size: usize) {
-        if !ptr.is_null() {
-            // Reconstruct the CudaSlice to properly free
-            unsafe {
-                let slice: CudaSlice<u8> = self
-                    .device
-                    .upgrade_device_ptr(DevicePtr::from(ptr as u64), size);
-                drop(slice);
-            }
-        }
-    }
-
-    #[cfg(not(feature = "cuda"))]
     fn deallocate(&self, _ptr: *mut u8, _size: usize) {}
 
-    #[cfg(feature = "cuda")]
-    fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        if dst.is_null() || src.is_null() || size == 0 {
-            return;
-        }
-        unsafe {
-            let src_slice = std::slice::from_raw_parts(src, size);
-            let _ =
-                cudarc::driver::result::memcpy_htod_sync(DevicePtr::from(dst as u64), src_slice);
-        }
-    }
-
-    #[cfg(not(feature = "cuda"))]
     fn copy_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
 
-    #[cfg(feature = "cuda")]
-    fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
-        if dst.is_null() || src.is_null() || size == 0 {
-            return;
-        }
-        unsafe {
-            let dst_slice = std::slice::from_raw_parts_mut(dst, size);
-            let _ =
-                cudarc::driver::result::memcpy_dtoh_sync(dst_slice, DevicePtr::from(src as u64));
-        }
-    }
-
-    #[cfg(not(feature = "cuda"))]
     fn copy_to_host(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
 
-    #[cfg(feature = "cuda")]
-    fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        if dst.is_null() || src.is_null() || size == 0 {
-            return;
-        }
-        unsafe {
-            let _ = cudarc::driver::result::memcpy_dtod_sync(
-                DevicePtr::from(dst as u64),
-                DevicePtr::from(src as u64),
-                size,
-            );
-        }
-    }
-
-    #[cfg(not(feature = "cuda"))]
     fn copy_device_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
 
-    #[cfg(feature = "cuda")]
-    fn synchronize(&self) {
-        let _ = self.device.synchronize();
-    }
-
-    #[cfg(not(feature = "cuda"))]
     fn synchronize(&self) {}
 }
 
@@ -265,11 +265,17 @@ impl Backend for CudaBackend {
 /// CUDA-specific error type
 #[derive(Debug)]
 pub enum CudaError {
+    /// CUDA device was not found
     DeviceNotFound,
+    /// Memory allocation on the GPU failed
     AllocationFailed,
+    /// Memory copy operation failed
     CopyFailed,
+    /// CUDA kernel launch failed
     KernelLaunchFailed,
+    /// cuBLAS operation error
     BlasError(String),
+    /// CUDA driver error
     DriverError(String),
 }
 
@@ -343,7 +349,7 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
             return backend.capabilities();
         }
     }
-
+    #[allow(unreachable_code)]
     DeviceCapabilities {
         name: format!("CUDA Device {}", index),
         total_memory: 0,
@@ -355,28 +361,17 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
     }
 }
 
-// =============================================================================
-// CUDA Stream Functions
-// =============================================================================
-
-/// CUDA stream wrapper for async operations
+/// Synchronizes a CUDA stream by handle.
+/// This is a no-op placeholder - actual stream sync should use the device.
 #[cfg(feature = "cuda")]
-pub struct Stream {
-    inner: CudaStream,
+pub fn stream_synchronize(_handle: usize) {
+    // Stream handles are managed internally by cudarc
+    // For synchronization, use CudaBackend::synchronize() instead
 }
 
-#[cfg(feature = "cuda")]
-impl Stream {
-    /// Creates a new CUDA stream.
-    pub fn new(backend: &CudaBackend) -> Result<Self, CudaError> {
-        let inner = backend.device.fork_default_stream()?;
-        Ok(Self { inner })
-    }
-
-    /// Synchronizes the stream.
-    pub fn synchronize(&self) -> Result<(), CudaError> {
-        self.inner.synchronize().map_err(CudaError::from)
-    }
+#[cfg(not(feature = "cuda"))]
+pub fn stream_synchronize(_handle: usize) {
+    // No-op when CUDA is not available
 }
 
 // =============================================================================
@@ -402,8 +397,6 @@ impl CudaBackend {
         c: &mut CudaSlice<f32>,
         ldc: usize,
     ) -> Result<(), CudaError> {
-        use cudarc::cublas::Gemm;
-
         let cfg = GemmConfig {
             transa: if transa {
                 cublasOperation_t::CUBLAS_OP_T
@@ -477,36 +470,40 @@ impl CudaBackend {
         }
         Ok(())
     }
-}
 
-// =============================================================================
-// Tensor Operations
-// =============================================================================
-
-#[cfg(feature = "cuda")]
-impl CudaBackend {
-    /// Element-wise addition: dst = a + b
+    /// Element-wise addition using device-to-device copy and manual computation.
     pub fn add_f32(
         &self,
         dst: &mut CudaSlice<f32>,
         a: &CudaSlice<f32>,
         b: &CudaSlice<f32>,
-        len: usize,
+        _len: usize,
     ) -> Result<(), CudaError> {
-        use cudarc::cublas::Axpy;
+        // Copy a to host, b to host, add, copy back
+        let a_host = self.dtoh_copy(a)?;
+        let b_host = self.dtoh_copy(b)?;
 
-        // Copy a to dst
-        self.device.dtod_copy(a, dst)?;
+        let result: Vec<f32> = a_host
+            .iter()
+            .zip(b_host.iter())
+            .map(|(x, y)| x + y)
+            .collect();
 
-        // dst = dst + 1.0 * b (axpy)
-        unsafe { self.blas.axpy(1.0f32, b, dst).map_err(CudaError::from) }
+        // Copy result to dst
+        let result_gpu = self.htod_copy(&result)?;
+        self.device.dtod_copy(&result_gpu, dst)?;
+
+        Ok(())
     }
 
-    /// Scalar multiplication: dst = alpha * a
+    /// Scalar multiplication.
     pub fn scale_f32(&self, dst: &mut CudaSlice<f32>, alpha: f32) -> Result<(), CudaError> {
-        use cudarc::cublas::Scal;
-
-        unsafe { self.blas.scal(alpha, dst).map_err(CudaError::from) }
+        // Copy to host, scale, copy back
+        let host_data = self.dtoh_copy(dst)?;
+        let scaled: Vec<f32> = host_data.iter().map(|x| x * alpha).collect();
+        let scaled_gpu = self.htod_copy(&scaled)?;
+        self.device.dtod_copy(&scaled_gpu, dst)?;
+        Ok(())
     }
 }
 
@@ -567,29 +564,55 @@ mod tests {
 
         let backend = CudaBackend::new(0).unwrap();
 
-        // 2x3 @ 3x2 = 2x2
-        let a: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]; // 2x3
-        let b: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]; // 3x2
-        let mut c: Vec<f32> = vec![0.0; 4]; // 2x2
+        // cuBLAS uses column-major order
+        // To compute C = A @ B where:
+        //   A is 2x3 (m=2, k=3) and B is 3x2 (k=3, n=2), C is 2x2 (m=2, n=2)
+        // In column-major: lda >= m, ldb >= k, ldc >= m
+        //
+        // A in column-major (2x3):
+        // | a00 a01 a02 |    stored as: [a00, a10, a01, a11, a02, a12]
+        // | a10 a11 a12 |
+        let a: Vec<f32> = vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]; // column-major 2x3
+                                                              // B in column-major (3x2):
+                                                              // | b00 b01 |    stored as: [b00, b10, b20, b01, b11, b21]
+                                                              // | b10 b11 |
+                                                              // | b20 b21 |
+        let b: Vec<f32> = vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]; // column-major 3x2
+        let c: Vec<f32> = vec![0.0; 4]; // 2x2
 
         let a_gpu = backend.htod_copy(&a).unwrap();
         let b_gpu = backend.htod_copy(&b).unwrap();
         let mut c_gpu = backend.htod_copy(&c).unwrap();
 
+        // C = A @ B
+        // m=2 (rows of A, rows of C)
+        // n=2 (cols of B, cols of C)
+        // k=3 (cols of A, rows of B)
+        // lda=2 (leading dimension of A, >= m)
+        // ldb=3 (leading dimension of B, >= k)
+        // ldc=2 (leading dimension of C, >= m)
         backend
             .gemm_f32(
                 false, false, 2, 2, 3,   // m, n, k
                 1.0, // alpha
-                &a_gpu, 3, // A, lda
-                &b_gpu, 2,   // B, ldb
+                &a_gpu, 2, // A, lda
+                &b_gpu, 3,   // B, ldb
                 0.0, // beta
                 &mut c_gpu, 2, // C, ldc
             )
             .unwrap();
 
         let result = backend.dtoh_copy(&c_gpu).unwrap();
-        // Expected: [[22, 28], [49, 64]]
-        assert!((result[0] - 22.0).abs() < 1e-5);
-        assert!((result[3] - 64.0).abs() < 1e-5);
+        // C = A @ B (in matrix form, row-major interpretation):
+        // A = [[1,2,3],[4,5,6]], B = [[1,2],[3,4],[5,6]]
+        // C[0,0] = 1*1 + 2*3 + 3*5 = 1 + 6 + 15 = 22
+        // C[1,0] = 4*1 + 5*3 + 6*5 = 4 + 15 + 30 = 49
+        // C[0,1] = 1*2 + 2*4 + 3*6 = 2 + 8 + 18 = 28
+        // C[1,1] = 4*2 + 5*4 + 6*6 = 8 + 20 + 36 = 64
+        // Column-major result: [22, 49, 28, 64]
+        assert!((result[0] - 22.0).abs() < 1e-5, "result[0] = {}", result[0]);
+        assert!((result[1] - 49.0).abs() < 1e-5, "result[1] = {}", result[1]);
+        assert!((result[2] - 28.0).abs() < 1e-5, "result[2] = {}", result[2]);
+        assert!((result[3] - 64.0).abs() < 1e-5, "result[3] = {}", result[3]);
     }
 }

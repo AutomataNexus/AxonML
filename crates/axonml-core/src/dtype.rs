@@ -24,11 +24,12 @@ use core::fmt::Debug;
 // =============================================================================
 
 /// Runtime representation of tensor data types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum DType {
     /// 16-bit floating point (half precision).
     F16,
     /// 32-bit floating point (single precision).
+    #[default]
     F32,
     /// 64-bit floating point (double precision).
     F64,
@@ -117,12 +118,6 @@ impl DType {
     }
 }
 
-impl Default for DType {
-    fn default() -> Self {
-        Self::F32
-    }
-}
-
 impl core::fmt::Display for DType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.name())
@@ -141,7 +136,8 @@ pub trait Scalar: Copy + Clone + Debug + Default + Send + Sync + Pod + Zeroable 
     const DTYPE: DType;
 
     /// Returns the dtype for this type.
-    #[must_use] fn dtype() -> DType {
+    #[must_use]
+    fn dtype() -> DType {
         Self::DTYPE
     }
 }

@@ -36,6 +36,86 @@ cargo run -p axonml-server -- --port 3021  # Match dashboard proxy for local dev
 cargo install --path crates/axonml-cli
 ```
 
+## PM2 Process Management
+
+AxonML server and dashboard run via PM2 for persistence across reboots.
+
+```bash
+# Start/Stop/Restart
+pm2 start ecosystem.config.js             # Start all (server + dashboard dev)
+pm2 start ecosystem.config.js --only axonml-server     # Server only
+pm2 start ecosystem.config.js --only axonml-dashboard  # Dashboard dev server only
+pm2 stop axonml-server                    # Stop server
+pm2 stop axonml-dashboard                 # Stop dashboard dev server
+pm2 restart axonml-server                 # Restart server
+pm2 reload axonml-server                  # Zero-downtime reload
+
+# Monitoring
+pm2 status                                # View process status
+pm2 logs axonml-server                    # View server logs
+pm2 logs axonml-dashboard                 # View dashboard logs
+pm2 logs axonml-server --lines 100        # View last 100 lines
+pm2 monit                                 # Real-time monitoring dashboard
+
+# Persistence (run once after first setup)
+pm2 save                                  # Save current process list
+pm2 startup                               # Generate startup script for reboot persistence
+
+# Production deployment
+cargo build --release -p axonml-server    # Build server binary
+cd crates/axonml-dashboard && trunk build --release  # Build dashboard WASM
+pm2 start ecosystem.config.js --only axonml-server --env production
+pm2 save
+
+# Ports
+# - axonml-server:    3021 (API backend)
+# - axonml-dashboard: 8082 (nginx production) or 8081 (trunk dev)
+```
+
+## Database Management
+
+AxonML uses Aegis-DB as its document store. The database is also managed via PM2.
+
+```bash
+# Initialize/Re-initialize Database
+./AxonML_DB_Init.sh                       # Create collections + default admin user
+./AxonML_DB_Init.sh --with-user           # Also create DevOps admin user
+
+# Default Users (created by init script)
+# Admin:  admin@axonml.local / admin
+# DevOps: DevOps@automatanexus.com / Invertedskynet2$ (with --with-user flag)
+
+# Check Aegis-DB status
+pm2 status aegis-db
+curl http://127.0.0.1:7001/health
+
+# Database location
+# Data: configured in Aegis-DB startup (typically /var/lib/aegis or /tmp/aegis-data)
+# Config: ~/.axonml/config.toml
+```
+
+## First-Time Setup
+
+```bash
+# 1. Build the release binary
+cargo build --release -p axonml-server
+
+# 2. Ensure Aegis-DB is running (should already be via PM2)
+pm2 status aegis-db
+
+# 3. Initialize database with DevOps user
+./AxonML_DB_Init.sh --with-user
+
+# 4. Create log directory
+sudo mkdir -p /var/log/axonml
+sudo chown $USER:$USER /var/log/axonml
+
+# 5. Start server via PM2
+pm2 start ecosystem.config.js
+pm2 save
+pm2 startup  # Follow the instructions to enable boot persistence
+```
+
 ## Architecture
 
 **Foundation Layer:**
@@ -104,12 +184,35 @@ mod tests { ... }
 
 **API design:** Follows PyTorch patterns for familiarity.
 
+## Critical Rules - READ THIS
+
+**NEVER use these flags without explicit user permission:**
+- `--no-default-features` - This disables application functionality, not dev tools
+- `--features=""` with empty value
+- Any flag that removes or disables features
+
+**Before running build commands:**
+1. STOP and think: "What does this flag actually do?"
+2. If unsure, ASK the user instead of guessing
+3. Trunk's dev server (live-reload websocket) is controlled by `trunk serve` vs `trunk build`, NOT by Cargo features
+
+**Dashboard builds:**
+```bash
+# Development (with live reload)
+trunk serve
+
+# Production (NO --no-default-features, just this)
+trunk build --release
+```
+
+**Do not rush. Think first. Ask if unsure.**
+
 ## Web Architecture
 
-- **Dashboard (frontend):** Leptos/WASM (CSR) on port 8080 (dev: 8081 via Trunk)
-- **Server (backend):** Axum REST + WebSocket on port 3000 (dev: 3021)
-- **Dev proxy:** Trunk proxies `/api/*` from :8081 → :3021
-- **Database:** Uses Aegis-DB (connection configured in `~/.axonml/config.toml`)
+- **Dashboard (frontend):** Leptos/WASM (CSR) on port 8082 (nginx) or 8081 (trunk dev)
+- **Server (backend):** Axum REST + WebSocket on port 3021
+- **Nginx proxy:** Serves static WASM from dist/, proxies `/api/*` to :3021
+- **Database:** Aegis-DB on port 7001 (configured in `~/.axonml/config.toml`)
 
 ## Key Dependencies
 
