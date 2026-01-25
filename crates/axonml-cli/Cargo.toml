@@ -97,9 +97,10 @@ assert_cmd = "2.0"
 predicates = "3.1"
 
 [features]
-default = ["wandb", "kaggle", "dataset-api", "hub-download"]
+default = ["wandb", "kaggle", "dataset-api", "hub-download", "server-sync"]
 serve = ["tokio"]
 wandb = ["reqwest", "chrono", "uuid"]
 kaggle = ["reqwest"]
 dataset-api = ["reqwest"]
 hub-download = ["reqwest"]
+server-sync = ["reqwest", "tokio"]

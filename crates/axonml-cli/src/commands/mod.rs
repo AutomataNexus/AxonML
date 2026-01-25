@@ -39,5 +39,8 @@ pub mod wandb_client;
 #[cfg(feature = "serve")]
 pub mod serve;
 
+#[cfg(feature = "server-sync")]
+pub mod sync;
+
 // Re-export common utilities for commands
 pub(crate) mod utils;

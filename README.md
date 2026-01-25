@@ -122,6 +122,7 @@ Axonml (named after axons - the nerve fibers that transmit signals between neuro
   - JWT authentication with refresh tokens
   - Training run management
   - Model registry and deployment
+  - WebSocket terminal (PTY) for in-browser shell access
   - Prometheus metrics export
 
 ### Axonml CLI
@@ -129,6 +130,13 @@ Axonml (named after axons - the nerve fibers that transmit signals between neuro
 The Axonml CLI provides a unified command-line interface for the entire ML workflow:
 
 ```bash
+# Server Sync (CLI ↔ Webapp Integration)
+axonml login                           # Login to AxonML server
+axonml login --server http://server:3021  # Login to custom server
+axonml logout                          # Logout and clear credentials
+axonml sync                            # Check sync status with server
+axonml sync --full                     # Full sync of training runs, models, datasets
+
 # Project Management
 axonml new my-model                    # Scaffold new project
 axonml init                            # Initialize in existing directory
@@ -308,6 +316,7 @@ axon logs -f
 - **Training Runs** - Start, monitor, and manage training with live metrics
 - **Model Registry** - Upload, version, and manage trained models
 - **Inference Endpoints** - Deploy models for serving predictions
+- **In-App Terminal** - Slide-out terminal with WebSocket PTY for server-side commands
 - **Settings** - User profile, security settings, MFA configuration
 
 **Authentication:**
