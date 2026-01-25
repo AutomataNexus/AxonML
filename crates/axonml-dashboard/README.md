@@ -32,6 +32,7 @@
 - **Inference Dashboard** - Deploy models and monitor inference endpoints
 - **Dark Mode** - Toggle between light and dark themes
 - **Toast Notifications** - Real-time feedback for user actions
+- **In-App Terminal** - Slide-out terminal with WebSocket PTY for server-side shell access
 - **Responsive Design** - Works seamlessly on desktop and tablet devices
 
 ---
@@ -50,6 +51,7 @@
 | `components::forms` | Form inputs with validation support |
 | `components::modal` | Modal dialog component |
 | `components::toast` | Toast notification system |
+| `components::terminal` | Slide-out terminal with WebSocket PTY |
 | `pages::dashboard` | Main dashboard overview and app shell layout |
 | `pages::training` | Training run list, detail view, and new run creation |
 | `pages::models` | Model registry with version management and upload |

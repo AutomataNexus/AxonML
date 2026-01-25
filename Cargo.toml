@@ -108,7 +108,7 @@ anyhow = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 
 # W&B integration
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.12", features = ["json", "blocking", "multipart"] }
 dirs = "5.0"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.10", features = ["v4"] }

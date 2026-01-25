@@ -31,6 +31,7 @@
 - **Model Registry** - Version-controlled model storage with file upload/download
 - **Inference Endpoints** - Deploy and manage model serving instances
 - **WebSocket Streaming** - Real-time training metrics via WebSocket
+- **Terminal WebSocket** - PTY-based in-browser terminal for server-side commands
 - **CORS Support** - Configurable cross-origin resource sharing
 - **Structured Logging** - Tracing-based logging with configurable levels
 - **Aegis-DB Integration** - SQL queries and key-value storage backend
@@ -59,6 +60,7 @@
 | `api::models` | Model registry endpoints with file handling |
 | `api::inference` | Inference endpoint management and prediction API |
 | `api::metrics` | System and performance metrics endpoints |
+| `api::terminal` | WebSocket PTY terminal endpoint |
 | `training` | Training run tracking and metrics collection |
 | `training::tracker` | Run lifecycle management and status tracking |
 | `training::websocket` | Real-time metrics WebSocket handler |
@@ -227,6 +229,13 @@ port = 8080
 | `POST` | `/api/inference/endpoints/:id/stop` | Stop endpoint | Yes |
 | `GET` | `/api/inference/endpoints/:id/metrics` | Get endpoint metrics | Yes |
 | `POST` | `/api/inference/predict/:name` | Run prediction | Yes |
+
+### Terminal
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/api/terminal` | WebSocket PTY terminal | Yes |
+| `GET` | `/api/terminal/info` | Terminal capabilities info | Yes |
 
 ### Admin & System
 

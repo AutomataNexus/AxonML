@@ -15,6 +15,7 @@ pub mod data;
 pub mod kaggle;
 pub mod builtin_datasets;
 pub mod notebooks;
+pub mod terminal;
 
 use crate::auth::{JwtAuth, AuthLayer, auth_middleware, require_admin_middleware, require_mfa_middleware, optional_auth_middleware};
 use crate::config::Config;
@@ -61,6 +62,8 @@ pub fn create_router(state: AppState) -> Router {
         .allow_origin([
             "http://127.0.0.1:8081".parse::<axum::http::HeaderValue>().unwrap(),
             "http://localhost:8081".parse::<axum::http::HeaderValue>().unwrap(),
+            "http://127.0.0.1:8083".parse::<axum::http::HeaderValue>().unwrap(),
+            "http://localhost:8083".parse::<axum::http::HeaderValue>().unwrap(),
             "http://127.0.0.1:3021".parse::<axum::http::HeaderValue>().unwrap(),
             "http://localhost:3021".parse::<axum::http::HeaderValue>().unwrap(),
         ])
@@ -76,6 +79,8 @@ pub fn create_router(state: AppState) -> Router {
             axum::http::header::AUTHORIZATION,
             axum::http::header::CONTENT_TYPE,
             axum::http::header::ACCEPT,
+            axum::http::header::UPGRADE,
+            axum::http::header::CONNECTION,
         ])
         .allow_credentials(true);
 
@@ -204,6 +209,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/notebooks/:id/checkpoints", post(notebooks::save_checkpoint))
         .route("/api/notebooks/:id/checkpoints/best", get(notebooks::get_best_checkpoint))
         .route("/api/notebooks/:id/upload-version", post(notebooks::upload_model_version))
+        // Terminal (WebSocket PTY)
+        .route("/api/terminal", get(terminal::terminal_ws))
+        .route("/api/terminal/info", get(terminal::terminal_info))
         .layer(middleware::from_fn_with_state(
             state.jwt.clone(),
             auth_middleware,
