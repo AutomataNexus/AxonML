@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use wgpu::{
     Adapter, Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, ComputePipeline,
     ComputePipelineDescriptor, Device, DeviceDescriptor, Features, Instance, InstanceDescriptor,
-    Limits, MapMode, Queue, RequestAdapterOptions, ShaderModuleDescriptor, ShaderSource,
+    Limits, MapMode, Queue, ShaderModuleDescriptor, ShaderSource,
 };
 
 // =============================================================================
@@ -586,6 +586,19 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
     }
 }
 
+/// Synchronizes a wgpu queue by handle (no-op, wgpu submits are synchronous).
+#[cfg(feature = "wgpu")]
+pub fn queue_submit(_handle: usize) {
+    // wgpu queue submissions are handled internally
+    // The handle is not used directly; synchronization happens via device.poll()
+}
+
+/// Synchronizes a wgpu queue by handle (no-op when wgpu is not available).
+#[cfg(not(feature = "wgpu"))]
+pub fn queue_submit(_handle: usize) {
+    // No-op when wgpu is not available
+}
+
 // =============================================================================
 // Tensor Operation Helpers
 // =============================================================================
@@ -734,9 +747,7 @@ impl WgpuBackend {
         let workgroups = ((count + 255) / 256) as u32;
         let mut encoder = self
             .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some(name),
-            });
+            .create_command_encoder(&CommandEncoderDescriptor { label: Some(name) });
 
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -777,7 +788,10 @@ impl WgpuBackend {
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: true,
         });
-        dims_buffer.slice(..).get_mapped_range_mut().copy_from_slice(dims_bytes);
+        dims_buffer
+            .slice(..)
+            .get_mapped_range_mut()
+            .copy_from_slice(dims_bytes);
         dims_buffer.unmap();
 
         let pipeline = self
@@ -901,9 +915,7 @@ impl WgpuBackend {
         let workgroups = ((count + 255) / 256) as u32;
         let mut encoder = self
             .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some(name),
-            });
+            .create_command_encoder(&CommandEncoderDescriptor { label: Some(name) });
 
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {

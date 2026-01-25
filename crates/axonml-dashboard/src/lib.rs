@@ -18,7 +18,7 @@ use components::toast::ToastContainer;
 use pages::{
     landing::LandingPage,
     dashboard::{DashboardPage, AppShell},
-    training::{TrainingListPage, TrainingDetailPage, NewTrainingPage},
+    training::{TrainingListPage, TrainingDetailPage, NewTrainingPage, NotebookListPage, NotebookEditorPage, NotebookImportPage},
     models::{ModelsListPage, ModelDetailPage, ModelUploadPage},
     datasets::{DatasetsListPage, DatasetUploadPage, DataAnalyzePage, KagglePage, BuiltinDatasetsPage},
     inference::{InferenceOverviewPage, EndpointsListPage, EndpointDetailPage, InferenceMetricsPage},
@@ -75,6 +75,36 @@ pub fn App() -> impl IntoView {
                     <ProtectedRoute>
                         <AppShell>
                             <TrainingDetailPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+
+                // Training Notebooks routes
+                <Route path="/training/notebooks" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <NotebookListPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+                <Route path="/training/notebooks/new" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <NotebookEditorPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+                <Route path="/training/notebooks/import" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <NotebookImportPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+                <Route path="/training/notebooks/:id" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <NotebookEditorPage />
                         </AppShell>
                     </ProtectedRoute>
                 } />

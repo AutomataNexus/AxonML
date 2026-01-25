@@ -14,7 +14,11 @@
 use super::Backend;
 use crate::device::DeviceCapabilities;
 use crate::dtype::{Float, Numeric, Scalar};
+use rayon::prelude::*;
 use sysinfo::System;
+
+/// Threshold for using parallel processing (in elements)
+const PARALLEL_THRESHOLD: usize = 4096;
 
 // =============================================================================
 // CPU Backend Struct
@@ -131,83 +135,143 @@ fn num_cpus() -> usize {
 // =============================================================================
 
 impl CpuBackend {
-    /// Adds two slices element-wise.
-    pub fn add<T: Numeric>(dst: &mut [T], a: &[T], b: &[T]) {
+    /// Adds two slices element-wise with optional parallelization.
+    pub fn add<T: Numeric + Sync + Send>(dst: &mut [T], a: &[T], b: &[T]) {
         debug_assert_eq!(a.len(), b.len());
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i] + b[i];
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut()
+                .zip(a.par_iter().zip(b.par_iter()))
+                .for_each(|(d, (a_val, b_val))| {
+                    *d = *a_val + *b_val;
+                });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i] + b[i];
+            }
         }
     }
 
-    /// Subtracts two slices element-wise.
-    pub fn sub<T: Numeric>(dst: &mut [T], a: &[T], b: &[T]) {
+    /// Subtracts two slices element-wise with optional parallelization.
+    pub fn sub<T: Numeric + Sync + Send>(dst: &mut [T], a: &[T], b: &[T]) {
         debug_assert_eq!(a.len(), b.len());
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i] - b[i];
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut()
+                .zip(a.par_iter().zip(b.par_iter()))
+                .for_each(|(d, (a_val, b_val))| {
+                    *d = *a_val - *b_val;
+                });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i] - b[i];
+            }
         }
     }
 
-    /// Multiplies two slices element-wise.
-    pub fn mul<T: Numeric>(dst: &mut [T], a: &[T], b: &[T]) {
+    /// Multiplies two slices element-wise with optional parallelization.
+    pub fn mul<T: Numeric + Sync + Send>(dst: &mut [T], a: &[T], b: &[T]) {
         debug_assert_eq!(a.len(), b.len());
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i] * b[i];
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut()
+                .zip(a.par_iter().zip(b.par_iter()))
+                .for_each(|(d, (a_val, b_val))| {
+                    *d = *a_val * *b_val;
+                });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i] * b[i];
+            }
         }
     }
 
-    /// Divides two slices element-wise.
-    pub fn div<T: Numeric>(dst: &mut [T], a: &[T], b: &[T]) {
+    /// Divides two slices element-wise with optional parallelization.
+    pub fn div<T: Numeric + Sync + Send>(dst: &mut [T], a: &[T], b: &[T]) {
         debug_assert_eq!(a.len(), b.len());
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i] / b[i];
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut()
+                .zip(a.par_iter().zip(b.par_iter()))
+                .for_each(|(d, (a_val, b_val))| {
+                    *d = *a_val / *b_val;
+                });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i] / b[i];
+            }
         }
     }
 
-    /// Adds a scalar to each element.
-    pub fn add_scalar<T: Numeric>(dst: &mut [T], a: &[T], scalar: T) {
+    /// Adds a scalar to each element with optional parallelization.
+    pub fn add_scalar<T: Numeric + Sync + Send>(dst: &mut [T], a: &[T], scalar: T) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i] + scalar;
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = *a_val + scalar;
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i] + scalar;
+            }
         }
     }
 
-    /// Multiplies each element by a scalar.
-    pub fn mul_scalar<T: Numeric>(dst: &mut [T], a: &[T], scalar: T) {
+    /// Multiplies each element by a scalar with optional parallelization.
+    pub fn mul_scalar<T: Numeric + Sync + Send>(dst: &mut [T], a: &[T], scalar: T) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i] * scalar;
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = *a_val * scalar;
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i] * scalar;
+            }
         }
     }
 
-    /// Negates each element.
-    pub fn neg<T: Numeric>(dst: &mut [T], a: &[T]) {
+    /// Negates each element with optional parallelization.
+    pub fn neg<T: Numeric + Sync + Send>(dst: &mut [T], a: &[T]) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = T::zero() - a[i];
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = T::zero() - *a_val;
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = T::zero() - a[i];
+            }
         }
     }
 
-    /// Computes absolute value of each element.
-    pub fn abs<T: Numeric>(dst: &mut [T], a: &[T]) {
+    /// Computes absolute value of each element with optional parallelization.
+    pub fn abs<T: Numeric + Sync + Send>(dst: &mut [T], a: &[T]) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = if a[i] < T::zero() {
-                T::zero() - a[i]
-            } else {
-                a[i]
-            };
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = if *a_val < T::zero() {
+                    T::zero() - *a_val
+                } else {
+                    *a_val
+                };
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = if a[i] < T::zero() {
+                    T::zero() - a[i]
+                } else {
+                    a[i]
+                };
+            }
         }
     }
 }
@@ -217,66 +281,112 @@ impl CpuBackend {
 // =============================================================================
 
 impl CpuBackend {
-    /// Applies `ReLU` activation: max(0, x).
-    pub fn relu<T: Float>(dst: &mut [T], a: &[T]) {
+    /// Applies `ReLU` activation: max(0, x) with optional parallelization.
+    pub fn relu<T: Float + Sync + Send>(dst: &mut [T], a: &[T]) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = if a[i] > T::zero() { a[i] } else { T::zero() };
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = if *a_val > T::zero() {
+                    *a_val
+                } else {
+                    T::zero()
+                };
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = if a[i] > T::zero() { a[i] } else { T::zero() };
+            }
         }
     }
 
-    /// Applies sigmoid activation: 1 / (1 + exp(-x)).
-    pub fn sigmoid<T: Float>(dst: &mut [T], a: &[T]) {
+    /// Applies sigmoid activation: 1 / (1 + exp(-x)) with optional parallelization.
+    pub fn sigmoid<T: Float + Sync + Send>(dst: &mut [T], a: &[T]) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = T::one() / (T::one() + (-a[i]).exp_value());
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = T::one() / (T::one() + (-*a_val).exp_value());
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = T::one() / (T::one() + (-a[i]).exp_value());
+            }
         }
     }
 
-    /// Applies tanh activation.
-    pub fn tanh<T: Float>(dst: &mut [T], a: &[T]) {
+    /// Applies tanh activation with optional parallelization.
+    pub fn tanh<T: Float + Sync + Send>(dst: &mut [T], a: &[T]) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i].tanh_value();
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = a_val.tanh_value();
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i].tanh_value();
+            }
         }
     }
 
-    /// Applies exponential function.
-    pub fn exp<T: Float>(dst: &mut [T], a: &[T]) {
+    /// Applies exponential function with optional parallelization.
+    pub fn exp<T: Float + Sync + Send>(dst: &mut [T], a: &[T]) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i].exp_value();
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = a_val.exp_value();
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i].exp_value();
+            }
         }
     }
 
-    /// Applies natural logarithm.
-    pub fn ln<T: Float>(dst: &mut [T], a: &[T]) {
+    /// Applies natural logarithm with optional parallelization.
+    pub fn ln<T: Float + Sync + Send>(dst: &mut [T], a: &[T]) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i].ln_value();
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = a_val.ln_value();
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i].ln_value();
+            }
         }
     }
 
-    /// Applies square root.
-    pub fn sqrt<T: Float>(dst: &mut [T], a: &[T]) {
+    /// Applies square root with optional parallelization.
+    pub fn sqrt<T: Float + Sync + Send>(dst: &mut [T], a: &[T]) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i].sqrt_value();
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = a_val.sqrt_value();
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i].sqrt_value();
+            }
         }
     }
 
-    /// Squares each element.
-    pub fn square<T: Numeric>(dst: &mut [T], a: &[T]) {
+    /// Squares each element with optional parallelization.
+    pub fn square<T: Numeric + Sync + Send>(dst: &mut [T], a: &[T]) {
         debug_assert_eq!(a.len(), dst.len());
 
-        for i in 0..dst.len() {
-            dst[i] = a[i] * a[i];
+        if dst.len() >= PARALLEL_THRESHOLD {
+            dst.par_iter_mut().zip(a.par_iter()).for_each(|(d, a_val)| {
+                *d = *a_val * *a_val;
+            });
+        } else {
+            for i in 0..dst.len() {
+                dst[i] = a[i] * a[i];
+            }
         }
     }
 }
@@ -395,7 +505,31 @@ impl CpuBackend {
         debug_assert_eq!(b.len(), k * n);
         debug_assert_eq!(c.len(), m * n);
 
-        // Use cache-efficient tiled matrix multiplication
+        // Use optimized BLAS routines for f32 and f64
+        use std::any::TypeId;
+        if TypeId::of::<T>() == TypeId::of::<f32>() {
+            // SAFETY: We verified T is f32, so the casts are safe
+            unsafe {
+                let a_f32: &[f32] = &*(a as *const [T] as *const [f32]);
+                let b_f32: &[f32] = &*(b as *const [T] as *const [f32]);
+                let c_f32: &mut [f32] = &mut *(c as *mut [T] as *mut [f32]);
+                Self::matmul_f32(c_f32, a_f32, b_f32, m, n, k);
+            }
+            return;
+        }
+
+        if TypeId::of::<T>() == TypeId::of::<f64>() {
+            // SAFETY: We verified T is f64, so the casts are safe
+            unsafe {
+                let a_f64: &[f64] = &*(a as *const [T] as *const [f64]);
+                let b_f64: &[f64] = &*(b as *const [T] as *const [f64]);
+                let c_f64: &mut [f64] = &mut *(c as *mut [T] as *mut [f64]);
+                Self::matmul_f64(c_f64, a_f64, b_f64, m, n, k);
+            }
+            return;
+        }
+
+        // Fallback: Use cache-efficient tiled matrix multiplication
         // Block size chosen for typical L1 cache (32KB)
         const BLOCK_SIZE: usize = 64;
 

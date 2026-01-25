@@ -19,6 +19,7 @@ mod api;
 mod training;
 mod inference;
 mod email;
+mod llm;
 
 use api::{create_router, AppState};
 use auth::JwtAuth;
@@ -117,6 +118,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::debug!("Admin user creation: {}", e);
     }
 
+    // Create DevOps admin user if not exists
+    if let Err(e) = Schema::create_devops_user(&db).await {
+        // This is expected if DevOps user already exists
+        tracing::debug!("DevOps user creation: {}", e);
+    }
+
     // Initialize JWT authentication
     let jwt = JwtAuth::new(&config.auth.jwt_secret, config.auth.jwt_expiry_hours);
 
@@ -145,6 +152,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize inference metrics collector
     let inference_metrics = inference::metrics::InferenceMetrics::new();
 
+    // Initialize Ollama client for AI assistance
+    let ollama = llm::OllamaClient::new();
+    if ollama.is_available().await {
+        info!("Ollama LLM service available at {}", llm::DEFAULT_OLLAMA_URL);
+    } else {
+        info!("Ollama LLM service not available - AI assistance will be limited");
+    }
+
     // Create application state
     let state = AppState {
         db: db_arc,
@@ -166,6 +181,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             network_tx: Vec::new(),
             gpu_utilization: Vec::new(),
         })),
+        ollama: Arc::new(ollama),
     };
 
     // Create router

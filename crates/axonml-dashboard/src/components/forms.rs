@@ -104,11 +104,11 @@ pub fn TextInput(
                         value.set(event_target_value(&e));
                     }
                     on:blur=move |_| {
-                        on_blur_stored.with_value(|cb| {
-                            if let Some(cb) = cb.as_ref() {
+                        if let Some(cb_opt) = on_blur_stored.try_with_value(|cb| cb.clone()) {
+                            if let Some(cb) = cb_opt {
                                 cb.call(());
                             }
-                        });
+                        }
                     }
                 />
 

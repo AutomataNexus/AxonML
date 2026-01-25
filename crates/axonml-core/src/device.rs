@@ -34,9 +34,10 @@ use sysinfo::System;
 // =============================================================================
 
 /// Represents a compute device where tensors can be allocated and operations executed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Device {
     /// CPU device (always available).
+    #[default]
     Cpu,
 
     /// NVIDIA CUDA GPU device with device index.
@@ -69,7 +70,7 @@ impl Device {
             #[cfg(feature = "metal")]
             Self::Metal(idx) => crate::backends::metal::is_device_available(idx),
             #[cfg(feature = "wgpu")]
-            Self::Wgpu(idx) => crate::backends::wgpu::is_device_available(idx),
+            Self::Wgpu(idx) => crate::backends::wgpu_backend::is_device_available(idx),
         }
     }
 
@@ -128,12 +129,6 @@ impl Device {
     #[must_use]
     pub const fn cuda(index: usize) -> Self {
         Self::Cuda(index)
-    }
-}
-
-impl Default for Device {
-    fn default() -> Self {
-        Self::Cpu
     }
 }
 
@@ -197,7 +192,7 @@ impl Device {
             #[cfg(feature = "metal")]
             Self::Metal(idx) => crate::backends::metal::get_capabilities(idx),
             #[cfg(feature = "wgpu")]
-            Self::Wgpu(idx) => crate::backends::wgpu::get_capabilities(idx),
+            Self::Wgpu(idx) => crate::backends::wgpu_backend::get_capabilities(idx),
         }
     }
 }

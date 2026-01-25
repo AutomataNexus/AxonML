@@ -398,6 +398,87 @@ impl GradientFunction for MeanBackward {
 }
 
 // =============================================================================
+// Narrow Backward
+// =============================================================================
+
+/// Gradient function for narrow (slice along a dimension).
+///
+/// Forward: output = input.narrow(dim, start, length)
+/// Backward: grad_input = zeros_like(input); grad_input.narrow(dim, start, length) = grad_output
+#[derive(Debug)]
+pub struct NarrowBackward {
+    next_fns: Vec<Option<GradFn>>,
+    input_shape: Vec<usize>,
+    dim: usize,
+    start: usize,
+}
+
+impl NarrowBackward {
+    /// Creates a new `NarrowBackward`.
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, input_shape: Vec<usize>, dim: usize, start: usize) -> Self {
+        Self {
+            next_fns: vec![input_grad_fn],
+            input_shape,
+            dim,
+            start,
+        }
+    }
+}
+
+impl GradientFunction for NarrowBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        // Create a zero tensor of input shape
+        let numel: usize = self.input_shape.iter().product();
+        let mut grad_data = vec![0.0f32; numel];
+        let grad_out_data = grad_output.to_vec();
+
+        // Compute strides for the input shape
+        let mut strides = vec![1usize; self.input_shape.len()];
+        for i in (0..self.input_shape.len() - 1).rev() {
+            strides[i] = strides[i + 1] * self.input_shape[i + 1];
+        }
+
+        // Copy grad_output data into the correct positions in grad_data
+        let output_shape = grad_output.shape();
+
+        // Iterate through all output indices and map to input indices
+        let out_numel: usize = output_shape.iter().product();
+        for out_idx in 0..out_numel {
+            // Compute multi-dimensional index in output
+            let mut indices = vec![0usize; output_shape.len()];
+            let mut remaining = out_idx;
+            for d in (0..output_shape.len()).rev() {
+                indices[d] = remaining % output_shape[d];
+                remaining /= output_shape[d];
+            }
+
+            // Map to input index (add start offset in the narrow dimension)
+            indices[self.dim] += self.start;
+
+            // Compute linear index in input
+            let in_idx: usize = indices.iter().zip(strides.iter()).map(|(&i, &s)| i * s).sum();
+            grad_data[in_idx] = grad_out_data[out_idx];
+        }
+
+        let grad = Tensor::from_vec(grad_data, &self.input_shape).unwrap();
+        vec![Some(grad)]
+    }
+
+    fn name(&self) -> &'static str {
+        "NarrowBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+// =============================================================================
 // Helper Functions
 // =============================================================================
 

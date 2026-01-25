@@ -251,6 +251,7 @@ dependencies = [
  "axonml-jit",
  "axonml-llm",
  "axonml-nn",
+ "axonml-onnx",
  "axonml-optim",
  "axonml-profile",
  "axonml-tensor",
@@ -333,6 +334,7 @@ dependencies = [
  "objc",
  "parking_lot",
  "pollster",
+ "rayon",
  "smallvec",
  "sysinfo 0.32.1",
  "thiserror 1.0.69",
@@ -362,6 +364,7 @@ dependencies = [
  "tracing",
  "tracing-wasm",
  "urlencoding",
+ "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
@@ -1948,6 +1951,8 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994"
 dependencies = [
+ "futures-channel",
+ "futures-core",
  "js-sys",
  "wasm-bindgen",
 ]

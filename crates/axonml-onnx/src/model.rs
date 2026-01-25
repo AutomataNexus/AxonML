@@ -208,29 +208,192 @@ fn load_initializers(graph: &GraphProto) -> OnnxResult<HashMap<String, Tensor<f3
 
 fn tensor_from_proto(proto: &TensorProto) -> OnnxResult<Tensor<f32>> {
     let shape: Vec<usize> = proto.dims.iter().map(|&d| d as usize).collect();
-    let data = proto.get_float_data();
+    let numel = if shape.is_empty() { 1 } else { shape.iter().product::<usize>() };
 
-    if data.is_empty() {
-        // Handle other data types by converting to f32
-        let int64_data = proto.get_int64_data();
-        if !int64_data.is_empty() {
-            let float_data: Vec<f32> = int64_data.iter().map(|&x| x as f32).collect();
-            return Tensor::from_vec(float_data, &shape)
-                .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)));
+    // Handle empty/scalar tensor
+    if numel == 0 || shape.is_empty() {
+        // Scalar or empty - still try to read data
+        if shape.is_empty() {
+            // Scalar tensor
+            if !proto.float_data.is_empty() {
+                return Tensor::from_vec(vec![proto.float_data[0]], &[])
+                    .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)));
+            }
+            if !proto.raw_data.is_empty() && proto.raw_data.len() >= 4 {
+                let val = f32::from_le_bytes([
+                    proto.raw_data[0], proto.raw_data[1], proto.raw_data[2], proto.raw_data[3]
+                ]);
+                return Tensor::from_vec(vec![val], &[])
+                    .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)));
+            }
+            // Return scalar zero
+            return Ok(zeros(&[]));
         }
-
-        // Empty tensor
-        if proto.numel() == 0 {
-            return Ok(zeros(&shape));
-        }
-
-        return Err(OnnxError::TensorConversion(
-            format!("Unsupported tensor data type for {}", proto.name)
-        ));
+        return Ok(zeros(&shape));
     }
 
-    Tensor::from_vec(data, &shape)
-        .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
+    // Try float_data first
+    if !proto.float_data.is_empty() {
+        return Tensor::from_vec(proto.float_data.clone(), &shape)
+            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)));
+    }
+
+    // Try double_data
+    if !proto.double_data.is_empty() {
+        let float_data: Vec<f32> = proto.double_data.iter().map(|&x| x as f32).collect();
+        return Tensor::from_vec(float_data, &shape)
+            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)));
+    }
+
+    // Try int64_data
+    if !proto.int64_data.is_empty() {
+        let float_data: Vec<f32> = proto.int64_data.iter().map(|&x| x as f32).collect();
+        return Tensor::from_vec(float_data, &shape)
+            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)));
+    }
+
+    // Try int32_data
+    if !proto.int32_data.is_empty() {
+        let float_data: Vec<f32> = proto.int32_data.iter().map(|&x| x as f32).collect();
+        return Tensor::from_vec(float_data, &shape)
+            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)));
+    }
+
+    // Try raw_data based on data_type
+    if !proto.raw_data.is_empty() {
+        let data_type = proto.data_type;
+        let float_data = match data_type {
+            1 => {
+                // FLOAT (f32)
+                let mut result = vec![0.0f32; numel];
+                let bytes_needed = numel * 4;
+                if proto.raw_data.len() >= bytes_needed {
+                    for (i, chunk) in proto.raw_data[..bytes_needed].chunks_exact(4).enumerate() {
+                        result[i] = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    }
+                }
+                result
+            }
+            6 => {
+                // INT32
+                let mut result = vec![0.0f32; numel];
+                let bytes_needed = numel * 4;
+                if proto.raw_data.len() >= bytes_needed {
+                    for (i, chunk) in proto.raw_data[..bytes_needed].chunks_exact(4).enumerate() {
+                        let val = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                        result[i] = val as f32;
+                    }
+                }
+                result
+            }
+            7 => {
+                // INT64
+                let mut result = vec![0.0f32; numel];
+                let bytes_needed = numel * 8;
+                if proto.raw_data.len() >= bytes_needed {
+                    for (i, chunk) in proto.raw_data[..bytes_needed].chunks_exact(8).enumerate() {
+                        let val = i64::from_le_bytes([
+                            chunk[0], chunk[1], chunk[2], chunk[3],
+                            chunk[4], chunk[5], chunk[6], chunk[7],
+                        ]);
+                        result[i] = val as f32;
+                    }
+                }
+                result
+            }
+            10 => {
+                // FLOAT16 (f16) - convert to f32
+                let mut result = vec![0.0f32; numel];
+                let bytes_needed = numel * 2;
+                if proto.raw_data.len() >= bytes_needed {
+                    for (i, chunk) in proto.raw_data[..bytes_needed].chunks_exact(2).enumerate() {
+                        let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
+                        result[i] = half_to_f32(bits);
+                    }
+                }
+                result
+            }
+            11 => {
+                // DOUBLE (f64)
+                let mut result = vec![0.0f32; numel];
+                let bytes_needed = numel * 8;
+                if proto.raw_data.len() >= bytes_needed {
+                    for (i, chunk) in proto.raw_data[..bytes_needed].chunks_exact(8).enumerate() {
+                        let val = f64::from_le_bytes([
+                            chunk[0], chunk[1], chunk[2], chunk[3],
+                            chunk[4], chunk[5], chunk[6], chunk[7],
+                        ]);
+                        result[i] = val as f32;
+                    }
+                }
+                result
+            }
+            16 => {
+                // BFLOAT16 - convert to f32
+                let mut result = vec![0.0f32; numel];
+                let bytes_needed = numel * 2;
+                if proto.raw_data.len() >= bytes_needed {
+                    for (i, chunk) in proto.raw_data[..bytes_needed].chunks_exact(2).enumerate() {
+                        let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
+                        // BF16 is just top 16 bits of f32
+                        let f32_bits = (bits as u32) << 16;
+                        result[i] = f32::from_bits(f32_bits);
+                    }
+                }
+                result
+            }
+            _ => {
+                return Err(OnnxError::TensorConversion(
+                    format!("Unsupported tensor data type {} for {}", data_type, proto.name)
+                ));
+            }
+        };
+
+        return Tensor::from_vec(float_data, &shape)
+            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)));
+    }
+
+    // If no data found, this could be a tensor with external data or just empty
+    // For now, initialize with zeros and log a warning
+    eprintln!("Warning: No data found for tensor {} (dims={:?}, dtype={}), initializing with zeros",
+        proto.name, proto.dims, proto.data_type);
+    Ok(zeros(&shape))
+}
+
+/// Convert IEEE 754 half-precision (f16) to single-precision (f32)
+fn half_to_f32(bits: u16) -> f32 {
+    let sign = ((bits >> 15) & 1) as u32;
+    let exp = ((bits >> 10) & 0x1f) as u32;
+    let mant = (bits & 0x3ff) as u32;
+
+    let f32_bits = if exp == 0 {
+        if mant == 0 {
+            // Zero
+            sign << 31
+        } else {
+            // Subnormal - convert to normalized f32
+            let mut e = 0u32;
+            let mut m = mant;
+            while (m & 0x400) == 0 {
+                m <<= 1;
+                e += 1;
+            }
+            let exp32 = 127 - 15 - e;
+            let mant32 = (m & 0x3ff) << 13;
+            (sign << 31) | (exp32 << 23) | mant32
+        }
+    } else if exp == 31 {
+        // Inf or NaN
+        let mant32 = mant << 13;
+        (sign << 31) | (0xff << 23) | mant32
+    } else {
+        // Normal
+        let exp32 = exp + 127 - 15;
+        let mant32 = mant << 13;
+        (sign << 31) | (exp32 << 23) | mant32
+    };
+
+    f32::from_bits(f32_bits)
 }
 
 fn compile_operators(graph: &GraphProto, _opset_version: i64) -> OnnxResult<Vec<CompiledOp>> {

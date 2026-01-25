@@ -238,6 +238,11 @@ impl Config {
         self.data_dir().join("logs")
     }
 
+    /// Get the checkpoints directory (for training notebook checkpoints)
+    pub fn checkpoints_dir(&self) -> PathBuf {
+        self.data_dir().join("checkpoints")
+    }
+
     /// Get the hub cache directory
     pub fn hub_cache_dir(&self) -> PathBuf {
         let path = self.hub.cache_dir.replace("~",
@@ -255,6 +260,7 @@ impl Config {
         std::fs::create_dir_all(self.models_dir())?;
         std::fs::create_dir_all(self.runs_dir())?;
         std::fs::create_dir_all(self.logs_dir())?;
+        std::fs::create_dir_all(self.checkpoints_dir())?;
         std::fs::create_dir_all(self.hub_cache_dir())?;
         Ok(())
     }

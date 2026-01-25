@@ -75,8 +75,9 @@
 
 - Rust 1.75+
 - Running Aegis-DB instance
+- Node.js + PM2 (for production deployment)
 
-### Start the Server
+### Development
 
 ```bash
 # Start with defaults (0.0.0.0:3000)
@@ -88,9 +89,45 @@ axonml-server
 # Custom host and port
 axonml-server --host 127.0.0.1 --port 8000
 
+# Development port (matches dashboard proxy)
+cargo run -p axonml-server -- --port 3021
+
 # With custom config file
 axonml-server --config /path/to/config.toml
 ```
+
+### Production Deployment (PM2)
+
+```bash
+# 1. Build release binary
+cargo build --release -p axonml-server
+
+# 2. Initialize database
+./AxonML_DB_Init.sh --with-user    # Creates collections + DevOps user
+
+# 3. Create log directory
+sudo mkdir -p /var/log/axonml
+sudo chown $USER:$USER /var/log/axonml
+
+# 4. Start with PM2
+pm2 start ecosystem.config.js
+pm2 save                            # Save process list
+pm2 startup                         # Enable boot persistence
+
+# Management commands
+pm2 status                          # Check status
+pm2 logs axonml-server              # View logs
+pm2 restart axonml-server           # Restart server
+pm2 stop axonml-server              # Stop server
+pm2 reload axonml-server            # Zero-downtime reload
+```
+
+### Default Users
+
+| User | Email | Password |
+|------|-------|----------|
+| Admin | admin@axonml.local | admin |
+| DevOps | DevOps@automatanexus.com | Invertedskynet2$ |
 
 ### Configuration
 

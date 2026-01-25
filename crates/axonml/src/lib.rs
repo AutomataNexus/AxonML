@@ -67,6 +67,7 @@
 //! - `profile`: Performance profiling and bottleneck detection
 //! - `llm`: LLM architectures (BERT, GPT-2)
 //! - `jit`: JIT compilation and tracing
+//! - `onnx`: ONNX model import and export
 //!
 //! @version 0.1.0
 //! @author `AutomataNexus` Development Team
@@ -185,6 +186,9 @@ pub use axonml_llm as llm;
 
 #[cfg(feature = "jit")]
 pub use axonml_jit as jit;
+
+#[cfg(feature = "onnx")]
+pub use axonml_onnx as onnx;
 
 // =============================================================================
 // Prelude
@@ -320,6 +324,9 @@ pub mod prelude {
 
     #[cfg(feature = "jit")]
     features.push("jit");
+
+    #[cfg(feature = "onnx")]
+    features.push("onnx");
 
     if features.is_empty() {
         "none".to_string()

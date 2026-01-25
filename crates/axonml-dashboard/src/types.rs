@@ -148,8 +148,10 @@ pub struct TrainingConfig {
     pub learning_rate: f64,
     pub batch_size: u32,
     pub epochs: u32,
-    pub optimizer: String,
-    pub loss_function: String,
+    #[serde(default)]
+    pub optimizer: Option<String>,
+    #[serde(default)]
+    pub loss_function: Option<String>,
     #[serde(default)]
     pub extra: std::collections::HashMap<String, serde_json::Value>,
 }
@@ -699,6 +701,202 @@ pub struct ExportResponse {
     pub format: String,
     pub size: u64,
     pub compatible_with: Vec<String>,
+}
+
+// ============================================================================
+// Training Notebook Types
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CellType {
+    Code,
+    Markdown,
+}
+
+impl Default for CellType {
+    fn default() -> Self {
+        Self::Code
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CellStatus {
+    Idle,
+    Running,
+    Completed,
+    Error,
+}
+
+impl Default for CellStatus {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CellOutput {
+    pub output_type: String,
+    pub text: Option<String>,
+    pub data: Option<serde_json::Value>,
+    pub execution_count: Option<u32>,
+    pub error_name: Option<String>,
+    pub error_value: Option<String>,
+    pub traceback: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotebookCell {
+    pub id: String,
+    pub cell_type: CellType,
+    pub source: String,
+    #[serde(default)]
+    pub outputs: Vec<CellOutput>,
+    #[serde(default)]
+    pub status: CellStatus,
+    pub execution_count: Option<u32>,
+    #[serde(default)]
+    pub metadata: std::collections::HashMap<String, serde_json::Value>,
+}
+
+impl Default for NotebookCell {
+    fn default() -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            cell_type: CellType::Code,
+            source: String::new(),
+            outputs: vec![],
+            status: CellStatus::Idle,
+            execution_count: None,
+            metadata: std::collections::HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotebookCheckpoint {
+    pub id: String,
+    pub notebook_id: String,
+    pub epoch: u32,
+    pub step: u32,
+    pub metrics: serde_json::Value,
+    pub model_state_path: String,
+    pub optimizer_state_path: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrainingNotebook {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub cells: Vec<NotebookCell>,
+    #[serde(default)]
+    pub metadata: NotebookMetadata,
+    #[serde(default)]
+    pub checkpoints: Vec<NotebookCheckpoint>,
+    pub model_id: Option<String>,
+    pub dataset_id: Option<String>,
+    pub status: RunStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NotebookMetadata {
+    pub kernel: Option<String>,
+    pub language: Option<String>,
+    pub framework: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub extra: std::collections::HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateNotebookRequest {
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub cells: Vec<NotebookCell>,
+    pub model_id: Option<String>,
+    pub dataset_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateNotebookRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub cells: Option<Vec<NotebookCell>>,
+    pub model_id: Option<String>,
+    pub dataset_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecuteCellRequest {
+    pub cell_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecuteCellResponse {
+    pub cell_id: String,
+    pub outputs: Vec<CellOutput>,
+    pub execution_count: u32,
+    pub status: CellStatus,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAssistRequest {
+    /// User's prompt/question
+    pub prompt: String,
+    /// ID of the currently selected cell (if any)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_cell_id: Option<String>,
+    /// Type of cell to generate
+    #[serde(default)]
+    pub cell_type: CellType,
+    /// Whether to include imports
+    #[serde(default)]
+    pub include_imports: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAssistResponse {
+    pub suggestion: String,
+    pub explanation: Option<String>,
+    pub confidence: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveCheckpointRequest {
+    pub epoch: u32,
+    pub step: u32,
+    pub metrics: serde_json::Value,
+    pub model_state: Vec<u8>,
+    pub optimizer_state: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadModelVersionRequest {
+    pub checkpoint_id: String,
+    pub model_id: String,
+    pub metrics: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportNotebookRequest {
+    pub content: String,
+    pub format: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportNotebookResponse {
+    pub content: String,
+    pub format: String,
+    pub filename: String,
 }
 
 // ============================================================================

@@ -74,7 +74,7 @@ js-sys = "0.3"
 
 # HTTP client
 gloo-net = "0.5"
-gloo-timers = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
 gloo-storage = "0.3"
 gloo-file = "0.3"
 gloo-console = "0.3"
@@ -100,6 +100,9 @@ serde_urlencoded = "0.7.1"
 
 # Async utilities
 futures = "0.3"
+
+# UUID generation
+uuid = { version = "1.6", features = ["v4", "js"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
