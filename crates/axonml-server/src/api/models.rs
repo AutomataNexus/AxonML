@@ -59,6 +59,9 @@ pub struct ModelResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub model_type: String,
+    pub version_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<u32>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -80,11 +83,16 @@ pub struct ModelVersionResponse {
 #[derive(Debug, Deserialize)]
 pub struct DeployRequest {
     pub name: String,
+    #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default = "default_replicas")]
     pub replicas: u32,
     #[serde(default)]
     pub config: Option<serde_json::Value>,
+}
+
+fn default_port() -> u16 {
+    8080
 }
 
 fn default_replicas() -> u32 {
@@ -95,12 +103,15 @@ fn default_replicas() -> u32 {
 pub struct EndpointResponse {
     pub id: String,
     pub model_version_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
     pub name: String,
     pub status: String,
     pub port: u16,
     pub replicas: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<serde_json::Value>,
+    pub config: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
     pub created_at: String,
@@ -111,13 +122,15 @@ pub struct EndpointResponse {
 // Helper Functions
 // ============================================================================
 
-fn model_to_response(model: Model) -> ModelResponse {
+fn model_to_response(model: Model, version_count: u32, latest_version: Option<u32>) -> ModelResponse {
     ModelResponse {
         id: model.id,
         user_id: model.user_id,
         name: model.name,
         description: model.description,
         model_type: model.model_type,
+        version_count,
+        latest_version,
         created_at: model.created_at.to_rfc3339(),
         updated_at: model.updated_at.to_rfc3339(),
     }
@@ -137,14 +150,23 @@ fn version_to_response(version: ModelVersion) -> ModelVersionResponse {
 }
 
 fn endpoint_to_response(endpoint: Endpoint) -> EndpointResponse {
+    // Provide default config if none exists
+    let config = endpoint.config.unwrap_or_else(|| serde_json::json!({
+        "batch_size": 1,
+        "timeout_ms": 30000,
+        "max_concurrent": 10
+    }));
+
     EndpointResponse {
         id: endpoint.id,
         model_version_id: endpoint.model_version_id,
+        model_name: None, // Would need to join with model table to get this
+        version: None,    // Would need to join with version table to get this
         name: endpoint.name,
         status: format!("{:?}", endpoint.status).to_lowercase(),
         port: endpoint.port,
         replicas: endpoint.replicas,
-        config: endpoint.config,
+        config,
         error_message: endpoint.error_message,
         created_at: endpoint.created_at.to_rfc3339(),
         updated_at: endpoint.updated_at.to_rfc3339(),
@@ -171,7 +193,14 @@ pub async fn list_models(
     }
     .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-    let response: Vec<ModelResponse> = models.into_iter().map(model_to_response).collect();
+    // Fetch version info for each model
+    let mut response = Vec::with_capacity(models.len());
+    for model in models {
+        let versions = repo.list_versions(&model.id).await.unwrap_or_default();
+        let version_count = versions.len() as u32;
+        let latest_version = versions.iter().map(|v| v.version).max();
+        response.push(model_to_response(model, version_count, latest_version));
+    }
 
     Ok(Json(response))
 }
@@ -198,7 +227,8 @@ pub async fn create_model(
     let model_dir = state.config.models_dir().join(&model.id);
     std::fs::create_dir_all(&model_dir).ok();
 
-    Ok((StatusCode::CREATED, Json(model_to_response(model))))
+    // New model has no versions yet
+    Ok((StatusCode::CREATED, Json(model_to_response(model, 0, None))))
 }
 
 /// Get a model by ID
@@ -220,7 +250,12 @@ pub async fn get_model(
         return Err(AuthError::Unauthorized);
     }
 
-    Ok(Json(model_to_response(model)))
+    // Get version info
+    let versions = repo.list_versions(&id).await.unwrap_or_default();
+    let version_count = versions.len() as u32;
+    let latest_version = versions.iter().map(|v| v.version).max();
+
+    Ok(Json(model_to_response(model, version_count, latest_version)))
 }
 
 /// Update a model
@@ -248,7 +283,12 @@ pub async fn update_model(
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-    Ok(Json(model_to_response(model)))
+    // Get version info
+    let versions = repo.list_versions(&id).await.unwrap_or_default();
+    let version_count = versions.len() as u32;
+    let latest_version = versions.iter().map(|v| v.version).max();
+
+    Ok(Json(model_to_response(model, version_count, latest_version)))
 }
 
 /// Delete a model

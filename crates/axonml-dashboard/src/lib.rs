@@ -20,9 +20,12 @@ use pages::{
     dashboard::{DashboardPage, AppShell},
     training::{TrainingListPage, TrainingDetailPage, NewTrainingPage},
     models::{ModelsListPage, ModelDetailPage, ModelUploadPage},
+    datasets::{DatasetsListPage, DatasetUploadPage, DataAnalyzePage, KagglePage, BuiltinDatasetsPage},
     inference::{InferenceOverviewPage, EndpointsListPage, EndpointDetailPage, InferenceMetricsPage},
     settings::{SettingsPage, ProfileSettingsPage, SecuritySettingsPage},
     admin::{UserManagementPage, SystemStatsPage},
+    system::SystemOverviewPage,
+    hub::{HubBrowsePage, HubCachePage},
 };
 use auth::mfa_setup::{TotpSetupPage, WebAuthnSetupPage, RecoveryCodesPage};
 use state::provide_app_state;
@@ -106,6 +109,43 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // Datasets routes
+                <Route path="/datasets" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <DatasetsListPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+                <Route path="/datasets/upload" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <DatasetUploadPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+                <Route path="/datasets/analyze" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <DataAnalyzePage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+                <Route path="/datasets/kaggle" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <KagglePage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+                <Route path="/datasets/library" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <BuiltinDatasetsPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+
                 // Inference routes
                 <Route path="/inference" view=|| view! {
                     <ProtectedRoute>
@@ -132,6 +172,31 @@ pub fn App() -> impl IntoView {
                     <ProtectedRoute>
                         <AppShell>
                             <InferenceMetricsPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+
+                // System routes
+                <Route path="/system" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <SystemOverviewPage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+
+                // Hub routes (Pretrained Models)
+                <Route path="/hub" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <HubBrowsePage />
+                        </AppShell>
+                    </ProtectedRoute>
+                } />
+                <Route path="/hub/cache" view=|| view! {
+                    <ProtectedRoute>
+                        <AppShell>
+                            <HubCachePage />
                         </AppShell>
                     </ProtectedRoute>
                 } />

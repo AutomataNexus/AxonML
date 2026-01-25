@@ -8,6 +8,37 @@ pub const TEST_API_URL: &str = "http://localhost:3021";
 pub const ADMIN_EMAIL: &str = "admin@axonml.local";
 pub const ADMIN_PASSWORD: &str = "admin";
 
+/// Check if a specific route exists by making an authenticated request
+/// and checking if it returns 404 (route not found) vs other responses
+pub async fn route_exists(client: &Client, path: &str, token: &str) -> bool {
+    let response = client
+        .get(format!("{}{}", TEST_API_URL, path))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => resp.status().as_u16() != 404,
+        Err(_) => false,
+    }
+}
+
+/// Check if a POST route exists
+pub async fn post_route_exists(client: &Client, path: &str, token: &str) -> bool {
+    let response = client
+        .post(format!("{}{}", TEST_API_URL, path))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => resp.status().as_u16() != 404,
+        Err(_) => false,
+    }
+}
+
 /// Test HTTP client with common configuration
 pub fn test_client() -> Client {
     Client::builder()

@@ -30,6 +30,8 @@ pub struct User {
     pub name: String,
     pub role: UserRole,
     pub mfa_enabled: bool,
+    #[serde(default)]
+    pub mfa_verified: bool,
     pub totp_enabled: bool,
     pub webauthn_enabled: bool,
     pub created_at: DateTime<Utc>,
@@ -46,8 +48,12 @@ pub struct LoginRequest {
 pub struct LoginResponse {
     pub requires_mfa: bool,
     pub mfa_token: Option<String>,
+    #[serde(default)]
+    pub mfa_methods: Option<Vec<String>>,
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub expires_in: Option<i64>,
     pub user: Option<User>,
 }
 
@@ -166,6 +172,10 @@ pub struct TrainingRun {
     pub user_id: String,
     pub name: String,
     pub model_type: String,
+    #[serde(default)]
+    pub model_version_id: Option<String>,
+    #[serde(default)]
+    pub dataset_id: Option<String>,
     pub status: RunStatus,
     pub config: TrainingConfig,
     pub latest_metrics: Option<TrainingMetrics>,
@@ -178,6 +188,10 @@ pub struct TrainingRun {
 pub struct CreateRunRequest {
     pub name: String,
     pub model_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_version_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dataset_id: Option<String>,
     pub config: TrainingConfig,
 }
 
@@ -246,6 +260,26 @@ pub struct ModelVersion {
 pub struct ModelWithVersions {
     pub model: Model,
     pub versions: Vec<ModelVersion>,
+}
+
+// ============================================================================
+// Dataset Types
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Dataset {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub dataset_type: String,
+    pub file_path: String,
+    pub file_size: u64,
+    pub num_samples: Option<u64>,
+    pub num_features: Option<u64>,
+    pub num_classes: Option<u64>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 // ============================================================================
@@ -435,4 +469,452 @@ pub enum WsMessage {
     Ping,
     #[serde(rename = "pong")]
     Pong,
+}
+
+// ============================================================================
+// System Types
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemInfo {
+    pub platform: String,
+    pub arch: String,
+    pub cpu_count: usize,
+    pub total_memory_bytes: u64,
+    pub available_memory_bytes: u64,
+    pub axonml_version: String,
+    pub rust_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuInfo {
+    pub id: usize,
+    pub name: String,
+    pub vendor: String,
+    pub device_type: String,
+    pub backend: String,
+    pub driver: String,
+    pub memory_total: u64,
+    pub is_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuListResponse {
+    pub gpus: Vec<GpuInfo>,
+    pub cuda_available: bool,
+    pub total_gpu_memory: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkResult {
+    pub gpu_id: usize,
+    pub gpu_name: String,
+    pub buffer_copy_1mb_ms: f64,
+    pub buffer_copy_16mb_ms: f64,
+    pub buffer_copy_64mb_ms: f64,
+    pub compute_dispatch_ms: f64,
+    pub effective_bandwidth_1mb: String,
+    pub effective_bandwidth_16mb: String,
+    pub effective_bandwidth_64mb: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkResponse {
+    pub results: Vec<BenchmarkResult>,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RealtimeMetrics {
+    pub timestamp: String,
+    pub cpu_usage_percent: f64,
+    pub memory_used_bytes: u64,
+    pub memory_total_bytes: u64,
+    pub memory_percent: f64,
+    pub disk_used_bytes: u64,
+    pub disk_total_bytes: u64,
+    pub disk_percent: f64,
+    pub network_rx_bytes: u64,
+    pub network_tx_bytes: u64,
+    pub process_count: usize,
+    pub uptime_seconds: u64,
+    pub load_avg_1m: f64,
+    pub load_avg_5m: f64,
+    pub load_avg_15m: f64,
+    pub cpu_per_core: Vec<f64>,
+    pub gpu_metrics: Vec<GpuMetrics>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuMetrics {
+    pub id: usize,
+    pub name: String,
+    pub utilization_percent: f64,
+    pub memory_used_mb: u64,
+    pub memory_total_mb: u64,
+    pub temperature_c: f64,
+    pub power_watts: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemMetricsHistory {
+    pub timestamps: Vec<String>,
+    pub cpu_history: Vec<f64>,
+    pub memory_history: Vec<f64>,
+    pub disk_io_read: Vec<f64>,
+    pub disk_io_write: Vec<f64>,
+    pub network_rx: Vec<f64>,
+    pub network_tx: Vec<f64>,
+    pub gpu_utilization: Vec<Vec<f64>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrelationData {
+    pub points: Vec<CorrelationPoint>,
+    pub x_label: String,
+    pub y_label: String,
+    pub z_label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrelationPoint {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub label: String,
+    pub category: String,
+}
+
+// ============================================================================
+// Hub Types (Pretrained Models)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PretrainedModel {
+    pub name: String,
+    pub description: String,
+    pub architecture: String,
+    pub size_mb: f64,
+    pub accuracy: f32,
+    pub dataset: String,
+    pub input_size: (usize, usize),
+    pub num_classes: usize,
+    pub num_parameters: u64,
+    pub is_cached: bool,
+    pub cache_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadResponse {
+    pub model_name: String,
+    pub path: String,
+    pub size_bytes: u64,
+    pub downloaded: bool,
+    pub was_cached: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheInfo {
+    pub total_models: usize,
+    pub total_size_bytes: u64,
+    pub cache_directory: String,
+    pub models: Vec<CachedModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedModel {
+    pub name: String,
+    pub size_bytes: u64,
+    pub path: String,
+}
+
+// ============================================================================
+// Tools Types (Model Inspection, Conversion, Quantization, Export)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInspection {
+    pub name: String,
+    pub format: String,
+    pub file_size: u64,
+    pub num_parameters: u64,
+    pub num_layers: usize,
+    pub layers: Vec<LayerInfo>,
+    pub metadata: std::collections::HashMap<String, String>,
+    pub memory_fp32: String,
+    pub memory_fp16: String,
+    pub trainable_params: u64,
+    pub non_trainable_params: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerInfo {
+    pub index: usize,
+    pub name: String,
+    pub layer_type: String,
+    pub shape: Vec<usize>,
+    pub num_params: u64,
+    pub dtype: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConvertResponse {
+    pub input_file: String,
+    pub output_file: String,
+    pub input_format: String,
+    pub output_format: String,
+    pub input_size: u64,
+    pub output_size: u64,
+    pub num_parameters: u64,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuantizeResponse {
+    pub input_file: String,
+    pub output_file: String,
+    pub source_type: String,
+    pub target_type: String,
+    pub input_size: u64,
+    pub output_size: u64,
+    pub compression_ratio: f64,
+    pub num_parameters: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuantizationTypes {
+    pub types: Vec<QuantTypeInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuantTypeInfo {
+    pub name: String,
+    pub bits_per_weight: f64,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportResponse {
+    pub output_file: String,
+    pub format: String,
+    pub size: u64,
+    pub compatible_with: Vec<String>,
+}
+
+// ============================================================================
+// Data Analysis Types
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnalysisDatasetType {
+    Image,
+    Tabular,
+    Text,
+    Audio,
+    Mixed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataStatistics {
+    pub mean: Option<f64>,
+    pub std: Option<f64>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub missing_count: usize,
+    pub missing_percentage: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrainingRecommendations {
+    pub suggested_model: String,
+    pub suggested_batch_size: u32,
+    pub suggested_lr: f64,
+    pub suggested_epochs: u32,
+    pub suggested_optimizer: String,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatasetAnalysis {
+    pub name: String,
+    pub path: String,
+    pub data_type: String,
+    pub task_type: String,
+    pub num_samples: usize,
+    pub num_classes: Option<usize>,
+    pub class_distribution: Option<std::collections::HashMap<String, usize>>,
+    pub input_shape: Option<Vec<usize>>,
+    pub feature_names: Option<Vec<String>>,
+    pub statistics: DataStatistics,
+    pub recommendations: TrainingRecommendations,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataPreviewSample {
+    pub index: usize,
+    pub label: Option<String>,
+    pub features: Option<Vec<f64>>,
+    pub text: Option<String>,
+    pub image_dimensions: Option<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataPreviewResponse {
+    pub name: String,
+    pub data_type: String,
+    pub samples: Vec<DataPreviewSample>,
+    pub total_samples: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationIssue {
+    pub category: String,
+    pub severity: String,
+    pub message: String,
+    pub file_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationResult {
+    pub is_valid: bool,
+    pub issues: Vec<ValidationIssue>,
+    pub warnings: Vec<String>,
+    pub class_distribution: Option<std::collections::HashMap<String, usize>>,
+    pub num_samples: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratedTrainingConfig {
+    pub name: String,
+    pub model_type: String,
+    pub config: TrainingConfig,
+    pub data_config: DataConfig,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DataConfig {
+    pub train_split: f64,
+    pub val_split: f64,
+    pub test_split: f64,
+    pub shuffle: bool,
+    pub augmentation: bool,
+    pub normalize: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyzeQuery {
+    pub data_type: Option<String>,
+    pub max_samples: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviewQuery {
+    pub num_samples: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidateQuery {
+    pub num_classes: Option<usize>,
+    pub check_balance: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateConfigRequest {
+    pub format: Option<String>,
+}
+
+// ============================================================================
+// Kaggle Types
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KaggleCredentials {
+    pub username: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KaggleStatusResponse {
+    pub configured: bool,
+    pub username: Option<String>,
+    pub config_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KaggleDataset {
+    pub ref_name: String,
+    pub title: String,
+    pub size: String,
+    pub download_count: u64,
+    pub vote_count: u64,
+    pub last_updated: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KaggleSearchResponse {
+    pub datasets: Vec<KaggleDataset>,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KaggleDownloadRequest {
+    pub dataset_ref: String,
+    pub output_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KaggleDownloadResponse {
+    pub dataset_ref: String,
+    pub path: String,
+    pub size_bytes: u64,
+    pub files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KaggleLocalDataset {
+    pub filename: String,
+    pub size_mb: f64,
+    pub path: String,
+}
+
+// ============================================================================
+// Built-in Dataset Types
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuiltinDataset {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub num_samples: u64,
+    pub num_features: u64,
+    pub num_classes: u64,
+    pub size_mb: f64,
+    pub data_type: String,
+    pub task_type: String,
+    pub source: String,
+    pub download_url: Option<String>,
+    pub loading_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatasetSource {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub dataset_count: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatasetSearchResult {
+    pub id: String,
+    pub name: String,
+    pub source: String,
+    pub size: String,
+    pub download_count: u64,
+    pub description: String,
 }

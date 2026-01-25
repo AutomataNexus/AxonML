@@ -246,7 +246,7 @@ fn parse_binary_proto(bytes: &[u8]) -> OnnxResult<ModelProto> {
     Ok(model)
 }
 
-fn convert_graph(raw: impl std::any::Any) -> crate::proto::GraphProto {
+fn convert_graph(_raw: impl std::any::Any) -> crate::proto::GraphProto {
     // This is a simplified conversion - in practice would properly convert all fields
     crate::proto::GraphProto {
         node: Vec::new(),

@@ -130,7 +130,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize training tracker for real-time metrics broadcasting
     let db_arc = Arc::new(db);
-    let tracker = training::tracker::TrainingTracker::new(db_arc.clone());
+    let tracker = Arc::new(training::tracker::TrainingTracker::new(db_arc.clone()));
+
+    // Initialize training executor
+    let executor = Arc::new(training::executor::TrainingExecutor::new(
+        db_arc.clone(),
+        tracker.clone(),
+        config.models_dir(),
+    ));
 
     // Initialize model pool for managing loaded model instances (max 100 models, 5 minute idle timeout)
     let model_pool = inference::pool::ModelPool::new(100, 300);
@@ -145,9 +152,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config: Arc::new(config.clone()),
         email: Arc::new(email),
         inference: Arc::new(inference),
-        tracker: Arc::new(tracker),
+        tracker,
+        executor,
         model_pool: Arc::new(model_pool),
         inference_metrics: Arc::new(inference_metrics),
+        metrics_history: Arc::new(tokio::sync::Mutex::new(api::system::SystemMetricsHistory {
+            timestamps: Vec::new(),
+            cpu_history: Vec::new(),
+            memory_history: Vec::new(),
+            disk_io_read: Vec::new(),
+            disk_io_write: Vec::new(),
+            network_rx: Vec::new(),
+            network_tx: Vec::new(),
+            gpu_utilization: Vec::new(),
+        })),
     };
 
     // Create router
