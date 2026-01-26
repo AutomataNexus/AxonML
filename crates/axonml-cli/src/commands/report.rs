@@ -14,7 +14,7 @@ use axonml_nn::CrossEntropyLoss;
 use axonml_nn::{Linear, Module, ReLU, Sequential};
 use axonml_serialize::{load_checkpoint, load_state_dict, StateDict};
 use axonml_tensor::Tensor;
-use axonml_vision::SyntheticMNIST;
+use axonml_vision::{MNIST, CIFAR10, FashionMNIST};
 
 use super::utils::{
     ensure_dir, path_exists, print_header, print_info, print_kv, print_success,
@@ -71,7 +71,6 @@ pub struct ClassMetrics {
 
 /// Training history for plotting (used by HTML report generation)
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
 pub struct TrainingHistory {
     pub epochs: Vec<usize>,
     pub train_loss: Vec<f64>,
@@ -79,6 +78,85 @@ pub struct TrainingHistory {
     pub val_loss: Vec<f64>,
     pub val_accuracy: Vec<f64>,
     pub learning_rates: Vec<f64>,
+}
+
+impl TrainingHistory {
+    /// Load training history from a JSON log file
+    pub fn from_file(path: &str) -> Option<Self> {
+        let content = std::fs::read_to_string(path).ok()?;
+
+        let mut history = TrainingHistory::default();
+
+        // Try to parse as JSON array first
+        if let Ok(records) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
+            for record in records {
+                if let Some(epoch) = record.get("epoch").and_then(|v| v.as_u64()) {
+                    history.epochs.push(epoch as usize);
+                }
+                if let Some(loss) = record.get("train_loss").and_then(|v| v.as_f64()) {
+                    history.train_loss.push(loss);
+                }
+                if let Some(loss) = record.get("val_loss").and_then(|v| v.as_f64()) {
+                    history.val_loss.push(loss);
+                }
+                if let Some(acc) = record.get("train_accuracy").and_then(|v| v.as_f64()) {
+                    history.train_accuracy.push(acc);
+                }
+                if let Some(acc) = record.get("val_accuracy").and_then(|v| v.as_f64()) {
+                    history.val_accuracy.push(acc);
+                }
+                if let Some(lr) = record.get("learning_rate").and_then(|v| v.as_f64()) {
+                    history.learning_rates.push(lr);
+                }
+            }
+        } else {
+            // Try to parse as newline-delimited JSON (JSONL format)
+            for line in content.lines() {
+                if let Ok(record) = serde_json::from_str::<serde_json::Value>(line) {
+                    if let Some(epoch) = record.get("epoch").and_then(|v| v.as_u64()) {
+                        history.epochs.push(epoch as usize);
+                    }
+                    if let Some(loss) = record.get("train_loss").and_then(|v| v.as_f64()) {
+                        history.train_loss.push(loss);
+                    } else if let Some(loss) = record.get("loss").and_then(|v| v.as_f64()) {
+                        history.train_loss.push(loss);
+                    }
+                    if let Some(loss) = record.get("val_loss").and_then(|v| v.as_f64()) {
+                        history.val_loss.push(loss);
+                    }
+                    if let Some(acc) = record.get("train_accuracy").and_then(|v| v.as_f64()) {
+                        history.train_accuracy.push(acc);
+                    } else if let Some(acc) = record.get("accuracy").and_then(|v| v.as_f64()) {
+                        history.train_accuracy.push(acc);
+                    }
+                    if let Some(acc) = record.get("val_accuracy").and_then(|v| v.as_f64()) {
+                        history.val_accuracy.push(acc);
+                    }
+                    if let Some(lr) = record.get("learning_rate").and_then(|v| v.as_f64()) {
+                        history.learning_rates.push(lr);
+                    } else if let Some(lr) = record.get("lr").and_then(|v| v.as_f64()) {
+                        history.learning_rates.push(lr);
+                    }
+                }
+            }
+        }
+
+        // Only return if we have meaningful data
+        if !history.train_loss.is_empty() {
+            // Fill epochs if empty
+            if history.epochs.is_empty() {
+                history.epochs = (1..=history.train_loss.len()).collect();
+            }
+            Some(history)
+        } else {
+            None
+        }
+    }
+
+    /// Check if we have real training data
+    pub fn is_empty(&self) -> bool {
+        self.train_loss.is_empty()
+    }
 }
 
 // =============================================================================
@@ -98,19 +176,17 @@ pub fn execute(args: ReportArgs) -> CliResult<()> {
         )));
     }
 
-    // Verify data exists if provided
-    if let Some(ref data_path) = args.data {
-        if !path_exists(data_path) {
-            return Err(CliError::Config(format!(
-                "Data path not found: {data_path}"
-            )));
-        }
+    // Verify data exists
+    let data_path = PathBuf::from(&args.data);
+    if !path_exists(&data_path) {
+        return Err(CliError::Config(format!(
+            "Data path not found: {}",
+            args.data
+        )));
     }
 
     print_kv("Model", &args.model);
-    if let Some(ref data) = args.data {
-        print_kv("Data", data);
-    }
+    print_kv("Data", &args.data);
     print_kv("Output format", &args.format);
 
     println!();
@@ -144,10 +220,22 @@ pub fn execute(args: ReportArgs) -> CliResult<()> {
         .unwrap_or_else(|| "./report".to_string());
     ensure_dir(&output_dir)?;
 
+    // Load training history if provided
+    let training_history = args.history.as_ref().and_then(|path| {
+        print_info(&format!("Loading training history from: {path}"));
+        TrainingHistory::from_file(path)
+    });
+
+    if training_history.is_some() {
+        print_success("Training history loaded successfully");
+    } else if args.history.is_some() {
+        print_info("Could not parse training history file, loss curves will not be included");
+    }
+
     match args.format.to_lowercase().as_str() {
         "html" => {
             let html_path = format!("{output_dir}/report.html");
-            generate_html_report(&metrics, &args, &html_path)?;
+            generate_html_report(&metrics, &args, training_history.as_ref(), &html_path)?;
             print_success(&format!("HTML report saved to: {html_path}"));
         }
         "json" => {
@@ -162,7 +250,7 @@ pub fn execute(args: ReportArgs) -> CliResult<()> {
         }
         "all" => {
             let html_path = format!("{output_dir}/report.html");
-            generate_html_report(&metrics, &args, &html_path)?;
+            generate_html_report(&metrics, &args, training_history.as_ref(), &html_path)?;
             print_success(&format!("HTML report saved to: {html_path}"));
 
             let json_path = format!("{output_dir}/report.json");
@@ -254,17 +342,57 @@ impl ReportModel {
 // Dataset Wrapper
 // =============================================================================
 
-struct ReportDataset(SyntheticMNIST);
+enum ReportDataset {
+    Mnist(MNIST),
+    FashionMnist(FashionMNIST),
+    Cifar10(CIFAR10),
+}
+
+impl ReportDataset {
+    fn load(path: &std::path::Path, format: &str, train: bool) -> Result<Self, String> {
+        match format.to_lowercase().as_str() {
+            "mnist" => Ok(ReportDataset::Mnist(MNIST::new(path, train)?)),
+            "fashion-mnist" | "fashion_mnist" | "fashionmnist" => {
+                Ok(ReportDataset::FashionMnist(FashionMNIST::new(path, train)?))
+            }
+            "cifar10" | "cifar-10" => Ok(ReportDataset::Cifar10(CIFAR10::new(path, train)?)),
+            _ => Err(format!(
+                "Unsupported dataset format: '{}'. Supported: mnist, fashion-mnist, cifar10",
+                format
+            )),
+        }
+    }
+
+    fn detect_format(path: &std::path::Path) -> Option<String> {
+        if path.join("t10k-images-idx3-ubyte").exists()
+            || path.join("t10k-images-idx3-ubyte.gz").exists()
+        {
+            return Some("mnist".to_string());
+        }
+        if path.join("test_batch.bin").exists() {
+            return Some("cifar10".to_string());
+        }
+        None
+    }
+}
 
 impl Dataset for ReportDataset {
     type Item = (Tensor<f32>, Tensor<f32>);
 
     fn len(&self) -> usize {
-        self.0.len()
+        match self {
+            ReportDataset::Mnist(d) => d.len(),
+            ReportDataset::FashionMnist(d) => d.len(),
+            ReportDataset::Cifar10(d) => d.len(),
+        }
     }
 
     fn get(&self, index: usize) -> Option<Self::Item> {
-        self.0.get(index)
+        match self {
+            ReportDataset::Mnist(d) => d.get(index),
+            ReportDataset::FashionMnist(d) => d.get(index),
+            ReportDataset::Cifar10(d) => d.get(index),
+        }
     }
 }
 
@@ -281,8 +409,21 @@ fn evaluate_model(args: &ReportArgs, model_info: &ModelInfo) -> CliResult<Classi
         .load_state_dict(&model_info.state_dict)
         .map_err(CliError::Model)?;
 
-    // Load dataset
-    let dataset = ReportDataset(SyntheticMNIST::new(10000));
+    // Load dataset from the specified path
+    let data_path = PathBuf::from(&args.data);
+
+    let format = args.dataset_format.clone().unwrap_or_else(|| {
+        ReportDataset::detect_format(&data_path)
+            .unwrap_or_else(|| "mnist".to_string())
+    });
+
+    print_info(&format!("Loading {} dataset from: {}", format, args.data));
+
+    let dataset = ReportDataset::load(&data_path, &format, false) // false = test set
+        .map_err(|e| CliError::Config(format!("Failed to load dataset: {}", e)))?;
+
+    print_success(&format!("Loaded {} samples", dataset.len()));
+
     let loader = DataLoader::new(dataset, args.batch_size);
     let total_batches = loader.len() as u64;
 
@@ -731,6 +872,7 @@ fn generate_text_report(metrics: &ClassificationMetrics, path: &str) -> CliResul
 fn generate_html_report(
     metrics: &ClassificationMetrics,
     args: &ReportArgs,
+    training_history: Option<&TrainingHistory>,
     path: &str,
 ) -> CliResult<()> {
     let mut html = String::new();
@@ -1153,24 +1295,40 @@ fn generate_html_report(
         );
     }
 
-    // SVG Loss curve (simulated training history)
-    html.push_str(
-        r#"
+    // SVG Loss curve - only show if loss_curves is enabled
+    if args.loss_curves {
+        if let Some(history) = training_history {
+            // Use real training history data
+            html.push_str(
+                r#"
         <div class="section">
-            <h2>Training Progress (Sample)</h2>
+            <h2>Training Progress</h2>
             <div class="chart-container">
 "#,
-    );
-
-    // Generate sample SVG loss curve
-    html.push_str(&generate_loss_curve_svg());
-
-    html.push_str(
-        r"
+            );
+            html.push_str(&generate_loss_curve_svg_from_history(history));
+            html.push_str(
+                r"
             </div>
         </div>
 ",
-    );
+            );
+        } else {
+            // No training history provided - show informational message
+            html.push_str(
+                r#"
+        <div class="section">
+            <h2>Training Progress</h2>
+            <div style="text-align: center; padding: 2rem; color: var(--text-light);">
+                <p>No training history available.</p>
+                <p style="font-size: 0.875rem;">To include loss curves, provide a training history file with <code>--history path/to/training.log</code></p>
+                <p style="font-size: 0.875rem;">Expected format: JSON array or JSONL with fields: epoch, train_loss, val_loss, train_accuracy, val_accuracy</p>
+            </div>
+        </div>
+"#,
+            );
+        }
+    }
 
     // Footer
     html.push_str(&format!(
@@ -1192,25 +1350,26 @@ fn generate_html_report(
     Ok(())
 }
 
-fn generate_loss_curve_svg() -> String {
-    // Generate sample loss curve SVG
+fn generate_loss_curve_svg_from_history(history: &TrainingHistory) -> String {
+    // Generate loss curve SVG from actual training history
     let width = 600;
     let height = 250;
     let padding = 40;
 
-    // Sample training data points (simulated)
-    let epochs: Vec<f64> = (1..=20).map(f64::from).collect();
-    let train_loss: Vec<f64> = epochs
-        .iter()
-        .map(|&e| 2.5 * (-e / 5.0).exp() + 0.3 + 0.1 * (e * 0.5).sin())
-        .collect();
-    let val_loss: Vec<f64> = epochs
-        .iter()
-        .map(|&e| 2.6 * (-e / 5.5).exp() + 0.35 + 0.12 * (e * 0.5).cos())
-        .collect();
+    let train_loss: Vec<f64> = history.train_loss.clone();
+    let val_loss: Vec<f64> = history.val_loss.clone();
+    let num_epochs = train_loss.len();
 
-    let x_scale = f64::from(width - 2 * padding) / 20.0;
-    let y_max = 2.5;
+    if num_epochs == 0 {
+        return String::from("<p>No training data available</p>");
+    }
+
+    let x_scale = f64::from(width - 2 * padding) / num_epochs.max(1) as f64;
+
+    // Calculate y_max dynamically from actual data
+    let train_max = train_loss.iter().cloned().fold(0.0f64, f64::max);
+    let val_max = val_loss.iter().cloned().fold(0.0f64, f64::max);
+    let y_max = (train_max.max(val_max) * 1.1).max(0.1); // Add 10% padding, ensure non-zero
     let y_scale = f64::from(height - 2 * padding) / y_max;
 
     let mut svg = format!(
@@ -1291,24 +1450,26 @@ fn generate_loss_curve_svg() -> String {
 "##
     ));
 
-    // Validation loss line
-    let val_points: String = val_loss
-        .iter()
-        .enumerate()
-        .map(|(i, &y)| {
-            let x = f64::from(padding) + (i as f64 + 1.0) * x_scale;
-            let y_pos = f64::from(height) - f64::from(padding) - y * y_scale;
-            format!("{x:.1},{y_pos:.1}")
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
+    // Validation loss line (only if we have validation data)
+    if !val_loss.is_empty() {
+        let val_points: String = val_loss
+            .iter()
+            .enumerate()
+            .map(|(i, &y)| {
+                let x = f64::from(padding) + (i as f64 + 1.0) * x_scale;
+                let y_pos = f64::from(height) - f64::from(padding) - y * y_scale;
+                format!("{x:.1},{y_pos:.1}")
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
 
-    svg.push_str(&format!(
-        r##"    <!-- Validation loss line -->
+        svg.push_str(&format!(
+            r##"    <!-- Validation loss line -->
     <polyline fill="none" stroke="#22c55e" stroke-width="2" stroke-dasharray="5,5" points="{val_points}"/>
 
 "##
-    ));
+        ));
+    }
 
     // Axis labels
     svg.push_str(&format!(r##"    <!-- Axis labels -->
@@ -1318,8 +1479,16 @@ fn generate_loss_curve_svg() -> String {
 "##, width / 2, height - 5,
     15, height / 2, 15, height / 2));
 
-    // Legend
-    svg.push_str(&format!(r##"    <!-- Legend -->
+    // Legend - only show Val Loss if we have validation data
+    if val_loss.is_empty() {
+        svg.push_str(&format!(r##"    <!-- Legend -->
+    <g transform="translate({}, {})">
+        <line x1="0" y1="0" x2="20" y2="0" stroke="#4f46e5" stroke-width="2"/>
+        <text x="25" y="4" font-size="11" fill="#64748b">Train Loss</text>
+    </g>
+"##, width - 150, 20));
+    } else {
+        svg.push_str(&format!(r##"    <!-- Legend -->
     <g transform="translate({}, {})">
         <line x1="0" y1="0" x2="20" y2="0" stroke="#4f46e5" stroke-width="2"/>
         <text x="25" y="4" font-size="11" fill="#64748b">Train Loss</text>
@@ -1327,6 +1496,7 @@ fn generate_loss_curve_svg() -> String {
         <text x="125" y="4" font-size="11" fill="#64748b">Val Loss</text>
     </g>
 "##, width - 250, 20));
+    }
 
     // Y-axis tick labels
     for i in 0..=5 {
@@ -1341,9 +1511,10 @@ fn generate_loss_curve_svg() -> String {
         ));
     }
 
-    // X-axis tick labels
-    for i in (0..=20).step_by(4) {
-        let x_pos = padding + (f64::from(i) * x_scale) as i32;
+    // X-axis tick labels - dynamically based on number of epochs
+    let tick_step = (num_epochs / 5).max(1);
+    for i in (0..=num_epochs).step_by(tick_step) {
+        let x_pos = padding + (i as f64 * x_scale) as i32;
         svg.push_str(&format!(
             r##"    <text x="{}" y="{}" font-size="10" fill="#64748b" text-anchor="middle">{}</text>
 "##,

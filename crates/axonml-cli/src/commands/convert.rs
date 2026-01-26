@@ -14,6 +14,10 @@ use super::utils::{
 use crate::cli::ConvertArgs;
 use crate::error::{CliError, CliResult};
 
+use axonml_serialize::{
+    load_state_dict, save_state_dict, convert_from_pytorch, Format, StateDict,
+};
+
 // =============================================================================
 // Supported Formats
 // =============================================================================
@@ -206,62 +210,161 @@ fn convert_model(
 // Specific Converters
 // =============================================================================
 
+/// Count total parameters in a state dict
+fn count_parameters(state_dict: &StateDict) -> u64 {
+    let mut total = 0u64;
+    for (_, entry) in state_dict.entries() {
+        let count: u64 = entry.data.shape.iter().map(|&s| s as u64).product();
+        total += count;
+    }
+    total
+}
+
 fn convert_pytorch_to_axonml(
-    _input: &PathBuf,
+    input: &PathBuf,
     output: &str,
     _optimize: bool,
 ) -> Result<u64, String> {
-    // Simulated conversion
-    let dummy_content = b"FERRITE_MODEL_v1\x00";
-    std::fs::write(output, dummy_content).map_err(|e| format!("Failed to write output: {e}"))?;
-    Ok(1_234_567) // Simulated parameter count
+    // Load the PyTorch state dict (assuming it's in a compatible format)
+    let state_dict = load_state_dict(input)
+        .map_err(|e| format!("Failed to load PyTorch model: {}", e))?;
+
+    // Convert key names from PyTorch convention
+    let converted = convert_from_pytorch(&state_dict);
+
+    // Save in Axonml format
+    save_state_dict(&converted, output, Format::Axonml)
+        .map_err(|e| format!("Failed to save Axonml model: {}", e))?;
+
+    Ok(count_parameters(&converted))
 }
 
-fn convert_onnx_to_axonml(_input: &PathBuf, output: &str, _optimize: bool) -> Result<u64, String> {
-    let dummy_content = b"FERRITE_MODEL_v1\x00";
-    std::fs::write(output, dummy_content).map_err(|e| format!("Failed to write output: {e}"))?;
-    Ok(2_345_678)
+fn convert_onnx_to_axonml(input: &PathBuf, output: &str, _optimize: bool) -> Result<u64, String> {
+    // Use the ONNX parser to load the model
+    let onnx_model = axonml_onnx::import_onnx(input)
+        .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
+
+    // Extract weights from the ONNX model into a state dict
+    let state_dict = onnx_model.to_state_dict();
+
+    // Save in Axonml format
+    save_state_dict(&state_dict, output, Format::Axonml)
+        .map_err(|e| format!("Failed to save Axonml model: {}", e))?;
+
+    Ok(count_parameters(&state_dict))
 }
 
-fn convert_axonml_to_onnx(_input: &PathBuf, output: &str, _optimize: bool) -> Result<u64, String> {
-    let dummy_content = b"ONNX\x00";
-    std::fs::write(output, dummy_content).map_err(|e| format!("Failed to write output: {e}"))?;
-    Ok(1_234_567)
+fn convert_axonml_to_onnx(input: &PathBuf, output: &str, _optimize: bool) -> Result<u64, String> {
+    // Load the Axonml state dict
+    let state_dict = load_state_dict(input)
+        .map_err(|e| format!("Failed to load Axonml model: {}", e))?;
+
+    let num_params = count_parameters(&state_dict);
+
+    // Create ONNX exporter from state dict
+    let model_name = input.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("model");
+
+    let mut exporter = axonml_onnx::export::OnnxExporter::new(model_name);
+
+    // Infer network structure from state dict entries
+    let mut layers: Vec<(String, Vec<usize>)> = Vec::new();
+    let mut input_size = 0usize;
+    let mut output_size = 0usize;
+
+    for (name, entry) in state_dict.entries() {
+        let shape = entry.data.shape.clone();
+        layers.push((name.clone(), shape.clone()));
+
+        // Try to infer input/output from weight shapes
+        if name.ends_with(".weight") && shape.len() == 2 {
+            if name.contains("fc1") || name.contains("layer.0") || name.contains("encoder") {
+                input_size = shape[1];
+            }
+            if name.contains("fc") || name.contains("classifier") || name.contains("head") {
+                output_size = shape[0];
+            }
+        }
+
+        // Add weights as initializers
+        let tensor = axonml_tensor::Tensor::from_vec(entry.data.values.clone(), &shape)
+            .map_err(|e| format!("Failed to create tensor: {:?}", e))?;
+        exporter.add_initializer(&name, &tensor);
+    }
+
+    // Set default sizes if not found
+    if input_size == 0 { input_size = 784; }
+    if output_size == 0 { output_size = 10; }
+
+    // Add input/output
+    exporter.add_input("input", &[1, input_size as i64], axonml_onnx::proto::TensorDataType::Float);
+    exporter.add_output("output", &[1, output_size as i64], axonml_onnx::proto::TensorDataType::Float);
+
+    // Add identity node to connect input to output (minimal graph)
+    exporter.add_node("Identity", &["input"], &["output"], std::collections::HashMap::new());
+
+    // Export to ONNX file
+    axonml_onnx::export_onnx(&exporter, output)
+        .map_err(|e| format!("Failed to export to ONNX: {}", e))?;
+
+    Ok(num_params)
 }
 
-fn convert_axonml_to_safetensors(_input: &PathBuf, output: &str) -> Result<u64, String> {
-    let dummy_content = b"SAFETENSORS\x00";
-    std::fs::write(output, dummy_content).map_err(|e| format!("Failed to write output: {e}"))?;
-    Ok(1_234_567)
+fn convert_axonml_to_safetensors(input: &PathBuf, output: &str) -> Result<u64, String> {
+    // Load Axonml state dict
+    let state_dict = load_state_dict(input)
+        .map_err(|e| format!("Failed to load Axonml model: {}", e))?;
+
+    // Save in SafeTensors format
+    save_state_dict(&state_dict, output, Format::SafeTensors)
+        .map_err(|e| format!("Failed to save SafeTensors: {}", e))?;
+
+    Ok(count_parameters(&state_dict))
 }
 
-fn convert_safetensors_to_axonml(_input: &PathBuf, output: &str) -> Result<u64, String> {
-    let dummy_content = b"FERRITE_MODEL_v1\x00";
-    std::fs::write(output, dummy_content).map_err(|e| format!("Failed to write output: {e}"))?;
-    Ok(1_234_567)
+fn convert_safetensors_to_axonml(input: &PathBuf, output: &str) -> Result<u64, String> {
+    // Load SafeTensors format
+    let state_dict = load_state_dict(input)
+        .map_err(|e| format!("Failed to load SafeTensors: {}", e))?;
+
+    // Save in Axonml format
+    save_state_dict(&state_dict, output, Format::Axonml)
+        .map_err(|e| format!("Failed to save Axonml model: {}", e))?;
+
+    Ok(count_parameters(&state_dict))
 }
 
-fn convert_axonml_to_json(_input: &PathBuf, output: &str) -> Result<u64, String> {
-    let json_content = r#"{
-  "format": "axonml",
-  "version": "1.0",
-  "architecture": "Sequential",
-  "layers": [
-    {"type": "Linear", "in_features": 784, "out_features": 256},
-    {"type": "ReLU"},
-    {"type": "Linear", "in_features": 256, "out_features": 10}
-  ],
-  "num_parameters": 1234567
-}"#;
-    std::fs::write(output, json_content).map_err(|e| format!("Failed to write output: {e}"))?;
-    Ok(1_234_567)
+fn convert_axonml_to_json(input: &PathBuf, output: &str) -> Result<u64, String> {
+    // Load Axonml state dict
+    let state_dict = load_state_dict(input)
+        .map_err(|e| format!("Failed to load Axonml model: {}", e))?;
+
+    // Save in JSON format
+    save_state_dict(&state_dict, output, Format::Json)
+        .map_err(|e| format!("Failed to save JSON: {}", e))?;
+
+    Ok(count_parameters(&state_dict))
 }
 
-fn generic_conversion(_input: &PathBuf, output: &str, to_format: &str) -> Result<u64, String> {
-    let content = format!("Converted to {to_format} format");
-    std::fs::write(output, content.as_bytes())
-        .map_err(|e| format!("Failed to write output: {e}"))?;
-    Ok(1_000_000)
+fn generic_conversion(input: &PathBuf, output: &str, to_format: &str) -> Result<u64, String> {
+    // Try to load as any supported format
+    let state_dict = load_state_dict(input)
+        .map_err(|e| format!("Failed to load model: {}", e))?;
+
+    // Determine output format
+    let format = match to_format.to_lowercase().as_str() {
+        "axonml" | "binary" => Format::Axonml,
+        "json" => Format::Json,
+        "safetensors" => Format::SafeTensors,
+        _ => return Err(format!("Unsupported output format: {}", to_format)),
+    };
+
+    // Save in target format
+    save_state_dict(&state_dict, output, format)
+        .map_err(|e| format!("Failed to save model: {}", e))?;
+
+    Ok(count_parameters(&state_dict))
 }
 
 // =============================================================================

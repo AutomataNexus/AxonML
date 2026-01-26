@@ -359,8 +359,8 @@ impl Model {{
     }}
 
     pub fn num_parameters(&self) -> usize {{
-        // Count total parameters
-        0 // Placeholder
+        // Count total parameters from all layers
+        self.parameters().iter().map(|p| p.data().len()).sum()
     }}
 }}
 
@@ -421,7 +421,7 @@ impl CnnModel {{
     }}
 
     pub fn num_parameters(&self) -> usize {{
-        0 // Placeholder
+        self.parameters().iter().map(|p| p.data().len()).sum()
     }}
 }}
 
@@ -486,7 +486,7 @@ impl MlpModel {{
     }}
 
     pub fn num_parameters(&self) -> usize {{
-        0 // Placeholder
+        self.parameters().iter().map(|p| p.data().len()).sum()
     }}
 }}
 
@@ -541,7 +541,7 @@ impl TransformerModel {{
     }}
 
     pub fn num_parameters(&self) -> usize {{
-        0 // Placeholder
+        self.parameters().iter().map(|p| p.data().len()).sum()
     }}
 }}
 

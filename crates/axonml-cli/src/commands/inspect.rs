@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use super::utils::{detect_model_format, path_exists, print_header, print_info, print_kv};
 use crate::cli::InspectArgs;
 use crate::error::{CliError, CliResult};
+use axonml_serialize::load_state_dict;
 
 // =============================================================================
 // Execute Command
@@ -76,82 +77,122 @@ fn inspect_model(path: &PathBuf, format: &str) -> CliResult<ModelInfo> {
         .unwrap_or("model")
         .to_string();
 
-    // Simulated model inspection
-    let layers = vec![
-        LayerInfo {
-            index: 0,
-            name: "conv1".to_string(),
-            layer_type: "Conv2d".to_string(),
-            input_shape: vec![1, 3, 224, 224],
-            output_shape: vec![1, 64, 112, 112],
-            num_params: 9472,
-            trainable: true,
-        },
-        LayerInfo {
-            index: 1,
-            name: "bn1".to_string(),
-            layer_type: "BatchNorm2d".to_string(),
-            input_shape: vec![1, 64, 112, 112],
-            output_shape: vec![1, 64, 112, 112],
-            num_params: 128,
-            trainable: true,
-        },
-        LayerInfo {
-            index: 2,
-            name: "relu".to_string(),
-            layer_type: "ReLU".to_string(),
-            input_shape: vec![1, 64, 112, 112],
-            output_shape: vec![1, 64, 112, 112],
-            num_params: 0,
-            trainable: false,
-        },
-        LayerInfo {
-            index: 3,
-            name: "maxpool".to_string(),
-            layer_type: "MaxPool2d".to_string(),
-            input_shape: vec![1, 64, 112, 112],
-            output_shape: vec![1, 64, 56, 56],
-            num_params: 0,
-            trainable: false,
-        },
-        LayerInfo {
-            index: 4,
-            name: "layer1.0.conv1".to_string(),
-            layer_type: "Conv2d".to_string(),
-            input_shape: vec![1, 64, 56, 56],
-            output_shape: vec![1, 64, 56, 56],
-            num_params: 36928,
-            trainable: true,
-        },
-        LayerInfo {
-            index: 5,
-            name: "fc".to_string(),
-            layer_type: "Linear".to_string(),
-            input_shape: vec![1, 512],
-            output_shape: vec![1, 1000],
-            num_params: 513000,
-            trainable: true,
-        },
-    ];
+    // Load the actual state dict from the model file
+    let state_dict = load_state_dict(path)
+        .map_err(|e| CliError::Model(format!("Failed to load model: {}", e)))?;
 
-    let num_params: u64 = layers.iter().map(|l| l.num_params).sum();
+    // Extract layer information from state dict entries
+    let mut layers = Vec::new();
+    let mut total_params: u64 = 0;
 
-    let metadata = vec![
-        ("version".to_string(), "1.0.0".to_string()),
-        ("framework".to_string(), "axonml".to_string()),
-        ("created".to_string(), "2026-01-19".to_string()),
-        ("dtype".to_string(), "float32".to_string()),
-    ];
+    // Group parameters by layer prefix
+    let mut layer_params: std::collections::BTreeMap<String, Vec<(String, Vec<usize>, u64, bool)>> =
+        std::collections::BTreeMap::new();
+
+    for (param_name, entry) in state_dict.entries() {
+        let shape = entry.data.shape().to_vec();
+        let num_params: u64 = shape.iter().map(|&s| s as u64).product();
+        total_params += num_params;
+
+        // Extract layer name from parameter name (e.g., "layer1.conv.weight" -> "layer1.conv")
+        let layer_name = if let Some(idx) = param_name.rfind('.') {
+            param_name[..idx].to_string()
+        } else {
+            param_name.clone()
+        };
+
+        layer_params
+            .entry(layer_name)
+            .or_default()
+            .push((param_name.clone(), shape, num_params, entry.requires_grad));
+    }
+
+    // Create LayerInfo for each unique layer
+    for (index, (layer_name, params)) in layer_params.iter().enumerate() {
+        let layer_num_params: u64 = params.iter().map(|(_, _, p, _)| *p).sum();
+        let trainable = params.iter().any(|(_, _, _, t)| *t);
+
+        // Infer layer type from parameter names
+        let layer_type = infer_layer_type(&params);
+
+        // Get shape from weight parameter if available
+        let (input_shape, output_shape) = infer_shapes(&params);
+
+        layers.push(LayerInfo {
+            index,
+            name: layer_name.clone(),
+            layer_type,
+            input_shape,
+            output_shape,
+            num_params: layer_num_params,
+            trainable,
+        });
+    }
+
+    // Extract metadata
+    let mut metadata = Vec::new();
+    metadata.push(("framework".to_string(), "axonml".to_string()));
+    metadata.push(("format".to_string(), format.to_string()));
+    metadata.push(("total_parameters".to_string(), total_params.to_string()));
+
+    // Add common metadata keys if present
+    for key in &["version", "model_type", "dtype", "created"] {
+        if let Some(value) = state_dict.get_metadata(key) {
+            metadata.push((key.to_string(), value.clone()));
+        }
+    }
 
     Ok(ModelInfo {
         name,
         format: format.to_string(),
         file_size,
-        num_parameters: num_params,
+        num_parameters: total_params,
         num_layers: layers.len(),
         layers,
         metadata,
     })
+}
+
+/// Infer layer type from parameter names
+fn infer_layer_type(params: &[(String, Vec<usize>, u64, bool)]) -> String {
+    for (name, shape, _, _) in params {
+        if name.ends_with(".weight") {
+            let dims = shape.len();
+            if dims == 4 {
+                return "Conv2d".to_string();
+            } else if dims == 2 {
+                return "Linear".to_string();
+            } else if dims == 1 {
+                return "BatchNorm".to_string();
+            }
+        }
+        if name.ends_with(".gamma") || name.ends_with(".beta") {
+            return "LayerNorm".to_string();
+        }
+        if name.ends_with(".embedding") {
+            return "Embedding".to_string();
+        }
+    }
+    "Unknown".to_string()
+}
+
+/// Infer input and output shapes from parameters
+fn infer_shapes(params: &[(String, Vec<usize>, u64, bool)]) -> (Vec<usize>, Vec<usize>) {
+    for (name, shape, _, _) in params {
+        if name.ends_with(".weight") && shape.len() >= 2 {
+            // For Linear: [out_features, in_features]
+            // For Conv2d: [out_channels, in_channels, kernel_h, kernel_w]
+            if shape.len() == 2 {
+                return (vec![1, shape[1]], vec![1, shape[0]]);
+            } else if shape.len() == 4 {
+                return (
+                    vec![1, shape[1], 0, 0], // [batch, in_channels, H, W]
+                    vec![1, shape[0], 0, 0], // [batch, out_channels, H, W]
+                );
+            }
+        }
+    }
+    (vec![], vec![])
 }
 
 // =============================================================================

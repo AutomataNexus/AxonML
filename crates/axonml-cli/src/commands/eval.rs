@@ -16,7 +16,7 @@ use axonml_serialize::{load_checkpoint, load_state_dict, StateDict};
 #[cfg(test)]
 use axonml_tensor::zeros;
 use axonml_tensor::Tensor;
-use axonml_vision::SyntheticMNIST;
+use axonml_vision::{MNIST, CIFAR10, FashionMNIST};
 
 use super::utils::{
     detect_model_format, path_exists, print_header, print_info, print_kv, print_success,
@@ -171,17 +171,70 @@ impl EvalModel {
 // Dataset Wrapper
 // =============================================================================
 
-struct EvalDataset(SyntheticMNIST);
+/// Supported dataset formats for evaluation
+enum EvalDataset {
+    Mnist(MNIST),
+    FashionMnist(FashionMNIST),
+    Cifar10(CIFAR10),
+}
+
+impl EvalDataset {
+    /// Load dataset from path based on format
+    fn load(path: &std::path::Path, format: &str, train: bool) -> Result<Self, String> {
+        match format.to_lowercase().as_str() {
+            "mnist" => {
+                let dataset = MNIST::new(path, train)?;
+                Ok(EvalDataset::Mnist(dataset))
+            }
+            "fashion-mnist" | "fashion_mnist" | "fashionmnist" => {
+                let dataset = FashionMNIST::new(path, train)?;
+                Ok(EvalDataset::FashionMnist(dataset))
+            }
+            "cifar10" | "cifar-10" => {
+                let dataset = CIFAR10::new(path, train)?;
+                Ok(EvalDataset::Cifar10(dataset))
+            }
+            _ => Err(format!(
+                "Unsupported dataset format: '{}'. Supported: mnist, fashion-mnist, cifar10",
+                format
+            )),
+        }
+    }
+
+    /// Detect dataset format from directory contents
+    fn detect_format(path: &std::path::Path) -> Option<String> {
+        // Check for MNIST files
+        if path.join("train-images-idx3-ubyte").exists()
+            || path.join("train-images-idx3-ubyte.gz").exists()
+        {
+            // Check if it's Fashion-MNIST by looking for a marker or assuming MNIST
+            return Some("mnist".to_string());
+        }
+        // Check for CIFAR files
+        if path.join("data_batch_1.bin").exists() {
+            return Some("cifar10".to_string());
+        }
+        None
+    }
+}
 
 impl Dataset for EvalDataset {
     type Item = (Tensor<f32>, Tensor<f32>);
 
     fn len(&self) -> usize {
-        self.0.len()
+        match self {
+            EvalDataset::Mnist(d) => d.len(),
+            EvalDataset::FashionMnist(d) => d.len(),
+            EvalDataset::Cifar10(d) => d.len(),
+        }
     }
 
     fn get(&self, index: usize) -> Option<Self::Item> {
-        self.0.get(index)
+        match self {
+            EvalDataset::Mnist(d) => d.get(index),
+            EvalDataset::FashionMnist(d) => d.get(index),
+            EvalDataset::Cifar10(d) => d.get(index),
+        }
     }
 }
 
@@ -198,8 +251,22 @@ fn run_evaluation(args: &EvalArgs, model_info: &ModelInfo) -> CliResult<Vec<(Str
         .load_state_dict(&model_info.state_dict)
         .map_err(CliError::Model)?;
 
-    // Load dataset (using synthetic data that matches saved model architecture)
-    let dataset = EvalDataset(SyntheticMNIST::new(10000));
+    // Load dataset from the specified path
+    let data_path = PathBuf::from(&args.data);
+
+    // Detect or use specified format
+    let format = args.format.clone().unwrap_or_else(|| {
+        EvalDataset::detect_format(&data_path)
+            .unwrap_or_else(|| "mnist".to_string())
+    });
+
+    print_info(&format!("Loading {} dataset from: {}", format, args.data));
+
+    let dataset = EvalDataset::load(&data_path, &format, false) // false = test set
+        .map_err(|e| CliError::Config(format!("Failed to load dataset: {}", e)))?;
+
+    print_success(&format!("Loaded {} samples", dataset.len()));
+
     let loader = DataLoader::new(dataset, args.batch_size);
     let total_batches = loader.len() as u64;
 

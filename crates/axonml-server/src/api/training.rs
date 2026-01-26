@@ -55,6 +55,8 @@ pub struct RunConfigRequest {
     pub batch_size: u32,
     pub learning_rate: f64,
     #[serde(default)]
+    pub steps_per_epoch: Option<u32>,
+    #[serde(default)]
     pub optimizer: String,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
@@ -209,6 +211,7 @@ pub async fn create_run(
         epochs: req.config.epochs,
         batch_size: req.config.batch_size,
         learning_rate: req.config.learning_rate,
+        steps_per_epoch: req.config.steps_per_epoch.unwrap_or(100),
         optimizer: if req.config.optimizer.is_empty() {
             "adam".to_string()
         } else {
@@ -638,13 +641,33 @@ pub async fn append_log(
     Ok(StatusCode::CREATED)
 }
 
+/// Query params for WebSocket auth
+#[derive(Debug, Deserialize)]
+pub struct WsStreamQuery {
+    pub token: Option<String>,
+}
+
 /// WebSocket handler for streaming metrics
+/// SECURITY: Requires authentication via query param token
 pub async fn stream_metrics(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_metrics_stream(socket, state, id))
+    Query(query): Query<WsStreamQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    // SECURITY: Validate the token from query params
+    let token = query.token.ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Missing token parameter. Connect with ?token=<jwt>".to_string(),
+    ))?;
+
+    // Verify the JWT token
+    let _claims = state.jwt.validate_access_token(&token).map_err(|e| {
+        tracing::warn!(run_id = %id, "Unauthorized WebSocket connection attempt");
+        (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
+    })?;
+
+    Ok(ws.on_upgrade(move |socket| handle_metrics_stream(socket, state, id)))
 }
 
 /// Handle WebSocket connection for metrics streaming

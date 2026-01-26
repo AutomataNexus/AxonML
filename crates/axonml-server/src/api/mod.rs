@@ -25,6 +25,7 @@ use crate::inference::pool::ModelPool;
 use crate::inference::metrics::InferenceMetrics;
 use crate::training::tracker::TrainingTracker;
 use crate::training::executor::TrainingExecutor;
+use crate::training::notebook_executor::NotebookExecutor;
 use crate::llm::OllamaClient;
 use axum::{
     extract::State,
@@ -49,6 +50,7 @@ pub struct AppState {
     pub inference: Arc<InferenceServer>,
     pub tracker: Arc<TrainingTracker>,
     pub executor: Arc<TrainingExecutor>,
+    pub notebook_executor: Arc<NotebookExecutor>,
     pub model_pool: Arc<ModelPool>,
     pub inference_metrics: Arc<InferenceMetrics>,
     pub metrics_history: Arc<Mutex<system::SystemMetricsHistory>>,
@@ -58,14 +60,15 @@ pub struct AppState {
 /// Create the main API router
 pub fn create_router(state: AppState) -> Router {
     // CORS configuration - Only allow requests from trusted origins
+    // These are known valid origins, expect will never fail for these static strings
     let cors = CorsLayer::new()
         .allow_origin([
-            "http://127.0.0.1:8081".parse::<axum::http::HeaderValue>().unwrap(),
-            "http://localhost:8081".parse::<axum::http::HeaderValue>().unwrap(),
-            "http://127.0.0.1:8083".parse::<axum::http::HeaderValue>().unwrap(),
-            "http://localhost:8083".parse::<axum::http::HeaderValue>().unwrap(),
-            "http://127.0.0.1:3021".parse::<axum::http::HeaderValue>().unwrap(),
-            "http://localhost:3021".parse::<axum::http::HeaderValue>().unwrap(),
+            "http://127.0.0.1:8081".parse::<axum::http::HeaderValue>().expect("valid origin"),
+            "http://localhost:8081".parse::<axum::http::HeaderValue>().expect("valid origin"),
+            "http://127.0.0.1:8083".parse::<axum::http::HeaderValue>().expect("valid origin"),
+            "http://localhost:8083".parse::<axum::http::HeaderValue>().expect("valid origin"),
+            "http://127.0.0.1:3021".parse::<axum::http::HeaderValue>().expect("valid origin"),
+            "http://localhost:3021".parse::<axum::http::HeaderValue>().expect("valid origin"),
         ])
         .allow_methods([
             axum::http::Method::GET,
@@ -528,11 +531,72 @@ struct AdminQueryRequest {
     params: Vec<serde_json::Value>,
 }
 
-/// Admin query endpoint - execute raw SQL-like queries (admin only)
+/// SECURITY: Whitelist of allowed query patterns for admin endpoint
+const ALLOWED_QUERY_PREFIXES: &[&str] = &[
+    "SELECT ",
+    "SHOW ",
+    "DESCRIBE ",
+    "COUNT(",
+];
+
+/// SECURITY: Forbidden patterns in queries
+const FORBIDDEN_PATTERNS: &[&str] = &[
+    ";",      // Multiple statements
+    "--",     // SQL comments
+    "/*",     // SQL block comments
+    "DROP ",
+    "DELETE ",
+    "TRUNCATE ",
+    "ALTER ",
+    "CREATE ",
+    "INSERT ",
+    "UPDATE ",
+    "GRANT ",
+    "REVOKE ",
+    "EXEC ",
+    "EXECUTE ",
+    "xp_",    // SQL Server extended procedures
+    "sp_",    // SQL Server stored procedures
+];
+
+/// Validate query against whitelist
+fn validate_admin_query(query: &str) -> Result<(), String> {
+    let query_upper = query.trim().to_uppercase();
+
+    // Check if query starts with allowed prefix
+    let is_allowed = ALLOWED_QUERY_PREFIXES
+        .iter()
+        .any(|prefix| query_upper.starts_with(prefix));
+
+    if !is_allowed {
+        return Err("Query type not allowed. Only SELECT, SHOW, DESCRIBE, and COUNT queries permitted.".to_string());
+    }
+
+    // Check for forbidden patterns
+    for pattern in FORBIDDEN_PATTERNS {
+        if query_upper.contains(&pattern.to_uppercase()) {
+            return Err(format!("Query contains forbidden pattern: {}", pattern));
+        }
+    }
+
+    Ok(())
+}
+
+/// Admin query endpoint - execute read-only queries (admin only)
+/// SECURITY: Only SELECT/SHOW/DESCRIBE queries are allowed
 async fn admin_query(
     State(state): State<AppState>,
     Json(req): Json<AdminQueryRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // SECURITY: Validate query against whitelist
+    if let Err(e) = validate_admin_query(&req.query) {
+        tracing::warn!(query = %req.query, "Admin query rejected: {}", e);
+        return Err((StatusCode::FORBIDDEN, e));
+    }
+
+    // Log admin query for audit trail
+    tracing::info!(query = %req.query, "Admin query executed");
+
     // Use the database query method
     let result = if req.params.is_empty() {
         state.db.query(&req.query).await
@@ -545,28 +609,22 @@ async fn admin_query(
             "rows": response.rows,
             "affected_rows": response.affected_rows,
         }))),
-        Err(e) => Err((StatusCode::BAD_REQUEST, e.to_string())),
+        Err(_) => Err((StatusCode::BAD_REQUEST, "Query execution failed".to_string())),
     }
 }
 
-/// Admin execute endpoint - execute SQL-like statements (admin only)
+/// Admin execute endpoint - DISABLED for security
+/// SECURITY: Write operations via raw queries are not permitted
 async fn admin_execute(
-    State(state): State<AppState>,
-    Json(req): Json<AdminQueryRequest>,
+    State(_state): State<AppState>,
+    Json(_req): Json<AdminQueryRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    // Use the database execute method
-    let result = if req.params.is_empty() {
-        state.db.execute(&req.query).await
-    } else {
-        state.db.execute_with_params(&req.query, req.params).await
-    };
-
-    match result {
-        Ok(affected_rows) => Ok(Json(serde_json::json!({
-            "affected_rows": affected_rows,
-        }))),
-        Err(e) => Err((StatusCode::BAD_REQUEST, e.to_string())),
-    }
+    // SECURITY: Raw execute is disabled - use specific API endpoints instead
+    tracing::warn!("Attempted to use disabled admin_execute endpoint");
+    Err((
+        StatusCode::FORBIDDEN,
+        "Raw SQL execute is disabled for security. Use specific API endpoints for write operations.".to_string()
+    ))
 }
 
 /// Admin record metrics request

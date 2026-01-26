@@ -199,9 +199,13 @@ pub struct TrainArgs {
     #[arg(short, long)]
     pub model: Option<String>,
 
-    /// Path to training data
+    /// Path to training data directory (required)
     #[arg(short, long)]
-    pub data: Option<String>,
+    pub data: String,
+
+    /// Dataset format (mnist, fashion-mnist, cifar10). Auto-detected if not specified.
+    #[arg(long)]
+    pub format: Option<String>,
 
     /// Number of epochs to train
     #[arg(short, long)]
@@ -238,6 +242,14 @@ pub struct ResumeArgs {
     /// Path to checkpoint file
     pub checkpoint: String,
 
+    /// Path to training data directory (required)
+    #[arg(short, long)]
+    pub data: String,
+
+    /// Dataset format (mnist, fashion-mnist, cifar10). Auto-detected if not specified.
+    #[arg(long)]
+    pub format: Option<String>,
+
     /// Additional epochs to train
     #[arg(short, long)]
     pub epochs: Option<usize>,
@@ -245,6 +257,10 @@ pub struct ResumeArgs {
     /// Override learning rate
     #[arg(short, long)]
     pub lr: Option<f64>,
+
+    /// Batch size for training
+    #[arg(short, long, default_value = "32")]
+    pub batch_size: usize,
 
     /// Output directory for new checkpoints
     #[arg(short, long)]
@@ -261,8 +277,12 @@ pub struct EvalArgs {
     /// Path to model file
     pub model: String,
 
-    /// Path to evaluation data
+    /// Path to evaluation data directory
     pub data: String,
+
+    /// Dataset format (mnist, fashion-mnist, cifar10). Auto-detected if not specified.
+    #[arg(long)]
+    pub format: Option<String>,
 
     /// Batch size for evaluation
     #[arg(short, long, default_value = "32")]
@@ -388,9 +408,13 @@ pub struct ReportArgs {
     /// Path to model file
     pub model: String,
 
-    /// Path to evaluation data (optional, uses synthetic data if not provided)
+    /// Path to evaluation data directory (required)
     #[arg(short, long)]
-    pub data: Option<String>,
+    pub data: String,
+
+    /// Dataset format (mnist, fashion-mnist, cifar10). Auto-detected if not specified.
+    #[arg(long)]
+    pub dataset_format: Option<String>,
 
     /// Batch size for evaluation
     #[arg(short, long, default_value = "32")]

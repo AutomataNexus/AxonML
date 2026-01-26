@@ -55,7 +55,103 @@ pub fn NotebookEditorPage() -> impl IntoView {
                     NotebookCell {
                         id: uuid::Uuid::new_v4().to_string(),
                         cell_type: CellType::Code,
-                        source: "# Your training code here\nprint(\"Hello AxonML!\")".to_string(),
+                        source: r#"# AxonML Training Imports
+use axonml::prelude::*;
+use axonml::nn::{Linear, Conv2d, BatchNorm2d, Dropout, Sequential};
+use axonml::optim::{Adam, SGD, AdamW};
+use axonml::data::{DataLoader, Dataset};
+use axonml::tensor::Tensor;
+use axonml::autograd::Variable;
+
+# Training configuration
+let device = Device::cuda_if_available();
+let batch_size = 32;
+let learning_rate = 0.001;
+let epochs = 10;"#.to_string(),
+                        outputs: vec![],
+                        status: CellStatus::Idle,
+                        execution_count: None,
+                        metadata: std::collections::HashMap::new(),
+                    },
+                    NotebookCell {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        cell_type: CellType::Markdown,
+                        source: "## Model Definition".to_string(),
+                        outputs: vec![],
+                        status: CellStatus::Idle,
+                        execution_count: None,
+                        metadata: std::collections::HashMap::new(),
+                    },
+                    NotebookCell {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        cell_type: CellType::Code,
+                        source: r#"# Define your model here
+struct MyModel {
+    fc1: Linear,
+    fc2: Linear,
+}
+
+impl MyModel {
+    fn new(input_size: usize, hidden_size: usize, output_size: usize) -> Self {
+        Self {
+            fc1: Linear::new(input_size, hidden_size),
+            fc2: Linear::new(hidden_size, output_size),
+        }
+    }
+
+    fn forward(&self, x: &Tensor) -> Tensor {
+        let x = self.fc1.forward(x).relu();
+        self.fc2.forward(&x)
+    }
+}
+
+let model = MyModel::new(784, 128, 10).to(&device);"#.to_string(),
+                        outputs: vec![],
+                        status: CellStatus::Idle,
+                        execution_count: None,
+                        metadata: std::collections::HashMap::new(),
+                    },
+                    NotebookCell {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        cell_type: CellType::Markdown,
+                        source: "## Training Loop".to_string(),
+                        outputs: vec![],
+                        status: CellStatus::Idle,
+                        execution_count: None,
+                        metadata: std::collections::HashMap::new(),
+                    },
+                    NotebookCell {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        cell_type: CellType::Code,
+                        source: r#"# Setup optimizer and loss
+let optimizer = Adam::new(model.parameters(), learning_rate);
+let criterion = CrossEntropyLoss::new();
+
+# Training loop
+for epoch in 0..epochs {
+    let mut total_loss = 0.0;
+    let mut correct = 0;
+    let mut total = 0;
+
+    for (batch_idx, (data, target)) in train_loader.iter().enumerate() {
+        let data = data.to(&device);
+        let target = target.to(&device);
+
+        optimizer.zero_grad();
+        let output = model.forward(&data);
+        let loss = criterion.forward(&output, &target);
+        loss.backward();
+        optimizer.step();
+
+        total_loss += loss.item();
+        let pred = output.argmax(1);
+        correct += pred.eq(&target).sum().item() as usize;
+        total += target.size(0);
+    }
+
+    let accuracy = 100.0 * correct as f32 / total as f32;
+    println!("Epoch {}: Loss = {:.4}, Accuracy = {:.2}%", epoch + 1, total_loss, accuracy);
+}"#.to_string(),
                         outputs: vec![],
                         status: CellStatus::Idle,
                         execution_count: None,
@@ -184,12 +280,30 @@ pub fn NotebookEditorPage() -> impl IntoView {
         }
     };
 
+    // Format code on blur (basic auto-formatting)
+    let format_cell_source = move |cell_id: String, is_code: bool| {
+        if let Some(mut nb) = notebook.get() {
+            if let Some(cell) = nb.cells.iter_mut().find(|c| c.id == cell_id) {
+                let formatted = if is_code {
+                    format_code(&cell.source)
+                } else {
+                    format_markdown(&cell.source)
+                };
+                if formatted != cell.source {
+                    cell.source = formatted;
+                    set_notebook.set(Some(nb));
+                }
+            }
+        }
+    };
+
     // Request AI assist
     let request_ai_assist = {
         let state = state.clone();
         move |_| {
             let prompt = ai_prompt.get();
             if prompt.is_empty() {
+                state.toast_error("Error", "Please enter a prompt first");
                 return;
             }
 
@@ -202,13 +316,18 @@ pub fn NotebookEditorPage() -> impl IntoView {
 
             // Need a saved notebook to use AI assist
             if nb.id.is_empty() {
+                state.toast_error("Save Required", "Please save the notebook first before using AI assist");
                 set_ai_suggestion.set(Some(AiAssistResponse {
                     suggestion: "# Please save the notebook first\n# AI assistance requires the notebook to be saved so it can analyze the full context.".to_string(),
                     explanation: Some("Save the notebook first to enable AI assistance.".to_string()),
                     confidence: 0.0,
+                    model: String::new(),
+                    tokens_generated: 0,
                 }));
                 return;
             }
+
+            state.toast_info("AI Assist", "Generating suggestion...");
 
             let notebook_id = nb.id.clone();
             let selected = selected_cell.get();
@@ -234,6 +353,8 @@ pub fn NotebookEditorPage() -> impl IntoView {
                             suggestion: format!("# Error: {}", msg),
                             explanation: Some(msg),
                             confidence: 0.0,
+                            model: String::new(),
+                            tokens_generated: 0,
                         }));
                     }
                 }
@@ -335,7 +456,9 @@ pub fn NotebookEditorPage() -> impl IntoView {
                             let cell_id_for_select = cell.id.clone();
                             let cell_id_for_update = cell.id.clone();
                             let cell_id_for_delete = cell.id.clone();
+                            let cell_id_for_format = cell.id.clone();
                             let is_code = cell.cell_type == CellType::Code;
+                            let is_code_for_format = is_code;
                             let is_selected = move || selected_cell.get() == Some(cell_id.clone());
                             let source = cell.source.clone();
                             let exec_count = cell.execution_count;
@@ -386,6 +509,10 @@ pub fn NotebookEditorPage() -> impl IntoView {
                                                 on:input={
                                                     let id = cell_id_for_update.clone();
                                                     move |e| update_cell_source(id.clone(), event_target_value(&e))
+                                                }
+                                                on:blur={
+                                                    let id = cell_id_for_format.clone();
+                                                    move |_| format_cell_source(id.clone(), is_code_for_format)
                                                 }
                                                 spellcheck="false"
                                                 rows={std::cmp::max(3, source.lines().count())}
@@ -458,7 +585,25 @@ pub fn NotebookEditorPage() -> impl IntoView {
 
                     <Show when=move || ai_suggestion.get().is_some()>
                         <div class="ai-suggestion">
-                            <h4>"Suggestion"</h4>
+                            <div class="ai-suggestion-header">
+                                <h4>"Suggestion"</h4>
+                                {move || {
+                                    let suggestion = ai_suggestion.get();
+                                    if let Some(ref s) = suggestion {
+                                        if !s.model.is_empty() {
+                                            Some(view! {
+                                                <span class="ai-model-info">
+                                                    {format!("{} ({} tokens)", s.model, s.tokens_generated)}
+                                                </span>
+                                            })
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }}
+                            </div>
                             <pre class="suggestion-code">{move || ai_suggestion.get().map(|s| s.suggestion).unwrap_or_default()}</pre>
                             {move || ai_suggestion.get().and_then(|s| s.explanation).map(|exp| view! {
                                 <p class="suggestion-explanation">{exp}</p>
@@ -479,4 +624,57 @@ pub fn NotebookEditorPage() -> impl IntoView {
             </Modal>
         </div>
     }
+}
+
+/// Format code with basic auto-formatting
+fn format_code(source: &str) -> String {
+    let mut result = String::new();
+    let mut indent_level: i32 = 0;
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+
+        // Skip empty lines but preserve them
+        if trimmed.is_empty() {
+            result.push('\n');
+            continue;
+        }
+
+        // Decrease indent for closing braces/brackets at start
+        if trimmed.starts_with('}') || trimmed.starts_with(']') || trimmed.starts_with(')') {
+            indent_level = (indent_level - 1).max(0);
+        }
+
+        // Add proper indentation (4 spaces per level)
+        for _ in 0..indent_level {
+            result.push_str("    ");
+        }
+
+        // Add the trimmed line
+        result.push_str(trimmed);
+        result.push('\n');
+
+        // Increase indent after opening braces/brackets
+        if trimmed.ends_with('{') || trimmed.ends_with('[') || trimmed.ends_with('(') {
+            indent_level += 1;
+        }
+        // Handle else/elif on same line as closing brace
+        if trimmed.contains("} else") || trimmed.contains("} elif") {
+            // Don't change indent
+        }
+    }
+
+    // Remove trailing newlines but ensure one at end
+    result.trim_end().to_string()
+}
+
+/// Format markdown with basic cleanup
+fn format_markdown(source: &str) -> String {
+    source
+        .lines()
+        .map(|line| line.trim_end()) // Remove trailing whitespace
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end()
+        .to_string()
 }

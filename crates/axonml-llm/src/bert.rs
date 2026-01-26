@@ -8,6 +8,7 @@ use axonml_tensor::Tensor;
 
 use crate::config::BertConfig;
 use crate::embedding::BertEmbedding;
+use crate::error::{LLMError, LLMResult};
 use crate::transformer::{TransformerEncoder, LayerNorm};
 
 /// BERT model (encoder-only transformer).
@@ -181,14 +182,19 @@ impl BertForSequenceClassification {
     }
 
     /// Forward pass for classification.
-    pub fn forward_classification(&self, input_ids: &Tensor<u32>) -> Variable {
+    ///
+    /// # Errors
+    /// Returns an error if the BERT model does not have a pooler configured.
+    pub fn forward_classification(&self, input_ids: &Tensor<u32>) -> LLMResult<Variable> {
         let (_, pooled_output) = self.bert.forward_with_pooling(input_ids, None, None);
 
         if let Some(pooled) = pooled_output {
             let pooled = self.dropout.forward(&pooled);
-            self.classifier.forward(&pooled)
+            Ok(self.classifier.forward(&pooled))
         } else {
-            panic!("BERT model must have pooler for sequence classification");
+            Err(LLMError::InvalidConfig(
+                "BERT model must have pooler for sequence classification".to_string()
+            ))
         }
     }
 }

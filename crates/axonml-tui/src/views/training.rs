@@ -177,11 +177,135 @@ impl TrainingView {
     }
 
     /// Watch a training log file
-    pub fn watch_log(&mut self, _path: &Path) -> Result<(), String> {
-        // For now, just load demo session
-        // In real implementation, would parse training log files
-        self.load_demo_session();
-        Ok(())
+    pub fn watch_log(&mut self, path: &Path) -> Result<(), String> {
+        // Try to parse the training log file
+        match self.parse_training_log(path) {
+            Ok(session) => {
+                self.session = Some(session);
+                Ok(())
+            }
+            Err(e) => {
+                // Log file not found or invalid - fall back to demo
+                eprintln!("Warning: Could not parse training log: {}", e);
+                self.load_demo_session();
+                Err(e)
+            }
+        }
+    }
+
+    /// Parse a training log file to extract metrics
+    fn parse_training_log(&self, path: &Path) -> Result<TrainingSession, String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read log file: {}", e))?;
+
+        let mut metrics_history = Vec::new();
+        let mut config = TrainingConfig {
+            total_epochs: 10,
+            batch_size: 32,
+            optimizer: "Adam".to_string(),
+            initial_lr: 0.001,
+            model_name: "model".to_string(),
+        };
+
+        // Parse JSON log format (one JSON object per line)
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            // Try to parse as JSON
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                // Extract epoch info
+                if let Some(epoch) = json.get("epoch").and_then(|v| v.as_u64()) {
+                    let train_loss = json.get("train_loss")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0) as f32;
+                    let val_loss = json.get("val_loss")
+                        .and_then(|v| v.as_f64())
+                        .map(|v| v as f32);
+                    let train_acc = json.get("train_acc")
+                        .and_then(|v| v.as_f64())
+                        .map(|v| v as f32);
+                    let val_acc = json.get("val_acc")
+                        .and_then(|v| v.as_f64())
+                        .map(|v| v as f32);
+                    let learning_rate = json.get("learning_rate")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.001);
+                    let duration = json.get("duration_secs")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0) as f32;
+
+                    metrics_history.push(EpochMetrics {
+                        epoch: epoch as usize,
+                        train_loss,
+                        val_loss,
+                        train_acc,
+                        val_acc,
+                        learning_rate,
+                        duration_secs: duration,
+                    });
+                }
+
+                // Extract config info
+                if let Some(total) = json.get("total_epochs").and_then(|v| v.as_u64()) {
+                    config.total_epochs = total as usize;
+                }
+                if let Some(bs) = json.get("batch_size").and_then(|v| v.as_u64()) {
+                    config.batch_size = bs as usize;
+                }
+                if let Some(opt) = json.get("optimizer").and_then(|v| v.as_str()) {
+                    config.optimizer = opt.to_string();
+                }
+                if let Some(name) = json.get("model_name").and_then(|v| v.as_str()) {
+                    config.model_name = name.to_string();
+                }
+            }
+        }
+
+        if metrics_history.is_empty() {
+            return Err("No training metrics found in log file".to_string());
+        }
+
+        // Calculate derived values
+        let current_epoch = metrics_history.last().map(|m| m.epoch).unwrap_or(1);
+        let loss_history: Vec<u64> = metrics_history
+            .iter()
+            .map(|m| {
+                let max_loss = 3.0f32;
+                ((max_loss - m.train_loss.min(max_loss)) / max_loss * 100.0) as u64
+            })
+            .collect();
+
+        let (best_val_loss, best_epoch) = metrics_history
+            .iter()
+            .filter_map(|m| m.val_loss.map(|v| (v, m.epoch)))
+            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or((0.0, 1));
+
+        let total_duration: f32 = metrics_history.iter().map(|m| m.duration_secs).sum();
+        let avg_epoch_time = total_duration / metrics_history.len() as f32;
+        let total_epochs = config.total_epochs;
+        let remaining_epochs = total_epochs.saturating_sub(current_epoch);
+        let eta = (remaining_epochs as f32 * avg_epoch_time) as f64;
+
+        Ok(TrainingSession {
+            config,
+            current_epoch,
+            current_batch: 0,
+            total_batches: 100,
+            status: if current_epoch >= total_epochs {
+                TrainingStatus::Completed
+            } else {
+                TrainingStatus::Idle
+            },
+            metrics_history,
+            loss_history,
+            best_val_loss: Some(best_val_loss),
+            best_epoch: Some(best_epoch),
+            elapsed_secs: total_duration as f64,
+            eta_secs: if eta > 0.0 { Some(eta) } else { None },
+        })
     }
 
     /// Scroll up in the metrics history

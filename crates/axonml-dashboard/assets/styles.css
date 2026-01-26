@@ -6094,6 +6094,8 @@ select.form-input {
 
 .cell-code .cell-source {
   background: var(--code-bg);
+  color: #e0e0e0;
+  caret-color: #fff;
 }
 
 .cell-markdown .cell-source {
@@ -6156,10 +6158,25 @@ select.form-input {
   border: 1px solid var(--border-color);
 }
 
+.ai-suggestion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
 .ai-suggestion h4 {
-  margin: 0 0 12px 0;
+  margin: 0;
   font-size: 14px;
   font-weight: 600;
+}
+
+.ai-model-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 4px 8px;
+  border-radius: 4px;
 }
 
 .suggestion-code {

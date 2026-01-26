@@ -362,11 +362,29 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
 }
 
 /// Synchronizes a CUDA stream by handle.
-/// This is a no-op placeholder - actual stream sync should use the device.
+///
+/// # Design Note
+/// This function exists for API compatibility with the `GpuStream` abstraction.
+/// However, AxonML's CUDA backend uses the device's default stream exclusively
+/// (CudaStream is not Send+Sync, so explicit stream management is avoided).
+///
+/// For proper synchronization:
+/// - Use `CudaBackend::synchronize()` which calls `cudaDeviceSynchronize()`
+/// - This synchronizes all pending operations on the device
+///
+/// The handle parameter is accepted but not used because cudarc manages
+/// streams internally and doesn't expose raw stream handles.
+///
+/// # Arguments
+/// * `_handle` - Stream handle (unused, kept for API compatibility)
 #[cfg(feature = "cuda")]
 pub fn stream_synchronize(_handle: usize) {
-    // Stream handles are managed internally by cudarc
-    // For synchronization, use CudaBackend::synchronize() instead
+    // AxonML uses CudaDevice's default stream for all operations.
+    // Stream-level synchronization requires a CudaDevice reference.
+    // Use CudaBackend::synchronize() for device-level synchronization.
+    //
+    // Without a global device registry, we cannot synchronize here.
+    // This is intentional: synchronization should be explicit via CudaBackend.
 }
 
 #[cfg(not(feature = "cuda"))]

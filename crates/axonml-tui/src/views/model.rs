@@ -16,6 +16,7 @@ use ratatui::{
 };
 
 use crate::theme::AxonmlTheme;
+use axonml_serialize::load_state_dict;
 
 // =============================================================================
 // Types
@@ -93,80 +94,78 @@ impl ModelView {
         Ok(())
     }
 
-    /// Parse model file (placeholder - would use axonml-serialize in real impl)
+    /// Parse model file using axonml-serialize
     fn parse_model_file(&self, path: &Path) -> Result<ModelInfo, String> {
         let file_name = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("model");
 
-        // Demo model structure for visualization
-        let layers = vec![
-            LayerInfo {
-                name: "input".to_string(),
-                layer_type: "Input".to_string(),
-                input_shape: "[batch, 784]".to_string(),
-                output_shape: "[batch, 784]".to_string(),
-                params: 0,
-                trainable: false,
-            },
-            LayerInfo {
-                name: "fc1".to_string(),
-                layer_type: "Linear".to_string(),
-                input_shape: "[batch, 784]".to_string(),
-                output_shape: "[batch, 256]".to_string(),
-                params: 200_960,
-                trainable: true,
-            },
-            LayerInfo {
-                name: "relu1".to_string(),
-                layer_type: "ReLU".to_string(),
-                input_shape: "[batch, 256]".to_string(),
-                output_shape: "[batch, 256]".to_string(),
-                params: 0,
-                trainable: false,
-            },
-            LayerInfo {
-                name: "dropout1".to_string(),
-                layer_type: "Dropout(0.2)".to_string(),
-                input_shape: "[batch, 256]".to_string(),
-                output_shape: "[batch, 256]".to_string(),
-                params: 0,
-                trainable: false,
-            },
-            LayerInfo {
-                name: "fc2".to_string(),
-                layer_type: "Linear".to_string(),
-                input_shape: "[batch, 256]".to_string(),
-                output_shape: "[batch, 128]".to_string(),
-                params: 32_896,
-                trainable: true,
-            },
-            LayerInfo {
-                name: "relu2".to_string(),
-                layer_type: "ReLU".to_string(),
-                input_shape: "[batch, 128]".to_string(),
-                output_shape: "[batch, 128]".to_string(),
-                params: 0,
-                trainable: false,
-            },
-            LayerInfo {
-                name: "fc3".to_string(),
-                layer_type: "Linear".to_string(),
-                input_shape: "[batch, 128]".to_string(),
-                output_shape: "[batch, 10]".to_string(),
-                params: 1_290,
-                trainable: true,
-            },
-            LayerInfo {
-                name: "softmax".to_string(),
-                layer_type: "Softmax".to_string(),
-                input_shape: "[batch, 10]".to_string(),
-                output_shape: "[batch, 10]".to_string(),
-                params: 0,
-                trainable: false,
-            },
-        ];
+        // Get file size
+        let file_size = std::fs::metadata(path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        // Detect format from extension
+        let format = path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| match ext.to_lowercase().as_str() {
+                "axonml" => "Axonml",
+                "safetensors" => "SafeTensors",
+                "json" => "JSON",
+                "pt" | "pth" => "PyTorch",
+                "onnx" => "ONNX",
+                _ => "Unknown",
+            })
+            .unwrap_or("Unknown")
+            .to_string();
+
+        // Load the actual state dict
+        let state_dict = load_state_dict(path)
+            .map_err(|e| format!("Failed to load model: {}", e))?;
+
+        // Group parameters by layer prefix and extract layer info
+        let mut layer_map: std::collections::BTreeMap<String, Vec<(String, Vec<usize>, usize, bool)>> =
+            std::collections::BTreeMap::new();
+
+        for (param_name, entry) in state_dict.entries() {
+            let shape = entry.data.shape.clone();
+            let num_params: usize = shape.iter().product();
+
+            // Extract layer name from parameter name (e.g., "layer1.conv.weight" -> "layer1.conv")
+            let layer_name = if let Some(idx) = param_name.rfind('.') {
+                param_name[..idx].to_string()
+            } else {
+                param_name.clone()
+            };
+
+            layer_map
+                .entry(layer_name)
+                .or_default()
+                .push((param_name.clone(), shape, num_params, entry.requires_grad));
+        }
+
+        // Create LayerInfo for each unique layer
+        let mut layers = Vec::new();
+        for (layer_name, params) in layer_map {
+            let layer_num_params: usize = params.iter().map(|(_, _, p, _)| *p).sum();
+            let trainable = params.iter().any(|(_, _, _, t)| *t);
+
+            // Infer layer type from parameter names
+            let layer_type = infer_layer_type(&params);
+
+            // Get shape from weight parameter if available
+            let (input_shape, output_shape) = infer_shapes(&params);
+
+            layers.push(LayerInfo {
+                name: layer_name,
+                layer_type,
+                input_shape,
+                output_shape,
+                params: layer_num_params,
+                trainable,
+            });
+        }
 
         let total_params: usize = layers.iter().map(|l| l.params).sum();
         let trainable_params: usize = layers
@@ -180,8 +179,8 @@ impl ModelView {
             layers,
             total_params,
             trainable_params,
-            file_size: 940_584,
-            format: "Axonml".to_string(),
+            file_size,
+            format,
         })
     }
 
@@ -440,4 +439,49 @@ fn format_number(n: usize) -> String {
     } else {
         n.to_string()
     }
+}
+
+/// Infer layer type from parameter names
+fn infer_layer_type(params: &[(String, Vec<usize>, usize, bool)]) -> String {
+    for (name, shape, _, _) in params {
+        if name.ends_with(".weight") {
+            let dims = shape.len();
+            if dims == 4 {
+                return "Conv2d".to_string();
+            } else if dims == 2 {
+                return "Linear".to_string();
+            } else if dims == 1 {
+                return "BatchNorm".to_string();
+            }
+        }
+        if name.ends_with(".gamma") || name.ends_with(".beta") {
+            return "LayerNorm".to_string();
+        }
+        if name.ends_with(".embedding") {
+            return "Embedding".to_string();
+        }
+    }
+    "Unknown".to_string()
+}
+
+/// Infer input and output shapes from parameters
+fn infer_shapes(params: &[(String, Vec<usize>, usize, bool)]) -> (String, String) {
+    for (name, shape, _, _) in params {
+        if name.ends_with(".weight") && shape.len() >= 2 {
+            // For Linear: [out_features, in_features]
+            // For Conv2d: [out_channels, in_channels, kernel_h, kernel_w]
+            if shape.len() == 2 {
+                return (
+                    format!("[batch, {}]", shape[1]),
+                    format!("[batch, {}]", shape[0]),
+                );
+            } else if shape.len() == 4 {
+                return (
+                    format!("[batch, {}, H, W]", shape[1]),
+                    format!("[batch, {}, H', W']", shape[0]),
+                );
+            }
+        }
+    }
+    ("-".to_string(), "-".to_string())
 }

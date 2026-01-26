@@ -224,6 +224,7 @@ fn generate_main_rs(
 //! Architecture: {architecture}
 
 use std::error::Error;
+use std::path::PathBuf;
 
 use clap::{{Parser, Subcommand}};
 use axonml::prelude::*;
@@ -232,7 +233,7 @@ use axonml_data::{{Dataset, DataLoader}};
 use axonml_nn::{{Module, Sequential, Linear, ReLU, Dropout, CrossEntropyLoss}};
 use axonml_optim::{{Adam, Optimizer}};
 use axonml_serialize::{{save_state_dict, Format}};
-use axonml_vision::SyntheticMNIST;
+use axonml_vision::{{MNIST, FashionMNIST, CIFAR10}};
 use indicatif::{{ProgressBar, ProgressStyle}};
 
 mod model;
@@ -248,6 +249,14 @@ struct Cli {{
 enum Commands {{
     /// Train the model
     Train {{
+        /// Path to training data directory (required)
+        #[arg(short, long)]
+        data: String,
+
+        /// Dataset format (mnist, fashion-mnist, cifar10). Auto-detected if not specified.
+        #[arg(long)]
+        format: Option<String>,
+
         /// Number of epochs
         #[arg(short, long, default_value = "{epochs}")]
         epochs: usize,
@@ -265,6 +274,14 @@ enum Commands {{
         /// Path to model checkpoint
         #[arg(short, long, default_value = "output/model.axonml")]
         model: String,
+
+        /// Path to evaluation data directory (required)
+        #[arg(short, long)]
+        data: String,
+
+        /// Dataset format (mnist, fashion-mnist, cifar10). Auto-detected if not specified.
+        #[arg(long)]
+        format: Option<String>,
     }},
 }}
 
@@ -272,19 +289,70 @@ fn main() -> Result<(), Box<dyn Error>> {{
     let cli = Cli::parse();
 
     match cli.command {{
-        Commands::Train {{ epochs, batch_size, lr }} => {{
-            train(epochs, batch_size, lr)?;
+        Commands::Train {{ data, format, epochs, batch_size, lr }} => {{
+            train(&data, format.as_deref(), epochs, batch_size, lr)?;
         }}
-        Commands::Eval {{ model }} => {{
-            evaluate(&model)?;
+        Commands::Eval {{ model, data, format }} => {{
+            evaluate(&model, &data, format.as_deref())?;
         }}
     }}
 
     Ok(())
 }}
 
-fn train(epochs: usize, batch_size: usize, lr: f64) -> Result<(), Box<dyn Error>> {{
+/// Supported dataset formats
+enum TrainDataset {{
+    Mnist(MNIST),
+    FashionMnist(FashionMNIST),
+    Cifar10(CIFAR10),
+}}
+
+impl TrainDataset {{
+    fn load(path: &std::path::Path, format: &str, train: bool) -> Result<Self, String> {{
+        match format.to_lowercase().as_str() {{
+            "mnist" => Ok(TrainDataset::Mnist(MNIST::new(path, train)?)),
+            "fashion-mnist" | "fashion_mnist" | "fashionmnist" => {{
+                Ok(TrainDataset::FashionMnist(FashionMNIST::new(path, train)?))
+            }}
+            "cifar10" | "cifar-10" => Ok(TrainDataset::Cifar10(CIFAR10::new(path, train)?)),
+            _ => Err(format!("Unsupported dataset format: '{{}}'. Supported: mnist, fashion-mnist, cifar10", format)),
+        }}
+    }}
+
+    fn detect_format(path: &std::path::Path) -> Option<String> {{
+        if path.join("train-images-idx3-ubyte").exists() || path.join("train-images-idx3-ubyte.gz").exists() {{
+            return Some("mnist".to_string());
+        }}
+        if path.join("data_batch_1.bin").exists() {{
+            return Some("cifar10".to_string());
+        }}
+        None
+    }}
+}}
+
+impl Dataset for TrainDataset {{
+    type Item = (axonml_tensor::Tensor<f32>, axonml_tensor::Tensor<f32>);
+
+    fn len(&self) -> usize {{
+        match self {{
+            TrainDataset::Mnist(d) => d.len(),
+            TrainDataset::FashionMnist(d) => d.len(),
+            TrainDataset::Cifar10(d) => d.len(),
+        }}
+    }}
+
+    fn get(&self, index: usize) -> Option<Self::Item> {{
+        match self {{
+            TrainDataset::Mnist(d) => d.get(index),
+            TrainDataset::FashionMnist(d) => d.get(index),
+            TrainDataset::Cifar10(d) => d.get(index),
+        }}
+    }}
+}}
+
+fn train(data_path: &str, format: Option<&str>, epochs: usize, batch_size: usize, lr: f64) -> Result<(), Box<dyn Error>> {{
     println!("=== Axonml Training ===");
+    println!("Data: {{}}", data_path);
     println!("Epochs: {{}}", epochs);
     println!("Batch size: {{}}", batch_size);
     println!("Learning rate: {{}}", lr);
@@ -300,7 +368,20 @@ fn train(epochs: usize, batch_size: usize, lr: f64) -> Result<(), Box<dyn Error>
 
     // Load dataset
     println!("Loading dataset...");
-    let train_dataset = SyntheticMNIST::new(10000);
+    let path = PathBuf::from(data_path);
+    if !path.exists() {{
+        return Err(format!("Data path not found: {{}}", data_path).into());
+    }}
+
+    let detected_format = format.map(String::from).unwrap_or_else(|| {{
+        TrainDataset::detect_format(&path).unwrap_or_else(|| "mnist".to_string())
+    }});
+    println!("Dataset format: {{}}", detected_format);
+
+    let train_dataset = TrainDataset::load(&path, &detected_format, true)
+        .map_err(|e| format!("Failed to load dataset: {{}}", e))?;
+
+    println!("Loaded {{}} samples", train_dataset.len());
     let train_loader = DataLoader::new(train_dataset, batch_size);
     println!("Batches per epoch: {{}}", train_loader.len());
     println!();
@@ -367,18 +448,31 @@ fn train(epochs: usize, batch_size: usize, lr: f64) -> Result<(), Box<dyn Error>
     Ok(())
 }}
 
-fn evaluate(model_path: &str) -> Result<(), Box<dyn Error>> {{
+fn evaluate(model_path: &str, data_path: &str, format: Option<&str>) -> Result<(), Box<dyn Error>> {{
     println!("=== Model Evaluation ===");
     println!("Model: {{}}", model_path);
+    println!("Data: {{}}", data_path);
     println!();
 
     // Load model
     let model = model::create_model();
-    let state_dict = axonml_serialize::load_state_dict(model_path)?;
+    let _state_dict = axonml_serialize::load_state_dict(model_path)?;
     // model.load_state_dict(&state_dict)?;
 
     // Load test data
-    let test_dataset = SyntheticMNIST::new(1000);
+    let path = PathBuf::from(data_path);
+    if !path.exists() {{
+        return Err(format!("Data path not found: {{}}", data_path).into());
+    }}
+
+    let detected_format = format.map(String::from).unwrap_or_else(|| {{
+        TrainDataset::detect_format(&path).unwrap_or_else(|| "mnist".to_string())
+    }});
+
+    let test_dataset = TrainDataset::load(&path, &detected_format, false)
+        .map_err(|e| format!("Failed to load dataset: {{}}", e))?;
+
+    println!("Loaded {{}} test samples", test_dataset.len());
     let test_loader = DataLoader::new(test_dataset, 32);
 
     // Evaluate
@@ -606,15 +700,28 @@ A Axonml ML training project.
 # Build the project
 cargo build --release
 
-# Train the model
-cargo run --release -- train
+# Download a dataset (e.g., MNIST)
+# Place dataset files in the data/ directory
+
+# Train the model (data path is required)
+cargo run --release -- train --data ./data
 
 # Train with custom parameters
-cargo run --release -- train --epochs 20 --batch-size 64 --lr 0.0001
+cargo run --release -- train --data ./data --epochs 20 --batch-size 64 --lr 0.0001
+
+# Specify dataset format explicitly
+cargo run --release -- train --data ./data --format mnist
 
 # Evaluate the model
-cargo run --release -- eval --model output/model.axonml
+cargo run --release -- eval --model output/model.axonml --data ./data
 ```
+
+## Supported Datasets
+
+The following dataset formats are supported:
+- **MNIST** - Auto-detected by `train-images-idx3-ubyte` files
+- **Fashion-MNIST** - Use `--format fashion-mnist`
+- **CIFAR-10** - Auto-detected by `data_batch_1.bin` files
 
 ## Project Structure
 
@@ -625,7 +732,7 @@ cargo run --release -- eval --model output/model.axonml
 ├── src/
 │   ├── main.rs         # Training/eval entry point
 │   └── model.rs        # Model definition
-├── data/               # Dataset directory
+├── data/               # Dataset directory (put your data here)
 ├── models/             # Pretrained models
 └── output/             # Training outputs
 ```

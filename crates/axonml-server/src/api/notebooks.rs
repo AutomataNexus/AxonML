@@ -8,6 +8,7 @@ use crate::db::notebooks::{
     CellOutput, CellStatus, CellType, NewCheckpoint, NewNotebook, NotebookCell,
     NotebookCheckpoint, NotebookRepository, NotebookStatus, TrainingNotebook, UpdateNotebook,
 };
+use crate::training::notebook_executor::result_to_cell_output;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -159,6 +160,8 @@ pub struct AiAssistResponse {
     pub suggestion: String,
     pub explanation: Option<String>,
     pub confidence: f32,
+    pub model: String,
+    pub tokens_generated: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -557,14 +560,15 @@ pub async fn delete_cell(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Execute a cell (placeholder - actual execution requires Python/Rust runtime)
+/// Execute a code cell using the notebook executor
 pub async fn execute_cell(
     State(state): State<AppState>,
     user: AuthUser,
     Path((notebook_id, cell_id)): Path<(String, String)>,
-    Json(_req): Json<ExecuteCellRequest>,
+    Json(req): Json<ExecuteCellRequest>,
 ) -> Result<Json<ExecuteCellResponse>, AuthError> {
     let repo = NotebookRepository::new(&state.db);
+    let timeout_ms = req.timeout_ms.unwrap_or(60000); // Default 60 second timeout for compilation
 
     // Get notebook and check ownership
     let notebook = repo
@@ -577,12 +581,23 @@ pub async fn execute_cell(
         return Err(AuthError::Unauthorized);
     }
 
-    // Find the cell
-    let mut cell = notebook
+    // Find the cell and its index
+    let cell_index = notebook
         .cells
-        .into_iter()
-        .find(|c| c.id == cell_id)
+        .iter()
+        .position(|c| c.id == cell_id)
         .ok_or(AuthError::NotFound("Cell not found".to_string()))?;
+
+    let mut cell = notebook.cells[cell_index].clone();
+
+    // Get previous cells for context (all code cells before this one)
+    let previous_cells: Vec<NotebookCell> = notebook
+        .cells
+        .iter()
+        .take(cell_index)
+        .filter(|c| c.cell_type == CellType::Code)
+        .cloned()
+        .collect();
 
     // Mark as running
     cell.status = CellStatus::Running;
@@ -590,26 +605,29 @@ pub async fn execute_cell(
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-    // Simulate execution (in real implementation, this would call a Python/Rust kernel)
     let start = std::time::Instant::now();
-
-    // For now, just return a placeholder output
     let execution_count = cell.execution_count.unwrap_or(0) + 1;
-    let output = CellOutput {
-        output_type: "execute_result".to_string(),
-        text: Some(format!("Cell executed (placeholder). Source:\n{}", cell.source)),
-        data: None,
-        execution_count: Some(execution_count),
-        error_name: None,
-        error_value: None,
-        traceback: None,
-    };
+
+    // Execute the cell using the notebook executor
+    let result = state.notebook_executor
+        .execute_cell(&cell, &previous_cells, timeout_ms)
+        .await;
 
     let duration = start.elapsed();
 
-    // Update cell with output
+    // Convert result to cell output
+    let output = result_to_cell_output(result, execution_count);
+
+    // Update cell status based on output
+    let status = if output.output_type == "error" {
+        cell.status = CellStatus::Error;
+        "error"
+    } else {
+        cell.status = CellStatus::Completed;
+        "completed"
+    };
+
     cell.outputs = vec![output.clone()];
-    cell.status = CellStatus::Completed;
     cell.execution_count = Some(execution_count);
 
     repo.update_cell(&notebook_id, cell)
@@ -620,7 +638,7 @@ pub async fn execute_cell(
         cell_id,
         outputs: vec![output],
         execution_count,
-        status: "completed".to_string(),
+        status: status.to_string(),
         duration_ms: duration.as_millis() as u64,
     }))
 }
@@ -648,6 +666,8 @@ pub async fn ai_assist(
             suggestion,
             explanation: Some("Ollama LLM service is not available. Please start it with 'ollama serve'.".to_string()),
             confidence: 0.0,
+            model: String::new(),
+            tokens_generated: 0,
         }));
     }
 
@@ -682,6 +702,8 @@ pub async fn ai_assist(
                 suggestion: suggestion.code,
                 explanation: suggestion.explanation,
                 confidence: 0.85,
+                model: suggestion.model,
+                tokens_generated: suggestion.tokens_generated,
             }))
         }
         Err(e) => {
@@ -690,6 +712,8 @@ pub async fn ai_assist(
                 suggestion: format!("# Error generating suggestion\n# {}", e),
                 explanation: Some(format!("Generation failed: {}", e)),
                 confidence: 0.0,
+                model: String::new(),
+                tokens_generated: 0,
             }))
         }
     }
@@ -1199,7 +1223,84 @@ pub async fn start_notebook(
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-    // TODO: Actually start execution in background
+    // Spawn background task to execute all cells
+    let notebook_id = id.clone();
+    let db = state.db.clone();
+    let executor = state.notebook_executor.clone();
+
+    tokio::spawn(async move {
+        let repo = NotebookRepository::new(&db);
+
+        // Get fresh notebook data
+        let notebook = match repo.find_by_id(&notebook_id).await {
+            Ok(Some(nb)) => nb,
+            _ => {
+                tracing::error!(notebook_id = %notebook_id, "Failed to load notebook for execution");
+                return;
+            }
+        };
+
+        let cells = notebook.cells.clone();
+        let mut executed_cells = Vec::new();
+        let mut all_success = true;
+
+        // Execute each code cell in sequence
+        for (idx, cell) in cells.iter().enumerate() {
+            if cell.cell_type != CellType::Code {
+                executed_cells.push(cell.clone());
+                continue;
+            }
+
+            // Get previous cells for context
+            let previous_cells: Vec<NotebookCell> = cells[..idx]
+                .iter()
+                .filter(|c| c.cell_type == CellType::Code)
+                .cloned()
+                .collect();
+
+            // Update cell status to running
+            let mut running_cell = cell.clone();
+            running_cell.status = CellStatus::Running;
+            let _ = repo.update_cell(&notebook_id, running_cell.clone()).await;
+
+            // Execute the cell
+            let result = executor
+                .execute_cell(cell, &previous_cells, 60000) // 60 second timeout
+                .await;
+
+            // Update cell with result
+            let execution_count = cell.execution_count.unwrap_or(0) + 1;
+            let output = result_to_cell_output(result, execution_count);
+
+            let mut completed_cell = cell.clone();
+            completed_cell.execution_count = Some(execution_count);
+            completed_cell.outputs = vec![output.clone()];
+            completed_cell.status = if output.output_type == "error" {
+                all_success = false;
+                CellStatus::Error
+            } else {
+                CellStatus::Completed
+            };
+
+            let _ = repo.update_cell(&notebook_id, completed_cell.clone()).await;
+            executed_cells.push(completed_cell);
+
+            // Stop on error
+            if !all_success {
+                break;
+            }
+        }
+
+        // Update notebook status
+        let final_status = if all_success {
+            NotebookStatus::Completed
+        } else {
+            NotebookStatus::Failed
+        };
+
+        let _ = repo.update_status(&notebook_id, final_status).await;
+        tracing::info!(notebook_id = %notebook_id, status = ?final_status, "Notebook execution completed");
+    });
 
     Ok(Json(notebook_to_response(notebook)))
 }

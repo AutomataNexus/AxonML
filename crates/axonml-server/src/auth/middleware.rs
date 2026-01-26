@@ -145,6 +145,9 @@ impl IntoResponse for AuthError {
             AuthError::Forbidden(msg) => {
                 (StatusCode::FORBIDDEN, "forbidden", msg.as_str())
             }
+            AuthError::InvalidInput(msg) => {
+                (StatusCode::BAD_REQUEST, "invalid_input", msg.as_str())
+            }
             AuthError::Internal(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", msg.as_str())
             }
