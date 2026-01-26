@@ -42,6 +42,10 @@ thiserror = { workspace = true }
 # Randomness
 rand = { workspace = true }
 
+# Hub functionality
+dirs = { workspace = true }
+reqwest = { workspace = true }
+
 [dev-dependencies]
 approx = { workspace = true }
 

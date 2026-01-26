@@ -412,12 +412,26 @@ fn format_number(n: u64) -> String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use axonml_tensor::Tensor;
+    use axonml_serialize::TensorData;
 
     #[test]
     fn test_export_to_onnx() {
         let temp = tempdir().unwrap();
         let input = temp.path().join("model.axonml");
-        std::fs::write(&input, b"test").unwrap();
+
+        // Create a proper state dict with model weights
+        let mut state_dict = StateDict::new();
+        let fc1_weight = Tensor::from_vec(vec![0.1f32; 784 * 128], &[128, 784]).unwrap();
+        let fc1_bias = Tensor::from_vec(vec![0.0f32; 128], &[128]).unwrap();
+        let fc2_weight = Tensor::from_vec(vec![0.1f32; 128 * 10], &[10, 128]).unwrap();
+        let fc2_bias = Tensor::from_vec(vec![0.0f32; 10], &[10]).unwrap();
+
+        state_dict.insert("fc1.weight".to_string(), TensorData::from_tensor(&fc1_weight));
+        state_dict.insert("fc1.bias".to_string(), TensorData::from_tensor(&fc1_bias));
+        state_dict.insert("fc2.weight".to_string(), TensorData::from_tensor(&fc2_weight));
+        state_dict.insert("fc2.bias".to_string(), TensorData::from_tensor(&fc2_bias));
+        save_state_dict(&state_dict, &input, Format::Axonml).unwrap();
 
         let output = temp.path().join("model.onnx");
         let result = export_to_onnx(&input, output.to_str().unwrap(), "cpu", false, "fp16");

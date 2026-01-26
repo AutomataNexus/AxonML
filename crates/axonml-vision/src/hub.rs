@@ -184,6 +184,237 @@ pub fn model_registry() -> HashMap<String, PretrainedModel> {
         },
     );
 
+    // Larger ResNet variants
+    registry.insert(
+        "resnet101".to_string(),
+        PretrainedModel {
+            name: "resnet101".to_string(),
+            url: "https://huggingface.co/axonml-ml/resnet101-imagenet/resolve/main/resnet101.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 170_500_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 77.37,
+        },
+    );
+
+    registry.insert(
+        "resnet152".to_string(),
+        PretrainedModel {
+            name: "resnet152".to_string(),
+            url: "https://huggingface.co/axonml-ml/resnet152-imagenet/resolve/main/resnet152.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 230_400_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 78.31,
+        },
+    );
+
+    // Mobile-optimized models
+    registry.insert(
+        "mobilenet_v2".to_string(),
+        PretrainedModel {
+            name: "mobilenet_v2".to_string(),
+            url: "https://huggingface.co/axonml-ml/mobilenetv2-imagenet/resolve/main/mobilenet_v2.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 13_600_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 71.88,
+        },
+    );
+
+    registry.insert(
+        "mobilenet_v3_small".to_string(),
+        PretrainedModel {
+            name: "mobilenet_v3_small".to_string(),
+            url: "https://huggingface.co/axonml-ml/mobilenetv3-small-imagenet/resolve/main/mobilenet_v3_small.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 9_800_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 67.67,
+        },
+    );
+
+    registry.insert(
+        "mobilenet_v3_large".to_string(),
+        PretrainedModel {
+            name: "mobilenet_v3_large".to_string(),
+            url: "https://huggingface.co/axonml-ml/mobilenetv3-large-imagenet/resolve/main/mobilenet_v3_large.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 21_100_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 74.04,
+        },
+    );
+
+    // EfficientNet family
+    registry.insert(
+        "efficientnet_b0".to_string(),
+        PretrainedModel {
+            name: "efficientnet_b0".to_string(),
+            url: "https://huggingface.co/axonml-ml/efficientnet-b0-imagenet/resolve/main/efficientnet_b0.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 20_300_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 77.10,
+        },
+    );
+
+    registry.insert(
+        "efficientnet_b1".to_string(),
+        PretrainedModel {
+            name: "efficientnet_b1".to_string(),
+            url: "https://huggingface.co/axonml-ml/efficientnet-b1-imagenet/resolve/main/efficientnet_b1.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 30_100_000,
+            num_classes: 1000,
+            input_size: (240, 240),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 78.80,
+        },
+    );
+
+    registry.insert(
+        "efficientnet_b2".to_string(),
+        PretrainedModel {
+            name: "efficientnet_b2".to_string(),
+            url: "https://huggingface.co/axonml-ml/efficientnet-b2-imagenet/resolve/main/efficientnet_b2.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 35_200_000,
+            num_classes: 1000,
+            input_size: (260, 260),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 79.80,
+        },
+    );
+
+    // DenseNet family
+    registry.insert(
+        "densenet121".to_string(),
+        PretrainedModel {
+            name: "densenet121".to_string(),
+            url: "https://huggingface.co/axonml-ml/densenet121-imagenet/resolve/main/densenet121.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 30_800_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 74.43,
+        },
+    );
+
+    registry.insert(
+        "densenet169".to_string(),
+        PretrainedModel {
+            name: "densenet169".to_string(),
+            url: "https://huggingface.co/axonml-ml/densenet169-imagenet/resolve/main/densenet169.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 54_700_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 75.60,
+        },
+    );
+
+    // Vision Transformer (ViT)
+    registry.insert(
+        "vit_b_16".to_string(),
+        PretrainedModel {
+            name: "vit_b_16".to_string(),
+            url: "https://huggingface.co/axonml-ml/vit-b16-imagenet/resolve/main/vit_b_16.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 330_200_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 81.07,
+        },
+    );
+
+    registry.insert(
+        "vit_b_32".to_string(),
+        PretrainedModel {
+            name: "vit_b_32".to_string(),
+            url: "https://huggingface.co/axonml-ml/vit-b32-imagenet/resolve/main/vit_b_32.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 337_500_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 75.91,
+        },
+    );
+
+    // Swin Transformer
+    registry.insert(
+        "swin_t".to_string(),
+        PretrainedModel {
+            name: "swin_t".to_string(),
+            url: "https://huggingface.co/axonml-ml/swin-tiny-imagenet/resolve/main/swin_t.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 110_700_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 81.30,
+        },
+    );
+
+    registry.insert(
+        "swin_s".to_string(),
+        PretrainedModel {
+            name: "swin_s".to_string(),
+            url: "https://huggingface.co/axonml-ml/swin-small-imagenet/resolve/main/swin_s.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 193_500_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 83.20,
+        },
+    );
+
+    // ConvNeXt
+    registry.insert(
+        "convnext_tiny".to_string(),
+        PretrainedModel {
+            name: "convnext_tiny".to_string(),
+            url: "https://huggingface.co/axonml-ml/convnext-tiny-imagenet/resolve/main/convnext_tiny.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 109_100_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 82.10,
+        },
+    );
+
+    registry.insert(
+        "convnext_small".to_string(),
+        PretrainedModel {
+            name: "convnext_small".to_string(),
+            url: "https://huggingface.co/axonml-ml/convnext-small-imagenet/resolve/main/convnext_small.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 195_600_000,
+            num_classes: 1000,
+            input_size: (224, 224),
+            dataset: "ImageNet-1K".to_string(),
+            accuracy: 83.10,
+        },
+    );
+
     registry
 }
 
