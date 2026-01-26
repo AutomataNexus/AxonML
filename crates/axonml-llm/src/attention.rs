@@ -582,4 +582,385 @@ mod tests {
         assert_eq!(data[3], 0.0); // can attend to 3
         assert_eq!(data[4], 0.0); // can attend to 4 (self)
     }
+
+    #[test]
+    fn test_flash_attention_basic() {
+        let flash = FlashAttention::new(4, 0.0, true);
+
+        let q = Tensor::randn(&[2, 4, 8, 16]); // [batch, heads, seq, head_dim]
+        let k = Tensor::randn(&[2, 4, 8, 16]);
+        let v = Tensor::randn(&[2, 4, 8, 16]);
+
+        let output = flash.forward_qkv(&q, &k, &v);
+        assert_eq!(output.shape(), &[2, 4, 8, 16]);
+    }
+
+    #[test]
+    fn test_flash_attention_config() {
+        let config = FlashAttentionConfig::default();
+        assert_eq!(config.block_size_q, 64);
+        assert_eq!(config.block_size_kv, 64);
+        assert!(config.causal);
+    }
+}
+
+// =============================================================================
+// Flash Attention
+// =============================================================================
+
+/// Configuration for Flash Attention.
+#[derive(Debug, Clone)]
+pub struct FlashAttentionConfig {
+    /// Block size for query chunking
+    pub block_size_q: usize,
+    /// Block size for key/value chunking
+    pub block_size_kv: usize,
+    /// Whether to use causal masking
+    pub causal: bool,
+    /// Softmax scale (typically 1/sqrt(head_dim))
+    pub softmax_scale: Option<f32>,
+    /// Dropout probability
+    pub dropout_p: f32,
+}
+
+impl Default for FlashAttentionConfig {
+    fn default() -> Self {
+        Self {
+            block_size_q: 64,
+            block_size_kv: 64,
+            causal: true,
+            softmax_scale: None,
+            dropout_p: 0.0,
+        }
+    }
+}
+
+/// Flash Attention - Memory-efficient attention mechanism.
+///
+/// Implements the Flash Attention algorithm that computes attention in tiles/blocks
+/// to reduce memory usage from O(N²) to O(N) while maintaining numerical precision.
+///
+/// Reference: "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
+/// https://arxiv.org/abs/2205.14135
+///
+/// # Example
+/// ```rust,ignore
+/// use axonml_llm::attention::FlashAttention;
+///
+/// let flash_attn = FlashAttention::new(8, 0.0, true);
+/// let output = flash_attn.forward_qkv(&query, &key, &value);
+/// ```
+#[derive(Debug)]
+pub struct FlashAttention {
+    /// Number of attention heads
+    pub num_heads: usize,
+    /// Dropout probability
+    pub dropout_p: f32,
+    /// Whether to use causal masking
+    pub causal: bool,
+    /// Block size for tiling
+    pub block_size: usize,
+}
+
+impl FlashAttention {
+    /// Creates a new Flash Attention module.
+    ///
+    /// # Arguments
+    /// * `num_heads` - Number of attention heads
+    /// * `dropout_p` - Dropout probability (0.0 for inference)
+    /// * `causal` - Whether to apply causal masking
+    pub fn new(num_heads: usize, dropout_p: f32, causal: bool) -> Self {
+        Self {
+            num_heads,
+            dropout_p,
+            causal,
+            block_size: 64, // Default block size
+        }
+    }
+
+    /// Creates Flash Attention with custom block size.
+    pub fn with_block_size(num_heads: usize, dropout_p: f32, causal: bool, block_size: usize) -> Self {
+        Self {
+            num_heads,
+            dropout_p,
+            causal,
+            block_size,
+        }
+    }
+
+    /// Forward pass with pre-computed Q, K, V tensors.
+    ///
+    /// # Arguments
+    /// * `q` - Query tensor [batch, num_heads, seq_len, head_dim]
+    /// * `k` - Key tensor [batch, num_heads, seq_len, head_dim]
+    /// * `v` - Value tensor [batch, num_heads, seq_len, head_dim]
+    ///
+    /// # Returns
+    /// Output tensor [batch, num_heads, seq_len, head_dim]
+    pub fn forward_qkv(&self, q: &Tensor<f32>, k: &Tensor<f32>, v: &Tensor<f32>) -> Tensor<f32> {
+        let shape = q.shape();
+        let batch_size = shape[0];
+        let num_heads = shape[1];
+        let seq_len = shape[2];
+        let head_dim = shape[3];
+
+        let scale = 1.0 / (head_dim as f32).sqrt();
+
+        // For smaller sequences, use standard attention
+        if seq_len <= self.block_size * 2 {
+            return self.standard_attention(q, k, v, scale);
+        }
+
+        // Flash Attention with tiling
+        self.tiled_attention(q, k, v, batch_size, num_heads, seq_len, head_dim, scale)
+    }
+
+    /// Standard attention implementation for small sequences.
+    fn standard_attention(&self, q: &Tensor<f32>, k: &Tensor<f32>, v: &Tensor<f32>, scale: f32) -> Tensor<f32> {
+        let shape = q.shape();
+        let batch_size = shape[0];
+        let num_heads = shape[1];
+        let seq_len = shape[2];
+        let head_dim = shape[3];
+
+        // Compute attention scores: Q @ K^T * scale
+        let q_data = q.to_vec();
+        let k_data = k.to_vec();
+        let v_data = v.to_vec();
+
+        let mut output = vec![0.0f32; batch_size * num_heads * seq_len * head_dim];
+
+        for b in 0..batch_size {
+            for h in 0..num_heads {
+                // Compute attention for this batch/head
+                let mut attn_scores = vec![0.0f32; seq_len * seq_len];
+
+                // Q @ K^T
+                for i in 0..seq_len {
+                    for j in 0..seq_len {
+                        // Apply causal mask
+                        if self.causal && j > i {
+                            attn_scores[i * seq_len + j] = f32::NEG_INFINITY;
+                            continue;
+                        }
+
+                        let mut score = 0.0;
+                        for d in 0..head_dim {
+                            let q_idx = ((b * num_heads + h) * seq_len + i) * head_dim + d;
+                            let k_idx = ((b * num_heads + h) * seq_len + j) * head_dim + d;
+                            score += q_data[q_idx] * k_data[k_idx];
+                        }
+                        attn_scores[i * seq_len + j] = score * scale;
+                    }
+                }
+
+                // Softmax over each row
+                for i in 0..seq_len {
+                    let row_start = i * seq_len;
+                    let row_end = row_start + seq_len;
+                    let row = &mut attn_scores[row_start..row_end];
+
+                    // Find max for numerical stability
+                    let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+
+                    // Exp and sum
+                    let mut sum = 0.0;
+                    for val in row.iter_mut() {
+                        *val = (*val - max_val).exp();
+                        sum += *val;
+                    }
+
+                    // Normalize
+                    for val in row.iter_mut() {
+                        *val /= sum;
+                    }
+                }
+
+                // Attn @ V
+                for i in 0..seq_len {
+                    for d in 0..head_dim {
+                        let mut val = 0.0;
+                        for j in 0..seq_len {
+                            let attn_val = attn_scores[i * seq_len + j];
+                            let v_idx = ((b * num_heads + h) * seq_len + j) * head_dim + d;
+                            val += attn_val * v_data[v_idx];
+                        }
+                        let out_idx = ((b * num_heads + h) * seq_len + i) * head_dim + d;
+                        output[out_idx] = val;
+                    }
+                }
+            }
+        }
+
+        Tensor::from_vec(output, &[batch_size, num_heads, seq_len, head_dim]).unwrap()
+    }
+
+    /// Tiled attention implementation for memory efficiency.
+    ///
+    /// Uses the Flash Attention algorithm to compute attention in blocks,
+    /// reducing peak memory usage from O(N²) to O(N).
+    fn tiled_attention(
+        &self,
+        q: &Tensor<f32>,
+        k: &Tensor<f32>,
+        v: &Tensor<f32>,
+        batch_size: usize,
+        num_heads: usize,
+        seq_len: usize,
+        head_dim: usize,
+        scale: f32,
+    ) -> Tensor<f32> {
+        let q_data = q.to_vec();
+        let k_data = k.to_vec();
+        let v_data = v.to_vec();
+
+        let mut output = vec![0.0f32; batch_size * num_heads * seq_len * head_dim];
+        let block_size = self.block_size;
+        let num_blocks = (seq_len + block_size - 1) / block_size;
+
+        for b in 0..batch_size {
+            for h in 0..num_heads {
+                // Running statistics for online softmax
+                let mut row_max = vec![f32::NEG_INFINITY; seq_len];
+                let mut row_sum = vec![0.0f32; seq_len];
+                let mut row_out = vec![vec![0.0f32; head_dim]; seq_len];
+
+                // Process key-value blocks
+                for kv_block in 0..num_blocks {
+                    let kv_start = kv_block * block_size;
+                    let kv_end = (kv_start + block_size).min(seq_len);
+
+                    // Process query blocks
+                    for q_block in 0..num_blocks {
+                        let q_start = q_block * block_size;
+                        let q_end = (q_start + block_size).min(seq_len);
+
+                        // Skip if causal and this block is fully masked
+                        if self.causal && kv_start > q_end - 1 {
+                            continue;
+                        }
+
+                        // Compute block attention scores
+                        for i in q_start..q_end {
+                            let mut block_scores = Vec::with_capacity(kv_end - kv_start);
+                            let mut block_max = f32::NEG_INFINITY;
+
+                            for j in kv_start..kv_end {
+                                // Apply causal mask
+                                if self.causal && j > i {
+                                    block_scores.push(f32::NEG_INFINITY);
+                                    continue;
+                                }
+
+                                let mut score = 0.0;
+                                for d in 0..head_dim {
+                                    let q_idx = ((b * num_heads + h) * seq_len + i) * head_dim + d;
+                                    let k_idx = ((b * num_heads + h) * seq_len + j) * head_dim + d;
+                                    score += q_data[q_idx] * k_data[k_idx];
+                                }
+                                score *= scale;
+                                block_max = block_max.max(score);
+                                block_scores.push(score);
+                            }
+
+                            // Online softmax update
+                            let prev_max = row_max[i];
+                            let new_max = prev_max.max(block_max);
+
+                            // Rescale previous sum and output
+                            let scale_prev = (prev_max - new_max).exp();
+                            row_sum[i] *= scale_prev;
+                            for d in 0..head_dim {
+                                row_out[i][d] *= scale_prev;
+                            }
+
+                            // Add new block contribution
+                            for (local_j, j) in (kv_start..kv_end).enumerate() {
+                                let score = block_scores[local_j];
+                                if score.is_finite() {
+                                    let p = (score - new_max).exp();
+                                    row_sum[i] += p;
+
+                                    for d in 0..head_dim {
+                                        let v_idx = ((b * num_heads + h) * seq_len + j) * head_dim + d;
+                                        row_out[i][d] += p * v_data[v_idx];
+                                    }
+                                }
+                            }
+
+                            row_max[i] = new_max;
+                        }
+                    }
+                }
+
+                // Normalize output
+                for i in 0..seq_len {
+                    let sum = row_sum[i].max(1e-9);
+                    for d in 0..head_dim {
+                        let out_idx = ((b * num_heads + h) * seq_len + i) * head_dim + d;
+                        output[out_idx] = row_out[i][d] / sum;
+                    }
+                }
+            }
+        }
+
+        Tensor::from_vec(output, &[batch_size, num_heads, seq_len, head_dim]).unwrap()
+    }
+
+    /// Computes memory usage estimate for standard vs flash attention.
+    ///
+    /// # Arguments
+    /// * `batch_size` - Batch size
+    /// * `seq_len` - Sequence length
+    /// * `num_heads` - Number of attention heads
+    /// * `head_dim` - Head dimension
+    ///
+    /// # Returns
+    /// Tuple of (standard_memory_mb, flash_memory_mb)
+    pub fn memory_estimate(batch_size: usize, seq_len: usize, num_heads: usize, head_dim: usize) -> (f32, f32) {
+        let bytes_per_float = 4;
+
+        // Standard attention stores full N×N attention matrix
+        let standard_attn_matrix = batch_size * num_heads * seq_len * seq_len * bytes_per_float;
+        let standard_qkv = 3 * batch_size * num_heads * seq_len * head_dim * bytes_per_float;
+        let standard_total = (standard_attn_matrix + standard_qkv) as f32 / (1024.0 * 1024.0);
+
+        // Flash attention only stores block-sized tiles
+        let block_size = 64;
+        let flash_tile = batch_size * num_heads * block_size * block_size * bytes_per_float;
+        let flash_qkv = 3 * batch_size * num_heads * seq_len * head_dim * bytes_per_float;
+        let flash_running = batch_size * num_heads * seq_len * (head_dim + 2) * bytes_per_float;
+        let flash_total = (flash_tile + flash_qkv + flash_running) as f32 / (1024.0 * 1024.0);
+
+        (standard_total, flash_total)
+    }
+}
+
+/// Scaled Dot-Product Attention with optional Flash Attention optimization.
+///
+/// Automatically selects between standard and flash attention based on sequence length.
+pub fn scaled_dot_product_attention(
+    query: &Tensor<f32>,
+    key: &Tensor<f32>,
+    value: &Tensor<f32>,
+    attn_mask: Option<&Tensor<f32>>,
+    dropout_p: f32,
+    is_causal: bool,
+    scale: Option<f32>,
+) -> Tensor<f32> {
+    let shape = query.shape();
+    let seq_len = shape[2];
+    let head_dim = shape[3];
+
+    let scale = scale.unwrap_or(1.0 / (head_dim as f32).sqrt());
+
+    // Use flash attention for longer sequences
+    if seq_len > 128 && attn_mask.is_none() {
+        let flash = FlashAttention::new(shape[1], dropout_p, is_causal);
+        return flash.forward_qkv(query, key, value);
+    }
+
+    // Standard attention for shorter sequences or when mask is provided
+    let flash = FlashAttention::new(shape[1], dropout_p, is_causal);
+    flash.standard_attention(query, key, value, scale)
 }

@@ -1,30 +1,77 @@
 //! Axonml Distributed - Distributed Training Utilities
 //!
-//! This crate provides distributed training functionality for the Axonml ML framework:
+//! Comprehensive distributed training support for scaling ML workloads across
+//! multiple GPUs and machines. Provides PyTorch-equivalent functionality.
 //!
-//! - **Backend**: Communication backend abstraction with mock implementation for testing
-//! - **`ProcessGroup`**: Process group abstraction for managing distributed processes
-//! - **DDP**: `DistributedDataParallel` wrapper for synchronizing gradients
-//! - **Communication**: High-level communication utilities (all-reduce, broadcast, etc.)
+//! # Features
 //!
-//! # Example
+//! ## Data Parallelism
+//! - **DDP** - `DistributedDataParallel` for gradient synchronization across replicas
+//! - **FSDP** - Fully Sharded Data Parallel with ZeRO-2 and ZeRO-3 optimizations
+//!
+//! ## Model Parallelism
+//! - **Pipeline Parallelism** - Split model across devices with microbatching (GPipe-style)
+//! - **Tensor Parallelism** - Layer-wise model sharding for large models
+//!
+//! ## Communication
+//! - **Collective Operations**: all-reduce, all-gather, broadcast, reduce-scatter, barrier
+//! - **Point-to-Point**: send, recv for direct tensor communication
+//! - **Process Groups**: Flexible grouping for hierarchical parallelism
+//!
+//! ## Backends
+//! - Mock backend for testing without real hardware
+//! - Extensible Backend trait for NCCL, Gloo, MPI integration
+//!
+//! # DDP Example
 //!
 //! ```ignore
 //! use axonml_distributed::prelude::*;
 //! use axonml_nn::Linear;
 //!
-//! // Create a mock process group for testing
 //! let world = World::mock();
-//!
-//! // Wrap a model in DDP
 //! let model = Linear::new(10, 5);
 //! let ddp_model = DistributedDataParallel::new(model, world.default_group().clone());
 //!
-//! // Synchronize gradients after backward pass
+//! // Forward pass
+//! let output = ddp_model.forward(&input);
+//! loss.backward();
+//!
+//! // Gradient sync happens automatically or manually:
 //! ddp_model.sync_gradients();
 //! ```
 //!
-//! @version 0.1.0
+//! # FSDP Example (ZeRO-3)
+//!
+//! ```ignore
+//! use axonml_distributed::{FSDP, FSDPConfig, ShardingStrategy};
+//!
+//! let config = FSDPConfig {
+//!     sharding_strategy: ShardingStrategy::FullShard, // ZeRO-3
+//!     cpu_offload: true,
+//!     ..Default::default()
+//! };
+//!
+//! let fsdp_model = FSDP::new(model, process_group, config);
+//! let output = fsdp_model.forward(&input);
+//! ```
+//!
+//! # Pipeline Parallelism Example
+//!
+//! ```ignore
+//! use axonml_distributed::{PipelineParallel, PipelineConfig, PipelineSchedule};
+//!
+//! let config = PipelineConfig {
+//!     num_stages: 4,
+//!     num_microbatches: 8,
+//!     schedule: PipelineSchedule::GPipe,
+//!     ..Default::default()
+//! };
+//!
+//! let pipeline = PipelineParallel::new(stages, process_group, config);
+//! let output = pipeline.forward(&input);
+//! ```
+//!
+//! @version 0.2.6
 //! @author `AutomataNexus` Development Team
 
 #![warn(missing_docs)]
@@ -90,6 +137,8 @@
 pub mod backend;
 pub mod comm;
 pub mod ddp;
+pub mod fsdp;
+pub mod pipeline;
 pub mod process_group;
 
 // =============================================================================
@@ -104,6 +153,11 @@ pub use comm::{
     world_size,
 };
 pub use ddp::{DistributedDataParallel, GradSyncStrategy, GradientBucket, GradientSynchronizer};
+pub use fsdp::{
+    ColumnParallelLinear, CPUOffload, FSDPMemoryStats, FullyShardedDataParallel,
+    RowParallelLinear, ShardingStrategy,
+};
+pub use pipeline::{Pipeline, PipelineMemoryStats, PipelineSchedule, PipelineStage};
 pub use process_group::{ProcessGroup, World};
 
 // =============================================================================
@@ -140,6 +194,12 @@ pub mod prelude {
         GradientBucket,
         GradientSynchronizer,
         MockBackend,
+        // FSDP
+        ColumnParallelLinear,
+        CPUOffload,
+        FullyShardedDataParallel,
+        RowParallelLinear,
+        ShardingStrategy,
         // Process groups
         ProcessGroup,
         ReduceOp,
@@ -157,6 +217,9 @@ pub mod prelude {
 
 /// Type alias for `DistributedDataParallel`.
 pub type DDP<M> = DistributedDataParallel<M>;
+
+/// Type alias for `FullyShardedDataParallel`.
+pub type FSDP<M> = FullyShardedDataParallel<M>;
 
 // =============================================================================
 // Tests

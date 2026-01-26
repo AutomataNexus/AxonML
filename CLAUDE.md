@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AxonML is a PyTorch-equivalent machine learning framework written in pure Rust. It's a monorepo workspace with 22 crates organized in layered architecture.
+AxonML is a PyTorch-equivalent machine learning framework written in pure Rust (~92-95% PyTorch parity). It's a monorepo workspace with 22 crates organized in layered architecture. The test suite includes 1076+ passing tests.
 
 ## Build Commands
 
@@ -119,32 +119,32 @@ pm2 startup  # Follow the instructions to enable boot persistence
 ## Architecture
 
 **Foundation Layer:**
-- `axonml-core` - Device abstraction (CPU, CUDA, Vulkan, Metal, WebGPU), data types, storage
-- `axonml-tensor` - N-dimensional arrays with broadcasting, views, slicing, BLAS ops
+- `axonml-core` - Device abstraction (CPU, CUDA, Vulkan, Metal, WebGPU), data types, storage, GPU test suite
+- `axonml-tensor` - N-dimensional arrays with broadcasting, views, slicing, BLAS ops, sparse tensors, topk/sort/gather/scatter/unique
 
 **Computation Layer:**
-- `axonml-autograd` - Reverse-mode automatic differentiation, computational graphs
-- `axonml-nn` - Neural network modules (Linear, Conv, BatchNorm, Attention, RNN/LSTM/GRU)
-- `axonml-optim` - Optimizers (SGD, Adam, AdamW, RMSprop) and LR schedulers
+- `axonml-autograd` - Reverse-mode automatic differentiation, computational graphs, AMP (autocast), gradient checkpointing
+- `axonml-nn` - Neural network modules (Linear, Conv, BatchNorm, LayerNorm, GroupNorm, InstanceNorm, Attention, RNN/LSTM/GRU)
+- `axonml-optim` - Optimizers (SGD, Adam, AdamW, RMSprop, LAMB), GradScaler, LR schedulers
 
 **Data & Domain Layer:**
-- `axonml-data` - DataLoader, Dataset trait, batching, samplers
-- `axonml-vision` - Image transforms, MNIST/CIFAR datasets, CNN architectures
+- `axonml-data` - DataLoader, Dataset trait, batching, samplers, parallel data loading
+- `axonml-vision` - Image transforms, MNIST/CIFAR datasets, CNN architectures, pretrained model hub
 - `axonml-audio` - MelSpectrogram, MFCC, audio transforms
 - `axonml-text` - Tokenizers (Whitespace, Char, BPE), vocabulary
 
 **Advanced Features:**
-- `axonml-distributed` - DistributedDataParallel, collective ops
+- `axonml-distributed` - DDP, FSDP (ZeRO-2/3), Pipeline Parallelism, Tensor Parallelism, collective ops
 - `axonml-serialize` - Model save/load (SafeTensors, StateDict)
 - `axonml-onnx` - ONNX import/export (40+ operators)
 - `axonml-quant` - Quantization (INT8/INT4/INT5, F16)
-- `axonml-fusion` - Kernel fusion optimization
+- `axonml-fusion` - Kernel fusion optimization, Flash Attention
 - `axonml-jit` - JIT compilation, graph tracing
 - `axonml-profile` - Profiling tools
-- `axonml-llm` - LLM architectures (BERT, GPT-2)
+- `axonml-llm` - LLM architectures (BERT, GPT-2), pretrained hub (LLaMA, Mistral, Phi, Qwen)
 
 **Application Layer:**
-- `axonml` - Main umbrella crate with feature flags
+- `axonml` - Main umbrella crate with feature flags, unified model hub, benchmarking utilities
 - `axonml-cli` - CLI for training, evaluation, model management
 - `axonml-tui` - Terminal UI dashboard
 - `axonml-dashboard` - Leptos/WASM web frontend

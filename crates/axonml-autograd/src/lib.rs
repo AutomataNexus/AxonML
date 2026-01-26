@@ -5,13 +5,16 @@
 //! using gradient descent optimization.
 //!
 //! # Key Features
-//! - Dynamic computational graph construction
-//! - Reverse-mode autodiff (backpropagation)
-//! - Gradient accumulation
-//! - No-grad context for inference
-//! - Support for higher-order derivatives
 //!
-//! # Example
+//! - **Dynamic Computational Graph** - Build graph during forward pass
+//! - **Reverse-mode Autodiff** - Efficient backpropagation
+//! - **Gradient Accumulation** - Support for gradient accumulation across batches
+//! - **No-grad Context** - Disable gradient tracking for inference
+//! - **Automatic Mixed Precision (AMP)** - F16 autocast for faster training
+//! - **Gradient Checkpointing** - Trade compute for memory on large models
+//!
+//! # Basic Example
+//!
 //! ```rust,ignore
 //! use axonml_autograd::{Variable, no_grad};
 //!
@@ -30,7 +33,39 @@
 //! println!("dL/dw = {:?}", w.grad());
 //! ```
 //!
-//! @version 0.1.0
+//! # Mixed Precision Training
+//!
+//! ```rust,ignore
+//! use axonml_autograd::amp::{autocast, AutocastGuard};
+//! use axonml_core::DType;
+//!
+//! // Enable F16 autocast for forward pass
+//! let output = autocast(DType::F16, || {
+//!     model.forward(&input)
+//! });
+//!
+//! // Or use RAII guard
+//! {
+//!     let _guard = AutocastGuard::new(DType::F16);
+//!     let output = model.forward(&input);
+//! }
+//! ```
+//!
+//! # Gradient Checkpointing
+//!
+//! ```rust,ignore
+//! use axonml_autograd::checkpoint::{checkpoint, checkpoint_sequential};
+//!
+//! // Checkpoint a single function - recomputes during backward
+//! let output = checkpoint(|x| heavy_computation(x), &input);
+//!
+//! // Checkpoint sequential layers in segments
+//! let output = checkpoint_sequential(24, 4, &input, |layer_idx, x| {
+//!     layers[layer_idx].forward(x)
+//! });
+//! ```
+//!
+//! @version 0.2.6
 //! @author `AutomataNexus` Development Team
 
 #![warn(missing_docs)]

@@ -347,6 +347,7 @@ pub struct LLaMAWeightMapper {
 }
 
 impl LLaMAWeightMapper {
+    /// Create a new LLaMA weight mapper.
     pub fn new(num_layers: usize) -> Self {
         Self { num_layers }
     }
@@ -404,6 +405,7 @@ pub struct MistralWeightMapper {
 }
 
 impl MistralWeightMapper {
+    /// Create a new Mistral weight mapper.
     pub fn new(num_layers: usize) -> Self {
         Self { num_layers }
     }
@@ -428,6 +430,7 @@ pub struct PhiWeightMapper {
 }
 
 impl PhiWeightMapper {
+    /// Create a new Phi weight mapper.
     pub fn new(num_layers: usize) -> Self {
         Self { num_layers }
     }
@@ -479,7 +482,7 @@ pub fn load_llama_from_hf(model_id: &str) -> LLMResult<(crate::LLaMAConfig, Hash
 
     // Load config
     let config_json = loader.load_config()?;
-    let config = parse_llama_config(&config_json)?;
+    let config = parse_llama_config_from_json(&config_json)?;
 
     // Load tensors
     loader.load_tensors()?;
@@ -500,7 +503,7 @@ pub fn load_llama_from_hf(model_id: &str) -> LLMResult<(crate::LLaMAConfig, Hash
 }
 
 /// Parse LLaMA config from HuggingFace config.json.
-fn parse_llama_config(json: &serde_json::Value) -> LLMResult<crate::LLaMAConfig> {
+pub fn parse_llama_config_from_json(json: &serde_json::Value) -> LLMResult<crate::LLaMAConfig> {
     Ok(crate::LLaMAConfig {
         vocab_size: json["vocab_size"].as_u64().unwrap_or(32000) as usize,
         hidden_size: json["hidden_size"].as_u64().unwrap_or(4096) as usize,

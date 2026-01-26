@@ -600,6 +600,59 @@ impl PhiForCausalLM {
     pub fn create_kv_cache(&self, batch_size: usize) -> LayerKVCache {
         self.model.create_kv_cache(batch_size)
     }
+
+    /// Load model from HuggingFace Hub.
+    pub fn from_pretrained(model_id: &str) -> crate::error::LLMResult<Self> {
+        use crate::hf_loader::HFLoader;
+
+        println!("Loading Phi from: {}", model_id);
+
+        let mut loader = HFLoader::new(model_id)?;
+        let config_json = loader.load_config()?;
+
+        // Parse Phi config
+        let config = PhiConfig {
+            vocab_size: config_json["vocab_size"].as_u64().unwrap_or(51200) as usize,
+            hidden_size: config_json["hidden_size"].as_u64().unwrap_or(2560) as usize,
+            intermediate_size: config_json["intermediate_size"].as_u64().unwrap_or(10240) as usize,
+            num_hidden_layers: config_json["num_hidden_layers"].as_u64().unwrap_or(32) as usize,
+            num_attention_heads: config_json["num_attention_heads"].as_u64().unwrap_or(32) as usize,
+            num_key_value_heads: config_json["num_key_value_heads"]
+                .as_u64()
+                .unwrap_or(config_json["num_attention_heads"].as_u64().unwrap_or(32)) as usize,
+            max_position_embeddings: config_json["max_position_embeddings"].as_u64().unwrap_or(2048) as usize,
+            layer_norm_eps: config_json["layer_norm_eps"].as_f64().unwrap_or(1e-5) as f32,
+            rope_theta: config_json["rope_theta"].as_f64().unwrap_or(10000.0) as f32,
+            partial_rotary_factor: config_json["partial_rotary_factor"].as_f64().unwrap_or(0.5) as f32,
+            attention_dropout: 0.0,
+            hidden_dropout: 0.0,
+            use_bias: config_json["use_bias"].as_bool().unwrap_or(true),
+        };
+
+        loader.load_tensors()?;
+
+        let mut model = Self::new(&config);
+
+        // Load weights
+        let mut loaded = 0;
+        for (name, info) in loader.tensors() {
+            let tensor = Tensor::from_vec(info.data.clone(), &info.shape).unwrap();
+
+            if name.contains("embed_tokens.weight") {
+                model.model.embed_tokens.weight.update_data(tensor);
+                loaded += 1;
+            } else if name.contains("lm_head.weight") {
+                model.lm_head.weight.update_data(tensor);
+                loaded += 1;
+            } else if name.contains("final_layernorm.weight") {
+                model.model.final_layernorm.load_weight(&tensor);
+                loaded += 1;
+            }
+        }
+
+        println!("PhiForCausalLM: Loaded {} weight tensors", loaded);
+        Ok(model)
+    }
 }
 
 impl Module for PhiForCausalLM {

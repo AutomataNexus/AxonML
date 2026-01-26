@@ -100,6 +100,7 @@
 pub mod creation;
 pub mod ops;
 pub mod shape;
+pub mod sparse;
 pub mod tensor;
 pub mod view;
 

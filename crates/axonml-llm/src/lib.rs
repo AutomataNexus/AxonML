@@ -52,7 +52,10 @@ pub mod generation;
 
 pub use error::{LLMError, LLMResult};
 pub use config::{BertConfig, GPT2Config, TransformerConfig};
-pub use attention::{MultiHeadSelfAttention, CausalSelfAttention, KVCache, LayerKVCache};
+pub use attention::{
+    CausalSelfAttention, FlashAttention, FlashAttentionConfig, KVCache, LayerKVCache,
+    MultiHeadSelfAttention, scaled_dot_product_attention,
+};
 pub use embedding::{TokenEmbedding, PositionalEmbedding, BertEmbedding, GPT2Embedding};
 pub use hub::{PretrainedLLM, llm_registry, download_weights as download_llm_weights};
 pub use hf_loader::{HFLoader, load_llama_from_hf, load_mistral_from_hf};

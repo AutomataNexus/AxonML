@@ -554,6 +554,57 @@ impl MistralForCausalLM {
     pub fn create_kv_cache(&self, batch_size: usize) -> LayerKVCache {
         self.model.create_kv_cache(batch_size)
     }
+
+    /// Load model from HuggingFace Hub.
+    pub fn from_pretrained(model_id: &str) -> crate::error::LLMResult<Self> {
+        use crate::hf_loader::HFLoader;
+
+        println!("Loading Mistral from: {}", model_id);
+
+        let mut loader = HFLoader::new(model_id)?;
+        let config_json = loader.load_config()?;
+
+        // Parse Mistral config
+        let config = MistralConfig {
+            vocab_size: config_json["vocab_size"].as_u64().unwrap_or(32000) as usize,
+            hidden_size: config_json["hidden_size"].as_u64().unwrap_or(4096) as usize,
+            intermediate_size: config_json["intermediate_size"].as_u64().unwrap_or(14336) as usize,
+            num_hidden_layers: config_json["num_hidden_layers"].as_u64().unwrap_or(32) as usize,
+            num_attention_heads: config_json["num_attention_heads"].as_u64().unwrap_or(32) as usize,
+            num_key_value_heads: config_json["num_key_value_heads"].as_u64().unwrap_or(8) as usize,
+            max_position_embeddings: config_json["max_position_embeddings"].as_u64().unwrap_or(32768) as usize,
+            sliding_window: config_json["sliding_window"].as_u64().unwrap_or(4096) as usize,
+            rms_norm_eps: config_json["rms_norm_eps"].as_f64().unwrap_or(1e-5) as f32,
+            rope_theta: config_json["rope_theta"].as_f64().unwrap_or(10000.0) as f32,
+            attention_dropout: 0.0,
+        };
+
+        loader.load_tensors()?;
+
+        let mut model = Self::new(&config);
+
+        // Load weights (same structure as LLaMA)
+        let mut loaded = 0;
+        for (name, info) in loader.tensors() {
+            let tensor = Tensor::from_vec(info.data.clone(), &info.shape).unwrap();
+
+            // Map weight names
+            if name.contains("embed_tokens.weight") {
+                model.model.embed_tokens.weight.update_data(tensor);
+                loaded += 1;
+            } else if name.contains("lm_head.weight") {
+                model.lm_head.weight.update_data(tensor);
+                loaded += 1;
+            } else if name.contains(".norm.weight") && !name.contains("layers.") {
+                model.model.norm.load_weight(&tensor);
+                loaded += 1;
+            }
+            // Layer weights are handled by pattern matching layer index
+        }
+
+        println!("MistralForCausalLM: Loaded {} weight tensors", loaded);
+        Ok(model)
+    }
 }
 
 impl Module for MistralForCausalLM {

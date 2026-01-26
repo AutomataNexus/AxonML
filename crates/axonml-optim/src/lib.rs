@@ -1,12 +1,31 @@
 //! axonml-optim - Optimization Algorithms
 //!
-//! Provides optimizers for training neural networks, including:
-//! - SGD with momentum and Nesterov acceleration
-//! - Adam and `AdamW`
-//! - `RMSprop`
-//! - Learning rate schedulers
+//! Provides optimizers for training neural networks with comprehensive support
+//! for modern training techniques.
 //!
-//! # Example
+//! # Optimizers
+//!
+//! - **SGD** - Stochastic Gradient Descent with momentum and Nesterov acceleration
+//! - **Adam** - Adaptive Moment Estimation
+//! - **AdamW** - Adam with decoupled weight decay
+//! - **RMSprop** - Root Mean Square Propagation
+//! - **LAMB** - Layer-wise Adaptive Moments for large batch training (BERT-scale)
+//!
+//! # Learning Rate Schedulers
+//!
+//! - **StepLR** - Step decay at fixed intervals
+//! - **MultiStepLR** - Decay at specified milestones
+//! - **ExponentialLR** - Exponential decay
+//! - **CosineAnnealingLR** - Cosine annealing
+//! - **OneCycleLR** - 1cycle policy (super-convergence)
+//! - **WarmupLR** - Linear warmup
+//! - **ReduceLROnPlateau** - Reduce on metric plateau
+//!
+//! # Mixed Precision Support
+//!
+//! - **GradScaler** - Gradient scaling for F16 training to prevent underflow
+//!
+//! # Basic Example
 //!
 //! ```ignore
 //! use axonml_optim::prelude::*;
@@ -31,7 +50,47 @@
 //! }
 //! ```
 //!
-//! @version 0.1.0
+//! # Mixed Precision Training with GradScaler
+//!
+//! ```ignore
+//! use axonml_optim::{Adam, GradScaler};
+//!
+//! let mut optimizer = Adam::new(params, 0.001);
+//! let mut scaler = GradScaler::new();
+//!
+//! for batch in dataloader {
+//!     // Forward pass (with autocast in F16)
+//!     let loss = model.forward(&batch);
+//!
+//!     // Scale loss for backward
+//!     let scaled_loss = scaler.scale_loss(loss);
+//!
+//!     // Backward
+//!     optimizer.zero_grad();
+//!     scaled_loss.backward();
+//!
+//!     // Unscale gradients and check for inf/nan
+//!     if scaler.unscale_grads(&mut grads) {
+//!         optimizer.step();
+//!     }
+//!
+//!     // Update scale factor
+//!     scaler.update();
+//! }
+//! ```
+//!
+//! # LAMB for Large Batch Training
+//!
+//! ```ignore
+//! use axonml_optim::LAMB;
+//!
+//! // LAMB enables training with very large batches (32K+)
+//! let optimizer = LAMB::new(params, 0.001)
+//!     .betas(0.9, 0.999)
+//!     .weight_decay(0.01);
+//! ```
+//!
+//! @version 0.2.6
 //! @author `AutomataNexus` Development Team
 
 #![warn(missing_docs)]
