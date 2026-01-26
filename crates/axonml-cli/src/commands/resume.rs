@@ -15,11 +15,11 @@ use axonml_nn::{Linear, Module, ReLU, Sequential};
 use axonml_optim::{Adam, Optimizer};
 use axonml_serialize::{load_checkpoint, load_state_dict, save_state_dict, Format, StateDict};
 use axonml_tensor::Tensor;
-use axonml_vision::SyntheticMNIST;
+use axonml_vision::{CIFAR10, FashionMNIST, MNIST};
 
 use super::utils::{
-    ensure_dir, epoch_progress_bar, path_exists, print_header, print_info, print_kv, print_success,
-    print_warning,
+    ensure_dir, epoch_progress_bar, path_exists, print_header, print_info, print_kv,
+    print_success, print_warning,
 };
 use crate::cli::ResumeArgs;
 use crate::error::{CliError, CliResult};
@@ -78,6 +78,15 @@ pub fn execute(args: ResumeArgs) -> CliResult<()> {
     print_info("Continuing training...");
     println!();
 
+    // Verify data path exists
+    let data_path = PathBuf::from(&args.data);
+    if !path_exists(&data_path) {
+        return Err(CliError::Config(format!(
+            "Data path not found: {}",
+            args.data
+        )));
+    }
+
     // Run training loop
     let start_time = Instant::now();
     let result = run_resumed_training(
@@ -86,6 +95,9 @@ pub fn execute(args: ResumeArgs) -> CliResult<()> {
         additional_epochs,
         learning_rate,
         &output_dir,
+        &args.data,
+        args.format.as_deref(),
+        args.batch_size,
     );
     let elapsed = start_time.elapsed();
 
@@ -240,17 +252,69 @@ impl ResumableModel {
 // Dataset Wrapper
 // =============================================================================
 
-struct ResumeDataset(SyntheticMNIST);
+/// Supported dataset formats for resumed training
+enum ResumeDataset {
+    Mnist(MNIST),
+    FashionMnist(FashionMNIST),
+    Cifar10(CIFAR10),
+}
+
+impl ResumeDataset {
+    /// Load dataset from path based on format
+    fn load(path: &std::path::Path, format: &str, train: bool) -> Result<Self, String> {
+        match format.to_lowercase().as_str() {
+            "mnist" => {
+                let dataset = MNIST::new(path, train)?;
+                Ok(ResumeDataset::Mnist(dataset))
+            }
+            "fashion-mnist" | "fashion_mnist" | "fashionmnist" => {
+                let dataset = FashionMNIST::new(path, train)?;
+                Ok(ResumeDataset::FashionMnist(dataset))
+            }
+            "cifar10" | "cifar-10" => {
+                let dataset = CIFAR10::new(path, train)?;
+                Ok(ResumeDataset::Cifar10(dataset))
+            }
+            _ => Err(format!(
+                "Unsupported dataset format: '{}'. Supported: mnist, fashion-mnist, cifar10",
+                format
+            )),
+        }
+    }
+
+    /// Detect dataset format from directory contents
+    fn detect_format(path: &std::path::Path) -> Option<String> {
+        // Check for MNIST files
+        if path.join("train-images-idx3-ubyte").exists()
+            || path.join("train-images-idx3-ubyte.gz").exists()
+        {
+            return Some("mnist".to_string());
+        }
+        // Check for CIFAR files
+        if path.join("data_batch_1.bin").exists() {
+            return Some("cifar10".to_string());
+        }
+        None
+    }
+}
 
 impl Dataset for ResumeDataset {
     type Item = (Tensor<f32>, Tensor<f32>);
 
     fn len(&self) -> usize {
-        self.0.len()
+        match self {
+            ResumeDataset::Mnist(d) => d.len(),
+            ResumeDataset::FashionMnist(d) => d.len(),
+            ResumeDataset::Cifar10(d) => d.len(),
+        }
     }
 
     fn get(&self, index: usize) -> Option<Self::Item> {
-        self.0.get(index)
+        match self {
+            ResumeDataset::Mnist(d) => d.get(index),
+            ResumeDataset::FashionMnist(d) => d.get(index),
+            ResumeDataset::Cifar10(d) => d.get(index),
+        }
     }
 }
 
@@ -264,6 +328,9 @@ fn run_resumed_training(
     additional_epochs: usize,
     learning_rate: f64,
     output_dir: &str,
+    data_path: &str,
+    format: Option<&str>,
+    batch_size: usize,
 ) -> Result<Vec<(String, f64)>, Box<dyn std::error::Error>> {
     // Create and initialize model
     let mut model = ResumableModel::default_mlp();
@@ -276,9 +343,24 @@ fn run_resumed_training(
     let lr = learning_rate as f32;
     let mut optimizer = Adam::new(model.parameters(), lr);
 
-    // Load dataset
-    let dataset = ResumeDataset(SyntheticMNIST::new(10000));
-    let batch_size = 32;
+    // Load dataset from the specified path
+    let data_path_buf = PathBuf::from(data_path);
+
+    // Detect or use specified format
+    let detected_format = format.map(String::from).unwrap_or_else(|| {
+        ResumeDataset::detect_format(&data_path_buf).unwrap_or_else(|| "mnist".to_string())
+    });
+
+    print_info(&format!(
+        "Loading {} dataset from: {}",
+        detected_format, data_path
+    ));
+
+    let dataset = ResumeDataset::load(&data_path_buf, &detected_format, true)
+        .map_err(|e| format!("Failed to load dataset: {}", e))?;
+
+    print_success(&format!("Loaded {} samples", dataset.len()));
+
     let loader = DataLoader::new(dataset, batch_size);
     let batches_per_epoch = loader.len() as u64;
 

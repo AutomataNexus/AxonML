@@ -17,7 +17,7 @@ use axonml_nn::{Conv2d, Dropout, Linear, MaxPool2d, Module, ReLU, Sequential};
 use axonml_optim::{Adam, AdamW, Optimizer, RMSprop, SGD};
 use axonml_serialize::{save_state_dict, Format, StateDict};
 use axonml_tensor::Tensor;
-use axonml_vision::{SyntheticCIFAR, SyntheticMNIST};
+use axonml_vision::{MNIST, CIFAR10, FashionMNIST};
 
 use super::utils::{
     ensure_dir, epoch_progress_bar, parse_device, print_header, print_info, print_kv, print_success,
@@ -168,9 +168,7 @@ fn print_training_info(config: &TrainingConfig, args: &TrainArgs) {
     print_kv("Optimizer", &config.optimizer.name);
     print_kv("Output directory", &args.output);
 
-    if let Some(data_path) = &args.data {
-        print_kv("Data path", data_path);
-    }
+    print_kv("Data path", &args.data);
 
     if config.optimizer.weight_decay > 0.0 {
         print_kv(
@@ -464,8 +462,46 @@ fn create_optimizer(
 // =============================================================================
 
 enum TrainDataset {
-    MNIST(SyntheticMNIST),
-    CIFAR(SyntheticCIFAR),
+    Mnist(MNIST),
+    FashionMnist(FashionMNIST),
+    Cifar10(CIFAR10),
+}
+
+impl TrainDataset {
+    /// Load dataset from path based on format
+    fn load(path: &std::path::Path, format: &str, train: bool) -> Result<Self, String> {
+        match format.to_lowercase().as_str() {
+            "mnist" => {
+                let dataset = MNIST::new(path, train)?;
+                Ok(TrainDataset::Mnist(dataset))
+            }
+            "fashion-mnist" | "fashion_mnist" | "fashionmnist" => {
+                let dataset = FashionMNIST::new(path, train)?;
+                Ok(TrainDataset::FashionMnist(dataset))
+            }
+            "cifar10" | "cifar-10" => {
+                let dataset = CIFAR10::new(path, train)?;
+                Ok(TrainDataset::Cifar10(dataset))
+            }
+            _ => Err(format!(
+                "Unsupported dataset format: '{}'. Supported: mnist, fashion-mnist, cifar10",
+                format
+            )),
+        }
+    }
+
+    /// Detect dataset format from directory contents
+    fn detect_format(path: &std::path::Path) -> Option<String> {
+        if path.join("train-images-idx3-ubyte").exists()
+            || path.join("train-images-idx3-ubyte.gz").exists()
+        {
+            return Some("mnist".to_string());
+        }
+        if path.join("data_batch_1.bin").exists() {
+            return Some("cifar10".to_string());
+        }
+        None
+    }
 }
 
 impl Dataset for TrainDataset {
@@ -473,29 +509,35 @@ impl Dataset for TrainDataset {
 
     fn len(&self) -> usize {
         match self {
-            TrainDataset::MNIST(d) => d.len(),
-            TrainDataset::CIFAR(d) => d.len(),
+            TrainDataset::Mnist(d) => d.len(),
+            TrainDataset::FashionMnist(d) => d.len(),
+            TrainDataset::Cifar10(d) => d.len(),
         }
     }
 
     fn get(&self, index: usize) -> Option<Self::Item> {
         match self {
-            TrainDataset::MNIST(d) => d.get(index),
-            TrainDataset::CIFAR(d) => d.get(index),
+            TrainDataset::Mnist(d) => d.get(index),
+            TrainDataset::FashionMnist(d) => d.get(index),
+            TrainDataset::Cifar10(d) => d.get(index),
         }
     }
 }
 
-fn load_dataset(data_config: &DataConfig, model_config: &ModelConfig) -> TrainDataset {
-    let arch = model_config.architecture.to_lowercase();
+fn load_dataset(args: &TrainArgs) -> Result<TrainDataset, String> {
+    let data_path = PathBuf::from(&args.data);
 
-    // Determine dataset based on architecture or data format
-    if arch.contains("cifar") || data_config.format.to_lowercase().contains("cifar") {
-        TrainDataset::CIFAR(SyntheticCIFAR::cifar10(10000))
-    } else {
-        // Default to MNIST-style data
-        TrainDataset::MNIST(SyntheticMNIST::new(10000))
+    if !data_path.exists() {
+        return Err(format!("Data path does not exist: {}", args.data));
     }
+
+    // Detect or use specified format
+    let format = args.format.clone().unwrap_or_else(|| {
+        TrainDataset::detect_format(&data_path)
+            .unwrap_or_else(|| "mnist".to_string())
+    });
+
+    TrainDataset::load(&data_path, &format, true) // true = training set
 }
 
 // =============================================================================
@@ -628,10 +670,10 @@ fn run_training_loop(
     let mut optimizer = create_optimizer(config, model.parameters());
 
     // Load dataset
-    print_info("Loading dataset...");
-    let dataset = load_dataset(&data_config, &model_config);
+    print_info(&format!("Loading dataset from: {}", args.data));
+    let dataset = load_dataset(args)?;
     let dataset_size = dataset.len();
-    print_kv("Dataset size", &dataset_size.to_string());
+    print_success(&format!("Loaded {} training samples", dataset_size));
 
     let loader = DataLoader::new(dataset, config.batch_size);
     let batches_per_epoch = loader.len() as u64;

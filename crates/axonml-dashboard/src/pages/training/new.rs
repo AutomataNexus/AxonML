@@ -130,6 +130,7 @@ pub fn NewTrainingPage() -> impl IntoView {
                 learning_rate: learning_rate.get(),
                 batch_size: batch_size.get() as u32,
                 epochs: epochs.get() as u32,
+                steps_per_epoch: 100, // Default value
                 optimizer: Some(optimizer.get()),
                 loss_function: Some(loss_function.get()),
                 extra: std::collections::HashMap::new(),

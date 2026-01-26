@@ -272,38 +272,9 @@ pub async fn get_metrics_history(
     State(state): State<AppState>,
     _user: AuthUser,
 ) -> Result<Json<SystemMetricsHistory>, AuthError> {
-    // Get from in-memory history or return simulated data
+    // Get from in-memory history collected by background task
     let history = state.metrics_history.lock().await;
-
-    if history.timestamps.is_empty() {
-        // Return simulated history for initial display
-        let now = chrono::Utc::now();
-        let timestamps: Vec<String> = (0..60)
-            .map(|i| (now - chrono::Duration::seconds(60 - i)).format("%H:%M:%S").to_string())
-            .collect();
-
-        // Generate realistic-looking data
-        let cpu_history: Vec<f64> = (0..60).map(|i| {
-            25.0 + 15.0 * ((i as f64 * 0.2).sin()) + (i as f64 * 0.5 % 10.0)
-        }).collect();
-
-        let memory_history: Vec<f64> = (0..60).map(|i| {
-            45.0 + 5.0 * ((i as f64 * 0.1).cos()) + (i as f64 * 0.2 % 5.0)
-        }).collect();
-
-        Ok(Json(SystemMetricsHistory {
-            timestamps,
-            cpu_history,
-            memory_history,
-            disk_io_read: (0..60).map(|i| 50.0 + 30.0 * ((i as f64 * 0.15).sin())).collect(),
-            disk_io_write: (0..60).map(|i| 30.0 + 20.0 * ((i as f64 * 0.12).cos())).collect(),
-            network_rx: (0..60).map(|i| 100.0 + 50.0 * ((i as f64 * 0.1).sin())).collect(),
-            network_tx: (0..60).map(|i| 80.0 + 40.0 * ((i as f64 * 0.08).cos())).collect(),
-            gpu_utilization: vec![(0..60).map(|i| 30.0 + 25.0 * ((i as f64 * 0.2).sin())).collect()],
-        }))
-    } else {
-        Ok(Json(history.clone()))
-    }
+    Ok(Json(history.clone()))
 }
 
 /// Get correlation data for 3D scatter plot

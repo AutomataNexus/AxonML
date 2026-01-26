@@ -34,10 +34,16 @@ pub struct RunConfig {
     pub epochs: u32,
     pub batch_size: u32,
     pub learning_rate: f64,
+    #[serde(default = "default_steps_per_epoch")]
+    pub steps_per_epoch: u32,
     #[serde(default)]
     pub optimizer: String,
     #[serde(flatten)]
     pub extra: serde_json::Value,
+}
+
+fn default_steps_per_epoch() -> u32 {
+    100
 }
 
 /// Training run data structure
@@ -158,10 +164,13 @@ impl<'a> RunRepository<'a> {
         if let Some(s) = status {
             let status_str = serde_json::to_string(&s)?;
             let status_str = status_str.trim_matches('"');
-            filter.as_object_mut().unwrap().insert(
-                "status".to_string(),
-                serde_json::json!({ "$eq": status_str })
-            );
+            // filter is guaranteed to be an object since we created it with json!({...})
+            if let Some(obj) = filter.as_object_mut() {
+                obj.insert(
+                    "status".to_string(),
+                    serde_json::json!({ "$eq": status_str })
+                );
+            }
         }
 
         let query = DocumentQuery {

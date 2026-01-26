@@ -95,40 +95,28 @@ impl InferenceServer {
         version: u32,
         file_path: &str,
     ) -> Result<(), String> {
+        // Check if file exists
+        if !Path::new(file_path).exists() {
+            return Err(format!(
+                "Model file not found: {}",
+                file_path
+            ));
+        }
+
         // Load the state dict from file
-        let loaded_model = if Path::new(file_path).exists() {
-            match Self::load_model_from_file(file_path) {
-                Ok(model) => Some(model),
-                Err(e) => {
-                    tracing::warn!(
-                        endpoint_id = endpoint_id,
-                        file_path = file_path,
-                        error = %e,
-                        "Failed to load model weights, using stub model"
-                    );
-                    None
-                }
-            }
-        } else {
-            tracing::warn!(
-                endpoint_id = endpoint_id,
-                file_path = file_path,
-                "Model file not found, using stub model"
-            );
-            None
-        };
+        let loaded_model = Self::load_model_from_file(file_path)?;
 
         let instance = ModelInstance {
             model_id: model_id.to_string(),
             version_id: version_id.to_string(),
             version,
             file_path: file_path.to_string(),
-            loaded: loaded_model.is_some(),
+            loaded: true,
         };
 
         let entry = ModelEntry {
             instance,
-            model: loaded_model,
+            model: Some(loaded_model),
         };
 
         let mut models = self.models.write().await;
@@ -138,6 +126,7 @@ impl InferenceServer {
             endpoint_id = endpoint_id,
             model_id = model_id,
             version = version,
+            file_path = file_path,
             "Model loaded for inference"
         );
 
@@ -361,20 +350,11 @@ impl InferenceServer {
             return Self::run_inference(loaded, inputs);
         }
 
-        // Fallback: return structured response based on input shape
-        let input_array = Self::parse_input(&inputs)?;
-        let batch_size = input_array.len();
-
-        // Return placeholder predictions matching input batch size
-        let predictions: Vec<Vec<f32>> = (0..batch_size)
-            .map(|_| vec![0.33, 0.33, 0.34])
-            .collect();
-
-        Ok(serde_json::json!({
-            "predictions": predictions,
-            "model_loaded": false,
-            "message": "Model weights not loaded, returning placeholder predictions"
-        }))
+        // Model not loaded - return error instead of fake predictions
+        Err(format!(
+            "Model weights not loaded for endpoint '{}'. Please verify the model file exists and is valid.",
+            endpoint_id
+        ))
     }
 
     /// Run real inference using loaded model

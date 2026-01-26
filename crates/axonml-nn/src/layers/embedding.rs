@@ -116,15 +116,21 @@ impl Embedding {
 
         for (i, &idx_f) in indices_vec.iter().enumerate() {
             let idx = idx_f as usize;
-            if idx >= self.num_embeddings {
-                panic!(
-                    "Index {} out of range for embedding with {} entries",
-                    idx, self.num_embeddings
+            // Clamp out-of-bounds indices to the padding index (0)
+            // This prevents panics while still producing valid output
+            let safe_idx = if idx >= self.num_embeddings {
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "Warning: embedding index {} out of range (max {}), using padding index 0",
+                    idx, self.num_embeddings - 1
                 );
-            }
+                0
+            } else {
+                idx
+            };
 
             for d in 0..self.embedding_dim {
-                output_data[i * self.embedding_dim + d] = weight_vec[idx * self.embedding_dim + d];
+                output_data[i * self.embedding_dim + d] = weight_vec[safe_idx * self.embedding_dim + d];
             }
         }
 

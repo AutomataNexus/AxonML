@@ -255,8 +255,8 @@ fn quantize_state_dict(state_dict: &StateDict, quant_type: QuantType) -> CliResu
                 entry.data.clone()
             }
             QuantType::F16 => {
-                // Convert to F16 (simulated - just copy for now)
-                entry.data.clone()
+                // Convert to F16 and back (lossy conversion)
+                quantize_tensor_f16(&entry.data)
             }
             QuantType::Q8_0 => {
                 // 8-bit quantization
@@ -276,6 +276,26 @@ fn quantize_state_dict(state_dict: &StateDict, quant_type: QuantType) -> CliResu
     }
 
     Ok(quantized)
+}
+
+fn quantize_tensor_f16(data: &TensorData) -> TensorData {
+    // Convert F32 to F16 and back (simulating precision loss)
+    let values = &data.values;
+
+    // Use half crate's conversion if available, otherwise simulate
+    let quantized: Vec<f32> = values
+        .iter()
+        .map(|&v| {
+            // Convert to half precision and back
+            let h = half::f16::from_f32(v);
+            h.to_f32()
+        })
+        .collect();
+
+    TensorData {
+        shape: data.shape.clone(),
+        values: quantized,
+    }
 }
 
 fn quantize_tensor_q8(data: &TensorData) -> TensorData {

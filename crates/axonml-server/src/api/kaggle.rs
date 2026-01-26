@@ -213,21 +213,80 @@ pub async fn search_datasets(
     Ok(Json(KaggleSearchResponse { datasets, total }))
 }
 
+/// SECURITY: Validate dataset reference to prevent path traversal
+fn validate_dataset_ref(dataset_ref: &str) -> Result<(), AuthError> {
+    // Check for path traversal patterns
+    if dataset_ref.contains("..") || dataset_ref.contains("./") || dataset_ref.starts_with('/') {
+        return Err(AuthError::InvalidInput("Invalid dataset reference: path traversal detected".to_string()));
+    }
+    // Only allow alphanumeric, hyphens, underscores, and single forward slash
+    let valid = dataset_ref.chars().all(|c| {
+        c.is_alphanumeric() || c == '-' || c == '_' || c == '/'
+    });
+    if !valid {
+        return Err(AuthError::InvalidInput("Invalid dataset reference: contains invalid characters".to_string()));
+    }
+    // Must contain exactly one slash (owner/dataset format)
+    if dataset_ref.matches('/').count() != 1 {
+        return Err(AuthError::InvalidInput("Invalid dataset reference: must be in format 'owner/dataset'".to_string()));
+    }
+    Ok(())
+}
+
+/// SECURITY: Validate that a path is within the allowed base directory
+fn validate_path_within_base(path: &PathBuf, base: &PathBuf) -> Result<(), AuthError> {
+    // Canonicalize both paths to resolve any .. or symlinks
+    let canonical_base = base.canonicalize()
+        .map_err(|_| AuthError::Internal("Failed to resolve base path".to_string()))?;
+
+    // Create the directory first so we can canonicalize it
+    fs::create_dir_all(path)
+        .map_err(|e| AuthError::Internal(format!("Failed to create directory: {}", e)))?;
+
+    let canonical_path = path.canonicalize()
+        .map_err(|_| AuthError::Internal("Failed to resolve output path".to_string()))?;
+
+    if !canonical_path.starts_with(&canonical_base) {
+        tracing::warn!(
+            path = %canonical_path.display(),
+            base = %canonical_base.display(),
+            "Path traversal attempt detected"
+        );
+        return Err(AuthError::InvalidInput("Invalid output directory: path traversal detected".to_string()));
+    }
+    Ok(())
+}
+
 /// Download a Kaggle dataset
 pub async fn download_dataset(
     State(_state): State<AppState>,
     user: AuthUser,
     Json(request): Json<KaggleDownloadRequest>,
 ) -> Result<Json<KaggleDownloadResponse>, AuthError> {
+    // SECURITY: Validate dataset reference
+    validate_dataset_ref(&request.dataset_ref)?;
+
     let credentials = get_credentials(&user.id)?;
 
-    // Determine output directory
-    let output_dir = request.output_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| get_data_dir(&user.id));
+    // Determine base directory (user's data directory)
+    let base_dir = get_data_dir(&user.id);
 
-    fs::create_dir_all(&output_dir)
-        .map_err(|e| AuthError::Internal(format!("Failed to create output directory: {}", e)))?;
+    // Determine output directory
+    let output_dir = if let Some(ref custom_dir) = request.output_dir {
+        // SECURITY: Custom directory must be within user's data directory
+        let requested = PathBuf::from(custom_dir);
+        if requested.is_absolute() {
+            return Err(AuthError::InvalidInput("Absolute paths not allowed for output directory".to_string()));
+        }
+        base_dir.join(requested)
+    } else {
+        base_dir.clone()
+    };
+
+    // SECURITY: Validate the output path is within allowed base
+    fs::create_dir_all(&base_dir)
+        .map_err(|e| AuthError::Internal(format!("Failed to create base directory: {}", e)))?;
+    validate_path_within_base(&output_dir, &base_dir)?;
 
     // Download dataset
     let client = Client::new();
@@ -251,7 +310,7 @@ pub async fn download_dataset(
         )));
     }
 
-    // Save to file
+    // Save to file - SECURITY: filename is derived from validated dataset_ref
     let filename = request.dataset_ref.replace('/', "_") + ".zip";
     let output_path = output_dir.join(&filename);
 

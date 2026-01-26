@@ -42,6 +42,7 @@ axonml-optim = { workspace = true }
 axonml-data = { workspace = true }
 axonml-vision = { workspace = true }
 axonml-serialize = { workspace = true }
+axonml-onnx = { path = "../axonml-onnx", version = "0.2.5" }
 axonml-tui.workspace = true
 
 # CLI framework
@@ -54,6 +55,7 @@ serde_json = { workspace = true }
 
 # Async runtime (for serve command)
 tokio = { version = "1.0", features = ["full"], optional = true }
+axum = { workspace = true, optional = true }
 
 # Progress and output
 indicatif = "0.17"
@@ -79,6 +81,7 @@ sysinfo = { workspace = true }
 wgpu = { workspace = true }
 pollster = "0.4"
 bytemuck = { workspace = true }
+half = { workspace = true }
 
 # Directory operations (for hub, kaggle)
 dirs = { workspace = true }
@@ -98,7 +101,7 @@ predicates = "3.1"
 
 [features]
 default = ["wandb", "kaggle", "dataset-api", "hub-download", "server-sync"]
-serve = ["tokio"]
+serve = ["tokio", "axum"]
 wandb = ["reqwest", "chrono", "uuid"]
 kaggle = ["reqwest"]
 dataset-api = ["reqwest"]

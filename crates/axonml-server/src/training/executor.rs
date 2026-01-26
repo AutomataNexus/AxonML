@@ -130,8 +130,8 @@ impl TrainingExecutor {
             .add(Linear::new(input_size, hidden_size))
             .add(Linear::new(hidden_size, output_size));
 
-        // Simulate training with synthetic data
-        let steps_per_epoch = 100;
+        // Get steps per epoch from config (or use default)
+        let steps_per_epoch = config.steps_per_epoch as usize;
         let mut global_step = 0u32;
 
         for epoch in 0..epochs {

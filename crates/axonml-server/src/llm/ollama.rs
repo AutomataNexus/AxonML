@@ -136,7 +136,6 @@ impl OllamaClient {
                 temperature: Some(0.7),
                 top_p: Some(0.9),
                 num_predict: Some(1024),
-                stop: Some(vec!["```".to_string()]),
                 ..Default::default()
             }),
         };
