@@ -17,9 +17,11 @@
 #[cfg(feature = "cuda")]
 use cudarc::cublas::{sys::cublasOperation_t, CudaBlas, Gemm, GemmConfig};
 #[cfg(feature = "cuda")]
-use cudarc::driver::{CudaDevice, CudaSlice, DeviceRepr, ValidAsZeroBits};
+use cudarc::driver::{CudaDevice, CudaSlice, DeviceRepr, LaunchAsync, ValidAsZeroBits};
 
 use super::Backend;
+#[cfg(feature = "cuda")]
+use super::cuda_kernels::{self, CudaKernels};
 use crate::device::DeviceCapabilities;
 use std::sync::Arc;
 
@@ -36,6 +38,7 @@ pub struct CudaBackend {
     device_index: usize,
     device: Arc<CudaDevice>,
     blas: CudaBlas,
+    kernels: CudaKernels,
 }
 
 #[cfg(not(feature = "cuda"))]
@@ -67,11 +70,13 @@ impl CudaBackend {
         // CudaDevice::new returns Result<Arc<CudaDevice>, _>
         let device = CudaDevice::new(device_index).ok()?;
         let blas = CudaBlas::new(device.clone()).ok()?;
+        let kernels = CudaKernels::load(device.clone()).ok()?;
 
         Some(Self {
             device_index,
             device,
             blas,
+            kernels,
         })
     }
 
@@ -277,6 +282,10 @@ pub enum CudaError {
     BlasError(String),
     /// CUDA driver error
     DriverError(String),
+    /// PTX module loading failed
+    ModuleLoadFailed(String),
+    /// Kernel function not found in module
+    KernelNotFound(String),
 }
 
 impl std::fmt::Display for CudaError {
@@ -288,6 +297,8 @@ impl std::fmt::Display for CudaError {
             CudaError::KernelLaunchFailed => write!(f, "CUDA kernel launch failed"),
             CudaError::BlasError(s) => write!(f, "cuBLAS error: {}", s),
             CudaError::DriverError(s) => write!(f, "CUDA driver error: {}", s),
+            CudaError::ModuleLoadFailed(s) => write!(f, "CUDA module load failed: {}", s),
+            CudaError::KernelNotFound(s) => write!(f, "CUDA kernel not found: {}", s),
         }
     }
 }
@@ -489,38 +500,126 @@ impl CudaBackend {
         Ok(())
     }
 
-    /// Element-wise addition using device-to-device copy and manual computation.
+    /// Element-wise addition using CUDA kernel.
     pub fn add_f32(
         &self,
         dst: &mut CudaSlice<f32>,
         a: &CudaSlice<f32>,
         b: &CudaSlice<f32>,
-        _len: usize,
+        len: usize,
     ) -> Result<(), CudaError> {
-        // Copy a to host, b to host, add, copy back
-        let a_host = self.dtoh_copy(a)?;
-        let b_host = self.dtoh_copy(b)?;
+        let func = self
+            .kernels
+            .get("add_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("add_f32".to_string()))?;
 
-        let result: Vec<f32> = a_host
-            .iter()
-            .zip(b_host.iter())
-            .map(|(x, y)| x + y)
-            .collect();
-
-        // Copy result to dst
-        let result_gpu = self.htod_copy(&result)?;
-        self.device.dtod_copy(&result_gpu, dst)?;
-
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (a, b, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
         Ok(())
     }
 
-    /// Scalar multiplication.
-    pub fn scale_f32(&self, dst: &mut CudaSlice<f32>, alpha: f32) -> Result<(), CudaError> {
-        // Copy to host, scale, copy back
-        let host_data = self.dtoh_copy(dst)?;
-        let scaled: Vec<f32> = host_data.iter().map(|x| x * alpha).collect();
-        let scaled_gpu = self.htod_copy(&scaled)?;
-        self.device.dtod_copy(&scaled_gpu, dst)?;
+    /// Scalar multiplication using CUDA kernel.
+    pub fn scale_f32(&self, dst: &mut CudaSlice<f32>, alpha: f32, len: usize) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("scale_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("scale_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (dst, alpha, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Element-wise multiplication using CUDA kernel.
+    pub fn mul_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("mul_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("mul_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (a, b, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// ReLU activation using CUDA kernel.
+    pub fn relu_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("relu_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("relu_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Sigmoid activation using CUDA kernel.
+    pub fn sigmoid_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("sigmoid_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("sigmoid_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Tanh activation using CUDA kernel.
+    pub fn tanh_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("tanh_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("tanh_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
         Ok(())
     }
 }
@@ -632,5 +731,175 @@ mod tests {
         assert!((result[1] - 49.0).abs() < 1e-5, "result[1] = {}", result[1]);
         assert!((result[2] - 28.0).abs() < 1e-5, "result[2] = {}", result[2]);
         assert!((result[3] - 64.0).abs() < 1e-5, "result[3] = {}", result[3]);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_cuda_add_kernel() {
+        if !is_available() {
+            return;
+        }
+
+        let backend = CudaBackend::new(0).unwrap();
+
+        let a: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+        let b: Vec<f32> = vec![5.0, 6.0, 7.0, 8.0];
+
+        let a_gpu = backend.htod_copy(&a).unwrap();
+        let b_gpu = backend.htod_copy(&b).unwrap();
+        let mut c_gpu = backend.alloc::<f32>(4).unwrap();
+
+        backend.add_f32(&mut c_gpu, &a_gpu, &b_gpu, 4).unwrap();
+
+        let result = backend.dtoh_copy(&c_gpu).unwrap();
+        assert!((result[0] - 6.0).abs() < 1e-5);
+        assert!((result[1] - 8.0).abs() < 1e-5);
+        assert!((result[2] - 10.0).abs() < 1e-5);
+        assert!((result[3] - 12.0).abs() < 1e-5);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_cuda_mul_kernel() {
+        if !is_available() {
+            return;
+        }
+
+        let backend = CudaBackend::new(0).unwrap();
+
+        let a: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+        let b: Vec<f32> = vec![2.0, 3.0, 4.0, 5.0];
+
+        let a_gpu = backend.htod_copy(&a).unwrap();
+        let b_gpu = backend.htod_copy(&b).unwrap();
+        let mut c_gpu = backend.alloc::<f32>(4).unwrap();
+
+        backend.mul_f32(&mut c_gpu, &a_gpu, &b_gpu, 4).unwrap();
+
+        let result = backend.dtoh_copy(&c_gpu).unwrap();
+        assert!((result[0] - 2.0).abs() < 1e-5);
+        assert!((result[1] - 6.0).abs() < 1e-5);
+        assert!((result[2] - 12.0).abs() < 1e-5);
+        assert!((result[3] - 20.0).abs() < 1e-5);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_cuda_scale_kernel() {
+        if !is_available() {
+            return;
+        }
+
+        let backend = CudaBackend::new(0).unwrap();
+
+        let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+        let mut data_gpu = backend.htod_copy(&data).unwrap();
+
+        backend.scale_f32(&mut data_gpu, 2.5, 4).unwrap();
+
+        let result = backend.dtoh_copy(&data_gpu).unwrap();
+        assert!((result[0] - 2.5).abs() < 1e-5);
+        assert!((result[1] - 5.0).abs() < 1e-5);
+        assert!((result[2] - 7.5).abs() < 1e-5);
+        assert!((result[3] - 10.0).abs() < 1e-5);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_cuda_relu_kernel() {
+        if !is_available() {
+            return;
+        }
+
+        let backend = CudaBackend::new(0).unwrap();
+
+        let input: Vec<f32> = vec![-2.0, -1.0, 0.0, 1.0, 2.0];
+        let input_gpu = backend.htod_copy(&input).unwrap();
+        let mut output_gpu = backend.alloc::<f32>(5).unwrap();
+
+        backend.relu_f32(&mut output_gpu, &input_gpu, 5).unwrap();
+
+        let result = backend.dtoh_copy(&output_gpu).unwrap();
+        assert!((result[0] - 0.0).abs() < 1e-5);
+        assert!((result[1] - 0.0).abs() < 1e-5);
+        assert!((result[2] - 0.0).abs() < 1e-5);
+        assert!((result[3] - 1.0).abs() < 1e-5);
+        assert!((result[4] - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_cuda_sigmoid_kernel() {
+        if !is_available() {
+            return;
+        }
+
+        let backend = CudaBackend::new(0).unwrap();
+
+        let input: Vec<f32> = vec![0.0, 1.0, -1.0];
+        let input_gpu = backend.htod_copy(&input).unwrap();
+        let mut output_gpu = backend.alloc::<f32>(3).unwrap();
+
+        backend.sigmoid_f32(&mut output_gpu, &input_gpu, 3).unwrap();
+
+        let result = backend.dtoh_copy(&output_gpu).unwrap();
+        // sigmoid(0) = 0.5
+        assert!((result[0] - 0.5).abs() < 1e-4);
+        // sigmoid(1) ≈ 0.7311
+        assert!((result[1] - 0.7311).abs() < 1e-3);
+        // sigmoid(-1) ≈ 0.2689
+        assert!((result[2] - 0.2689).abs() < 1e-3);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_cuda_tanh_kernel() {
+        if !is_available() {
+            return;
+        }
+
+        let backend = CudaBackend::new(0).unwrap();
+
+        let input: Vec<f32> = vec![0.0, 1.0, -1.0];
+        let input_gpu = backend.htod_copy(&input).unwrap();
+        let mut output_gpu = backend.alloc::<f32>(3).unwrap();
+
+        backend.tanh_f32(&mut output_gpu, &input_gpu, 3).unwrap();
+
+        let result = backend.dtoh_copy(&output_gpu).unwrap();
+        // tanh(0) = 0
+        assert!((result[0] - 0.0).abs() < 1e-5);
+        // tanh(1) ≈ 0.7616
+        assert!((result[1] - 0.7616).abs() < 1e-3);
+        // tanh(-1) ≈ -0.7616
+        assert!((result[2] - (-0.7616)).abs() < 1e-3);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_cuda_large_tensor_add() {
+        if !is_available() {
+            return;
+        }
+
+        let backend = CudaBackend::new(0).unwrap();
+
+        // Test with a large tensor (1M elements)
+        let n = 1_000_000;
+        let a: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let b: Vec<f32> = (0..n).map(|i| (n - i) as f32).collect();
+
+        let a_gpu = backend.htod_copy(&a).unwrap();
+        let b_gpu = backend.htod_copy(&b).unwrap();
+        let mut c_gpu = backend.alloc::<f32>(n).unwrap();
+
+        backend.add_f32(&mut c_gpu, &a_gpu, &b_gpu, n).unwrap();
+
+        let result = backend.dtoh_copy(&c_gpu).unwrap();
+
+        // Each element should equal n (i + (n-i) = n)
+        assert!((result[0] - n as f32).abs() < 1e-3);
+        assert!((result[n / 2] - n as f32).abs() < 1e-3);
+        assert!((result[n - 1] - n as f32).abs() < 1e-3);
     }
 }

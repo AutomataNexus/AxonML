@@ -10,6 +10,7 @@ use crate::collate::{stack_tensors, Collate};
 use crate::dataset::Dataset;
 use crate::sampler::{RandomSampler, Sampler, SequentialSampler};
 use axonml_tensor::Tensor;
+use rayon::prelude::*;
 use std::marker::PhantomData;
 
 // =============================================================================
@@ -146,6 +147,7 @@ where
             batch_size: self.batch_size,
             drop_last: self.drop_last,
             position: 0,
+            num_workers: self.num_workers,
         }
     }
 }
@@ -164,6 +166,7 @@ where
     batch_size: usize,
     drop_last: bool,
     position: usize,
+    num_workers: usize,
 }
 
 impl<D> Iterator for DataLoaderIter<'_, D>
@@ -185,20 +188,28 @@ where
             return None;
         }
 
-        // Collect samples for this batch
-        let mut data_samples = Vec::with_capacity(batch_indices.len());
-        let mut target_samples = Vec::with_capacity(batch_indices.len());
+        // Collect samples for this batch (parallel when num_workers > 0)
+        let samples: Vec<(Tensor<f32>, Tensor<f32>)> = if self.num_workers > 0 {
+            // Parallel sample collection using rayon
+            batch_indices
+                .par_iter()
+                .filter_map(|&idx| self.dataset.get(idx))
+                .collect()
+        } else {
+            // Sequential fallback for num_workers = 0
+            batch_indices
+                .iter()
+                .filter_map(|&idx| self.dataset.get(idx))
+                .collect()
+        };
 
-        for &idx in batch_indices {
-            if let Some((x, y)) = self.dataset.get(idx) {
-                data_samples.push(x);
-                target_samples.push(y);
-            }
-        }
-
-        if data_samples.is_empty() {
+        if samples.is_empty() {
             return None;
         }
+
+        // Separate data and targets for stacking
+        let data_samples: Vec<Tensor<f32>> = samples.iter().map(|(x, _)| x.clone()).collect();
+        let target_samples: Vec<Tensor<f32>> = samples.iter().map(|(_, y)| y.clone()).collect();
 
         // Stack samples into batches
         let data = stack_tensors(&data_samples);
@@ -241,6 +252,7 @@ where
     batch_size: usize,
     shuffle: bool,
     drop_last: bool,
+    num_workers: usize,
     _phantom: PhantomData<T>,
 }
 
@@ -258,8 +270,15 @@ where
             batch_size,
             shuffle: false,
             drop_last: false,
+            num_workers: 0,
             _phantom: PhantomData,
         }
+    }
+
+    /// Sets the number of worker threads for parallel data loading.
+    pub fn num_workers(mut self, num_workers: usize) -> Self {
+        self.num_workers = num_workers;
+        self
     }
 
     /// Enables or disables shuffling.
@@ -305,6 +324,7 @@ where
             batch_size: self.batch_size,
             drop_last: self.drop_last,
             position: 0,
+            num_workers: self.num_workers,
             _phantom: PhantomData,
         }
     }
@@ -323,6 +343,7 @@ where
     batch_size: usize,
     drop_last: bool,
     position: usize,
+    num_workers: usize,
     _phantom: PhantomData<T>,
 }
 
@@ -330,7 +351,7 @@ impl<D, C, T> Iterator for GenericDataLoaderIter<'_, D, C, T>
 where
     D: Dataset<Item = T>,
     C: Collate<T>,
-    T: Send,
+    T: Send + Sync,
 {
     type Item = C::Output;
 
@@ -346,11 +367,18 @@ where
             return None;
         }
 
-        // Collect samples
-        let samples: Vec<T> = batch_indices
-            .iter()
-            .filter_map(|&idx| self.dataset.get(idx))
-            .collect();
+        // Collect samples (parallel when num_workers > 0)
+        let samples: Vec<T> = if self.num_workers > 0 {
+            batch_indices
+                .par_iter()
+                .filter_map(|&idx| self.dataset.get(idx))
+                .collect()
+        } else {
+            batch_indices
+                .iter()
+                .filter_map(|&idx| self.dataset.get(idx))
+                .collect()
+        };
 
         if samples.is_empty() {
             return None;
@@ -512,5 +540,67 @@ mod tests {
 
         iter.next();
         assert_eq!(iter.remaining(), 2);
+    }
+
+    #[test]
+    fn test_parallel_dataloader() {
+        let dataset = create_test_dataset(100);
+        let loader = DataLoader::new(dataset, 10).num_workers(4);
+
+        let batches: Vec<Batch> = loader.iter().collect();
+        assert_eq!(batches.len(), 10);
+
+        // Verify all samples are present
+        let total_samples: usize = batches.iter().map(|b| b.len()).sum();
+        assert_eq!(total_samples, 100);
+    }
+
+    #[test]
+    fn test_parallel_vs_sequential_equivalence() {
+        // Create two identical datasets
+        let dataset_seq = create_test_dataset(50);
+        let dataset_par = create_test_dataset(50);
+
+        // Sequential
+        let loader_seq = DataLoader::new(dataset_seq, 5).num_workers(0);
+        let batches_seq: Vec<Batch> = loader_seq.iter().collect();
+
+        // Parallel
+        let loader_par = DataLoader::new(dataset_par, 5).num_workers(4);
+        let batches_par: Vec<Batch> = loader_par.iter().collect();
+
+        // Same number of batches
+        assert_eq!(batches_seq.len(), batches_par.len());
+
+        // Same data (no shuffle, so order should be same)
+        for i in 0..batches_seq.len() {
+            assert_eq!(batches_seq[i].data.to_vec(), batches_par[i].data.to_vec());
+            assert_eq!(batches_seq[i].targets.to_vec(), batches_par[i].targets.to_vec());
+        }
+    }
+
+    #[test]
+    fn test_parallel_dataloader_drop_last() {
+        let dataset = create_test_dataset(95);
+        let loader = DataLoader::new(dataset, 10)
+            .drop_last(true)
+            .num_workers(4);
+
+        let batches: Vec<Batch> = loader.iter().collect();
+        assert_eq!(batches.len(), 9); // 95 / 10 = 9 full batches
+
+        for batch in &batches {
+            assert_eq!(batch.len(), 10);
+        }
+    }
+
+    #[test]
+    fn test_parallel_generic_dataloader() {
+        let dataset = create_test_dataset(60);
+        let collate = DefaultCollate::new();
+        let loader = GenericDataLoader::new(dataset, collate, 10).num_workers(4);
+
+        let batches: Vec<_> = loader.iter().collect();
+        assert_eq!(batches.len(), 6);
     }
 }
