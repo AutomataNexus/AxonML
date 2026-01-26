@@ -1,11 +1,119 @@
 //! Attention Mechanisms Module
 //!
 //! Implements multi-head self-attention and causal (masked) self-attention
-//! for transformer models.
+//! for transformer models with KV-cache support for efficient inference.
 
 use axonml_autograd::Variable;
 use axonml_nn::{Module, Linear, Dropout, Parameter};
-use axonml_tensor::Tensor;
+use axonml_tensor::{Tensor, view::cat};
+
+// =============================================================================
+// KV Cache
+// =============================================================================
+
+/// Key-Value cache for efficient autoregressive generation.
+///
+/// Stores the key and value tensors from previous forward passes to avoid
+/// recomputation during incremental decoding.
+#[derive(Debug, Clone)]
+pub struct KVCache {
+    /// Cached key tensor: [batch, num_heads, seq_len, head_dim]
+    pub key: Tensor<f32>,
+    /// Cached value tensor: [batch, num_heads, seq_len, head_dim]
+    pub value: Tensor<f32>,
+    /// Current sequence length in cache
+    pub seq_len: usize,
+}
+
+impl KVCache {
+    /// Create a new empty KV cache.
+    pub fn new(batch_size: usize, num_heads: usize, max_seq_len: usize, head_dim: usize) -> Self {
+        Self {
+            key: Tensor::zeros(&[batch_size, num_heads, max_seq_len, head_dim]),
+            value: Tensor::zeros(&[batch_size, num_heads, max_seq_len, head_dim]),
+            seq_len: 0,
+        }
+    }
+
+    /// Update cache with new key/value tensors.
+    ///
+    /// # Arguments
+    /// * `new_key` - New key tensor [batch, num_heads, new_seq_len, head_dim]
+    /// * `new_value` - New value tensor [batch, num_heads, new_seq_len, head_dim]
+    ///
+    /// # Returns
+    /// Updated key and value tensors including cached values
+    pub fn update(&mut self, new_key: &Tensor<f32>, new_value: &Tensor<f32>) -> (Tensor<f32>, Tensor<f32>) {
+        let new_seq_len = new_key.shape()[2];
+
+        if self.seq_len == 0 {
+            // First token(s), just store and return
+            self.key = new_key.clone();
+            self.value = new_value.clone();
+            self.seq_len = new_seq_len;
+            return (new_key.clone(), new_value.clone());
+        }
+
+        // Concatenate cached and new along sequence dimension
+        let key = cat(&[self.key.clone(), new_key.clone()], 2).unwrap();
+        let value = cat(&[self.value.clone(), new_value.clone()], 2).unwrap();
+
+        self.key = key.clone();
+        self.value = value.clone();
+        self.seq_len += new_seq_len;
+
+        (key, value)
+    }
+
+    /// Get current sequence length in cache.
+    pub fn len(&self) -> usize {
+        self.seq_len
+    }
+
+    /// Check if cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.seq_len == 0
+    }
+
+    /// Clear the cache.
+    pub fn clear(&mut self) {
+        self.seq_len = 0;
+    }
+}
+
+/// Layer-wise KV cache for full model.
+#[derive(Debug, Clone)]
+pub struct LayerKVCache {
+    /// Cache for each layer
+    pub layers: Vec<KVCache>,
+}
+
+impl LayerKVCache {
+    /// Create cache for all layers.
+    pub fn new(num_layers: usize, batch_size: usize, num_heads: usize, max_seq_len: usize, head_dim: usize) -> Self {
+        let layers = (0..num_layers)
+            .map(|_| KVCache::new(batch_size, num_heads, max_seq_len, head_dim))
+            .collect();
+        Self { layers }
+    }
+
+    /// Get mutable reference to layer cache.
+    pub fn get_mut(&mut self, layer_idx: usize) -> Option<&mut KVCache> {
+        self.layers.get_mut(layer_idx)
+    }
+
+    /// Clear all layer caches.
+    pub fn clear(&mut self) {
+        for cache in &mut self.layers {
+            cache.clear();
+        }
+    }
+
+    /// Get current sequence length (same for all layers).
+    pub fn seq_len(&self) -> usize {
+        self.layers.first().map(|c| c.seq_len).unwrap_or(0)
+    }
+}
 
 /// Multi-head self-attention layer.
 #[derive(Debug)]
@@ -201,6 +309,22 @@ impl CausalSelfAttention {
 
     /// Forward pass with causal masking.
     pub fn forward_causal(&self, x: &Variable) -> Variable {
+        self.forward_with_cache(x, None).0
+    }
+
+    /// Forward pass with KV-cache support for efficient generation.
+    ///
+    /// # Arguments
+    /// * `x` - Input tensor [batch, seq_len, n_embd]
+    /// * `kv_cache` - Optional mutable reference to KV cache
+    ///
+    /// # Returns
+    /// Tuple of (output, updated_cache) where cache contains new key/value pairs
+    pub fn forward_with_cache(
+        &self,
+        x: &Variable,
+        kv_cache: Option<&mut KVCache>,
+    ) -> (Variable, Option<(Tensor<f32>, Tensor<f32>)>) {
         let x_data = x.data();
         let shape = x_data.shape();
         let batch_size = shape[0];
@@ -211,7 +335,6 @@ impl CausalSelfAttention {
 
         // Split into Q, K, V
         let qkv_data = qkv.data();
-        let _qkv_shape = qkv_data.shape();
 
         // Split along last dimension: [batch, seq, 3*n_embd] -> 3x [batch, seq, n_embd]
         let q_data = qkv_data.slice(&[0..batch_size, 0..seq_len, 0..self.n_embd]);
@@ -219,21 +342,35 @@ impl CausalSelfAttention {
         let v_data = qkv_data.slice(&[0..batch_size, 0..seq_len, 2*self.n_embd..3*self.n_embd]);
 
         let q = Variable::new(q_data, qkv.requires_grad());
-        let k = Variable::new(k_data, qkv.requires_grad());
-        let v = Variable::new(v_data, qkv.requires_grad());
+        let k_new = Variable::new(k_data.clone(), qkv.requires_grad());
+        let v_new = Variable::new(v_data.clone(), qkv.requires_grad());
 
         // Reshape for multi-head attention
         // [batch, seq, n_embd] -> [batch, seq, num_heads, head_dim] -> [batch, num_heads, seq, head_dim]
         let q = q.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
-        let k = k.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
-        let v = v.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
+        let k_new = k_new.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
+        let v_new = v_new.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
+
+        // Apply KV cache if provided
+        let (k, v, total_seq_len, new_cache) = if let Some(cache) = kv_cache {
+            let (cached_k, cached_v) = cache.update(&k_new.data(), &v_new.data());
+            let total_len = cached_k.shape()[2];
+            (
+                Variable::new(cached_k.clone(), false),
+                Variable::new(cached_v.clone(), false),
+                total_len,
+                Some((cached_k, cached_v)),
+            )
+        } else {
+            (k_new.clone(), v_new.clone(), seq_len, Some((k_new.data(), v_new.data())))
+        };
 
         // Scaled dot-product attention
         let scale = 1.0 / (self.head_dim as f32).sqrt();
         let attn = q.matmul(&k.transpose(2, 3)).mul_scalar(scale);
 
-        // Apply causal mask
-        let causal_mask = self.create_causal_mask(seq_len);
+        // Apply causal mask (only mask future positions relative to query position)
+        let causal_mask = self.create_causal_mask_for_cache(seq_len, total_seq_len);
         let mask_var = Variable::new(causal_mask, false);
         let attn = attn.add(&mask_var);
 
@@ -251,7 +388,30 @@ impl CausalSelfAttention {
 
         // Output projection and dropout
         let output = self.c_proj.forward(&output);
-        self.resid_dropout.forward(&output)
+        let output = self.resid_dropout.forward(&output);
+
+        (output, new_cache)
+    }
+
+    /// Creates causal mask for cached attention.
+    ///
+    /// When using KV-cache, query has length `q_len` but key/value have length `kv_len`.
+    /// We need to mask so position i in query can only attend to positions 0..=(cache_len + i).
+    fn create_causal_mask_for_cache(&self, q_len: usize, kv_len: usize) -> Tensor<f32> {
+        let mut mask_data = vec![0.0f32; q_len * kv_len];
+        let start_pos = kv_len - q_len; // Position offset for new tokens
+
+        for i in 0..q_len {
+            let query_pos = start_pos + i;
+            for j in 0..kv_len {
+                if j > query_pos {
+                    // Can't attend to future positions
+                    mask_data[i * kv_len + j] = f32::NEG_INFINITY;
+                }
+            }
+        }
+
+        Tensor::from_vec(mask_data, &[1, 1, q_len, kv_len]).unwrap()
     }
 }
 
@@ -334,5 +494,92 @@ mod tests {
 
         // Should have 4 sets of weight/bias for Q, K, V, and output projection
         assert_eq!(params.len(), 8); // 4 weights + 4 biases
+    }
+
+    #[test]
+    fn test_kv_cache_creation() {
+        let cache = KVCache::new(2, 4, 128, 16);
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_kv_cache_update() {
+        let mut cache = KVCache::new(2, 4, 128, 16);
+
+        // First update
+        let k1 = Tensor::randn(&[2, 4, 5, 16]);
+        let v1 = Tensor::randn(&[2, 4, 5, 16]);
+        let (k_out, v_out) = cache.update(&k1, &v1);
+
+        assert_eq!(cache.len(), 5);
+        assert_eq!(k_out.shape(), &[2, 4, 5, 16]);
+        assert_eq!(v_out.shape(), &[2, 4, 5, 16]);
+
+        // Second update (incremental)
+        let k2 = Tensor::randn(&[2, 4, 1, 16]);
+        let v2 = Tensor::randn(&[2, 4, 1, 16]);
+        let (k_out, v_out) = cache.update(&k2, &v2);
+
+        assert_eq!(cache.len(), 6);
+        assert_eq!(k_out.shape(), &[2, 4, 6, 16]);
+        assert_eq!(v_out.shape(), &[2, 4, 6, 16]);
+    }
+
+    #[test]
+    fn test_layer_kv_cache() {
+        let mut cache = LayerKVCache::new(12, 2, 4, 128, 16);
+        assert_eq!(cache.layers.len(), 12);
+        assert_eq!(cache.seq_len(), 0);
+
+        // Update first layer
+        let k = Tensor::randn(&[2, 4, 3, 16]);
+        let v = Tensor::randn(&[2, 4, 3, 16]);
+        cache.get_mut(0).unwrap().update(&k, &v);
+
+        assert_eq!(cache.layers[0].len(), 3);
+
+        // Clear all
+        cache.clear();
+        assert_eq!(cache.seq_len(), 0);
+    }
+
+    #[test]
+    fn test_causal_attention_with_cache() {
+        let attn = CausalSelfAttention::new(64, 4, 128, 0.0);
+        let mut cache = KVCache::new(2, 4, 128, 16);
+
+        // First forward with prompt
+        let prompt = Tensor::randn(&[2, 5, 64]);
+        let prompt_var = Variable::new(prompt, false);
+        let (output1, _) = attn.forward_with_cache(&prompt_var, Some(&mut cache));
+
+        assert_eq!(output1.data().shape(), &[2, 5, 64]);
+        assert_eq!(cache.len(), 5);
+
+        // Incremental forward with single token
+        let token = Tensor::randn(&[2, 1, 64]);
+        let token_var = Variable::new(token, false);
+        let (output2, _) = attn.forward_with_cache(&token_var, Some(&mut cache));
+
+        assert_eq!(output2.data().shape(), &[2, 1, 64]);
+        assert_eq!(cache.len(), 6);
+    }
+
+    #[test]
+    fn test_causal_mask_for_cache() {
+        let attn = CausalSelfAttention::new(64, 4, 128, 0.0);
+
+        // Query length 1, KV length 5 (4 cached + 1 new)
+        let mask = attn.create_causal_mask_for_cache(1, 5);
+        assert_eq!(mask.shape(), &[1, 1, 1, 5]);
+
+        // The single query at position 4 can attend to all 5 positions
+        let data = mask.to_vec();
+        assert_eq!(data[0], 0.0); // can attend to 0
+        assert_eq!(data[1], 0.0); // can attend to 1
+        assert_eq!(data[2], 0.0); // can attend to 2
+        assert_eq!(data[3], 0.0); // can attend to 3
+        assert_eq!(data[4], 0.0); // can attend to 4 (self)
     }
 }
