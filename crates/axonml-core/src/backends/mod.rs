@@ -29,6 +29,9 @@ pub mod cpu;
 #[cfg(feature = "cuda")]
 pub mod cuda;
 
+#[cfg(feature = "cuda")]
+pub mod cuda_kernels;
+
 #[cfg(feature = "vulkan")]
 pub mod vulkan;
 
