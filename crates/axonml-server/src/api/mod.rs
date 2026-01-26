@@ -209,9 +209,6 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/notebooks/:id/checkpoints", post(notebooks::save_checkpoint))
         .route("/api/notebooks/:id/checkpoints/best", get(notebooks::get_best_checkpoint))
         .route("/api/notebooks/:id/upload-version", post(notebooks::upload_model_version))
-        // Terminal (WebSocket PTY)
-        .route("/api/terminal", get(terminal::terminal_ws))
-        .route("/api/terminal/info", get(terminal::terminal_info))
         .layer(middleware::from_fn_with_state(
             state.jwt.clone(),
             auth_middleware,
@@ -249,9 +246,11 @@ pub fn create_router(state: AppState) -> Router {
             optional_auth_middleware,
         ));
 
-    // WebSocket routes (handled separately due to upgrade)
+    // WebSocket routes (handled separately due to upgrade, auth via query params)
     let ws_routes = Router::new()
-        .route("/api/training/runs/:id/stream", get(training::stream_metrics));
+        .route("/api/training/runs/:id/stream", get(training::stream_metrics))
+        .route("/api/terminal", get(terminal::terminal_ws))
+        .route("/api/terminal/info", get(terminal::terminal_info));
 
     // Create auth layer for tower-based auth on specific routes
     // This demonstrates using AuthLayer as a tower Layer trait implementation

@@ -334,6 +334,7 @@ pub fn NotebookEditorPage() -> impl IntoView {
                             let cell_id = cell.id.clone();
                             let cell_id_for_select = cell.id.clone();
                             let cell_id_for_update = cell.id.clone();
+                            let cell_id_for_delete = cell.id.clone();
                             let is_code = cell.cell_type == CellType::Code;
                             let is_selected = move || selected_cell.get() == Some(cell_id.clone());
                             let source = cell.source.clone();
@@ -362,6 +363,19 @@ pub fn NotebookEditorPage() -> impl IntoView {
                                                 <IconFileText size=IconSize::Xs />
                                             }.into_view()
                                         }}
+                                        <button
+                                            class="cell-delete-btn"
+                                            title="Delete cell"
+                                            on:click={
+                                                let id = cell_id_for_delete.clone();
+                                                move |e: web_sys::MouseEvent| {
+                                                    e.stop_propagation();
+                                                    delete_cell(id.clone());
+                                                }
+                                            }
+                                        >
+                                            <IconTrash size=IconSize::Xs />
+                                        </button>
                                     </div>
 
                                     <div class="cell-content">

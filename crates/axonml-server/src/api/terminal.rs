@@ -5,11 +5,13 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
+    http::StatusCode,
     response::IntoResponse,
 };
 use futures::{SinkExt, StreamExt};
+use serde::Deserialize;
 use std::process::Stdio;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -17,15 +19,32 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 
 use crate::api::AppState;
-use crate::auth::AuthUser;
+
+/// Query params for WebSocket auth
+#[derive(Debug, Deserialize)]
+pub struct WsAuthQuery {
+    pub token: Option<String>,
+}
 
 /// WebSocket handler for terminal
+/// Authenticates via query param since WebSocket can't use Authorization header
 pub async fn terminal_ws(
     ws: WebSocketUpgrade,
-    State(_state): State<AppState>,
-    _user: AuthUser,
-) -> impl IntoResponse {
-    ws.on_upgrade(handle_terminal)
+    State(state): State<AppState>,
+    Query(query): Query<WsAuthQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    // Validate the token from query params
+    let token = query.token.ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Missing token parameter".to_string(),
+    ))?;
+
+    // Verify the JWT token
+    let _claims = state.jwt.validate_access_token(&token).map_err(|e| {
+        (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
+    })?;
+
+    Ok(ws.on_upgrade(handle_terminal))
 }
 
 /// Handle terminal WebSocket connection
@@ -164,18 +183,28 @@ async fn handle_terminal(socket: WebSocket) {
 
 /// Get terminal info
 pub async fn terminal_info(
-    State(_state): State<AppState>,
-    _user: AuthUser,
-) -> impl IntoResponse {
+    State(state): State<AppState>,
+    Query(query): Query<WsAuthQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    // Validate the token from query params
+    let token = query.token.ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Missing token parameter".to_string(),
+    ))?;
+
+    // Verify the JWT token
+    let _claims = state.jwt.validate_access_token(&token).map_err(|e| {
+        (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
+    })?;
     let shell: String = if cfg!(target_os = "windows") {
         "powershell.exe".to_string()
     } else {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
     };
 
-    axum::Json(serde_json::json!({
+    Ok(axum::Json(serde_json::json!({
         "available": true,
         "shell": shell,
         "features": ["pty", "resize", "colors"],
-    }))
+    })))
 }
