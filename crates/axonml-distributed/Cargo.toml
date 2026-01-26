@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "Distributed training utilities for the Axonml ML framework"
 readme = "README.md"
 

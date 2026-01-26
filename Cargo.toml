@@ -38,37 +38,38 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 rust-version = "1.75"
 authors = ["AutomataNexus Development Team"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/automatanexus/axonml"
-homepage = "https://github.com/automatanexus/axonml"
-documentation = "https://docs.rs/axonml"
+repository = "https://github.com/AutomataNexus/AxonML"
+homepage = "https://AutomataNexus.com"
+documentation = "https://automatanexus.github.io/AxonML"
 keywords = ["machine-learning", "deep-learning", "neural-network", "tensor", "ai"]
 categories = ["science", "mathematics", "algorithms"]
+readme = "README.md"
 
 [workspace.dependencies]
 # Internal crates
-axonml-core = { path = "crates/axonml-core", version = "0.2.7" }
-axonml-tensor = { path = "crates/axonml-tensor", version = "0.2.7" }
-axonml-autograd = { path = "crates/axonml-autograd", version = "0.2.7" }
-axonml-nn = { path = "crates/axonml-nn", version = "0.2.7" }
-axonml-optim = { path = "crates/axonml-optim", version = "0.2.7" }
-axonml-data = { path = "crates/axonml-data", version = "0.2.7" }
-axonml-vision = { path = "crates/axonml-vision", version = "0.2.7" }
-axonml-audio = { path = "crates/axonml-audio", version = "0.2.7" }
-axonml-text = { path = "crates/axonml-text", version = "0.2.7" }
-axonml-distributed = { path = "crates/axonml-distributed", version = "0.2.7" }
-axonml-serialize = { path = "crates/axonml-serialize", version = "0.2.7" }
-axonml-onnx = { path = "crates/axonml-onnx", version = "0.2.7" }
-axonml-quant = { path = "crates/axonml-quant", version = "0.2.7" }
-axonml-fusion = { path = "crates/axonml-fusion", version = "0.2.7" }
-axonml-profile = { path = "crates/axonml-profile", version = "0.2.7" }
-axonml-llm = { path = "crates/axonml-llm", version = "0.2.7" }
-axonml-jit = { path = "crates/axonml-jit", version = "0.2.7" }
-axonml-tui = { path = "crates/axonml-tui", version = "0.2.7" }
+axonml-core = { path = "crates/axonml-core", version = "0.2.8" }
+axonml-tensor = { path = "crates/axonml-tensor", version = "0.2.8" }
+axonml-autograd = { path = "crates/axonml-autograd", version = "0.2.8" }
+axonml-nn = { path = "crates/axonml-nn", version = "0.2.8" }
+axonml-optim = { path = "crates/axonml-optim", version = "0.2.8" }
+axonml-data = { path = "crates/axonml-data", version = "0.2.8" }
+axonml-vision = { path = "crates/axonml-vision", version = "0.2.8" }
+axonml-audio = { path = "crates/axonml-audio", version = "0.2.8" }
+axonml-text = { path = "crates/axonml-text", version = "0.2.8" }
+axonml-distributed = { path = "crates/axonml-distributed", version = "0.2.8" }
+axonml-serialize = { path = "crates/axonml-serialize", version = "0.2.8" }
+axonml-onnx = { path = "crates/axonml-onnx", version = "0.2.8" }
+axonml-quant = { path = "crates/axonml-quant", version = "0.2.8" }
+axonml-fusion = { path = "crates/axonml-fusion", version = "0.2.8" }
+axonml-profile = { path = "crates/axonml-profile", version = "0.2.8" }
+axonml-llm = { path = "crates/axonml-llm", version = "0.2.8" }
+axonml-jit = { path = "crates/axonml-jit", version = "0.2.8" }
+axonml-tui = { path = "crates/axonml-tui", version = "0.2.8" }
 
 # External dependencies
 thiserror = "1.0"
