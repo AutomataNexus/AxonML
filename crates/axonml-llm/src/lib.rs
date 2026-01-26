@@ -40,6 +40,8 @@ pub mod attention;
 pub mod embedding;
 pub mod hub;
 pub mod hf_loader;
+pub mod tokenizer;
+pub mod state_dict;
 pub mod transformer;
 pub mod bert;
 pub mod gpt2;
@@ -54,6 +56,8 @@ pub use attention::{MultiHeadSelfAttention, CausalSelfAttention, KVCache, LayerK
 pub use embedding::{TokenEmbedding, PositionalEmbedding, BertEmbedding, GPT2Embedding};
 pub use hub::{PretrainedLLM, llm_registry, download_weights as download_llm_weights};
 pub use hf_loader::{HFLoader, load_llama_from_hf, load_mistral_from_hf};
+pub use tokenizer::{HFTokenizer, SpecialTokens};
+pub use state_dict::{LoadStateDict, LoadResult};
 pub use transformer::{TransformerBlock, TransformerEncoder, TransformerDecoder};
 pub use bert::{Bert, BertForSequenceClassification, BertForMaskedLM};
 pub use gpt2::{GPT2, GPT2LMHead};
