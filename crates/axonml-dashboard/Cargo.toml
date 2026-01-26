@@ -9,6 +9,7 @@ repository.workspace = true
 description = "Web dashboard for AxonML Machine Learning Framework"
 keywords = ["machine-learning", "dashboard", "wasm", "leptos", "ml"]
 categories = ["web-programming", "wasm", "gui"]
+publish = false  # WASM frontend - distribute via GitHub releases, not crates.io
 
 [lib]
 crate-type = ["cdylib", "rlib"]
