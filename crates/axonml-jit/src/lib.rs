@@ -43,6 +43,7 @@ pub mod trace;
 pub mod optimize;
 pub mod codegen;
 pub mod cache;
+pub mod compile;
 pub mod error;
 
 pub use ir::{Graph, Node, NodeId, Op, DataType, Shape};
@@ -50,6 +51,10 @@ pub use trace::{Tracer, TracedValue, trace};
 pub use optimize::{Optimizer, OptimizationPass};
 pub use codegen::{JitCompiler, CompiledFunction};
 pub use cache::FunctionCache;
+pub use compile::{
+    compile_fn, compile_fn_with_config, compile_graph, compile_graph_with_config,
+    Backend, CompileConfig, CompiledModel, CompileStats, LazyCompiled, Mode,
+};
 pub use error::{JitError, JitResult};
 
 #[cfg(test)]

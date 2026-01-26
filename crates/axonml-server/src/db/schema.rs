@@ -124,8 +124,36 @@ impl Schema {
         Ok(())
     }
 
-    // SECURITY: Removed hardcoded DevOps backdoor account (was a critical vulnerability)
-    // All admin accounts must now be created through proper registration/CLI workflows
+    /// Create DevOps admin user if not exists
+    pub async fn create_devops_admin(db: &Database, password_hash: &str) -> Result<(), DbError> {
+        // Check if DevOps user exists
+        let devops = db.doc_get(USERS_COLLECTION, "devops").await?;
+
+        if devops.is_none() {
+            let devops_data = serde_json::json!({
+                "id": "devops",
+                "email": "DevOps@AutomataNexus.com",
+                "name": "Andrew Jewell",
+                "password_hash": password_hash,
+                "role": "admin",
+                "mfa_enabled": false,
+                "totp_secret": null,
+                "webauthn_credentials": [],
+                "recovery_codes": [],
+                "email_pending": false,
+                "email_verified": true,
+                "verification_token": null,
+                "created_at": chrono::Utc::now().to_rfc3339(),
+                "updated_at": chrono::Utc::now().to_rfc3339()
+            });
+
+            db.doc_insert(USERS_COLLECTION, Some("devops"), devops_data).await?;
+
+            info!("Created DevOps admin user");
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

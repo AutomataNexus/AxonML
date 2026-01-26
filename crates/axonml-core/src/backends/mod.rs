@@ -41,6 +41,9 @@ pub mod metal;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_backend;
 
+// GPU testing infrastructure
+pub mod gpu_tests;
+
 // =============================================================================
 // Re-exports
 // =============================================================================

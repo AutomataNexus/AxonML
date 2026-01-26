@@ -116,6 +116,20 @@ impl ProcessGroup {
         }
         Tensor::from_vec(recv_data, &new_shape).unwrap()
     }
+
+    /// Sends a tensor to a destination rank.
+    pub fn send_tensor(&self, tensor: &mut Tensor<f32>, dst: usize) {
+        let data = tensor.to_vec();
+        self.backend.send(&data, dst, 0);
+    }
+
+    /// Receives a tensor from a source rank.
+    #[must_use] pub fn recv_tensor(&self, src: usize, shape: &[usize]) -> Tensor<f32> {
+        let size: usize = shape.iter().product();
+        let mut data = vec![0.0; size];
+        self.backend.recv(&mut data, src, 0);
+        Tensor::from_vec(data, shape).unwrap()
+    }
 }
 
 // =============================================================================

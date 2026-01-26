@@ -20,6 +20,6 @@ pub use conv::{Conv1d, Conv2d};
 pub use dropout::Dropout;
 pub use embedding::Embedding;
 pub use linear::Linear;
-pub use norm::{BatchNorm1d, BatchNorm2d, LayerNorm};
+pub use norm::{BatchNorm1d, BatchNorm2d, GroupNorm, InstanceNorm2d, LayerNorm};
 pub use pooling::{AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, MaxPool1d, MaxPool2d};
 pub use rnn::{GRUCell, LSTMCell, RNNCell, GRU, LSTM, RNN};
