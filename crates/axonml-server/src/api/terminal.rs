@@ -11,12 +11,12 @@ use axum::{
     response::IntoResponse,
 };
 use futures::{SinkExt, StreamExt};
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Deserialize;
-use std::process::Stdio;
-use tokio::io::{AsyncWriteExt, BufReader};
-use tokio::process::Command;
+use std::io::{Read, Write};
+use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::api::AppState;
 
@@ -47,120 +47,145 @@ pub async fn terminal_ws(
     Ok(ws.on_upgrade(handle_terminal))
 }
 
-/// Handle terminal WebSocket connection
+/// Handle terminal WebSocket connection with proper PTY
 async fn handle_terminal(socket: WebSocket) {
-    let (mut sender, mut receiver) = socket.split();
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
+    // Get the PTY system
+    let pty_system = native_pty_system();
+
+    // Create a new PTY pair with initial size
+    let pair = match pty_system.openpty(PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+    }) {
+        Ok(pair) => pair,
+        Err(e) => {
+            error!("Failed to create PTY: {}", e);
+            let _ = ws_sender
+                .send(Message::Text(format!("\r\nError: Failed to create PTY: {}\r\n", e)))
+                .await;
+            return;
+        }
+    };
 
     // Determine shell
-    let shell: String = if cfg!(target_os = "windows") {
+    let shell = if cfg!(target_os = "windows") {
         "powershell.exe".to_string()
     } else {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
     };
 
-    info!("Starting terminal session with shell: {}", shell);
+    info!("Starting PTY terminal session with shell: {}", shell);
 
-    // Spawn shell process
-    let mut child = match Command::new(&shell)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+    // Build command
+    let mut cmd = CommandBuilder::new(&shell);
+    cmd.env("TERM", "xterm-256color");
+
+    // Spawn the shell in the PTY
+    let mut child = match pair.slave.spawn_command(cmd) {
         Ok(child) => child,
         Err(e) => {
             error!("Failed to spawn shell: {}", e);
-            let _ = sender.send(Message::Text(format!("Error: Failed to spawn shell: {}\r\n", e))).await;
+            let _ = ws_sender
+                .send(Message::Text(format!("\r\nError: Failed to spawn shell: {}\r\n", e)))
+                .await;
             return;
         }
     };
 
-    let mut stdin = child.stdin.take().expect("Failed to get stdin");
-    let stdout = child.stdout.take().expect("Failed to get stdout");
-    let stderr = child.stderr.take().expect("Failed to get stderr");
+    // Get reader for the PTY master
+    let mut reader = match pair.master.try_clone_reader() {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Failed to get PTY reader: {}", e);
+            return;
+        }
+    };
 
-    // Channel for sending data to WebSocket
-    let (tx, mut rx) = mpsc::channel::<String>(100);
-    let tx_stderr = tx.clone();
+    // Get writer for the PTY master
+    let pty_writer: Box<dyn Write + Send> = match pair.master.take_writer() {
+        Ok(w) => w,
+        Err(e) => {
+            error!("Failed to get PTY writer: {}", e);
+            return;
+        }
+    };
 
-    // Task to read stdout
-    let stdout_task = tokio::spawn(async move {
-        let mut reader = BufReader::new(stdout);
+    // Keep master for resize operations, writer for data
+    let master = Arc::new(std::sync::Mutex::new(pair.master));
+    let writer = Arc::new(std::sync::Mutex::new(pty_writer));
+
+    // Channel for PTY output -> WebSocket
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(256);
+
+    // Task to read from PTY and send to channel
+    let read_handle = std::thread::spawn(move || {
         let mut buffer = [0u8; 4096];
         loop {
-            match tokio::io::AsyncReadExt::read(&mut reader, &mut buffer).await {
-                Ok(0) => break, // EOF
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    // EOF
+                    break;
+                }
                 Ok(n) => {
-                    let data = String::from_utf8_lossy(&buffer[..n]).to_string();
-                    if tx.send(data).await.is_err() {
+                    if tx.blocking_send(buffer[..n].to_vec()).is_err() {
                         break;
                     }
                 }
                 Err(e) => {
-                    error!("Error reading stdout: {}", e);
+                    // Check if it's just the PTY closing
+                    if e.kind() != std::io::ErrorKind::Other {
+                        warn!("PTY read error: {}", e);
+                    }
                     break;
                 }
             }
         }
     });
 
-    // Task to read stderr
-    let stderr_task = tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr);
-        let mut buffer = [0u8; 4096];
-        loop {
-            match tokio::io::AsyncReadExt::read(&mut reader, &mut buffer).await {
-                Ok(0) => break, // EOF
-                Ok(n) => {
-                    let data = String::from_utf8_lossy(&buffer[..n]).to_string();
-                    if tx_stderr.send(data).await.is_err() {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    error!("Error reading stderr: {}", e);
-                    break;
-                }
-            }
-        }
-    });
-
-    // Task to send output to WebSocket
+    // Task to send PTY output to WebSocket
     let send_task = tokio::spawn(async move {
         while let Some(data) = rx.recv().await {
-            if sender.send(Message::Text(data)).await.is_err() {
+            let text = String::from_utf8_lossy(&data).to_string();
+            if ws_sender.send(Message::Text(text)).await.is_err() {
                 break;
             }
         }
     });
 
-    // Task to receive input from WebSocket and write to stdin
+    // Task to receive from WebSocket and write to PTY
+    let master_clone = master.clone();
+    let writer_clone = writer.clone();
     let recv_task = tokio::spawn(async move {
-        while let Some(Ok(msg)) = receiver.next().await {
+        while let Some(Ok(msg)) = ws_receiver.next().await {
             match msg {
                 Message::Text(text) => {
-                    // Handle special control sequences
-                    let bytes = if text == "\\x03" {
-                        vec![0x03] // Ctrl+C
-                    } else if text == "\\x04" {
-                        vec![0x04] // Ctrl+D
-                    } else {
-                        text.into_bytes()
-                    };
-
-                    if stdin.write_all(&bytes).await.is_err() {
-                        break;
+                    // Handle resize command
+                    if text.starts_with("\x1b[8;") {
+                        // Parse resize: ESC[8;rows;colst
+                        if let Some(size) = parse_resize_sequence(&text) {
+                            if let Ok(master) = master_clone.lock() {
+                                let _ = master.resize(size);
+                            }
+                            continue;
+                        }
                     }
-                    if stdin.flush().await.is_err() {
-                        break;
+
+                    // Write to PTY
+                    if let Ok(mut pty_writer) = writer_clone.lock() {
+                        if pty_writer.write_all(text.as_bytes()).is_err() {
+                            break;
+                        }
                     }
                 }
                 Message::Binary(data) => {
-                    if stdin.write_all(&data).await.is_err() {
-                        break;
-                    }
-                    if stdin.flush().await.is_err() {
-                        break;
+                    if let Ok(mut pty_writer) = writer_clone.lock() {
+                        if pty_writer.write_all(&data).is_err() {
+                            break;
+                        }
                     }
                 }
                 Message::Close(_) => break,
@@ -169,16 +194,52 @@ async fn handle_terminal(socket: WebSocket) {
         }
     });
 
-    // Wait for any task to complete
+    // Wait for tasks or child process to end
     tokio::select! {
-        _ = stdout_task => info!("stdout task ended"),
-        _ = stderr_task => info!("stderr task ended"),
-        _ = send_task => info!("send task ended"),
-        _ = recv_task => info!("recv task ended"),
-        _ = child.wait() => info!("shell process ended"),
+        _ = send_task => {
+            info!("Send task ended");
+        }
+        _ = recv_task => {
+            info!("Recv task ended");
+        }
+        _ = tokio::task::spawn_blocking(move || {
+            let _ = child.wait();
+        }) => {
+            info!("Shell process ended");
+        }
     }
 
+    // Clean up the reader thread
+    drop(writer);
+    drop(master);
+    let _ = read_handle.join();
+
     info!("Terminal session ended");
+}
+
+/// Parse terminal resize sequence ESC[8;rows;colst
+fn parse_resize_sequence(s: &str) -> Option<PtySize> {
+    // Format: \x1b[8;ROWS;COLSt
+    if !s.starts_with("\x1b[8;") || !s.ends_with('t') {
+        return None;
+    }
+
+    let inner = &s[4..s.len() - 1]; // Remove prefix and suffix
+    let parts: Vec<&str> = inner.split(';').collect();
+
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let rows: u16 = parts[0].parse().ok()?;
+    let cols: u16 = parts[1].parse().ok()?;
+
+    Some(PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    })
 }
 
 /// Get terminal info
@@ -196,7 +257,8 @@ pub async fn terminal_info(
     let _claims = state.jwt.validate_access_token(&token).map_err(|e| {
         (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
     })?;
-    let shell: String = if cfg!(target_os = "windows") {
+
+    let shell = if cfg!(target_os = "windows") {
         "powershell.exe".to_string()
     } else {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())

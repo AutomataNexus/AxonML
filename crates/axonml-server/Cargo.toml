@@ -97,6 +97,9 @@ urlencoding = "2.1.3"
 # Secrets management (HashiCorp Vault)
 vaultrs = "0.7"
 
+# PTY support for terminal
+portable-pty = "0.8"
+
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
