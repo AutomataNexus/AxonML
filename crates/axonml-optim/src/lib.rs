@@ -99,6 +99,8 @@
 // =============================================================================
 
 pub mod adam;
+pub mod grad_scaler;
+pub mod lamb;
 pub mod lr_scheduler;
 pub mod optimizer;
 pub mod rmsprop;
@@ -109,6 +111,8 @@ pub mod sgd;
 // =============================================================================
 
 pub use adam::{Adam, AdamW};
+pub use grad_scaler::{GradScaler, GradScalerState};
+pub use lamb::LAMB;
 pub use lr_scheduler::{
     CosineAnnealingLR, ExponentialLR, LRScheduler, MultiStepLR, OneCycleLR, ReduceLROnPlateau,
     StepLR, WarmupLR,
@@ -124,8 +128,8 @@ pub use sgd::SGD;
 /// Common imports for optimization.
 pub mod prelude {
     pub use crate::{
-        Adam, AdamW, CosineAnnealingLR, ExponentialLR, LRScheduler, MultiStepLR, OneCycleLR,
-        Optimizer, RMSprop, ReduceLROnPlateau, StepLR, WarmupLR, SGD,
+        Adam, AdamW, CosineAnnealingLR, ExponentialLR, GradScaler, LRScheduler, LAMB, MultiStepLR,
+        OneCycleLR, Optimizer, RMSprop, ReduceLROnPlateau, StepLR, WarmupLR, SGD,
     };
 }
 

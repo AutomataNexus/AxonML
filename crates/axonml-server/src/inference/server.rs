@@ -532,22 +532,39 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_unload_model() {
+        use axonml_serialize::{save_state_dict, StateDict, TensorData, Format};
+        use axonml_tensor::Tensor;
+
+        // Create a temporary model file
+        let temp_dir = std::env::temp_dir();
+        let model_path = temp_dir.join("test_model.axonml");
+
+        // Create a simple state dict and save it
+        let mut state_dict = StateDict::new();
+        let weight = Tensor::from_vec(vec![0.1f32; 10 * 5], &[5, 10]).unwrap();
+        let bias = Tensor::from_vec(vec![0.0f32; 5], &[5]).unwrap();
+        state_dict.insert("0.weight".to_string(), TensorData::from_tensor(&weight));
+        state_dict.insert("0.bias".to_string(), TensorData::from_tensor(&bias));
+        save_state_dict(&state_dict, &model_path, Format::Axonml).unwrap();
+
         let server = InferenceServer::new(InferenceConfig::default());
 
         server
-            .load_model("ep-1", "model-1", "ver-1", 1, "/path/to/model")
+            .load_model("ep-1", "model-1", "ver-1", 1, model_path.to_str().unwrap())
             .await
             .unwrap();
 
-        // Entry exists but weights not loaded (file doesn't exist)
         assert_eq!(server.loaded_count().await, 1);
-        assert!(!server.is_loaded("ep-1").await); // File doesn't exist, so weights not loaded
-        assert!(!server.has_weights("ep-1").await);
+        assert!(server.is_loaded("ep-1").await);
+        assert!(server.has_weights("ep-1").await);
 
         server.unload_model("ep-1").await.unwrap();
 
         assert_eq!(server.loaded_count().await, 0);
         assert!(!server.is_loaded("ep-1").await);
+
+        // Clean up
+        let _ = std::fs::remove_file(&model_path);
     }
 
     #[test]

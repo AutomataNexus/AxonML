@@ -97,7 +97,9 @@
 // Modules
 // =============================================================================
 
+pub mod amp;
 pub mod backward;
+pub mod checkpoint;
 pub mod functions;
 pub mod grad_fn;
 pub mod graph;
@@ -108,7 +110,9 @@ pub mod variable;
 // Re-exports
 // =============================================================================
 
+pub use amp::{autocast, autocast_dtype, disable_autocast, is_autocast_enabled, AutocastGuard, AutocastPolicy};
 pub use backward::backward;
+pub use checkpoint::{checkpoint, checkpoint_sequential};
 pub use grad_fn::{GradFn, GradientFunction};
 pub use graph::{ComputationGraph, GraphNode};
 pub use no_grad::{no_grad, NoGradGuard};
