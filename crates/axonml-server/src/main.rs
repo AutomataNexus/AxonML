@@ -20,6 +20,7 @@ mod training;
 mod inference;
 mod email;
 mod llm;
+mod secrets;
 
 use api::{create_router, AppState};
 use auth::JwtAuth;
@@ -88,9 +89,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Models directory: {:?}", config.models_dir());
     info!("Runs directory: {:?}", config.runs_dir());
 
-    // Connect to Aegis-DB
+    // Initialize secrets manager
+    // Priority: Vault -> Environment variables -> Config file
+    let mut secrets_manager = secrets::SecretsManager::new();
+
+    // Try Vault first (production)
+    match secrets::vault::VaultBackend::from_env().await {
+        Ok(Some(vault)) => {
+            info!("Vault secrets backend enabled");
+            let vault = Arc::new(vault);
+
+            // Start background token renewal
+            let vault_clone = vault.clone();
+            vault_clone.start_token_renewal();
+
+            secrets_manager = secrets_manager.with_backend(vault);
+        }
+        Ok(None) => {
+            tracing::debug!("Vault not configured (VAULT_ADDR not set)");
+        }
+        Err(e) => {
+            tracing::warn!("Failed to initialize Vault: {}", e);
+        }
+    }
+
+    // Add environment variable backend (development)
+    secrets_manager = secrets_manager.with_backend(Arc::new(secrets::env::EnvBackend::default()));
+
+    info!(
+        backends = ?secrets_manager.backend_names(),
+        "Secrets manager initialized"
+    );
+
+    // Load secrets with config file fallback
+    let jwt_secret = secrets_manager
+        .get_secret(secrets::SecretKey::JWT_SECRET)
+        .await
+        .unwrap_or_else(|_| config.auth.jwt_secret.clone());
+
+    let db_username = secrets_manager
+        .get_secret(secrets::SecretKey::DB_USERNAME)
+        .await
+        .unwrap_or_else(|_| config.aegis.username.clone());
+
+    let db_password = secrets_manager
+        .get_secret(secrets::SecretKey::DB_PASSWORD)
+        .await
+        .unwrap_or_else(|_| config.aegis.password.clone());
+
+    let email_api_key = secrets_manager
+        .get_secret_optional(secrets::SecretKey::RESEND_API_KEY)
+        .await
+        .ok()
+        .flatten();
+
+    // Validate required secrets
+    if jwt_secret.is_empty() {
+        error!("JWT secret is required. Set via Vault, AXONML_JWT_SECRET env var, or config file.");
+        return Err("JWT secret is required".into());
+    }
+    if jwt_secret.len() < 32 {
+        error!("JWT secret must be at least 32 characters for security.");
+        return Err("JWT secret must be at least 32 characters".into());
+    }
+
+    // Connect to Aegis-DB with secrets-loaded credentials
     info!("Connecting to Aegis-DB at {}", config.aegis_url());
-    let db = match Database::new(&config.aegis).await {
+    let mut aegis_config = config.aegis.clone();
+    aegis_config.username = db_username;
+    aegis_config.password = db_password;
+
+    let db = match Database::new(&aegis_config).await {
         Ok(db) => {
             info!("Connected to Aegis-DB");
             db
@@ -139,14 +208,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Initialize JWT authentication
-    let jwt = JwtAuth::new(&config.auth.jwt_secret, config.auth.jwt_expiry_hours);
+    // Initialize JWT authentication with secrets-loaded secret
+    let jwt = JwtAuth::new(&jwt_secret, config.auth.jwt_expiry_hours);
 
-    // Initialize email service (requires RESEND_API_KEY environment variable)
-    let email_api_key = std::env::var("RESEND_API_KEY").ok();
+    // Initialize email service with secrets-loaded API key
     let email = email::EmailService::new(email_api_key);
     if !email.is_configured() {
-        tracing::warn!("RESEND_API_KEY not set - email functionality will be disabled");
+        tracing::warn!("Email API key not configured - email functionality will be disabled");
+        tracing::warn!("Set via Vault (resend_api_key), AXONML_RESEND_API_KEY env var, or RESEND_API_KEY env var");
     }
 
     // Initialize inference server
