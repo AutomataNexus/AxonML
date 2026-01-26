@@ -193,6 +193,11 @@ impl RMSNorm {
     pub fn parameters(&self) -> Vec<Parameter> {
         vec![Parameter::named("weight", self.weight.clone(), true)]
     }
+
+    /// Load weight from tensor.
+    pub fn load_weight(&mut self, weight: &Tensor<f32>) {
+        self.weight = weight.clone();
+    }
 }
 
 // =============================================================================
@@ -480,6 +485,30 @@ impl LLaMAAttention {
         params.extend(self.o_proj.parameters());
         params
     }
+
+    /// Load weights from state dict.
+    pub fn load_weights(&mut self, prefix: &str, weights: &std::collections::HashMap<String, Tensor<f32>>) -> usize {
+        let mut loaded = 0;
+
+        if let Some(w) = weights.get(&format!("{}.q_proj.weight", prefix)) {
+            self.q_proj.weight.update_data(w.clone());
+            loaded += 1;
+        }
+        if let Some(w) = weights.get(&format!("{}.k_proj.weight", prefix)) {
+            self.k_proj.weight.update_data(w.clone());
+            loaded += 1;
+        }
+        if let Some(w) = weights.get(&format!("{}.v_proj.weight", prefix)) {
+            self.v_proj.weight.update_data(w.clone());
+            loaded += 1;
+        }
+        if let Some(w) = weights.get(&format!("{}.o_proj.weight", prefix)) {
+            self.o_proj.weight.update_data(w.clone());
+            loaded += 1;
+        }
+
+        loaded
+    }
 }
 
 // =============================================================================
@@ -522,6 +551,26 @@ impl LLaMAMLP {
         params.extend(self.up_proj.parameters());
         params.extend(self.down_proj.parameters());
         params
+    }
+
+    /// Load weights from state dict.
+    pub fn load_weights(&mut self, prefix: &str, weights: &std::collections::HashMap<String, Tensor<f32>>) -> usize {
+        let mut loaded = 0;
+
+        if let Some(w) = weights.get(&format!("{}.gate_proj.weight", prefix)) {
+            self.gate_proj.weight.update_data(w.clone());
+            loaded += 1;
+        }
+        if let Some(w) = weights.get(&format!("{}.up_proj.weight", prefix)) {
+            self.up_proj.weight.update_data(w.clone());
+            loaded += 1;
+        }
+        if let Some(w) = weights.get(&format!("{}.down_proj.weight", prefix)) {
+            self.down_proj.weight.update_data(w.clone());
+            loaded += 1;
+        }
+
+        loaded
     }
 }
 
@@ -581,6 +630,29 @@ impl LLaMADecoderLayer {
         params.extend(self.input_layernorm.parameters());
         params.extend(self.post_attention_layernorm.parameters());
         params
+    }
+
+    /// Load weights from state dict.
+    pub fn load_weights(&mut self, prefix: &str, weights: &std::collections::HashMap<String, Tensor<f32>>) -> usize {
+        let mut loaded = 0;
+
+        // Attention weights
+        loaded += self.self_attn.load_weights(&format!("{}.self_attn", prefix), weights);
+
+        // MLP weights
+        loaded += self.mlp.load_weights(&format!("{}.mlp", prefix), weights);
+
+        // Layer norms
+        if let Some(w) = weights.get(&format!("{}.input_layernorm.weight", prefix)) {
+            self.input_layernorm.load_weight(w);
+            loaded += 1;
+        }
+        if let Some(w) = weights.get(&format!("{}.post_attention_layernorm.weight", prefix)) {
+            self.post_attention_layernorm.load_weight(w);
+            loaded += 1;
+        }
+
+        loaded
     }
 }
 
@@ -666,6 +738,50 @@ impl LLaMA {
             self.config.max_position_embeddings,
             self.config.head_dim(),
         )
+    }
+
+    /// Load state dict from HuggingFace format weights.
+    ///
+    /// Expects weights with names like:
+    /// - model.embed_tokens.weight
+    /// - model.layers.0.self_attn.q_proj.weight
+    /// - model.layers.0.mlp.gate_proj.weight
+    /// - model.norm.weight
+    pub fn load_state_dict(&mut self, weights: &std::collections::HashMap<String, Tensor<f32>>) -> usize {
+        let mut loaded = 0;
+
+        // Embedding
+        if let Some(w) = weights.get("model.embed_tokens.weight")
+            .or_else(|| weights.get("embed_tokens.weight"))
+        {
+            self.embed_tokens.weight.update_data(w.clone());
+            loaded += 1;
+        }
+
+        // Layers
+        for (i, layer) in self.layers.iter_mut().enumerate() {
+            // Try both with and without "model." prefix
+            let prefix1 = format!("model.layers.{}", i);
+            let prefix2 = format!("layers.{}", i);
+
+            let layer_loaded = layer.load_weights(&prefix1, weights);
+            if layer_loaded == 0 {
+                loaded += layer.load_weights(&prefix2, weights);
+            } else {
+                loaded += layer_loaded;
+            }
+        }
+
+        // Final norm
+        if let Some(w) = weights.get("model.norm.weight")
+            .or_else(|| weights.get("norm.weight"))
+        {
+            self.norm.load_weight(w);
+            loaded += 1;
+        }
+
+        println!("LLaMA: Loaded {} weight tensors", loaded);
+        loaded
     }
 }
 
@@ -869,6 +985,65 @@ impl LLaMAForCausalLM {
         }
 
         next_tokens
+    }
+
+    /// Load state dict from HuggingFace format weights.
+    pub fn load_state_dict(&mut self, weights: &std::collections::HashMap<String, Tensor<f32>>) -> usize {
+        let mut loaded = self.model.load_state_dict(weights);
+
+        // LM head weight (may be tied to embeddings)
+        if let Some(w) = weights.get("lm_head.weight") {
+            self.lm_head.weight.update_data(w.clone());
+            loaded += 1;
+        } else if let Some(w) = weights.get("model.embed_tokens.weight")
+            .or_else(|| weights.get("embed_tokens.weight"))
+        {
+            // Tie lm_head to embeddings (common in LLaMA)
+            self.lm_head.weight.update_data(w.clone());
+            loaded += 1;
+        }
+
+        println!("LLaMAForCausalLM: Loaded {} total weight tensors", loaded);
+        loaded
+    }
+
+    /// Load model from HuggingFace Hub.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let model = LLaMAForCausalLM::from_pretrained("meta-llama/Llama-2-7b-hf")?;
+    /// ```
+    pub fn from_pretrained(model_id: &str) -> crate::error::LLMResult<Self> {
+        use crate::hf_loader::HFLoader;
+
+        println!("Loading LLaMA from: {}", model_id);
+
+        // Create loader and download weights
+        let mut loader = HFLoader::new(model_id)?;
+
+        // Load config
+        let config_json = loader.load_config()?;
+        let config = crate::hf_loader::parse_llama_config_from_json(&config_json)?;
+
+        // Load tensors
+        loader.load_tensors()?;
+
+        // Create model
+        let mut model = Self::new(&config);
+
+        // Load weights
+        let weights: std::collections::HashMap<String, Tensor<f32>> = loader
+            .tensors()
+            .iter()
+            .map(|(k, v)| {
+                let tensor = Tensor::from_vec(v.data.clone(), &v.shape).unwrap();
+                (k.clone(), tensor)
+            })
+            .collect();
+
+        model.load_state_dict(&weights);
+
+        Ok(model)
     }
 }
 

@@ -208,6 +208,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Create DevOps admin user (Andrew Jewell)
+    let devops_password_hash = auth::hash_password("Invertedskynet2$")?;
+    match Schema::create_devops_admin(&db, &devops_password_hash).await {
+        Ok(_) => {
+            info!("DevOps admin user ready (DevOps@AutomataNexus.com)");
+        }
+        Err(e) => {
+            tracing::debug!("DevOps user creation: {}", e);
+        }
+    }
+
     // Initialize JWT authentication with secrets-loaded secret
     let jwt = JwtAuth::new(&jwt_secret, config.auth.jwt_expiry_hours);
 

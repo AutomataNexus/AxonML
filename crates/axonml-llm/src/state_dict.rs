@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use axonml_tensor::Tensor;
 
-use crate::error::{LLMError, LLMResult};
+use crate::error::LLMResult;
 
 // =============================================================================
 // State Dict Trait

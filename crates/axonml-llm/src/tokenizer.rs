@@ -181,8 +181,8 @@ impl HFTokenizer {
         let vocab_json: HashMap<String, u32> = serde_json::from_str(&vocab_content)
             .map_err(|e| LLMError::ParseError(e.to_string()))?;
 
-        let mut vocab = vocab_json;
-        let mut id_to_token: HashMap<u32, String> = vocab.iter()
+        let vocab = vocab_json;
+        let id_to_token: HashMap<u32, String> = vocab.iter()
             .map(|(k, v)| (*v, k.clone()))
             .collect();
 
@@ -237,8 +237,8 @@ impl HFTokenizer {
     /// Extract special tokens from tokenizer.json.
     fn extract_special_tokens(
         json: &serde_json::Value,
-        vocab: &HashMap<String, u32>,
-        added_tokens: &HashMap<String, u32>,
+        _vocab: &HashMap<String, u32>,
+        _added_tokens: &HashMap<String, u32>,
     ) -> SpecialTokens {
         let mut special = SpecialTokens::default();
 

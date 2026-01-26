@@ -1,8 +1,38 @@
-//! Normalization Layers - BatchNorm and LayerNorm
+//! Normalization Layers
 //!
-//! Normalizes inputs to improve training stability and speed.
+//! Provides normalization layers to improve training stability and convergence speed.
 //!
-//! @version 0.1.0
+//! # Available Layers
+//!
+//! - **BatchNorm1d/2d** - Normalizes over batch dimension (good for large batches)
+//! - **LayerNorm** - Normalizes over feature dimension (stable for any batch size)
+//! - **GroupNorm** - Normalizes within channel groups (good for small batches, used in diffusion models)
+//! - **InstanceNorm2d** - Normalizes each (batch, channel) independently (good for style transfer)
+//!
+//! # When to Use Which
+//!
+//! | Layer | Best For | Batch Size Dependency |
+//! |-------|----------|----------------------|
+//! | BatchNorm | CNNs, large batch training | Requires large batches |
+//! | LayerNorm | Transformers, RNNs | Batch-independent |
+//! | GroupNorm | ResNeXt, diffusion models | Batch-independent |
+//! | InstanceNorm | Style transfer, GANs | Batch-independent |
+//!
+//! # Example
+//!
+//! ```ignore
+//! use axonml_nn::{GroupNorm, InstanceNorm2d, Module};
+//!
+//! // GroupNorm: 8 groups, 32 channels
+//! let gn = GroupNorm::new(8, 32);
+//! let output = gn.forward(&input); // [N, 32, H, W]
+//!
+//! // InstanceNorm: normalize each channel independently
+//! let inn = InstanceNorm2d::with_affine(64);
+//! let output = inn.forward(&input); // [N, 64, H, W]
+//! ```
+//!
+//! @version 0.2.6
 //! @author AutomataNexus Development Team
 
 use std::collections::HashMap;
@@ -468,6 +498,297 @@ impl Module for LayerNorm {
 }
 
 // =============================================================================
+// GroupNorm
+// =============================================================================
+
+/// Applies Group Normalization over a mini-batch of inputs.
+///
+/// Groups channels and normalizes within each group.
+/// Particularly effective for small batch sizes where BatchNorm struggles.
+///
+/// # Shape
+/// - Input: (N, C, *) where C must be divisible by num_groups
+/// - Output: Same as input
+pub struct GroupNorm {
+    /// Learnable scale parameter (gamma).
+    pub weight: Parameter,
+    /// Learnable shift parameter (beta).
+    pub bias: Parameter,
+    /// Number of groups to divide channels into.
+    num_groups: usize,
+    /// Number of channels expected in input.
+    num_channels: usize,
+    /// Epsilon for numerical stability.
+    eps: f32,
+    /// Whether to use learnable affine parameters.
+    affine: bool,
+}
+
+impl GroupNorm {
+    /// Creates a new GroupNorm layer.
+    ///
+    /// # Arguments
+    /// * `num_groups` - Number of groups to divide channels into
+    /// * `num_channels` - Number of channels expected in input
+    pub fn new(num_groups: usize, num_channels: usize) -> Self {
+        Self::with_options(num_groups, num_channels, 1e-5, true)
+    }
+
+    /// Creates a GroupNorm with custom options.
+    pub fn with_options(num_groups: usize, num_channels: usize, eps: f32, affine: bool) -> Self {
+        assert!(
+            num_channels % num_groups == 0,
+            "num_channels ({}) must be divisible by num_groups ({})",
+            num_channels, num_groups
+        );
+
+        Self {
+            weight: Parameter::named("weight", ones(&[num_channels]), affine),
+            bias: Parameter::named("bias", zeros(&[num_channels]), affine),
+            num_groups,
+            num_channels,
+            eps,
+            affine,
+        }
+    }
+}
+
+impl Module for GroupNorm {
+    fn forward(&self, input: &Variable) -> Variable {
+        let input_data = input.data();
+        let shape = input_data.shape().to_vec();
+        let batch_size = shape[0];
+        let channels = shape[1];
+        let spatial_size: usize = shape[2..].iter().product();
+
+        assert_eq!(
+            channels, self.num_channels,
+            "GroupNorm: expected {} channels, got {}",
+            self.num_channels, channels
+        );
+
+        let input_vec = input_data.to_vec();
+        let channels_per_group = channels / self.num_groups;
+
+        let mut output_vec = vec![0.0f32; input_vec.len()];
+
+        for b in 0..batch_size {
+            for g in 0..self.num_groups {
+                // Calculate mean and variance for this group
+                let mut sum = 0.0f32;
+                let group_size = channels_per_group * spatial_size;
+
+                for c in 0..channels_per_group {
+                    let channel_idx = g * channels_per_group + c;
+                    for s in 0..spatial_size {
+                        let idx = b * channels * spatial_size + channel_idx * spatial_size + s;
+                        sum += input_vec[idx];
+                    }
+                }
+                let mean = sum / group_size as f32;
+
+                let mut var_sum = 0.0f32;
+                for c in 0..channels_per_group {
+                    let channel_idx = g * channels_per_group + c;
+                    for s in 0..spatial_size {
+                        let idx = b * channels * spatial_size + channel_idx * spatial_size + s;
+                        let diff = input_vec[idx] - mean;
+                        var_sum += diff * diff;
+                    }
+                }
+                let var = var_sum / group_size as f32;
+
+                // Normalize
+                let std_inv = 1.0 / (var + self.eps).sqrt();
+                for c in 0..channels_per_group {
+                    let channel_idx = g * channels_per_group + c;
+                    let weight = if self.affine {
+                        self.weight.data().to_vec()[channel_idx]
+                    } else {
+                        1.0
+                    };
+                    let bias = if self.affine {
+                        self.bias.data().to_vec()[channel_idx]
+                    } else {
+                        0.0
+                    };
+
+                    for s in 0..spatial_size {
+                        let idx = b * channels * spatial_size + channel_idx * spatial_size + s;
+                        let normalized = (input_vec[idx] - mean) * std_inv;
+                        output_vec[idx] = normalized * weight + bias;
+                    }
+                }
+            }
+        }
+
+        let output = Tensor::from_vec(output_vec, &shape).unwrap();
+        Variable::new(output, input.requires_grad())
+    }
+
+    fn parameters(&self) -> Vec<Parameter> {
+        if self.affine {
+            vec![self.weight.clone(), self.bias.clone()]
+        } else {
+            vec![]
+        }
+    }
+
+    fn named_parameters(&self) -> HashMap<String, Parameter> {
+        if self.affine {
+            let mut params = HashMap::new();
+            params.insert("weight".to_string(), self.weight.clone());
+            params.insert("bias".to_string(), self.bias.clone());
+            params
+        } else {
+            HashMap::new()
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "GroupNorm"
+    }
+}
+
+// =============================================================================
+// InstanceNorm2d
+// =============================================================================
+
+/// Applies Instance Normalization over a 4D input (images).
+///
+/// Each channel in each sample is normalized independently.
+/// Particularly useful for style transfer and image generation.
+///
+/// # Shape
+/// - Input: (N, C, H, W)
+/// - Output: Same as input
+pub struct InstanceNorm2d {
+    /// Learnable scale parameter (gamma).
+    pub weight: Parameter,
+    /// Learnable shift parameter (beta).
+    pub bias: Parameter,
+    /// Number of features (channels).
+    num_features: usize,
+    /// Epsilon for numerical stability.
+    eps: f32,
+    /// Whether to use learnable affine parameters.
+    affine: bool,
+}
+
+impl InstanceNorm2d {
+    /// Creates a new InstanceNorm2d layer.
+    pub fn new(num_features: usize) -> Self {
+        Self::with_options(num_features, 1e-5, false)
+    }
+
+    /// Creates an InstanceNorm2d with affine parameters.
+    pub fn with_affine(num_features: usize) -> Self {
+        Self::with_options(num_features, 1e-5, true)
+    }
+
+    /// Creates an InstanceNorm2d with custom options.
+    pub fn with_options(num_features: usize, eps: f32, affine: bool) -> Self {
+        Self {
+            weight: Parameter::named("weight", ones(&[num_features]), affine),
+            bias: Parameter::named("bias", zeros(&[num_features]), affine),
+            num_features,
+            eps,
+            affine,
+        }
+    }
+}
+
+impl Module for InstanceNorm2d {
+    fn forward(&self, input: &Variable) -> Variable {
+        let input_data = input.data();
+        let shape = input_data.shape().to_vec();
+
+        assert!(shape.len() == 4, "InstanceNorm2d expects 4D input (N, C, H, W)");
+
+        let batch_size = shape[0];
+        let channels = shape[1];
+        let height = shape[2];
+        let width = shape[3];
+        let spatial_size = height * width;
+
+        assert_eq!(
+            channels, self.num_features,
+            "InstanceNorm2d: expected {} channels, got {}",
+            self.num_features, channels
+        );
+
+        let input_vec = input_data.to_vec();
+        let mut output_vec = vec![0.0f32; input_vec.len()];
+
+        for b in 0..batch_size {
+            for c in 0..channels {
+                // Calculate mean for this (batch, channel) pair
+                let mut sum = 0.0f32;
+                for s in 0..spatial_size {
+                    let idx = b * channels * spatial_size + c * spatial_size + s;
+                    sum += input_vec[idx];
+                }
+                let mean = sum / spatial_size as f32;
+
+                // Calculate variance
+                let mut var_sum = 0.0f32;
+                for s in 0..spatial_size {
+                    let idx = b * channels * spatial_size + c * spatial_size + s;
+                    let diff = input_vec[idx] - mean;
+                    var_sum += diff * diff;
+                }
+                let var = var_sum / spatial_size as f32;
+
+                // Normalize and apply affine
+                let std_inv = 1.0 / (var + self.eps).sqrt();
+                let weight = if self.affine {
+                    self.weight.data().to_vec()[c]
+                } else {
+                    1.0
+                };
+                let bias = if self.affine {
+                    self.bias.data().to_vec()[c]
+                } else {
+                    0.0
+                };
+
+                for s in 0..spatial_size {
+                    let idx = b * channels * spatial_size + c * spatial_size + s;
+                    let normalized = (input_vec[idx] - mean) * std_inv;
+                    output_vec[idx] = normalized * weight + bias;
+                }
+            }
+        }
+
+        let output = Tensor::from_vec(output_vec, &shape).unwrap();
+        Variable::new(output, input.requires_grad())
+    }
+
+    fn parameters(&self) -> Vec<Parameter> {
+        if self.affine {
+            vec![self.weight.clone(), self.bias.clone()]
+        } else {
+            vec![]
+        }
+    }
+
+    fn named_parameters(&self) -> HashMap<String, Parameter> {
+        if self.affine {
+            let mut params = HashMap::new();
+            params.insert("weight".to_string(), self.weight.clone());
+            params.insert("bias".to_string(), self.bias.clone());
+            params
+        } else {
+            HashMap::new()
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "InstanceNorm2d"
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -513,5 +834,59 @@ mod tests {
         let bn = BatchNorm1d::new(10);
         assert_eq!(bn.parameters().len(), 2);
         assert_eq!(bn.num_parameters(), 20); // weight + bias
+    }
+
+    #[test]
+    fn test_groupnorm() {
+        let gn = GroupNorm::new(2, 4); // 2 groups, 4 channels
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 32], &[2, 4, 2, 2]).unwrap(),
+            false,
+        );
+        let output = gn.forward(&input);
+        assert_eq!(output.shape(), vec![2, 4, 2, 2]);
+    }
+
+    #[test]
+    fn test_groupnorm_normalization() {
+        let gn = GroupNorm::with_options(2, 4, 1e-5, false); // No affine
+        let input = Variable::new(
+            Tensor::from_vec(
+                vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+                &[1, 4, 1, 2]
+            ).unwrap(),
+            false,
+        );
+        let output = gn.forward(&input);
+        // After normalization within groups, should have zero mean
+        let out_vec = output.data().to_vec();
+        // Group 1: channels 0,1 (vals 1,2,3,4) and Group 2: channels 2,3 (vals 5,6,7,8)
+        let group1_mean: f32 = out_vec[0..4].iter().sum::<f32>() / 4.0;
+        let group2_mean: f32 = out_vec[4..8].iter().sum::<f32>() / 4.0;
+        assert!(group1_mean.abs() < 1e-5);
+        assert!(group2_mean.abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_instancenorm2d() {
+        let inn = InstanceNorm2d::new(2);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 32], &[2, 2, 2, 4]).unwrap(),
+            false,
+        );
+        let output = inn.forward(&input);
+        assert_eq!(output.shape(), vec![2, 2, 2, 4]);
+    }
+
+    #[test]
+    fn test_instancenorm2d_with_affine() {
+        let inn = InstanceNorm2d::with_affine(4);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 64], &[1, 4, 4, 4]).unwrap(),
+            false,
+        );
+        let output = inn.forward(&input);
+        assert_eq!(output.shape(), vec![1, 4, 4, 4]);
+        assert_eq!(inn.parameters().len(), 2);
     }
 }

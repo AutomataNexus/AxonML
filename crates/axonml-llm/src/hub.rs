@@ -386,6 +386,184 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         },
     );
 
+    // =========================================================================
+    // LLaMA Family
+    // =========================================================================
+
+    registry.insert(
+        "llama-2-7b".to_string(),
+        PretrainedLLM {
+            name: "llama-2-7b".to_string(),
+            url: "https://huggingface.co/meta-llama/Llama-2-7b-hf/resolve/main/model.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 13_500_000_000,
+            vocab_size: 32000,
+            hidden_size: 4096,
+            num_layers: 32,
+            num_heads: 32,
+            max_seq_len: 4096,
+            num_parameters: 6_738_000_000,
+            architecture: "LLaMA".to_string(),
+            dataset: "Web crawl + curated data".to_string(),
+        },
+    );
+
+    registry.insert(
+        "llama-2-13b".to_string(),
+        PretrainedLLM {
+            name: "llama-2-13b".to_string(),
+            url: "https://huggingface.co/meta-llama/Llama-2-13b-hf/resolve/main/model.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 26_000_000_000,
+            vocab_size: 32000,
+            hidden_size: 5120,
+            num_layers: 40,
+            num_heads: 40,
+            max_seq_len: 4096,
+            num_parameters: 13_016_000_000,
+            architecture: "LLaMA".to_string(),
+            dataset: "Web crawl + curated data".to_string(),
+        },
+    );
+
+    registry.insert(
+        "tinyllama-1.1b".to_string(),
+        PretrainedLLM {
+            name: "tinyllama-1.1b".to_string(),
+            url: "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 2_200_000_000,
+            vocab_size: 32000,
+            hidden_size: 2048,
+            num_layers: 22,
+            num_heads: 32,
+            max_seq_len: 2048,
+            num_parameters: 1_100_000_000,
+            architecture: "LLaMA".to_string(),
+            dataset: "SlimPajama + StarCoder".to_string(),
+        },
+    );
+
+    // =========================================================================
+    // Mistral Family
+    // =========================================================================
+
+    registry.insert(
+        "mistral-7b".to_string(),
+        PretrainedLLM {
+            name: "mistral-7b".to_string(),
+            url: "https://huggingface.co/mistralai/Mistral-7B-v0.1/resolve/main/model.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 14_500_000_000,
+            vocab_size: 32000,
+            hidden_size: 4096,
+            num_layers: 32,
+            num_heads: 32,
+            max_seq_len: 8192,
+            num_parameters: 7_241_000_000,
+            architecture: "Mistral".to_string(),
+            dataset: "Web data".to_string(),
+        },
+    );
+
+    registry.insert(
+        "mistral-7b-instruct".to_string(),
+        PretrainedLLM {
+            name: "mistral-7b-instruct".to_string(),
+            url: "https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2/resolve/main/model.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 14_500_000_000,
+            vocab_size: 32000,
+            hidden_size: 4096,
+            num_layers: 32,
+            num_heads: 32,
+            max_seq_len: 32768,
+            num_parameters: 7_241_000_000,
+            architecture: "Mistral".to_string(),
+            dataset: "Web data + instruction tuning".to_string(),
+        },
+    );
+
+    // =========================================================================
+    // Phi Family (Microsoft)
+    // =========================================================================
+
+    registry.insert(
+        "phi-2".to_string(),
+        PretrainedLLM {
+            name: "phi-2".to_string(),
+            url: "https://huggingface.co/microsoft/phi-2/resolve/main/model.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 5_600_000_000,
+            vocab_size: 51200,
+            hidden_size: 2560,
+            num_layers: 32,
+            num_heads: 32,
+            max_seq_len: 2048,
+            num_parameters: 2_780_000_000,
+            architecture: "Phi".to_string(),
+            dataset: "Synthetic + Web data".to_string(),
+        },
+    );
+
+    registry.insert(
+        "phi-1.5".to_string(),
+        PretrainedLLM {
+            name: "phi-1.5".to_string(),
+            url: "https://huggingface.co/microsoft/phi-1_5/resolve/main/model.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 2_800_000_000,
+            vocab_size: 51200,
+            hidden_size: 2048,
+            num_layers: 24,
+            num_heads: 32,
+            max_seq_len: 2048,
+            num_parameters: 1_300_000_000,
+            architecture: "Phi".to_string(),
+            dataset: "Synthetic textbooks".to_string(),
+        },
+    );
+
+    // =========================================================================
+    // Qwen Family (Alibaba)
+    // =========================================================================
+
+    registry.insert(
+        "qwen-1.8b".to_string(),
+        PretrainedLLM {
+            name: "qwen-1.8b".to_string(),
+            url: "https://huggingface.co/Qwen/Qwen-1_8B/resolve/main/model.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 3_800_000_000,
+            vocab_size: 151936,
+            hidden_size: 2048,
+            num_layers: 24,
+            num_heads: 16,
+            max_seq_len: 8192,
+            num_parameters: 1_800_000_000,
+            architecture: "Qwen".to_string(),
+            dataset: "Web data + curated".to_string(),
+        },
+    );
+
+    registry.insert(
+        "qwen-7b".to_string(),
+        PretrainedLLM {
+            name: "qwen-7b".to_string(),
+            url: "https://huggingface.co/Qwen/Qwen-7B/resolve/main/model.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 15_000_000_000,
+            vocab_size: 151936,
+            hidden_size: 4096,
+            num_layers: 32,
+            num_heads: 32,
+            max_seq_len: 8192,
+            num_parameters: 7_720_000_000,
+            architecture: "Qwen".to_string(),
+            dataset: "Web data + curated".to_string(),
+        },
+    );
+
     registry
 }
 
