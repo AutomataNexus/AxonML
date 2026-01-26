@@ -46,6 +46,12 @@ rand = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }
 
+# Model loading
+safetensors = "0.3"
+byteorder = "1.5"
+indicatif = { workspace = true }
+half = "2.3"
+
 [dev-dependencies]
 approx = { workspace = true }
 

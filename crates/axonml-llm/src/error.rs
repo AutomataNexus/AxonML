@@ -37,7 +37,31 @@ pub enum LLMError {
     #[error("Core error: {0}")]
     CoreError(#[from] axonml_core::Error),
 
-    /// IO error
+    /// IO error (string to avoid duplicate From impl)
     #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
+    IoError(String),
+
+    /// Network error
+    #[error("Network error: {0}")]
+    NetworkError(String),
+
+    /// Parse error
+    #[error("Parse error: {0}")]
+    ParseError(String),
+
+    /// Model not found
+    #[error("Model not found: {0}")]
+    ModelNotFound(String),
+
+    /// Weight not found
+    #[error("Weight not found: {0}")]
+    WeightNotFound(String),
+
+    /// Unsupported format
+    #[error("Unsupported format: {0}")]
+    UnsupportedFormat(String),
+
+    /// Tensor error
+    #[error("Tensor error: {0}")]
+    TensorError(String),
 }
