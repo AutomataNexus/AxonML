@@ -728,6 +728,148 @@ impl LLaMAForCausalLM {
     pub fn create_kv_cache(&self, batch_size: usize) -> LayerKVCache {
         self.model.create_kv_cache(batch_size)
     }
+
+    /// Get the config.
+    pub fn config(&self) -> &LLaMAConfig {
+        &self.model.config
+    }
+
+    /// Generate text autoregressively.
+    ///
+    /// # Arguments
+    /// * `input_ids` - Initial token IDs [batch_size, seq_len]
+    /// * `max_new_tokens` - Maximum number of tokens to generate
+    /// * `temperature` - Sampling temperature (1.0 = normal, <1 = more deterministic)
+    /// * `top_k` - If set, only sample from top k tokens
+    ///
+    /// # Returns
+    /// Generated token IDs [batch_size, seq_len + max_new_tokens]
+    pub fn generate(
+        &self,
+        input_ids: &Tensor<u32>,
+        max_new_tokens: usize,
+        temperature: f32,
+        top_k: Option<usize>,
+        eos_token_id: Option<u32>,
+    ) -> Tensor<u32> {
+        let batch_size = input_ids.shape()[0];
+        let mut cache = self.create_kv_cache(batch_size);
+
+        // Start with input tokens
+        let mut all_tokens: Vec<Vec<u32>> = (0..batch_size)
+            .map(|b| {
+                let start = b * input_ids.shape()[1];
+                let end = start + input_ids.shape()[1];
+                input_ids.to_vec()[start..end].to_vec()
+            })
+            .collect();
+
+        // Process initial prompt
+        let logits = self.forward_with_cache(input_ids, Some(&mut cache));
+
+        // Get next token from last position
+        let mut next_tokens = self.sample_next_token(&logits, temperature, top_k);
+
+        // Check for EOS
+        let mut finished = vec![false; batch_size];
+        if let Some(eos_id) = eos_token_id {
+            for (b, &token) in next_tokens.iter().enumerate() {
+                if token == eos_id {
+                    finished[b] = true;
+                }
+            }
+        }
+
+        // Append first generated token
+        for (b, &token) in next_tokens.iter().enumerate() {
+            all_tokens[b].push(token);
+        }
+
+        // Generate remaining tokens
+        for _ in 1..max_new_tokens {
+            if finished.iter().all(|&f| f) {
+                break;
+            }
+
+            // Create input tensor for next token
+            let next_input = Tensor::from_vec(next_tokens.clone(), &[batch_size, 1]).unwrap();
+
+            // Forward with cache (only processes 1 new token)
+            let logits = self.forward_with_cache(&next_input, Some(&mut cache));
+
+            // Sample next tokens
+            next_tokens = self.sample_next_token(&logits, temperature, top_k);
+
+            // Check for EOS and append
+            for (b, &token) in next_tokens.iter().enumerate() {
+                if !finished[b] {
+                    all_tokens[b].push(token);
+                    if Some(token) == eos_token_id {
+                        finished[b] = true;
+                    }
+                }
+            }
+        }
+
+        // Find max length and pad
+        let max_len = all_tokens.iter().map(|t| t.len()).max().unwrap_or(0);
+        let mut output = vec![0u32; batch_size * max_len];
+        for (b, tokens) in all_tokens.iter().enumerate() {
+            for (i, &token) in tokens.iter().enumerate() {
+                output[b * max_len + i] = token;
+            }
+        }
+
+        Tensor::from_vec(output, &[batch_size, max_len]).unwrap()
+    }
+
+    /// Sample next token from logits.
+    fn sample_next_token(&self, logits: &Variable, temperature: f32, top_k: Option<usize>) -> Vec<u32> {
+        let logits_data = logits.data();
+        let shape = logits_data.shape();
+        let batch_size = shape[0];
+        let seq_len = shape[1];
+        let vocab_size = shape[2];
+
+        let logits_vec = logits_data.to_vec();
+        let mut next_tokens = Vec::with_capacity(batch_size);
+
+        for b in 0..batch_size {
+            // Get logits for last position
+            let start = (b * seq_len + seq_len - 1) * vocab_size;
+            let end = start + vocab_size;
+            let mut token_logits: Vec<(usize, f32)> = logits_vec[start..end]
+                .iter()
+                .enumerate()
+                .map(|(i, &v)| (i, v / temperature))
+                .collect();
+
+            // Apply top-k filtering
+            if let Some(k) = top_k {
+                token_logits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                token_logits.truncate(k);
+            }
+
+            // Softmax
+            let max_logit = token_logits.iter().map(|(_, v)| *v).fold(f32::NEG_INFINITY, f32::max);
+            let exp_sum: f32 = token_logits.iter().map(|(_, v)| (v - max_logit).exp()).sum();
+            let probs: Vec<(usize, f32)> = token_logits
+                .iter()
+                .map(|(i, v)| (*i, (v - max_logit).exp() / exp_sum))
+                .collect();
+
+            // Sample (greedy for now - TODO: add proper sampling)
+            let next_token = probs
+                .iter()
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                .map(|(i, _)| *i as u32)
+                .unwrap_or(0);
+
+            next_tokens.push(next_token);
+        }
+
+        next_tokens
+    }
 }
 
 impl Module for LLaMAForCausalLM {
