@@ -42,7 +42,7 @@ axonml-optim = { workspace = true }
 axonml-data = { workspace = true }
 axonml-vision = { workspace = true }
 axonml-serialize = { workspace = true }
-axonml-onnx = { path = "../axonml-onnx", version = "0.2.5" }
+axonml-onnx = { path = "../axonml-onnx", version = "0.2.6" }
 axonml-tui.workspace = true
 
 # CLI framework
