@@ -1,12 +1,15 @@
 [package]
 name = "axonml-tui"
 version.workspace = true
-edition = "2021"
-authors = ["AutomataNexus Development Team"]
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "Terminal User Interface for Axonml ML Framework"
 readme = "README.md"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/automatanexus/ferrite"
 keywords = ["machine-learning", "tui", "terminal", "deep-learning"]
 categories = ["command-line-interface", "visualization"]
 

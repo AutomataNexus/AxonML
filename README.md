@@ -23,7 +23,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with 1076+ passin
 
 ## Features
 
-### Core (v0.2.6)
+### Core (v0.2.8)
 
 - **Tensor Operations** (`axonml-tensor`)
   - N-dimensional tensors with arbitrary shapes

@@ -1,11 +1,15 @@
 [package]
 name = "axonml-serialize"
 version.workspace = true
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "Model serialization for Axonml ML framework"
 readme = "README.md"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/automatanexus/ferrite"
 keywords = ["machine-learning", "serialization", "deep-learning"]
 categories = ["science", "data-structures"]
 
