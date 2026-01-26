@@ -97,7 +97,7 @@ impl HFLoader {
     }
 
     /// Download a file from HuggingFace Hub.
-    fn download_file(&self, filename: &str) -> LLMResult<PathBuf> {
+    pub fn download_file(&self, filename: &str) -> LLMResult<PathBuf> {
         let local_path = self.cache_dir.join(filename);
 
         // Return if already cached
@@ -301,6 +301,30 @@ impl HFLoader {
             let info = &self.tensors[name];
             println!("  {} {:?} ({})", name, info.shape, info.dtype);
         }
+    }
+
+    /// Get the cache directory path.
+    pub fn cache_dir(&self) -> &std::path::Path {
+        &self.cache_dir
+    }
+
+    /// Get the model ID.
+    pub fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    /// Download a file if it exists (doesn't error on 404).
+    pub fn download_file_if_exists(&self, filename: &str) -> LLMResult<bool> {
+        match self.download_file(filename) {
+            Ok(_) => Ok(true),
+            Err(LLMError::NetworkError(msg)) if msg.contains("404") || msg.contains("HTTP 4") => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get all loaded tensors.
+    pub fn tensors(&self) -> &HashMap<String, TensorInfo> {
+        &self.tensors
     }
 }
 
