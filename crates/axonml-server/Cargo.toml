@@ -16,11 +16,11 @@ path = "src/main.rs"
 
 [dependencies]
 # AxonML crates for model inference
-axonml-core = { path = "../axonml-core" }
-axonml-tensor = { path = "../axonml-tensor" }
-axonml-autograd = { path = "../axonml-autograd" }
-axonml-nn = { path = "../axonml-nn" }
-axonml-serialize = { path = "../axonml-serialize" }
+axonml-core = { path = "../axonml-core", version = "0.2.6" }
+axonml-tensor = { path = "../axonml-tensor", version = "0.2.6" }
+axonml-autograd = { path = "../axonml-autograd", version = "0.2.6" }
+axonml-nn = { path = "../axonml-nn", version = "0.2.6" }
+axonml-serialize = { path = "../axonml-serialize", version = "0.2.6" }
 
 # Web framework
 axum = { version = "0.7", features = ["ws", "multipart", "macros"] }
