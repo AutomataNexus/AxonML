@@ -6034,11 +6034,33 @@ select.form-input {
   width: 60px;
   padding: 12px;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   border-right: 1px solid var(--border-color);
   background: var(--bg-secondary);
   border-radius: 8px 0 0 8px;
+}
+
+.cell-delete-btn {
+  opacity: 0;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: opacity 0.2s, color 0.2s, background 0.2s;
+}
+
+.notebook-cell:hover .cell-delete-btn,
+.notebook-cell.selected .cell-delete-btn {
+  opacity: 1;
+}
+
+.cell-delete-btn:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .execution-count {
