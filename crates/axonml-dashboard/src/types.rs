@@ -114,6 +114,7 @@ pub struct RecoveryCodesResponse {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RunStatus {
+    Draft,
     Pending,
     Running,
     Completed,
@@ -124,6 +125,7 @@ pub enum RunStatus {
 impl RunStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Draft => "draft",
             Self::Pending => "pending",
             Self::Running => "running",
             Self::Completed => "completed",
@@ -134,6 +136,7 @@ impl RunStatus {
 
     pub fn color_class(&self) -> &'static str {
         match self {
+            Self::Draft => "status-draft",
             Self::Pending => "status-pending",
             Self::Running => "status-running",
             Self::Completed => "status-success",
@@ -148,12 +151,18 @@ pub struct TrainingConfig {
     pub learning_rate: f64,
     pub batch_size: u32,
     pub epochs: u32,
+    #[serde(default = "default_steps_per_epoch")]
+    pub steps_per_epoch: u32,
     #[serde(default)]
     pub optimizer: Option<String>,
     #[serde(default)]
     pub loss_function: Option<String>,
     #[serde(default)]
     pub extra: std::collections::HashMap<String, serde_json::Value>,
+}
+
+fn default_steps_per_epoch() -> u32 {
+    100
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -868,6 +877,10 @@ pub struct AiAssistResponse {
     pub suggestion: String,
     pub explanation: Option<String>,
     pub confidence: f32,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub tokens_generated: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

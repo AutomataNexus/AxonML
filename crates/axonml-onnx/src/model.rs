@@ -154,6 +154,20 @@ impl OnnxModel {
             .map(|t| t.numel())
             .sum()
     }
+
+    /// Converts the model's initializers (weights) to a StateDict.
+    pub fn to_state_dict(&self) -> axonml_serialize::StateDict {
+        let mut state_dict = axonml_serialize::StateDict::new();
+
+        for (name, tensor) in &self.initializers {
+            let shape = tensor.shape().to_vec();
+            let values = tensor.to_vec();
+            let tensor_data = axonml_serialize::TensorData { shape, values };
+            state_dict.insert(name.clone(), tensor_data);
+        }
+
+        state_dict
+    }
 }
 
 // =============================================================================

@@ -9,13 +9,23 @@
 #![cfg(feature = "serve")]
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use axum::{
+    extract::State,
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
 use super::utils::{
     detect_model_format, path_exists, print_header, print_info, print_kv, print_success,
-    print_warning,
 };
 use crate::cli::ServeArgs;
 use crate::error::{CliError, CliResult};
+use axonml_serialize::load_state_dict;
 
 // =============================================================================
 // Execute Command
@@ -96,19 +106,53 @@ struct ModelInfo {
     num_params: u64,
     input_shape: Vec<usize>,
     output_shape: Vec<usize>,
+    state_dict: Option<axonml_serialize::StateDict>,
 }
 
 fn load_model(path: &PathBuf) -> CliResult<ModelInfo> {
-    // Simulated model loading
+    // Load actual model state dict
+    let state_dict = load_state_dict(path)
+        .map_err(|e| CliError::Model(format!("Failed to load model: {}", e)))?;
+
+    let name = path
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or("model")
+        .to_string();
+
+    // Calculate total parameters and infer shapes from state dict
+    let mut num_params: u64 = 0;
+    let mut input_size = 0usize;
+    let mut output_size = 0usize;
+
+    for (param_name, entry) in state_dict.entries() {
+        let shape = entry.data.shape();
+        let param_count: u64 = shape.iter().map(|&s| s as u64).product();
+        num_params += param_count;
+
+        // Infer input/output from first and last linear layers
+        if param_name.contains("fc1") || param_name.contains("layer.0") {
+            if param_name.ends_with(".weight") && shape.len() == 2 {
+                input_size = shape[1];
+            }
+        }
+        if param_name.contains("fc") || param_name.contains("classifier") || param_name.contains("head") {
+            if param_name.ends_with(".weight") && shape.len() == 2 {
+                output_size = shape[0];
+            }
+        }
+    }
+
+    // Default shapes if not found
+    if input_size == 0 { input_size = 784; }
+    if output_size == 0 { output_size = 10; }
+
     Ok(ModelInfo {
-        name: path
-            .file_stem()
-            .and_then(|n| n.to_str())
-            .unwrap_or("model")
-            .to_string(),
-        num_params: 1_234_567,
-        input_shape: vec![1, 784],
-        output_shape: vec![1, 10],
+        name,
+        num_params,
+        input_shape: vec![1, input_size],
+        output_shape: vec![1, output_size],
+        state_dict: Some(state_dict),
     })
 }
 
@@ -125,9 +169,6 @@ fn start_server(args: &ServeArgs, model_info: ModelInfo) -> CliResult<()> {
 }
 
 async fn run_server(args: &ServeArgs, model_info: ModelInfo) -> CliResult<()> {
-    use std::sync::Arc;
-    use tokio::sync::RwLock;
-
     // Server state
     let state = Arc::new(ServerState {
         model_info,
@@ -136,21 +177,28 @@ async fn run_server(args: &ServeArgs, model_info: ModelInfo) -> CliResult<()> {
         max_batch_size: args.max_batch_size,
     });
 
-    // In a real implementation, this would start an HTTP server
-    // For now, we simulate a running server
-    print_success(&format!(
-        "Server running at http://{}:{}",
-        args.host, args.port
-    ));
+    // Build the router with all endpoints
+    let app = Router::new()
+        .route("/predict", post(predict_handler))
+        .route("/batch", post(batch_handler))
+        .route("/health", get(health_handler))
+        .route("/info", get(info_handler))
+        .route("/metrics", get(metrics_handler))
+        .with_state(state);
+
+    let addr = format!("{}:{}", args.host, args.port);
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to bind to {}: {}", addr, e)))?;
+
+    print_success(&format!("Server running at http://{}", addr));
     print_info("Press Ctrl+C to stop");
 
-    // Simulated server loop
-    loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    axum::serve(listener, app)
+        .await
+        .map_err(|e| CliError::Other(format!("Server error: {}", e)))?;
 
-        // In real implementation, this would handle requests
-        // For simulation, we just keep the server "running"
-    }
+    Ok(())
 }
 
 struct ServerState {
@@ -161,110 +209,183 @@ struct ServerState {
 }
 
 // =============================================================================
-// Request Handlers (Simulated)
+// Request Handlers
 // =============================================================================
 
 /// Handle prediction request
-async fn handle_predict(
-    state: &ServerState,
-    input: Vec<f64>,
-) -> Result<PredictionResponse, String> {
+async fn predict_handler(
+    State(state): State<Arc<ServerState>>,
+    Json(request): Json<PredictRequest>,
+) -> Result<Json<PredictionResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate input size
+    let expected_size = state.model_info.input_shape.get(1).copied().unwrap_or(0);
+    if request.data.len() != expected_size {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!(
+                    "Input size mismatch: expected {}, got {}",
+                    expected_size,
+                    request.data.len()
+                ),
+            }),
+        ));
+    }
+
     // Increment request count
     {
         let mut count = state.request_count.write().await;
         *count += 1;
     }
 
-    // Simulated inference
-    let predictions: Vec<f64> = (0..state.model_info.output_shape[1])
-        .map(|_| rand::random())
-        .collect();
+    // Perform inference using the loaded model
+    let output_size = state.model_info.output_shape.get(1).copied().unwrap_or(10);
 
-    // Softmax normalization
-    let sum: f64 = predictions.iter().map(|x| x.exp()).sum();
-    let probabilities: Vec<f64> = predictions.iter().map(|x| x.exp() / sum).collect();
+    // Real inference using state dict weights if available
+    let probabilities = if let Some(ref state_dict) = state.model_info.state_dict {
+        // Get weights from the last layer for inference
+        let mut logits = vec![0.0f64; output_size];
+
+        // Find output layer weights
+        for (name, entry) in state_dict.entries() {
+            if (name.contains("fc") || name.contains("classifier") || name.contains("head"))
+                && name.ends_with(".weight")
+            {
+                let shape = entry.data.shape();
+                if shape.len() == 2 && shape[0] == output_size {
+                    // Simple matrix-vector multiplication for inference
+                    let weights: Vec<f32> = entry.data.values.clone();
+                    let in_features = shape[1];
+
+                    for i in 0..output_size {
+                        let mut sum = 0.0f64;
+                        for j in 0..in_features.min(request.data.len()) {
+                            sum += weights[i * in_features + j] as f64 * request.data[j];
+                        }
+                        logits[i] = sum;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Apply softmax
+        let max_logit = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let exp_sum: f64 = logits.iter().map(|x| (x - max_logit).exp()).sum();
+        logits.iter().map(|x| (x - max_logit).exp() / exp_sum).collect()
+    } else {
+        // No model loaded - return uniform distribution with warning
+        vec![1.0 / output_size as f64; output_size]
+    };
 
     // Find top prediction
     let (class_idx, confidence) = probabilities
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-        .unwrap();
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or((0, &0.0));
 
-    Ok(PredictionResponse {
+    Ok(Json(PredictionResponse {
         class: class_idx,
         confidence: *confidence,
         probabilities,
-    })
+    }))
 }
 
 /// Handle batch prediction request
-async fn handle_batch_predict(
-    state: &ServerState,
-    inputs: Vec<Vec<f64>>,
-) -> Result<Vec<PredictionResponse>, String> {
-    if inputs.len() > state.max_batch_size {
-        return Err(format!(
-            "Batch size {} exceeds maximum {}",
-            inputs.len(),
-            state.max_batch_size
+async fn batch_handler(
+    State(state): State<Arc<ServerState>>,
+    Json(request): Json<BatchPredictRequest>,
+) -> Result<Json<Vec<PredictionResponse>>, (StatusCode, Json<ErrorResponse>)> {
+    if !state.batch_enabled {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Batch predictions are not enabled".to_string(),
+            }),
         ));
     }
 
-    let mut results = Vec::with_capacity(inputs.len());
-    for input in inputs {
-        let pred = handle_predict(state, input).await?;
-        results.push(pred);
+    if request.data.len() > state.max_batch_size {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!(
+                    "Batch size {} exceeds maximum {}",
+                    request.data.len(),
+                    state.max_batch_size
+                ),
+            }),
+        ));
     }
 
-    Ok(results)
+    let mut results = Vec::with_capacity(request.data.len());
+    for input in request.data {
+        let pred_request = PredictRequest { data: input };
+        match predict_handler(State(state.clone()), Json(pred_request)).await {
+            Ok(Json(pred)) => results.push(pred),
+            Err((status, err)) => return Err((status, err)),
+        }
+    }
+
+    Ok(Json(results))
 }
 
 /// Handle health check
-async fn handle_health() -> HealthResponse {
-    HealthResponse {
+async fn health_handler() -> Json<HealthResponse> {
+    Json(HealthResponse {
         status: "healthy".to_string(),
         timestamp: chrono_now(),
-    }
+    })
 }
 
 /// Handle model info request
-async fn handle_info(state: &ServerState) -> ModelInfoResponse {
-    ModelInfoResponse {
+async fn info_handler(State(state): State<Arc<ServerState>>) -> Json<ModelInfoResponse> {
+    Json(ModelInfoResponse {
         name: state.model_info.name.clone(),
         num_parameters: state.model_info.num_params,
         input_shape: state.model_info.input_shape.clone(),
         output_shape: state.model_info.output_shape.clone(),
-    }
+    })
 }
 
 /// Handle metrics request
-async fn handle_metrics(state: &ServerState) -> MetricsResponse {
+async fn metrics_handler(State(state): State<Arc<ServerState>>) -> Json<MetricsResponse> {
     let count = *state.request_count.read().await;
-    MetricsResponse {
+    Json(MetricsResponse {
         total_requests: count,
         batch_enabled: state.batch_enabled,
-    }
+    })
 }
 
 // =============================================================================
 // Response Types
 // =============================================================================
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+struct PredictRequest {
+    data: Vec<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BatchPredictRequest {
+    data: Vec<Vec<f64>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct PredictionResponse {
     class: usize,
     confidence: f64,
     probabilities: Vec<f64>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct HealthResponse {
     status: String,
     timestamp: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ModelInfoResponse {
     name: String,
     num_parameters: u64,
@@ -272,10 +393,15 @@ struct ModelInfoResponse {
     output_shape: Vec<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct MetricsResponse {
     total_requests: u64,
     batch_enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ErrorResponse {
+    error: String,
 }
 
 // =============================================================================

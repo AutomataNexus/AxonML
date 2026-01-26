@@ -4,10 +4,9 @@
 
 use super::AuthError;
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{rand_core::OsRng, rand_core::RngCore, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
-use rand::Rng;
 
 /// Recovery code authentication handler
 pub struct RecoveryAuth;
@@ -38,15 +37,16 @@ impl RecoveryAuth {
     }
 
     /// Generate a single recovery code
+    /// SECURITY: Uses cryptographically secure OsRng for recovery codes
     fn generate_code() -> String {
-        let mut rng = rand::thread_rng();
-        let parts: Vec<String> = (0..2)
-            .map(|_| {
-                let num: u32 = rng.gen_range(0..100000);
-                format!("{:05}", num)
-            })
-            .collect();
-        parts.join("-")
+        let mut bytes = [0u8; 8];
+        OsRng.fill_bytes(&mut bytes);
+
+        // Convert bytes to two 5-digit numbers
+        let num1 = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) % 100000;
+        let num2 = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) % 100000;
+
+        format!("{:05}-{:05}", num1, num2)
     }
 
     /// Hash a recovery code

@@ -929,7 +929,7 @@ impl OnnxOperator for ReduceMaxOp {
 }
 
 // =============================================================================
-// Neural Network Operators (Stubs - would need full impl)
+// Neural Network Operators
 // =============================================================================
 
 /// Conv operator

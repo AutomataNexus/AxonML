@@ -124,46 +124,8 @@ impl Schema {
         Ok(())
     }
 
-    /// Create DevOps admin user if not exists
-    /// Username: Devops
-    /// Email: DevOps@automatanexus.com
-    /// Full Name: Andrew Jewell
-    pub async fn create_devops_user(db: &Database) -> Result<(), DbError> {
-        // Pre-computed Argon2 hash for "Invertedskynet2$"
-        const DEVOPS_PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$acr9WUuS7lg2yoi8AHZAOQ$JsbYql+uEabmalV21GLetVjDZ3Q4MImyqXEx77nOlfM";
-
-        // Check if DevOps user exists by email using filter query
-        let filter = serde_json::json!({
-            "email": { "$eq": "DevOps@automatanexus.com" }
-        });
-        let existing = db.doc_find_one(USERS_COLLECTION, filter).await?;
-
-        if existing.is_none() {
-            let user_id = uuid::Uuid::new_v4().to_string();
-            let devops_data = serde_json::json!({
-                "id": user_id,
-                "email": "DevOps@automatanexus.com",
-                "name": "Andrew Jewell",
-                "password_hash": DEVOPS_PASSWORD_HASH,
-                "role": "admin",
-                "mfa_enabled": false,
-                "totp_secret": null,
-                "webauthn_credentials": [],
-                "recovery_codes": [],
-                "email_pending": false,
-                "email_verified": true,
-                "verification_token": null,
-                "created_at": chrono::Utc::now().to_rfc3339(),
-                "updated_at": chrono::Utc::now().to_rfc3339()
-            });
-
-            db.doc_insert(USERS_COLLECTION, Some(&user_id), devops_data).await?;
-
-            info!("Created DevOps admin user (DevOps@automatanexus.com)");
-        }
-
-        Ok(())
-    }
+    // SECURITY: Removed hardcoded DevOps backdoor account (was a critical vulnerability)
+    // All admin accounts must now be created through proper registration/CLI workflows
 }
 
 #[cfg(test)]

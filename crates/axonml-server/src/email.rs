@@ -10,6 +10,8 @@ pub enum EmailError {
     SendError(String),
     #[error("HTTP request failed: {0}")]
     HttpError(#[from] reqwest::Error),
+    #[error("Email service not configured - RESEND_API_KEY not set")]
+    NotConfigured,
 }
 
 #[derive(Debug, Serialize)]
@@ -26,18 +28,23 @@ struct ResendEmailResponse {
 }
 
 pub struct EmailService {
-    api_key: String,
+    api_key: Option<String>,
     client: Client,
     from_email: String,
 }
 
 impl EmailService {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: Option<String>) -> Self {
         Self {
             api_key,
             client: Client::new(),
             from_email: "AxonML <noreply@automatanexus.com>".to_string(),
         }
+    }
+
+    /// Check if email service is properly configured
+    pub fn is_configured(&self) -> bool {
+        self.api_key.is_some()
     }
 
     /// Send verification email to user
@@ -303,6 +310,9 @@ impl EmailService {
         subject: &str,
         html: &str,
     ) -> Result<(), EmailError> {
+        // Check if API key is configured
+        let api_key = self.api_key.as_ref().ok_or(EmailError::NotConfigured)?;
+
         let request = ResendEmailRequest {
             from: self.from_email.clone(),
             to: vec![to.to_string()],
@@ -312,7 +322,7 @@ impl EmailService {
 
         let response = self.client
             .post("https://api.resend.com/emails")
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
             .json(&request)
             .send()

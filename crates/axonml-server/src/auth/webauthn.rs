@@ -5,6 +5,7 @@
 
 use super::AuthError;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as BASE64, Engine};
+use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
@@ -149,9 +150,10 @@ impl WebAuthnAuth {
     }
 
     /// Generate a random challenge
+    /// SECURITY: Uses cryptographically secure OsRng for authentication challenges
     fn generate_challenge() -> String {
         let mut bytes = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut bytes);
+        OsRng.fill_bytes(&mut bytes);
         BASE64.encode(bytes)
     }
 

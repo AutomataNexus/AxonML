@@ -200,9 +200,19 @@ impl GpuStream {
     }
 
     /// Synchronizes this stream (waits for all operations to complete).
+    ///
+    /// # Backend-specific behavior
+    /// - **CPU**: No-op (CPU operations are synchronous)
+    /// - **CUDA**: No-op at stream level; use `CudaBackend::synchronize()` for device sync
+    /// - **Vulkan**: Waits for queue to become idle
+    /// - **Metal**: Waits for command buffer completion
+    /// - **WebGPU**: Submits pending commands to queue
+    ///
+    /// For CUDA, proper synchronization should be done through `CudaBackend::synchronize()`
+    /// which performs device-level synchronization.
     pub fn synchronize(&self) {
         match self.backend_type {
-            BackendType::Cpu => {} // No-op for CPU
+            BackendType::Cpu => {} // No-op for CPU (synchronous)
             #[cfg(feature = "cuda")]
             BackendType::Cuda => cuda::stream_synchronize(self.handle),
             #[cfg(feature = "vulkan")]

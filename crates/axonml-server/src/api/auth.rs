@@ -597,9 +597,9 @@ pub async fn webauthn_register_finish(
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or(AuthError::UserNotFound)?;
 
-    user_data
-        .webauthn_credentials
-        .push(serde_json::to_value(&credential).unwrap());
+    let credential_value = serde_json::to_value(&credential)
+        .map_err(|e| AuthError::Internal(format!("Failed to serialize credential: {}", e)))?;
+    user_data.webauthn_credentials.push(credential_value);
 
     repo.update(
         &user.id,

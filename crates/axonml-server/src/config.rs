@@ -100,9 +100,11 @@ fn default_port() -> u16 { 3000 }
 fn default_data_dir() -> String { "~/.axonml".to_string() }
 fn default_aegis_host() -> String { "localhost".to_string() }
 fn default_aegis_port() -> u16 { 3020 }
-fn default_aegis_user() -> String { "demo".to_string() }
-fn default_aegis_pass() -> String { "demo".to_string() }
-fn default_jwt_secret() -> String { "CHANGE_ME_IN_PRODUCTION_USE_RANDOM_32_BYTES".to_string() }
+// SECURITY: No default database credentials - must be explicitly configured
+fn default_aegis_user() -> String { String::new() }
+fn default_aegis_pass() -> String { String::new() }
+// SECURITY: No default JWT secret - must be explicitly configured
+fn default_jwt_secret() -> String { String::new() }
 fn default_jwt_expiry() -> u64 { 24 }
 fn default_session_timeout() -> u64 { 30 }
 fn default_allow_registration() -> bool { true }
@@ -270,19 +272,26 @@ impl Config {
         format!("http://{}:{}", self.aegis.host, self.aegis.port)
     }
 
-    /// Validate configuration for production use
+    /// Validate configuration - always called on startup
     pub fn validate(&self) -> Result<(), ConfigError> {
-        // Check if JWT secret is still the default
-        if self.auth.jwt_secret == default_jwt_secret() {
+        // SECURITY: JWT secret must be explicitly configured
+        if self.auth.jwt_secret.is_empty() {
             return Err(ConfigError::MissingConfig(
-                "jwt_secret is using the default value. Please set a secure random secret in production.".to_string()
+                "jwt_secret is required. Set auth.jwt_secret in config.toml or AXONML_JWT_SECRET environment variable.".to_string()
             ));
         }
 
-        // Check if JWT secret is long enough
+        // Check if JWT secret is long enough (at least 32 bytes for HS256)
         if self.auth.jwt_secret.len() < 32 {
             return Err(ConfigError::MissingConfig(
-                "jwt_secret must be at least 32 characters long.".to_string()
+                "jwt_secret must be at least 32 characters long for security.".to_string()
+            ));
+        }
+
+        // SECURITY: Database credentials must be explicitly configured
+        if self.aegis.username.is_empty() || self.aegis.password.is_empty() {
+            return Err(ConfigError::MissingConfig(
+                "Database credentials are required. Set aegis.username and aegis.password in config.toml.".to_string()
             ));
         }
 
@@ -292,10 +301,6 @@ impl Config {
     /// Validate configuration for production (returns warnings for non-critical issues)
     pub fn validate_warnings(&self) -> Vec<String> {
         let mut warnings = Vec::new();
-
-        if self.auth.jwt_secret == default_jwt_secret() {
-            warnings.push("WARNING: Using default JWT secret. Change this in production!".to_string());
-        }
 
         if self.auth.allow_public_registration {
             warnings.push("INFO: Public registration is enabled.".to_string());

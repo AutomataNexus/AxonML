@@ -238,6 +238,7 @@ pub fn TrainingDetailPage() -> impl IntoView {
                     let latest_metrics_for_progress = r.latest_metrics.clone();
                     let latest_metrics_for_stats = r.latest_metrics.clone();
                     let config_epochs = r.config.epochs;
+                    let config_steps_per_epoch = r.config.steps_per_epoch;
 
                     view! {
                         // Header
@@ -281,13 +282,14 @@ pub fn TrainingDetailPage() -> impl IntoView {
                                 let epoch = m.epoch;
                                 let step = m.step;
                                 let total_epochs = config_epochs;
+                                let total_steps = config_steps_per_epoch;
                                 view! {
                                     <div class="card progress-card">
                                         <TrainingProgress
                                             epoch=MaybeSignal::derive(move || epoch)
                                             total_epochs=MaybeSignal::derive(move || total_epochs)
                                             step=MaybeSignal::derive(move || step)
-                                            total_steps=MaybeSignal::derive(move || 1000u32) // Placeholder
+                                            total_steps=MaybeSignal::derive(move || total_steps)
                                         />
                                     </div>
                                 }
