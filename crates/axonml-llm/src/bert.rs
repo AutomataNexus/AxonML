@@ -390,7 +390,7 @@ mod tests {
         let model = BertForSequenceClassification::new(&config, 2);
 
         let input_ids = Tensor::from_vec(vec![1u32, 2, 3, 4, 5, 6, 7, 8], &[2, 4]).unwrap();
-        let logits = model.forward_classification(&input_ids);
+        let logits = model.forward_classification(&input_ids).unwrap();
 
         assert_eq!(logits.data().shape(), &[2, 2]); // [batch, num_labels]
     }
