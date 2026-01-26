@@ -1,11 +1,16 @@
 //! axonml-llm - Large Language Model Architectures
 //!
 //! This crate provides implementations of popular transformer-based language models
-//! including BERT, GPT-2, and building blocks for custom LLM architectures.
+//! including BERT, GPT-2, LLaMA, Mistral, and Phi, along with building blocks for
+//! custom LLM architectures.
 //!
 //! # Key Features
 //! - BERT (Bidirectional Encoder Representations from Transformers)
 //! - GPT-2 (Generative Pre-trained Transformer 2)
+//! - LLaMA (Large Language Model Meta AI) with RoPE and SwiGLU
+//! - Mistral with sliding window attention
+//! - Phi with partial rotary embeddings
+//! - KV-cache for efficient autoregressive generation
 //! - Transformer building blocks (attention, feed-forward, positional encoding)
 //! - Text generation utilities
 //!
@@ -23,7 +28,7 @@
 //! let output = model.forward(&input_ids);
 //! ```
 //!
-//! @version 0.1.0
+//! @version 0.2.0
 //! @author AutomataNexus Development Team
 
 #![warn(missing_docs)]
@@ -37,16 +42,22 @@ pub mod hub;
 pub mod transformer;
 pub mod bert;
 pub mod gpt2;
+pub mod llama;
+pub mod mistral;
+pub mod phi;
 pub mod generation;
 
 pub use error::{LLMError, LLMResult};
 pub use config::{BertConfig, GPT2Config, TransformerConfig};
-pub use attention::{MultiHeadSelfAttention, CausalSelfAttention};
+pub use attention::{MultiHeadSelfAttention, CausalSelfAttention, KVCache, LayerKVCache};
 pub use embedding::{TokenEmbedding, PositionalEmbedding, BertEmbedding, GPT2Embedding};
 pub use hub::{PretrainedLLM, llm_registry, download_weights as download_llm_weights};
 pub use transformer::{TransformerBlock, TransformerEncoder, TransformerDecoder};
 pub use bert::{Bert, BertForSequenceClassification, BertForMaskedLM};
 pub use gpt2::{GPT2, GPT2LMHead};
+pub use llama::{LLaMA, LLaMAConfig, LLaMAForCausalLM};
+pub use mistral::{Mistral, MistralConfig, MistralForCausalLM};
+pub use phi::{Phi, PhiConfig, PhiForCausalLM};
 pub use generation::{GenerationConfig, TextGenerator};
 
 // =============================================================================
