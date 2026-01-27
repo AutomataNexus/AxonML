@@ -72,12 +72,14 @@ impl AdamState {
 
 impl Adam {
     /// Creates a new Adam optimizer with default hyperparameters.
-    #[must_use] pub fn new(params: Vec<Parameter>, lr: f32) -> Self {
+    #[must_use]
+    pub fn new(params: Vec<Parameter>, lr: f32) -> Self {
         Self::with_betas(params, lr, (0.9, 0.999))
     }
 
     /// Creates Adam with specified betas.
-    #[must_use] pub fn with_betas(params: Vec<Parameter>, lr: f32, betas: (f32, f32)) -> Self {
+    #[must_use]
+    pub fn with_betas(params: Vec<Parameter>, lr: f32, betas: (f32, f32)) -> Self {
         Self {
             params,
             lr,
@@ -91,7 +93,8 @@ impl Adam {
     }
 
     /// Creates Adam with all options.
-    #[must_use] pub fn with_options(
+    #[must_use]
+    pub fn with_options(
         params: Vec<Parameter>,
         lr: f32,
         betas: (f32, f32),
@@ -112,26 +115,30 @@ impl Adam {
     }
 
     /// Builder method to set betas.
-    #[must_use] pub fn betas(mut self, betas: (f32, f32)) -> Self {
+    #[must_use]
+    pub fn betas(mut self, betas: (f32, f32)) -> Self {
         self.beta1 = betas.0;
         self.beta2 = betas.1;
         self
     }
 
     /// Builder method to set epsilon.
-    #[must_use] pub fn eps(mut self, eps: f32) -> Self {
+    #[must_use]
+    pub fn eps(mut self, eps: f32) -> Self {
         self.eps = eps;
         self
     }
 
     /// Builder method to set weight decay.
-    #[must_use] pub fn weight_decay(mut self, weight_decay: f32) -> Self {
+    #[must_use]
+    pub fn weight_decay(mut self, weight_decay: f32) -> Self {
         self.weight_decay = weight_decay;
         self
     }
 
     /// Builder method to enable `AMSGrad`.
-    #[must_use] pub fn amsgrad(mut self, amsgrad: bool) -> Self {
+    #[must_use]
+    pub fn amsgrad(mut self, amsgrad: bool) -> Self {
         self.amsgrad = amsgrad;
         self
     }
@@ -283,12 +290,14 @@ pub struct AdamW {
 
 impl AdamW {
     /// Creates a new `AdamW` optimizer with default hyperparameters.
-    #[must_use] pub fn new(params: Vec<Parameter>, lr: f32) -> Self {
+    #[must_use]
+    pub fn new(params: Vec<Parameter>, lr: f32) -> Self {
         Self::with_betas(params, lr, (0.9, 0.999))
     }
 
     /// Creates `AdamW` with specified betas.
-    #[must_use] pub fn with_betas(params: Vec<Parameter>, lr: f32, betas: (f32, f32)) -> Self {
+    #[must_use]
+    pub fn with_betas(params: Vec<Parameter>, lr: f32, betas: (f32, f32)) -> Self {
         Self {
             params,
             lr,
@@ -302,7 +311,8 @@ impl AdamW {
     }
 
     /// Creates `AdamW` with all options.
-    #[must_use] pub fn with_options(
+    #[must_use]
+    pub fn with_options(
         params: Vec<Parameter>,
         lr: f32,
         betas: (f32, f32),
@@ -323,26 +333,30 @@ impl AdamW {
     }
 
     /// Builder method to set betas.
-    #[must_use] pub fn betas(mut self, betas: (f32, f32)) -> Self {
+    #[must_use]
+    pub fn betas(mut self, betas: (f32, f32)) -> Self {
         self.beta1 = betas.0;
         self.beta2 = betas.1;
         self
     }
 
     /// Builder method to set epsilon.
-    #[must_use] pub fn eps(mut self, eps: f32) -> Self {
+    #[must_use]
+    pub fn eps(mut self, eps: f32) -> Self {
         self.eps = eps;
         self
     }
 
     /// Builder method to set weight decay.
-    #[must_use] pub fn weight_decay(mut self, weight_decay: f32) -> Self {
+    #[must_use]
+    pub fn weight_decay(mut self, weight_decay: f32) -> Self {
         self.weight_decay = weight_decay;
         self
     }
 
     /// Builder method to enable `AMSGrad`.
-    #[must_use] pub fn amsgrad(mut self, amsgrad: bool) -> Self {
+    #[must_use]
+    pub fn amsgrad(mut self, amsgrad: bool) -> Self {
         self.amsgrad = amsgrad;
         self
     }

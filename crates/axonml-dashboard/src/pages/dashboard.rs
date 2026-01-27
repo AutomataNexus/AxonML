@@ -4,13 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{icons::*, spinner::*, table::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{
-    icons::*,
-    spinner::*,
-    table::*,
-};
 
 /// Main dashboard overview page
 #[component]
@@ -20,16 +16,26 @@ pub fn DashboardPage() -> impl IntoView {
     let (loading, set_loading) = create_signal(true);
     let (stats, set_stats) = create_signal(DashboardStats::default());
     let (recent_runs, set_recent_runs) = create_signal::<Vec<TrainingRun>>(Vec::new());
-    let (active_endpoints, set_active_endpoints) = create_signal::<Vec<InferenceEndpoint>>(Vec::new());
+    let (active_endpoints, set_active_endpoints) =
+        create_signal::<Vec<InferenceEndpoint>>(Vec::new());
 
     // Fetch dashboard data
     create_effect(move |_| {
         spawn_local(async move {
             // Fetch training runs
             if let Ok(runs) = api::training::list_runs(None, Some(5)).await {
-                let active = runs.iter().filter(|r| r.status == RunStatus::Running).count();
-                let completed = runs.iter().filter(|r| r.status == RunStatus::Completed).count();
-                let failed = runs.iter().filter(|r| r.status == RunStatus::Failed).count();
+                let active = runs
+                    .iter()
+                    .filter(|r| r.status == RunStatus::Running)
+                    .count();
+                let completed = runs
+                    .iter()
+                    .filter(|r| r.status == RunStatus::Completed)
+                    .count();
+                let failed = runs
+                    .iter()
+                    .filter(|r| r.status == RunStatus::Failed)
+                    .count();
 
                 set_stats.update(|s| {
                     s.active_runs = active as u32;
@@ -46,9 +52,18 @@ pub fn DashboardPage() -> impl IntoView {
 
             // Fetch endpoints
             if let Ok(endpoints) = api::inference::list_endpoints().await {
-                let active = endpoints.iter().filter(|e| e.status == EndpointStatus::Running).count();
+                let active = endpoints
+                    .iter()
+                    .filter(|e| e.status == EndpointStatus::Running)
+                    .count();
                 set_stats.update(|s| s.active_endpoints = active as u32);
-                set_active_endpoints.set(endpoints.into_iter().filter(|e| e.status == EndpointStatus::Running).take(5).collect());
+                set_active_endpoints.set(
+                    endpoints
+                        .into_iter()
+                        .filter(|e| e.status == EndpointStatus::Running)
+                        .take(5)
+                        .collect(),
+                );
             }
 
             set_loading.set(false);

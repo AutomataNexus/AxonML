@@ -2,9 +2,9 @@
 //!
 //! Tracks memory allocations, deallocations, peak usage, and memory leaks.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
-use serde::{Serialize, Deserialize};
 
 /// Record of a single memory allocation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,11 +147,7 @@ impl MemoryProfiler {
         let mut per_name_usage = HashMap::new();
 
         for (name, records) in &self.allocations {
-            let active_bytes: usize = records
-                .iter()
-                .filter(|r| !r.freed)
-                .map(|r| r.size)
-                .sum();
+            let active_bytes: usize = records.iter().filter(|r| !r.freed).map(|r| r.size).sum();
             if active_bytes > 0 {
                 per_name_usage.insert(name.clone(), active_bytes);
             }

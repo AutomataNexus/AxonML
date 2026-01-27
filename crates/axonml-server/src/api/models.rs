@@ -5,8 +5,7 @@
 use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};
 use crate::db::models::{
-    Endpoint, Model, ModelRepository, ModelVersion, NewEndpoint, NewModel,
-    NewModelVersion,
+    Endpoint, Model, ModelRepository, ModelVersion, NewEndpoint, NewModel, NewModelVersion,
 };
 use axum::{
     body::Bytes,
@@ -122,7 +121,11 @@ pub struct EndpointResponse {
 // Helper Functions
 // ============================================================================
 
-fn model_to_response(model: Model, version_count: u32, latest_version: Option<u32>) -> ModelResponse {
+fn model_to_response(
+    model: Model,
+    version_count: u32,
+    latest_version: Option<u32>,
+) -> ModelResponse {
     ModelResponse {
         id: model.id,
         user_id: model.user_id,
@@ -151,11 +154,13 @@ fn version_to_response(version: ModelVersion) -> ModelVersionResponse {
 
 fn endpoint_to_response(endpoint: Endpoint) -> EndpointResponse {
     // Provide default config if none exists
-    let config = endpoint.config.unwrap_or_else(|| serde_json::json!({
-        "batch_size": 1,
-        "timeout_ms": 30000,
-        "max_concurrent": 10
-    }));
+    let config = endpoint.config.unwrap_or_else(|| {
+        serde_json::json!({
+            "batch_size": 1,
+            "timeout_ms": 30000,
+            "max_concurrent": 10
+        })
+    });
 
     EndpointResponse {
         id: endpoint.id,
@@ -255,7 +260,11 @@ pub async fn get_model(
     let version_count = versions.len() as u32;
     let latest_version = versions.iter().map(|v| v.version).max();
 
-    Ok(Json(model_to_response(model, version_count, latest_version)))
+    Ok(Json(model_to_response(
+        model,
+        version_count,
+        latest_version,
+    )))
 }
 
 /// Update a model
@@ -288,7 +297,11 @@ pub async fn update_model(
     let version_count = versions.len() as u32;
     let latest_version = versions.iter().map(|v| v.version).max();
 
-    Ok(Json(model_to_response(model, version_count, latest_version)))
+    Ok(Json(model_to_response(
+        model,
+        version_count,
+        latest_version,
+    )))
 }
 
 /// Delete a model
@@ -345,7 +358,8 @@ pub async fn list_versions(
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-    let response: Vec<ModelVersionResponse> = versions.into_iter().map(version_to_response).collect();
+    let response: Vec<ModelVersionResponse> =
+        versions.into_iter().map(version_to_response).collect();
 
     Ok(Json(response))
 }
@@ -439,8 +453,7 @@ pub async fn upload_version(
         .models_dir()
         .join(&id)
         .join(format!("v{}", version.version));
-    std::fs::create_dir_all(&version_dir)
-        .map_err(|e| AuthError::Internal(e.to_string()))?;
+    std::fs::create_dir_all(&version_dir).map_err(|e| AuthError::Internal(e.to_string()))?;
 
     let file_path = version_dir.join(format!("model.{}", extension));
     let mut file = tokio::fs::File::create(&file_path)
@@ -514,7 +527,11 @@ pub async fn delete_version(
         .ok_or(AuthError::Internal("Version not found".to_string()))?;
 
     // Delete version directory
-    let version_dir = state.config.models_dir().join(&id).join(format!("v{}", version));
+    let version_dir = state
+        .config
+        .models_dir()
+        .join(&id)
+        .join(format!("v{}", version));
     std::fs::remove_dir_all(&version_dir).ok();
 
     repo.delete_version(&ver.id)
@@ -551,12 +568,16 @@ pub async fn download_version(
         .ok_or(AuthError::Internal("Version not found".to_string()))?;
 
     // Find the model file
-    let version_dir = state.config.models_dir().join(&id).join(format!("v{}", version));
+    let version_dir = state
+        .config
+        .models_dir()
+        .join(&id)
+        .join(format!("v{}", version));
     let mut file_path: Option<PathBuf> = None;
 
     if version_dir.exists() {
-        for entry in std::fs::read_dir(&version_dir)
-            .map_err(|e| AuthError::Internal(e.to_string()))?
+        for entry in
+            std::fs::read_dir(&version_dir).map_err(|e| AuthError::Internal(e.to_string()))?
         {
             if let Ok(entry) = entry {
                 let path = entry.path();

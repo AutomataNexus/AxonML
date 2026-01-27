@@ -41,7 +41,9 @@ impl TrainingExecutor {
     pub async fn stop_run(&self, run_id: &str) -> Result<(), String> {
         let commands = self.run_commands.read().await;
         if let Some(cmd_tx) = commands.get(run_id) {
-            cmd_tx.send(TrainingCommand::Stop).await
+            cmd_tx
+                .send(TrainingCommand::Stop)
+                .await
                 .map_err(|e| format!("Failed to send stop command: {}", e))
         } else {
             Err(format!("No active training found for run {}", run_id))
@@ -49,10 +51,7 @@ impl TrainingExecutor {
     }
 
     /// Start training a run in the background
-    pub async fn start_training(
-        &self,
-        run: TrainingRun,
-    ) -> Result<(), String> {
+    pub async fn start_training(&self, run: TrainingRun) -> Result<(), String> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<TrainingCommand>(10);
 
         // Store the command sender for this run
@@ -75,7 +74,8 @@ impl TrainingExecutor {
                 models_dir,
                 run.clone(),
                 &mut cmd_rx,
-            ).await;
+            )
+            .await;
 
             // Clean up the command sender
             {
@@ -121,7 +121,7 @@ impl TrainingExecutor {
 
         // For now, create a simple demo model
         // In production, we'd load the actual model from the uploaded file
-        let input_size = 784;  // e.g., MNIST
+        let input_size = 784; // e.g., MNIST
         let hidden_size = 128;
         let output_size = 10;
 
@@ -169,17 +169,20 @@ impl TrainingExecutor {
                 if step % 10 == 0 {
                     let current_lr = learning_rate * (0.99f64).powi(epoch as i32);
 
-                    tracker.record_metrics(
-                        &run.id,
-                        epoch,
-                        global_step,
-                        Some(loss),
-                        Some(accuracy),
-                        Some(current_lr),
-                        Some(0.75 + (step as f64 / steps_per_epoch as f64) * 0.2), // GPU util
-                        Some(2048.0 + (step as f64 / steps_per_epoch as f64) * 512.0), // Memory
-                        serde_json::json!({}),
-                    ).await.map_err(|e| e.to_string())?;
+                    tracker
+                        .record_metrics(
+                            &run.id,
+                            epoch,
+                            global_step,
+                            Some(loss),
+                            Some(accuracy),
+                            Some(current_lr),
+                            Some(0.75 + (step as f64 / steps_per_epoch as f64) * 0.2), // GPU util
+                            Some(2048.0 + (step as f64 / steps_per_epoch as f64) * 512.0), // Memory
+                            serde_json::json!({}),
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
                 }
 
                 global_step += 1;

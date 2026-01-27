@@ -16,7 +16,7 @@ use axonml_serialize::{load_checkpoint, load_state_dict, StateDict};
 #[cfg(test)]
 use axonml_tensor::zeros;
 use axonml_tensor::Tensor;
-use axonml_vision::{MNIST, CIFAR10, FashionMNIST};
+use axonml_vision::{FashionMNIST, CIFAR10, MNIST};
 
 use super::utils::{
     detect_model_format, path_exists, print_header, print_info, print_kv, print_success,
@@ -118,8 +118,8 @@ fn load_model(path: &PathBuf) -> CliResult<ModelInfo> {
     }
 
     // Fallback: try to load as a state dict directly
-    let state_dict = load_state_dict(path)
-        .map_err(|e| CliError::Model(format!("Failed to load model: {e}")))?;
+    let state_dict =
+        load_state_dict(path).map_err(|e| CliError::Model(format!("Failed to load model: {e}")))?;
 
     let num_params = state_dict.len();
 
@@ -256,8 +256,7 @@ fn run_evaluation(args: &EvalArgs, model_info: &ModelInfo) -> CliResult<Vec<(Str
 
     // Detect or use specified format
     let format = args.format.clone().unwrap_or_else(|| {
-        EvalDataset::detect_format(&data_path)
-            .unwrap_or_else(|| "mnist".to_string())
+        EvalDataset::detect_format(&data_path).unwrap_or_else(|| "mnist".to_string())
     });
 
     print_info(&format!("Loading {} dataset from: {}", format, args.data));

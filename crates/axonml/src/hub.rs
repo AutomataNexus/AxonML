@@ -163,7 +163,9 @@ pub fn search_models(query: &str) -> Vec<UnifiedModelInfo> {
         .filter(|m| {
             m.name.to_lowercase().contains(&query_lower)
                 || m.architecture.to_lowercase().contains(&query_lower)
-                || m.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
+                || m.tags
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(&query_lower))
         })
         .collect()
 }
@@ -205,24 +207,35 @@ pub fn models_by_max_params(max_params: u64) -> Vec<UnifiedModelInfo> {
 pub fn recommended_models(task: &str) -> Vec<UnifiedModelInfo> {
     let task_lower = task.to_lowercase();
 
-    if task_lower.contains("image") || task_lower.contains("vision") || task_lower.contains("classify") {
+    if task_lower.contains("image")
+        || task_lower.contains("vision")
+        || task_lower.contains("classify")
+    {
         // Image classification - recommend efficient models first
         let mut models = models_by_category(ModelCategory::Vision);
         models.sort_by(|a, b| {
             // Prefer models with good accuracy/size ratio
             let ratio_a = a.size_bytes as f64;
             let ratio_b = b.size_bytes as f64;
-            ratio_a.partial_cmp(&ratio_b).unwrap_or(std::cmp::Ordering::Equal)
+            ratio_a
+                .partial_cmp(&ratio_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         models.truncate(5);
         models
-    } else if task_lower.contains("text") || task_lower.contains("nlp") || task_lower.contains("language") {
+    } else if task_lower.contains("text")
+        || task_lower.contains("nlp")
+        || task_lower.contains("language")
+    {
         // NLP tasks - recommend smaller models first
         let mut models = models_by_category(ModelCategory::Language);
         models.sort_by_key(|m| m.num_parameters);
         models.truncate(5);
         models
-    } else if task_lower.contains("chat") || task_lower.contains("instruct") || task_lower.contains("generate") {
+    } else if task_lower.contains("chat")
+        || task_lower.contains("instruct")
+        || task_lower.contains("generate")
+    {
         // Text generation - recommend instruction-tuned models
         search_models("instruct")
     } else {
@@ -282,7 +295,11 @@ fn format_params(params: u64) -> String {
 
 #[cfg(feature = "vision")]
 fn generate_vision_tags(name: &str, _info: &axonml_vision::hub::PretrainedModel) -> Vec<String> {
-    let mut tags = vec!["vision".to_string(), "image".to_string(), "classification".to_string()];
+    let mut tags = vec![
+        "vision".to_string(),
+        "image".to_string(),
+        "classification".to_string(),
+    ];
 
     if name.contains("mobile") {
         tags.push("mobile".to_string());
@@ -300,7 +317,11 @@ fn generate_vision_tags(name: &str, _info: &axonml_vision::hub::PretrainedModel)
 
 #[cfg(feature = "llm")]
 fn generate_llm_tags(name: &str, info: &axonml_llm::hub::PretrainedLLM) -> Vec<String> {
-    let mut tags = vec!["language".to_string(), "nlp".to_string(), "text".to_string()];
+    let mut tags = vec![
+        "language".to_string(),
+        "nlp".to_string(),
+        "text".to_string(),
+    ];
 
     tags.push(info.architecture.to_lowercase());
 
@@ -342,11 +363,7 @@ pub struct BenchmarkResult {
 
 impl BenchmarkResult {
     /// Create a new benchmark result.
-    pub fn new(
-        model_name: &str,
-        latencies_ms: &[f64],
-        peak_memory_bytes: u64,
-    ) -> Self {
+    pub fn new(model_name: &str, latencies_ms: &[f64], peak_memory_bytes: u64) -> Self {
         let iterations = latencies_ms.len();
         let avg_latency_ms = if iterations > 0 {
             latencies_ms.iter().sum::<f64>() / iterations as f64
@@ -358,7 +375,10 @@ impl BenchmarkResult {
         let mut sorted = latencies_ms.to_vec();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let p95_idx = (iterations as f64 * 0.95) as usize;
-        let p95_latency_ms = sorted.get(p95_idx.min(iterations.saturating_sub(1))).copied().unwrap_or(0.0);
+        let p95_latency_ms = sorted
+            .get(p95_idx.min(iterations.saturating_sub(1)))
+            .copied()
+            .unwrap_or(0.0);
 
         let throughput = if avg_latency_ms > 0.0 {
             1000.0 / avg_latency_ms
@@ -397,8 +417,10 @@ pub fn compare_benchmarks(results: &[BenchmarkResult]) {
         return;
     }
 
-    println!("\n{:<25} {:>12} {:>12} {:>14} {:>12}",
-             "Model", "Avg (ms)", "P95 (ms)", "Throughput", "Memory (MB)");
+    println!(
+        "\n{:<25} {:>12} {:>12} {:>14} {:>12}",
+        "Model", "Avg (ms)", "P95 (ms)", "Throughput", "Memory (MB)"
+    );
     println!("{}", "-".repeat(80));
 
     for result in results {
@@ -482,8 +504,10 @@ mod tests {
     fn test_search_models() {
         let results = search_models("resnet");
         for model in &results {
-            assert!(model.name.to_lowercase().contains("resnet")
-                || model.architecture.to_lowercase().contains("resnet"));
+            assert!(
+                model.name.to_lowercase().contains("resnet")
+                    || model.architecture.to_lowercase().contains("resnet")
+            );
         }
     }
 }

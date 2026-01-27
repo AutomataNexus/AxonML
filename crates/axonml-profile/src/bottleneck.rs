@@ -2,8 +2,8 @@
 //!
 //! Analyzes profiling data to identify performance bottlenecks.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
 
 use crate::compute::OperationStats;
 use crate::memory::MemoryStats;
@@ -75,10 +75,10 @@ pub struct AnalyzerConfig {
 impl Default for AnalyzerConfig {
     fn default() -> Self {
         Self {
-            slow_op_threshold_pct: 20.0,  // 20% of total time
-            high_call_threshold: 10000,    // 10k+ calls
+            slow_op_threshold_pct: 20.0,        // 20% of total time
+            high_call_threshold: 10000,         // 10k+ calls
             memory_hotspot_threshold_pct: 30.0, // 30% of peak memory
-            min_gflops_threshold: 1.0,     // 1 GFLOPS minimum
+            min_gflops_threshold: 1.0,          // 1 GFLOPS minimum
             check_memory_leaks: true,
         }
     }
@@ -136,10 +136,7 @@ impl BottleneckAnalyzer {
     }
 
     /// Analyzes for slow operations.
-    fn analyze_slow_operations(
-        &self,
-        stats: &HashMap<String, OperationStats>,
-    ) -> Vec<Bottleneck> {
+    fn analyze_slow_operations(&self, stats: &HashMap<String, OperationStats>) -> Vec<Bottleneck> {
         let mut bottlenecks = Vec::new();
 
         // Calculate total time
@@ -164,7 +161,10 @@ impl BottleneckAnalyzer {
 
                 let mut metrics = HashMap::new();
                 metrics.insert("time_percentage".to_string(), pct);
-                metrics.insert("total_time_ms".to_string(), op_stats.total_time_ns as f64 / 1e6);
+                metrics.insert(
+                    "total_time_ms".to_string(),
+                    op_stats.total_time_ns as f64 / 1e6,
+                );
                 metrics.insert("call_count".to_string(), op_stats.call_count as f64);
 
                 bottlenecks.push(Bottleneck {
@@ -189,10 +189,7 @@ impl BottleneckAnalyzer {
     }
 
     /// Analyzes for high call counts.
-    fn analyze_high_call_counts(
-        &self,
-        stats: &HashMap<String, OperationStats>,
-    ) -> Vec<Bottleneck> {
+    fn analyze_high_call_counts(&self, stats: &HashMap<String, OperationStats>) -> Vec<Bottleneck> {
         let mut bottlenecks = Vec::new();
 
         for (name, op_stats) in stats {
@@ -221,7 +218,9 @@ impl BottleneckAnalyzer {
                     name: name.clone(),
                     description: format!(
                         "Operation '{}' called {} times (avg {:.2}us per call)",
-                        name, op_stats.call_count, avg_time_ns as f64 / 1000.0
+                        name,
+                        op_stats.call_count,
+                        avg_time_ns as f64 / 1000.0
                     ),
                     suggestion: format!(
                         "Consider batching calls to '{}' or caching results if inputs repeat",
@@ -236,10 +235,7 @@ impl BottleneckAnalyzer {
     }
 
     /// Analyzes computational throughput.
-    fn analyze_throughput(
-        &self,
-        stats: &HashMap<String, OperationStats>,
-    ) -> Vec<Bottleneck> {
+    fn analyze_throughput(&self, stats: &HashMap<String, OperationStats>) -> Vec<Bottleneck> {
         let mut bottlenecks = Vec::new();
 
         for (name, op_stats) in stats {
@@ -354,8 +350,10 @@ impl BottleneckAnalyzer {
                         "Potential memory leak detected: {} bytes ({:.1}%) not freed",
                         leaked, leak_pct
                     ),
-                    suggestion: "Review memory management - ensure all allocations are properly freed. \
-                        Consider using RAII patterns or explicit deallocation tracking.".to_string(),
+                    suggestion:
+                        "Review memory management - ensure all allocations are properly freed. \
+                        Consider using RAII patterns or explicit deallocation tracking."
+                            .to_string(),
                     metrics,
                 });
             }
@@ -383,7 +381,10 @@ impl BottleneckAnalyzer {
 
             output.push_str(&format!(
                 "{}. {} {:?}: {}\n",
-                i + 1, severity_str, b.bottleneck_type, b.name
+                i + 1,
+                severity_str,
+                b.bottleneck_type,
+                b.name
             ));
             output.push_str(&format!("   Description: {}\n", b.description));
             output.push_str(&format!("   Suggestion: {}\n\n", b.suggestion));
@@ -400,25 +401,31 @@ mod tests {
     fn create_test_compute_stats() -> HashMap<String, OperationStats> {
         let mut stats = HashMap::new();
 
-        stats.insert("slow_op".to_string(), OperationStats {
-            name: "slow_op".to_string(),
-            call_count: 100,
-            total_time_ns: 8_000_000_000, // 8 seconds (80%)
-            min_time_ns: 70_000_000,
-            max_time_ns: 90_000_000,
-            flops: None,
-            bytes_processed: None,
-        });
+        stats.insert(
+            "slow_op".to_string(),
+            OperationStats {
+                name: "slow_op".to_string(),
+                call_count: 100,
+                total_time_ns: 8_000_000_000, // 8 seconds (80%)
+                min_time_ns: 70_000_000,
+                max_time_ns: 90_000_000,
+                flops: None,
+                bytes_processed: None,
+            },
+        );
 
-        stats.insert("fast_op".to_string(), OperationStats {
-            name: "fast_op".to_string(),
-            call_count: 1000,
-            total_time_ns: 2_000_000_000, // 2 seconds (20%)
-            min_time_ns: 1_000_000,
-            max_time_ns: 3_000_000,
-            flops: None,
-            bytes_processed: None,
-        });
+        stats.insert(
+            "fast_op".to_string(),
+            OperationStats {
+                name: "fast_op".to_string(),
+                call_count: 1000,
+                total_time_ns: 2_000_000_000, // 2 seconds (20%)
+                min_time_ns: 1_000_000,
+                max_time_ns: 3_000_000,
+                flops: None,
+                bytes_processed: None,
+            },
+        );
 
         stats
     }

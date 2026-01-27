@@ -235,7 +235,9 @@ impl<'a> NotebookRepository<'a> {
         };
 
         let notebook_json = serde_json::to_value(&notebook)?;
-        self.db.doc_insert(COLLECTION, Some(&notebook.id), notebook_json).await?;
+        self.db
+            .doc_insert(COLLECTION, Some(&notebook.id), notebook_json)
+            .await?;
 
         Ok(notebook)
     }
@@ -307,8 +309,14 @@ impl<'a> NotebookRepository<'a> {
     }
 
     /// Update notebook
-    pub async fn update(&self, id: &str, updates: UpdateNotebook) -> Result<TrainingNotebook, DbError> {
-        let mut notebook = self.find_by_id(id).await?
+    pub async fn update(
+        &self,
+        id: &str,
+        updates: UpdateNotebook,
+    ) -> Result<TrainingNotebook, DbError> {
+        let mut notebook = self
+            .find_by_id(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Notebook {} not found", id)))?;
 
         if let Some(name) = updates.name {
@@ -339,8 +347,14 @@ impl<'a> NotebookRepository<'a> {
     }
 
     /// Update a single cell in a notebook
-    pub async fn update_cell(&self, notebook_id: &str, cell: NotebookCell) -> Result<TrainingNotebook, DbError> {
-        let mut notebook = self.find_by_id(notebook_id).await?
+    pub async fn update_cell(
+        &self,
+        notebook_id: &str,
+        cell: NotebookCell,
+    ) -> Result<TrainingNotebook, DbError> {
+        let mut notebook = self
+            .find_by_id(notebook_id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Notebook {} not found", notebook_id)))?;
 
         // Find and update the cell
@@ -354,20 +368,32 @@ impl<'a> NotebookRepository<'a> {
         }
 
         if !found {
-            return Err(DbError::NotFound(format!("Cell {} not found in notebook", cell.id)));
+            return Err(DbError::NotFound(format!(
+                "Cell {} not found in notebook",
+                cell.id
+            )));
         }
 
         notebook.updated_at = Utc::now();
 
         let notebook_json = serde_json::to_value(&notebook)?;
-        self.db.doc_update(COLLECTION, notebook_id, notebook_json).await?;
+        self.db
+            .doc_update(COLLECTION, notebook_id, notebook_json)
+            .await?;
 
         Ok(notebook)
     }
 
     /// Add a cell to a notebook
-    pub async fn add_cell(&self, notebook_id: &str, cell: NotebookCell, position: Option<usize>) -> Result<TrainingNotebook, DbError> {
-        let mut notebook = self.find_by_id(notebook_id).await?
+    pub async fn add_cell(
+        &self,
+        notebook_id: &str,
+        cell: NotebookCell,
+        position: Option<usize>,
+    ) -> Result<TrainingNotebook, DbError> {
+        let mut notebook = self
+            .find_by_id(notebook_id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Notebook {} not found", notebook_id)))?;
 
         match position {
@@ -382,43 +408,66 @@ impl<'a> NotebookRepository<'a> {
         notebook.updated_at = Utc::now();
 
         let notebook_json = serde_json::to_value(&notebook)?;
-        self.db.doc_update(COLLECTION, notebook_id, notebook_json).await?;
+        self.db
+            .doc_update(COLLECTION, notebook_id, notebook_json)
+            .await?;
 
         Ok(notebook)
     }
 
     /// Delete a cell from a notebook
-    pub async fn delete_cell(&self, notebook_id: &str, cell_id: &str) -> Result<TrainingNotebook, DbError> {
-        let mut notebook = self.find_by_id(notebook_id).await?
+    pub async fn delete_cell(
+        &self,
+        notebook_id: &str,
+        cell_id: &str,
+    ) -> Result<TrainingNotebook, DbError> {
+        let mut notebook = self
+            .find_by_id(notebook_id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Notebook {} not found", notebook_id)))?;
 
         let original_len = notebook.cells.len();
         notebook.cells.retain(|c| c.id != cell_id);
 
         if notebook.cells.len() == original_len {
-            return Err(DbError::NotFound(format!("Cell {} not found in notebook", cell_id)));
+            return Err(DbError::NotFound(format!(
+                "Cell {} not found in notebook",
+                cell_id
+            )));
         }
 
         notebook.updated_at = Utc::now();
 
         let notebook_json = serde_json::to_value(&notebook)?;
-        self.db.doc_update(COLLECTION, notebook_id, notebook_json).await?;
+        self.db
+            .doc_update(COLLECTION, notebook_id, notebook_json)
+            .await?;
 
         Ok(notebook)
     }
 
     /// Update notebook status
-    pub async fn update_status(&self, id: &str, status: NotebookStatus) -> Result<TrainingNotebook, DbError> {
-        self.update(id, UpdateNotebook {
-            status: Some(status),
-            ..Default::default()
-        }).await
+    pub async fn update_status(
+        &self,
+        id: &str,
+        status: NotebookStatus,
+    ) -> Result<TrainingNotebook, DbError> {
+        self.update(
+            id,
+            UpdateNotebook {
+                status: Some(status),
+                ..Default::default()
+            },
+        )
+        .await
     }
 
     /// Delete notebook
     pub async fn delete(&self, id: &str) -> Result<(), DbError> {
         // Check if notebook exists
-        let _ = self.find_by_id(id).await?
+        let _ = self
+            .find_by_id(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Notebook {} not found", id)))?;
 
         // Delete all associated checkpoints
@@ -435,7 +484,10 @@ impl<'a> NotebookRepository<'a> {
     // ========================================================================
 
     /// Create a checkpoint
-    pub async fn create_checkpoint(&self, new_checkpoint: NewCheckpoint) -> Result<NotebookCheckpoint, DbError> {
+    pub async fn create_checkpoint(
+        &self,
+        new_checkpoint: NewCheckpoint,
+    ) -> Result<NotebookCheckpoint, DbError> {
         let checkpoint = NotebookCheckpoint {
             id: Uuid::new_v4().to_string(),
             notebook_id: new_checkpoint.notebook_id,
@@ -448,7 +500,13 @@ impl<'a> NotebookRepository<'a> {
         };
 
         let checkpoint_json = serde_json::to_value(&checkpoint)?;
-        self.db.doc_insert(CHECKPOINTS_COLLECTION, Some(&checkpoint.id), checkpoint_json).await?;
+        self.db
+            .doc_insert(
+                CHECKPOINTS_COLLECTION,
+                Some(&checkpoint.id),
+                checkpoint_json,
+            )
+            .await?;
 
         Ok(checkpoint)
     }
@@ -467,7 +525,10 @@ impl<'a> NotebookRepository<'a> {
     }
 
     /// List checkpoints for a notebook
-    pub async fn list_checkpoints(&self, notebook_id: &str) -> Result<Vec<NotebookCheckpoint>, DbError> {
+    pub async fn list_checkpoints(
+        &self,
+        notebook_id: &str,
+    ) -> Result<Vec<NotebookCheckpoint>, DbError> {
         let filter = serde_json::json!({
             "notebook_id": { "$eq": notebook_id }
         });
@@ -491,19 +552,33 @@ impl<'a> NotebookRepository<'a> {
     }
 
     /// Get best checkpoint by metric
-    pub async fn get_best_checkpoint(&self, notebook_id: &str, metric_key: &str, minimize: bool) -> Result<Option<NotebookCheckpoint>, DbError> {
+    pub async fn get_best_checkpoint(
+        &self,
+        notebook_id: &str,
+        metric_key: &str,
+        minimize: bool,
+    ) -> Result<Option<NotebookCheckpoint>, DbError> {
         let checkpoints = self.list_checkpoints(notebook_id).await?;
 
-        let best = checkpoints.into_iter()
+        let best = checkpoints
+            .into_iter()
             .filter_map(|cp| {
                 let value = cp.metrics.get(metric_key)?.as_f64()?;
                 Some((cp, value))
             })
             .reduce(|a, b| {
                 if minimize {
-                    if a.1 < b.1 { a } else { b }
+                    if a.1 < b.1 {
+                        a
+                    } else {
+                        b
+                    }
                 } else {
-                    if a.1 > b.1 { a } else { b }
+                    if a.1 > b.1 {
+                        a
+                    } else {
+                        b
+                    }
                 }
             })
             .map(|(cp, _)| cp);
@@ -548,14 +623,12 @@ mod tests {
             user_id: "user-456".to_string(),
             name: "Test Notebook".to_string(),
             description: Some("A test notebook".to_string()),
-            cells: vec![
-                NotebookCell {
-                    id: "cell-1".to_string(),
-                    cell_type: CellType::Markdown,
-                    source: "# Hello".to_string(),
-                    ..Default::default()
-                },
-            ],
+            cells: vec![NotebookCell {
+                id: "cell-1".to_string(),
+                cell_type: CellType::Markdown,
+                source: "# Hello".to_string(),
+                ..Default::default()
+            }],
             metadata: NotebookMetadata::default(),
             model_id: None,
             dataset_id: None,

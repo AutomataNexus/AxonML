@@ -100,11 +100,7 @@ impl SecretsManager {
         for backend in &self.backends {
             match backend.get_secret(key).await {
                 Ok(Some(value)) => {
-                    tracing::debug!(
-                        secret_key = key,
-                        backend = backend.name(),
-                        "Secret loaded"
-                    );
+                    tracing::debug!(secret_key = key, backend = backend.name(), "Secret loaded");
                     return Ok(value);
                 }
                 Ok(None) => continue,
@@ -187,7 +183,10 @@ mod tests {
     #[tokio::test]
     async fn test_secrets_manager_priority() {
         let backend1 = Arc::new(MockBackend::new(vec![("key1", "value1")]));
-        let backend2 = Arc::new(MockBackend::new(vec![("key1", "value2"), ("key2", "value2")]));
+        let backend2 = Arc::new(MockBackend::new(vec![
+            ("key1", "value2"),
+            ("key2", "value2"),
+        ]));
 
         let manager = SecretsManager::new()
             .with_backend(backend1)

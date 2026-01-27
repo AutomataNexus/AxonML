@@ -45,7 +45,8 @@ pub struct Vocab {
 
 impl Vocab {
     /// Creates a new empty vocabulary.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             token_to_idx: HashMap::new(),
             idx_to_token: Vec::new(),
@@ -57,7 +58,8 @@ impl Vocab {
     }
 
     /// Creates a vocabulary with default special tokens.
-    #[must_use] pub fn with_special_tokens() -> Self {
+    #[must_use]
+    pub fn with_special_tokens() -> Self {
         let mut vocab = Self::new();
         vocab.add_special_tokens(&[PAD_TOKEN, UNK_TOKEN, BOS_TOKEN, EOS_TOKEN]);
         vocab.unk_token = Some(UNK_TOKEN.to_string());
@@ -68,7 +70,8 @@ impl Vocab {
     }
 
     /// Creates a vocabulary from a list of tokens.
-    #[must_use] pub fn from_tokens(tokens: &[&str]) -> Self {
+    #[must_use]
+    pub fn from_tokens(tokens: &[&str]) -> Self {
         let mut vocab = Self::new();
         for token in tokens {
             vocab.add_token(token);
@@ -77,7 +80,8 @@ impl Vocab {
     }
 
     /// Creates a vocabulary from text by extracting unique tokens.
-    #[must_use] pub fn from_text(text: &str, min_freq: usize) -> Self {
+    #[must_use]
+    pub fn from_text(text: &str, min_freq: usize) -> Self {
         let mut freq: HashMap<String, usize> = HashMap::new();
 
         for word in text.split_whitespace() {
@@ -120,7 +124,8 @@ impl Vocab {
     }
 
     /// Returns the index for a token, or the UNK index if not found.
-    #[must_use] pub fn token_to_index(&self, token: &str) -> usize {
+    #[must_use]
+    pub fn token_to_index(&self, token: &str) -> usize {
         if let Some(&idx) = self.token_to_idx.get(token) {
             return idx;
         }
@@ -136,63 +141,76 @@ impl Vocab {
     }
 
     /// Returns the token for an index.
-    #[must_use] pub fn index_to_token(&self, idx: usize) -> Option<&str> {
+    #[must_use]
+    pub fn index_to_token(&self, idx: usize) -> Option<&str> {
         self.idx_to_token.get(idx).map(std::string::String::as_str)
     }
 
     /// Returns the vocabulary size.
-    #[must_use] pub fn len(&self) -> usize {
+    #[must_use]
+    pub fn len(&self) -> usize {
         self.idx_to_token.len()
     }
 
     /// Returns true if the vocabulary is empty.
-    #[must_use] pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
         self.idx_to_token.is_empty()
     }
 
     /// Checks if a token is in the vocabulary.
-    #[must_use] pub fn contains(&self, token: &str) -> bool {
+    #[must_use]
+    pub fn contains(&self, token: &str) -> bool {
         self.token_to_idx.contains_key(token)
     }
 
     /// Returns the UNK token index.
-    #[must_use] pub fn unk_index(&self) -> Option<usize> {
+    #[must_use]
+    pub fn unk_index(&self) -> Option<usize> {
         self.unk_token
             .as_ref()
             .and_then(|t| self.token_to_idx.get(t).copied())
     }
 
     /// Returns the PAD token index.
-    #[must_use] pub fn pad_index(&self) -> Option<usize> {
+    #[must_use]
+    pub fn pad_index(&self) -> Option<usize> {
         self.pad_token
             .as_ref()
             .and_then(|t| self.token_to_idx.get(t).copied())
     }
 
     /// Returns the BOS token index.
-    #[must_use] pub fn bos_index(&self) -> Option<usize> {
+    #[must_use]
+    pub fn bos_index(&self) -> Option<usize> {
         self.bos_token
             .as_ref()
             .and_then(|t| self.token_to_idx.get(t).copied())
     }
 
     /// Returns the EOS token index.
-    #[must_use] pub fn eos_index(&self) -> Option<usize> {
+    #[must_use]
+    pub fn eos_index(&self) -> Option<usize> {
         self.eos_token
             .as_ref()
             .and_then(|t| self.token_to_idx.get(t).copied())
     }
 
     /// Encodes a sequence of tokens to indices.
-    #[must_use] pub fn encode(&self, tokens: &[&str]) -> Vec<usize> {
+    #[must_use]
+    pub fn encode(&self, tokens: &[&str]) -> Vec<usize> {
         tokens.iter().map(|t| self.token_to_index(t)).collect()
     }
 
     /// Decodes a sequence of indices to tokens.
-    #[must_use] pub fn decode(&self, indices: &[usize]) -> Vec<String> {
+    #[must_use]
+    pub fn decode(&self, indices: &[usize]) -> Vec<String> {
         indices
             .iter()
-            .filter_map(|&idx| self.index_to_token(idx).map(std::string::ToString::to_string))
+            .filter_map(|&idx| {
+                self.index_to_token(idx)
+                    .map(std::string::ToString::to_string)
+            })
             .collect()
     }
 
@@ -209,7 +227,8 @@ impl Vocab {
     }
 
     /// Returns all tokens in the vocabulary.
-    #[must_use] pub fn tokens(&self) -> &[String] {
+    #[must_use]
+    pub fn tokens(&self) -> &[String] {
         &self.idx_to_token
     }
 }

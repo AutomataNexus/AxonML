@@ -5,9 +5,9 @@
 use leptos::*;
 
 use crate::api;
+use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*};
 
 /// Kaggle integration page
 #[component]

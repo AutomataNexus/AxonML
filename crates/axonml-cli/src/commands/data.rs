@@ -140,8 +140,10 @@ fn execute_upload(args: DataUploadArgs) -> CliResult<()> {
 
     // Determine dataset name
     let dataset_name = args.name.clone().unwrap_or_else(|| {
-        source_path
-            .file_stem().map_or_else(|| "dataset".to_string(), |s| s.to_string_lossy().to_string())
+        source_path.file_stem().map_or_else(
+            || "dataset".to_string(),
+            |s| s.to_string_lossy().to_string(),
+        )
     });
 
     print_kv("Source", &args.path);
@@ -267,8 +269,10 @@ fn analyze_dataset(
     type_hint: Option<&str>,
     max_samples: usize,
 ) -> CliResult<DatasetAnalysis> {
-    let name = path
-        .file_name().map_or_else(|| "dataset".to_string(), |s| s.to_string_lossy().to_string());
+    let name = path.file_name().map_or_else(
+        || "dataset".to_string(),
+        |s| s.to_string_lossy().to_string(),
+    );
 
     // Detect dataset type
     let data_type = type_hint.map_or_else(|| detect_data_type(path), parse_data_type);
@@ -359,7 +363,10 @@ fn scan_files(path: &PathBuf) -> CliResult<(DataStatistics, HashMap<String, usiz
     let mut stats = DataStatistics::default();
     let mut file_types: HashMap<String, usize> = HashMap::new();
 
-    for entry in WalkDir::new(path).into_iter().filter_map(std::result::Result::ok) {
+    for entry in WalkDir::new(path)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+    {
         if entry.file_type().is_file() {
             stats.num_files += 1;
             if let Ok(metadata) = entry.metadata() {
@@ -402,11 +409,7 @@ fn estimate_sample_count(
                 .into_iter()
                 .filter_map(std::result::Result::ok)
             {
-                if entry
-                    .path()
-                    .extension()
-                    .is_some_and(|e| e == "csv")
-                {
+                if entry.path().extension().is_some_and(|e| e == "csv") {
                     if let Ok(content) = fs::read_to_string(entry.path()) {
                         return content.lines().count().saturating_sub(1); // Subtract header
                     }
@@ -466,11 +469,7 @@ fn detect_classes(
                 .into_iter()
                 .filter_map(std::result::Result::ok)
             {
-                if entry
-                    .path()
-                    .extension()
-                    .is_some_and(|e| e == "csv")
-                {
+                if entry.path().extension().is_some_and(|e| e == "csv") {
                     if let Ok(content) = fs::read_to_string(entry.path()) {
                         let lines: Vec<&str> = content.lines().collect();
                         if lines.len() > 1 {
@@ -512,11 +511,7 @@ fn detect_input_shape(
                 .into_iter()
                 .filter_map(std::result::Result::ok)
             {
-                if entry
-                    .path()
-                    .extension()
-                    .is_some_and(|e| e == "csv")
-                {
+                if entry.path().extension().is_some_and(|e| e == "csv") {
                     if let Ok(content) = fs::read_to_string(entry.path()) {
                         if let Some(first_line) = content.lines().next() {
                             let num_cols = first_line.split(',').count();
@@ -838,11 +833,7 @@ fn preview_tabular(path: &PathBuf, num_samples: usize) -> CliResult<()> {
         .into_iter()
         .filter_map(std::result::Result::ok)
     {
-        if entry
-            .path()
-            .extension()
-            .is_some_and(|e| e == "csv")
-        {
+        if entry.path().extension().is_some_and(|e| e == "csv") {
             let content = fs::read_to_string(entry.path())?;
             let lines: Vec<&str> = content.lines().collect();
 
@@ -868,17 +859,20 @@ fn preview_image(path: &PathBuf, num_samples: usize) -> CliResult<()> {
     let mut count = 0;
 
     println!("Sample images:");
-    for entry in WalkDir::new(path).into_iter().filter_map(std::result::Result::ok) {
+    for entry in WalkDir::new(path)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+    {
         if let Some(ext) = entry.path().extension() {
             if matches!(
                 ext.to_string_lossy().to_lowercase().as_str(),
                 "jpg" | "jpeg" | "png" | "bmp"
-            )
-                && count < num_samples {
-                    let relative = entry.path().strip_prefix(path).unwrap_or(entry.path());
-                    println!("  [{}] {}", count + 1, relative.display());
-                    count += 1;
-                }
+            ) && count < num_samples
+            {
+                let relative = entry.path().strip_prefix(path).unwrap_or(entry.path());
+                println!("  [{}] {}", count + 1, relative.display());
+                count += 1;
+            }
         }
     }
 
@@ -902,14 +896,14 @@ fn preview_text(path: &PathBuf, num_samples: usize) -> CliResult<()> {
             if matches!(
                 ext.to_string_lossy().to_lowercase().as_str(),
                 "txt" | "json" | "jsonl"
-            )
-                && count < num_samples {
-                    if let Ok(content) = fs::read_to_string(entry.path()) {
-                        let preview = truncate(content.lines().next().unwrap_or(""), 100);
-                        println!("  [{}] {}", count + 1, preview);
-                        count += 1;
-                    }
+            ) && count < num_samples
+            {
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    let preview = truncate(content.lines().next().unwrap_or(""), 100);
+                    println!("  [{}] {}", count + 1, preview);
+                    count += 1;
                 }
+            }
         }
     }
 
@@ -924,7 +918,10 @@ fn preview_files(path: &PathBuf, num_samples: usize) -> CliResult<()> {
     let mut count = 0;
 
     println!("Sample files:");
-    for entry in WalkDir::new(path).into_iter().filter_map(std::result::Result::ok) {
+    for entry in WalkDir::new(path)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+    {
         if entry.file_type().is_file() && count < num_samples {
             let relative = entry.path().strip_prefix(path).unwrap_or(entry.path());
             println!("  [{}] {}", count + 1, relative.display());

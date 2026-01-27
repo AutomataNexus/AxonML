@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, modal::*};
 
 /// Endpoints list page
 #[component]
@@ -484,8 +484,8 @@ pub fn EndpointDetailPage() -> impl IntoView {
                                     <div class="api-example">
                                         <h4>"Example Request"</h4>
                                         <pre><code>{r#"curl -X POST http://localhost:3000/api/inference/predict/"#}{e.name.clone()}{r#" \
-  -H "Content-Type: application/json" \
-  -d '{"inputs": [1, 2, 3]}'"#}</code></pre>
+    -H "Content-Type: application/json" \
+    -d '{"inputs": [1, 2, 3]}'"#}</code></pre>
                                     </div>
                                 </div>
                             </div>

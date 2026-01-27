@@ -197,7 +197,8 @@ axonml = { path = "/opt/AxonML/crates/axonml" }
 [profile.dev]
 opt-level = 0
 debug = false
-"#.to_string()
+"#
+        .to_string()
     }
 
     /// Run cargo build and execute
@@ -215,11 +216,14 @@ debug = false
                 .spawn()
                 .map_err(|e| format!("Failed to spawn cargo build: {}", e))?;
 
-            let output = child.wait_with_output().await
+            let output = child
+                .wait_with_output()
+                .await
                 .map_err(|e| format!("Failed to wait for cargo build: {}", e))?;
 
             Ok::<_, String>(output)
-        }).await;
+        })
+        .await;
 
         let build_output = match build_result {
             Ok(Ok(output)) => output,
@@ -264,11 +268,14 @@ debug = false
                 .spawn()
                 .map_err(|e| format!("Failed to spawn cargo run: {}", e))?;
 
-            let output = child.wait_with_output().await
+            let output = child
+                .wait_with_output()
+                .await
                 .map_err(|e| format!("Failed to wait for execution: {}", e))?;
 
             Ok::<_, String>(output)
-        }).await;
+        })
+        .await;
 
         match run_result {
             Ok(Ok(output)) => {
@@ -309,7 +316,10 @@ debug = false
                     .replace(r"/tmp/", "")
                     .replace("notebook_cell/src/main.rs", "cell");
                 cleaned.push(cleaned_line);
-            } else if line.starts_with("error") || line.starts_with("warning") || line.contains("-->") {
+            } else if line.starts_with("error")
+                || line.starts_with("warning")
+                || line.contains("-->")
+            {
                 cleaned.push(line.to_string());
             } else if line.trim().starts_with('|') || line.trim().starts_with('=') {
                 cleaned.push(line.to_string());
@@ -354,7 +364,12 @@ pub fn result_to_cell_output(result: ExecutionResult, execution_count: u32) -> C
             error_value: Some(if result.stderr.is_empty() {
                 "Unknown error".to_string()
             } else {
-                result.stderr.lines().next().unwrap_or("Unknown error").to_string()
+                result
+                    .stderr
+                    .lines()
+                    .next()
+                    .unwrap_or("Unknown error")
+                    .to_string()
             }),
             traceback: Some(result.stderr.lines().map(|s| s.to_string()).collect()),
         }

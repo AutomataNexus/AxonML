@@ -24,7 +24,8 @@ pub struct AudioClassificationDataset {
 
 impl AudioClassificationDataset {
     /// Creates a new audio classification dataset from waveforms and labels.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         waveforms: Vec<Tensor<f32>>,
         labels: Vec<usize>,
         sample_rate: usize,
@@ -39,12 +40,14 @@ impl AudioClassificationDataset {
     }
 
     /// Returns the sample rate.
-    #[must_use] pub fn sample_rate(&self) -> usize {
+    #[must_use]
+    pub fn sample_rate(&self) -> usize {
         self.sample_rate
     }
 
     /// Returns the number of classes.
-    #[must_use] pub fn num_classes(&self) -> usize {
+    #[must_use]
+    pub fn num_classes(&self) -> usize {
         self.num_classes
     }
 }
@@ -87,7 +90,8 @@ pub struct SyntheticCommandDataset {
 
 impl SyntheticCommandDataset {
     /// Creates a new synthetic command dataset.
-    #[must_use] pub fn new(num_samples: usize, sample_rate: usize, duration: f32, num_classes: usize) -> Self {
+    #[must_use]
+    pub fn new(num_samples: usize, sample_rate: usize, duration: f32, num_classes: usize) -> Self {
         Self {
             num_samples,
             sample_rate,
@@ -97,17 +101,20 @@ impl SyntheticCommandDataset {
     }
 
     /// Creates a small dataset with 100 samples.
-    #[must_use] pub fn small() -> Self {
+    #[must_use]
+    pub fn small() -> Self {
         Self::new(100, 16000, 0.5, 10)
     }
 
     /// Creates a medium dataset with 1000 samples.
-    #[must_use] pub fn medium() -> Self {
+    #[must_use]
+    pub fn medium() -> Self {
         Self::new(1000, 16000, 0.5, 10)
     }
 
     /// Creates a large dataset with 10000 samples.
-    #[must_use] pub fn large() -> Self {
+    #[must_use]
+    pub fn large() -> Self {
         Self::new(10000, 16000, 0.5, 35)
     }
 
@@ -151,12 +158,14 @@ impl SyntheticCommandDataset {
     }
 
     /// Returns the sample rate.
-    #[must_use] pub fn sample_rate(&self) -> usize {
+    #[must_use]
+    pub fn sample_rate(&self) -> usize {
         self.sample_rate
     }
 
     /// Returns the number of classes.
-    #[must_use] pub fn num_classes(&self) -> usize {
+    #[must_use]
+    pub fn num_classes(&self) -> usize {
         self.num_classes
     }
 }
@@ -200,7 +209,8 @@ pub struct SyntheticMusicDataset {
 
 impl SyntheticMusicDataset {
     /// Creates a new synthetic music dataset.
-    #[must_use] pub fn new(num_samples: usize, sample_rate: usize, duration: f32, num_genres: usize) -> Self {
+    #[must_use]
+    pub fn new(num_samples: usize, sample_rate: usize, duration: f32, num_genres: usize) -> Self {
         Self {
             num_samples,
             sample_rate,
@@ -210,12 +220,14 @@ impl SyntheticMusicDataset {
     }
 
     /// Creates a small dataset.
-    #[must_use] pub fn small() -> Self {
+    #[must_use]
+    pub fn small() -> Self {
         Self::new(100, 22050, 1.0, 5)
     }
 
     /// Creates a medium dataset.
-    #[must_use] pub fn medium() -> Self {
+    #[must_use]
+    pub fn medium() -> Self {
         Self::new(500, 22050, 2.0, 10)
     }
 
@@ -275,12 +287,14 @@ impl SyntheticMusicDataset {
     }
 
     /// Returns the sample rate.
-    #[must_use] pub fn sample_rate(&self) -> usize {
+    #[must_use]
+    pub fn sample_rate(&self) -> usize {
         self.sample_rate
     }
 
     /// Returns the number of genres.
-    #[must_use] pub fn num_genres(&self) -> usize {
+    #[must_use]
+    pub fn num_genres(&self) -> usize {
         self.num_genres
     }
 }
@@ -324,7 +338,8 @@ pub struct SyntheticSpeakerDataset {
 
 impl SyntheticSpeakerDataset {
     /// Creates a new synthetic speaker dataset.
-    #[must_use] pub fn new(num_samples: usize, sample_rate: usize, duration: f32, num_speakers: usize) -> Self {
+    #[must_use]
+    pub fn new(num_samples: usize, sample_rate: usize, duration: f32, num_speakers: usize) -> Self {
         Self {
             num_samples,
             sample_rate,
@@ -334,12 +349,14 @@ impl SyntheticSpeakerDataset {
     }
 
     /// Creates a small dataset.
-    #[must_use] pub fn small() -> Self {
+    #[must_use]
+    pub fn small() -> Self {
         Self::new(100, 16000, 0.5, 5)
     }
 
     /// Creates a medium dataset.
-    #[must_use] pub fn medium() -> Self {
+    #[must_use]
+    pub fn medium() -> Self {
         Self::new(500, 16000, 1.0, 20)
     }
 
@@ -390,12 +407,14 @@ impl SyntheticSpeakerDataset {
     }
 
     /// Returns the sample rate.
-    #[must_use] pub fn sample_rate(&self) -> usize {
+    #[must_use]
+    pub fn sample_rate(&self) -> usize {
         self.sample_rate
     }
 
     /// Returns the number of speakers.
-    #[must_use] pub fn num_speakers(&self) -> usize {
+    #[must_use]
+    pub fn num_speakers(&self) -> usize {
         self.num_speakers
     }
 }
@@ -436,12 +455,14 @@ pub struct AudioSeq2SeqDataset {
 
 impl AudioSeq2SeqDataset {
     /// Creates a new audio seq2seq dataset.
-    #[must_use] pub fn new(sources: Vec<Tensor<f32>>, targets: Vec<Tensor<f32>>) -> Self {
+    #[must_use]
+    pub fn new(sources: Vec<Tensor<f32>>, targets: Vec<Tensor<f32>>) -> Self {
         Self { sources, targets }
     }
 
     /// Creates a synthetic noise reduction dataset.
-    #[must_use] pub fn noise_reduction_task(num_samples: usize, sample_rate: usize, duration: f32) -> Self {
+    #[must_use]
+    pub fn noise_reduction_task(num_samples: usize, sample_rate: usize, duration: f32) -> Self {
         let n_samples_per = (sample_rate as f32 * duration) as usize;
         let mut sources = Vec::with_capacity(num_samples);
         let mut targets = Vec::with_capacity(num_samples);

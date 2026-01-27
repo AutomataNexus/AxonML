@@ -133,7 +133,8 @@ pub struct GradientBucket {
 
 impl GradientBucket {
     /// Creates a new gradient bucket.
-    #[must_use] pub fn new(capacity: usize) -> Self {
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
         Self {
             data: Vec::with_capacity(capacity),
             shapes: Vec::new(),
@@ -142,17 +143,20 @@ impl GradientBucket {
     }
 
     /// Checks if the bucket is full.
-    #[must_use] pub fn is_full(&self) -> bool {
+    #[must_use]
+    pub fn is_full(&self) -> bool {
         self.data.len() >= self.capacity
     }
 
     /// Checks if the bucket is empty.
-    #[must_use] pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
     /// Returns the current size.
-    #[must_use] pub fn size(&self) -> usize {
+    #[must_use]
+    pub fn size(&self) -> usize {
         self.data.len()
     }
 
@@ -169,7 +173,8 @@ impl GradientBucket {
     }
 
     /// Returns the flattened data.
-    #[must_use] pub fn data(&self) -> &[f32] {
+    #[must_use]
+    pub fn data(&self) -> &[f32] {
         &self.data
     }
 
@@ -185,7 +190,8 @@ impl GradientBucket {
     }
 
     /// Extracts tensors back from the bucket.
-    #[must_use] pub fn extract(&self) -> Vec<Tensor<f32>> {
+    #[must_use]
+    pub fn extract(&self) -> Vec<Tensor<f32>> {
         let mut result = Vec::new();
         let mut offset = 0;
 
@@ -224,7 +230,8 @@ pub struct GradientSynchronizer {
 
 impl GradientSynchronizer {
     /// Creates a new gradient synchronizer.
-    #[must_use] pub fn new(strategy: GradSyncStrategy, bucket_size: usize) -> Self {
+    #[must_use]
+    pub fn new(strategy: GradSyncStrategy, bucket_size: usize) -> Self {
         Self {
             strategy,
             bucket_size,
@@ -233,7 +240,8 @@ impl GradientSynchronizer {
     }
 
     /// Returns the synchronization strategy.
-    #[must_use] pub fn strategy(&self) -> GradSyncStrategy {
+    #[must_use]
+    pub fn strategy(&self) -> GradSyncStrategy {
         self.strategy
     }
 

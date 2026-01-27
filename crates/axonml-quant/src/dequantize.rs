@@ -9,7 +9,7 @@ use axonml_tensor::Tensor;
 use rayon::prelude::*;
 
 use crate::error::{QuantError, QuantResult};
-use crate::types::{QuantType, QuantizedTensor, QuantizedBlock, Q8Block, Q4Block, Q4_1Block};
+use crate::types::{Q4Block, Q4_1Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
 
 // =============================================================================
 // Public API
@@ -88,11 +88,7 @@ fn dequantize_q8_0(quantized: &QuantizedTensor) -> QuantResult<Vec<f32>> {
 /// Dequantizes a single Q8 block.
 fn dequantize_q8_block(block: &Q8Block) -> Vec<f32> {
     let scale = block.scale.to_f32();
-    block
-        .data
-        .iter()
-        .map(|&q| q as f32 * scale)
-        .collect()
+    block.data.iter().map(|&q| q as f32 * scale).collect()
 }
 
 // =============================================================================
@@ -121,10 +117,7 @@ fn dequantize_q4_block(block: &Q4Block) -> Vec<f32> {
     let scale = block.scale.to_f32();
     let unpacked = block.unpack();
 
-    unpacked
-        .iter()
-        .map(|&q| q as f32 * scale)
-        .collect()
+    unpacked.iter().map(|&q| q as f32 * scale).collect()
 }
 
 // =============================================================================
@@ -154,10 +147,7 @@ fn dequantize_q4_1_block(block: &Q4_1Block) -> Vec<f32> {
     let min = block.min.to_f32();
     let unpacked = block.unpack();
 
-    unpacked
-        .iter()
-        .map(|&q| q as f32 * scale + min)
-        .collect()
+    unpacked.iter().map(|&q| q as f32 * scale + min).collect()
 }
 
 // =============================================================================
@@ -225,7 +215,12 @@ mod tests {
         // Check values are close (some error expected)
         let deq_data = dequantized.to_vec();
         for (orig, deq) in original.iter().zip(deq_data.iter()) {
-            assert!((orig - deq).abs() < 0.1, "Q8 error too large: {} vs {}", orig, deq);
+            assert!(
+                (orig - deq).abs() < 0.1,
+                "Q8 error too large: {} vs {}",
+                orig,
+                deq
+            );
         }
     }
 

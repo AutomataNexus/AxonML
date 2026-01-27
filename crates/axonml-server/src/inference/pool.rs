@@ -147,20 +147,24 @@ impl ModelPool {
     /// Get all entry infos
     pub async fn list_entries(&self) -> Vec<PoolEntryInfo> {
         let entries = self.entries.read().await;
-        entries.values().map(|e| PoolEntryInfo {
-            endpoint_id: e.endpoint_id.clone(),
-            model_id: e.model_id.clone(),
-            version_id: e.version_id.clone(),
-            replicas: e.replicas,
-            current_load: e.current_load,
-            idle_time_secs: e.last_used.elapsed().as_secs(),
-        }).collect()
+        entries
+            .values()
+            .map(|e| PoolEntryInfo {
+                endpoint_id: e.endpoint_id.clone(),
+                model_id: e.model_id.clone(),
+                version_id: e.version_id.clone(),
+                replicas: e.replicas,
+                current_load: e.current_load,
+                idle_time_secs: e.last_used.elapsed().as_secs(),
+            })
+            .collect()
     }
 
     /// Check if pool has capacity for an endpoint
     pub async fn has_capacity(&self, endpoint_id: &str) -> bool {
         let entries = self.entries.read().await;
-        entries.get(endpoint_id)
+        entries
+            .get(endpoint_id)
             .map(|e| e.current_load < e.replicas)
             .unwrap_or(false)
     }

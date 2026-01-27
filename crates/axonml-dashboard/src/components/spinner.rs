@@ -151,9 +151,7 @@ pub fn LoadingOverlay(
 
 /// Full page loading state
 #[component]
-pub fn PageLoader(
-    #[prop(optional, into)] text: String,
-) -> impl IntoView {
+pub fn PageLoader(#[prop(optional, into)] text: String) -> impl IntoView {
     let text_empty = text.is_empty();
     let text_stored = store_value(text);
 
@@ -204,9 +202,7 @@ pub fn SkeletonText(
 
 /// Skeleton card
 #[component]
-pub fn SkeletonCard(
-    #[prop(optional, into)] class: String,
-) -> impl IntoView {
+pub fn SkeletonCard(#[prop(optional, into)] class: String) -> impl IntoView {
     view! {
         <div class=format!("card skeleton-card {}", class)>
             <Skeleton width="40%".to_string() height="1.5rem".to_string() />

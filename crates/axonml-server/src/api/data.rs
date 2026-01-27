@@ -151,20 +151,23 @@ pub async fn analyze_dataset(
     Query(query): Query<AnalyzeQuery>,
 ) -> Result<Json<DatasetAnalysis>, AuthError> {
     // Get dataset from database
-    let dataset = state.db.doc_get("axonml_datasets", &dataset_id)
+    let dataset = state
+        .db
+        .doc_get("axonml_datasets", &dataset_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Dataset not found".to_string()))?;
 
-    let dataset: Dataset = serde_json::from_value(dataset)
-        .map_err(|e| AuthError::Internal(e.to_string()))?;
+    let dataset: Dataset =
+        serde_json::from_value(dataset).map_err(|e| AuthError::Internal(e.to_string()))?;
 
     if dataset.user_id != user.id {
         return Err(AuthError::Forbidden("Access denied".to_string()));
     }
 
     let path = PathBuf::from(&dataset.file_path);
-    let data_type = query.data_type
+    let data_type = query
+        .data_type
         .map(|t| parse_data_type(&t))
         .unwrap_or_else(|| detect_data_type(&path));
     let max_samples = query.max_samples.unwrap_or(1000);
@@ -181,13 +184,15 @@ pub async fn preview_dataset(
     Path(dataset_id): Path<String>,
     Query(query): Query<PreviewQuery>,
 ) -> Result<Json<DataPreviewResponse>, AuthError> {
-    let dataset = state.db.doc_get("axonml_datasets", &dataset_id)
+    let dataset = state
+        .db
+        .doc_get("axonml_datasets", &dataset_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Dataset not found".to_string()))?;
 
-    let dataset: Dataset = serde_json::from_value(dataset)
-        .map_err(|e| AuthError::Internal(e.to_string()))?;
+    let dataset: Dataset =
+        serde_json::from_value(dataset).map_err(|e| AuthError::Internal(e.to_string()))?;
 
     if dataset.user_id != user.id {
         return Err(AuthError::Forbidden("Access denied".to_string()));
@@ -214,13 +219,15 @@ pub async fn validate_dataset(
     Path(dataset_id): Path<String>,
     Query(query): Query<ValidateQuery>,
 ) -> Result<Json<ValidationResult>, AuthError> {
-    let dataset = state.db.doc_get("axonml_datasets", &dataset_id)
+    let dataset = state
+        .db
+        .doc_get("axonml_datasets", &dataset_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Dataset not found".to_string()))?;
 
-    let dataset: Dataset = serde_json::from_value(dataset)
-        .map_err(|e| AuthError::Internal(e.to_string()))?;
+    let dataset: Dataset =
+        serde_json::from_value(dataset).map_err(|e| AuthError::Internal(e.to_string()))?;
 
     if dataset.user_id != user.id {
         return Err(AuthError::Forbidden("Access denied".to_string()));
@@ -239,13 +246,15 @@ pub async fn generate_config(
     Path(dataset_id): Path<String>,
     Json(request): Json<DataConfigRequest>,
 ) -> Result<Json<DataConfigResponse>, AuthError> {
-    let dataset = state.db.doc_get("axonml_datasets", &dataset_id)
+    let dataset = state
+        .db
+        .doc_get("axonml_datasets", &dataset_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Dataset not found".to_string()))?;
 
-    let dataset: Dataset = serde_json::from_value(dataset)
-        .map_err(|e| AuthError::Internal(e.to_string()))?;
+    let dataset: Dataset =
+        serde_json::from_value(dataset).map_err(|e| AuthError::Internal(e.to_string()))?;
 
     if dataset.user_id != user.id {
         return Err(AuthError::Forbidden("Access denied".to_string()));
@@ -294,18 +303,10 @@ fn detect_data_type(path: &PathBuf) -> DatasetType {
     let text_exts = ["txt", "md", "xml"];
     let audio_exts = ["wav", "mp3", "flac", "ogg"];
 
-    let image_count: usize = image_exts.iter()
-        .filter_map(|e| file_types.get(*e))
-        .sum();
-    let tabular_count: usize = tabular_exts.iter()
-        .filter_map(|e| file_types.get(*e))
-        .sum();
-    let text_count: usize = text_exts.iter()
-        .filter_map(|e| file_types.get(*e))
-        .sum();
-    let audio_count: usize = audio_exts.iter()
-        .filter_map(|e| file_types.get(*e))
-        .sum();
+    let image_count: usize = image_exts.iter().filter_map(|e| file_types.get(*e)).sum();
+    let tabular_count: usize = tabular_exts.iter().filter_map(|e| file_types.get(*e)).sum();
+    let text_count: usize = text_exts.iter().filter_map(|e| file_types.get(*e)).sum();
+    let audio_count: usize = audio_exts.iter().filter_map(|e| file_types.get(*e)).sum();
 
     let max_count = [image_count, tabular_count, text_count, audio_count]
         .into_iter()
@@ -357,20 +358,26 @@ fn analyze_dataset_path(
             for entry in entries.flatten() {
                 let entry_path = entry.path();
                 if entry_path.is_dir() {
-                    let class_name = entry_path.file_name()
+                    let class_name = entry_path
+                        .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default();
 
                     if !class_name.starts_with('.') {
-                        let count = fs::read_dir(&entry_path)
-                            .map(|e| e.count())
-                            .unwrap_or(0);
+                        let count = fs::read_dir(&entry_path).map(|e| e.count()).unwrap_or(0);
                         if count > 0 {
                             class_distribution.insert(class_name, count);
                         }
                     }
 
-                    walk_dir(&entry_path, file_types, total_size, num_files, class_distribution, depth + 1);
+                    walk_dir(
+                        &entry_path,
+                        file_types,
+                        total_size,
+                        num_files,
+                        class_distribution,
+                        depth + 1,
+                    );
                 } else {
                     *num_files += 1;
                     if let Ok(meta) = entry.metadata() {
@@ -385,7 +392,14 @@ fn analyze_dataset_path(
         }
     }
 
-    walk_dir(path, &mut file_types, &mut total_size, &mut num_files, &mut class_distribution, 0);
+    walk_dir(
+        path,
+        &mut file_types,
+        &mut total_size,
+        &mut num_files,
+        &mut class_distribution,
+        0,
+    );
 
     let num_samples = num_files.min(max_samples);
     let num_classes = if class_distribution.is_empty() {
@@ -427,7 +441,11 @@ fn analyze_dataset_path(
         task_type,
         num_samples,
         num_classes,
-        class_distribution: if class_distribution.is_empty() { None } else { Some(class_distribution) },
+        class_distribution: if class_distribution.is_empty() {
+            None
+        } else {
+            Some(class_distribution)
+        },
         input_shape,
         feature_names: None,
         statistics,
@@ -510,16 +528,16 @@ fn generate_recommendations(
             "random_rotation(10)".to_string(),
             "color_jitter(0.1, 0.1, 0.1)".to_string(),
         ],
-        DatasetType::Audio => vec![
-            "add_noise(0.01)".to_string(),
-            "time_shift".to_string(),
-        ],
+        DatasetType::Audio => vec!["add_noise(0.01)".to_string(), "time_shift".to_string()],
         _ => vec![],
     };
 
     let notes = vec![
         format!("Recommended for {} samples", num_samples),
-        format!("Architecture chosen based on {} data type", format!("{:?}", data_type).to_lowercase()),
+        format!(
+            "Architecture chosen based on {} data type",
+            format!("{:?}", data_type).to_lowercase()
+        ),
     ];
 
     TrainingRecommendations {
@@ -553,10 +571,17 @@ fn preview_samples(
                             for (i, line) in content.lines().take(num_samples + 1).enumerate() {
                                 samples.push(SamplePreview {
                                     index: i,
-                                    filename: Some(entry_path.file_name()
-                                        .map(|n| n.to_string_lossy().to_string())
-                                        .unwrap_or_default()),
-                                    label: if i == 0 { Some("header".to_string()) } else { None },
+                                    filename: Some(
+                                        entry_path
+                                            .file_name()
+                                            .map(|n| n.to_string_lossy().to_string())
+                                            .unwrap_or_default(),
+                                    ),
+                                    label: if i == 0 {
+                                        Some("header".to_string())
+                                    } else {
+                                        None
+                                    },
                                     preview: truncate(line, 200),
                                     size_bytes: None,
                                 });
@@ -575,10 +600,14 @@ fn preview_samples(
 
                     samples.push(SamplePreview {
                         index: i,
-                        filename: Some(entry_path.file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default()),
-                        label: entry_path.parent()
+                        filename: Some(
+                            entry_path
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default(),
+                        ),
+                        label: entry_path
+                            .parent()
                             .and_then(|p| p.file_name())
                             .map(|n| n.to_string_lossy().to_string()),
                         preview: format!("File: {}", entry_path.display()),
@@ -597,9 +626,12 @@ fn preview_samples(
 
                     samples.push(SamplePreview {
                         index: i,
-                        filename: Some(entry_path.file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default()),
+                        filename: Some(
+                            entry_path
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default(),
+                        ),
                         label: None,
                         preview,
                         size_bytes: entry.metadata().ok().map(|m| m.len()),
@@ -644,14 +676,13 @@ fn validate_dataset_path(
         for entry in entries.flatten() {
             let entry_path = entry.path();
             if entry_path.is_dir() {
-                let class_name = entry_path.file_name()
+                let class_name = entry_path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
 
                 if !class_name.starts_with('.') {
-                    let count = fs::read_dir(&entry_path)
-                        .map(|e| e.count())
-                        .unwrap_or(0);
+                    let count = fs::read_dir(&entry_path).map(|e| e.count()).unwrap_or(0);
                     class_distribution.insert(class_name, count);
                 }
             }
@@ -693,16 +724,17 @@ fn validate_dataset_path(
         is_valid,
         issues,
         warnings,
-        class_distribution: if class_distribution.is_empty() { None } else { Some(class_distribution) },
+        class_distribution: if class_distribution.is_empty() {
+            None
+        } else {
+            Some(class_distribution)
+        },
         missing_files,
         corrupted_files,
     })
 }
 
-fn generate_config_string(
-    analysis: &DatasetAnalysis,
-    format: &str,
-) -> Result<String, AuthError> {
+fn generate_config_string(analysis: &DatasetAnalysis, format: &str) -> Result<String, AuthError> {
     let config = serde_json::json!({
         "dataset": {
             "name": analysis.name,
@@ -726,14 +758,14 @@ fn generate_config_string(
     });
 
     match format {
-        "json" => serde_json::to_string_pretty(&config)
-            .map_err(|e| AuthError::Internal(e.to_string())),
+        "json" => {
+            serde_json::to_string_pretty(&config).map_err(|e| AuthError::Internal(e.to_string()))
+        }
         _ => {
             // Convert to TOML
-            let toml_value: toml::Value = serde_json::from_value(config)
-                .map_err(|e| AuthError::Internal(e.to_string()))?;
-            toml::to_string_pretty(&toml_value)
-                .map_err(|e| AuthError::Internal(e.to_string()))
+            let toml_value: toml::Value =
+                serde_json::from_value(config).map_err(|e| AuthError::Internal(e.to_string()))?;
+            toml::to_string_pretty(&toml_value).map_err(|e| AuthError::Internal(e.to_string()))
         }
     }
 }

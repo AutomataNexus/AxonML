@@ -2,12 +2,12 @@
 //!
 //! Provides connection to Aegis-DB and CRUD operations for all entities.
 
+pub mod datasets;
+pub mod models;
+pub mod notebooks;
+pub mod runs;
 pub mod schema;
 pub mod users;
-pub mod runs;
-pub mod models;
-pub mod datasets;
-pub mod notebooks;
 
 use crate::config::AegisConfig;
 use reqwest::Client;
@@ -170,7 +170,8 @@ impl Database {
     /// Authenticate with Aegis-DB
     async fn authenticate(&self) -> Result<(), DbError> {
         if let Some((username, password)) = &self.auth {
-            let resp = self.client
+            let resp = self
+                .client
                 .post(format!("{}/api/v1/auth/login", self.base_url))
                 .json(&serde_json::json!({
                     "username": username,
@@ -202,12 +203,21 @@ impl Database {
     }
 
     /// Execute a query with parameters
-    pub async fn query_with_params(&self, sql: &str, params: Vec<Value>) -> Result<QueryResponse, DbError> {
-        let mut request = self.client
+    pub async fn query_with_params(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> Result<QueryResponse, DbError> {
+        let mut request = self
+            .client
             .post(format!("{}/api/v1/query", self.base_url))
             .json(&QueryRequest {
                 query: sql.to_string(),
-                params: if params.is_empty() { None } else { Some(params) },
+                params: if params.is_empty() {
+                    None
+                } else {
+                    Some(params)
+                },
             });
 
         if let Some(auth) = self.auth_header().await {
@@ -217,7 +227,10 @@ impl Database {
         let resp = request.send().await?;
 
         if !resp.status().is_success() {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
@@ -238,7 +251,8 @@ impl Database {
 
     /// Set a key-value pair
     pub async fn kv_set(&self, key: &str, value: Value) -> Result<(), DbError> {
-        let mut request = self.client
+        let mut request = self
+            .client
             .post(format!("{}/api/v1/kv/keys", self.base_url))
             .json(&serde_json::json!({
                 "key": key,
@@ -252,7 +266,10 @@ impl Database {
         let resp = request.send().await?;
 
         if !resp.status().is_success() {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
@@ -261,7 +278,8 @@ impl Database {
 
     /// Get a key-value pair
     pub async fn kv_get(&self, key: &str) -> Result<Option<Value>, DbError> {
-        let mut request = self.client
+        let mut request = self
+            .client
             .get(format!("{}/api/v1/kv/keys/{}", self.base_url, key));
 
         if let Some(auth) = self.auth_header().await {
@@ -275,7 +293,10 @@ impl Database {
         }
 
         if !resp.status().is_success() {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
@@ -285,7 +306,8 @@ impl Database {
 
     /// Delete a key-value pair
     pub async fn kv_delete(&self, key: &str) -> Result<(), DbError> {
-        let mut request = self.client
+        let mut request = self
+            .client
             .delete(format!("{}/api/v1/kv/keys/{}", self.base_url, key));
 
         if let Some(auth) = self.auth_header().await {
@@ -295,7 +317,10 @@ impl Database {
         let resp = request.send().await?;
 
         if !resp.status().is_success() && resp.status().as_u16() != 404 {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
@@ -308,7 +333,8 @@ impl Database {
 
     /// Create a document collection
     pub async fn create_collection(&self, name: &str) -> Result<(), DbError> {
-        let mut request = self.client
+        let mut request = self
+            .client
             .post(format!("{}/api/v1/documents/collections", self.base_url))
             .json(&serde_json::json!({ "name": name }));
 
@@ -332,9 +358,18 @@ impl Database {
     }
 
     /// Insert a document into a collection
-    pub async fn doc_insert(&self, collection: &str, id: Option<&str>, data: Value) -> Result<String, DbError> {
-        let mut request = self.client
-            .post(format!("{}/api/v1/documents/collections/{}/documents", self.base_url, collection))
+    pub async fn doc_insert(
+        &self,
+        collection: &str,
+        id: Option<&str>,
+        data: Value,
+    ) -> Result<String, DbError> {
+        let mut request = self
+            .client
+            .post(format!(
+                "{}/api/v1/documents/collections/{}/documents",
+                self.base_url, collection
+            ))
             .json(&serde_json::json!({
                 "id": id,
                 "document": data
@@ -347,7 +382,10 @@ impl Database {
         let resp = request.send().await?;
 
         if !resp.status().is_success() {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
@@ -358,13 +396,17 @@ impl Database {
             return Err(DbError::InvalidData("Document insert failed".to_string()));
         }
 
-        result.id.ok_or_else(|| DbError::InvalidData("No document ID returned".to_string()))
+        result
+            .id
+            .ok_or_else(|| DbError::InvalidData("No document ID returned".to_string()))
     }
 
     /// Get a document by ID
     pub async fn doc_get(&self, collection: &str, id: &str) -> Result<Option<Value>, DbError> {
-        let mut request = self.client
-            .get(format!("{}/api/v1/documents/collections/{}/documents/{}", self.base_url, collection, id));
+        let mut request = self.client.get(format!(
+            "{}/api/v1/documents/collections/{}/documents/{}",
+            self.base_url, collection, id
+        ));
 
         if let Some(auth) = self.auth_header().await {
             request = request.header("Authorization", auth);
@@ -377,7 +419,10 @@ impl Database {
         }
 
         if !resp.status().is_success() {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
@@ -387,8 +432,12 @@ impl Database {
 
     /// Update a document by ID
     pub async fn doc_update(&self, collection: &str, id: &str, data: Value) -> Result<(), DbError> {
-        let mut request = self.client
-            .put(format!("{}/api/v1/documents/collections/{}/documents/{}", self.base_url, collection, id))
+        let mut request = self
+            .client
+            .put(format!(
+                "{}/api/v1/documents/collections/{}/documents/{}",
+                self.base_url, collection, id
+            ))
             .json(&serde_json::json!({ "document": data }));
 
         if let Some(auth) = self.auth_header().await {
@@ -402,7 +451,10 @@ impl Database {
         }
 
         if !resp.status().is_success() {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
@@ -411,8 +463,10 @@ impl Database {
 
     /// Delete a document by ID
     pub async fn doc_delete(&self, collection: &str, id: &str) -> Result<(), DbError> {
-        let mut request = self.client
-            .delete(format!("{}/api/v1/documents/collections/{}/documents/{}", self.base_url, collection, id));
+        let mut request = self.client.delete(format!(
+            "{}/api/v1/documents/collections/{}/documents/{}",
+            self.base_url, collection, id
+        ));
 
         if let Some(auth) = self.auth_header().await {
             request = request.header("Authorization", auth);
@@ -421,7 +475,10 @@ impl Database {
         let resp = request.send().await?;
 
         if !resp.status().is_success() && resp.status().as_u16() != 404 {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
@@ -429,9 +486,17 @@ impl Database {
     }
 
     /// Query documents in a collection with filter
-    pub async fn doc_query(&self, collection: &str, query: DocumentQuery) -> Result<Vec<Value>, DbError> {
-        let mut request = self.client
-            .post(format!("{}/api/v1/documents/collections/{}/query", self.base_url, collection))
+    pub async fn doc_query(
+        &self,
+        collection: &str,
+        query: DocumentQuery,
+    ) -> Result<Vec<Value>, DbError> {
+        let mut request = self
+            .client
+            .post(format!(
+                "{}/api/v1/documents/collections/{}/query",
+                self.base_url, collection
+            ))
             .json(&query);
 
         if let Some(auth) = self.auth_header().await {
@@ -441,14 +506,19 @@ impl Database {
         let resp = request.send().await?;
 
         if !resp.status().is_success() {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
         let result: DocumentQueryResponse = resp.json().await?;
 
         // Extract the "data" field from each document wrapper
-        let documents: Vec<Value> = result.documents.into_iter()
+        let documents: Vec<Value> = result
+            .documents
+            .into_iter()
             .filter_map(|doc| doc.get("data").cloned())
             .collect();
 
@@ -456,7 +526,11 @@ impl Database {
     }
 
     /// Find one document matching a filter
-    pub async fn doc_find_one(&self, collection: &str, filter: Value) -> Result<Option<Value>, DbError> {
+    pub async fn doc_find_one(
+        &self,
+        collection: &str,
+        filter: Value,
+    ) -> Result<Option<Value>, DbError> {
         let query = DocumentQuery {
             filter: Some(filter),
             limit: Some(1),
@@ -472,14 +546,20 @@ impl Database {
     // ========================================================================
 
     /// Write a single time series data point
-    pub async fn ts_write_one(&self, metric: &str, value: f64, tags: std::collections::HashMap<String, String>) -> Result<(), DbError> {
+    pub async fn ts_write_one(
+        &self,
+        metric: &str,
+        value: f64,
+        tags: std::collections::HashMap<String, String>,
+    ) -> Result<(), DbError> {
         let point = DataPoint {
             timestamp: chrono::Utc::now(),
             value,
             tags,
         };
 
-        let mut request = self.client
+        let mut request = self
+            .client
             .post(format!("{}/api/v1/timeseries/write", self.base_url))
             .json(&serde_json::json!({
                 "metric": metric,
@@ -493,7 +573,10 @@ impl Database {
         let resp = request.send().await?;
 
         if !resp.status().is_success() {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
@@ -502,7 +585,8 @@ impl Database {
 
     /// Query time series data
     pub async fn ts_query(&self, query: TimeSeriesQuery) -> Result<Vec<DataPoint>, DbError> {
-        let mut request = self.client
+        let mut request = self
+            .client
             .post(format!("{}/api/v1/timeseries/query", self.base_url))
             .json(&query);
 
@@ -513,7 +597,10 @@ impl Database {
         let resp = request.send().await?;
 
         if !resp.status().is_success() {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(DbError::QueryFailed(error));
         }
 
@@ -523,7 +610,8 @@ impl Database {
 
     /// Check if database is healthy
     pub async fn health_check(&self) -> bool {
-        match self.client
+        match self
+            .client
             .get(format!("{}/health", self.base_url))
             .send()
             .await

@@ -189,7 +189,8 @@ pub fn broadcast_shape(shape1: &[usize], shape2: &[usize]) -> Result<Shape> {
 ///
 /// # Returns
 /// New strides for broadcasting (0 stride for broadcast dimensions).
-#[must_use] pub fn broadcast_strides(shape: &[usize], strides: &[isize], target_shape: &[usize]) -> Strides {
+#[must_use]
+pub fn broadcast_strides(shape: &[usize], strides: &[isize], target_shape: &[usize]) -> Strides {
     let mut result = Strides::with_capacity(target_shape.len());
     let shape_offset = target_shape.len() - shape.len();
 
@@ -340,7 +341,8 @@ pub fn transpose_shape(shape: &[usize], dim0: usize, dim1: usize) -> Result<Shap
 }
 
 /// Swaps two stride values.
-#[must_use] pub fn transpose_strides(strides: &[isize], dim0: usize, dim1: usize) -> Strides {
+#[must_use]
+pub fn transpose_strides(strides: &[isize], dim0: usize, dim1: usize) -> Strides {
     let mut result = Strides::from_slice(strides);
     result.swap(dim0, dim1);
     result

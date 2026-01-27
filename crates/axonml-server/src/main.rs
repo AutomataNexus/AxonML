@@ -12,15 +12,15 @@
 //! axonml-server --host 0.0.0.0 --port 3000
 //! ```
 
+mod api;
+mod auth;
 mod config;
 mod db;
-mod auth;
-mod api;
-mod training;
-mod inference;
 mod email;
+mod inference;
 mod llm;
 mod secrets;
+mod training;
 
 use api::{create_router, AppState};
 use auth::JwtAuth;
@@ -29,7 +29,7 @@ use config::Config;
 use db::{schema::Schema, Database};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// AxonML Server - REST API for Machine Learning
@@ -166,7 +166,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => {
             error!("Failed to connect to Aegis-DB: {}", e);
-            error!("Make sure Aegis-DB is running on {}:{}", config.aegis.host, config.aegis.port);
+            error!(
+                "Make sure Aegis-DB is running on {}:{}",
+                config.aegis.host, config.aegis.port
+            );
             error!("Start it with: aegis start");
             return Err(e.into());
         }
@@ -182,7 +185,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // SECURITY: Generate a random password for the default admin
     let random_password: String = {
         use rand::Rng;
-        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+        const CHARSET: &[u8] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
         let mut rng = rand::thread_rng();
         (0..24)
             .map(|_| {
@@ -230,7 +234,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Initialize inference server
-    let inference = inference::server::InferenceServer::new(inference::server::InferenceConfig::default());
+    let inference =
+        inference::server::InferenceServer::new(inference::server::InferenceConfig::default());
 
     // Initialize training tracker for real-time metrics broadcasting
     let db_arc = Arc::new(db);
@@ -252,7 +257,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize Ollama client for AI assistance
     let ollama = llm::OllamaClient::new();
     if ollama.is_available().await {
-        info!("Ollama LLM service available at {}", llm::DEFAULT_OLLAMA_URL);
+        info!(
+            "Ollama LLM service available at {}",
+            llm::DEFAULT_OLLAMA_URL
+        );
     } else {
         info!("Ollama LLM service not available - AI assistance will be limited");
     }
@@ -375,7 +383,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("║     ██╔╝ ██╗╚██████╔╝██║ ╚████║██║ ╚═╝ ██║███████╗       ║");
     println!("║     ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝     ╚═╝╚══════╝       ║");
     println!("║                                                           ║");
-    println!("║              AxonML Server v{}                       ║", env!("CARGO_PKG_VERSION"));
+    println!(
+        "║              AxonML Server v{}                       ║",
+        env!("CARGO_PKG_VERSION")
+    );
     println!("║                                                           ║");
     println!("║     Server:  http://{}                           ║", addr);
     println!("║     Health:  http://{}/health                    ║", addr);

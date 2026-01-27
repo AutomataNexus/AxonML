@@ -47,7 +47,8 @@ pub struct GraphNode {
 
 impl GraphNode {
     /// Creates a new leaf node (for user-created variables).
-    #[must_use] pub fn leaf(requires_grad: bool) -> Self {
+    #[must_use]
+    pub fn leaf(requires_grad: bool) -> Self {
         Self {
             id: new_node_id(),
             grad_fn: None,
@@ -58,7 +59,8 @@ impl GraphNode {
     }
 
     /// Creates a new intermediate node (result of an operation).
-    #[must_use] pub fn intermediate(grad_fn: GradFn, requires_grad: bool, topo_order: u64) -> Self {
+    #[must_use]
+    pub fn intermediate(grad_fn: GradFn, requires_grad: bool, topo_order: u64) -> Self {
         Self {
             id: new_node_id(),
             grad_fn: Some(grad_fn),
@@ -87,7 +89,8 @@ pub struct ComputationGraph {
 
 impl ComputationGraph {
     /// Creates a new empty computation graph.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             nodes: RwLock::new(HashMap::new()),
             max_topo_order: AtomicU64::new(0),

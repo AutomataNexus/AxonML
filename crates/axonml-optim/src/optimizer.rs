@@ -59,7 +59,8 @@ pub struct ParamState {
 
 impl ParamState {
     /// Creates a new empty parameter state.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             momentum_buffer: None,
             exp_avg_sq: None,

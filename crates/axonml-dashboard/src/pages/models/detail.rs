@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{forms::*, icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, modal::*, forms::*};
 
 /// Model detail page
 #[component]
@@ -131,8 +131,14 @@ pub fn ModelDetailPage() -> impl IntoView {
             spawn_local(async move {
                 match api::models::deploy_version(&id, version, &name).await {
                     Ok(endpoint) => {
-                        state.toast_success("Deployed", format!("Model deployed to endpoint: {}", endpoint.name));
-                        navigate(&format!("/inference/endpoints/{}", endpoint.id), Default::default());
+                        state.toast_success(
+                            "Deployed",
+                            format!("Model deployed to endpoint: {}", endpoint.name),
+                        );
+                        navigate(
+                            &format!("/inference/endpoints/{}", endpoint.id),
+                            Default::default(),
+                        );
                     }
                     Err(e) => {
                         state.toast_error("Error", e.message);

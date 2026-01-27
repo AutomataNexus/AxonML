@@ -85,7 +85,7 @@ pub struct TrainingSession {
     pub total_batches: usize,
     pub status: TrainingStatus,
     pub metrics_history: Vec<EpochMetrics>,
-    pub loss_history: Vec<u64>,  // Scaled for sparkline
+    pub loss_history: Vec<u64>, // Scaled for sparkline
     pub best_val_loss: Option<f32>,
     pub best_epoch: Option<usize>,
     pub elapsed_secs: f64,
@@ -121,14 +121,78 @@ impl TrainingView {
     /// Load a demo training session for visualization
     pub fn load_demo_session(&mut self) {
         let metrics_history = vec![
-            EpochMetrics { epoch: 1, train_loss: 2.312, val_loss: Some(2.298), train_acc: Some(0.112), val_acc: Some(0.118), learning_rate: 0.001, duration_secs: 45.2 },
-            EpochMetrics { epoch: 2, train_loss: 1.845, val_loss: Some(1.756), train_acc: Some(0.342), val_acc: Some(0.358), learning_rate: 0.001, duration_secs: 44.8 },
-            EpochMetrics { epoch: 3, train_loss: 1.234, val_loss: Some(1.189), train_acc: Some(0.567), val_acc: Some(0.582), learning_rate: 0.001, duration_secs: 45.1 },
-            EpochMetrics { epoch: 4, train_loss: 0.856, val_loss: Some(0.823), train_acc: Some(0.712), val_acc: Some(0.724), learning_rate: 0.001, duration_secs: 44.9 },
-            EpochMetrics { epoch: 5, train_loss: 0.612, val_loss: Some(0.598), train_acc: Some(0.798), val_acc: Some(0.805), learning_rate: 0.0005, duration_secs: 45.3 },
-            EpochMetrics { epoch: 6, train_loss: 0.478, val_loss: Some(0.489), train_acc: Some(0.845), val_acc: Some(0.842), learning_rate: 0.0005, duration_secs: 45.0 },
-            EpochMetrics { epoch: 7, train_loss: 0.389, val_loss: Some(0.412), train_acc: Some(0.878), val_acc: Some(0.869), learning_rate: 0.0005, duration_secs: 44.7 },
-            EpochMetrics { epoch: 8, train_loss: 0.321, val_loss: Some(0.358), train_acc: Some(0.902), val_acc: Some(0.891), learning_rate: 0.00025, duration_secs: 45.2 },
+            EpochMetrics {
+                epoch: 1,
+                train_loss: 2.312,
+                val_loss: Some(2.298),
+                train_acc: Some(0.112),
+                val_acc: Some(0.118),
+                learning_rate: 0.001,
+                duration_secs: 45.2,
+            },
+            EpochMetrics {
+                epoch: 2,
+                train_loss: 1.845,
+                val_loss: Some(1.756),
+                train_acc: Some(0.342),
+                val_acc: Some(0.358),
+                learning_rate: 0.001,
+                duration_secs: 44.8,
+            },
+            EpochMetrics {
+                epoch: 3,
+                train_loss: 1.234,
+                val_loss: Some(1.189),
+                train_acc: Some(0.567),
+                val_acc: Some(0.582),
+                learning_rate: 0.001,
+                duration_secs: 45.1,
+            },
+            EpochMetrics {
+                epoch: 4,
+                train_loss: 0.856,
+                val_loss: Some(0.823),
+                train_acc: Some(0.712),
+                val_acc: Some(0.724),
+                learning_rate: 0.001,
+                duration_secs: 44.9,
+            },
+            EpochMetrics {
+                epoch: 5,
+                train_loss: 0.612,
+                val_loss: Some(0.598),
+                train_acc: Some(0.798),
+                val_acc: Some(0.805),
+                learning_rate: 0.0005,
+                duration_secs: 45.3,
+            },
+            EpochMetrics {
+                epoch: 6,
+                train_loss: 0.478,
+                val_loss: Some(0.489),
+                train_acc: Some(0.845),
+                val_acc: Some(0.842),
+                learning_rate: 0.0005,
+                duration_secs: 45.0,
+            },
+            EpochMetrics {
+                epoch: 7,
+                train_loss: 0.389,
+                val_loss: Some(0.412),
+                train_acc: Some(0.878),
+                val_acc: Some(0.869),
+                learning_rate: 0.0005,
+                duration_secs: 44.7,
+            },
+            EpochMetrics {
+                epoch: 8,
+                train_loss: 0.321,
+                val_loss: Some(0.358),
+                train_acc: Some(0.902),
+                val_acc: Some(0.891),
+                learning_rate: 0.00025,
+                duration_secs: 45.2,
+            },
         ];
 
         // Scale loss values for sparkline (0-100 range)
@@ -195,8 +259,8 @@ impl TrainingView {
 
     /// Parse a training log file to extract metrics
     fn parse_training_log(&self, path: &Path) -> Result<TrainingSession, String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read log file: {}", e))?;
+        let content =
+            std::fs::read_to_string(path).map_err(|e| format!("Failed to read log file: {}", e))?;
 
         let mut metrics_history = Vec::new();
         let mut config = TrainingConfig {
@@ -217,22 +281,28 @@ impl TrainingView {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
                 // Extract epoch info
                 if let Some(epoch) = json.get("epoch").and_then(|v| v.as_u64()) {
-                    let train_loss = json.get("train_loss")
+                    let train_loss = json
+                        .get("train_loss")
                         .and_then(|v| v.as_f64())
                         .unwrap_or(0.0) as f32;
-                    let val_loss = json.get("val_loss")
+                    let val_loss = json
+                        .get("val_loss")
                         .and_then(|v| v.as_f64())
                         .map(|v| v as f32);
-                    let train_acc = json.get("train_acc")
+                    let train_acc = json
+                        .get("train_acc")
                         .and_then(|v| v.as_f64())
                         .map(|v| v as f32);
-                    let val_acc = json.get("val_acc")
+                    let val_acc = json
+                        .get("val_acc")
                         .and_then(|v| v.as_f64())
                         .map(|v| v as f32);
-                    let learning_rate = json.get("learning_rate")
+                    let learning_rate = json
+                        .get("learning_rate")
                         .and_then(|v| v.as_f64())
                         .unwrap_or(0.001);
-                    let duration = json.get("duration_secs")
+                    let duration = json
+                        .get("duration_secs")
                         .and_then(|v| v.as_f64())
                         .unwrap_or(0.0) as f32;
 
@@ -385,11 +455,21 @@ impl TrainingView {
                 Span::styled(&session.config.optimizer, AxonmlTheme::accent()),
                 Span::raw("  "),
                 Span::styled("Batch Size: ", AxonmlTheme::muted()),
-                Span::styled(session.config.batch_size.to_string(), AxonmlTheme::metric_value()),
+                Span::styled(
+                    session.config.batch_size.to_string(),
+                    AxonmlTheme::metric_value(),
+                ),
                 Span::raw("  "),
                 Span::styled("LR: ", AxonmlTheme::muted()),
                 Span::styled(
-                    format!("{:.6}", session.metrics_history.last().map(|m| m.learning_rate).unwrap_or(session.config.initial_lr)),
+                    format!(
+                        "{:.6}",
+                        session
+                            .metrics_history
+                            .last()
+                            .map(|m| m.learning_rate)
+                            .unwrap_or(session.config.initial_lr)
+                    ),
                     AxonmlTheme::metric_value(),
                 ),
             ]),
@@ -399,32 +479,40 @@ impl TrainingView {
                 Span::raw("  "),
                 Span::styled("ETA: ", AxonmlTheme::muted()),
                 Span::styled(
-                    session.eta_secs.map(format_duration).unwrap_or_else(|| "--:--".to_string()),
+                    session
+                        .eta_secs
+                        .map(format_duration)
+                        .unwrap_or_else(|| "--:--".to_string()),
                     AxonmlTheme::accent(),
                 ),
             ]),
             Line::from(vec![
                 Span::styled("Best Val Loss: ", AxonmlTheme::muted()),
                 Span::styled(
-                    session.best_val_loss.map(|v| format!("{:.4}", v)).unwrap_or_else(|| "-".to_string()),
+                    session
+                        .best_val_loss
+                        .map(|v| format!("{:.4}", v))
+                        .unwrap_or_else(|| "-".to_string()),
                     AxonmlTheme::success(),
                 ),
                 Span::raw("  "),
                 Span::styled("@ Epoch: ", AxonmlTheme::muted()),
                 Span::styled(
-                    session.best_epoch.map(|e| e.to_string()).unwrap_or_else(|| "-".to_string()),
+                    session
+                        .best_epoch
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
                     AxonmlTheme::success(),
                 ),
             ]),
         ];
 
-        let header = Paragraph::new(header_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border())
-                    .title(Span::styled(" Training Session ", AxonmlTheme::header())),
-            );
+        let header = Paragraph::new(header_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border())
+                .title(Span::styled(" Training Session ", AxonmlTheme::header())),
+        );
 
         frame.render_widget(header, area);
     }
@@ -438,7 +526,10 @@ impl TrainingView {
                     .borders(Borders::ALL)
                     .border_style(AxonmlTheme::border())
                     .title(Span::styled(
-                        format!(" Epoch {}/{} ", session.current_epoch, session.config.total_epochs),
+                        format!(
+                            " Epoch {}/{} ",
+                            session.current_epoch, session.config.total_epochs
+                        ),
                         AxonmlTheme::epoch(),
                     )),
             )
@@ -458,7 +549,10 @@ impl TrainingView {
                     .borders(Borders::ALL)
                     .border_style(AxonmlTheme::border())
                     .title(Span::styled(
-                        format!(" Batch {}/{} ", session.current_batch, session.total_batches),
+                        format!(
+                            " Batch {}/{} ",
+                            session.current_batch, session.total_batches
+                        ),
                         AxonmlTheme::muted(),
                     )),
             )
@@ -473,8 +567,8 @@ impl TrainingView {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(50),  // Current metrics
-                Constraint::Percentage(50),  // Loss sparkline
+                Constraint::Percentage(50), // Current metrics
+                Constraint::Percentage(50), // Loss sparkline
             ])
             .split(area);
 
@@ -497,36 +591,44 @@ impl TrainingView {
                 Line::from(vec![
                     Span::styled("Val Loss:    ", AxonmlTheme::metric_label()),
                     Span::styled(
-                        m.val_loss.map(|v| format!("{:.4}", v)).unwrap_or_else(|| "-".to_string()),
+                        m.val_loss
+                            .map(|v| format!("{:.4}", v))
+                            .unwrap_or_else(|| "-".to_string()),
                         AxonmlTheme::metric_value(),
                     ),
                 ]),
                 Line::from(vec![
                     Span::styled("Train Acc:   ", AxonmlTheme::metric_label()),
                     Span::styled(
-                        m.train_acc.map(|v| format!("{:.2}%", v * 100.0)).unwrap_or_else(|| "-".to_string()),
+                        m.train_acc
+                            .map(|v| format!("{:.2}%", v * 100.0))
+                            .unwrap_or_else(|| "-".to_string()),
                         AxonmlTheme::success(),
                     ),
                 ]),
                 Line::from(vec![
                     Span::styled("Val Acc:     ", AxonmlTheme::metric_label()),
                     Span::styled(
-                        m.val_acc.map(|v| format!("{:.2}%", v * 100.0)).unwrap_or_else(|| "-".to_string()),
+                        m.val_acc
+                            .map(|v| format!("{:.2}%", v * 100.0))
+                            .unwrap_or_else(|| "-".to_string()),
                         AxonmlTheme::success(),
                     ),
                 ]),
             ]
         } else {
-            vec![Line::from(Span::styled("No metrics yet", AxonmlTheme::muted()))]
+            vec![Line::from(Span::styled(
+                "No metrics yet",
+                AxonmlTheme::muted(),
+            ))]
         };
 
-        let metrics = Paragraph::new(metrics_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border_focused())
-                    .title(Span::styled(" Current Metrics ", AxonmlTheme::header())),
-            );
+        let metrics = Paragraph::new(metrics_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border_focused())
+                .title(Span::styled(" Current Metrics ", AxonmlTheme::header())),
+        );
 
         frame.render_widget(metrics, chunks[0]);
 
@@ -536,7 +638,10 @@ impl TrainingView {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(AxonmlTheme::border())
-                    .title(Span::styled(" Loss Trend (inverted) ", AxonmlTheme::header())),
+                    .title(Span::styled(
+                        " Loss Trend (inverted) ",
+                        AxonmlTheme::header(),
+                    )),
             )
             .data(&session.loss_history)
             .style(AxonmlTheme::graph_primary());
@@ -557,18 +662,24 @@ impl TrainingView {
                     Span::styled(format!("{:.4}", m.train_loss), AxonmlTheme::metric_value()),
                     Span::raw(" / "),
                     Span::styled(
-                        m.val_loss.map(|v| format!("{:.4}", v)).unwrap_or_else(|| "-".to_string()),
+                        m.val_loss
+                            .map(|v| format!("{:.4}", v))
+                            .unwrap_or_else(|| "-".to_string()),
                         AxonmlTheme::accent(),
                     ),
                     Span::raw("  "),
                     Span::styled("Acc: ", AxonmlTheme::muted()),
                     Span::styled(
-                        m.train_acc.map(|v| format!("{:.1}%", v * 100.0)).unwrap_or_else(|| "-".to_string()),
+                        m.train_acc
+                            .map(|v| format!("{:.1}%", v * 100.0))
+                            .unwrap_or_else(|| "-".to_string()),
                         AxonmlTheme::success(),
                     ),
                     Span::raw(" / "),
                     Span::styled(
-                        m.val_acc.map(|v| format!("{:.1}%", v * 100.0)).unwrap_or_else(|| "-".to_string()),
+                        m.val_acc
+                            .map(|v| format!("{:.1}%", v * 100.0))
+                            .unwrap_or_else(|| "-".to_string()),
                         AxonmlTheme::success(),
                     ),
                     Span::raw("  "),
@@ -577,13 +688,15 @@ impl TrainingView {
             })
             .collect();
 
-        let history = Paragraph::new(history_lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border())
-                    .title(Span::styled(" Epoch History (recent) ", AxonmlTheme::header())),
-            );
+        let history = Paragraph::new(history_lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border())
+                .title(Span::styled(
+                    " Epoch History (recent) ",
+                    AxonmlTheme::header(),
+                )),
+        );
 
         frame.render_widget(history, area);
     }

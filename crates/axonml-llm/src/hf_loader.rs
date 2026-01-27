@@ -144,11 +144,14 @@ impl HFLoader {
         }
 
         // Read and write in chunks
-        let bytes = response.bytes().map_err(|e| LLMError::NetworkError(e.to_string()))?;
+        let bytes = response
+            .bytes()
+            .map_err(|e| LLMError::NetworkError(e.to_string()))?;
         pb.set_position(bytes.len() as u64);
 
         let mut file = File::create(&local_path).map_err(|e| LLMError::IoError(e.to_string()))?;
-        file.write_all(&bytes).map_err(|e| LLMError::IoError(e.to_string()))?;
+        file.write_all(&bytes)
+            .map_err(|e| LLMError::IoError(e.to_string()))?;
 
         pb.finish_with_message(format!("Downloaded {}", filename));
 
@@ -182,8 +185,8 @@ impl HFLoader {
         let index_path = self.download_file("model.safetensors.index.json")?;
         let index_content =
             fs::read_to_string(&index_path).map_err(|e| LLMError::IoError(e.to_string()))?;
-        let index: serde_json::Value =
-            serde_json::from_str(&index_content).map_err(|e| LLMError::ParseError(e.to_string()))?;
+        let index: serde_json::Value = serde_json::from_str(&index_content)
+            .map_err(|e| LLMError::ParseError(e.to_string()))?;
 
         // Get list of shard files
         let weight_map = index["weight_map"]
@@ -221,10 +224,8 @@ impl HFLoader {
             // Convert to f32
             let data = self.convert_tensor_to_f32(&tensor)?;
 
-            self.tensors.insert(
-                name.to_string(),
-                TensorInfo { shape, data, dtype },
-            );
+            self.tensors
+                .insert(name.to_string(), TensorInfo { shape, data, dtype });
         }
 
         println!("Loaded {} tensors from {}", tensors.len(), filename);
@@ -232,7 +233,10 @@ impl HFLoader {
     }
 
     /// Convert tensor data to f32.
-    fn convert_tensor_to_f32(&self, tensor: &safetensors::tensor::TensorView) -> LLMResult<Vec<f32>> {
+    fn convert_tensor_to_f32(
+        &self,
+        tensor: &safetensors::tensor::TensorView,
+    ) -> LLMResult<Vec<f32>> {
         use safetensors::Dtype;
 
         let data = tensor.data();
@@ -279,9 +283,10 @@ impl HFLoader {
 
     /// Get a tensor as an AxonML Tensor.
     pub fn get_as_tensor(&self, name: &str) -> LLMResult<Tensor<f32>> {
-        let info = self.tensors.get(name).ok_or_else(|| {
-            LLMError::WeightNotFound(name.to_string())
-        })?;
+        let info = self
+            .tensors
+            .get(name)
+            .ok_or_else(|| LLMError::WeightNotFound(name.to_string()))?;
 
         Tensor::from_vec(info.data.clone(), &info.shape)
             .map_err(|e| LLMError::TensorError(e.to_string()))
@@ -317,7 +322,9 @@ impl HFLoader {
     pub fn download_file_if_exists(&self, filename: &str) -> LLMResult<bool> {
         match self.download_file(filename) {
             Ok(_) => Ok(true),
-            Err(LLMError::NetworkError(msg)) if msg.contains("404") || msg.contains("HTTP 4") => Ok(false),
+            Err(LLMError::NetworkError(msg)) if msg.contains("404") || msg.contains("HTTP 4") => {
+                Ok(false)
+            }
             Err(e) => Err(e),
         }
     }
@@ -376,10 +383,7 @@ impl WeightMapper for LLaMAWeightMapper {
     }
 
     fn expected_weights(&self) -> Vec<String> {
-        let mut weights = vec![
-            "embed_tokens.weight".to_string(),
-            "norm.weight".to_string(),
-        ];
+        let mut weights = vec!["embed_tokens.weight".to_string(), "norm.weight".to_string()];
 
         for i in 0..self.num_layers {
             weights.extend([
@@ -477,7 +481,9 @@ impl WeightMapper for PhiWeightMapper {
 // =============================================================================
 
 /// Load LLaMA weights from HuggingFace.
-pub fn load_llama_from_hf(model_id: &str) -> LLMResult<(crate::LLaMAConfig, HashMap<String, Tensor<f32>>)> {
+pub fn load_llama_from_hf(
+    model_id: &str,
+) -> LLMResult<(crate::LLaMAConfig, HashMap<String, Tensor<f32>>)> {
     let mut loader = HFLoader::new(model_id)?;
 
     // Load config
@@ -512,7 +518,8 @@ pub fn parse_llama_config_from_json(json: &serde_json::Value) -> LLMResult<crate
         num_attention_heads: json["num_attention_heads"].as_u64().unwrap_or(32) as usize,
         num_key_value_heads: json["num_key_value_heads"]
             .as_u64()
-            .unwrap_or(json["num_attention_heads"].as_u64().unwrap_or(32)) as usize,
+            .unwrap_or(json["num_attention_heads"].as_u64().unwrap_or(32))
+            as usize,
         max_position_embeddings: json["max_position_embeddings"].as_u64().unwrap_or(4096) as usize,
         rms_norm_eps: json["rms_norm_eps"].as_f64().unwrap_or(1e-5) as f32,
         rope_theta: json["rope_theta"].as_f64().unwrap_or(10000.0) as f32,
@@ -522,7 +529,9 @@ pub fn parse_llama_config_from_json(json: &serde_json::Value) -> LLMResult<crate
 }
 
 /// Load Mistral weights from HuggingFace.
-pub fn load_mistral_from_hf(model_id: &str) -> LLMResult<(crate::MistralConfig, HashMap<String, Tensor<f32>>)> {
+pub fn load_mistral_from_hf(
+    model_id: &str,
+) -> LLMResult<(crate::MistralConfig, HashMap<String, Tensor<f32>>)> {
     let mut loader = HFLoader::new(model_id)?;
 
     let config_json = loader.load_config()?;

@@ -2,8 +2,8 @@
 //!
 //! Records timestamped events for visualization and analysis.
 
+use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
-use serde::{Serialize, Deserialize};
 
 /// Type of event in the timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,8 +130,8 @@ impl TimelineProfiler {
 
     /// Gets a simple thread ID (hash of thread debug representation).
     fn current_thread_id() -> u64 {
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
 
         let thread_id = std::thread::current().id();
         let mut hasher = DefaultHasher::new();
@@ -151,7 +151,10 @@ impl TimelineProfiler {
 
     /// Returns events filtered by type.
     pub fn events_by_type(&self, event_type: EventType) -> Vec<&Event> {
-        self.events.iter().filter(|e| e.event_type == event_type).collect()
+        self.events
+            .iter()
+            .filter(|e| e.event_type == event_type)
+            .collect()
     }
 
     /// Calculates duration between start and end events for a given name.
@@ -159,7 +162,10 @@ impl TimelineProfiler {
         let events: Vec<_> = self.events_by_name(name);
 
         let start = events.iter().find(|e| e.event_type == EventType::Start)?;
-        let end = events.iter().rev().find(|e| e.event_type == EventType::End)?;
+        let end = events
+            .iter()
+            .rev()
+            .find(|e| e.event_type == EventType::End)?;
 
         if end.timestamp_ns >= start.timestamp_ns {
             Some(Duration::from_nanos(end.timestamp_ns - start.timestamp_ns))
@@ -181,28 +187,33 @@ impl TimelineProfiler {
     /// Exports events to Chrome trace format (JSON).
     #[cfg(feature = "chrome-trace")]
     pub fn to_chrome_trace(&self) -> String {
-        let trace_events: Vec<_> = self.events.iter().map(|e| {
-            let ph = match e.event_type {
-                EventType::Start => "B",
-                EventType::End => "E",
-                EventType::Instant => "i",
-                _ => "i",
-            };
+        let trace_events: Vec<_> = self
+            .events
+            .iter()
+            .map(|e| {
+                let ph = match e.event_type {
+                    EventType::Start => "B",
+                    EventType::End => "E",
+                    EventType::Instant => "i",
+                    _ => "i",
+                };
 
-            serde_json::json!({
-                "name": e.name,
-                "cat": "profile",
-                "ph": ph,
-                "ts": e.timestamp_ns / 1000, // Convert to microseconds
-                "pid": 1,
-                "tid": e.thread_id.unwrap_or(1),
+                serde_json::json!({
+                    "name": e.name,
+                    "cat": "profile",
+                    "ph": ph,
+                    "ts": e.timestamp_ns / 1000, // Convert to microseconds
+                    "pid": 1,
+                    "tid": e.thread_id.unwrap_or(1),
+                })
             })
-        }).collect();
+            .collect();
 
         serde_json::json!({
             "traceEvents": trace_events,
             "displayTimeUnit": "ms"
-        }).to_string()
+        })
+        .to_string()
     }
 
     /// Exports events to a simple JSON format.

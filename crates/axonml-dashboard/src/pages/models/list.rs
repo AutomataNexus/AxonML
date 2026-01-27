@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, modal::*};
 
 /// Models list page
 #[component]
@@ -51,7 +51,10 @@ pub fn ModelsListPage() -> impl IntoView {
                 search_term.is_empty()
                     || m.name.to_lowercase().contains(&search_term)
                     || m.model_type.to_lowercase().contains(&search_term)
-                    || m.description.as_ref().map(|d| d.to_lowercase().contains(&search_term)).unwrap_or(false)
+                    || m.description
+                        .as_ref()
+                        .map(|d| d.to_lowercase().contains(&search_term))
+                        .unwrap_or(false)
             })
             .collect::<Vec<_>>()
     };
@@ -184,10 +187,7 @@ pub fn ModelsListPage() -> impl IntoView {
 
 /// Model card component
 #[component]
-fn ModelCard(
-    model: Model,
-    #[prop(into)] on_delete: Callback<()>,
-) -> impl IntoView {
+fn ModelCard(model: Model, #[prop(into)] on_delete: Callback<()>) -> impl IntoView {
     view! {
         <div class="model-card card">
             <div class="card-header">

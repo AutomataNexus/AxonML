@@ -80,9 +80,10 @@ impl FusedLinear {
     ) -> FusionResult<Self> {
         let shape = weight.shape();
         if shape.len() != 2 {
-            return Err(FusionError::InvalidConfig(
-                format!("Weight must be 2D, got shape {:?}", shape)
-            ));
+            return Err(FusionError::InvalidConfig(format!(
+                "Weight must be 2D, got shape {:?}",
+                shape
+            )));
         }
 
         let out_features = shape[0];
@@ -116,9 +117,10 @@ impl FusedLinear {
         } else if input_shape.len() == 2 {
             (input_shape[0], input_shape[1])
         } else {
-            return Err(FusionError::InvalidConfig(
-                format!("Input must be 1D or 2D, got shape {:?}", input_shape)
-            ));
+            return Err(FusionError::InvalidConfig(format!(
+                "Input must be 1D or 2D, got shape {:?}",
+                input_shape
+            )));
         };
 
         if input_features != self.in_features {
@@ -141,7 +143,8 @@ impl FusedLinear {
                 (0..self.out_features)
                     .map(|o| {
                         // Dot product
-                        let weight_row = &weight_data[o * self.in_features..(o + 1) * self.in_features];
+                        let weight_row =
+                            &weight_data[o * self.in_features..(o + 1) * self.in_features];
                         let mut sum: f32 = input_row
                             .iter()
                             .zip(weight_row.iter())
@@ -173,7 +176,8 @@ impl FusedLinear {
 
 impl FusedOp for FusedLinear {
     fn execute(&self, inputs: &[&Tensor<f32>]) -> FusionResult<Tensor<f32>> {
-        let input = inputs.first()
+        let input = inputs
+            .first()
             .ok_or_else(|| FusionError::InvalidConfig("No input provided".to_string()))?;
         self.forward(input)
     }
@@ -203,11 +207,7 @@ pub fn fuse_matmul_bias_relu(
     weight: &Tensor<f32>,
     bias: &Tensor<f32>,
 ) -> FusionResult<FusedLinear> {
-    FusedLinear::new(
-        weight.clone(),
-        Some(bias.clone()),
-        Activation::Relu,
-    )
+    FusedLinear::new(weight.clone(), Some(bias.clone()), Activation::Relu)
 }
 
 /// Creates a fused MatMul + Bias + GELU operation.
@@ -215,23 +215,12 @@ pub fn fuse_matmul_bias_gelu(
     weight: &Tensor<f32>,
     bias: &Tensor<f32>,
 ) -> FusionResult<FusedLinear> {
-    FusedLinear::new(
-        weight.clone(),
-        Some(bias.clone()),
-        Activation::Gelu,
-    )
+    FusedLinear::new(weight.clone(), Some(bias.clone()), Activation::Gelu)
 }
 
 /// Creates a fused MatMul + Bias operation (no activation).
-pub fn fuse_matmul_bias(
-    weight: &Tensor<f32>,
-    bias: &Tensor<f32>,
-) -> FusionResult<FusedLinear> {
-    FusedLinear::new(
-        weight.clone(),
-        Some(bias.clone()),
-        Activation::None,
-    )
+pub fn fuse_matmul_bias(weight: &Tensor<f32>, bias: &Tensor<f32>) -> FusionResult<FusedLinear> {
+    FusedLinear::new(weight.clone(), Some(bias.clone()), Activation::None)
 }
 
 // =============================================================================
@@ -245,11 +234,7 @@ mod tests {
     #[test]
     fn test_fused_linear_no_activation() {
         // 2x3 weight matrix
-        let weight = Tensor::from_vec(
-            vec![1.0, 2.0, 3.0,
-                 4.0, 5.0, 6.0],
-            &[2, 3]
-        ).unwrap();
+        let weight = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).unwrap();
 
         // Bias
         let bias = Tensor::from_vec(vec![0.5, 0.5], &[2]).unwrap();
@@ -268,11 +253,7 @@ mod tests {
 
     #[test]
     fn test_fused_linear_with_relu() {
-        let weight = Tensor::from_vec(
-            vec![1.0, -1.0,
-                 -1.0, 1.0],
-            &[2, 2]
-        ).unwrap();
+        let weight = Tensor::from_vec(vec![1.0, -1.0, -1.0, 1.0], &[2, 2]).unwrap();
 
         let bias = Tensor::from_vec(vec![-0.5, -0.5], &[2]).unwrap();
 

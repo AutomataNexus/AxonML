@@ -3,8 +3,8 @@
 //! Provides tracing functionality to record tensor operations and build
 //! computation graphs for JIT compilation.
 
+use crate::ir::{DataType, Graph, NodeId, Op, Shape};
 use std::cell::RefCell;
-use crate::ir::{Graph, NodeId, Op, DataType, Shape};
 
 /// A traced value representing a node in the computation graph.
 #[derive(Debug, Clone, Copy)]
@@ -33,7 +33,14 @@ impl TracedValue {
     pub fn add(&self, other: &TracedValue) -> TracedValue {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
-            tracer.binary_op(Op::Add { lhs: self.id, rhs: other.id }, self.id, other.id)
+            tracer.binary_op(
+                Op::Add {
+                    lhs: self.id,
+                    rhs: other.id,
+                },
+                self.id,
+                other.id,
+            )
         })
     }
 
@@ -41,7 +48,14 @@ impl TracedValue {
     pub fn sub(&self, other: &TracedValue) -> TracedValue {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
-            tracer.binary_op(Op::Sub { lhs: self.id, rhs: other.id }, self.id, other.id)
+            tracer.binary_op(
+                Op::Sub {
+                    lhs: self.id,
+                    rhs: other.id,
+                },
+                self.id,
+                other.id,
+            )
         })
     }
 
@@ -49,7 +63,14 @@ impl TracedValue {
     pub fn mul(&self, other: &TracedValue) -> TracedValue {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
-            tracer.binary_op(Op::Mul { lhs: self.id, rhs: other.id }, self.id, other.id)
+            tracer.binary_op(
+                Op::Mul {
+                    lhs: self.id,
+                    rhs: other.id,
+                },
+                self.id,
+                other.id,
+            )
         })
     }
 
@@ -57,7 +78,14 @@ impl TracedValue {
     pub fn div(&self, other: &TracedValue) -> TracedValue {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
-            tracer.binary_op(Op::Div { lhs: self.id, rhs: other.id }, self.id, other.id)
+            tracer.binary_op(
+                Op::Div {
+                    lhs: self.id,
+                    rhs: other.id,
+                },
+                self.id,
+                other.id,
+            )
         })
     }
 
@@ -65,7 +93,14 @@ impl TracedValue {
     pub fn pow(&self, exp: &TracedValue) -> TracedValue {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
-            tracer.binary_op(Op::Pow { base: self.id, exp: exp.id }, self.id, exp.id)
+            tracer.binary_op(
+                Op::Pow {
+                    base: self.id,
+                    exp: exp.id,
+                },
+                self.id,
+                exp.id,
+            )
         })
     }
 
@@ -83,7 +118,13 @@ impl TracedValue {
     pub fn add_scalar(&self, scalar: f64) -> TracedValue {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
-            tracer.unary_op(Op::AddScalar { input: self.id, scalar }, self.id)
+            tracer.unary_op(
+                Op::AddScalar {
+                    input: self.id,
+                    scalar,
+                },
+                self.id,
+            )
         })
     }
 
@@ -91,7 +132,13 @@ impl TracedValue {
     pub fn mul_scalar(&self, scalar: f64) -> TracedValue {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
-            tracer.unary_op(Op::MulScalar { input: self.id, scalar }, self.id)
+            tracer.unary_op(
+                Op::MulScalar {
+                    input: self.id,
+                    scalar,
+                },
+                self.id,
+            )
         })
     }
 
@@ -209,7 +256,16 @@ impl TracedValue {
     pub fn sum_axis(&self, axis: i32, keepdim: bool) -> TracedValue {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
-            tracer.reduction_op(Op::SumAxis { input: self.id, axis, keepdim }, self.id, Some(axis), keepdim)
+            tracer.reduction_op(
+                Op::SumAxis {
+                    input: self.id,
+                    axis,
+                    keepdim,
+                },
+                self.id,
+                Some(axis),
+                keepdim,
+            )
         })
     }
 
@@ -225,7 +281,16 @@ impl TracedValue {
     pub fn mean_axis(&self, axis: i32, keepdim: bool) -> TracedValue {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
-            tracer.reduction_op(Op::MeanAxis { input: self.id, axis, keepdim }, self.id, Some(axis), keepdim)
+            tracer.reduction_op(
+                Op::MeanAxis {
+                    input: self.id,
+                    axis,
+                    keepdim,
+                },
+                self.id,
+                Some(axis),
+                keepdim,
+            )
         })
     }
 
@@ -298,7 +363,9 @@ impl TracerState {
         let rhs_node = self.graph.node(rhs);
 
         // Use broadcast shape
-        let shape = lhs_node.shape.broadcast_shape(&rhs_node.shape)
+        let shape = lhs_node
+            .shape
+            .broadcast_shape(&rhs_node.shape)
             .unwrap_or_else(|| lhs_node.shape.clone());
         let dtype = lhs_node.dtype; // Assume same dtype
 
@@ -327,13 +394,23 @@ impl TracerState {
         TracedValue::new(id, self.tracer_id)
     }
 
-    fn reduction_op(&mut self, op: Op, input: NodeId, axis: Option<i32>, keepdim: bool) -> TracedValue {
+    fn reduction_op(
+        &mut self,
+        op: Op,
+        input: NodeId,
+        axis: Option<i32>,
+        keepdim: bool,
+    ) -> TracedValue {
         let node = self.graph.node(input);
         let dtype = node.dtype;
 
         let shape = if let Some(ax) = axis {
             let mut dims = node.shape.dims().to_vec();
-            let ax = if ax < 0 { (dims.len() as i32 + ax) as usize } else { ax as usize };
+            let ax = if ax < 0 {
+                (dims.len() as i32 + ax) as usize
+            } else {
+                ax as usize
+            };
             if keepdim {
                 dims[ax] = 1;
             } else {
@@ -379,7 +456,10 @@ impl TracerState {
         }
 
         let id = self.graph.add_node(
-            Op::Reshape { input, shape: new_shape.to_vec() },
+            Op::Reshape {
+                input,
+                shape: new_shape.to_vec(),
+            },
             dtype,
             Shape::from(shape),
         );
@@ -406,16 +486,18 @@ impl TracerState {
         let dtype = node.dtype;
 
         let mut shape = node.shape.dims().to_vec();
-        let d = if dim < 0 { (shape.len() as i32 + dim) as usize } else { dim as usize };
+        let d = if dim < 0 {
+            (shape.len() as i32 + dim) as usize
+        } else {
+            dim as usize
+        };
         if shape[d] == 1 {
             shape.remove(d);
         }
 
-        let id = self.graph.add_node(
-            Op::Squeeze { input, dim },
-            dtype,
-            Shape::from(shape),
-        );
+        let id = self
+            .graph
+            .add_node(Op::Squeeze { input, dim }, dtype, Shape::from(shape));
         TracedValue::new(id, self.tracer_id)
     }
 
@@ -424,14 +506,16 @@ impl TracerState {
         let dtype = node.dtype;
 
         let mut shape = node.shape.dims().to_vec();
-        let d = if dim < 0 { (shape.len() as i32 + 1 + dim) as usize } else { dim as usize };
+        let d = if dim < 0 {
+            (shape.len() as i32 + 1 + dim) as usize
+        } else {
+            dim as usize
+        };
         shape.insert(d, 1);
 
-        let id = self.graph.add_node(
-            Op::Unsqueeze { input, dim },
-            dtype,
-            Shape::from(shape),
-        );
+        let id = self
+            .graph
+            .add_node(Op::Unsqueeze { input, dim }, dtype, Shape::from(shape));
         TracedValue::new(id, self.tracer_id)
     }
 }
@@ -447,7 +531,9 @@ impl Tracer {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
             let id = tracer.graph.add_node(
-                Op::Input { name: name.to_string() },
+                Op::Input {
+                    name: name.to_string(),
+                },
                 DataType::F32,
                 Shape::new(shape),
             );
@@ -460,11 +546,10 @@ impl Tracer {
     pub fn constant(&self, value: f64, shape: &[usize]) -> TracedValue {
         TRACER.with(|t| {
             let mut tracer = t.borrow_mut();
-            let id = tracer.graph.add_node(
-                Op::Constant { value },
-                DataType::F32,
-                Shape::new(shape),
-            );
+            let id =
+                tracer
+                    .graph
+                    .add_node(Op::Constant { value }, DataType::F32, Shape::new(shape));
             TracedValue::new(id, self.tracer_id)
         })
     }
@@ -478,7 +563,10 @@ impl Tracer {
             let shape = node.shape.clone();
 
             let id = tracer.graph.add_node(
-                Op::Output { name: name.to_string(), input: value.id },
+                Op::Output {
+                    name: name.to_string(),
+                    input: value.id,
+                },
                 dtype,
                 shape,
             );

@@ -154,8 +154,8 @@ pub use comm::{
 };
 pub use ddp::{DistributedDataParallel, GradSyncStrategy, GradientBucket, GradientSynchronizer};
 pub use fsdp::{
-    ColumnParallelLinear, CPUOffload, FSDPMemoryStats, FullyShardedDataParallel,
-    RowParallelLinear, ShardingStrategy,
+    CPUOffload, ColumnParallelLinear, FSDPMemoryStats, FullyShardedDataParallel, RowParallelLinear,
+    ShardingStrategy,
 };
 pub use pipeline::{Pipeline, PipelineMemoryStats, PipelineSchedule, PipelineStage};
 pub use process_group::{ProcessGroup, World};
@@ -188,21 +188,21 @@ pub mod prelude {
         world_size,
         // Backend
         Backend,
+        CPUOffload,
+        // FSDP
+        ColumnParallelLinear,
         // DDP
         DistributedDataParallel,
+        FullyShardedDataParallel,
         GradSyncStrategy,
         GradientBucket,
         GradientSynchronizer,
         MockBackend,
-        // FSDP
-        ColumnParallelLinear,
-        CPUOffload,
-        FullyShardedDataParallel,
-        RowParallelLinear,
-        ShardingStrategy,
         // Process groups
         ProcessGroup,
         ReduceOp,
+        RowParallelLinear,
+        ShardingStrategy,
         World,
     };
 

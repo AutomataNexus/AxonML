@@ -1,7 +1,7 @@
 //! User Management Admin Page
 
-use leptos::*;
 use crate::components::icons::*;
+use leptos::*;
 
 #[component]
 pub fn UserManagementPage() -> impl IntoView {

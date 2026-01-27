@@ -39,7 +39,8 @@ pub struct SequentialSampler {
 
 impl SequentialSampler {
     /// Creates a new `SequentialSampler`.
-    #[must_use] pub fn new(len: usize) -> Self {
+    #[must_use]
+    pub fn new(len: usize) -> Self {
         Self { len }
     }
 }
@@ -67,7 +68,8 @@ pub struct RandomSampler {
 
 impl RandomSampler {
     /// Creates a new `RandomSampler` without replacement.
-    #[must_use] pub fn new(len: usize) -> Self {
+    #[must_use]
+    pub fn new(len: usize) -> Self {
         Self {
             len,
             replacement: false,
@@ -76,7 +78,8 @@ impl RandomSampler {
     }
 
     /// Creates a `RandomSampler` with replacement.
-    #[must_use] pub fn with_replacement(len: usize, num_samples: usize) -> Self {
+    #[must_use]
+    pub fn with_replacement(len: usize, num_samples: usize) -> Self {
         Self {
             len,
             replacement: true,
@@ -143,7 +146,8 @@ pub struct SubsetRandomSampler {
 
 impl SubsetRandomSampler {
     /// Creates a new `SubsetRandomSampler`.
-    #[must_use] pub fn new(indices: Vec<usize>) -> Self {
+    #[must_use]
+    pub fn new(indices: Vec<usize>) -> Self {
         Self { indices }
     }
 }
@@ -173,7 +177,8 @@ pub struct WeightedRandomSampler {
 
 impl WeightedRandomSampler {
     /// Creates a new `WeightedRandomSampler`.
-    #[must_use] pub fn new(weights: Vec<f64>, num_samples: usize, replacement: bool) -> Self {
+    #[must_use]
+    pub fn new(weights: Vec<f64>, num_samples: usize, replacement: bool) -> Self {
         Self {
             weights,
             num_samples,

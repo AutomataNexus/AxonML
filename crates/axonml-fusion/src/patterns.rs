@@ -43,8 +43,10 @@ impl FusionPattern {
     pub fn num_ops(&self) -> usize {
         match self {
             FusionPattern::MatMulBias | FusionPattern::AddRelu | FusionPattern::MulAdd => 2,
-            FusionPattern::MatMulBiasRelu | FusionPattern::MatMulBiasGelu |
-            FusionPattern::ConvBatchNorm | FusionPattern::Softmax => 3,
+            FusionPattern::MatMulBiasRelu
+            | FusionPattern::MatMulBiasGelu
+            | FusionPattern::ConvBatchNorm
+            | FusionPattern::Softmax => 3,
             FusionPattern::ConvBatchNormRelu | FusionPattern::LayerNorm => 4,
             FusionPattern::GeluApprox => 5,
             FusionPattern::ElementwiseChain => 2, // Variable, default 2
@@ -175,7 +177,10 @@ pub fn detect_patterns(ops: &[OpType]) -> Vec<(FusionPattern, usize, usize)> {
                 i += 3;
                 continue;
             }
-            if ops[i] == OpType::Conv && ops[i + 1] == OpType::BatchNorm && ops[i + 2] == OpType::Relu {
+            if ops[i] == OpType::Conv
+                && ops[i + 1] == OpType::BatchNorm
+                && ops[i + 2] == OpType::Relu
+            {
                 patterns.push((FusionPattern::ConvBatchNormRelu, i, i + 3));
                 i += 3;
                 continue;
@@ -228,9 +233,16 @@ pub fn detect_patterns(ops: &[OpType]) -> Vec<(FusionPattern, usize, usize)> {
 fn is_elementwise_op(op: OpType) -> bool {
     matches!(
         op,
-        OpType::Add | OpType::Sub | OpType::Mul | OpType::Div |
-        OpType::Relu | OpType::Sigmoid | OpType::Tanh |
-        OpType::Exp | OpType::Log | OpType::Sqrt
+        OpType::Add
+            | OpType::Sub
+            | OpType::Mul
+            | OpType::Div
+            | OpType::Relu
+            | OpType::Sigmoid
+            | OpType::Tanh
+            | OpType::Exp
+            | OpType::Log
+            | OpType::Sqrt
     )
 }
 
@@ -286,7 +298,10 @@ mod tests {
 
     #[test]
     fn test_pattern_display() {
-        assert_eq!(format!("{}", FusionPattern::MatMulBiasRelu), "MatMul+Bias+ReLU");
+        assert_eq!(
+            format!("{}", FusionPattern::MatMulBiasRelu),
+            "MatMul+Bias+ReLU"
+        );
         assert_eq!(format!("{}", FusionPattern::Softmax), "Softmax");
     }
 }

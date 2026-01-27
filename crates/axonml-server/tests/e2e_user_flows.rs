@@ -142,7 +142,10 @@ async fn test_model_lifecycle_flow() {
             .await
             .expect("Get model failed");
 
-        assert!(get_response.status().is_success(), "Should get model details");
+        assert!(
+            get_response.status().is_success(),
+            "Should get model details"
+        );
         let model_details: Value = get_response.json().await.expect("Failed to parse");
         assert_eq!(model_details["name"], unique_name);
 
@@ -158,16 +161,16 @@ async fn test_model_lifecycle_flow() {
         .await
         .expect("Update model failed");
 
-        assert!(
-            update_response.status().is_success(),
-            "Should update model"
-        );
+        assert!(update_response.status().is_success(), "Should update model");
 
         // Step 5: List versions (should be empty)
-        let versions_response =
-            auth_get(&client, &format!("/api/models/{}/versions", model_id), &token)
-                .await
-                .expect("List versions failed");
+        let versions_response = auth_get(
+            &client,
+            &format!("/api/models/{}/versions", model_id),
+            &token,
+        )
+        .await
+        .expect("List versions failed");
 
         assert!(
             versions_response.status().is_success(),
@@ -276,10 +279,13 @@ async fn test_training_run_lifecycle() {
         }
 
         // Step 5: Get metrics
-        let get_metrics_response =
-            auth_get(&client, &format!("/api/training/runs/{}/metrics", run_id), &token)
-                .await
-                .expect("Get metrics failed");
+        let get_metrics_response = auth_get(
+            &client,
+            &format!("/api/training/runs/{}/metrics", run_id),
+            &token,
+        )
+        .await
+        .expect("Get metrics failed");
 
         assert!(
             get_metrics_response.status().is_success(),
@@ -487,7 +493,10 @@ async fn test_system_info_flow() {
     );
 
     let info: Value = info_response.json().await.expect("Failed to parse");
-    assert!(info.get("cpu_count").is_some() || info.get("cpus").is_some(), "Should have CPU info");
+    assert!(
+        info.get("cpu_count").is_some() || info.get("cpus").is_some(),
+        "Should have CPU info"
+    );
 
     // Step 2: List GPUs
     let gpus_response = auth_get(&client, "/api/system/gpus", &token)
@@ -513,7 +522,10 @@ async fn test_admin_operations_flow() {
         .await
         .expect("List users failed");
 
-    assert!(users_response.status().is_success(), "Admin should list users");
+    assert!(
+        users_response.status().is_success(),
+        "Admin should list users"
+    );
 
     let users: Vec<Value> = users_response.json().await.expect("Failed to parse");
     assert!(!users.is_empty(), "Should have at least admin user");
@@ -545,10 +557,7 @@ async fn test_dataset_operations_flow() {
         .await
         .expect("List datasets failed");
 
-    assert!(
-        list_response.status().is_success(),
-        "Should list datasets"
-    );
+    assert!(list_response.status().is_success(), "Should list datasets");
 
     let datasets: Vec<Value> = list_response.json().await.expect("Failed to parse");
 
@@ -609,7 +618,10 @@ async fn test_complete_ml_pipeline_flow() {
     let datasets_response = match auth_get(&client, "/api/builtin-datasets", &token).await {
         Ok(resp) => resp,
         Err(e) => {
-            eprintln!("Note: Builtin datasets request failed (network issue): {}", e);
+            eprintln!(
+                "Note: Builtin datasets request failed (network issue): {}",
+                e
+            );
             return; // Skip test on network failure
         }
     };

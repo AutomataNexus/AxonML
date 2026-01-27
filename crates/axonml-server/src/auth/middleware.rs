@@ -78,9 +78,14 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
@@ -118,39 +123,41 @@ pub struct ErrorResponse {
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         let (status, error, message) = match &self {
-            AuthError::InvalidCredentials => {
-                (StatusCode::UNAUTHORIZED, "invalid_credentials", "Invalid credentials")
-            }
-            AuthError::TokenExpired => {
-                (StatusCode::UNAUTHORIZED, "token_expired", "Token has expired")
-            }
-            AuthError::InvalidToken => {
-                (StatusCode::UNAUTHORIZED, "invalid_token", "Invalid token")
-            }
-            AuthError::MfaRequired => {
-                (StatusCode::FORBIDDEN, "mfa_required", "MFA verification required")
-            }
-            AuthError::InvalidMfaCode => {
-                (StatusCode::UNAUTHORIZED, "invalid_mfa_code", "Invalid MFA code")
-            }
-            AuthError::UserNotFound => {
-                (StatusCode::NOT_FOUND, "user_not_found", "User not found")
-            }
-            AuthError::NotFound(msg) => {
-                (StatusCode::NOT_FOUND, "not_found", msg.as_str())
-            }
+            AuthError::InvalidCredentials => (
+                StatusCode::UNAUTHORIZED,
+                "invalid_credentials",
+                "Invalid credentials",
+            ),
+            AuthError::TokenExpired => (
+                StatusCode::UNAUTHORIZED,
+                "token_expired",
+                "Token has expired",
+            ),
+            AuthError::InvalidToken => (StatusCode::UNAUTHORIZED, "invalid_token", "Invalid token"),
+            AuthError::MfaRequired => (
+                StatusCode::FORBIDDEN,
+                "mfa_required",
+                "MFA verification required",
+            ),
+            AuthError::InvalidMfaCode => (
+                StatusCode::UNAUTHORIZED,
+                "invalid_mfa_code",
+                "Invalid MFA code",
+            ),
+            AuthError::UserNotFound => (StatusCode::NOT_FOUND, "user_not_found", "User not found"),
+            AuthError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found", msg.as_str()),
             AuthError::Unauthorized => {
                 (StatusCode::FORBIDDEN, "unauthorized", "Unauthorized access")
             }
-            AuthError::Forbidden(msg) => {
-                (StatusCode::FORBIDDEN, "forbidden", msg.as_str())
-            }
+            AuthError::Forbidden(msg) => (StatusCode::FORBIDDEN, "forbidden", msg.as_str()),
             AuthError::InvalidInput(msg) => {
                 (StatusCode::BAD_REQUEST, "invalid_input", msg.as_str())
             }
-            AuthError::Internal(msg) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", msg.as_str())
-            }
+            AuthError::Internal(msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                msg.as_str(),
+            ),
         };
 
         let body = Json(ErrorResponse {
@@ -194,8 +201,7 @@ pub async fn auth_middleware(
         .ok_or(AuthError::InvalidToken)?;
 
     // Extract token
-    let token = JwtAuth::extract_from_header(auth_header)
-        .ok_or(AuthError::InvalidToken)?;
+    let token = JwtAuth::extract_from_header(auth_header).ok_or(AuthError::InvalidToken)?;
 
     // Validate token
     let claims = jwt.validate_access_token(token)?;
@@ -249,8 +255,7 @@ pub async fn require_mfa_middleware(
         .ok_or(AuthError::InvalidToken)?;
 
     // Extract token
-    let token = JwtAuth::extract_from_header(auth_header)
-        .ok_or(AuthError::InvalidToken)?;
+    let token = JwtAuth::extract_from_header(auth_header).ok_or(AuthError::InvalidToken)?;
 
     // Validate token
     let claims = jwt.validate_access_token(token)?;
@@ -284,8 +289,7 @@ pub async fn require_admin_middleware(
         .ok_or(AuthError::InvalidToken)?;
 
     // Extract token
-    let token = JwtAuth::extract_from_header(auth_header)
-        .ok_or(AuthError::InvalidToken)?;
+    let token = JwtAuth::extract_from_header(auth_header).ok_or(AuthError::InvalidToken)?;
 
     // Validate token
     let claims = jwt.validate_access_token(token)?;

@@ -3,8 +3,8 @@
 //! Sampling strategies and generation configuration for language models.
 
 use axonml_tensor::Tensor;
-use serde::{Serialize, Deserialize};
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for text generation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,9 +163,7 @@ impl TextGenerator {
             if k < logits.len() {
                 // Find indices of top k values
                 let mut sorted_indices: Vec<usize> = (0..logits.len()).collect();
-                sorted_indices.sort_by(|&a, &b| {
-                    logits[b].partial_cmp(&logits[a]).unwrap()
-                });
+                sorted_indices.sort_by(|&a, &b| logits[b].partial_cmp(&logits[a]).unwrap());
 
                 // Create a set of top-k indices
                 let top_k_indices: std::collections::HashSet<usize> =
@@ -192,9 +190,7 @@ impl TextGenerator {
 
             // Sort by probability
             let mut sorted_indices: Vec<usize> = (0..probs.len()).collect();
-            sorted_indices.sort_by(|&a, &b| {
-                probs[b].partial_cmp(&probs[a]).unwrap()
-            });
+            sorted_indices.sort_by(|&a, &b| probs[b].partial_cmp(&probs[a]).unwrap());
 
             // Find cutoff
             let mut cumsum = 0.0f32;
@@ -320,7 +316,12 @@ pub struct BeamSearch {
 
 impl BeamSearch {
     /// Creates a new beam search.
-    pub fn new(num_beams: usize, length_penalty: f32, early_stopping: bool, eos_token_ids: Vec<u32>) -> Self {
+    pub fn new(
+        num_beams: usize,
+        length_penalty: f32,
+        early_stopping: bool,
+        eos_token_ids: Vec<u32>,
+    ) -> Self {
         Self {
             num_beams,
             length_penalty,
@@ -348,9 +349,8 @@ impl BeamSearch {
             let logits = &next_token_logits[beam_idx];
 
             // Get top-k tokens for this beam
-            let mut indexed: Vec<(usize, f32)> = logits.iter().enumerate()
-                .map(|(i, &v)| (i, v))
-                .collect();
+            let mut indexed: Vec<(usize, f32)> =
+                logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
             indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
             for (token, log_prob) in indexed.into_iter().take(self.num_beams * 2) {

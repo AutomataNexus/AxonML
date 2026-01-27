@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{forms::*, icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{forms::*, icons::*, spinner::*, modal::*};
 use crate::utils::webauthn;
 
 /// TOTP Setup Page
@@ -50,7 +50,10 @@ pub fn TotpSetupPage() -> impl IntoView {
                     let promise = clipboard.write_text(&secret);
                     let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
                     set_copied.set(true);
-                    set_timeout(move || set_copied.set(false), std::time::Duration::from_secs(2));
+                    set_timeout(
+                        move || set_copied.set(false),
+                        std::time::Duration::from_secs(2),
+                    );
                 });
             }
         }
@@ -73,7 +76,10 @@ pub fn TotpSetupPage() -> impl IntoView {
                 match api::auth::totp_enable(&code).await {
                     Ok(_) => {
                         set_step.set(3);
-                        state.toast_success("TOTP Enabled", "Two-factor authentication is now active");
+                        state.toast_success(
+                            "TOTP Enabled",
+                            "Two-factor authentication is now active",
+                        );
                     }
                     Err(e) => {
                         error.set(Some(e.message));
@@ -281,7 +287,9 @@ pub fn WebAuthnSetupPage() -> impl IntoView {
 
         // Check if WebAuthn is available
         if !webauthn::is_webauthn_available() {
-            error.set(Some("WebAuthn is not supported in this browser".to_string()));
+            error.set(Some(
+                "WebAuthn is not supported in this browser".to_string(),
+            ));
             return;
         }
 
@@ -289,10 +297,14 @@ pub fn WebAuthnSetupPage() -> impl IntoView {
         error.set(None);
 
         let name = device_name.get();
-        let user_id = state.user.get()
+        let user_id = state
+            .user
+            .get()
             .map(|u| u.id.clone())
             .unwrap_or_else(|| "user".to_string());
-        let user_email = state.user.get()
+        let user_email = state
+            .user
+            .get()
             .map(|u| u.email.clone())
             .unwrap_or_else(|| "user@example.com".to_string());
 
@@ -312,7 +324,9 @@ pub fn WebAuthnSetupPage() -> impl IntoView {
                         &challenge.user_id.unwrap_or(user_id),
                         &user_email,
                         &name,
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(registration) => {
                             // Step 3: Send credential to server for registration
                             let finish_request = api::auth::WebAuthnRegisterFinishRequest {
@@ -455,7 +469,10 @@ pub fn RecoveryCodesPage() -> impl IntoView {
             let promise = clipboard.write_text(&codes_text);
             let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
             set_copied.set(true);
-            set_timeout(move || set_copied.set(false), std::time::Duration::from_secs(2));
+            set_timeout(
+                move || set_copied.set(false),
+                std::time::Duration::from_secs(2),
+            );
         });
     };
 
@@ -471,7 +488,10 @@ pub fn RecoveryCodesPage() -> impl IntoView {
                     Ok(response) => {
                         set_codes.set(response.codes);
                         show_regenerate_modal.set(false);
-                        state.toast_success("Codes Regenerated", "New recovery codes have been generated");
+                        state.toast_success(
+                            "Codes Regenerated",
+                            "New recovery codes have been generated",
+                        );
                     }
                     Err(e) => {
                         error.set(Some(e.message));

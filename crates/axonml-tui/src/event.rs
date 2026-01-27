@@ -230,7 +230,10 @@ mod tests {
         handle_key_event(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(app.active_tab, Tab::Data);
 
-        handle_key_event(&mut app, KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
+        );
         assert_eq!(app.active_tab, Tab::Model);
     }
 

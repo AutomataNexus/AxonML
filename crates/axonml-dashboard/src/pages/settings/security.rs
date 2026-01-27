@@ -4,8 +4,8 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{forms::*, icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
-use crate::components::{icons::*, spinner::*, forms::*, modal::*};
 
 /// Security settings page
 #[component]
@@ -82,7 +82,10 @@ pub fn SecuritySettingsPage() -> impl IntoView {
         spawn_local(async move {
             match api::auth::totp_disable().await {
                 Ok(_) => {
-                    state.toast_success("TOTP Disabled", "Two-factor authentication has been disabled");
+                    state.toast_success(
+                        "TOTP Disabled",
+                        "Two-factor authentication has been disabled",
+                    );
                     totp_enabled.set(false);
                 }
                 Err(e) => {

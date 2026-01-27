@@ -35,16 +35,16 @@
 #![allow(clippy::missing_panics_doc)]
 
 pub mod error;
+pub mod export;
 pub mod model;
 pub mod operators;
 pub mod parser;
 pub mod proto;
-pub mod export;
 
 pub use error::{OnnxError, OnnxResult};
+pub use export::export_onnx;
 pub use model::OnnxModel;
 pub use parser::{import_onnx, import_onnx_bytes};
-pub use export::export_onnx;
 
 // =============================================================================
 // Re-exports for convenience

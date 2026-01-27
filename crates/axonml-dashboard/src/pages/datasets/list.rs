@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, modal::*};
 
 /// Datasets list page
 #[component]
@@ -50,7 +50,10 @@ pub fn DatasetsListPage() -> impl IntoView {
                 search_term.is_empty()
                     || d.name.to_lowercase().contains(&search_term)
                     || d.dataset_type.to_lowercase().contains(&search_term)
-                    || d.description.as_ref().map(|desc| desc.to_lowercase().contains(&search_term)).unwrap_or(false)
+                    || d.description
+                        .as_ref()
+                        .map(|desc| desc.to_lowercase().contains(&search_term))
+                        .unwrap_or(false)
             })
             .collect::<Vec<_>>()
     };
@@ -182,10 +185,7 @@ pub fn DatasetsListPage() -> impl IntoView {
 
 /// Dataset card component
 #[component]
-fn DatasetCard(
-    dataset: Dataset,
-    #[prop(into)] on_delete: Callback<()>,
-) -> impl IntoView {
+fn DatasetCard(dataset: Dataset, #[prop(into)] on_delete: Callback<()>) -> impl IntoView {
     // Extract values for display
     let name = dataset.name.clone();
     let dataset_type = dataset.dataset_type.clone();

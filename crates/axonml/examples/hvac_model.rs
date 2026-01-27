@@ -12,8 +12,8 @@
 //!
 //! Usage: cargo run --example hvac_model
 
-use axonml::nn::{Module, Parameter, GRU, Linear, LayerNorm, ReLU, Dropout, Softmax};
 use axonml::autograd::Variable;
+use axonml::nn::{Dropout, LayerNorm, Linear, Module, Parameter, ReLU, Softmax, GRU};
 use axonml::tensor::Tensor;
 
 // =============================================================================
@@ -116,9 +116,9 @@ pub struct HvacPredictor {
     gru: GRU,
 
     // Prediction heads
-    head_imminent: PredictionHead,  // 5 min
-    head_warning: PredictionHead,   // 15 min
-    head_early: PredictionHead,     // 30 min
+    head_imminent: PredictionHead, // 5 min
+    head_warning: PredictionHead,  // 15 min
+    head_early: PredictionHead,    // 30 min
 
     // Output
     softmax: Softmax,
@@ -143,8 +143,16 @@ impl HvacPredictor {
             input_norm: LayerNorm::new(vec![config.hidden_size]),
             input_relu: ReLU,
             gru: GRU::new(config.hidden_size, config.hidden_size, config.num_layers),
-            head_imminent: PredictionHead::new(config.hidden_size, config.num_classes, config.dropout),
-            head_warning: PredictionHead::new(config.hidden_size, config.num_classes, config.dropout),
+            head_imminent: PredictionHead::new(
+                config.hidden_size,
+                config.num_classes,
+                config.dropout,
+            ),
+            head_warning: PredictionHead::new(
+                config.hidden_size,
+                config.num_classes,
+                config.dropout,
+            ),
             head_early: PredictionHead::new(config.hidden_size, config.num_classes, config.dropout),
             softmax: Softmax::new(-1),
             config,
@@ -236,7 +244,10 @@ impl HvacPredictor {
 
     /// Returns the number of trainable parameters
     pub fn num_parameters(&self) -> usize {
-        self.parameters().iter().map(|p| p.variable().data().numel()).sum()
+        self.parameters()
+            .iter()
+            .map(|p| p.variable().data().numel())
+            .sum()
     }
 }
 
@@ -385,9 +396,9 @@ fn main() {
                 input_data[base + i] = 0.5;
             }
             // Temperatures (normalized)
-            input_data[base + 6] = 0.83;  // HW supply ~180F
+            input_data[base + 6] = 0.83; // HW supply ~180F
             input_data[base + 7] = 0.375; // CW supply ~55F
-            // VFD speeds ~60%
+                                          // VFD speeds ~60%
             for i in 16..22 {
                 input_data[base + i] = 0.6;
             }
@@ -397,7 +408,8 @@ fn main() {
     let input = Tensor::from_vec(
         input_data,
         &[batch_size, config.seq_len, config.num_features],
-    ).expect("Failed to create input tensor");
+    )
+    .expect("Failed to create input tensor");
 
     let input_var = Variable::new(input, false);
     println!("Input shape: {:?}", input_var.data().shape());
@@ -412,9 +424,18 @@ fn main() {
     println!("────────────────────────────────────────────────────────────");
     for b in 0..batch_size {
         println!("Sample {}:", b);
-        println!("  5 min (Imminent): {} - {}", imminent[b], FAILURE_TYPES[imminent[b]]);
-        println!("  15 min (Warning): {} - {}", warning[b], FAILURE_TYPES[warning[b]]);
-        println!("  30 min (Early):   {} - {}", early[b], FAILURE_TYPES[early[b]]);
+        println!(
+            "  5 min (Imminent): {} - {}",
+            imminent[b], FAILURE_TYPES[imminent[b]]
+        );
+        println!(
+            "  15 min (Warning): {} - {}",
+            warning[b], FAILURE_TYPES[warning[b]]
+        );
+        println!(
+            "  30 min (Early):   {} - {}",
+            early[b], FAILURE_TYPES[early[b]]
+        );
     }
     println!("────────────────────────────────────────────────────────────");
     println!();

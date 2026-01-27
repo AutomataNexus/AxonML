@@ -29,7 +29,8 @@ pub struct DefaultCollate;
 
 impl DefaultCollate {
     /// Creates a new `DefaultCollate`.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self
     }
 }
@@ -83,12 +84,14 @@ pub struct StackCollate {
 
 impl StackCollate {
     /// Creates a new `StackCollate` with default dimension 0.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self { dim: 0 }
     }
 
     /// Creates a `StackCollate` with specified dimension.
-    #[must_use] pub fn with_dim(dim: usize) -> Self {
+    #[must_use]
+    pub fn with_dim(dim: usize) -> Self {
         Self { dim }
     }
 }
@@ -136,7 +139,8 @@ impl Collate<(Tensor<f32>, Tensor<f32>)> for StackCollate {
 // =============================================================================
 
 /// Stacks a vector of tensors along dimension 0.
-#[must_use] pub fn stack_tensors(tensors: &[Tensor<f32>]) -> Tensor<f32> {
+#[must_use]
+pub fn stack_tensors(tensors: &[Tensor<f32>]) -> Tensor<f32> {
     if tensors.is_empty() {
         return Tensor::from_vec(vec![], &[0]).unwrap();
     }
@@ -158,7 +162,8 @@ impl Collate<(Tensor<f32>, Tensor<f32>)> for StackCollate {
 }
 
 /// Concatenates tensors along an existing dimension.
-#[must_use] pub fn concat_tensors(tensors: &[Tensor<f32>], dim: usize) -> Tensor<f32> {
+#[must_use]
+pub fn concat_tensors(tensors: &[Tensor<f32>], dim: usize) -> Tensor<f32> {
     if tensors.is_empty() {
         return Tensor::from_vec(vec![], &[0]).unwrap();
     }

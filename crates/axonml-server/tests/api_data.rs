@@ -30,7 +30,11 @@ async fn test_analyze_dataset_requires_auth() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should require authentication");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should require authentication"
+    );
 }
 
 #[tokio::test]
@@ -49,7 +53,11 @@ async fn test_analyze_dataset_not_found() {
     .await
     .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 404, "Should return 404 for nonexistent dataset");
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "Should return 404 for nonexistent dataset"
+    );
 }
 
 #[tokio::test]
@@ -63,7 +71,11 @@ async fn test_preview_dataset_requires_auth() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should require authentication");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should require authentication"
+    );
 }
 
 #[tokio::test]
@@ -77,7 +89,11 @@ async fn test_validate_dataset_requires_auth() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should require authentication");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should require authentication"
+    );
 }
 
 #[tokio::test]
@@ -92,7 +108,11 @@ async fn test_generate_config_requires_auth() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should require authentication");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should require authentication"
+    );
 }
 
 // ============================================================================
@@ -118,7 +138,10 @@ async fn test_kaggle_status_endpoint() {
     );
 
     let body: Value = response.json().await.expect("Failed to parse JSON");
-    assert!(body.get("configured").is_some(), "Response should have 'configured' field");
+    assert!(
+        body.get("configured").is_some(),
+        "Response should have 'configured' field"
+    );
 }
 
 #[tokio::test]
@@ -132,7 +155,11 @@ async fn test_kaggle_status_requires_auth() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should require authentication");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should require authentication"
+    );
 }
 
 #[tokio::test]
@@ -146,7 +173,11 @@ async fn test_kaggle_search_requires_auth() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should require authentication");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should require authentication"
+    );
 }
 
 #[tokio::test]
@@ -162,7 +193,10 @@ async fn test_kaggle_search_without_credentials() {
         .expect("Request failed");
 
     let status: Value = status_resp.json().await.expect("Failed to parse JSON");
-    let configured = status.get("configured").and_then(|v| v.as_bool()).unwrap_or(false);
+    let configured = status
+        .get("configured")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let response = auth_get(&client, "/api/kaggle/search?query=mnist&limit=5", &token)
         .await
@@ -269,7 +303,11 @@ async fn test_list_builtin_datasets_requires_auth() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should require authentication");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should require authentication"
+    );
 }
 
 #[tokio::test]

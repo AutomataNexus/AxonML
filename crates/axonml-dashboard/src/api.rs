@@ -70,7 +70,10 @@ async fn fetch_json<T: DeserializeOwned>(request: RequestBuilder) -> ApiResult<T
             message: format!("Failed to parse response: {}", e),
         })
     } else {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         Err(ApiClientError {
             status,
             message: error_text,
@@ -79,7 +82,10 @@ async fn fetch_json<T: DeserializeOwned>(request: RequestBuilder) -> ApiResult<T
 }
 
 /// Execute a POST/PUT/PATCH request with body and parse JSON response
-async fn fetch_json_with_body<T: DeserializeOwned, B: Serialize>(builder: RequestBuilder, body: &B) -> ApiResult<T> {
+async fn fetch_json_with_body<T: DeserializeOwned, B: Serialize>(
+    builder: RequestBuilder,
+    body: &B,
+) -> ApiResult<T> {
     let request = builder
         .header("Content-Type", "application/json")
         .body(serde_json::to_string(body).unwrap())
@@ -97,7 +103,10 @@ async fn fetch_json_with_body<T: DeserializeOwned, B: Serialize>(builder: Reques
             message: format!("Failed to parse response: {}", e),
         })
     } else {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         Err(ApiClientError {
             status,
             message: error_text,
@@ -113,7 +122,10 @@ async fn fetch_empty(request: RequestBuilder) -> ApiResult<()> {
     if status >= 200 && status < 300 {
         Ok(())
     } else {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         Err(ApiClientError {
             status,
             message: error_text,
@@ -137,7 +149,10 @@ async fn fetch_empty_with_body<B: Serialize>(builder: RequestBuilder, body: &B) 
     if status >= 200 && status < 300 {
         Ok(())
     } else {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         Err(ApiClientError {
             status,
             message: error_text,
@@ -168,7 +183,8 @@ pub mod auth {
         fetch_json_with_body(
             build_request("POST", "/auth/refresh"),
             &serde_json::json!({ "refresh_token": refresh_token }),
-        ).await
+        )
+        .await
     }
 
     pub async fn me() -> ApiResult<User> {
@@ -180,14 +196,19 @@ pub mod auth {
     }
 
     pub async fn totp_setup() -> ApiResult<TotpSetupResponse> {
-        fetch_json_with_body(build_request("POST", "/auth/mfa/totp/setup"), &serde_json::json!({})).await
+        fetch_json_with_body(
+            build_request("POST", "/auth/mfa/totp/setup"),
+            &serde_json::json!({}),
+        )
+        .await
     }
 
     pub async fn totp_enable(code: &str) -> ApiResult<()> {
         fetch_empty_with_body(
             build_request("POST", "/auth/mfa/totp/enable"),
             &serde_json::json!({ "code": code }),
-        ).await
+        )
+        .await
     }
 
     pub async fn totp_disable() -> ApiResult<()> {
@@ -195,7 +216,11 @@ pub mod auth {
     }
 
     pub async fn webauthn_register_start() -> ApiResult<WebAuthnRegisterStart> {
-        fetch_json_with_body(build_request("POST", "/auth/mfa/webauthn/register/start"), &serde_json::json!({})).await
+        fetch_json_with_body(
+            build_request("POST", "/auth/mfa/webauthn/register/start"),
+            &serde_json::json!({}),
+        )
+        .await
     }
 
     /// WebAuthn registration finish request
@@ -207,18 +232,24 @@ pub mod auth {
         pub device_name: String,
     }
 
-    pub async fn webauthn_register_finish(request: &WebAuthnRegisterFinishRequest) -> ApiResult<()> {
+    pub async fn webauthn_register_finish(
+        request: &WebAuthnRegisterFinishRequest,
+    ) -> ApiResult<()> {
         fetch_empty_with_body(
             build_request("POST", "/auth/mfa/webauthn/register/finish"),
             request,
-        ).await
+        )
+        .await
     }
 
-    pub async fn webauthn_authenticate_start(mfa_token: &str) -> ApiResult<WebAuthnAuthenticateStart> {
+    pub async fn webauthn_authenticate_start(
+        mfa_token: &str,
+    ) -> ApiResult<WebAuthnAuthenticateStart> {
         fetch_json_with_body(
             build_request("POST", "/auth/mfa/webauthn/authenticate/start"),
             &serde_json::json!({ "mfa_token": mfa_token }),
-        ).await
+        )
+        .await
     }
 
     /// WebAuthn authentication finish request
@@ -231,7 +262,10 @@ pub mod auth {
         pub user_handle: Option<String>,
     }
 
-    pub async fn webauthn_authenticate_finish(mfa_token: &str, request: &WebAuthnAuthFinishRequest) -> ApiResult<TokenPair> {
+    pub async fn webauthn_authenticate_finish(
+        mfa_token: &str,
+        request: &WebAuthnAuthFinishRequest,
+    ) -> ApiResult<TokenPair> {
         fetch_json_with_body(
             build_request("POST", "/auth/mfa/webauthn/authenticate/finish"),
             &serde_json::json!({
@@ -242,7 +276,8 @@ pub mod auth {
                 "signature": request.signature,
                 "user_handle": request.user_handle
             }),
-        ).await
+        )
+        .await
     }
 
     pub async fn get_recovery_codes() -> ApiResult<RecoveryCodesResponse> {
@@ -250,7 +285,11 @@ pub mod auth {
     }
 
     pub async fn regenerate_recovery_codes() -> ApiResult<RecoveryCodesResponse> {
-        fetch_json_with_body(build_request("POST", "/auth/mfa/recovery/regenerate"), &serde_json::json!({})).await
+        fetch_json_with_body(
+            build_request("POST", "/auth/mfa/recovery/regenerate"),
+            &serde_json::json!({}),
+        )
+        .await
     }
 
     pub async fn use_recovery_code(mfa_token: &str, code: &str) -> ApiResult<TokenPair> {
@@ -260,7 +299,8 @@ pub mod auth {
                 "mfa_token": mfa_token,
                 "code": code
             }),
-        ).await
+        )
+        .await
     }
 
     pub async fn change_password(current: &str, new_password: &str) -> ApiResult<()> {
@@ -270,7 +310,8 @@ pub mod auth {
                 "current_password": current,
                 "new_password": new_password
             }),
-        ).await
+        )
+        .await
     }
 }
 
@@ -281,7 +322,10 @@ pub mod auth {
 pub mod training {
     use super::*;
 
-    pub async fn list_runs(status: Option<RunStatus>, limit: Option<u32>) -> ApiResult<Vec<TrainingRun>> {
+    pub async fn list_runs(
+        status: Option<RunStatus>,
+        limit: Option<u32>,
+    ) -> ApiResult<Vec<TrainingRun>> {
         let mut path = "/training/runs".to_string();
         let mut params = Vec::new();
         if let Some(s) = status {
@@ -310,10 +354,18 @@ pub mod training {
     }
 
     pub async fn stop_run(id: &str) -> ApiResult<TrainingRun> {
-        fetch_json(build_request("POST", &format!("/training/runs/{}/stop", id))).await
+        fetch_json(build_request(
+            "POST",
+            &format!("/training/runs/{}/stop", id),
+        ))
+        .await
     }
 
-    pub async fn get_metrics(id: &str, start: Option<&str>, end: Option<&str>) -> ApiResult<MetricsHistory> {
+    pub async fn get_metrics(
+        id: &str,
+        start: Option<&str>,
+        end: Option<&str>,
+    ) -> ApiResult<MetricsHistory> {
         let mut path = format!("/training/runs/{}/metrics", id);
         let mut params = Vec::new();
         if let Some(s) = start {
@@ -342,7 +394,9 @@ pub mod training {
         let window = web_sys::window().expect("no window");
         let location = window.location();
         let protocol = location.protocol().unwrap_or_else(|_| "http:".to_string());
-        let host = location.host().unwrap_or_else(|_| "localhost:8080".to_string());
+        let host = location
+            .host()
+            .unwrap_or_else(|_| "localhost:8080".to_string());
 
         let ws_protocol = if protocol == "https:" { "wss:" } else { "ws:" };
         format!("{}//{}/api/training/runs/{}/stream", ws_protocol, host, id)
@@ -383,18 +437,32 @@ pub mod models {
     }
 
     pub async fn list_versions(model_id: &str) -> ApiResult<Vec<ModelVersion>> {
-        fetch_json(build_request("GET", &format!("/models/{}/versions", model_id))).await
+        fetch_json(build_request(
+            "GET",
+            &format!("/models/{}/versions", model_id),
+        ))
+        .await
     }
 
     pub async fn get_version(model_id: &str, version: u32) -> ApiResult<ModelVersion> {
-        fetch_json(build_request("GET", &format!("/models/{}/versions/{}", model_id, version))).await
+        fetch_json(build_request(
+            "GET",
+            &format!("/models/{}/versions/{}", model_id, version),
+        ))
+        .await
     }
 
-    pub async fn upload_version(model_id: &str, file: web_sys::File, training_run_id: Option<&str>) -> ApiResult<ModelVersion> {
+    pub async fn upload_version(
+        model_id: &str,
+        file: web_sys::File,
+        training_run_id: Option<&str>,
+    ) -> ApiResult<ModelVersion> {
         let form_data = FormData::new().unwrap();
         form_data.append_with_blob("file", &file).unwrap();
         if let Some(run_id) = training_run_id {
-            form_data.append_with_str("training_run_id", run_id).unwrap();
+            form_data
+                .append_with_str("training_run_id", run_id)
+                .unwrap();
         }
 
         let url = format!("{}/models/{}/versions", API_BASE, model_id);
@@ -413,12 +481,18 @@ pub mod models {
         let status = response.status();
 
         if status >= 200 && status < 300 {
-            response.json::<ModelVersion>().await.map_err(|e| ApiClientError {
-                status,
-                message: format!("Failed to parse response: {}", e),
-            })
+            response
+                .json::<ModelVersion>()
+                .await
+                .map_err(|e| ApiClientError {
+                    status,
+                    message: format!("Failed to parse response: {}", e),
+                })
         } else {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             Err(ApiClientError {
                 status,
                 message: error_text,
@@ -427,18 +501,33 @@ pub mod models {
     }
 
     pub async fn delete_version(model_id: &str, version: u32) -> ApiResult<()> {
-        fetch_empty(build_request("DELETE", &format!("/models/{}/versions/{}", model_id, version))).await
+        fetch_empty(build_request(
+            "DELETE",
+            &format!("/models/{}/versions/{}", model_id, version),
+        ))
+        .await
     }
 
     pub fn download_url(model_id: &str, version: u32) -> String {
-        format!("{}/models/{}/versions/{}/download", API_BASE, model_id, version)
+        format!(
+            "{}/models/{}/versions/{}/download",
+            API_BASE, model_id, version
+        )
     }
 
-    pub async fn deploy_version(model_id: &str, version: u32, endpoint_name: &str) -> ApiResult<InferenceEndpoint> {
+    pub async fn deploy_version(
+        model_id: &str,
+        version: u32,
+        endpoint_name: &str,
+    ) -> ApiResult<InferenceEndpoint> {
         fetch_json_with_body(
-            build_request("POST", &format!("/models/{}/versions/{}/deploy", model_id, version)),
+            build_request(
+                "POST",
+                &format!("/models/{}/versions/{}/deploy", model_id, version),
+            ),
             &serde_json::json!({ "name": endpoint_name }),
-        ).await
+        )
+        .await
     }
 }
 
@@ -454,30 +543,57 @@ pub mod inference {
     }
 
     pub async fn get_endpoint(id: &str) -> ApiResult<InferenceEndpoint> {
-        fetch_json(build_request("GET", &format!("/inference/endpoints/{}", id))).await
+        fetch_json(build_request(
+            "GET",
+            &format!("/inference/endpoints/{}", id),
+        ))
+        .await
     }
 
     pub async fn create_endpoint(request: &CreateEndpointRequest) -> ApiResult<InferenceEndpoint> {
         fetch_json_with_body(build_request("POST", "/inference/endpoints"), request).await
     }
 
-    pub async fn update_endpoint(id: &str, request: &UpdateEndpointRequest) -> ApiResult<InferenceEndpoint> {
-        fetch_json_with_body(build_request("PUT", &format!("/inference/endpoints/{}", id)), request).await
+    pub async fn update_endpoint(
+        id: &str,
+        request: &UpdateEndpointRequest,
+    ) -> ApiResult<InferenceEndpoint> {
+        fetch_json_with_body(
+            build_request("PUT", &format!("/inference/endpoints/{}", id)),
+            request,
+        )
+        .await
     }
 
     pub async fn delete_endpoint(id: &str) -> ApiResult<()> {
-        fetch_empty(build_request("DELETE", &format!("/inference/endpoints/{}", id))).await
+        fetch_empty(build_request(
+            "DELETE",
+            &format!("/inference/endpoints/{}", id),
+        ))
+        .await
     }
 
     pub async fn start_endpoint(id: &str) -> ApiResult<InferenceEndpoint> {
-        fetch_json(build_request("POST", &format!("/inference/endpoints/{}/start", id))).await
+        fetch_json(build_request(
+            "POST",
+            &format!("/inference/endpoints/{}/start", id),
+        ))
+        .await
     }
 
     pub async fn stop_endpoint(id: &str) -> ApiResult<InferenceEndpoint> {
-        fetch_json(build_request("POST", &format!("/inference/endpoints/{}/stop", id))).await
+        fetch_json(build_request(
+            "POST",
+            &format!("/inference/endpoints/{}/stop", id),
+        ))
+        .await
     }
 
-    pub async fn get_metrics(id: &str, start: Option<&str>, end: Option<&str>) -> ApiResult<InferenceMetricsHistory> {
+    pub async fn get_metrics(
+        id: &str,
+        start: Option<&str>,
+        end: Option<&str>,
+    ) -> ApiResult<InferenceMetricsHistory> {
         let mut path = format!("/inference/endpoints/{}/metrics", id);
         let mut params = Vec::new();
         if let Some(s) = start {
@@ -493,11 +609,15 @@ pub mod inference {
         fetch_json(build_request("GET", &path)).await
     }
 
-    pub async fn predict(endpoint_name: &str, inputs: serde_json::Value) -> ApiResult<PredictResponse> {
+    pub async fn predict(
+        endpoint_name: &str,
+        inputs: serde_json::Value,
+    ) -> ApiResult<PredictResponse> {
         fetch_json_with_body(
             build_request("POST", &format!("/inference/predict/{}", endpoint_name)),
             &PredictRequest { inputs },
-        ).await
+        )
+        .await
     }
 }
 
@@ -517,7 +637,11 @@ pub mod admin {
     }
 
     pub async fn update_user(id: &str, request: &UpdateUserRequest) -> ApiResult<User> {
-        fetch_json_with_body(build_request("PUT", &format!("/admin/users/{}", id)), request).await
+        fetch_json_with_body(
+            build_request("PUT", &format!("/admin/users/{}", id)),
+            request,
+        )
+        .await
     }
 
     pub async fn delete_user(id: &str) -> ApiResult<()> {
@@ -544,7 +668,12 @@ pub mod datasets {
         fetch_json(build_request("GET", &format!("/datasets/{}", id))).await
     }
 
-    pub async fn upload(file: web_sys::File, name: &str, description: Option<&str>, dataset_type: Option<&str>) -> ApiResult<Dataset> {
+    pub async fn upload(
+        file: web_sys::File,
+        name: &str,
+        description: Option<&str>,
+        dataset_type: Option<&str>,
+    ) -> ApiResult<Dataset> {
         let form_data = FormData::new().unwrap();
         form_data.append_with_blob("file", &file).unwrap();
         form_data.append_with_str("name", name).unwrap();
@@ -571,12 +700,18 @@ pub mod datasets {
         let status = response.status();
 
         if status >= 200 && status < 300 {
-            response.json::<Dataset>().await.map_err(|e| ApiClientError {
-                status,
-                message: format!("Failed to parse response: {}", e),
-            })
+            response
+                .json::<Dataset>()
+                .await
+                .map_err(|e| ApiClientError {
+                    status,
+                    message: format!("Failed to parse response: {}", e),
+                })
         } else {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             Err(ApiClientError {
                 status,
                 message: error_text,
@@ -617,7 +752,11 @@ pub mod system {
     }
 
     pub async fn run_benchmark() -> ApiResult<BenchmarkResponse> {
-        fetch_json_with_body(build_request("POST", "/system/benchmark"), &serde_json::json!({})).await
+        fetch_json_with_body(
+            build_request("POST", "/system/benchmark"),
+            &serde_json::json!({}),
+        )
+        .await
     }
 
     pub async fn get_realtime_metrics() -> ApiResult<RealtimeMetrics> {
@@ -640,7 +779,11 @@ pub mod system {
 pub mod hub {
     use super::*;
 
-    pub async fn list_models(architecture: Option<&str>, min_accuracy: Option<f32>, max_size_mb: Option<f64>) -> ApiResult<Vec<PretrainedModel>> {
+    pub async fn list_models(
+        architecture: Option<&str>,
+        min_accuracy: Option<f32>,
+        max_size_mb: Option<f64>,
+    ) -> ApiResult<Vec<PretrainedModel>> {
         let mut path = "/hub/models".to_string();
         let mut params = Vec::new();
         if let Some(arch) = architecture {
@@ -667,7 +810,8 @@ pub mod hub {
         fetch_json_with_body(
             build_request("POST", &format!("/hub/models/{}/download", name)),
             &serde_json::json!({ "force": force }),
-        ).await
+        )
+        .await
     }
 
     pub async fn get_cache_info() -> ApiResult<CacheInfo> {
@@ -691,35 +835,66 @@ pub mod tools {
     use super::*;
 
     pub async fn inspect_model(model_id: &str, version_id: &str) -> ApiResult<ModelInspection> {
-        fetch_json(build_request("GET", &format!("/models/{}/versions/{}/inspect", model_id, version_id))).await
+        fetch_json(build_request(
+            "GET",
+            &format!("/models/{}/versions/{}/inspect", model_id, version_id),
+        ))
+        .await
     }
 
-    pub async fn convert_model(model_id: &str, version_id: &str, target_format: &str, optimize: bool) -> ApiResult<ConvertResponse> {
+    pub async fn convert_model(
+        model_id: &str,
+        version_id: &str,
+        target_format: &str,
+        optimize: bool,
+    ) -> ApiResult<ConvertResponse> {
         fetch_json_with_body(
-            build_request("POST", &format!("/models/{}/versions/{}/convert", model_id, version_id)),
+            build_request(
+                "POST",
+                &format!("/models/{}/versions/{}/convert", model_id, version_id),
+            ),
             &serde_json::json!({
                 "target_format": target_format,
                 "optimize": optimize
             }),
-        ).await
+        )
+        .await
     }
 
-    pub async fn quantize_model(model_id: &str, version_id: &str, target_type: &str) -> ApiResult<QuantizeResponse> {
+    pub async fn quantize_model(
+        model_id: &str,
+        version_id: &str,
+        target_type: &str,
+    ) -> ApiResult<QuantizeResponse> {
         fetch_json_with_body(
-            build_request("POST", &format!("/models/{}/versions/{}/quantize", model_id, version_id)),
+            build_request(
+                "POST",
+                &format!("/models/{}/versions/{}/quantize", model_id, version_id),
+            ),
             &serde_json::json!({ "target_type": target_type }),
-        ).await
+        )
+        .await
     }
 
-    pub async fn export_model(model_id: &str, version_id: &str, target: &str, optimize: bool, include_metadata: bool) -> ApiResult<ExportResponse> {
+    pub async fn export_model(
+        model_id: &str,
+        version_id: &str,
+        target: &str,
+        optimize: bool,
+        include_metadata: bool,
+    ) -> ApiResult<ExportResponse> {
         fetch_json_with_body(
-            build_request("POST", &format!("/models/{}/versions/{}/export", model_id, version_id)),
+            build_request(
+                "POST",
+                &format!("/models/{}/versions/{}/export", model_id, version_id),
+            ),
             &serde_json::json!({
                 "target": target,
                 "optimize": optimize,
                 "include_metadata": include_metadata
             }),
-        ).await
+        )
+        .await
     }
 
     pub async fn list_quantization_types() -> ApiResult<QuantizationTypes> {
@@ -735,21 +910,36 @@ pub mod data {
     use super::*;
 
     pub async fn analyze(dataset_id: &str, query: &AnalyzeQuery) -> ApiResult<DatasetAnalysis> {
-        let url = format!("/data/{}/analyze?{}", dataset_id, serde_urlencoded::to_string(query).unwrap_or_default());
+        let url = format!(
+            "/data/{}/analyze?{}",
+            dataset_id,
+            serde_urlencoded::to_string(query).unwrap_or_default()
+        );
         fetch_json(build_request("POST", &url)).await
     }
 
     pub async fn preview(dataset_id: &str, query: &PreviewQuery) -> ApiResult<DataPreviewResponse> {
-        let url = format!("/data/{}/preview?{}", dataset_id, serde_urlencoded::to_string(query).unwrap_or_default());
+        let url = format!(
+            "/data/{}/preview?{}",
+            dataset_id,
+            serde_urlencoded::to_string(query).unwrap_or_default()
+        );
         fetch_json(build_request("POST", &url)).await
     }
 
     pub async fn validate(dataset_id: &str, query: &ValidateQuery) -> ApiResult<ValidationResult> {
-        let url = format!("/data/{}/validate?{}", dataset_id, serde_urlencoded::to_string(query).unwrap_or_default());
+        let url = format!(
+            "/data/{}/validate?{}",
+            dataset_id,
+            serde_urlencoded::to_string(query).unwrap_or_default()
+        );
         fetch_json(build_request("POST", &url)).await
     }
 
-    pub async fn generate_config(dataset_id: &str, request: &GenerateConfigRequest) -> ApiResult<GeneratedTrainingConfig> {
+    pub async fn generate_config(
+        dataset_id: &str,
+        request: &GenerateConfigRequest,
+    ) -> ApiResult<GeneratedTrainingConfig> {
         let url = format!("/data/{}/generate-config", dataset_id);
         fetch_json_with_body(build_request("POST", &url), request).await
     }
@@ -762,7 +952,9 @@ pub mod data {
 pub mod kaggle {
     use super::*;
 
-    pub async fn save_credentials(credentials: &KaggleCredentials) -> ApiResult<KaggleStatusResponse> {
+    pub async fn save_credentials(
+        credentials: &KaggleCredentials,
+    ) -> ApiResult<KaggleStatusResponse> {
         fetch_json_with_body(build_request("POST", "/kaggle/credentials"), credentials).await
     }
 
@@ -774,7 +966,11 @@ pub mod kaggle {
         fetch_json(build_request("GET", "/kaggle/status")).await
     }
 
-    pub async fn search(query: &str, limit: Option<usize>, page: Option<usize>) -> ApiResult<KaggleSearchResponse> {
+    pub async fn search(
+        query: &str,
+        limit: Option<usize>,
+        page: Option<usize>,
+    ) -> ApiResult<KaggleSearchResponse> {
         let mut path = format!("/kaggle/search?query={}", urlencoding::encode(query));
         if let Some(l) = limit {
             path.push_str(&format!("&limit={}", l));
@@ -813,8 +1009,15 @@ pub mod builtin_datasets {
         fetch_json(build_request("GET", &format!("/builtin-datasets/{}", id))).await
     }
 
-    pub async fn search(query: &str, source: Option<&str>, limit: Option<usize>) -> ApiResult<Vec<DatasetSearchResult>> {
-        let mut path = format!("/builtin-datasets/search?query={}", urlencoding::encode(query));
+    pub async fn search(
+        query: &str,
+        source: Option<&str>,
+        limit: Option<usize>,
+    ) -> ApiResult<Vec<DatasetSearchResult>> {
+        let mut path = format!(
+            "/builtin-datasets/search?query={}",
+            urlencoding::encode(query)
+        );
         if let Some(s) = source {
             path.push_str(&format!("&source={}", s));
         }
@@ -832,7 +1035,8 @@ pub mod builtin_datasets {
         fetch_json_with_body(
             build_request("POST", &format!("/builtin-datasets/{}/prepare", id)),
             &serde_json::json!({}),
-        ).await
+        )
+        .await
     }
 }
 
@@ -855,15 +1059,27 @@ pub mod notebooks {
         fetch_json_with_body(build_request("POST", "/notebooks"), &request).await
     }
 
-    pub async fn update_notebook(id: &str, request: UpdateNotebookRequest) -> ApiResult<TrainingNotebook> {
-        fetch_json_with_body(build_request("PUT", &format!("/notebooks/{}", id)), &request).await
+    pub async fn update_notebook(
+        id: &str,
+        request: UpdateNotebookRequest,
+    ) -> ApiResult<TrainingNotebook> {
+        fetch_json_with_body(
+            build_request("PUT", &format!("/notebooks/{}", id)),
+            &request,
+        )
+        .await
     }
 
     pub async fn delete_notebook(id: &str) -> ApiResult<()> {
         fetch_empty(build_request("DELETE", &format!("/notebooks/{}", id))).await
     }
 
-    pub async fn add_cell(notebook_id: &str, cell_type: &str, source: &str, position: Option<usize>) -> ApiResult<NotebookCell> {
+    pub async fn add_cell(
+        notebook_id: &str,
+        cell_type: &str,
+        source: &str,
+        position: Option<usize>,
+    ) -> ApiResult<NotebookCell> {
         fetch_json_with_body(
             build_request("POST", &format!("/notebooks/{}/cells", notebook_id)),
             &serde_json::json!({
@@ -871,58 +1087,102 @@ pub mod notebooks {
                 "source": source,
                 "position": position
             }),
-        ).await
+        )
+        .await
     }
 
-    pub async fn update_cell(notebook_id: &str, cell_id: &str, source: Option<&str>, cell_type: Option<&str>) -> ApiResult<NotebookCell> {
+    pub async fn update_cell(
+        notebook_id: &str,
+        cell_id: &str,
+        source: Option<&str>,
+        cell_type: Option<&str>,
+    ) -> ApiResult<NotebookCell> {
         fetch_json_with_body(
-            build_request("PUT", &format!("/notebooks/{}/cells/{}", notebook_id, cell_id)),
+            build_request(
+                "PUT",
+                &format!("/notebooks/{}/cells/{}", notebook_id, cell_id),
+            ),
             &serde_json::json!({
                 "source": source,
                 "cell_type": cell_type
             }),
-        ).await
+        )
+        .await
     }
 
     pub async fn delete_cell(notebook_id: &str, cell_id: &str) -> ApiResult<()> {
-        fetch_empty(build_request("DELETE", &format!("/notebooks/{}/cells/{}", notebook_id, cell_id))).await
+        fetch_empty(build_request(
+            "DELETE",
+            &format!("/notebooks/{}/cells/{}", notebook_id, cell_id),
+        ))
+        .await
     }
 
     pub async fn execute_cell(notebook_id: &str, cell_id: &str) -> ApiResult<ExecuteCellResponse> {
         fetch_json_with_body(
-            build_request("POST", &format!("/notebooks/{}/cells/{}/execute", notebook_id, cell_id)),
+            build_request(
+                "POST",
+                &format!("/notebooks/{}/cells/{}/execute", notebook_id, cell_id),
+            ),
             &serde_json::json!({}),
-        ).await
+        )
+        .await
     }
 
-    pub async fn ai_assist(notebook_id: &str, request: AiAssistRequest) -> ApiResult<AiAssistResponse> {
+    pub async fn ai_assist(
+        notebook_id: &str,
+        request: AiAssistRequest,
+    ) -> ApiResult<AiAssistResponse> {
         fetch_json_with_body(
             build_request("POST", &format!("/notebooks/{}/ai-assist", notebook_id)),
             &request,
-        ).await
+        )
+        .await
     }
 
     pub async fn list_checkpoints(notebook_id: &str) -> ApiResult<Vec<NotebookCheckpoint>> {
-        fetch_json(build_request("GET", &format!("/notebooks/{}/checkpoints", notebook_id))).await
+        fetch_json(build_request(
+            "GET",
+            &format!("/notebooks/{}/checkpoints", notebook_id),
+        ))
+        .await
     }
 
-    pub async fn save_checkpoint(notebook_id: &str, request: SaveCheckpointRequest) -> ApiResult<NotebookCheckpoint> {
+    pub async fn save_checkpoint(
+        notebook_id: &str,
+        request: SaveCheckpointRequest,
+    ) -> ApiResult<NotebookCheckpoint> {
         fetch_json_with_body(
             build_request("POST", &format!("/notebooks/{}/checkpoints", notebook_id)),
             &request,
-        ).await
+        )
+        .await
     }
 
-    pub async fn get_best_checkpoint(notebook_id: &str, metric: &str, minimize: bool) -> ApiResult<Option<NotebookCheckpoint>> {
-        let path = format!("/notebooks/{}/checkpoints/best?metric={}&minimize={}", notebook_id, metric, minimize);
+    pub async fn get_best_checkpoint(
+        notebook_id: &str,
+        metric: &str,
+        minimize: bool,
+    ) -> ApiResult<Option<NotebookCheckpoint>> {
+        let path = format!(
+            "/notebooks/{}/checkpoints/best?metric={}&minimize={}",
+            notebook_id, metric, minimize
+        );
         fetch_json(build_request("GET", &path)).await
     }
 
-    pub async fn upload_model_version(notebook_id: &str, request: UploadModelVersionRequest) -> ApiResult<serde_json::Value> {
+    pub async fn upload_model_version(
+        notebook_id: &str,
+        request: UploadModelVersionRequest,
+    ) -> ApiResult<serde_json::Value> {
         fetch_json_with_body(
-            build_request("POST", &format!("/notebooks/{}/upload-version", notebook_id)),
+            build_request(
+                "POST",
+                &format!("/notebooks/{}/upload-version", notebook_id),
+            ),
             &request,
-        ).await
+        )
+        .await
     }
 
     pub async fn import_notebook(content: &str, format: &str) -> ApiResult<TrainingNotebook> {
@@ -932,11 +1192,16 @@ pub mod notebooks {
                 content: content.to_string(),
                 format: format.to_string(),
             },
-        ).await
+        )
+        .await
     }
 
     pub async fn export_notebook(id: &str, format: &str) -> ApiResult<ExportNotebookResponse> {
-        fetch_json(build_request("GET", &format!("/notebooks/{}/export?format={}", id, format))).await
+        fetch_json(build_request(
+            "GET",
+            &format!("/notebooks/{}/export?format={}", id, format),
+        ))
+        .await
     }
 
     pub async fn start_notebook(id: &str) -> ApiResult<TrainingNotebook> {

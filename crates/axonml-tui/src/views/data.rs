@@ -106,20 +106,68 @@ impl DataView {
             num_classes: 10,
             feature_dim: "[28, 28, 1]".to_string(),
             classes: vec![
-                ClassInfo { name: "0".to_string(), count: 6903, percentage: 9.86 },
-                ClassInfo { name: "1".to_string(), count: 7877, percentage: 11.25 },
-                ClassInfo { name: "2".to_string(), count: 6990, percentage: 9.99 },
-                ClassInfo { name: "3".to_string(), count: 7141, percentage: 10.20 },
-                ClassInfo { name: "4".to_string(), count: 6824, percentage: 9.75 },
-                ClassInfo { name: "5".to_string(), count: 6313, percentage: 9.02 },
-                ClassInfo { name: "6".to_string(), count: 6876, percentage: 9.82 },
-                ClassInfo { name: "7".to_string(), count: 7293, percentage: 10.42 },
-                ClassInfo { name: "8".to_string(), count: 6825, percentage: 9.75 },
-                ClassInfo { name: "9".to_string(), count: 6958, percentage: 9.94 },
+                ClassInfo {
+                    name: "0".to_string(),
+                    count: 6903,
+                    percentage: 9.86,
+                },
+                ClassInfo {
+                    name: "1".to_string(),
+                    count: 7877,
+                    percentage: 11.25,
+                },
+                ClassInfo {
+                    name: "2".to_string(),
+                    count: 6990,
+                    percentage: 9.99,
+                },
+                ClassInfo {
+                    name: "3".to_string(),
+                    count: 7141,
+                    percentage: 10.20,
+                },
+                ClassInfo {
+                    name: "4".to_string(),
+                    count: 6824,
+                    percentage: 9.75,
+                },
+                ClassInfo {
+                    name: "5".to_string(),
+                    count: 6313,
+                    percentage: 9.02,
+                },
+                ClassInfo {
+                    name: "6".to_string(),
+                    count: 6876,
+                    percentage: 9.82,
+                },
+                ClassInfo {
+                    name: "7".to_string(),
+                    count: 7293,
+                    percentage: 10.42,
+                },
+                ClassInfo {
+                    name: "8".to_string(),
+                    count: 6825,
+                    percentage: 9.75,
+                },
+                ClassInfo {
+                    name: "9".to_string(),
+                    count: 6958,
+                    percentage: 9.94,
+                },
             ],
             splits: vec![
-                SplitInfo { name: "Train".to_string(), samples: 60_000, percentage: 85.71 },
-                SplitInfo { name: "Test".to_string(), samples: 10_000, percentage: 14.29 },
+                SplitInfo {
+                    name: "Train".to_string(),
+                    samples: 60_000,
+                    percentage: 85.71,
+                },
+                SplitInfo {
+                    name: "Test".to_string(),
+                    samples: 10_000,
+                    percentage: 14.29,
+                },
             ],
             features: vec![
                 FeatureInfo {
@@ -197,9 +245,9 @@ impl DataView {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(6),  // Header
-                    Constraint::Min(10),    // Main content
-                    Constraint::Length(6),  // Splits panel
+                    Constraint::Length(6), // Header
+                    Constraint::Min(10),   // Main content
+                    Constraint::Length(6), // Splits panel
                 ])
                 .split(area);
 
@@ -223,7 +271,10 @@ impl DataView {
             ]),
             Line::from(vec![
                 Span::styled("Total Samples: ", AxonmlTheme::muted()),
-                Span::styled(format_number(dataset.total_samples), AxonmlTheme::metric_value()),
+                Span::styled(
+                    format_number(dataset.total_samples),
+                    AxonmlTheme::metric_value(),
+                ),
                 Span::raw("  "),
                 Span::styled("Classes: ", AxonmlTheme::muted()),
                 Span::styled(dataset.num_classes.to_string(), AxonmlTheme::metric_value()),
@@ -237,13 +288,12 @@ impl DataView {
             ]),
         ];
 
-        let header = Paragraph::new(header_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border())
-                    .title(Span::styled(" Dataset Info ", AxonmlTheme::header())),
-            );
+        let header = Paragraph::new(header_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border())
+                .title(Span::styled(" Dataset Info ", AxonmlTheme::header())),
+        );
 
         frame.render_widget(header, area);
     }
@@ -252,8 +302,8 @@ impl DataView {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(50),  // Class distribution
-                Constraint::Percentage(50),  // Features
+                Constraint::Percentage(50), // Class distribution
+                Constraint::Percentage(50), // Features
             ])
             .split(area);
 
@@ -325,15 +375,24 @@ impl DataView {
                     Span::styled(&feature.dtype, AxonmlTheme::accent()),
                     Span::styled(&feature.shape, AxonmlTheme::layer_shape()),
                     Span::styled(
-                        feature.min.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "-".to_string()),
+                        feature
+                            .min
+                            .map(|v| format!("{:.2}", v))
+                            .unwrap_or_else(|| "-".to_string()),
                         AxonmlTheme::muted(),
                     ),
                     Span::styled(
-                        feature.max.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "-".to_string()),
+                        feature
+                            .max
+                            .map(|v| format!("{:.2}", v))
+                            .unwrap_or_else(|| "-".to_string()),
                         AxonmlTheme::muted(),
                     ),
                     Span::styled(
-                        feature.mean.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "-".to_string()),
+                        feature
+                            .mean
+                            .map(|v| format!("{:.2}", v))
+                            .unwrap_or_else(|| "-".to_string()),
                         AxonmlTheme::metric_value(),
                     ),
                 ])
@@ -349,12 +408,12 @@ impl DataView {
         let table = Table::new(
             rows,
             [
-                Constraint::Length(10),  // Name
-                Constraint::Length(6),   // Type
-                Constraint::Length(10),  // Shape
-                Constraint::Length(8),   // Min
-                Constraint::Length(8),   // Max
-                Constraint::Length(8),   // Mean
+                Constraint::Length(10), // Name
+                Constraint::Length(6),  // Type
+                Constraint::Length(10), // Shape
+                Constraint::Length(8),  // Min
+                Constraint::Length(8),  // Max
+                Constraint::Length(8),  // Mean
             ],
         )
         .header(
@@ -386,19 +445,21 @@ impl DataView {
                         format!("{:>8} samples ", format_number(split.samples)),
                         AxonmlTheme::metric_value(),
                     ),
-                    Span::styled(format!("({:>5.1}%) ", split.percentage), AxonmlTheme::muted()),
+                    Span::styled(
+                        format!("({:>5.1}%) ", split.percentage),
+                        AxonmlTheme::muted(),
+                    ),
                     Span::styled(bar, AxonmlTheme::graph_secondary()),
                 ])
             })
             .collect();
 
-        let splits = Paragraph::new(split_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border())
-                    .title(Span::styled(" Data Splits ", AxonmlTheme::header())),
-            );
+        let splits = Paragraph::new(split_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border())
+                .title(Span::styled(" Data Splits ", AxonmlTheme::header())),
+        );
 
         frame.render_widget(splits, area);
     }
@@ -406,10 +467,7 @@ impl DataView {
     fn render_empty(&self, frame: &mut Frame, area: Rect) {
         let text = vec![
             Line::from(""),
-            Line::from(Span::styled(
-                "No dataset loaded",
-                AxonmlTheme::muted(),
-            )),
+            Line::from(Span::styled("No dataset loaded", AxonmlTheme::muted())),
             Line::from(""),
             Line::from(Span::styled(
                 "Press 'o' to open a dataset file",

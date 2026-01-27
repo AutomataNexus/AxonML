@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 
 use colored::Colorize;
 
-use crate::cli::{StartArgs, StopArgs, StatusArgs, LogsArgs};
+use crate::cli::{LogsArgs, StartArgs, StatusArgs, StopArgs};
 use crate::error::{CliError, CliResult};
 
 // =============================================================================
@@ -76,9 +76,7 @@ fn remove_pid(service: &str) -> CliResult<()> {
 #[cfg(unix)]
 fn is_process_running(pid: u32) -> bool {
     // Use kill -0 to check if process exists
-    let result = unsafe {
-        libc::kill(pid as i32, 0)
-    };
+    let result = unsafe { libc::kill(pid as i32, 0) };
     result == 0
 }
 
@@ -88,9 +86,7 @@ fn is_process_running(pid: u32) -> bool {
     Command::new("tasklist")
         .args(["/FI", &format!("PID eq {}", pid)])
         .output()
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout).contains(&pid.to_string())
-        })
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()))
         .unwrap_or(false)
 }
 
@@ -98,9 +94,7 @@ fn is_process_running(pid: u32) -> bool {
 #[cfg(unix)]
 fn stop_process(pid: u32, force: bool) -> bool {
     let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
-    let result = unsafe {
-        libc::kill(pid as i32, signal)
-    };
+    let result = unsafe { libc::kill(pid as i32, signal) };
     result == 0
 }
 
@@ -130,9 +124,18 @@ pub fn execute_start(args: StartArgs) -> CliResult<()> {
 
     // Print banner
     println!();
-    println!("{}", "  ╔═══════════════════════════════════════════╗".cyan());
-    println!("{}", "  ║         AxonML Dashboard Starting         ║".cyan());
-    println!("{}", "  ╚═══════════════════════════════════════════╝".cyan());
+    println!(
+        "{}",
+        "  ╔═══════════════════════════════════════════╗".cyan()
+    );
+    println!(
+        "{}",
+        "  ║         AxonML Dashboard Starting         ║".cyan()
+    );
+    println!(
+        "{}",
+        "  ╚═══════════════════════════════════════════╝".cyan()
+    );
     println!();
 
     if start_server {
@@ -145,12 +148,28 @@ pub fn execute_start(args: StartArgs) -> CliResult<()> {
 
     println!();
     if start_server && start_dashboard {
-        println!("{} Dashboard: {}", "✓".green().bold(), format!("http://{}:{}", args.host, args.dashboard_port).cyan());
-        println!("{} API Server: {}", "✓".green().bold(), format!("http://{}:{}", args.host, args.port).cyan());
+        println!(
+            "{} Dashboard: {}",
+            "✓".green().bold(),
+            format!("http://{}:{}", args.host, args.dashboard_port).cyan()
+        );
+        println!(
+            "{} API Server: {}",
+            "✓".green().bold(),
+            format!("http://{}:{}", args.host, args.port).cyan()
+        );
     } else if start_server {
-        println!("{} API Server: {}", "✓".green().bold(), format!("http://{}:{}", args.host, args.port).cyan());
+        println!(
+            "{} API Server: {}",
+            "✓".green().bold(),
+            format!("http://{}:{}", args.host, args.port).cyan()
+        );
     } else if start_dashboard {
-        println!("{} Dashboard: {}", "✓".green().bold(), format!("http://{}:{}", args.host, args.dashboard_port).cyan());
+        println!(
+            "{} Dashboard: {}",
+            "✓".green().bold(),
+            format!("http://{}:{}", args.host, args.dashboard_port).cyan()
+        );
     }
     println!();
     println!("Use {} to stop services", "axon stop".yellow());
@@ -164,14 +183,22 @@ fn start_server_process(args: &StartArgs) -> CliResult<()> {
     // Check if already running
     if let Some(pid) = read_pid("server") {
         if is_process_running(pid) {
-            println!("{} API server already running (PID: {})", "!".yellow().bold(), pid);
+            println!(
+                "{} API server already running (PID: {})",
+                "!".yellow().bold(),
+                pid
+            );
             return Ok(());
         }
         // Stale PID file, remove it
         remove_pid("server")?;
     }
 
-    println!("{} Starting API server on port {}...", "→".blue().bold(), args.port);
+    println!(
+        "{} Starting API server on port {}...",
+        "→".blue().bold(),
+        args.port
+    );
 
     let log_file = get_log_file("server");
     if let Some(parent) = log_file.parent() {
@@ -199,7 +226,10 @@ fn start_server_process(args: &StartArgs) -> CliResult<()> {
             .status()?;
 
         if !status.success() {
-            return Err(CliError::Other(format!("Server exited with status: {:?}", status.code())));
+            return Err(CliError::Other(format!(
+                "Server exited with status: {:?}",
+                status.code()
+            )));
         }
     } else {
         // Run in background
@@ -209,7 +239,11 @@ fn start_server_process(args: &StartArgs) -> CliResult<()> {
             .spawn()?;
 
         write_pid("server", child.id())?;
-        println!("{} API server started (PID: {})", "✓".green().bold(), child.id());
+        println!(
+            "{} API server started (PID: {})",
+            "✓".green().bold(),
+            child.id()
+        );
     }
 
     Ok(())
@@ -219,14 +253,22 @@ fn start_dashboard_process(args: &StartArgs) -> CliResult<()> {
     // Check if already running
     if let Some(pid) = read_pid("dashboard") {
         if is_process_running(pid) {
-            println!("{} Dashboard already running (PID: {})", "!".yellow().bold(), pid);
+            println!(
+                "{} Dashboard already running (PID: {})",
+                "!".yellow().bold(),
+                pid
+            );
             return Ok(());
         }
         // Stale PID file, remove it
         remove_pid("dashboard")?;
     }
 
-    println!("{} Starting dashboard on port {}...", "→".blue().bold(), args.dashboard_port);
+    println!(
+        "{} Starting dashboard on port {}...",
+        "→".blue().bold(),
+        args.dashboard_port
+    );
 
     let log_file = get_log_file("dashboard");
     if let Some(parent) = log_file.parent() {
@@ -257,14 +299,26 @@ fn start_static_server(dist_path: &PathBuf, args: &StartArgs) -> CliResult<()> {
     // First try python
     let child = if Command::new("python3").arg("--version").output().is_ok() {
         Command::new("python3")
-            .args(["-m", "http.server", &args.dashboard_port.to_string(), "--bind", &args.host])
+            .args([
+                "-m",
+                "http.server",
+                &args.dashboard_port.to_string(),
+                "--bind",
+                &args.host,
+            ])
             .current_dir(dist_path)
             .stdout(Stdio::from(log_handle))
             .stderr(Stdio::from(err_handle))
             .spawn()?
     } else if Command::new("python").arg("--version").output().is_ok() {
         Command::new("python")
-            .args(["-m", "http.server", &args.dashboard_port.to_string(), "--bind", &args.host])
+            .args([
+                "-m",
+                "http.server",
+                &args.dashboard_port.to_string(),
+                "--bind",
+                &args.host,
+            ])
             .current_dir(dist_path)
             .stdout(Stdio::from(log_handle))
             .stderr(Stdio::from(err_handle))
@@ -277,13 +331,20 @@ fn start_static_server(dist_path: &PathBuf, args: &StartArgs) -> CliResult<()> {
             .stdout(Stdio::from(log_handle))
             .stderr(Stdio::from(err_handle))
             .spawn()
-            .map_err(|_| CliError::Other(
-                "No static file server found. Install Python or run: npm install -g serve".to_string()
-            ))?
+            .map_err(|_| {
+                CliError::Other(
+                    "No static file server found. Install Python or run: npm install -g serve"
+                        .to_string(),
+                )
+            })?
     };
 
     write_pid("dashboard", child.id())?;
-    println!("{} Dashboard started (PID: {})", "✓".green().bold(), child.id());
+    println!(
+        "{} Dashboard started (PID: {})",
+        "✓".green().bold(),
+        child.id()
+    );
 
     Ok(())
 }
@@ -301,20 +362,26 @@ fn start_trunk_server(args: &StartArgs) -> CliResult<()> {
     let child = Command::new("trunk")
         .args([
             "serve",
-            "--port", &args.dashboard_port.to_string(),
-            "--address", &args.host,
+            "--port",
+            &args.dashboard_port.to_string(),
+            "--address",
+            &args.host,
             &format!("--proxy-backend={}", proxy_backend),
         ])
         .current_dir(&dashboard_dir)
         .stdout(Stdio::from(log_handle))
         .stderr(Stdio::from(err_handle))
         .spawn()
-        .map_err(|_| CliError::Other(
-            "trunk not found. Install with: cargo install trunk".to_string()
-        ))?;
+        .map_err(|_| {
+            CliError::Other("trunk not found. Install with: cargo install trunk".to_string())
+        })?;
 
     write_pid("dashboard", child.id())?;
-    println!("{} Dashboard started via trunk (PID: {})", "✓".green().bold(), child.id());
+    println!(
+        "{} Dashboard started via trunk (PID: {})",
+        "✓".green().bold(),
+        child.id()
+    );
 
     Ok(())
 }
@@ -345,7 +412,7 @@ fn find_server_binary() -> CliResult<PathBuf> {
     }
 
     Err(CliError::Other(
-        "axonml-server not found. Build with: cargo build -p axonml-server --release".to_string()
+        "axonml-server not found. Build with: cargo build -p axonml-server --release".to_string(),
     ))
 }
 
@@ -371,7 +438,8 @@ fn find_dashboard_dir() -> CliResult<PathBuf> {
     }
 
     Err(CliError::Other(
-        "Dashboard source not found. Run from the AxonML repository root or set AXONML_HOME.".to_string()
+        "Dashboard source not found. Run from the AxonML repository root or set AXONML_HOME."
+            .to_string(),
     ))
 }
 
@@ -389,7 +457,11 @@ pub fn execute_stop(args: StopArgs) -> CliResult<()> {
     if stop_server {
         if let Some(pid) = read_pid("server") {
             if is_process_running(pid) {
-                println!("{} Stopping API server (PID: {})...", "→".blue().bold(), pid);
+                println!(
+                    "{} Stopping API server (PID: {})...",
+                    "→".blue().bold(),
+                    pid
+                );
                 if stop_process(pid, args.force) {
                     // Wait a moment for graceful shutdown
                     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -463,20 +535,24 @@ pub fn execute_status(args: StatusArgs) -> CliResult<()> {
 
         // Server status
         if server_running {
-            println!("{} API Server:  {} (PID: {})",
+            println!(
+                "{} API Server:  {} (PID: {})",
                 "●".green().bold(),
                 "Running".green(),
-                server_pid.unwrap());
+                server_pid.unwrap()
+            );
         } else {
             println!("{} API Server:  {}", "●".red().bold(), "Stopped".red());
         }
 
         // Dashboard status
         if dashboard_running {
-            println!("{} Dashboard:   {} (PID: {})",
+            println!(
+                "{} Dashboard:   {} (PID: {})",
                 "●".green().bold(),
                 "Running".green(),
-                dashboard_pid.unwrap());
+                dashboard_pid.unwrap()
+            );
         } else {
             println!("{} Dashboard:   {}", "●".red().bold(), "Stopped".red());
         }
@@ -535,8 +611,18 @@ pub fn execute_logs(args: LogsArgs) -> CliResult<()> {
     Ok(())
 }
 
-fn show_log(log_file: &PathBuf, name: &str, lines: usize, level_filter: Option<&str>) -> CliResult<()> {
-    println!("{} {} logs (last {} lines)", "━".cyan(), name.cyan().bold(), lines);
+fn show_log(
+    log_file: &PathBuf,
+    name: &str,
+    lines: usize,
+    level_filter: Option<&str>,
+) -> CliResult<()> {
+    println!(
+        "{} {} logs (last {} lines)",
+        "━".cyan(),
+        name.cyan().bold(),
+        lines
+    );
     println!();
 
     let file = fs::File::open(log_file)?;
@@ -561,7 +647,11 @@ fn show_log(log_file: &PathBuf, name: &str, lines: usize, level_filter: Option<&
 fn follow_log(log_file: &PathBuf, name: &str, level_filter: Option<&str>) -> CliResult<()> {
     use std::io::Seek;
 
-    println!("{} Following {} logs (Ctrl+C to stop)", "━".cyan(), name.cyan().bold());
+    println!(
+        "{} Following {} logs (Ctrl+C to stop)",
+        "━".cyan(),
+        name.cyan().bold()
+    );
     println!();
 
     let mut file = fs::File::open(log_file)?;

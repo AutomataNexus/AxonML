@@ -234,8 +234,8 @@ pub use axonml_onnx as onnx;
 
 pub mod trainer;
 pub use trainer::{
-    Callback, EarlyStopping, ProgressLogger, TrainingConfig, TrainingHistory,
-    TrainingMetrics, TrainingState,
+    Callback, EarlyStopping, ProgressLogger, TrainingConfig, TrainingHistory, TrainingMetrics,
+    TrainingState,
 };
 
 #[cfg(feature = "nn")]
@@ -262,9 +262,7 @@ pub use hub::{
 // =============================================================================
 
 pub mod benchmark;
-pub use benchmark::{
-    print_throughput_results, MemorySnapshot, ThroughputConfig, ThroughputResult,
-};
+pub use benchmark::{print_throughput_results, MemorySnapshot, ThroughputConfig, ThroughputResult};
 
 #[cfg(all(feature = "core", feature = "nn"))]
 pub use benchmark::{
@@ -348,21 +346,21 @@ pub mod prelude {
     // Profiling
     #[cfg(feature = "profile")]
     pub use axonml_profile::{
-        Profiler, ProfileGuard, ProfileReport, MemoryProfiler, ComputeProfiler,
-        TimelineProfiler, BottleneckAnalyzer, Bottleneck,
+        Bottleneck, BottleneckAnalyzer, ComputeProfiler, MemoryProfiler, ProfileGuard,
+        ProfileReport, Profiler, TimelineProfiler,
     };
 
     // LLM architectures
     #[cfg(feature = "llm")]
     pub use axonml_llm::{
-        BertConfig, GPT2Config, Bert, BertForSequenceClassification, BertForMaskedLM,
-        GPT2, GPT2LMHead, GenerationConfig, TextGenerator,
+        Bert, BertConfig, BertForMaskedLM, BertForSequenceClassification, GPT2Config, GPT2LMHead,
+        GenerationConfig, TextGenerator, GPT2,
     };
 
     // JIT compilation
     #[cfg(feature = "jit")]
     pub use axonml_jit::{
-        trace, Graph, JitCompiler, CompiledFunction, TracedValue, Optimizer as JitOptimizer,
+        trace, CompiledFunction, Graph, JitCompiler, Optimizer as JitOptimizer, TracedValue,
     };
 }
 
@@ -371,12 +369,14 @@ pub mod prelude {
 // =============================================================================
 
 /// Returns the version of the Axonml framework.
-#[must_use] pub fn version() -> &'static str {
+#[must_use]
+pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
 /// Returns a string describing the enabled features.
-#[must_use] pub fn features() -> String {
+#[must_use]
+pub fn features() -> String {
     let mut features = Vec::new();
 
     #[cfg(feature = "core")]

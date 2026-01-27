@@ -22,8 +22,7 @@ pub fn execute(args: NewArgs) -> CliResult<()> {
     let project_name = &args.name;
 
     // Determine project directory
-    let base_path = args
-        .path.map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let base_path = args.path.map_or_else(|| PathBuf::from("."), PathBuf::from);
     let project_path = base_path.join(project_name);
 
     // Check if project already exists

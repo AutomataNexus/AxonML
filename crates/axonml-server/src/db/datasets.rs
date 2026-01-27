@@ -88,7 +88,9 @@ impl<'a> DatasetRepository<'a> {
         };
 
         let dataset_json = serde_json::to_value(&dataset)?;
-        self.db.doc_insert(COLLECTION, Some(&dataset.id), dataset_json).await?;
+        self.db
+            .doc_insert(COLLECTION, Some(&dataset.id), dataset_json)
+            .await?;
 
         Ok(dataset)
     }

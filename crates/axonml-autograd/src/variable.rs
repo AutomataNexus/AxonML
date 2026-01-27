@@ -15,9 +15,9 @@ use parking_lot::RwLock;
 use axonml_tensor::Tensor;
 
 use crate::functions::{
-    AddBackward, DivBackward, MatMulBackward, MeanBackward, MulBackward, NarrowBackward, NegBackward,
-    PowBackward, ReluBackward, ReshapeBackward, SigmoidBackward, SubBackward, SumBackward,
-    TanhBackward, TransposeBackward,
+    AddBackward, DivBackward, MatMulBackward, MeanBackward, MulBackward, NarrowBackward,
+    NegBackward, PowBackward, ReluBackward, ReshapeBackward, SigmoidBackward, SubBackward,
+    SumBackward, TanhBackward, TransposeBackward,
 };
 use crate::grad_fn::{AccumulateGrad, GradAccumulator, GradFn};
 use crate::graph::{with_graph, GraphNode};
@@ -54,7 +54,8 @@ impl Variable {
     /// # Arguments
     /// * `data` - The tensor data
     /// * `requires_grad` - Whether to track gradients for this variable
-    #[must_use] pub fn new(data: Tensor<f32>, requires_grad: bool) -> Self {
+    #[must_use]
+    pub fn new(data: Tensor<f32>, requires_grad: bool) -> Self {
         // Create shared gradient accumulator
         let grad: GradAccumulator = Arc::new(RwLock::new(None));
 
@@ -82,7 +83,8 @@ impl Variable {
     }
 
     /// Creates a variable that doesn't require gradients.
-    #[must_use] pub fn from_tensor(data: Tensor<f32>) -> Self {
+    #[must_use]
+    pub fn from_tensor(data: Tensor<f32>) -> Self {
         Self::new(data, false)
     }
 
@@ -105,44 +107,52 @@ impl Variable {
     }
 
     /// Returns a reference to the underlying tensor data.
-    #[must_use] pub fn data(&self) -> Tensor<f32> {
+    #[must_use]
+    pub fn data(&self) -> Tensor<f32> {
         self.data.read().clone()
     }
 
     /// Returns the shape of the tensor.
-    #[must_use] pub fn shape(&self) -> Vec<usize> {
+    #[must_use]
+    pub fn shape(&self) -> Vec<usize> {
         self.data.read().shape().to_vec()
     }
 
     /// Returns the number of dimensions.
-    #[must_use] pub fn ndim(&self) -> usize {
+    #[must_use]
+    pub fn ndim(&self) -> usize {
         self.data.read().ndim()
     }
 
     /// Returns the total number of elements.
-    #[must_use] pub fn numel(&self) -> usize {
+    #[must_use]
+    pub fn numel(&self) -> usize {
         self.data.read().numel()
     }
 
     /// Returns whether this variable requires gradients.
-    #[must_use] pub fn requires_grad(&self) -> bool {
+    #[must_use]
+    pub fn requires_grad(&self) -> bool {
         self.requires_grad
     }
 
     /// Returns whether this is a leaf variable.
-    #[must_use] pub fn is_leaf(&self) -> bool {
+    #[must_use]
+    pub fn is_leaf(&self) -> bool {
         self.is_leaf
     }
 
     /// Returns the gradient of this variable.
     ///
     /// Only available for leaf variables after `backward()` has been called.
-    #[must_use] pub fn grad(&self) -> Option<Tensor<f32>> {
+    #[must_use]
+    pub fn grad(&self) -> Option<Tensor<f32>> {
         self.grad.read().clone()
     }
 
     /// Returns the gradient function.
-    #[must_use] pub fn grad_fn(&self) -> Option<&GradFn> {
+    #[must_use]
+    pub fn grad_fn(&self) -> Option<&GradFn> {
         self.grad_fn.as_ref()
     }
 
@@ -169,7 +179,8 @@ impl Variable {
     /// Detaches this variable from the computation graph.
     ///
     /// Returns a new variable with the same data but no gradient history.
-    #[must_use] pub fn detach(&self) -> Self {
+    #[must_use]
+    pub fn detach(&self) -> Self {
         Self {
             data: Arc::new(RwLock::new(self.data.read().clone())),
             grad: Arc::new(RwLock::new(None)),
@@ -181,7 +192,8 @@ impl Variable {
     }
 
     /// Returns a new variable with `requires_grad` set.
-    #[must_use] pub fn requires_grad_(mut self, requires_grad: bool) -> Self {
+    #[must_use]
+    pub fn requires_grad_(mut self, requires_grad: bool) -> Self {
         self.requires_grad = requires_grad;
         if requires_grad && self.is_leaf {
             // AccumulateGrad shares the gradient accumulator with this variable
@@ -196,9 +208,15 @@ impl Variable {
     /// This should only be called on scalar (single-element) tensors,
     /// typically the loss value.
     pub fn backward(&self) {
-        assert!(self.requires_grad, "Cannot call backward on a variable that doesn't require gradients");
+        assert!(
+            self.requires_grad,
+            "Cannot call backward on a variable that doesn't require gradients"
+        );
 
-        assert!((self.numel() == 1), "backward() can only be called on scalar tensors");
+        assert!(
+            (self.numel() == 1),
+            "backward() can only be called on scalar tensors"
+        );
 
         // Start with gradient of 1.0 for the output
         let grad_output = Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap();
@@ -210,7 +228,8 @@ impl Variable {
     // =========================================================================
 
     /// Element-wise addition.
-    #[must_use] pub fn add_var(&self, other: &Variable) -> Variable {
+    #[must_use]
+    pub fn add_var(&self, other: &Variable) -> Variable {
         let result = self.data.read().add(&other.data.read()).unwrap();
         let requires_grad = (self.requires_grad || other.requires_grad) && is_grad_enabled();
 
@@ -228,7 +247,8 @@ impl Variable {
     }
 
     /// Element-wise subtraction.
-    #[must_use] pub fn sub_var(&self, other: &Variable) -> Variable {
+    #[must_use]
+    pub fn sub_var(&self, other: &Variable) -> Variable {
         let result = self.data.read().sub(&other.data.read()).unwrap();
         let requires_grad = (self.requires_grad || other.requires_grad) && is_grad_enabled();
 
@@ -246,7 +266,8 @@ impl Variable {
     }
 
     /// Element-wise multiplication.
-    #[must_use] pub fn mul_var(&self, other: &Variable) -> Variable {
+    #[must_use]
+    pub fn mul_var(&self, other: &Variable) -> Variable {
         let self_data = self.data.read().clone();
         let other_data = other.data.read().clone();
         let result = self_data.mul(&other_data).unwrap();
@@ -266,7 +287,8 @@ impl Variable {
     }
 
     /// Element-wise division.
-    #[must_use] pub fn div_var(&self, other: &Variable) -> Variable {
+    #[must_use]
+    pub fn div_var(&self, other: &Variable) -> Variable {
         let self_data = self.data.read().clone();
         let other_data = other.data.read().clone();
         let result = self_data.div(&other_data).unwrap();
@@ -286,7 +308,8 @@ impl Variable {
     }
 
     /// Negation.
-    #[must_use] pub fn neg_var(&self) -> Variable {
+    #[must_use]
+    pub fn neg_var(&self) -> Variable {
         let result = self.data.read().neg();
         let requires_grad = self.requires_grad && is_grad_enabled();
 
@@ -299,7 +322,8 @@ impl Variable {
     }
 
     /// Matrix multiplication.
-    #[must_use] pub fn matmul(&self, other: &Variable) -> Variable {
+    #[must_use]
+    pub fn matmul(&self, other: &Variable) -> Variable {
         let self_data = self.data.read().clone();
         let other_data = other.data.read().clone();
         let result = self_data.matmul(&other_data).unwrap();
@@ -319,7 +343,8 @@ impl Variable {
     }
 
     /// Power operation.
-    #[must_use] pub fn pow(&self, exponent: f32) -> Variable {
+    #[must_use]
+    pub fn pow(&self, exponent: f32) -> Variable {
         let self_data = self.data.read().clone();
         let result = self_data.pow(exponent);
         let requires_grad = self.requires_grad && is_grad_enabled();
@@ -337,7 +362,8 @@ impl Variable {
     // =========================================================================
 
     /// `ReLU` activation.
-    #[must_use] pub fn relu(&self) -> Variable {
+    #[must_use]
+    pub fn relu(&self) -> Variable {
         let self_data = self.data.read().clone();
         let result = self_data.relu();
         let requires_grad = self.requires_grad && is_grad_enabled();
@@ -351,7 +377,8 @@ impl Variable {
     }
 
     /// Sigmoid activation.
-    #[must_use] pub fn sigmoid(&self) -> Variable {
+    #[must_use]
+    pub fn sigmoid(&self) -> Variable {
         let result = self.data.read().sigmoid();
         let requires_grad = self.requires_grad && is_grad_enabled();
 
@@ -364,7 +391,8 @@ impl Variable {
     }
 
     /// Tanh activation.
-    #[must_use] pub fn tanh(&self) -> Variable {
+    #[must_use]
+    pub fn tanh(&self) -> Variable {
         let result = self.data.read().tanh();
         let requires_grad = self.requires_grad && is_grad_enabled();
 
@@ -381,7 +409,8 @@ impl Variable {
     // =========================================================================
 
     /// Sum all elements.
-    #[must_use] pub fn sum(&self) -> Variable {
+    #[must_use]
+    pub fn sum(&self) -> Variable {
         let self_data = self.data.read().clone();
         let result = self_data.sum(); // Returns a scalar Tensor
         let requires_grad = self.requires_grad && is_grad_enabled();
@@ -395,7 +424,8 @@ impl Variable {
     }
 
     /// Mean of all elements.
-    #[must_use] pub fn mean(&self) -> Variable {
+    #[must_use]
+    pub fn mean(&self) -> Variable {
         let self_data = self.data.read().clone();
         let result = self_data.mean().unwrap(); // Returns a scalar Tensor
         let requires_grad = self.requires_grad && is_grad_enabled();
@@ -413,14 +443,16 @@ impl Variable {
     // =========================================================================
 
     /// Mean Squared Error loss.
-    #[must_use] pub fn mse_loss(&self, target: &Variable) -> Variable {
+    #[must_use]
+    pub fn mse_loss(&self, target: &Variable) -> Variable {
         let diff = self.sub_var(target);
         let squared = diff.pow(2.0);
         squared.mean()
     }
 
     /// Binary Cross Entropy loss (expects sigmoid output).
-    #[must_use] pub fn binary_cross_entropy(&self, target: &Variable) -> Variable {
+    #[must_use]
+    pub fn binary_cross_entropy(&self, target: &Variable) -> Variable {
         let eps = Variable::from_tensor(Tensor::scalar(1e-7));
         let one = Variable::from_tensor(Tensor::scalar(1.0));
 
@@ -441,10 +473,14 @@ impl Variable {
     // =========================================================================
 
     /// Reshapes the variable to a new shape.
-    #[must_use] pub fn reshape(&self, shape: &[usize]) -> Variable {
+    #[must_use]
+    pub fn reshape(&self, shape: &[usize]) -> Variable {
         let isize_shape: Vec<isize> = shape.iter().map(|&x| x as isize).collect();
         let original_shape = self.shape();
-        let new_data = self.data().reshape(&isize_shape).unwrap_or_else(|_| self.data().clone());
+        let new_data = self
+            .data()
+            .reshape(&isize_shape)
+            .unwrap_or_else(|_| self.data().clone());
         let requires_grad = self.requires_grad && is_grad_enabled();
 
         if requires_grad {
@@ -456,8 +492,12 @@ impl Variable {
     }
 
     /// Transposes two dimensions.
-    #[must_use] pub fn transpose(&self, dim0: usize, dim1: usize) -> Variable {
-        let new_data = self.data().transpose(dim0 as i64, dim1 as i64).unwrap_or_else(|_| self.data().clone());
+    #[must_use]
+    pub fn transpose(&self, dim0: usize, dim1: usize) -> Variable {
+        let new_data = self
+            .data()
+            .transpose(dim0 as i64, dim1 as i64)
+            .unwrap_or_else(|_| self.data().clone());
         let requires_grad = self.requires_grad && is_grad_enabled();
 
         if requires_grad {
@@ -469,7 +509,8 @@ impl Variable {
     }
 
     /// Slices the variable along specified ranges.
-    #[must_use] pub fn slice(&self, ranges: &[std::ops::Range<usize>]) -> Variable {
+    #[must_use]
+    pub fn slice(&self, ranges: &[std::ops::Range<usize>]) -> Variable {
         let new_data = self.data().slice(ranges);
         Variable::new(new_data, self.requires_grad())
     }
@@ -481,7 +522,10 @@ impl Variable {
     #[must_use]
     pub fn narrow(&self, dim: usize, start: usize, length: usize) -> Variable {
         let input_shape = self.shape();
-        let new_data = self.data().narrow(dim, start, length).unwrap_or_else(|_| self.data().clone());
+        let new_data = self
+            .data()
+            .narrow(dim, start, length)
+            .unwrap_or_else(|_| self.data().clone());
         let requires_grad = self.requires_grad && is_grad_enabled();
 
         if requires_grad {
@@ -498,7 +542,8 @@ impl Variable {
     }
 
     /// Expands the variable to a new shape (broadcast).
-    #[must_use] pub fn expand(&self, shape: &[usize]) -> Variable {
+    #[must_use]
+    pub fn expand(&self, shape: &[usize]) -> Variable {
         let new_data = self.data().broadcast_to(shape);
         Variable::new(new_data, self.requires_grad())
     }
@@ -508,7 +553,8 @@ impl Variable {
     // =========================================================================
 
     /// Multiplies by a scalar.
-    #[must_use] pub fn mul_scalar(&self, scalar: f32) -> Variable {
+    #[must_use]
+    pub fn mul_scalar(&self, scalar: f32) -> Variable {
         let data = self.data();
         let shape = data.shape();
         let numel: usize = shape.iter().product();
@@ -518,7 +564,8 @@ impl Variable {
     }
 
     /// Adds a scalar.
-    #[must_use] pub fn add_scalar(&self, scalar: f32) -> Variable {
+    #[must_use]
+    pub fn add_scalar(&self, scalar: f32) -> Variable {
         let data = self.data();
         let shape = data.shape();
         let numel: usize = shape.iter().product();
@@ -528,12 +575,14 @@ impl Variable {
     }
 
     /// Subtracts a scalar.
-    #[must_use] pub fn sub_scalar(&self, scalar: f32) -> Variable {
+    #[must_use]
+    pub fn sub_scalar(&self, scalar: f32) -> Variable {
         self.add_scalar(-scalar)
     }
 
     /// Divides by a scalar.
-    #[must_use] pub fn div_scalar(&self, scalar: f32) -> Variable {
+    #[must_use]
+    pub fn div_scalar(&self, scalar: f32) -> Variable {
         self.mul_scalar(1.0 / scalar)
     }
 
@@ -542,7 +591,8 @@ impl Variable {
     // =========================================================================
 
     /// GELU activation function (Gaussian Error Linear Unit).
-    #[must_use] pub fn gelu(&self) -> Variable {
+    #[must_use]
+    pub fn gelu(&self) -> Variable {
         // Approximate GELU: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
         let data = self.data();
         let result = data.gelu();
@@ -550,14 +600,16 @@ impl Variable {
     }
 
     /// SiLU/Swish activation function (x * sigmoid(x)).
-    #[must_use] pub fn silu(&self) -> Variable {
+    #[must_use]
+    pub fn silu(&self) -> Variable {
         let data = self.data();
         let result = data.silu();
         Variable::new(result, self.requires_grad())
     }
 
     /// Square root.
-    #[must_use] pub fn sqrt(&self) -> Variable {
+    #[must_use]
+    pub fn sqrt(&self) -> Variable {
         let data = self.data();
         let result = data.sqrt();
         Variable::new(result, self.requires_grad())
@@ -568,14 +620,16 @@ impl Variable {
     // =========================================================================
 
     /// Softmax along specified dimension.
-    #[must_use] pub fn softmax(&self, dim: i32) -> Variable {
+    #[must_use]
+    pub fn softmax(&self, dim: i32) -> Variable {
         let data = self.data();
         let result = data.softmax(dim);
         Variable::new(result, self.requires_grad())
     }
 
     /// Log softmax along specified dimension.
-    #[must_use] pub fn log_softmax(&self, dim: i32) -> Variable {
+    #[must_use]
+    pub fn log_softmax(&self, dim: i32) -> Variable {
         let data = self.data();
         let result = data.log_softmax(dim);
         Variable::new(result, self.requires_grad())
@@ -586,14 +640,16 @@ impl Variable {
     // =========================================================================
 
     /// Mean along a dimension, optionally keeping the dimension.
-    #[must_use] pub fn mean_dim(&self, dim: i32, keepdim: bool) -> Variable {
+    #[must_use]
+    pub fn mean_dim(&self, dim: i32, keepdim: bool) -> Variable {
         let data = self.data();
         let result = data.mean_dim(dim, keepdim);
         Variable::new(result, self.requires_grad())
     }
 
     /// Variance along a dimension, optionally keeping the dimension.
-    #[must_use] pub fn var_dim(&self, dim: i32, keepdim: bool) -> Variable {
+    #[must_use]
+    pub fn var_dim(&self, dim: i32, keepdim: bool) -> Variable {
         let data = self.data();
         let result = data.var_dim(dim, keepdim);
         Variable::new(result, self.requires_grad())
@@ -605,32 +661,38 @@ impl Variable {
 
     /// Creates a Variable from a tensor and requires_grad flag (for weight access).
     /// This is typically used internally by Parameter types.
-    #[must_use] pub fn from_tensor_with_grad(data: Tensor<f32>, requires_grad: bool) -> Variable {
+    #[must_use]
+    pub fn from_tensor_with_grad(data: Tensor<f32>, requires_grad: bool) -> Variable {
         Variable::new(data, requires_grad)
     }
 
     /// Clones the variable (alias for Clone trait).
-    #[must_use] pub fn clone_var(&self) -> Variable {
+    #[must_use]
+    pub fn clone_var(&self) -> Variable {
         self.clone()
     }
 
     /// Adds another variable (alias for add_var for method chaining).
-    #[must_use] pub fn add(&self, other: &Variable) -> Variable {
+    #[must_use]
+    pub fn add(&self, other: &Variable) -> Variable {
         self.add_var(other)
     }
 
     /// Subtracts another variable (alias for sub_var for method chaining).
-    #[must_use] pub fn sub(&self, other: &Variable) -> Variable {
+    #[must_use]
+    pub fn sub(&self, other: &Variable) -> Variable {
         self.sub_var(other)
     }
 
     /// Multiplies by another variable (alias for mul_var for method chaining).
-    #[must_use] pub fn mul(&self, other: &Variable) -> Variable {
+    #[must_use]
+    pub fn mul(&self, other: &Variable) -> Variable {
         self.mul_var(other)
     }
 
     /// Divides by another variable (alias for div_var for method chaining).
-    #[must_use] pub fn div(&self, other: &Variable) -> Variable {
+    #[must_use]
+    pub fn div(&self, other: &Variable) -> Variable {
         self.div_var(other)
     }
 }
@@ -685,7 +747,10 @@ impl std::fmt::Debug for Variable {
             .field("shape", &self.shape())
             .field("requires_grad", &self.requires_grad)
             .field("is_leaf", &self.is_leaf)
-            .field("grad_fn", &self.grad_fn.as_ref().map(super::grad_fn::GradFn::name))
+            .field(
+                "grad_fn",
+                &self.grad_fn.as_ref().map(super::grad_fn::GradFn::name),
+            )
             .finish()
     }
 }

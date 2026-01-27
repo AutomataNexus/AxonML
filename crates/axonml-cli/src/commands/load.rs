@@ -105,7 +105,8 @@ fn execute_load_model(args: LoadModelArgs) -> CliResult<()> {
 
     // Determine name
     let name = args.name.clone().unwrap_or_else(|| {
-        path.file_stem().map_or_else(|| "model".to_string(), |s| s.to_string_lossy().to_string())
+        path.file_stem()
+            .map_or_else(|| "model".to_string(), |s| s.to_string_lossy().to_string())
     });
 
     // Update workspace
@@ -163,7 +164,10 @@ fn execute_load_data(args: LoadDataArgs) -> CliResult<()> {
 
     // Determine name
     let name = args.name.clone().unwrap_or_else(|| {
-        path.file_name().map_or_else(|| "dataset".to_string(), |s| s.to_string_lossy().to_string())
+        path.file_name().map_or_else(
+            || "dataset".to_string(),
+            |s| s.to_string_lossy().to_string(),
+        )
     });
 
     // Update workspace
@@ -221,7 +225,8 @@ fn execute_load_both(args: LoadBothArgs) -> CliResult<()> {
     let num_parameters = count_parameters(&state_dict);
 
     let model_name = model_path
-        .file_stem().map_or_else(|| "model".to_string(), |s| s.to_string_lossy().to_string());
+        .file_stem()
+        .map_or_else(|| "model".to_string(), |s| s.to_string_lossy().to_string());
 
     print_kv("  Parameters", &format_number(num_parameters));
 
@@ -230,8 +235,10 @@ fn execute_load_both(args: LoadBothArgs) -> CliResult<()> {
     let data_type = detect_data_type(&data_path);
     let (num_samples, num_classes, _data_size) = quick_analyze_dataset(&data_path, &data_type)?;
 
-    let data_name = data_path
-        .file_name().map_or_else(|| "dataset".to_string(), |s| s.to_string_lossy().to_string());
+    let data_name = data_path.file_name().map_or_else(
+        || "dataset".to_string(),
+        |s| s.to_string_lossy().to_string(),
+    );
 
     print_kv("  Samples", &num_samples.to_string());
 
@@ -458,11 +465,7 @@ fn quick_analyze_dataset(
                 .into_iter()
                 .filter_map(std::result::Result::ok)
             {
-                if entry
-                    .path()
-                    .extension()
-                    .is_some_and(|e| e == "csv")
-                {
+                if entry.path().extension().is_some_and(|e| e == "csv") {
                     if let Ok(content) = fs::read_to_string(entry.path()) {
                         num_samples = content.lines().count().saturating_sub(1);
                         total_size = content.len() as u64;
@@ -480,7 +483,10 @@ fn quick_analyze_dataset(
         }
         _ => {
             // Generic file count
-            for entry in WalkDir::new(path).into_iter().filter_map(std::result::Result::ok) {
+            for entry in WalkDir::new(path)
+                .into_iter()
+                .filter_map(std::result::Result::ok)
+            {
                 if entry.file_type().is_file() {
                     num_samples += 1;
                     if let Ok(meta) = entry.metadata() {

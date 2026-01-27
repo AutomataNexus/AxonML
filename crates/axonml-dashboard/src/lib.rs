@@ -13,21 +13,31 @@ pub mod state;
 pub mod types;
 pub mod utils;
 
-use auth::{LoginPage, RegisterPage, session::{SessionInitializer, ProtectedRoute}};
+use auth::mfa_setup::{RecoveryCodesPage, TotpSetupPage, WebAuthnSetupPage};
+use auth::{
+    session::{ProtectedRoute, SessionInitializer},
+    LoginPage, RegisterPage,
+};
 use components::toast::ToastContainer;
 use pages::{
-    landing::LandingPage,
-    dashboard::{DashboardPage, AppShell},
-    training::{TrainingListPage, TrainingDetailPage, NewTrainingPage, NotebookListPage, NotebookEditorPage, NotebookImportPage},
-    models::{ModelsListPage, ModelDetailPage, ModelUploadPage},
-    datasets::{DatasetsListPage, DatasetUploadPage, DataAnalyzePage, KagglePage, BuiltinDatasetsPage},
-    inference::{InferenceOverviewPage, EndpointsListPage, EndpointDetailPage, InferenceMetricsPage},
-    settings::{SettingsPage, ProfileSettingsPage, SecuritySettingsPage},
-    admin::{UserManagementPage, SystemStatsPage},
-    system::SystemOverviewPage,
+    admin::{SystemStatsPage, UserManagementPage},
+    dashboard::{AppShell, DashboardPage},
+    datasets::{
+        BuiltinDatasetsPage, DataAnalyzePage, DatasetUploadPage, DatasetsListPage, KagglePage,
+    },
     hub::{HubBrowsePage, HubCachePage},
+    inference::{
+        EndpointDetailPage, EndpointsListPage, InferenceMetricsPage, InferenceOverviewPage,
+    },
+    landing::LandingPage,
+    models::{ModelDetailPage, ModelUploadPage, ModelsListPage},
+    settings::{ProfileSettingsPage, SecuritySettingsPage, SettingsPage},
+    system::SystemOverviewPage,
+    training::{
+        NewTrainingPage, NotebookEditorPage, NotebookImportPage, NotebookListPage,
+        TrainingDetailPage, TrainingListPage,
+    },
 };
-use auth::mfa_setup::{TotpSetupPage, WebAuthnSetupPage, RecoveryCodesPage};
 use state::provide_app_state;
 
 /// Main application component

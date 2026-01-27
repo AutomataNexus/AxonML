@@ -1,9 +1,9 @@
 //! Models Pages
 
-pub mod list;
 pub mod detail;
+pub mod list;
 pub mod upload;
 
-pub use list::*;
 pub use detail::*;
+pub use list::*;
 pub use upload::*;

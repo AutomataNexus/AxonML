@@ -5,8 +5,8 @@
 //! @version 0.1.0
 //! @author AutomataNexus Development Team
 
-use crate::patterns::{FusionPattern, OpType, detect_patterns};
 use crate::error::FusionResult;
+use crate::patterns::{detect_patterns, FusionPattern, OpType};
 
 // =============================================================================
 // Optimizer Configuration
@@ -137,10 +137,12 @@ impl FusionOptimizer {
         let patterns = detect_patterns(ops);
 
         // Filter based on config
-        patterns.into_iter().filter(|(pattern, _, _)| {
-            match pattern {
-                FusionPattern::MatMulBias | FusionPattern::MatMulBiasRelu |
-                FusionPattern::MatMulBiasGelu => self.config.fuse_linear,
+        patterns
+            .into_iter()
+            .filter(|(pattern, _, _)| match pattern {
+                FusionPattern::MatMulBias
+                | FusionPattern::MatMulBiasRelu
+                | FusionPattern::MatMulBiasGelu => self.config.fuse_linear,
 
                 FusionPattern::ConvBatchNorm | FusionPattern::ConvBatchNormRelu => {
                     self.config.fuse_conv
@@ -149,8 +151,8 @@ impl FusionOptimizer {
                 FusionPattern::ElementwiseChain => self.config.fuse_elementwise,
 
                 _ => true,
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     /// Applies detected fusions and updates statistics.
@@ -264,7 +266,13 @@ mod tests {
 
     #[test]
     fn test_optimize_graph() {
-        let ops = vec![OpType::MatMul, OpType::Add, OpType::Relu, OpType::Add, OpType::Mul];
+        let ops = vec![
+            OpType::MatMul,
+            OpType::Add,
+            OpType::Relu,
+            OpType::Add,
+            OpType::Mul,
+        ];
         let (patterns, stats) = optimize_graph(&ops, None).unwrap();
 
         assert!(!patterns.is_empty());
