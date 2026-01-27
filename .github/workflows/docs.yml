@@ -5,8 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'crates/**'
-      - 'Cargo.toml'
+      - 'docs/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -26,24 +25,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-docs-
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: docs
 
-      - name: Build documentation
+      - name: Create Gemfile
         run: |
-          cargo doc --workspace --no-deps --document-private-items
-          echo '<meta http-equiv="refresh" content="0; url=axonml/index.html">' > target/doc/index.html
+          cat > docs/Gemfile << 'EOF'
+          source "https://rubygems.org"
+          gem "jekyll", "~> 4.3"
+          gem "just-the-docs", "~> 0.8"
+          gem "jekyll-seo-tag"
+          gem "jekyll-sitemap"
+          gem "jekyll-feed"
+          EOF
+
+      - name: Install dependencies
+        run: |
+          cd docs
+          bundle install
+
+      - name: Build Jekyll site
+        run: |
+          cd docs
+          bundle exec jekyll build --destination ../_site
+        env:
+          JEKYLL_ENV: production
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -51,7 +61,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'target/doc'
+          path: '_site'
 
   deploy:
     environment:
