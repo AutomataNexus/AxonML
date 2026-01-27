@@ -1,9 +1,9 @@
 //! Inference Pages
 
-pub mod overview;
 pub mod endpoints;
 pub mod metrics;
+pub mod overview;
 
-pub use overview::*;
 pub use endpoints::*;
 pub use metrics::*;
+pub use overview::*;

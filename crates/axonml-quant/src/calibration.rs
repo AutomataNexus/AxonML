@@ -41,19 +41,13 @@ impl CalibrationData {
         let max = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
         let mean = data.iter().sum::<f32>() / data.len() as f32;
 
-        let variance = data
-            .iter()
-            .map(|x| (x - mean).powi(2))
-            .sum::<f32>()
-            / data.len() as f32;
+        let variance = data.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / data.len() as f32;
         let std_dev = variance.sqrt();
 
         // Initialize histogram
         let bin_width = (max - min) / num_bins as f32;
         let mut histogram = vec![0usize; num_bins];
-        let bin_edges: Vec<f32> = (0..=num_bins)
-            .map(|i| min + i as f32 * bin_width)
-            .collect();
+        let bin_edges: Vec<f32> = (0..=num_bins).map(|i| min + i as f32 * bin_width).collect();
 
         for &val in &data {
             let bin = ((val - min) / bin_width) as usize;
@@ -208,7 +202,9 @@ pub fn calibrate_batch(
     method: CalibrationMethod,
 ) -> QuantResult<CalibrationData> {
     if tensors.is_empty() {
-        return Err(QuantError::CalibrationError("No tensors provided".to_string()));
+        return Err(QuantError::CalibrationError(
+            "No tensors provided".to_string(),
+        ));
     }
 
     let mut combined = CalibrationData::new(tensors[0], 2048);

@@ -122,7 +122,10 @@ impl KaggleClient {
             .map_err(|e| format!("Network error: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("Kaggle API error: {} - verify credentials", response.status()));
+            return Err(format!(
+                "Kaggle API error: {} - verify credentials",
+                response.status()
+            ));
         }
 
         let datasets: Vec<KaggleDataset> = response.json().map_err(|e| e.to_string())?;
@@ -130,11 +133,12 @@ impl KaggleClient {
     }
 
     /// Download a dataset from Kaggle.
-    pub fn download_dataset(&self, dataset_ref: &str, output_dir: &PathBuf) -> Result<PathBuf, String> {
-        let url = format!(
-            "{}/datasets/download/{}",
-            self.base_url, dataset_ref
-        );
+    pub fn download_dataset(
+        &self,
+        dataset_ref: &str,
+        output_dir: &PathBuf,
+    ) -> Result<PathBuf, String> {
+        let url = format!("{}/datasets/download/{}", self.base_url, dataset_ref);
 
         fs::create_dir_all(output_dir).map_err(|e| e.to_string())?;
 
@@ -147,7 +151,10 @@ impl KaggleClient {
             .map_err(|e| format!("Network error: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("Download failed: {} - check dataset reference", response.status()));
+            return Err(format!(
+                "Download failed: {} - check dataset reference",
+                response.status()
+            ));
         }
 
         let filename = dataset_ref.replace('/', "_") + ".zip";
@@ -192,7 +199,11 @@ pub fn execute_login(username: &str, key: &str) -> Result<(), String> {
 
     save_credentials(&creds).map_err(|e| e.to_string())?;
 
-    println!("{} Kaggle credentials saved to {:?}", "✓".green(), kaggle_credentials_path());
+    println!(
+        "{} Kaggle credentials saved to {:?}",
+        "✓".green(),
+        kaggle_credentials_path()
+    );
     println!("  Username: {}", username);
     println!("  Key: {}...", &key[..8.min(key.len())]);
 

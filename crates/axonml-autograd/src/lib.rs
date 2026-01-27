@@ -145,7 +145,9 @@ pub mod variable;
 // Re-exports
 // =============================================================================
 
-pub use amp::{autocast, autocast_dtype, disable_autocast, is_autocast_enabled, AutocastGuard, AutocastPolicy};
+pub use amp::{
+    autocast, autocast_dtype, disable_autocast, is_autocast_enabled, AutocastGuard, AutocastPolicy,
+};
 pub use backward::backward;
 pub use checkpoint::{checkpoint, checkpoint_sequential};
 pub use grad_fn::{GradFn, GradientFunction};

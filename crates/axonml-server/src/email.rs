@@ -55,7 +55,10 @@ impl EmailService {
         verification_token: &str,
         base_url: &str,
     ) -> Result<(), EmailError> {
-        let verify_url = format!("{}/api/auth/verify-email?token={}", base_url, verification_token);
+        let verify_url = format!(
+            "{}/api/auth/verify-email?token={}",
+            base_url, verification_token
+        );
 
         let html = format!(
             r#"
@@ -109,7 +112,8 @@ impl EmailService {
             user_name, verify_url, verify_url, verify_url
         );
 
-        self.send_email(to_email, "Verify Your Email - AxonML", &html).await
+        self.send_email(to_email, "Verify Your Email - AxonML", &html)
+            .await
     }
 
     /// Send notification to admin about new user signup
@@ -160,7 +164,12 @@ impl EmailService {
             user_name, user_email
         );
 
-        self.send_email("devops@automatanexus.com", "New User Signup - AxonML", &html).await
+        self.send_email(
+            "devops@automatanexus.com",
+            "New User Signup - AxonML",
+            &html,
+        )
+        .await
     }
 
     /// Send approval request to admin after email verification
@@ -174,7 +183,10 @@ impl EmailService {
         approval_token: &str,
         base_url: &str,
     ) -> Result<(), EmailError> {
-        let approval_url = format!("{}/api/auth/approve-user?token={}", base_url, approval_token);
+        let approval_url = format!(
+            "{}/api/auth/approve-user?token={}",
+            base_url, approval_token
+        );
 
         let location_info = user_location.unwrap_or("Unknown");
         let ip_info = user_ip.unwrap_or("Unknown");
@@ -229,11 +241,24 @@ impl EmailService {
             </body>
             </html>
             "#,
-            user_name, user_email, user_name, location_info, ip_info, user_id,
-            approval_url, user_name, approval_url, approval_url
+            user_name,
+            user_email,
+            user_name,
+            location_info,
+            ip_info,
+            user_id,
+            approval_url,
+            user_name,
+            approval_url,
+            approval_url
         );
 
-        self.send_email("devops@automatanexus.com", &format!("Approval Required: {} - AxonML", user_name), &html).await
+        self.send_email(
+            "devops@automatanexus.com",
+            &format!("Approval Required: {} - AxonML", user_name),
+            &html,
+        )
+        .await
     }
 
     /// Send welcome email after approval
@@ -300,16 +325,16 @@ impl EmailService {
             user_name, dashboard_url
         );
 
-        self.send_email(to_email, "Welcome to AxonML - Your Account is Active!", &html).await
+        self.send_email(
+            to_email,
+            "Welcome to AxonML - Your Account is Active!",
+            &html,
+        )
+        .await
     }
 
     /// Internal method to send email via Resend API
-    async fn send_email(
-        &self,
-        to: &str,
-        subject: &str,
-        html: &str,
-    ) -> Result<(), EmailError> {
+    async fn send_email(&self, to: &str, subject: &str, html: &str) -> Result<(), EmailError> {
         // Check if API key is configured
         let api_key = self.api_key.as_ref().ok_or(EmailError::NotConfigured)?;
 
@@ -320,7 +345,8 @@ impl EmailService {
             html: html.to_string(),
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post("https://api.resend.com/emails")
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
@@ -329,7 +355,10 @@ impl EmailService {
             .await?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(EmailError::SendError(error_text));
         }
 

@@ -15,7 +15,7 @@
 //! ```
 
 use axonml_autograd::Variable;
-use axonml_nn::{Module, Linear, Dropout, Parameter, Embedding};
+use axonml_nn::{Dropout, Embedding, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
 
 use crate::attention::{KVCache, LayerKVCache};
@@ -183,10 +183,7 @@ impl RMSNorm {
             }
         }
 
-        Variable::new(
-            Tensor::from_vec(output, shape).unwrap(),
-            x.requires_grad(),
-        )
+        Variable::new(Tensor::from_vec(output, shape).unwrap(), x.requires_grad())
     }
 
     /// Get parameters.
@@ -260,7 +257,12 @@ impl RotaryEmbedding {
     /// * `q` - Query tensor [batch, num_heads, seq_len, head_dim]
     /// * `k` - Key tensor [batch, num_heads, seq_len, head_dim]
     /// * `position_offset` - Starting position (for KV-cache)
-    pub fn apply(&self, q: &Variable, k: &Variable, position_offset: usize) -> (Variable, Variable) {
+    pub fn apply(
+        &self,
+        q: &Variable,
+        k: &Variable,
+        position_offset: usize,
+    ) -> (Variable, Variable) {
         let q_data = q.data();
         let k_data = k.data();
         let shape = q_data.shape();
@@ -276,7 +278,13 @@ impl RotaryEmbedding {
         )
     }
 
-    fn rotate_tensor(&self, x: &Tensor<f32>, seq_len: usize, head_dim: usize, offset: usize) -> Tensor<f32> {
+    fn rotate_tensor(
+        &self,
+        x: &Tensor<f32>,
+        seq_len: usize,
+        head_dim: usize,
+        offset: usize,
+    ) -> Tensor<f32> {
         let shape = x.shape();
         let batch_size = shape[0];
         let num_heads = shape[1];
@@ -353,7 +361,11 @@ impl LLaMAAttention {
             k_proj: Linear::new(config.hidden_size, kv_hidden),
             v_proj: Linear::new(config.hidden_size, kv_hidden),
             o_proj: Linear::new(config.hidden_size, config.hidden_size),
-            rotary_emb: RotaryEmbedding::new(head_dim, config.max_position_embeddings, config.rope_theta),
+            rotary_emb: RotaryEmbedding::new(
+                head_dim,
+                config.max_position_embeddings,
+                config.rope_theta,
+            ),
             num_heads: config.num_attention_heads,
             num_kv_heads: config.num_key_value_heads,
             head_dim,
@@ -380,9 +392,15 @@ impl LLaMAAttention {
         let v = self.v_proj.forward(hidden_states);
 
         // Reshape for multi-head attention
-        let q = q.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
-        let k = k.reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim]).transpose(1, 2);
-        let v = v.reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim]).transpose(1, 2);
+        let q = q
+            .reshape(&[batch_size, seq_len, self.num_heads, self.head_dim])
+            .transpose(1, 2);
+        let k = k
+            .reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim])
+            .transpose(1, 2);
+        let v = v
+            .reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim])
+            .transpose(1, 2);
 
         // Apply rotary embeddings
         let (q, k) = self.rotary_emb.apply(&q, &k, position_offset);
@@ -402,10 +420,7 @@ impl LLaMAAttention {
         // Repeat KV heads for grouped-query attention
         let (k, v) = if self.num_kv_heads != self.num_heads {
             let repeat = self.num_heads / self.num_kv_heads;
-            (
-                self.repeat_kv(&k, repeat),
-                self.repeat_kv(&v, repeat),
-            )
+            (self.repeat_kv(&k, repeat), self.repeat_kv(&v, repeat))
         } else {
             (k, v)
         };
@@ -424,7 +439,10 @@ impl LLaMAAttention {
 
         // Compute output
         let attn_output = attn_weights.matmul(&v);
-        let attn_output = attn_output.transpose(1, 2).reshape(&[batch_size, seq_len, self.hidden_size]);
+        let attn_output =
+            attn_output
+                .transpose(1, 2)
+                .reshape(&[batch_size, seq_len, self.hidden_size]);
 
         self.o_proj.forward(&attn_output)
     }
@@ -487,7 +505,11 @@ impl LLaMAAttention {
     }
 
     /// Load weights from state dict.
-    pub fn load_weights(&mut self, prefix: &str, weights: &std::collections::HashMap<String, Tensor<f32>>) -> usize {
+    pub fn load_weights(
+        &mut self,
+        prefix: &str,
+        weights: &std::collections::HashMap<String, Tensor<f32>>,
+    ) -> usize {
         let mut loaded = 0;
 
         if let Some(w) = weights.get(&format!("{}.q_proj.weight", prefix)) {
@@ -554,7 +576,11 @@ impl LLaMAMLP {
     }
 
     /// Load weights from state dict.
-    pub fn load_weights(&mut self, prefix: &str, weights: &std::collections::HashMap<String, Tensor<f32>>) -> usize {
+    pub fn load_weights(
+        &mut self,
+        prefix: &str,
+        weights: &std::collections::HashMap<String, Tensor<f32>>,
+    ) -> usize {
         let mut loaded = 0;
 
         if let Some(w) = weights.get(&format!("{}.gate_proj.weight", prefix)) {
@@ -612,7 +638,9 @@ impl LLaMADecoderLayer {
         // Self attention with pre-norm
         let residual = hidden_states.clone();
         let hidden_states = self.input_layernorm.forward(hidden_states);
-        let hidden_states = self.self_attn.forward_with_cache(&hidden_states, kv_cache, position_offset);
+        let hidden_states =
+            self.self_attn
+                .forward_with_cache(&hidden_states, kv_cache, position_offset);
         let hidden_states = residual.add(&hidden_states);
 
         // MLP with pre-norm
@@ -633,11 +661,17 @@ impl LLaMADecoderLayer {
     }
 
     /// Load weights from state dict.
-    pub fn load_weights(&mut self, prefix: &str, weights: &std::collections::HashMap<String, Tensor<f32>>) -> usize {
+    pub fn load_weights(
+        &mut self,
+        prefix: &str,
+        weights: &std::collections::HashMap<String, Tensor<f32>>,
+    ) -> usize {
         let mut loaded = 0;
 
         // Attention weights
-        loaded += self.self_attn.load_weights(&format!("{}.self_attn", prefix), weights);
+        loaded += self
+            .self_attn
+            .load_weights(&format!("{}.self_attn", prefix), weights);
 
         // MLP weights
         loaded += self.mlp.load_weights(&format!("{}.mlp", prefix), weights);
@@ -703,10 +737,7 @@ impl LLaMA {
 
         // Convert token IDs to Variable for embedding lookup
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var = Variable::new(
-            Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(),
-            false,
-        );
+        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
 
         // Embed tokens
         let mut hidden_states = self.embed_tokens.forward(&ids_var);
@@ -715,7 +746,8 @@ impl LLaMA {
         if let Some(cache) = kv_cache {
             for (i, layer) in self.layers.iter().enumerate() {
                 let layer_cache = cache.get_mut(i);
-                hidden_states = layer.forward_with_cache(&hidden_states, layer_cache, position_offset);
+                hidden_states =
+                    layer.forward_with_cache(&hidden_states, layer_cache, position_offset);
             }
         } else {
             for layer in &self.layers {
@@ -747,11 +779,15 @@ impl LLaMA {
     /// - model.layers.0.self_attn.q_proj.weight
     /// - model.layers.0.mlp.gate_proj.weight
     /// - model.norm.weight
-    pub fn load_state_dict(&mut self, weights: &std::collections::HashMap<String, Tensor<f32>>) -> usize {
+    pub fn load_state_dict(
+        &mut self,
+        weights: &std::collections::HashMap<String, Tensor<f32>>,
+    ) -> usize {
         let mut loaded = 0;
 
         // Embedding
-        if let Some(w) = weights.get("model.embed_tokens.weight")
+        if let Some(w) = weights
+            .get("model.embed_tokens.weight")
             .or_else(|| weights.get("embed_tokens.weight"))
         {
             self.embed_tokens.weight.update_data(w.clone());
@@ -773,7 +809,8 @@ impl LLaMA {
         }
 
         // Final norm
-        if let Some(w) = weights.get("model.norm.weight")
+        if let Some(w) = weights
+            .get("model.norm.weight")
             .or_else(|| weights.get("norm.weight"))
         {
             self.norm.load_weight(w);
@@ -940,7 +977,12 @@ impl LLaMAForCausalLM {
     }
 
     /// Sample next token from logits.
-    fn sample_next_token(&self, logits: &Variable, temperature: f32, top_k: Option<usize>) -> Vec<u32> {
+    fn sample_next_token(
+        &self,
+        logits: &Variable,
+        temperature: f32,
+        top_k: Option<usize>,
+    ) -> Vec<u32> {
         let logits_data = logits.data();
         let shape = logits_data.shape();
         let batch_size = shape[0];
@@ -967,8 +1009,14 @@ impl LLaMAForCausalLM {
             }
 
             // Softmax
-            let max_logit = token_logits.iter().map(|(_, v)| *v).fold(f32::NEG_INFINITY, f32::max);
-            let exp_sum: f32 = token_logits.iter().map(|(_, v)| (v - max_logit).exp()).sum();
+            let max_logit = token_logits
+                .iter()
+                .map(|(_, v)| *v)
+                .fold(f32::NEG_INFINITY, f32::max);
+            let exp_sum: f32 = token_logits
+                .iter()
+                .map(|(_, v)| (v - max_logit).exp())
+                .sum();
             let probs: Vec<(usize, f32)> = token_logits
                 .iter()
                 .map(|(i, v)| (*i, (v - max_logit).exp() / exp_sum))
@@ -988,14 +1036,18 @@ impl LLaMAForCausalLM {
     }
 
     /// Load state dict from HuggingFace format weights.
-    pub fn load_state_dict(&mut self, weights: &std::collections::HashMap<String, Tensor<f32>>) -> usize {
+    pub fn load_state_dict(
+        &mut self,
+        weights: &std::collections::HashMap<String, Tensor<f32>>,
+    ) -> usize {
         let mut loaded = self.model.load_state_dict(weights);
 
         // LM head weight (may be tied to embeddings)
         if let Some(w) = weights.get("lm_head.weight") {
             self.lm_head.weight.update_data(w.clone());
             loaded += 1;
-        } else if let Some(w) = weights.get("model.embed_tokens.weight")
+        } else if let Some(w) = weights
+            .get("model.embed_tokens.weight")
             .or_else(|| weights.get("embed_tokens.weight"))
         {
             // Tie lm_head to embeddings (common in LLaMA)

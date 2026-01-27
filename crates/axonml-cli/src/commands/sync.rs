@@ -16,7 +16,11 @@ pub async fn login(args: &LoginArgs) -> CliResult<()> {
     // Check if server is available
     if !client.is_server_available().await {
         let url = server_url.unwrap_or("http://localhost:3021");
-        eprintln!("{} Cannot connect to server at {}", "Error:".red().bold(), url);
+        eprintln!(
+            "{} Cannot connect to server at {}",
+            "Error:".red().bold(),
+            url
+        );
         eprintln!("Make sure the AxonML server is running (axonml start)");
         return Ok(());
     }
@@ -48,7 +52,8 @@ pub async fn login(args: &LoginArgs) -> CliResult<()> {
     println!("{}", "Logging in...".dimmed());
     match client.login(&username, &password).await {
         Ok(user) => {
-            println!("{} Logged in as {} ({})",
+            println!(
+                "{} Logged in as {} ({})",
                 "✓".green().bold(),
                 user.name.green(),
                 user.email.dimmed()
@@ -95,7 +100,10 @@ pub async fn sync(args: &SyncArgs) -> CliResult<()> {
 
     // Check server availability
     if !client.is_server_available().await {
-        println!("{} Logged in but server is not available", "Status:".yellow().bold());
+        println!(
+            "{} Logged in but server is not available",
+            "Status:".yellow().bold()
+        );
         if let Some(user) = client.current_user() {
             println!("  User: {} ({})", user.name, user.email);
         }

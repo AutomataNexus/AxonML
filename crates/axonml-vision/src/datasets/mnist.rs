@@ -5,9 +5,9 @@
 //! @version 0.1.0
 //! @author `AutomataNexus` Development Team
 
-use byteorder::{BigEndian, ReadBytesExt};
 use axonml_data::Dataset;
 use axonml_tensor::Tensor;
+use byteorder::{BigEndian, ReadBytesExt};
 use flate2::read::GzDecoder;
 use std::fs::File;
 use std::io::Read;
@@ -158,17 +158,20 @@ impl MNIST {
     }
 
     /// Returns whether this is the training set.
-    #[must_use] pub fn is_train(&self) -> bool {
+    #[must_use]
+    pub fn is_train(&self) -> bool {
         self.train
     }
 
     /// Returns the number of classes (10 for digits 0-9).
-    #[must_use] pub fn num_classes(&self) -> usize {
+    #[must_use]
+    pub fn num_classes(&self) -> usize {
         10
     }
 
     /// Returns the image dimensions (28, 28).
-    #[must_use] pub fn image_size(&self) -> (usize, usize) {
+    #[must_use]
+    pub fn image_size(&self) -> (usize, usize) {
         (28, 28)
     }
 }
@@ -220,7 +223,8 @@ impl FashionMNIST {
     }
 
     /// Returns the class names.
-    #[must_use] pub fn class_names() -> Vec<&'static str> {
+    #[must_use]
+    pub fn class_names() -> Vec<&'static str> {
         vec![
             "T-shirt/top",
             "Trouser",
@@ -236,12 +240,14 @@ impl FashionMNIST {
     }
 
     /// Returns whether this is the training set.
-    #[must_use] pub fn is_train(&self) -> bool {
+    #[must_use]
+    pub fn is_train(&self) -> bool {
         self.inner.is_train()
     }
 
     /// Returns the number of classes.
-    #[must_use] pub fn num_classes(&self) -> usize {
+    #[must_use]
+    pub fn num_classes(&self) -> usize {
         10
     }
 }
@@ -269,22 +275,26 @@ pub struct SyntheticMNIST {
 
 impl SyntheticMNIST {
     /// Creates a synthetic MNIST dataset with the specified size.
-    #[must_use] pub fn new(size: usize) -> Self {
+    #[must_use]
+    pub fn new(size: usize) -> Self {
         Self { size }
     }
 
     /// Creates a small test dataset (100 samples).
-    #[must_use] pub fn small() -> Self {
+    #[must_use]
+    pub fn small() -> Self {
         Self::new(100)
     }
 
     /// Creates a standard training-size dataset (60000 samples).
-    #[must_use] pub fn train() -> Self {
+    #[must_use]
+    pub fn train() -> Self {
         Self::new(60000)
     }
 
     /// Creates a standard test-size dataset (10000 samples).
-    #[must_use] pub fn test() -> Self {
+    #[must_use]
+    pub fn test() -> Self {
         Self::new(10000)
     }
 }

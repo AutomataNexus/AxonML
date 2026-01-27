@@ -37,12 +37,14 @@ pub struct WhitespaceTokenizer {
 
 impl WhitespaceTokenizer {
     /// Creates a new `WhitespaceTokenizer`.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self { lowercase: false }
     }
 
     /// Creates a tokenizer that lowercases all tokens.
-    #[must_use] pub fn lowercase() -> Self {
+    #[must_use]
+    pub fn lowercase() -> Self {
         Self { lowercase: true }
     }
 }
@@ -73,14 +75,16 @@ pub struct CharTokenizer {
 
 impl CharTokenizer {
     /// Creates a new `CharTokenizer`.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             include_whitespace: true,
         }
     }
 
     /// Creates a tokenizer that excludes whitespace.
-    #[must_use] pub fn no_whitespace() -> Self {
+    #[must_use]
+    pub fn no_whitespace() -> Self {
         Self {
             include_whitespace: false,
         }
@@ -112,12 +116,14 @@ pub struct WordPunctTokenizer {
 
 impl WordPunctTokenizer {
     /// Creates a new `WordPunctTokenizer`.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self { lowercase: false }
     }
 
     /// Creates a tokenizer that lowercases all tokens.
-    #[must_use] pub fn lowercase() -> Self {
+    #[must_use]
+    pub fn lowercase() -> Self {
         Self { lowercase: true }
     }
 }
@@ -170,7 +176,8 @@ pub struct NGramTokenizer {
 
 impl NGramTokenizer {
     /// Creates a word-level n-gram tokenizer.
-    #[must_use] pub fn word_ngrams(n: usize) -> Self {
+    #[must_use]
+    pub fn word_ngrams(n: usize) -> Self {
         Self {
             n: n.max(1),
             char_level: false,
@@ -178,7 +185,8 @@ impl NGramTokenizer {
     }
 
     /// Creates a character-level n-gram tokenizer.
-    #[must_use] pub fn char_ngrams(n: usize) -> Self {
+    #[must_use]
+    pub fn char_ngrams(n: usize) -> Self {
         Self {
             n: n.max(1),
             char_level: true,
@@ -224,7 +232,8 @@ pub struct BasicBPETokenizer {
 
 impl BasicBPETokenizer {
     /// Creates a new BPE tokenizer.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             merges: HashMap::new(),
             vocab: Vec::new(),
@@ -291,7 +300,8 @@ impl BasicBPETokenizer {
     }
 
     /// Returns the vocabulary.
-    #[must_use] pub fn get_vocab(&self) -> &[String] {
+    #[must_use]
+    pub fn get_vocab(&self) -> &[String] {
         &self.vocab
     }
 
@@ -356,8 +366,13 @@ pub struct UnigramTokenizer {
 
 impl UnigramTokenizer {
     /// Creates a new unigram tokenizer from a vocabulary with scores.
-    #[must_use] pub fn new(vocab: HashMap<String, f32>) -> Self {
-        let max_len = vocab.keys().map(std::string::String::len).max().unwrap_or(1);
+    #[must_use]
+    pub fn new(vocab: HashMap<String, f32>) -> Self {
+        let max_len = vocab
+            .keys()
+            .map(std::string::String::len)
+            .max()
+            .unwrap_or(1);
         Self {
             vocab,
             max_token_length: max_len,
@@ -365,7 +380,8 @@ impl UnigramTokenizer {
     }
 
     /// Creates a tokenizer from a list of tokens (equal scores).
-    #[must_use] pub fn from_tokens(tokens: &[&str]) -> Self {
+    #[must_use]
+    pub fn from_tokens(tokens: &[&str]) -> Self {
         let vocab: HashMap<String, f32> = tokens.iter().map(|&t| (t.to_string(), 1.0)).collect();
         Self::new(vocab)
     }

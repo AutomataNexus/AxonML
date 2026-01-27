@@ -44,7 +44,8 @@ pub fn SystemStatsPage() -> impl IntoView {
 
     let (loading, set_loading) = create_signal(true);
     let (realtime_metrics, set_realtime_metrics) = create_signal::<Option<RealtimeMetrics>>(None);
-    let (metrics_history, set_metrics_history) = create_signal::<Option<SystemMetricsHistory>>(None);
+    let (metrics_history, set_metrics_history) =
+        create_signal::<Option<SystemMetricsHistory>>(None);
     let (correlation_data, set_correlation_data) = create_signal::<Option<CorrelationData>>(None);
     let (system_info, set_system_info) = create_signal::<Option<SystemInfo>>(None);
     let (gpu_list, set_gpu_list) = create_signal::<Option<GpuListResponse>>(None);
@@ -344,21 +345,38 @@ fn RadarChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
                 values.push(&JsValue::from_f64(m.cpu_usage_percent));
                 values.push(&JsValue::from_f64(m.memory_percent));
                 values.push(&JsValue::from_f64(m.disk_percent));
-                let net_usage = ((m.network_rx_bytes + m.network_tx_bytes) as f64 / 1_000_000.0).min(100.0);
+                let net_usage =
+                    ((m.network_rx_bytes + m.network_tx_bytes) as f64 / 1_000_000.0).min(100.0);
                 values.push(&JsValue::from_f64(net_usage));
                 values.push(&JsValue::from_f64(m.load_avg_1m * 10.0));
                 js_sys::Reflect::set(&dataset, &"data".into(), &values).unwrap();
 
-                js_sys::Reflect::set(&dataset, &"backgroundColor".into(), &"rgba(20, 184, 166, 0.2)".into()).unwrap();
-                js_sys::Reflect::set(&dataset, &"borderColor".into(), &"rgba(20, 184, 166, 1)".into()).unwrap();
-                js_sys::Reflect::set(&dataset, &"pointBackgroundColor".into(), &"rgba(20, 184, 166, 1)".into()).unwrap();
+                js_sys::Reflect::set(
+                    &dataset,
+                    &"backgroundColor".into(),
+                    &"rgba(20, 184, 166, 0.2)".into(),
+                )
+                .unwrap();
+                js_sys::Reflect::set(
+                    &dataset,
+                    &"borderColor".into(),
+                    &"rgba(20, 184, 166, 1)".into(),
+                )
+                .unwrap();
+                js_sys::Reflect::set(
+                    &dataset,
+                    &"pointBackgroundColor".into(),
+                    &"rgba(20, 184, 166, 1)".into(),
+                )
+                .unwrap();
 
                 datasets.push(&dataset);
                 js_sys::Reflect::set(&data, &"datasets".into(), &datasets).unwrap();
                 js_sys::Reflect::set(&config, &"data".into(), &data).unwrap();
 
                 let options = js_sys::Object::new();
-                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into()).unwrap();
+                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into())
+                    .unwrap();
                 js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).unwrap();
 
                 // Scales with light theme
@@ -374,7 +392,8 @@ fn RadarChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
 
                 // Angle lines
                 let angleLines = js_sys::Object::new();
-                js_sys::Reflect::set(&angleLines, &"color".into(), &"rgba(0, 0, 0, 0.1)".into()).unwrap();
+                js_sys::Reflect::set(&angleLines, &"color".into(), &"rgba(0, 0, 0, 0.1)".into())
+                    .unwrap();
                 js_sys::Reflect::set(&r, &"angleLines".into(), &angleLines).unwrap();
 
                 // Point labels (light theme - dark text)
@@ -389,7 +408,8 @@ fn RadarChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
                 // Ticks (light theme)
                 let ticks = js_sys::Object::new();
                 js_sys::Reflect::set(&ticks, &"color".into(), &"#6b7280".into()).unwrap();
-                js_sys::Reflect::set(&ticks, &"backdropColor".into(), &"transparent".into()).unwrap();
+                js_sys::Reflect::set(&ticks, &"backdropColor".into(), &"transparent".into())
+                    .unwrap();
                 js_sys::Reflect::set(&r, &"ticks".into(), &ticks).unwrap();
 
                 js_sys::Reflect::set(&scales, &"r".into(), &r).unwrap();
@@ -447,24 +467,36 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
                 js_sys::Reflect::set(&config, &"type".into(), &"line".into()).unwrap();
 
                 let data = js_sys::Object::new();
-                let labels = js_sys::Array::from_iter(h.timestamps.iter().map(|s| JsValue::from_str(s)));
+                let labels =
+                    js_sys::Array::from_iter(h.timestamps.iter().map(|s| JsValue::from_str(s)));
                 js_sys::Reflect::set(&data, &"labels".into(), &labels).unwrap();
 
                 let datasets = js_sys::Array::new();
 
                 // CPU dataset
-                let cpu_dataset = create_line_dataset("CPU", &h.cpu_history, "rgba(20, 184, 166, 1)", "rgba(20, 184, 166, 0.3)");
+                let cpu_dataset = create_line_dataset(
+                    "CPU",
+                    &h.cpu_history,
+                    "rgba(20, 184, 166, 1)",
+                    "rgba(20, 184, 166, 0.3)",
+                );
                 datasets.push(&cpu_dataset);
 
                 // Memory dataset
-                let mem_dataset = create_line_dataset("Memory", &h.memory_history, "rgba(249, 115, 22, 1)", "rgba(249, 115, 22, 0.3)");
+                let mem_dataset = create_line_dataset(
+                    "Memory",
+                    &h.memory_history,
+                    "rgba(249, 115, 22, 1)",
+                    "rgba(249, 115, 22, 0.3)",
+                );
                 datasets.push(&mem_dataset);
 
                 js_sys::Reflect::set(&data, &"datasets".into(), &datasets).unwrap();
                 js_sys::Reflect::set(&config, &"data".into(), &data).unwrap();
 
                 let options = js_sys::Object::new();
-                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into()).unwrap();
+                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into())
+                    .unwrap();
                 js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).unwrap();
 
                 // Scales with light theme
@@ -475,7 +507,8 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
                 js_sys::Reflect::set(&y, &"beginAtZero".into(), &true.into()).unwrap();
                 js_sys::Reflect::set(&y, &"max".into(), &JsValue::from_f64(100.0)).unwrap();
                 let y_grid = js_sys::Object::new();
-                js_sys::Reflect::set(&y_grid, &"color".into(), &"rgba(0, 0, 0, 0.06)".into()).unwrap();
+                js_sys::Reflect::set(&y_grid, &"color".into(), &"rgba(0, 0, 0, 0.06)".into())
+                    .unwrap();
                 js_sys::Reflect::set(&y, &"grid".into(), &y_grid).unwrap();
                 let y_ticks = js_sys::Object::new();
                 js_sys::Reflect::set(&y_ticks, &"color".into(), &"#6b7280".into()).unwrap();
@@ -489,7 +522,8 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
                 js_sys::Reflect::set(&x, &"grid".into(), &x_grid).unwrap();
                 let x_ticks = js_sys::Object::new();
                 js_sys::Reflect::set(&x_ticks, &"color".into(), &"#6b7280".into()).unwrap();
-                js_sys::Reflect::set(&x_ticks, &"maxRotation".into(), &JsValue::from_f64(0.0)).unwrap();
+                js_sys::Reflect::set(&x_ticks, &"maxRotation".into(), &JsValue::from_f64(0.0))
+                    .unwrap();
                 js_sys::Reflect::set(&x, &"ticks".into(), &x_ticks).unwrap();
                 js_sys::Reflect::set(&scales, &"x".into(), &x).unwrap();
 
@@ -501,8 +535,10 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
                 js_sys::Reflect::set(&legend, &"position".into(), &"top".into()).unwrap();
                 let legend_labels = js_sys::Object::new();
                 js_sys::Reflect::set(&legend_labels, &"color".into(), &"#374151".into()).unwrap();
-                js_sys::Reflect::set(&legend_labels, &"usePointStyle".into(), &true.into()).unwrap();
-                js_sys::Reflect::set(&legend_labels, &"padding".into(), &JsValue::from_f64(16.0)).unwrap();
+                js_sys::Reflect::set(&legend_labels, &"usePointStyle".into(), &true.into())
+                    .unwrap();
+                js_sys::Reflect::set(&legend_labels, &"padding".into(), &JsValue::from_f64(16.0))
+                    .unwrap();
                 js_sys::Reflect::set(&legend, &"labels".into(), &legend_labels).unwrap();
                 js_sys::Reflect::set(&plugins, &"legend".into(), &legend).unwrap();
                 js_sys::Reflect::set(&options, &"plugins".into(), &plugins).unwrap();
@@ -548,7 +584,8 @@ fn ScatterPlot3D(data: ReadSignal<Option<CorrelationData>>) -> impl IntoView {
             let width = container.client_width() as f64;
             let height = 380.0;
 
-            let init_code = format!(r#"
+            let init_code = format!(
+                r#"
                 (function() {{
                     const container = document.getElementById('scatter-3d-container');
                     if (!container || container.querySelector('canvas')) return;
@@ -777,22 +814,34 @@ fn NetworkChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoV
                 js_sys::Reflect::set(&config, &"type".into(), &"line".into()).unwrap();
 
                 let data = js_sys::Object::new();
-                let labels = js_sys::Array::from_iter(h.timestamps.iter().map(|s| JsValue::from_str(s)));
+                let labels =
+                    js_sys::Array::from_iter(h.timestamps.iter().map(|s| JsValue::from_str(s)));
                 js_sys::Reflect::set(&data, &"labels".into(), &labels).unwrap();
 
                 let datasets = js_sys::Array::new();
 
-                let rx_dataset = create_line_dataset("Download", &h.network_rx, "rgba(59, 130, 246, 1)", "rgba(59, 130, 246, 0.3)");
+                let rx_dataset = create_line_dataset(
+                    "Download",
+                    &h.network_rx,
+                    "rgba(59, 130, 246, 1)",
+                    "rgba(59, 130, 246, 0.3)",
+                );
                 datasets.push(&rx_dataset);
 
-                let tx_dataset = create_line_dataset("Upload", &h.network_tx, "rgba(168, 85, 247, 1)", "rgba(168, 85, 247, 0.3)");
+                let tx_dataset = create_line_dataset(
+                    "Upload",
+                    &h.network_tx,
+                    "rgba(168, 85, 247, 1)",
+                    "rgba(168, 85, 247, 0.3)",
+                );
                 datasets.push(&tx_dataset);
 
                 js_sys::Reflect::set(&data, &"datasets".into(), &datasets).unwrap();
                 js_sys::Reflect::set(&config, &"data".into(), &data).unwrap();
 
                 let options = js_sys::Object::new();
-                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into()).unwrap();
+                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into())
+                    .unwrap();
                 js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).unwrap();
 
                 // Scales with light theme
@@ -801,7 +850,8 @@ fn NetworkChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoV
                 let y = js_sys::Object::new();
                 js_sys::Reflect::set(&y, &"beginAtZero".into(), &true.into()).unwrap();
                 let y_grid = js_sys::Object::new();
-                js_sys::Reflect::set(&y_grid, &"color".into(), &"rgba(0, 0, 0, 0.06)".into()).unwrap();
+                js_sys::Reflect::set(&y_grid, &"color".into(), &"rgba(0, 0, 0, 0.06)".into())
+                    .unwrap();
                 js_sys::Reflect::set(&y, &"grid".into(), &y_grid).unwrap();
                 let y_ticks = js_sys::Object::new();
                 js_sys::Reflect::set(&y_ticks, &"color".into(), &"#6b7280".into()).unwrap();
@@ -825,7 +875,8 @@ fn NetworkChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoV
                 js_sys::Reflect::set(&legend, &"position".into(), &"top".into()).unwrap();
                 let legend_labels = js_sys::Object::new();
                 js_sys::Reflect::set(&legend_labels, &"color".into(), &"#374151".into()).unwrap();
-                js_sys::Reflect::set(&legend_labels, &"usePointStyle".into(), &true.into()).unwrap();
+                js_sys::Reflect::set(&legend_labels, &"usePointStyle".into(), &true.into())
+                    .unwrap();
                 js_sys::Reflect::set(&legend, &"labels".into(), &legend_labels).unwrap();
                 js_sys::Reflect::set(&plugins, &"legend".into(), &legend).unwrap();
                 js_sys::Reflect::set(&options, &"plugins".into(), &plugins).unwrap();

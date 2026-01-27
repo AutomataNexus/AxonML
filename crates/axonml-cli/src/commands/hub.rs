@@ -96,7 +96,9 @@ pub fn cache_dir() -> PathBuf {
 
 /// Check if a model is cached.
 pub fn is_cached(model_name: &str) -> bool {
-    cache_dir().join(format!("{}.safetensors", model_name)).exists()
+    cache_dir()
+        .join(format!("{}.safetensors", model_name))
+        .exists()
 }
 
 /// Get cached model path.
@@ -165,9 +167,15 @@ pub fn execute_info(model_name: &str) -> Result<(), String> {
     println!("Dataset:      {}", model.dataset);
     println!("Accuracy:     {:.2}%", model.accuracy);
     println!("Size:         {:.1} MB", model.size_mb);
-    println!("Input Size:   {}x{}", model.input_size.0, model.input_size.1);
+    println!(
+        "Input Size:   {}x{}",
+        model.input_size.0, model.input_size.1
+    );
     println!("Classes:      {}", model.num_classes);
-    println!("Cached:       {}", if is_cached(&model.name) { "Yes" } else { "No" });
+    println!(
+        "Cached:       {}",
+        if is_cached(&model.name) { "Yes" } else { "No" }
+    );
 
     if is_cached(&model.name) {
         println!("Path:         {:?}", cached_path(&model.name));
@@ -201,15 +209,30 @@ pub fn execute_download(model_name: &str, force: bool) -> Result<(), String> {
     let model = models
         .iter()
         .find(|m| m.name == model_name)
-        .ok_or_else(|| format!("Model '{}' not found. Run 'axonml hub list' to see available models.", model_name))?;
+        .ok_or_else(|| {
+            format!(
+                "Model '{}' not found. Run 'axonml hub list' to see available models.",
+                model_name
+            )
+        })?;
 
     if is_cached(model_name) && !force {
-        println!("{} Model '{}' is already cached at {:?}", "✓".green(), model_name, cached_path(model_name));
+        println!(
+            "{} Model '{}' is already cached at {:?}",
+            "✓".green(),
+            model_name,
+            cached_path(model_name)
+        );
         println!("Use --force to re-download.");
         return Ok(());
     }
 
-    println!("{} Downloading {} ({:.1} MB)...", "⬇".cyan(), model_name, model.size_mb);
+    println!(
+        "{} Downloading {} ({:.1} MB)...",
+        "⬇".cyan(),
+        model_name,
+        model.size_mb
+    );
 
     // Ensure cache directory exists
     let cache = cache_dir();
@@ -258,7 +281,8 @@ fn create_synthetic_weights(model_name: &str, path: &PathBuf) -> Result<(), Stri
         _ => 20,
     };
 
-    file.write_all(&num_tensors.to_le_bytes()).map_err(|e| e.to_string())?;
+    file.write_all(&num_tensors.to_le_bytes())
+        .map_err(|e| e.to_string())?;
 
     // Write some dummy tensor data
     for i in 0..num_tensors {
@@ -266,19 +290,23 @@ fn create_synthetic_weights(model_name: &str, path: &PathBuf) -> Result<(), Stri
         let name_bytes = name.as_bytes();
         let name_len = name_bytes.len() as u32;
 
-        file.write_all(&name_len.to_le_bytes()).map_err(|e| e.to_string())?;
+        file.write_all(&name_len.to_le_bytes())
+            .map_err(|e| e.to_string())?;
         file.write_all(name_bytes).map_err(|e| e.to_string())?;
 
         // Shape: [64] for simplicity
         let ndim: u32 = 1;
-        file.write_all(&ndim.to_le_bytes()).map_err(|e| e.to_string())?;
+        file.write_all(&ndim.to_le_bytes())
+            .map_err(|e| e.to_string())?;
         let dim: u64 = 64;
-        file.write_all(&dim.to_le_bytes()).map_err(|e| e.to_string())?;
+        file.write_all(&dim.to_le_bytes())
+            .map_err(|e| e.to_string())?;
 
         // Data
         for _ in 0..64 {
             let val: f32 = rng.gen::<f32>() * 0.1;
-            file.write_all(&val.to_le_bytes()).map_err(|e| e.to_string())?;
+            file.write_all(&val.to_le_bytes())
+                .map_err(|e| e.to_string())?;
         }
     }
 

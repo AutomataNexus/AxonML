@@ -6,9 +6,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{icons::*, modal::*, spinner::*, StatusBadge};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, modal::*, StatusBadge};
 
 /// Notebook editor page
 #[component]
@@ -67,7 +67,8 @@ use axonml::autograd::Variable;
 let device = Device::cuda_if_available();
 let batch_size = 32;
 let learning_rate = 0.001;
-let epochs = 10;"#.to_string(),
+let epochs = 10;"#
+                            .to_string(),
                         outputs: vec![],
                         status: CellStatus::Idle,
                         execution_count: None,
@@ -105,7 +106,8 @@ impl MyModel {
     }
 }
 
-let model = MyModel::new(784, 128, 10).to(&device);"#.to_string(),
+let model = MyModel::new(784, 128, 10).to(&device);"#
+                            .to_string(),
                         outputs: vec![],
                         status: CellStatus::Idle,
                         execution_count: None,
@@ -151,7 +153,8 @@ for epoch in 0..epochs {
 
     let accuracy = 100.0 * correct as f32 / total as f32;
     println!("Epoch {}: Loss = {:.4}, Accuracy = {:.2}%", epoch + 1, total_loss, accuracy);
-}"#.to_string(),
+}"#
+                        .to_string(),
                         outputs: vec![],
                         status: CellStatus::Idle,
                         execution_count: None,
@@ -200,22 +203,30 @@ for epoch in 0..epochs {
                         cells: nb.cells.clone(),
                         model_id: nb.model_id.clone(),
                         dataset_id: nb.dataset_id.clone(),
-                    }).await
+                    })
+                    .await
                 } else {
-                    api::notebooks::update_notebook(&nb.id, UpdateNotebookRequest {
-                        name: Some(nb.name.clone()),
-                        description: nb.description.clone(),
-                        cells: Some(nb.cells.clone()),
-                        model_id: nb.model_id.clone(),
-                        dataset_id: nb.dataset_id.clone(),
-                    }).await
+                    api::notebooks::update_notebook(
+                        &nb.id,
+                        UpdateNotebookRequest {
+                            name: Some(nb.name.clone()),
+                            description: nb.description.clone(),
+                            cells: Some(nb.cells.clone()),
+                            model_id: nb.model_id.clone(),
+                            dataset_id: nb.dataset_id.clone(),
+                        },
+                    )
+                    .await
                 };
 
                 match result {
                     Ok(saved) => {
                         state.toast_success("Saved", "Notebook saved successfully");
                         if nb.id.is_empty() {
-                            navigate_ref(&format!("/training/notebooks/{}", saved.id), Default::default());
+                            navigate_ref(
+                                &format!("/training/notebooks/{}", saved.id),
+                                Default::default(),
+                            );
                         }
                         set_notebook.set(Some(saved));
                     }
@@ -316,7 +327,10 @@ for epoch in 0..epochs {
 
             // Need a saved notebook to use AI assist
             if nb.id.is_empty() {
-                state.toast_error("Save Required", "Please save the notebook first before using AI assist");
+                state.toast_error(
+                    "Save Required",
+                    "Please save the notebook first before using AI assist",
+                );
                 set_ai_suggestion.set(Some(AiAssistResponse {
                     suggestion: "# Please save the notebook first\n# AI assistance requires the notebook to be saved so it can analyze the full context.".to_string(),
                     explanation: Some("Save the notebook first to enable AI assistance.".to_string()),

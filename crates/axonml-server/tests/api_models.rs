@@ -43,7 +43,11 @@ async fn test_list_models_unauthenticated() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should return 401 without auth");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should return 401 without auth"
+    );
 }
 
 #[tokio::test]
@@ -57,7 +61,11 @@ async fn test_get_model_not_found() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 404, "Should return 404 for nonexistent model");
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "Should return 404 for nonexistent model"
+    );
 }
 
 #[tokio::test]
@@ -109,7 +117,9 @@ async fn test_update_model() {
     }
 
     let models: Value = list_response.json().await.expect("Failed to parse JSON");
-    let models_arr = models.as_array().or_else(|| models.get("models").and_then(|m| m.as_array()));
+    let models_arr = models
+        .as_array()
+        .or_else(|| models.get("models").and_then(|m| m.as_array()));
 
     if let Some(arr) = models_arr {
         if let Some(first_model) = arr.first() {
@@ -126,7 +136,11 @@ async fn test_update_model() {
                 .expect("Request failed");
 
                 let status = response.status().as_u16();
-                assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+                assert!(
+                    status == 200 || status == 404,
+                    "Got unexpected status: {}",
+                    status
+                );
             }
         }
     }
@@ -143,7 +157,11 @@ async fn test_delete_model_not_found() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 404, "Should return 404 for nonexistent model");
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "Should return 404 for nonexistent model"
+    );
 }
 
 #[tokio::test]
@@ -163,7 +181,9 @@ async fn test_model_versions() {
     }
 
     let models: Value = list_response.json().await.expect("Failed to parse JSON");
-    let models_arr = models.as_array().or_else(|| models.get("models").and_then(|m| m.as_array()));
+    let models_arr = models
+        .as_array()
+        .or_else(|| models.get("models").and_then(|m| m.as_array()));
 
     if let Some(arr) = models_arr {
         if let Some(first_model) = arr.first() {
@@ -174,7 +194,11 @@ async fn test_model_versions() {
 
                 // Versions endpoint may or may not exist
                 let status = response.status().as_u16();
-                assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+                assert!(
+                    status == 200 || status == 404,
+                    "Got unexpected status: {}",
+                    status
+                );
             }
         }
     }

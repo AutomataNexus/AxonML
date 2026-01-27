@@ -5,9 +5,9 @@
 use leptos::*;
 
 use crate::api;
+use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*};
 
 /// System overview page
 #[component]
@@ -17,7 +17,8 @@ pub fn SystemOverviewPage() -> impl IntoView {
     let (loading, set_loading) = create_signal(true);
     let (system_info, set_system_info) = create_signal::<Option<SystemInfo>>(None);
     let (gpu_list, set_gpu_list) = create_signal::<Option<GpuListResponse>>(None);
-    let (benchmark_results, set_benchmark_results) = create_signal::<Option<BenchmarkResponse>>(None);
+    let (benchmark_results, set_benchmark_results) =
+        create_signal::<Option<BenchmarkResponse>>(None);
     let (benchmarking, set_benchmarking) = create_signal(false);
 
     let state_for_effect = state.clone();
@@ -182,7 +183,8 @@ fn GpuListCardInner(
             match api::system::run_benchmark().await {
                 Ok(results) => {
                     set_benchmark_results.set(Some(results));
-                    state.toast_success("Benchmark Complete", "GPU benchmark finished successfully");
+                    state
+                        .toast_success("Benchmark Complete", "GPU benchmark finished successfully");
                 }
                 Err(e) => {
                     state.toast_error("Benchmark Failed", e.message);

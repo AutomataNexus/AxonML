@@ -567,10 +567,7 @@ mod tests {
         // 2 samples, 3 classes
         // Sample 0: [0.1, 0.8, 0.1] -> predicted class 1
         // Sample 1: [0.9, 0.05, 0.05] -> predicted class 0
-        let predictions = Tensor::from_vec(
-            vec![0.1, 0.8, 0.1, 0.9, 0.05, 0.05],
-            &[2, 3],
-        ).unwrap();
+        let predictions = Tensor::from_vec(vec![0.1, 0.8, 0.1, 0.9, 0.05, 0.05], &[2, 3]).unwrap();
 
         // Targets: [1, 0] (both correct)
         let targets = Tensor::from_vec(vec![1.0, 0.0], &[2]).unwrap();

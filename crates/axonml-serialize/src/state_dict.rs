@@ -23,7 +23,8 @@ pub struct TensorData {
 
 impl TensorData {
     /// Create `TensorData` from a Tensor.
-    #[must_use] pub fn from_tensor(tensor: &Tensor<f32>) -> Self {
+    #[must_use]
+    pub fn from_tensor(tensor: &Tensor<f32>) -> Self {
         Self {
             shape: tensor.shape().to_vec(),
             values: tensor.to_vec(),
@@ -36,12 +37,14 @@ impl TensorData {
     }
 
     /// Get the number of elements.
-    #[must_use] pub fn numel(&self) -> usize {
+    #[must_use]
+    pub fn numel(&self) -> usize {
         self.values.len()
     }
 
     /// Get the shape.
-    #[must_use] pub fn shape(&self) -> &[usize] {
+    #[must_use]
+    pub fn shape(&self) -> &[usize] {
         &self.shape
     }
 }
@@ -64,7 +67,8 @@ pub struct StateDictEntry {
 
 impl StateDictEntry {
     /// Create a new entry from tensor data.
-    #[must_use] pub fn new(data: TensorData, requires_grad: bool) -> Self {
+    #[must_use]
+    pub fn new(data: TensorData, requires_grad: bool) -> Self {
         Self {
             data,
             requires_grad,
@@ -73,7 +77,8 @@ impl StateDictEntry {
     }
 
     /// Add metadata to the entry.
-    #[must_use] pub fn with_metadata(mut self, key: &str, value: &str) -> Self {
+    #[must_use]
+    pub fn with_metadata(mut self, key: &str, value: &str) -> Self {
         self.metadata.insert(key.to_string(), value.to_string());
         self
     }
@@ -95,7 +100,8 @@ pub struct StateDict {
 
 impl StateDict {
     /// Create an empty state dictionary.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -125,7 +131,8 @@ impl StateDict {
     }
 
     /// Get an entry by name.
-    #[must_use] pub fn get(&self, name: &str) -> Option<&StateDictEntry> {
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<&StateDictEntry> {
         self.entries.get(name)
     }
 
@@ -135,17 +142,20 @@ impl StateDict {
     }
 
     /// Check if the state dictionary contains a key.
-    #[must_use] pub fn contains(&self, name: &str) -> bool {
+    #[must_use]
+    pub fn contains(&self, name: &str) -> bool {
         self.entries.contains_key(name)
     }
 
     /// Get the number of entries.
-    #[must_use] pub fn len(&self) -> usize {
+    #[must_use]
+    pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Check if the state dictionary is empty.
-    #[must_use] pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
@@ -172,7 +182,8 @@ impl StateDict {
     }
 
     /// Get a subset of entries matching a prefix.
-    #[must_use] pub fn filter_prefix(&self, prefix: &str) -> StateDict {
+    #[must_use]
+    pub fn filter_prefix(&self, prefix: &str) -> StateDict {
         let mut filtered = StateDict::new();
         for (name, entry) in &self.entries {
             if name.starts_with(prefix) {
@@ -183,7 +194,8 @@ impl StateDict {
     }
 
     /// Strip a prefix from all keys.
-    #[must_use] pub fn strip_prefix(&self, prefix: &str) -> StateDict {
+    #[must_use]
+    pub fn strip_prefix(&self, prefix: &str) -> StateDict {
         let mut stripped = StateDict::new();
         for (name, entry) in &self.entries {
             let new_name = name.strip_prefix(prefix).unwrap_or(name).to_string();
@@ -193,7 +205,8 @@ impl StateDict {
     }
 
     /// Add a prefix to all keys.
-    #[must_use] pub fn add_prefix(&self, prefix: &str) -> StateDict {
+    #[must_use]
+    pub fn add_prefix(&self, prefix: &str) -> StateDict {
         let mut prefixed = StateDict::new();
         for (name, entry) in &self.entries {
             let new_name = format!("{prefix}{name}");
@@ -208,22 +221,26 @@ impl StateDict {
     }
 
     /// Get metadata from the state dictionary.
-    #[must_use] pub fn get_metadata(&self, key: &str) -> Option<&String> {
+    #[must_use]
+    pub fn get_metadata(&self, key: &str) -> Option<&String> {
         self.metadata.get(key)
     }
 
     /// Get total number of parameters (elements across all tensors).
-    #[must_use] pub fn total_params(&self) -> usize {
+    #[must_use]
+    pub fn total_params(&self) -> usize {
         self.entries.values().map(|e| e.data.numel()).sum()
     }
 
     /// Get total size in bytes.
-    #[must_use] pub fn size_bytes(&self) -> usize {
+    #[must_use]
+    pub fn size_bytes(&self) -> usize {
         self.total_params() * std::mem::size_of::<f32>()
     }
 
     /// Print a summary of the state dictionary.
-    #[must_use] pub fn summary(&self) -> String {
+    #[must_use]
+    pub fn summary(&self) -> String {
         let mut lines = Vec::new();
         lines.push(format!("StateDict with {} entries:", self.len()));
         lines.push(format!("  Total parameters: {}", self.total_params()));

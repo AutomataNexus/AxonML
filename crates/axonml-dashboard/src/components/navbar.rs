@@ -3,8 +3,8 @@
 use leptos::*;
 use leptos_router::*;
 
-use crate::state::use_app_state;
 use crate::components::icons::*;
+use crate::state::use_app_state;
 
 /// Top navigation bar
 #[component]

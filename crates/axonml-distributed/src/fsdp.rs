@@ -251,7 +251,8 @@ impl<M: Module> FullyShardedDataParallel<M> {
                 for param in self.module.parameters() {
                     if let Some(grad) = param.grad() {
                         let mut grad_tensor = grad.clone();
-                        self.process_group.all_reduce_tensor(&mut grad_tensor, ReduceOp::Average);
+                        self.process_group
+                            .all_reduce_tensor(&mut grad_tensor, ReduceOp::Average);
                     }
                 }
             }
@@ -259,7 +260,9 @@ impl<M: Module> FullyShardedDataParallel<M> {
                 // Reduce-scatter gradients to get sharded gradients
                 for param in self.module.parameters() {
                     if let Some(grad) = param.grad() {
-                        let _reduced = self.process_group.reduce_scatter_tensor(&grad, ReduceOp::Average);
+                        let _reduced = self
+                            .process_group
+                            .reduce_scatter_tensor(&grad, ReduceOp::Average);
                         // In full implementation, would update parameter's gradient shard
                     }
                 }
@@ -269,7 +272,8 @@ impl<M: Module> FullyShardedDataParallel<M> {
                 for param in self.module.parameters() {
                     if let Some(grad) = param.grad() {
                         let mut grad_tensor = grad.clone();
-                        self.process_group.all_reduce_tensor(&mut grad_tensor, ReduceOp::Average);
+                        self.process_group
+                            .all_reduce_tensor(&mut grad_tensor, ReduceOp::Average);
                     }
                 }
             }
@@ -290,7 +294,8 @@ impl<M: Module> FullyShardedDataParallel<M> {
 
         // All-reduce total norm across ranks
         let mut norm_tensor = Tensor::from_vec(vec![total_norm_sq], &[1]).unwrap();
-        self.process_group.all_reduce_tensor(&mut norm_tensor, ReduceOp::Sum);
+        self.process_group
+            .all_reduce_tensor(&mut norm_tensor, ReduceOp::Sum);
         let global_norm = norm_tensor.to_vec()[0].sqrt();
 
         // Clip if necessary
@@ -572,7 +577,8 @@ impl Module for RowParallelLinear {
 
         // All-reduce to combine partial outputs
         let mut output_data = local_output.data().clone();
-        self.process_group.all_reduce_tensor(&mut output_data, ReduceOp::Sum);
+        self.process_group
+            .all_reduce_tensor(&mut output_data, ReduceOp::Sum);
         let output = Variable::new(output_data, local_output.requires_grad());
 
         // Add bias (only on rank 0, then broadcast)
@@ -659,8 +665,8 @@ mod tests {
     fn test_fsdp_no_shard() {
         let model = Linear::new(10, 5);
         let pg = ProcessGroup::mock();
-        let fsdp = FullyShardedDataParallel::new(model, pg)
-            .sharding_strategy(ShardingStrategy::NoShard);
+        let fsdp =
+            FullyShardedDataParallel::new(model, pg).sharding_strategy(ShardingStrategy::NoShard);
 
         assert_eq!(fsdp.strategy(), ShardingStrategy::NoShard);
     }

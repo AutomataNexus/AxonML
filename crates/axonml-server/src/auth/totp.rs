@@ -4,8 +4,8 @@
 
 use super::AuthError;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use qrcode::QrCode;
 use qrcode::render::svg;
+use qrcode::QrCode;
 use totp_rs::{Algorithm, Secret, TOTP};
 
 /// TOTP authentication handler
@@ -88,7 +88,9 @@ impl TotpAuth {
             6,  // 6-digit codes
             1,  // 1 step tolerance
             30, // 30-second period
-            secret.to_bytes().map_err(|e| AuthError::Internal(format!("Invalid secret: {}", e)))?,
+            secret
+                .to_bytes()
+                .map_err(|e| AuthError::Internal(format!("Invalid secret: {}", e)))?,
             Some(self.issuer.clone()),
             user_email.to_string(),
         )
@@ -126,7 +128,9 @@ mod tests {
         assert!(!setup.secret.is_empty());
         // Base32 encoded secrets are typically 32 chars
         assert!(setup.secret.len() >= 16);
-        assert!(setup.qr_code_data_url.starts_with("data:image/svg+xml;base64,"));
+        assert!(setup
+            .qr_code_data_url
+            .starts_with("data:image/svg+xml;base64,"));
         assert!(setup.otpauth_url.contains("otpauth://totp/"));
         assert!(setup.otpauth_url.contains("AxonML"));
     }
@@ -137,14 +141,20 @@ mod tests {
         let setup = totp.setup("test@example.com").unwrap();
 
         // Get the current valid code
-        let current_code = totp.get_current_code(&setup.secret, "test@example.com").unwrap();
+        let current_code = totp
+            .get_current_code(&setup.secret, "test@example.com")
+            .unwrap();
 
         // Verify it works
-        let result = totp.verify(&setup.secret, &current_code, "test@example.com").unwrap();
+        let result = totp
+            .verify(&setup.secret, &current_code, "test@example.com")
+            .unwrap();
         assert!(result);
 
         // Wrong code should fail
-        let result = totp.verify(&setup.secret, "000000", "test@example.com").unwrap();
+        let result = totp
+            .verify(&setup.secret, "000000", "test@example.com")
+            .unwrap();
         assert!(!result);
     }
 }

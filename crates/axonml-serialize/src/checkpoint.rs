@@ -36,7 +36,8 @@ pub struct TrainingState {
 
 impl TrainingState {
     /// Create a new training state.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -89,7 +90,8 @@ impl TrainingState {
     }
 
     /// Get the average loss over recent values.
-    #[must_use] pub fn avg_loss(&self, n: usize) -> Option<f32> {
+    #[must_use]
+    pub fn avg_loss(&self, n: usize) -> Option<f32> {
         if self.loss_history.is_empty() {
             return None;
         }
@@ -136,22 +138,26 @@ pub struct Checkpoint {
 
 impl Checkpoint {
     /// Create a new checkpoint builder.
-    #[must_use] pub fn builder() -> CheckpointBuilder {
+    #[must_use]
+    pub fn builder() -> CheckpointBuilder {
         CheckpointBuilder::new()
     }
 
     /// Get the epoch from this checkpoint.
-    #[must_use] pub fn epoch(&self) -> usize {
+    #[must_use]
+    pub fn epoch(&self) -> usize {
         self.training_state.epoch
     }
 
     /// Get the global step from this checkpoint.
-    #[must_use] pub fn global_step(&self) -> usize {
+    #[must_use]
+    pub fn global_step(&self) -> usize {
         self.training_state.global_step
     }
 
     /// Get the best metric value.
-    #[must_use] pub fn best_metric(&self) -> Option<f32> {
+    #[must_use]
+    pub fn best_metric(&self) -> Option<f32> {
         self.training_state.best_metric
     }
 }
@@ -171,7 +177,8 @@ pub struct CheckpointBuilder {
 
 impl CheckpointBuilder {
     /// Create a new checkpoint builder.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             model_state: None,
             optimizer_state: None,
@@ -182,49 +189,57 @@ impl CheckpointBuilder {
     }
 
     /// Set the model state.
-    #[must_use] pub fn model_state(mut self, state: StateDict) -> Self {
+    #[must_use]
+    pub fn model_state(mut self, state: StateDict) -> Self {
         self.model_state = Some(state);
         self
     }
 
     /// Set the optimizer state.
-    #[must_use] pub fn optimizer_state(mut self, state: StateDict) -> Self {
+    #[must_use]
+    pub fn optimizer_state(mut self, state: StateDict) -> Self {
         self.optimizer_state = Some(state);
         self
     }
 
     /// Set the training state.
-    #[must_use] pub fn training_state(mut self, state: TrainingState) -> Self {
+    #[must_use]
+    pub fn training_state(mut self, state: TrainingState) -> Self {
         self.training_state = state;
         self
     }
 
     /// Set the RNG state.
-    #[must_use] pub fn rng_state(mut self, state: Vec<u8>) -> Self {
+    #[must_use]
+    pub fn rng_state(mut self, state: Vec<u8>) -> Self {
         self.rng_state = Some(state);
         self
     }
 
     /// Add a configuration value.
-    #[must_use] pub fn config(mut self, key: &str, value: &str) -> Self {
+    #[must_use]
+    pub fn config(mut self, key: &str, value: &str) -> Self {
         self.config.insert(key.to_string(), value.to_string());
         self
     }
 
     /// Set the epoch.
-    #[must_use] pub fn epoch(mut self, epoch: usize) -> Self {
+    #[must_use]
+    pub fn epoch(mut self, epoch: usize) -> Self {
         self.training_state.epoch = epoch;
         self
     }
 
     /// Set the global step.
-    #[must_use] pub fn global_step(mut self, step: usize) -> Self {
+    #[must_use]
+    pub fn global_step(mut self, step: usize) -> Self {
         self.training_state.global_step = step;
         self
     }
 
     /// Build the checkpoint.
-    #[must_use] pub fn build(self) -> Checkpoint {
+    #[must_use]
+    pub fn build(self) -> Checkpoint {
         Checkpoint {
             model_state: self.model_state.unwrap_or_default(),
             optimizer_state: self.optimizer_state.unwrap_or_default(),

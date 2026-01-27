@@ -26,17 +26,17 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::missing_errors_doc)]
 
-pub mod error;
-pub mod types;
-pub mod quantize;
-pub mod dequantize;
 pub mod calibration;
+pub mod dequantize;
+pub mod error;
+pub mod quantize;
+pub mod types;
 
+pub use calibration::{calibrate, CalibrationData};
+pub use dequantize::{dequantize_block, dequantize_tensor};
 pub use error::{QuantError, QuantResult};
-pub use types::{QuantType, QuantizedTensor, QuantizedBlock};
-pub use quantize::{quantize_tensor, quantize_model};
-pub use dequantize::{dequantize_tensor, dequantize_block};
-pub use calibration::{CalibrationData, calibrate};
+pub use quantize::{quantize_model, quantize_tensor};
+pub use types::{QuantType, QuantizedBlock, QuantizedTensor};
 
 // =============================================================================
 // Constants

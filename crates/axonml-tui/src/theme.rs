@@ -93,16 +93,12 @@ impl AxonmlTheme {
 
     /// Header style (teal light, bold)
     pub fn header() -> Style {
-        Style::default()
-            .fg(TEAL_LIGHT)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(TEAL_LIGHT).add_modifier(Modifier::BOLD)
     }
 
     /// Title style (teal, bold)
     pub fn title() -> Style {
-        Style::default()
-            .fg(TEAL)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(TEAL).add_modifier(Modifier::BOLD)
     }
 
     /// Accent style (terracotta)
@@ -168,9 +164,7 @@ impl AxonmlTheme {
 
     /// Highlighted style
     pub fn highlight() -> Style {
-        Style::default()
-            .fg(CREAM)
-            .bg(TERRACOTTA)
+        Style::default().fg(CREAM).bg(TERRACOTTA)
     }
 
     // -------------------------------------------------------------------------
@@ -208,9 +202,7 @@ impl AxonmlTheme {
 
     /// Layer type style
     pub fn layer_type() -> Style {
-        Style::default()
-            .fg(TEAL_LIGHT)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(TEAL_LIGHT).add_modifier(Modifier::BOLD)
     }
 
     /// Layer params style
@@ -229,9 +221,7 @@ impl AxonmlTheme {
 
     /// Epoch style
     pub fn epoch() -> Style {
-        Style::default()
-            .fg(TEAL)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(TEAL).add_modifier(Modifier::BOLD)
     }
 
     /// Loss style (good - decreasing)
@@ -256,9 +246,7 @@ impl AxonmlTheme {
 
     /// Metric value style
     pub fn metric_value() -> Style {
-        Style::default()
-            .fg(CREAM)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(CREAM).add_modifier(Modifier::BOLD)
     }
 
     // -------------------------------------------------------------------------
@@ -272,9 +260,7 @@ impl AxonmlTheme {
 
     /// Tab active style
     pub fn tab_active() -> Style {
-        Style::default()
-            .fg(TEAL)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(TEAL).add_modifier(Modifier::BOLD)
     }
 
     // -------------------------------------------------------------------------
@@ -283,9 +269,7 @@ impl AxonmlTheme {
 
     /// Key binding style
     pub fn key() -> Style {
-        Style::default()
-            .fg(TEAL_LIGHT)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(TEAL_LIGHT).add_modifier(Modifier::BOLD)
     }
 
     /// Key description style

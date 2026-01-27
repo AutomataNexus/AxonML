@@ -2,15 +2,15 @@
 //!
 //! Generates formatted profiling reports in various output formats.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use serde::{Serialize, Deserialize};
 
-use crate::{Profiler, BottleneckAnalyzer, Bottleneck};
+use crate::error::{ProfileError, ProfileResult};
 use crate::memory::MemoryProfiler;
-use crate::error::{ProfileResult, ProfileError};
+use crate::{Bottleneck, BottleneckAnalyzer, Profiler};
 
 /// Output format for profiling reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,30 +162,64 @@ impl ProfileReport {
     pub fn to_text(&self) -> String {
         let mut output = String::new();
 
-        output.push_str(&format!("═══════════════════════════════════════════════════════════════\n"));
+        output.push_str(&format!(
+            "═══════════════════════════════════════════════════════════════\n"
+        ));
         output.push_str(&format!("                    {}\n", self.title));
-        output.push_str(&format!("═══════════════════════════════════════════════════════════════\n\n"));
+        output.push_str(&format!(
+            "═══════════════════════════════════════════════════════════════\n\n"
+        ));
 
-        output.push_str(&format!("Total Duration: {:.3} seconds\n\n", self.total_duration_secs));
+        output.push_str(&format!(
+            "Total Duration: {:.3} seconds\n\n",
+            self.total_duration_secs
+        ));
 
         // Memory section
         output.push_str("─── Memory Statistics ─────────────────────────────────────────\n");
-        output.push_str(&format!("  Current Usage:    {}\n", MemoryProfiler::format_bytes(self.memory.current_usage)));
-        output.push_str(&format!("  Peak Usage:       {}\n", MemoryProfiler::format_bytes(self.memory.peak_usage)));
-        output.push_str(&format!("  Total Allocated:  {}\n", MemoryProfiler::format_bytes(self.memory.total_allocated)));
-        output.push_str(&format!("  Total Freed:      {}\n", MemoryProfiler::format_bytes(self.memory.total_freed)));
-        output.push_str(&format!("  Allocations:      {}\n\n", self.memory.allocation_count));
+        output.push_str(&format!(
+            "  Current Usage:    {}\n",
+            MemoryProfiler::format_bytes(self.memory.current_usage)
+        ));
+        output.push_str(&format!(
+            "  Peak Usage:       {}\n",
+            MemoryProfiler::format_bytes(self.memory.peak_usage)
+        ));
+        output.push_str(&format!(
+            "  Total Allocated:  {}\n",
+            MemoryProfiler::format_bytes(self.memory.total_allocated)
+        ));
+        output.push_str(&format!(
+            "  Total Freed:      {}\n",
+            MemoryProfiler::format_bytes(self.memory.total_freed)
+        ));
+        output.push_str(&format!(
+            "  Allocations:      {}\n\n",
+            self.memory.allocation_count
+        ));
 
         // Compute section
         output.push_str("─── Compute Statistics ────────────────────────────────────────\n");
-        output.push_str(&format!("  Operations Profiled: {}\n", self.compute.operation_count));
-        output.push_str(&format!("  Total Compute Time:  {}\n\n", Self::format_duration_ns(self.compute.total_time_ns)));
+        output.push_str(&format!(
+            "  Operations Profiled: {}\n",
+            self.compute.operation_count
+        ));
+        output.push_str(&format!(
+            "  Total Compute Time:  {}\n\n",
+            Self::format_duration_ns(self.compute.total_time_ns)
+        ));
 
         if !self.compute.top_operations.is_empty() {
             output.push_str("  Top Operations by Time:\n");
-            output.push_str("  ┌─────────────────────────────┬────────────┬──────────┬───────────┐\n");
-            output.push_str("  │ Operation                   │ Total Time │ Calls    │ % Time    │\n");
-            output.push_str("  ├─────────────────────────────┼────────────┼──────────┼───────────┤\n");
+            output.push_str(
+                "  ┌─────────────────────────────┬────────────┬──────────┬───────────┐\n",
+            );
+            output.push_str(
+                "  │ Operation                   │ Total Time │ Calls    │ % Time    │\n",
+            );
+            output.push_str(
+                "  ├─────────────────────────────┼────────────┼──────────┼───────────┤\n",
+            );
 
             for op in &self.compute.top_operations {
                 let name = if op.name.len() > 27 {
@@ -201,7 +235,9 @@ impl ProfileReport {
                     op.time_percentage
                 ));
             }
-            output.push_str("  └─────────────────────────────┴────────────┴──────────┴───────────┘\n\n");
+            output.push_str(
+                "  └─────────────────────────────┴────────────┴──────────┴───────────┘\n\n",
+            );
         }
 
         // Bottlenecks section
@@ -240,22 +276,46 @@ impl ProfileReport {
         let mut output = String::new();
 
         output.push_str(&format!("# {}\n\n", self.title));
-        output.push_str(&format!("**Total Duration:** {:.3} seconds\n\n", self.total_duration_secs));
+        output.push_str(&format!(
+            "**Total Duration:** {:.3} seconds\n\n",
+            self.total_duration_secs
+        ));
 
         // Memory section
         output.push_str("## Memory Statistics\n\n");
         output.push_str("| Metric | Value |\n");
         output.push_str("|--------|-------|\n");
-        output.push_str(&format!("| Current Usage | {} |\n", MemoryProfiler::format_bytes(self.memory.current_usage)));
-        output.push_str(&format!("| Peak Usage | {} |\n", MemoryProfiler::format_bytes(self.memory.peak_usage)));
-        output.push_str(&format!("| Total Allocated | {} |\n", MemoryProfiler::format_bytes(self.memory.total_allocated)));
-        output.push_str(&format!("| Total Freed | {} |\n", MemoryProfiler::format_bytes(self.memory.total_freed)));
-        output.push_str(&format!("| Allocations | {} |\n\n", self.memory.allocation_count));
+        output.push_str(&format!(
+            "| Current Usage | {} |\n",
+            MemoryProfiler::format_bytes(self.memory.current_usage)
+        ));
+        output.push_str(&format!(
+            "| Peak Usage | {} |\n",
+            MemoryProfiler::format_bytes(self.memory.peak_usage)
+        ));
+        output.push_str(&format!(
+            "| Total Allocated | {} |\n",
+            MemoryProfiler::format_bytes(self.memory.total_allocated)
+        ));
+        output.push_str(&format!(
+            "| Total Freed | {} |\n",
+            MemoryProfiler::format_bytes(self.memory.total_freed)
+        ));
+        output.push_str(&format!(
+            "| Allocations | {} |\n\n",
+            self.memory.allocation_count
+        ));
 
         // Compute section
         output.push_str("## Compute Statistics\n\n");
-        output.push_str(&format!("- **Operations Profiled:** {}\n", self.compute.operation_count));
-        output.push_str(&format!("- **Total Compute Time:** {}\n\n", Self::format_duration_ns(self.compute.total_time_ns)));
+        output.push_str(&format!(
+            "- **Operations Profiled:** {}\n",
+            self.compute.operation_count
+        ));
+        output.push_str(&format!(
+            "- **Total Compute Time:** {}\n\n",
+            Self::format_duration_ns(self.compute.total_time_ns)
+        ));
 
         if !self.compute.top_operations.is_empty() {
             output.push_str("### Top Operations by Time\n\n");
@@ -305,7 +365,8 @@ impl ProfileReport {
         output.push_str("<style>\n");
         output.push_str("body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; }\n");
         output.push_str("h1 { color: #333; }\n");
-        output.push_str("h2 { color: #555; border-bottom: 1px solid #ddd; padding-bottom: 5px; }\n");
+        output
+            .push_str("h2 { color: #555; border-bottom: 1px solid #ddd; padding-bottom: 5px; }\n");
         output.push_str("table { border-collapse: collapse; width: 100%; margin: 20px 0; }\n");
         output.push_str("th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }\n");
         output.push_str("th { background: #f5f5f5; }\n");
@@ -317,23 +378,43 @@ impl ProfileReport {
         output.push_str("</style>\n</head>\n<body>\n");
 
         output.push_str(&format!("<h1>{}</h1>\n", self.title));
-        output.push_str(&format!("<p><strong>Total Duration:</strong> {:.3} seconds</p>\n", self.total_duration_secs));
+        output.push_str(&format!(
+            "<p><strong>Total Duration:</strong> {:.3} seconds</p>\n",
+            self.total_duration_secs
+        ));
 
         // Memory section
         output.push_str("<h2>Memory Statistics</h2>\n");
         output.push_str("<table>\n<tr><th>Metric</th><th>Value</th></tr>\n");
-        output.push_str(&format!("<tr><td>Current Usage</td><td>{}</td></tr>\n", MemoryProfiler::format_bytes(self.memory.current_usage)));
-        output.push_str(&format!("<tr><td>Peak Usage</td><td>{}</td></tr>\n", MemoryProfiler::format_bytes(self.memory.peak_usage)));
-        output.push_str(&format!("<tr><td>Total Allocated</td><td>{}</td></tr>\n", MemoryProfiler::format_bytes(self.memory.total_allocated)));
-        output.push_str(&format!("<tr><td>Total Freed</td><td>{}</td></tr>\n", MemoryProfiler::format_bytes(self.memory.total_freed)));
-        output.push_str(&format!("<tr><td>Allocations</td><td>{}</td></tr>\n", self.memory.allocation_count));
+        output.push_str(&format!(
+            "<tr><td>Current Usage</td><td>{}</td></tr>\n",
+            MemoryProfiler::format_bytes(self.memory.current_usage)
+        ));
+        output.push_str(&format!(
+            "<tr><td>Peak Usage</td><td>{}</td></tr>\n",
+            MemoryProfiler::format_bytes(self.memory.peak_usage)
+        ));
+        output.push_str(&format!(
+            "<tr><td>Total Allocated</td><td>{}</td></tr>\n",
+            MemoryProfiler::format_bytes(self.memory.total_allocated)
+        ));
+        output.push_str(&format!(
+            "<tr><td>Total Freed</td><td>{}</td></tr>\n",
+            MemoryProfiler::format_bytes(self.memory.total_freed)
+        ));
+        output.push_str(&format!(
+            "<tr><td>Allocations</td><td>{}</td></tr>\n",
+            self.memory.allocation_count
+        ));
         output.push_str("</table>\n");
 
         // Compute section
         output.push_str("<h2>Compute Statistics</h2>\n");
         if !self.compute.top_operations.is_empty() {
             output.push_str("<table>\n");
-            output.push_str("<tr><th>Operation</th><th>Total Time</th><th>Calls</th><th>% Time</th></tr>\n");
+            output.push_str(
+                "<tr><th>Operation</th><th>Total Time</th><th>Calls</th><th>% Time</th></tr>\n",
+            );
             for op in &self.compute.top_operations {
                 output.push_str(&format!(
                     "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.1}%</td></tr>\n",

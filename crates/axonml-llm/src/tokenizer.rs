@@ -89,7 +89,7 @@ impl HFTokenizer {
         }
 
         Err(LLMError::ModelNotFound(
-            "No tokenizer.json or vocab.json found".to_string()
+            "No tokenizer.json or vocab.json found".to_string(),
         ))
     }
 
@@ -112,10 +112,9 @@ impl HFTokenizer {
 
     /// Load from tokenizer.json (HuggingFace fast tokenizer format).
     fn load_tokenizer_json(path: &Path) -> LLMResult<Self> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| LLMError::IoError(e.to_string()))?;
-        let json: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| LLMError::ParseError(e.to_string()))?;
+        let content = fs::read_to_string(path).map_err(|e| LLMError::IoError(e.to_string()))?;
+        let json: serde_json::Value =
+            serde_json::from_str(&content).map_err(|e| LLMError::ParseError(e.to_string()))?;
 
         // Extract vocab from model.vocab
         let mut vocab = HashMap::new();
@@ -153,7 +152,7 @@ impl HFTokenizer {
             for token in tokens {
                 if let (Some(content), Some(id)) = (
                     token.get("content").and_then(|c| c.as_str()),
-                    token.get("id").and_then(|i| i.as_u64())
+                    token.get("id").and_then(|i| i.as_u64()),
                 ) {
                     added_tokens.insert(content.to_string(), id as u32);
                     id_to_token.insert(id as u32, content.to_string());
@@ -176,22 +175,22 @@ impl HFTokenizer {
     /// Load from legacy vocab.json + merges.txt format.
     fn load_legacy_format(vocab_path: &Path, merges_path: &Path, dir: &Path) -> LLMResult<Self> {
         // Load vocab
-        let vocab_content = fs::read_to_string(vocab_path)
-            .map_err(|e| LLMError::IoError(e.to_string()))?;
+        let vocab_content =
+            fs::read_to_string(vocab_path).map_err(|e| LLMError::IoError(e.to_string()))?;
         let vocab_json: HashMap<String, u32> = serde_json::from_str(&vocab_content)
             .map_err(|e| LLMError::ParseError(e.to_string()))?;
 
         let vocab = vocab_json;
-        let id_to_token: HashMap<u32, String> = vocab.iter()
-            .map(|(k, v)| (*v, k.clone()))
-            .collect();
+        let id_to_token: HashMap<u32, String> =
+            vocab.iter().map(|(k, v)| (*v, k.clone())).collect();
 
         // Load merges if present
         let mut merges = Vec::new();
         if merges_path.exists() {
-            let merges_content = fs::read_to_string(merges_path)
-                .map_err(|e| LLMError::IoError(e.to_string()))?;
-            for line in merges_content.lines().skip(1) {  // Skip header
+            let merges_content =
+                fs::read_to_string(merges_path).map_err(|e| LLMError::IoError(e.to_string()))?;
+            for line in merges_content.lines().skip(1) {
+                // Skip header
                 let parts: Vec<&str> = line.split(' ').collect();
                 if parts.len() == 2 {
                     merges.push((parts[0].to_string(), parts[1].to_string()));
@@ -247,7 +246,10 @@ impl HFTokenizer {
             for token in tokens {
                 let content = token.get("content").and_then(|c| c.as_str());
                 let id = token.get("id").and_then(|i| i.as_u64()).map(|i| i as u32);
-                let special_flag = token.get("special").and_then(|s| s.as_bool()).unwrap_or(false);
+                let special_flag = token
+                    .get("special")
+                    .and_then(|s| s.as_bool())
+                    .unwrap_or(false);
 
                 if let (Some(content), Some(id)) = (content, id) {
                     if special_flag {
@@ -424,8 +426,8 @@ impl HFTokenizer {
         }
 
         // Clean up common BPE artifacts
-        let text = text.replace("Ġ", " ");  // GPT-2 style space
-        let text = text.replace("▁", " ");  // SentencePiece style space
+        let text = text.replace("Ġ", " "); // GPT-2 style space
+        let text = text.replace("▁", " "); // SentencePiece style space
 
         Ok(text)
     }
@@ -457,7 +459,9 @@ impl HFTokenizer {
 
     /// Convert a token string to ID.
     pub fn token_to_id(&self, token: &str) -> Option<u32> {
-        self.vocab.get(token).copied()
+        self.vocab
+            .get(token)
+            .copied()
             .or_else(|| self.added_tokens.get(token).copied())
     }
 }

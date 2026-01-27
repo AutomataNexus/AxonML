@@ -81,7 +81,11 @@ pub async fn login_as_admin(client: &Client) -> Result<String, String> {
 }
 
 /// Make authenticated GET request
-pub async fn auth_get(client: &Client, path: &str, token: &str) -> Result<reqwest::Response, String> {
+pub async fn auth_get(
+    client: &Client,
+    path: &str,
+    token: &str,
+) -> Result<reqwest::Response, String> {
     client
         .get(format!("{}{}", TEST_API_URL, path))
         .header("Authorization", format!("Bearer {}", token))
@@ -91,7 +95,12 @@ pub async fn auth_get(client: &Client, path: &str, token: &str) -> Result<reqwes
 }
 
 /// Make authenticated POST request
-pub async fn auth_post(client: &Client, path: &str, token: &str, body: Value) -> Result<reqwest::Response, String> {
+pub async fn auth_post(
+    client: &Client,
+    path: &str,
+    token: &str,
+    body: Value,
+) -> Result<reqwest::Response, String> {
     client
         .post(format!("{}{}", TEST_API_URL, path))
         .header("Authorization", format!("Bearer {}", token))
@@ -102,7 +111,12 @@ pub async fn auth_post(client: &Client, path: &str, token: &str, body: Value) ->
 }
 
 /// Make authenticated PUT request
-pub async fn auth_put(client: &Client, path: &str, token: &str, body: Value) -> Result<reqwest::Response, String> {
+pub async fn auth_put(
+    client: &Client,
+    path: &str,
+    token: &str,
+    body: Value,
+) -> Result<reqwest::Response, String> {
     client
         .put(format!("{}{}", TEST_API_URL, path))
         .header("Authorization", format!("Bearer {}", token))
@@ -113,7 +127,11 @@ pub async fn auth_put(client: &Client, path: &str, token: &str, body: Value) -> 
 }
 
 /// Make authenticated DELETE request
-pub async fn auth_delete(client: &Client, path: &str, token: &str) -> Result<reqwest::Response, String> {
+pub async fn auth_delete(
+    client: &Client,
+    path: &str,
+    token: &str,
+) -> Result<reqwest::Response, String> {
     client
         .delete(format!("{}{}", TEST_API_URL, path))
         .header("Authorization", format!("Bearer {}", token))

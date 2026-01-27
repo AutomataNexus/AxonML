@@ -6,12 +6,12 @@
 //! @version 0.1.0
 //! @author AutomataNexus Development Team
 
-use std::collections::HashMap;
-use axonml_tensor::Tensor;
-use axonml_tensor::creation::zeros;
-use crate::proto::{GraphProto, ModelProto, TensorProto};
-use crate::operators::OnnxOperator;
 use crate::error::{OnnxError, OnnxResult};
+use crate::operators::OnnxOperator;
+use crate::proto::{GraphProto, ModelProto, TensorProto};
+use axonml_tensor::creation::zeros;
+use axonml_tensor::Tensor;
+use std::collections::HashMap;
 
 // =============================================================================
 // ONNX Model
@@ -63,16 +63,16 @@ pub struct CompiledOp {
 impl OnnxModel {
     /// Creates a new ONNX model from a parsed model proto.
     pub fn from_proto(proto: &ModelProto) -> OnnxResult<Self> {
-        let graph = proto.graph.as_ref()
+        let graph = proto
+            .graph
+            .as_ref()
             .ok_or_else(|| OnnxError::GraphValidation("Model has no graph".to_string()))?;
 
         // Extract inputs
         let inputs = extract_inputs(graph)?;
 
         // Extract outputs
-        let outputs: Vec<String> = graph.output.iter()
-            .map(|o| o.name.clone())
-            .collect();
+        let outputs: Vec<String> = graph.output.iter().map(|o| o.name.clone()).collect();
 
         // Load initializers (weights)
         let initializers = load_initializers(graph)?;
@@ -92,7 +92,10 @@ impl OnnxModel {
     }
 
     /// Runs inference on the model with the given inputs.
-    pub fn forward(&self, inputs: HashMap<String, Tensor<f32>>) -> OnnxResult<HashMap<String, Tensor<f32>>> {
+    pub fn forward(
+        &self,
+        inputs: HashMap<String, Tensor<f32>>,
+    ) -> OnnxResult<HashMap<String, Tensor<f32>>> {
         let mut values: HashMap<String, Tensor<f32>> = HashMap::new();
 
         // Add inputs
@@ -108,7 +111,9 @@ impl OnnxModel {
         // Execute operators in order
         for op in &self.operators {
             // Gather inputs
-            let op_inputs: Vec<Option<&Tensor<f32>>> = op.inputs.iter()
+            let op_inputs: Vec<Option<&Tensor<f32>>> = op
+                .inputs
+                .iter()
                 .map(|name| {
                     if name.is_empty() {
                         None
@@ -150,9 +155,7 @@ impl OnnxModel {
 
     /// Returns the number of parameters in the model.
     pub fn num_parameters(&self) -> usize {
-        self.initializers.values()
-            .map(|t| t.numel())
-            .sum()
+        self.initializers.values().map(|t| t.numel()).sum()
     }
 
     /// Converts the model's initializers (weights) to a StateDict.
@@ -175,10 +178,8 @@ impl OnnxModel {
 // =============================================================================
 
 fn extract_inputs(graph: &GraphProto) -> OnnxResult<Vec<ModelInput>> {
-    let initializer_names: std::collections::HashSet<_> = graph.initializer
-        .iter()
-        .map(|i| i.name.as_str())
-        .collect();
+    let initializer_names: std::collections::HashSet<_> =
+        graph.initializer.iter().map(|i| i.name.as_str()).collect();
 
     let mut inputs = Vec::new();
 
@@ -188,13 +189,17 @@ fn extract_inputs(graph: &GraphProto) -> OnnxResult<Vec<ModelInput>> {
             continue;
         }
 
-        let shape = input.r#type.as_ref()
+        let shape = input
+            .r#type
+            .as_ref()
             .and_then(|t| t.tensor_type.as_ref())
             .and_then(|tt| tt.shape.as_ref())
             .map(|s| s.to_vec())
             .unwrap_or_default();
 
-        let dtype = input.r#type.as_ref()
+        let dtype = input
+            .r#type
+            .as_ref()
             .and_then(|t| t.tensor_type.as_ref())
             .map(|tt| format!("{:?}", crate::proto::TensorDataType::from_i32(tt.elem_type)))
             .unwrap_or_else(|| "float32".to_string());
@@ -222,7 +227,11 @@ fn load_initializers(graph: &GraphProto) -> OnnxResult<HashMap<String, Tensor<f3
 
 fn tensor_from_proto(proto: &TensorProto) -> OnnxResult<Tensor<f32>> {
     let shape: Vec<usize> = proto.dims.iter().map(|&d| d as usize).collect();
-    let numel = if shape.is_empty() { 1 } else { shape.iter().product::<usize>() };
+    let numel = if shape.is_empty() {
+        1
+    } else {
+        shape.iter().product::<usize>()
+    };
 
     // Handle empty/scalar tensor
     if numel == 0 || shape.is_empty() {
@@ -235,7 +244,10 @@ fn tensor_from_proto(proto: &TensorProto) -> OnnxResult<Tensor<f32>> {
             }
             if !proto.raw_data.is_empty() && proto.raw_data.len() >= 4 {
                 let val = f32::from_le_bytes([
-                    proto.raw_data[0], proto.raw_data[1], proto.raw_data[2], proto.raw_data[3]
+                    proto.raw_data[0],
+                    proto.raw_data[1],
+                    proto.raw_data[2],
+                    proto.raw_data[3],
                 ]);
                 return Tensor::from_vec(vec![val], &[])
                     .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)));
@@ -307,8 +319,8 @@ fn tensor_from_proto(proto: &TensorProto) -> OnnxResult<Tensor<f32>> {
                 if proto.raw_data.len() >= bytes_needed {
                     for (i, chunk) in proto.raw_data[..bytes_needed].chunks_exact(8).enumerate() {
                         let val = i64::from_le_bytes([
-                            chunk[0], chunk[1], chunk[2], chunk[3],
-                            chunk[4], chunk[5], chunk[6], chunk[7],
+                            chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6],
+                            chunk[7],
                         ]);
                         result[i] = val as f32;
                     }
@@ -334,8 +346,8 @@ fn tensor_from_proto(proto: &TensorProto) -> OnnxResult<Tensor<f32>> {
                 if proto.raw_data.len() >= bytes_needed {
                     for (i, chunk) in proto.raw_data[..bytes_needed].chunks_exact(8).enumerate() {
                         let val = f64::from_le_bytes([
-                            chunk[0], chunk[1], chunk[2], chunk[3],
-                            chunk[4], chunk[5], chunk[6], chunk[7],
+                            chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6],
+                            chunk[7],
                         ]);
                         result[i] = val as f32;
                     }
@@ -357,9 +369,10 @@ fn tensor_from_proto(proto: &TensorProto) -> OnnxResult<Tensor<f32>> {
                 result
             }
             _ => {
-                return Err(OnnxError::TensorConversion(
-                    format!("Unsupported tensor data type {} for {}", data_type, proto.name)
-                ));
+                return Err(OnnxError::TensorConversion(format!(
+                    "Unsupported tensor data type {} for {}",
+                    data_type, proto.name
+                )));
             }
         };
 
@@ -369,8 +382,10 @@ fn tensor_from_proto(proto: &TensorProto) -> OnnxResult<Tensor<f32>> {
 
     // If no data found, this could be a tensor with external data or just empty
     // For now, initialize with zeros and log a warning
-    eprintln!("Warning: No data found for tensor {} (dims={:?}, dtype={}), initializing with zeros",
-        proto.name, proto.dims, proto.data_type);
+    eprintln!(
+        "Warning: No data found for tensor {} (dims={:?}, dtype={}), initializing with zeros",
+        proto.name, proto.dims, proto.data_type
+    );
     Ok(zeros(&shape))
 }
 

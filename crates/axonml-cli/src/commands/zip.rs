@@ -122,14 +122,18 @@ fn create_bundle(paths: &[PathBuf], include_config: bool) -> CliResult<Vec<u8>> 
         if base_path.is_file() {
             // Add single file
             let name = base_path
-                .file_name().map_or_else(|| "file".to_string(), |n| n.to_string_lossy().to_string());
+                .file_name()
+                .map_or_else(|| "file".to_string(), |n| n.to_string_lossy().to_string());
 
             let data = fs::read(base_path)?;
             add_file_to_bundle(&mut bundle, &name, &data)?;
             manifest.push_str(&format!("  - {name}\n"));
         } else if base_path.is_dir() {
             // Add directory contents
-            for entry in WalkDir::new(base_path).into_iter().filter_map(std::result::Result::ok) {
+            for entry in WalkDir::new(base_path)
+                .into_iter()
+                .filter_map(std::result::Result::ok)
+            {
                 if entry.file_type().is_file() {
                     let relative = entry
                         .path()

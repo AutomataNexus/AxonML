@@ -108,8 +108,8 @@ pub mod view;
 // Re-exports
 // =============================================================================
 
-pub use creation::*;
 pub use axonml_core::{DType, Device, Error, Result};
+pub use creation::*;
 pub use shape::{Shape, Strides};
 pub use tensor::Tensor;
 

@@ -116,7 +116,8 @@ impl Schema {
                 "updated_at": chrono::Utc::now().to_rfc3339()
             });
 
-            db.doc_insert(USERS_COLLECTION, Some("admin"), admin_data).await?;
+            db.doc_insert(USERS_COLLECTION, Some("admin"), admin_data)
+                .await?;
 
             info!("Created default admin user");
         }
@@ -147,7 +148,8 @@ impl Schema {
                 "updated_at": chrono::Utc::now().to_rfc3339()
             });
 
-            db.doc_insert(USERS_COLLECTION, Some("devops"), devops_data).await?;
+            db.doc_insert(USERS_COLLECTION, Some("devops"), devops_data)
+                .await?;
 
             info!("Created DevOps admin user");
         }

@@ -195,13 +195,17 @@ pub async fn get_realtime_metrics(
     State(_state): State<AppState>,
     _user: AuthUser,
 ) -> Result<Json<RealtimeMetrics>, AuthError> {
-    use sysinfo::{System, Disks, Networks};
+    use sysinfo::{Disks, Networks, System};
 
     let mut sys = System::new_all();
     sys.refresh_all();
 
     // CPU usage per core
-    let cpu_per_core: Vec<f64> = sys.cpus().iter().map(|cpu| cpu.cpu_usage() as f64).collect();
+    let cpu_per_core: Vec<f64> = sys
+        .cpus()
+        .iter()
+        .map(|cpu| cpu.cpu_usage() as f64)
+        .collect();
     let cpu_usage = if cpu_per_core.is_empty() {
         0.0
     } else {
@@ -220,7 +224,10 @@ pub async fn get_realtime_metrics(
     // Disk
     let disks = Disks::new_with_refreshed_list();
     let (disk_used, disk_total) = disks.iter().fold((0u64, 0u64), |(used, total), disk| {
-        (used + disk.total_space() - disk.available_space(), total + disk.total_space())
+        (
+            used + disk.total_space() - disk.available_space(),
+            total + disk.total_space(),
+        )
     });
     let disk_percent = if disk_total > 0 {
         (disk_used as f64 / disk_total as f64) * 100.0
@@ -323,7 +330,14 @@ pub async fn get_correlation_data(
                 y: 100.0 + 200.0 * angle.sin() + (i as f64 * 5.0),
                 z: i as f64 * 2.0,
                 label: format!("Process {}", i),
-                category: if i % 3 == 0 { "high-cpu" } else if i % 3 == 1 { "high-memory" } else { "normal" }.to_string(),
+                category: if i % 3 == 0 {
+                    "high-cpu"
+                } else if i % 3 == 1 {
+                    "high-memory"
+                } else {
+                    "normal"
+                }
+                .to_string(),
             });
         }
     }
@@ -415,7 +429,10 @@ fn detect_gpus_wgpu() -> Vec<GpuInfo> {
 
         tracing::info!(
             "Found adapter: name={}, vendor={:#x}, device_type={:?}, backend={:?}",
-            info.name, info.vendor, info.device_type, info.backend
+            info.name,
+            info.vendor,
+            info.device_type,
+            info.backend
         );
 
         // Skip CPU-based software renderers
@@ -443,11 +460,19 @@ fn detect_gpus_wgpu() -> Vec<GpuInfo> {
 
         let backend = match info.backend {
             wgpu::Backend::Vulkan => {
-                if vendor_name == "NVIDIA" { "Vulkan/CUDA" } else { "Vulkan" }
-            },
+                if vendor_name == "NVIDIA" {
+                    "Vulkan/CUDA"
+                } else {
+                    "Vulkan"
+                }
+            }
             wgpu::Backend::Dx12 => {
-                if vendor_name == "NVIDIA" { "DX12/CUDA" } else { "DX12" }
-            },
+                if vendor_name == "NVIDIA" {
+                    "DX12/CUDA"
+                } else {
+                    "DX12"
+                }
+            }
             wgpu::Backend::Metal => "Metal",
             wgpu::Backend::Gl => "OpenGL",
             wgpu::Backend::BrowserWebGpu => "WebGPU",
@@ -458,7 +483,11 @@ fn detect_gpus_wgpu() -> Vec<GpuInfo> {
 
         tracing::info!(
             "  -> Adding GPU {}: {} ({}, {}, max_buffer={})",
-            gpu_id, info.name, vendor_name, backend, limits.max_buffer_size
+            gpu_id,
+            info.name,
+            vendor_name,
+            backend,
+            limits.max_buffer_size
         );
 
         gpus.push(GpuInfo {
@@ -483,7 +512,10 @@ fn detect_gpus_nvidia_smi() -> Vec<GpuInfo> {
     use std::process::Command;
 
     let output = match Command::new("nvidia-smi")
-        .args(["--query-gpu=index,name,memory.total,driver_version", "--format=csv,noheader,nounits"])
+        .args([
+            "--query-gpu=index,name,memory.total,driver_version",
+            "--format=csv,noheader,nounits",
+        ])
         .output()
     {
         Ok(output) => output,
@@ -511,7 +543,10 @@ fn detect_gpus_nvidia_smi() -> Vec<GpuInfo> {
 
             tracing::info!(
                 "nvidia-smi found GPU {}: {} ({} MB, driver {})",
-                id, name, memory_mb, driver
+                id,
+                name,
+                memory_mb,
+                driver
             );
 
             gpus.push(GpuInfo {

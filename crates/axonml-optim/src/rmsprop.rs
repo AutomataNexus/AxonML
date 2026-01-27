@@ -80,7 +80,8 @@ impl RMSpropState {
 
 impl RMSprop {
     /// Creates a new `RMSprop` optimizer with default settings.
-    #[must_use] pub fn new(params: Vec<Parameter>, lr: f32) -> Self {
+    #[must_use]
+    pub fn new(params: Vec<Parameter>, lr: f32) -> Self {
         Self {
             params,
             lr,
@@ -94,7 +95,8 @@ impl RMSprop {
     }
 
     /// Creates `RMSprop` with specified alpha (smoothing constant).
-    #[must_use] pub fn with_alpha(params: Vec<Parameter>, lr: f32, alpha: f32) -> Self {
+    #[must_use]
+    pub fn with_alpha(params: Vec<Parameter>, lr: f32, alpha: f32) -> Self {
         Self {
             params,
             lr,
@@ -108,7 +110,8 @@ impl RMSprop {
     }
 
     /// Creates `RMSprop` with all options.
-    #[must_use] pub fn with_options(
+    #[must_use]
+    pub fn with_options(
         params: Vec<Parameter>,
         lr: f32,
         alpha: f32,
@@ -130,31 +133,36 @@ impl RMSprop {
     }
 
     /// Builder method to set alpha.
-    #[must_use] pub fn alpha(mut self, alpha: f32) -> Self {
+    #[must_use]
+    pub fn alpha(mut self, alpha: f32) -> Self {
         self.alpha = alpha;
         self
     }
 
     /// Builder method to set epsilon.
-    #[must_use] pub fn eps(mut self, eps: f32) -> Self {
+    #[must_use]
+    pub fn eps(mut self, eps: f32) -> Self {
         self.eps = eps;
         self
     }
 
     /// Builder method to set weight decay.
-    #[must_use] pub fn weight_decay(mut self, weight_decay: f32) -> Self {
+    #[must_use]
+    pub fn weight_decay(mut self, weight_decay: f32) -> Self {
         self.weight_decay = weight_decay;
         self
     }
 
     /// Builder method to set momentum.
-    #[must_use] pub fn momentum(mut self, momentum: f32) -> Self {
+    #[must_use]
+    pub fn momentum(mut self, momentum: f32) -> Self {
         self.momentum = momentum;
         self
     }
 
     /// Builder method to enable centered `RMSprop`.
-    #[must_use] pub fn centered(mut self, centered: bool) -> Self {
+    #[must_use]
+    pub fn centered(mut self, centered: bool) -> Self {
         self.centered = centered;
         self
     }

@@ -10,14 +10,13 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-use axonml_tensor::Tensor;
-use crate::proto::{
-    ModelProto, GraphProto, NodeProto, TensorProto, ValueInfo,
-    TypeProto, TensorType, TensorShape, Dimension,
-    OperatorSetIdProto, AttributeProto, TensorDataType,
-};
 use crate::error::{OnnxError, OnnxResult};
+use crate::proto::{
+    AttributeProto, Dimension, GraphProto, ModelProto, NodeProto, OperatorSetIdProto,
+    TensorDataType, TensorProto, TensorShape, TensorType, TypeProto, ValueInfo,
+};
 use crate::SUPPORTED_OPSET_VERSION;
+use axonml_tensor::Tensor;
 
 // =============================================================================
 // Public API
@@ -134,9 +133,10 @@ impl OnnxExporter {
             name: None,
             op_type: op_type.to_string(),
             domain: None,
-            attribute: attributes.into_iter().map(|(k, v)| {
-                create_attribute(&k, v)
-            }).collect(),
+            attribute: attributes
+                .into_iter()
+                .map(|(k, v)| create_attribute(&k, v))
+                .collect(),
             doc_string: None,
         };
         self.nodes.push(node);
@@ -157,9 +157,10 @@ impl OnnxExporter {
             name: Some(name.to_string()),
             op_type: op_type.to_string(),
             domain: None,
-            attribute: attributes.into_iter().map(|(k, v)| {
-                create_attribute(&k, v)
-            }).collect(),
+            attribute: attributes
+                .into_iter()
+                .map(|(k, v)| create_attribute(&k, v))
+                .collect(),
             doc_string: None,
         };
         self.nodes.push(node);
@@ -353,12 +354,13 @@ fn create_attribute(name: &str, value: AttributeValue) -> AttributeProto {
 // =============================================================================
 
 fn create_value_info(name: &str, shape: &[i64], dtype: TensorDataType) -> ValueInfo {
-    let dims: Vec<Dimension> = shape.iter().map(|&d| {
-        Dimension {
+    let dims: Vec<Dimension> = shape
+        .iter()
+        .map(|&d| Dimension {
             dim_value: Some(d),
             dim_param: None,
-        }
-    }).collect();
+        })
+        .collect();
 
     ValueInfo {
         name: name.to_string(),
@@ -392,8 +394,7 @@ fn tensor_to_proto(name: &str, tensor: &Tensor<f32>) -> TensorProto {
 fn serialize_model(proto: &ModelProto) -> OnnxResult<Vec<u8>> {
     // For simplicity, use JSON serialization
     // In production, this would use prost::Message::encode
-    serde_json::to_vec(proto)
-        .map_err(|e| OnnxError::Export(format!("Serialization error: {}", e)))
+    serde_json::to_vec(proto).map_err(|e| OnnxError::Export(format!("Serialization error: {}", e)))
 }
 
 // =============================================================================
@@ -403,7 +404,7 @@ fn serialize_model(proto: &ModelProto) -> OnnxResult<Vec<u8>> {
 /// Helper to export a simple feedforward network.
 pub fn export_feedforward(
     name: &str,
-    layers: &[(usize, usize)],  // (in_features, out_features)
+    layers: &[(usize, usize)], // (in_features, out_features)
     weights: &[(&str, &Tensor<f32>)],
     biases: &[(&str, &Tensor<f32>)],
 ) -> OnnxResult<OnnxExporter> {
@@ -420,8 +421,10 @@ pub fn export_feedforward(
     // Add layers
     let mut current_input = "input".to_string();
 
-    for (i, ((_in_f, _out_f), ((w_name, w_tensor), (b_name, b_tensor)))) in
-        layers.iter().zip(weights.iter().zip(biases.iter())).enumerate()
+    for (i, ((_in_f, _out_f), ((w_name, w_tensor), (b_name, b_tensor)))) in layers
+        .iter()
+        .zip(weights.iter().zip(biases.iter()))
+        .enumerate()
     {
         let output_name = if i == layers.len() - 1 {
             "output".to_string()
@@ -449,21 +452,11 @@ pub fn export_feedforward(
 
         // Add activation (ReLU) except for last layer
         if i < layers.len() - 1 {
-            exporter.add_node(
-                "Relu",
-                &[&gemm_output],
-                &[&output_name],
-                HashMap::new(),
-            );
+            exporter.add_node("Relu", &[&gemm_output], &[&output_name], HashMap::new());
             current_input = output_name;
         } else {
             // Rename gemm output to final output
-            exporter.add_node(
-                "Identity",
-                &[&gemm_output],
-                &[&output_name],
-                HashMap::new(),
-            );
+            exporter.add_node("Identity", &[&gemm_output], &[&output_name], HashMap::new());
         }
     }
 

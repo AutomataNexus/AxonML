@@ -180,25 +180,29 @@ where
 
 /// Print throughput results in a table format.
 pub fn print_throughput_results(results: &[ThroughputResult]) {
-    println!("\n{:<12} {:>14} {:>14} {:>18}",
-             "Batch Size", "Throughput", "Latency (ms)", "Per Sample (ms)");
+    println!(
+        "\n{:<12} {:>14} {:>14} {:>18}",
+        "Batch Size", "Throughput", "Latency (ms)", "Per Sample (ms)"
+    );
     println!("{}", "-".repeat(60));
 
     for result in results {
         println!(
             "{:<12} {:>12.1}/s {:>14.2} {:>18.3}",
-            result.batch_size,
-            result.throughput,
-            result.latency_ms,
-            result.latency_per_sample_ms
+            result.batch_size, result.throughput, result.latency_ms, result.latency_per_sample_ms
         );
     }
 
     // Find optimal batch size (highest throughput)
     if let Some(best) = results.iter().max_by(|a, b| {
-        a.throughput.partial_cmp(&b.throughput).unwrap_or(std::cmp::Ordering::Equal)
+        a.throughput
+            .partial_cmp(&b.throughput)
+            .unwrap_or(std::cmp::Ordering::Equal)
     }) {
-        println!("\nOptimal batch size: {} ({:.1} samples/sec)", best.batch_size, best.throughput);
+        println!(
+            "\nOptimal batch size: {} ({:.1} samples/sec)",
+            best.batch_size, best.throughput
+        );
     }
 }
 
@@ -248,12 +252,16 @@ pub fn profile_model_memory<M: Module>(model: &M) -> MemorySnapshot {
 /// Print memory profile.
 pub fn print_memory_profile(snapshot: &MemorySnapshot, name: &str) {
     println!("\nMemory Profile: {}", name);
-    println!("  Parameters: {} ({:.2} MB)",
-             snapshot.param_count,
-             snapshot.param_bytes as f64 / 1_000_000.0);
-    println!("  Tensors: {} ({:.2} MB)",
-             snapshot.tensor_count,
-             snapshot.tensor_bytes as f64 / 1_000_000.0);
+    println!(
+        "  Parameters: {} ({:.2} MB)",
+        snapshot.param_count,
+        snapshot.param_bytes as f64 / 1_000_000.0
+    );
+    println!(
+        "  Tensors: {} ({:.2} MB)",
+        snapshot.tensor_count,
+        snapshot.tensor_bytes as f64 / 1_000_000.0
+    );
     println!("  Total: {:.2} MB", snapshot.total_mb());
 }
 

@@ -9,9 +9,9 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use crate::proto::ModelProto;
-use crate::model::OnnxModel;
 use crate::error::{OnnxError, OnnxResult};
+use crate::model::OnnxModel;
+use crate::proto::ModelProto;
 
 // =============================================================================
 // Public API
@@ -308,24 +308,20 @@ fn parse_binary_proto(bytes: &[u8]) -> OnnxResult<ModelProto> {
 
     // Helper function to convert value info
     fn convert_value_info(v: RawValueInfo) -> crate::proto::ValueInfo {
-        let type_proto = v.r#type.map(|t| {
-            crate::proto::TypeProto {
-                tensor_type: t.tensor_type.map(|tt| {
-                    crate::proto::TensorType {
-                        elem_type: tt.elem_type,
-                        shape: tt.shape.map(|s| {
-                            crate::proto::TensorShape {
-                                dims: s.dim.into_iter().map(|d| {
-                                    crate::proto::Dimension {
-                                        dim_value: d.dim_value,
-                                        dim_param: d.dim_param,
-                                    }
-                                }).collect(),
-                            }
-                        }),
-                    }
+        let type_proto = v.r#type.map(|t| crate::proto::TypeProto {
+            tensor_type: t.tensor_type.map(|tt| crate::proto::TensorType {
+                elem_type: tt.elem_type,
+                shape: tt.shape.map(|s| crate::proto::TensorShape {
+                    dims: s
+                        .dim
+                        .into_iter()
+                        .map(|d| crate::proto::Dimension {
+                            dim_value: d.dim_value,
+                            dim_param: d.dim_param,
+                        })
+                        .collect(),
                 }),
-            }
+            }),
         });
 
         crate::proto::ValueInfo {
@@ -355,10 +351,14 @@ fn parse_binary_proto(bytes: &[u8]) -> OnnxResult<ModelProto> {
     // Convert to our ModelProto structure
     let model = ModelProto {
         ir_version: raw.ir_version,
-        opset_import: raw.opset_import.into_iter().map(|o| crate::proto::OperatorSetIdProto {
-            domain: o.domain,
-            version: o.version,
-        }).collect(),
+        opset_import: raw
+            .opset_import
+            .into_iter()
+            .map(|o| crate::proto::OperatorSetIdProto {
+                domain: o.domain,
+                version: o.version,
+            })
+            .collect(),
         producer_name: raw.producer_name,
         producer_version: raw.producer_version,
         domain: raw.domain,
@@ -386,7 +386,10 @@ fn validate_model(proto: &ModelProto) -> OnnxResult<()> {
     let opset_version = proto.opset_version();
     if opset_version < 7 || opset_version > crate::SUPPORTED_OPSET_VERSION {
         // Warning but don't fail - try to support anyway
-        eprintln!("Warning: ONNX opset version {} may not be fully supported", opset_version);
+        eprintln!(
+            "Warning: ONNX opset version {} may not be fully supported",
+            opset_version
+        );
     }
 
     // Check graph exists

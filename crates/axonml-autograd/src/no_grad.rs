@@ -22,7 +22,8 @@ thread_local! {
 }
 
 /// Returns whether gradient computation is currently enabled.
-#[must_use] pub fn is_grad_enabled() -> bool {
+#[must_use]
+pub fn is_grad_enabled() -> bool {
     GRAD_ENABLED.with(std::cell::Cell::get)
 }
 
@@ -57,7 +58,8 @@ pub struct NoGradGuard {
 
 impl NoGradGuard {
     /// Creates a new `NoGradGuard`, disabling gradient computation.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         let prev_state = is_grad_enabled();
         set_grad_enabled(false);
         NO_GRAD_DEPTH.with(|d| d.set(d.get() + 1));
@@ -94,7 +96,8 @@ pub struct EnableGradGuard {
 
 impl EnableGradGuard {
     /// Creates a new `EnableGradGuard`, enabling gradient computation.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         let prev_state = is_grad_enabled();
         set_grad_enabled(true);
         Self { prev_state }
@@ -171,7 +174,8 @@ thread_local! {
 }
 
 /// Returns whether inference mode is currently enabled.
-#[must_use] pub fn is_inference_mode() -> bool {
+#[must_use]
+pub fn is_inference_mode() -> bool {
     INFERENCE_MODE.with(std::cell::Cell::get)
 }
 
@@ -186,7 +190,8 @@ pub struct InferenceModeGuard {
 
 impl InferenceModeGuard {
     /// Creates a new `InferenceModeGuard`.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         let prev_grad_state = is_grad_enabled();
         let prev_inference_state = is_inference_mode();
         set_grad_enabled(false);

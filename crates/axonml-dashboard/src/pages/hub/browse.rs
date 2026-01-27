@@ -6,9 +6,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*};
 
 /// Hub browse page
 #[component]
@@ -38,7 +38,8 @@ pub fn HubBrowsePage() -> impl IntoView {
 
     // Get unique architectures for filter
     let architectures = move || {
-        let mut archs: Vec<String> = models.get()
+        let mut archs: Vec<String> = models
+            .get()
             .iter()
             .map(|m| m.architecture.clone())
             .collect();
@@ -52,7 +53,8 @@ pub fn HubBrowsePage() -> impl IntoView {
         let search_term = search.get().to_lowercase();
         let arch_filter = architecture_filter.get();
 
-        models.get()
+        models
+            .get()
             .into_iter()
             .filter(|m| {
                 let matches_search = search_term.is_empty()
@@ -60,7 +62,8 @@ pub fn HubBrowsePage() -> impl IntoView {
                     || m.description.to_lowercase().contains(&search_term)
                     || m.architecture.to_lowercase().contains(&search_term);
 
-                let matches_arch = arch_filter.as_ref()
+                let matches_arch = arch_filter
+                    .as_ref()
                     .map(|a| m.architecture == *a)
                     .unwrap_or(true);
 

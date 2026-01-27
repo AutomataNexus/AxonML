@@ -21,7 +21,8 @@ pub enum Format {
 
 impl Format {
     /// Get the file extension for this format.
-    #[must_use] pub fn extension(&self) -> &'static str {
+    #[must_use]
+    pub fn extension(&self) -> &'static str {
         match self {
             Format::Axonml => "axonml",
             Format::Json => "json",
@@ -30,7 +31,8 @@ impl Format {
     }
 
     /// Get a human-readable name for this format.
-    #[must_use] pub fn name(&self) -> &'static str {
+    #[must_use]
+    pub fn name(&self) -> &'static str {
         match self {
             Format::Axonml => "Axonml Native",
             Format::Json => "JSON",
@@ -39,7 +41,8 @@ impl Format {
     }
 
     /// Check if this format is binary.
-    #[must_use] pub fn is_binary(&self) -> bool {
+    #[must_use]
+    pub fn is_binary(&self) -> bool {
         match self {
             Format::Axonml => true,
             Format::Json => false,
@@ -48,7 +51,8 @@ impl Format {
     }
 
     /// Check if this format supports streaming.
-    #[must_use] pub fn supports_streaming(&self) -> bool {
+    #[must_use]
+    pub fn supports_streaming(&self) -> bool {
         match self {
             Format::Axonml => true,
             Format::Json => false,
@@ -57,7 +61,8 @@ impl Format {
     }
 
     /// Get all supported formats.
-    #[must_use] pub fn all() -> &'static [Format] {
+    #[must_use]
+    pub fn all() -> &'static [Format] {
         &[Format::Axonml, Format::Json, Format::SafeTensors]
     }
 }
@@ -87,7 +92,8 @@ pub fn detect_format<P: AsRef<Path>>(path: P) -> Format {
 }
 
 /// Detect format from file contents (magic bytes).
-#[must_use] pub fn detect_format_from_bytes(bytes: &[u8]) -> Option<Format> {
+#[must_use]
+pub fn detect_format_from_bytes(bytes: &[u8]) -> Option<Format> {
     if bytes.len() < 8 {
         return None;
     }

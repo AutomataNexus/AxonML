@@ -2,6 +2,6 @@
 //!
 //! Provides model serving and inference endpoints.
 
-pub mod server;
-pub mod pool;
 pub mod metrics;
+pub mod pool;
+pub mod server;

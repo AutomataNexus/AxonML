@@ -21,12 +21,14 @@ pub struct Resize {
 
 impl Resize {
     /// Creates a new Resize transform.
-    #[must_use] pub fn new(height: usize, width: usize) -> Self {
+    #[must_use]
+    pub fn new(height: usize, width: usize) -> Self {
         Self { height, width }
     }
 
     /// Creates a square Resize transform.
-    #[must_use] pub fn square(size: usize) -> Self {
+    #[must_use]
+    pub fn square(size: usize) -> Self {
         Self::new(size, size)
     }
 }
@@ -189,12 +191,14 @@ pub struct CenterCrop {
 
 impl CenterCrop {
     /// Creates a new `CenterCrop` transform.
-    #[must_use] pub fn new(height: usize, width: usize) -> Self {
+    #[must_use]
+    pub fn new(height: usize, width: usize) -> Self {
         Self { height, width }
     }
 
     /// Creates a square `CenterCrop` transform.
-    #[must_use] pub fn square(size: usize) -> Self {
+    #[must_use]
+    pub fn square(size: usize) -> Self {
         Self::new(size, size)
     }
 }
@@ -253,12 +257,14 @@ pub struct RandomHorizontalFlip {
 
 impl RandomHorizontalFlip {
     /// Creates a new `RandomHorizontalFlip` with probability 0.5.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self { probability: 0.5 }
     }
 
     /// Creates a `RandomHorizontalFlip` with custom probability.
-    #[must_use] pub fn with_probability(probability: f32) -> Self {
+    #[must_use]
+    pub fn with_probability(probability: f32) -> Self {
         Self {
             probability: probability.clamp(0.0, 1.0),
         }
@@ -320,12 +326,14 @@ pub struct RandomVerticalFlip {
 
 impl RandomVerticalFlip {
     /// Creates a new `RandomVerticalFlip` with probability 0.5.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self { probability: 0.5 }
     }
 
     /// Creates a `RandomVerticalFlip` with custom probability.
-    #[must_use] pub fn with_probability(probability: f32) -> Self {
+    #[must_use]
+    pub fn with_probability(probability: f32) -> Self {
         Self {
             probability: probability.clamp(0.0, 1.0),
         }
@@ -388,14 +396,16 @@ pub struct RandomRotation {
 
 impl RandomRotation {
     /// Creates a `RandomRotation` that can rotate by any 90-degree increment.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             angles: vec![0, 90, 180, 270],
         }
     }
 
     /// Creates a `RandomRotation` with specific allowed angles.
-    #[must_use] pub fn with_angles(angles: Vec<i32>) -> Self {
+    #[must_use]
+    pub fn with_angles(angles: Vec<i32>) -> Self {
         let valid: Vec<i32> = angles
             .into_iter()
             .filter(|&a| a == 0 || a == 90 || a == 180 || a == 270)
@@ -480,7 +490,8 @@ pub struct ColorJitter {
 
 impl ColorJitter {
     /// Creates a new `ColorJitter` with specified ranges.
-    #[must_use] pub fn new(brightness: f32, contrast: f32, saturation: f32) -> Self {
+    #[must_use]
+    pub fn new(brightness: f32, contrast: f32, saturation: f32) -> Self {
         Self {
             brightness: brightness.abs(),
             contrast: contrast.abs(),
@@ -547,14 +558,16 @@ pub struct Grayscale {
 
 impl Grayscale {
     /// Creates a Grayscale transform with 1 output channel.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             num_output_channels: 1,
         }
     }
 
     /// Creates a Grayscale transform with specified output channels.
-    #[must_use] pub fn with_channels(num_output_channels: usize) -> Self {
+    #[must_use]
+    pub fn with_channels(num_output_channels: usize) -> Self {
         Self {
             num_output_channels: num_output_channels.max(1),
         }
@@ -614,22 +627,26 @@ pub struct ImageNormalize {
 
 impl ImageNormalize {
     /// Creates a new `ImageNormalize` with per-channel mean and std.
-    #[must_use] pub fn new(mean: Vec<f32>, std: Vec<f32>) -> Self {
+    #[must_use]
+    pub fn new(mean: Vec<f32>, std: Vec<f32>) -> Self {
         Self { mean, std }
     }
 
     /// Creates normalization for `ImageNet` pretrained models.
-    #[must_use] pub fn imagenet() -> Self {
+    #[must_use]
+    pub fn imagenet() -> Self {
         Self::new(vec![0.485, 0.456, 0.406], vec![0.229, 0.224, 0.225])
     }
 
     /// Creates normalization for MNIST (single channel).
-    #[must_use] pub fn mnist() -> Self {
+    #[must_use]
+    pub fn mnist() -> Self {
         Self::new(vec![0.1307], vec![0.3081])
     }
 
     /// Creates normalization for CIFAR-10.
-    #[must_use] pub fn cifar10() -> Self {
+    #[must_use]
+    pub fn cifar10() -> Self {
         Self::new(vec![0.4914, 0.4822, 0.4465], vec![0.2470, 0.2435, 0.2616])
     }
 }
@@ -687,7 +704,8 @@ pub struct Pad {
 
 impl Pad {
     /// Creates a new Pad with uniform padding.
-    #[must_use] pub fn new(padding: usize) -> Self {
+    #[must_use]
+    pub fn new(padding: usize) -> Self {
         Self {
             padding: (padding, padding, padding, padding),
             fill_value: 0.0,
@@ -695,7 +713,8 @@ impl Pad {
     }
 
     /// Creates a Pad with asymmetric padding.
-    #[must_use] pub fn asymmetric(left: usize, right: usize, top: usize, bottom: usize) -> Self {
+    #[must_use]
+    pub fn asymmetric(left: usize, right: usize, top: usize, bottom: usize) -> Self {
         Self {
             padding: (left, right, top, bottom),
             fill_value: 0.0,
@@ -703,7 +722,8 @@ impl Pad {
     }
 
     /// Sets the fill value.
-    #[must_use] pub fn with_fill(mut self, value: f32) -> Self {
+    #[must_use]
+    pub fn with_fill(mut self, value: f32) -> Self {
         self.fill_value = value;
         self
     }
@@ -759,7 +779,8 @@ pub struct ToTensorImage;
 
 impl ToTensorImage {
     /// Creates a new `ToTensorImage` transform.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self
     }
 }

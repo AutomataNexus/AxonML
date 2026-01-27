@@ -16,7 +16,8 @@ use std::collections::HashMap;
 /// - "`encoder.layers.0.self_attn.q_proj.weight`"
 ///
 /// This function normalizes them for Axonml.
-#[must_use] pub fn from_pytorch_key(key: &str) -> String {
+#[must_use]
+pub fn from_pytorch_key(key: &str) -> String {
     let mut result = key.to_string();
 
     // Remove common prefixes
@@ -31,13 +32,15 @@ use std::collections::HashMap;
 }
 
 /// Convert a Axonml key to `PyTorch` format.
-#[must_use] pub fn to_pytorch_key(key: &str) -> String {
+#[must_use]
+pub fn to_pytorch_key(key: &str) -> String {
     // Add "module." prefix if not present (for DDP models)
     key.to_string()
 }
 
 /// Map of `PyTorch` layer names to Axonml equivalents.
-#[must_use] pub fn pytorch_layer_mapping() -> HashMap<&'static str, &'static str> {
+#[must_use]
+pub fn pytorch_layer_mapping() -> HashMap<&'static str, &'static str> {
     let mut map = HashMap::new();
 
     // Linear layers
@@ -65,7 +68,8 @@ use std::collections::HashMap;
 // =============================================================================
 
 /// Convert a shape to ONNX format (with batch dimension handling).
-#[must_use] pub fn to_onnx_shape(shape: &[usize], include_batch: bool) -> Vec<i64> {
+#[must_use]
+pub fn to_onnx_shape(shape: &[usize], include_batch: bool) -> Vec<i64> {
     if include_batch {
         // ONNX uses -1 for dynamic batch size
         std::iter::once(-1i64)
@@ -77,7 +81,8 @@ use std::collections::HashMap;
 }
 
 /// Convert from ONNX shape (handling -1 for dynamic dimensions).
-#[must_use] pub fn from_onnx_shape(shape: &[i64], default_dynamic: usize) -> Vec<usize> {
+#[must_use]
+pub fn from_onnx_shape(shape: &[i64], default_dynamic: usize) -> Vec<usize> {
     shape
         .iter()
         .map(|&d| if d < 0 { default_dynamic } else { d as usize })
@@ -155,7 +160,8 @@ pub enum OnnxOpType {
 
 impl OnnxOpType {
     /// Parse ONNX operator type from string.
-    #[must_use] pub fn from_str(s: &str) -> Self {
+    #[must_use]
+    pub fn from_str(s: &str) -> Self {
         match s {
             "Add" => Self::Add,
             "Sub" => Self::Sub,
@@ -193,7 +199,8 @@ impl OnnxOpType {
     }
 
     /// Get the ONNX operator name.
-    #[must_use] pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Add => "Add",
             Self::Sub => "Sub",
@@ -236,7 +243,8 @@ impl OnnxOpType {
 // =============================================================================
 
 /// Convert a state dict from `PyTorch` naming conventions.
-#[must_use] pub fn convert_from_pytorch(state_dict: &StateDict) -> StateDict {
+#[must_use]
+pub fn convert_from_pytorch(state_dict: &StateDict) -> StateDict {
     let mut converted = StateDict::new();
 
     for (key, entry) in state_dict.entries() {
@@ -251,7 +259,8 @@ impl OnnxOpType {
 ///
 /// `PyTorch` Linear: [`out_features`, `in_features`]
 /// Some frameworks: [`in_features`, `out_features`]
-#[must_use] pub fn transpose_linear_weights(data: &TensorData) -> TensorData {
+#[must_use]
+pub fn transpose_linear_weights(data: &TensorData) -> TensorData {
     if data.shape.len() != 2 {
         return data.clone();
     }

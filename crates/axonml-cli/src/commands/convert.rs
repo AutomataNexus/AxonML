@@ -14,22 +14,13 @@ use super::utils::{
 use crate::cli::ConvertArgs;
 use crate::error::{CliError, CliResult};
 
-use axonml_serialize::{
-    load_state_dict, save_state_dict, convert_from_pytorch, Format, StateDict,
-};
+use axonml_serialize::{convert_from_pytorch, load_state_dict, save_state_dict, Format, StateDict};
 
 // =============================================================================
 // Supported Formats
 // =============================================================================
 
-const SUPPORTED_FORMATS: &[&str] = &[
-    "axonml",
-    "onnx",
-    "pytorch",
-    "safetensors",
-    "json",
-    "binary",
-];
+const SUPPORTED_FORMATS: &[&str] = &["axonml", "onnx", "pytorch", "safetensors", "json", "binary"];
 
 // =============================================================================
 // Execute Command
@@ -226,8 +217,8 @@ fn convert_pytorch_to_axonml(
     _optimize: bool,
 ) -> Result<u64, String> {
     // Load the PyTorch state dict (assuming it's in a compatible format)
-    let state_dict = load_state_dict(input)
-        .map_err(|e| format!("Failed to load PyTorch model: {}", e))?;
+    let state_dict =
+        load_state_dict(input).map_err(|e| format!("Failed to load PyTorch model: {}", e))?;
 
     // Convert key names from PyTorch convention
     let converted = convert_from_pytorch(&state_dict);
@@ -241,8 +232,8 @@ fn convert_pytorch_to_axonml(
 
 fn convert_onnx_to_axonml(input: &PathBuf, output: &str, _optimize: bool) -> Result<u64, String> {
     // Use the ONNX parser to load the model
-    let onnx_model = axonml_onnx::import_onnx(input)
-        .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
+    let onnx_model =
+        axonml_onnx::import_onnx(input).map_err(|e| format!("Failed to load ONNX model: {}", e))?;
 
     // Extract weights from the ONNX model into a state dict
     let state_dict = onnx_model.to_state_dict();
@@ -256,13 +247,14 @@ fn convert_onnx_to_axonml(input: &PathBuf, output: &str, _optimize: bool) -> Res
 
 fn convert_axonml_to_onnx(input: &PathBuf, output: &str, _optimize: bool) -> Result<u64, String> {
     // Load the Axonml state dict
-    let state_dict = load_state_dict(input)
-        .map_err(|e| format!("Failed to load Axonml model: {}", e))?;
+    let state_dict =
+        load_state_dict(input).map_err(|e| format!("Failed to load Axonml model: {}", e))?;
 
     let num_params = count_parameters(&state_dict);
 
     // Create ONNX exporter from state dict
-    let model_name = input.file_stem()
+    let model_name = input
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("model");
 
@@ -294,15 +286,32 @@ fn convert_axonml_to_onnx(input: &PathBuf, output: &str, _optimize: bool) -> Res
     }
 
     // Set default sizes if not found
-    if input_size == 0 { input_size = 784; }
-    if output_size == 0 { output_size = 10; }
+    if input_size == 0 {
+        input_size = 784;
+    }
+    if output_size == 0 {
+        output_size = 10;
+    }
 
     // Add input/output
-    exporter.add_input("input", &[1, input_size as i64], axonml_onnx::proto::TensorDataType::Float);
-    exporter.add_output("output", &[1, output_size as i64], axonml_onnx::proto::TensorDataType::Float);
+    exporter.add_input(
+        "input",
+        &[1, input_size as i64],
+        axonml_onnx::proto::TensorDataType::Float,
+    );
+    exporter.add_output(
+        "output",
+        &[1, output_size as i64],
+        axonml_onnx::proto::TensorDataType::Float,
+    );
 
     // Add identity node to connect input to output (minimal graph)
-    exporter.add_node("Identity", &["input"], &["output"], std::collections::HashMap::new());
+    exporter.add_node(
+        "Identity",
+        &["input"],
+        &["output"],
+        std::collections::HashMap::new(),
+    );
 
     // Export to ONNX file
     axonml_onnx::export_onnx(&exporter, output)
@@ -313,8 +322,8 @@ fn convert_axonml_to_onnx(input: &PathBuf, output: &str, _optimize: bool) -> Res
 
 fn convert_axonml_to_safetensors(input: &PathBuf, output: &str) -> Result<u64, String> {
     // Load Axonml state dict
-    let state_dict = load_state_dict(input)
-        .map_err(|e| format!("Failed to load Axonml model: {}", e))?;
+    let state_dict =
+        load_state_dict(input).map_err(|e| format!("Failed to load Axonml model: {}", e))?;
 
     // Save in SafeTensors format
     save_state_dict(&state_dict, output, Format::SafeTensors)
@@ -325,8 +334,8 @@ fn convert_axonml_to_safetensors(input: &PathBuf, output: &str) -> Result<u64, S
 
 fn convert_safetensors_to_axonml(input: &PathBuf, output: &str) -> Result<u64, String> {
     // Load SafeTensors format
-    let state_dict = load_state_dict(input)
-        .map_err(|e| format!("Failed to load SafeTensors: {}", e))?;
+    let state_dict =
+        load_state_dict(input).map_err(|e| format!("Failed to load SafeTensors: {}", e))?;
 
     // Save in Axonml format
     save_state_dict(&state_dict, output, Format::Axonml)
@@ -337,8 +346,8 @@ fn convert_safetensors_to_axonml(input: &PathBuf, output: &str) -> Result<u64, S
 
 fn convert_axonml_to_json(input: &PathBuf, output: &str) -> Result<u64, String> {
     // Load Axonml state dict
-    let state_dict = load_state_dict(input)
-        .map_err(|e| format!("Failed to load Axonml model: {}", e))?;
+    let state_dict =
+        load_state_dict(input).map_err(|e| format!("Failed to load Axonml model: {}", e))?;
 
     // Save in JSON format
     save_state_dict(&state_dict, output, Format::Json)
@@ -349,8 +358,7 @@ fn convert_axonml_to_json(input: &PathBuf, output: &str) -> Result<u64, String> 
 
 fn generic_conversion(input: &PathBuf, output: &str, to_format: &str) -> Result<u64, String> {
     // Try to load as any supported format
-    let state_dict = load_state_dict(input)
-        .map_err(|e| format!("Failed to load model: {}", e))?;
+    let state_dict = load_state_dict(input).map_err(|e| format!("Failed to load model: {}", e))?;
 
     // Determine output format
     let format = match to_format.to_lowercase().as_str() {

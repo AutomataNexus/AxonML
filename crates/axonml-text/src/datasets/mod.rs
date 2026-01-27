@@ -25,7 +25,8 @@ pub struct TextDataset {
 
 impl TextDataset {
     /// Creates a new `TextDataset`.
-    #[must_use] pub fn new(texts: Vec<String>, labels: Vec<usize>, vocab: Vocab, max_length: usize) -> Self {
+    #[must_use]
+    pub fn new(texts: Vec<String>, labels: Vec<usize>, vocab: Vocab, max_length: usize) -> Self {
         let num_classes = labels.iter().max().map_or(0, |&m| m + 1);
         Self {
             texts,
@@ -71,17 +72,20 @@ impl TextDataset {
     }
 
     /// Returns the vocabulary.
-    #[must_use] pub fn vocab(&self) -> &Vocab {
+    #[must_use]
+    pub fn vocab(&self) -> &Vocab {
         &self.vocab
     }
 
     /// Returns the number of classes.
-    #[must_use] pub fn num_classes(&self) -> usize {
+    #[must_use]
+    pub fn num_classes(&self) -> usize {
         self.num_classes
     }
 
     /// Returns the maximum sequence length.
-    #[must_use] pub fn max_length(&self) -> usize {
+    #[must_use]
+    pub fn max_length(&self) -> usize {
         self.max_length
     }
 
@@ -140,7 +144,8 @@ pub struct LanguageModelDataset {
 
 impl LanguageModelDataset {
     /// Creates a new `LanguageModelDataset`.
-    #[must_use] pub fn new(text: &str, vocab: Vocab, sequence_length: usize) -> Self {
+    #[must_use]
+    pub fn new(text: &str, vocab: Vocab, sequence_length: usize) -> Self {
         let tokens: Vec<usize> = text
             .split_whitespace()
             .map(|t| vocab.token_to_index(t))
@@ -154,13 +159,15 @@ impl LanguageModelDataset {
     }
 
     /// Creates a dataset from text, building vocabulary automatically.
-    #[must_use] pub fn from_text(text: &str, sequence_length: usize, min_freq: usize) -> Self {
+    #[must_use]
+    pub fn from_text(text: &str, sequence_length: usize, min_freq: usize) -> Self {
         let vocab = Vocab::from_text(text, min_freq);
         Self::new(text, vocab, sequence_length)
     }
 
     /// Returns the vocabulary.
-    #[must_use] pub fn vocab(&self) -> &Vocab {
+    #[must_use]
+    pub fn vocab(&self) -> &Vocab {
         &self.vocab
     }
 }
@@ -213,7 +220,8 @@ pub struct SyntheticSentimentDataset {
 
 impl SyntheticSentimentDataset {
     /// Creates a new synthetic sentiment dataset.
-    #[must_use] pub fn new(size: usize, max_length: usize, vocab_size: usize) -> Self {
+    #[must_use]
+    pub fn new(size: usize, max_length: usize, vocab_size: usize) -> Self {
         Self {
             size,
             max_length,
@@ -222,17 +230,20 @@ impl SyntheticSentimentDataset {
     }
 
     /// Creates a small test dataset.
-    #[must_use] pub fn small() -> Self {
+    #[must_use]
+    pub fn small() -> Self {
         Self::new(100, 32, 1000)
     }
 
     /// Creates a standard training dataset.
-    #[must_use] pub fn train() -> Self {
+    #[must_use]
+    pub fn train() -> Self {
         Self::new(10000, 64, 10000)
     }
 
     /// Creates a standard test dataset.
-    #[must_use] pub fn test() -> Self {
+    #[must_use]
+    pub fn test() -> Self {
         Self::new(2000, 64, 10000)
     }
 }
@@ -291,7 +302,8 @@ pub struct SyntheticSeq2SeqDataset {
 
 impl SyntheticSeq2SeqDataset {
     /// Creates a new synthetic seq2seq dataset.
-    #[must_use] pub fn new(size: usize, src_length: usize, tgt_length: usize, vocab_size: usize) -> Self {
+    #[must_use]
+    pub fn new(size: usize, src_length: usize, tgt_length: usize, vocab_size: usize) -> Self {
         Self {
             size,
             src_length,
@@ -301,7 +313,8 @@ impl SyntheticSeq2SeqDataset {
     }
 
     /// Creates a copy task dataset (target = reversed source).
-    #[must_use] pub fn copy_task(size: usize, length: usize, vocab_size: usize) -> Self {
+    #[must_use]
+    pub fn copy_task(size: usize, length: usize, vocab_size: usize) -> Self {
         Self::new(size, length, length, vocab_size)
     }
 }

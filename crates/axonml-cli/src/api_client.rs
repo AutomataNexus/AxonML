@@ -110,7 +110,9 @@ pub struct ApiClient {
 impl ApiClient {
     /// Create a new API client
     pub fn new(server_url: Option<&str>) -> Self {
-        let url = server_url.unwrap_or(DEFAULT_SERVER_URL).trim_end_matches('/');
+        let url = server_url
+            .unwrap_or(DEFAULT_SERVER_URL)
+            .trim_end_matches('/');
         Self {
             client: reqwest::Client::new(),
             server_url: url.to_string(),
@@ -167,11 +169,12 @@ impl ApiClient {
 
     /// Get credentials file path
     fn credentials_path() -> Result<PathBuf, ApiError> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| ApiError::Io(std::io::Error::new(
+        let config_dir = dirs::config_dir().ok_or_else(|| {
+            ApiError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Could not find config directory",
-            )))?;
+            ))
+        })?;
         Ok(config_dir.join("axonml").join("credentials.json"))
     }
 
@@ -199,11 +202,7 @@ impl ApiClient {
             password: password.to_string(),
         };
 
-        let response = self.client
-            .post(&url)
-            .json(&req)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&req).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -217,12 +216,16 @@ impl ApiClient {
         let login_resp: LoginResponse = response.json().await?;
 
         if login_resp.requires_mfa {
-            return Err(ApiError::Server("MFA required - please login via webapp".to_string()));
+            return Err(ApiError::Server(
+                "MFA required - please login via webapp".to_string(),
+            ));
         }
 
-        let token = login_resp.access_token
+        let token = login_resp
+            .access_token
             .ok_or_else(|| ApiError::Server("No access token received".to_string()))?;
-        let user = login_resp.user
+        let user = login_resp
+            .user
             .ok_or_else(|| ApiError::Server("No user info received".to_string()))?;
 
         self.access_token = Some(token);
@@ -247,7 +250,8 @@ impl ApiClient {
     /// List training runs
     pub async fn list_training_runs(&self) -> Result<Vec<TrainingRun>, ApiError> {
         let url = format!("{}/api/training/runs", self.server_url);
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", self.auth_header()?)
             .send()
@@ -261,7 +265,12 @@ impl ApiClient {
     }
 
     /// Create a training run
-    pub async fn create_training_run(&self, name: &str, model_name: &str, config: serde_json::Value) -> Result<TrainingRun, ApiError> {
+    pub async fn create_training_run(
+        &self,
+        name: &str,
+        model_name: &str,
+        config: serde_json::Value,
+    ) -> Result<TrainingRun, ApiError> {
         let url = format!("{}/api/training/runs", self.server_url);
         let body = serde_json::json!({
             "name": name,
@@ -269,7 +278,8 @@ impl ApiClient {
             "config": config,
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header()?)
             .json(&body)
@@ -284,14 +294,20 @@ impl ApiClient {
     }
 
     /// Update training run metrics
-    pub async fn update_training_metrics(&self, run_id: &str, epoch: u32, metrics: serde_json::Value) -> Result<(), ApiError> {
+    pub async fn update_training_metrics(
+        &self,
+        run_id: &str,
+        epoch: u32,
+        metrics: serde_json::Value,
+    ) -> Result<(), ApiError> {
         let url = format!("{}/api/training/runs/{}/metrics", self.server_url, run_id);
         let body = serde_json::json!({
             "epoch": epoch,
             "metrics": metrics,
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header()?)
             .json(&body)
@@ -312,7 +328,8 @@ impl ApiClient {
     /// List models
     pub async fn list_models(&self) -> Result<Vec<Model>, ApiError> {
         let url = format!("{}/api/models", self.server_url);
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", self.auth_header()?)
             .send()
@@ -326,20 +343,28 @@ impl ApiClient {
     }
 
     /// Upload a model
-    pub async fn upload_model(&self, name: &str, model_path: &std::path::Path) -> Result<Model, ApiError> {
+    pub async fn upload_model(
+        &self,
+        name: &str,
+        model_path: &std::path::Path,
+    ) -> Result<Model, ApiError> {
         let url = format!("{}/api/models/upload", self.server_url);
 
         let file_content = std::fs::read(model_path)?;
-        let file_name = model_path.file_name()
+        let file_name = model_path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("model.safetensors");
 
         let form = reqwest::multipart::Form::new()
             .text("name", name.to_string())
-            .part("file", reqwest::multipart::Part::bytes(file_content)
-                .file_name(file_name.to_string()));
+            .part(
+                "file",
+                reqwest::multipart::Part::bytes(file_content).file_name(file_name.to_string()),
+            );
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header()?)
             .multipart(form)
@@ -360,7 +385,8 @@ impl ApiClient {
     /// List datasets
     pub async fn list_datasets(&self) -> Result<Vec<Dataset>, ApiError> {
         let url = format!("{}/api/datasets", self.server_url);
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", self.auth_header()?)
             .send()

@@ -48,7 +48,8 @@ pub struct SGD {
 
 impl SGD {
     /// Creates a new SGD optimizer with default settings.
-    #[must_use] pub fn new(params: Vec<Parameter>, lr: f32) -> Self {
+    #[must_use]
+    pub fn new(params: Vec<Parameter>, lr: f32) -> Self {
         let num_params = params.len();
         Self {
             params,
@@ -62,7 +63,8 @@ impl SGD {
     }
 
     /// Creates SGD with momentum.
-    #[must_use] pub fn with_momentum(params: Vec<Parameter>, lr: f32, momentum: f32) -> Self {
+    #[must_use]
+    pub fn with_momentum(params: Vec<Parameter>, lr: f32, momentum: f32) -> Self {
         let num_params = params.len();
         Self {
             params,
@@ -76,7 +78,8 @@ impl SGD {
     }
 
     /// Creates SGD with all options.
-    #[must_use] pub fn with_options(
+    #[must_use]
+    pub fn with_options(
         params: Vec<Parameter>,
         lr: f32,
         momentum: f32,
@@ -97,25 +100,29 @@ impl SGD {
     }
 
     /// Builder method to set momentum.
-    #[must_use] pub fn momentum(mut self, momentum: f32) -> Self {
+    #[must_use]
+    pub fn momentum(mut self, momentum: f32) -> Self {
         self.momentum = momentum;
         self
     }
 
     /// Builder method to set weight decay.
-    #[must_use] pub fn weight_decay(mut self, weight_decay: f32) -> Self {
+    #[must_use]
+    pub fn weight_decay(mut self, weight_decay: f32) -> Self {
         self.weight_decay = weight_decay;
         self
     }
 
     /// Builder method to enable Nesterov momentum.
-    #[must_use] pub fn nesterov(mut self, nesterov: bool) -> Self {
+    #[must_use]
+    pub fn nesterov(mut self, nesterov: bool) -> Self {
         self.nesterov = nesterov;
         self
     }
 
     /// Builder method to set dampening.
-    #[must_use] pub fn dampening(mut self, dampening: f32) -> Self {
+    #[must_use]
+    pub fn dampening(mut self, dampening: f32) -> Self {
         self.dampening = dampening;
         self
     }

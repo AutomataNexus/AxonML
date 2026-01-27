@@ -286,25 +286,35 @@ impl CudaKernels {
         };
 
         // Load element-wise kernels
-        kernels.load_module("elementwise", ELEMENTWISE_PTX, &[
-            "add_f32", "mul_f32", "scale_f32"
-        ])?;
+        kernels.load_module(
+            "elementwise",
+            ELEMENTWISE_PTX,
+            &["add_f32", "mul_f32", "scale_f32"],
+        )?;
 
         // Load activation kernels
-        kernels.load_module("activations", ACTIVATIONS_PTX, &[
-            "relu_f32", "sigmoid_f32", "tanh_f32"
-        ])?;
+        kernels.load_module(
+            "activations",
+            ACTIVATIONS_PTX,
+            &["relu_f32", "sigmoid_f32", "tanh_f32"],
+        )?;
 
         Ok(kernels)
     }
 
-    fn load_module(&mut self, name: &'static str, ptx: &'static str, functions: &'static [&'static str]) -> Result<(), CudaError> {
+    fn load_module(
+        &mut self,
+        name: &'static str,
+        ptx: &'static str,
+        functions: &'static [&'static str],
+    ) -> Result<(), CudaError> {
         self.device
             .load_ptx(ptx.into(), name, functions)
             .map_err(|e| CudaError::ModuleLoadFailed(e.to_string()))?;
 
         for func_name in functions {
-            let func = self.device
+            let func = self
+                .device
                 .get_func(name, func_name)
                 .ok_or_else(|| CudaError::KernelNotFound(func_name.to_string()))?;
             self.functions.insert(func_name.to_string(), func);

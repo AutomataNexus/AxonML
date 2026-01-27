@@ -34,7 +34,8 @@ use crate::tensor::Tensor;
 /// use axonml_tensor::zeros;
 /// let t = zeros::<f32>(&[2, 3]);
 /// ```
-#[must_use] pub fn zeros<T: Scalar>(shape: &[usize]) -> Tensor<T> {
+#[must_use]
+pub fn zeros<T: Scalar>(shape: &[usize]) -> Tensor<T> {
     let numel: usize = shape.iter().product();
     let data = vec![T::zeroed(); numel];
     Tensor::from_vec(data, shape).unwrap()
@@ -44,7 +45,8 @@ use crate::tensor::Tensor;
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
-#[must_use] pub fn ones<T: Numeric>(shape: &[usize]) -> Tensor<T> {
+#[must_use]
+pub fn ones<T: Numeric>(shape: &[usize]) -> Tensor<T> {
     full(shape, T::one())
 }
 
@@ -60,12 +62,14 @@ pub fn full<T: Scalar>(shape: &[usize], value: T) -> Tensor<T> {
 }
 
 /// Creates a tensor with the same shape as another, filled with zeros.
-#[must_use] pub fn zeros_like<T: Scalar>(other: &Tensor<T>) -> Tensor<T> {
+#[must_use]
+pub fn zeros_like<T: Scalar>(other: &Tensor<T>) -> Tensor<T> {
     zeros(other.shape())
 }
 
 /// Creates a tensor with the same shape as another, filled with ones.
-#[must_use] pub fn ones_like<T: Numeric>(other: &Tensor<T>) -> Tensor<T> {
+#[must_use]
+pub fn ones_like<T: Numeric>(other: &Tensor<T>) -> Tensor<T> {
     ones(other.shape())
 }
 
@@ -82,7 +86,8 @@ pub fn full_like<T: Scalar>(other: &Tensor<T>, value: T) -> Tensor<T> {
 ///
 /// # Arguments
 /// * `n` - Size of the matrix (n x n)
-#[must_use] pub fn eye<T: Numeric>(n: usize) -> Tensor<T> {
+#[must_use]
+pub fn eye<T: Numeric>(n: usize) -> Tensor<T> {
     let mut data = vec![T::zero(); n * n];
     for i in 0..n {
         data[i * n + i] = T::one();
@@ -111,7 +116,8 @@ pub fn diag<T: Numeric>(diag: &[T]) -> Tensor<T> {
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
-#[must_use] pub fn rand<T: Float>(shape: &[usize]) -> Tensor<T>
+#[must_use]
+pub fn rand<T: Float>(shape: &[usize]) -> Tensor<T>
 where
     Standard: Distribution<T>,
 {
@@ -125,7 +131,8 @@ where
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
-#[must_use] pub fn randn<T: Float>(shape: &[usize]) -> Tensor<T>
+#[must_use]
+pub fn randn<T: Float>(shape: &[usize]) -> Tensor<T>
 where
     StandardNormal: Distribution<T>,
 {
@@ -177,7 +184,8 @@ where
 /// * `shape` - Shape of the tensor
 /// * `low` - Lower bound (inclusive)
 /// * `high` - Upper bound (exclusive)
-#[must_use] pub fn randint<T: Numeric>(shape: &[usize], low: i64, high: i64) -> Tensor<T>
+#[must_use]
+pub fn randint<T: Numeric>(shape: &[usize], low: i64, high: i64) -> Tensor<T>
 where
     T: num_traits::NumCast,
 {
@@ -275,7 +283,8 @@ pub fn logspace<T: Float>(start: T, end: T, num: usize, base: T) -> Tensor<T> {
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
-#[must_use] pub fn empty<T: Scalar>(shape: &[usize]) -> Tensor<T> {
+#[must_use]
+pub fn empty<T: Scalar>(shape: &[usize]) -> Tensor<T> {
     zeros(shape)
 }
 

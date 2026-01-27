@@ -40,9 +40,10 @@ pub async fn terminal_ws(
     ))?;
 
     // Verify the JWT token
-    let _claims = state.jwt.validate_access_token(&token).map_err(|e| {
-        (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
-    })?;
+    let _claims = state
+        .jwt
+        .validate_access_token(&token)
+        .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e)))?;
 
     Ok(ws.on_upgrade(handle_terminal))
 }
@@ -65,7 +66,10 @@ async fn handle_terminal(socket: WebSocket) {
         Err(e) => {
             error!("Failed to create PTY: {}", e);
             let _ = ws_sender
-                .send(Message::Text(format!("\r\nError: Failed to create PTY: {}\r\n", e)))
+                .send(Message::Text(format!(
+                    "\r\nError: Failed to create PTY: {}\r\n",
+                    e
+                )))
                 .await;
             return;
         }
@@ -90,7 +94,10 @@ async fn handle_terminal(socket: WebSocket) {
         Err(e) => {
             error!("Failed to spawn shell: {}", e);
             let _ = ws_sender
-                .send(Message::Text(format!("\r\nError: Failed to spawn shell: {}\r\n", e)))
+                .send(Message::Text(format!(
+                    "\r\nError: Failed to spawn shell: {}\r\n",
+                    e
+                )))
                 .await;
             return;
         }
@@ -254,9 +261,10 @@ pub async fn terminal_info(
     ))?;
 
     // Verify the JWT token
-    let _claims = state.jwt.validate_access_token(&token).map_err(|e| {
-        (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
-    })?;
+    let _claims = state
+        .jwt
+        .validate_access_token(&token)
+        .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e)))?;
 
     let shell = if cfg!(target_os = "windows") {
         "powershell.exe".to_string()

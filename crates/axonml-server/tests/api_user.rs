@@ -27,7 +27,11 @@ async fn test_get_profile() {
 
     let status = response.status().as_u16();
     // Profile endpoint may be at /api/auth/me or /api/user/profile
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -49,7 +53,11 @@ async fn test_update_profile() {
     .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -120,7 +128,11 @@ async fn test_get_mfa_status() {
         .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -130,13 +142,22 @@ async fn test_setup_totp() {
     let client = test_client();
     let token = login_as_admin(&client).await.expect("Login failed");
 
-    let response = auth_post(&client, "/api/user/mfa/totp/setup", &token, serde_json::json!({}))
-        .await
-        .expect("Request failed");
+    let response = auth_post(
+        &client,
+        "/api/user/mfa/totp/setup",
+        &token,
+        serde_json::json!({}),
+    )
+    .await
+    .expect("Request failed");
 
     let status = response.status().as_u16();
     // Should return QR code/secret or endpoint not exist
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -178,7 +199,11 @@ async fn test_get_recovery_codes() {
         .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -188,12 +213,21 @@ async fn test_generate_recovery_codes() {
     let client = test_client();
     let token = login_as_admin(&client).await.expect("Login failed");
 
-    let response = auth_post(&client, "/api/user/mfa/recovery/generate", &token, serde_json::json!({}))
-        .await
-        .expect("Request failed");
+    let response = auth_post(
+        &client,
+        "/api/user/mfa/recovery/generate",
+        &token,
+        serde_json::json!({}),
+    )
+    .await
+    .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -208,7 +242,11 @@ async fn test_get_sessions() {
         .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -223,7 +261,11 @@ async fn test_revoke_session() {
         .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -238,7 +280,11 @@ async fn test_get_api_keys() {
         .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]

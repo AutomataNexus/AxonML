@@ -2,8 +2,8 @@
 //!
 //! Provides reactive state signals for the application.
 
-use leptos::*;
 use gloo_storage::{LocalStorage, Storage};
+use leptos::*;
 
 use crate::types::*;
 
@@ -98,7 +98,10 @@ impl AppState {
 
     /// Check if current user has admin role
     pub fn is_admin(&self) -> bool {
-        self.user.get().map(|u| u.role == UserRole::Admin).unwrap_or(false)
+        self.user
+            .get()
+            .map(|u| u.role == UserRole::Admin)
+            .unwrap_or(false)
     }
 
     /// Store authentication tokens and user
@@ -143,7 +146,12 @@ impl AppState {
     }
 
     /// Show a toast notification
-    pub fn show_toast(&self, toast_type: ToastType, title: impl Into<String>, message: impl Into<String>) {
+    pub fn show_toast(
+        &self,
+        toast_type: ToastType,
+        title: impl Into<String>,
+        message: impl Into<String>,
+    ) {
         self.toast_counter.update(|c| *c += 1);
         let id = self.toast_counter.get();
 

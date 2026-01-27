@@ -27,7 +27,9 @@ use crate::variable::Variable;
 /// * `grad_output` - The gradient of the loss with respect to output (typically 1.0)
 pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
     // Get the gradient function for the output
-    let grad_fn = if let Some(gf) = output.grad_fn() { gf.clone() } else {
+    let grad_fn = if let Some(gf) = output.grad_fn() {
+        gf.clone()
+    } else {
         // Leaf variable - accumulate gradient directly
         if output.is_leaf() && output.requires_grad() {
             output.accumulate_grad(grad_output);
@@ -153,7 +155,8 @@ where
 ///
 /// # Returns
 /// True if gradients match within tolerance
-#[must_use] pub fn gradcheck(analytical: &Tensor<f32>, numerical: &Tensor<f32>, rtol: f32, atol: f32) -> bool {
+#[must_use]
+pub fn gradcheck(analytical: &Tensor<f32>, numerical: &Tensor<f32>, rtol: f32, atol: f32) -> bool {
     if analytical.shape() != numerical.shape() {
         return false;
     }

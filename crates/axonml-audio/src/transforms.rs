@@ -22,7 +22,8 @@ pub struct Resample {
 
 impl Resample {
     /// Creates a new Resample transform.
-    #[must_use] pub fn new(orig_freq: usize, new_freq: usize) -> Self {
+    #[must_use]
+    pub fn new(orig_freq: usize, new_freq: usize) -> Self {
         Self {
             orig_freq,
             new_freq,
@@ -75,7 +76,8 @@ pub struct MelSpectrogram {
 
 impl MelSpectrogram {
     /// Creates a new `MelSpectrogram` transform with default parameters.
-    #[must_use] pub fn new(sample_rate: usize) -> Self {
+    #[must_use]
+    pub fn new(sample_rate: usize) -> Self {
         Self {
             sample_rate,
             n_fft: 2048,
@@ -85,7 +87,8 @@ impl MelSpectrogram {
     }
 
     /// Creates a `MelSpectrogram` with custom parameters.
-    #[must_use] pub fn with_params(sample_rate: usize, n_fft: usize, hop_length: usize, n_mels: usize) -> Self {
+    #[must_use]
+    pub fn with_params(sample_rate: usize, n_fft: usize, hop_length: usize, n_mels: usize) -> Self {
         Self {
             sample_rate,
             n_fft,
@@ -241,7 +244,8 @@ pub struct MFCC {
 
 impl MFCC {
     /// Creates a new MFCC transform.
-    #[must_use] pub fn new(sample_rate: usize, n_mfcc: usize) -> Self {
+    #[must_use]
+    pub fn new(sample_rate: usize, n_mfcc: usize) -> Self {
         Self {
             mel_spec: MelSpectrogram::new(sample_rate),
             n_mfcc,
@@ -308,7 +312,8 @@ pub struct TimeStretch {
 impl TimeStretch {
     /// Creates a new `TimeStretch` transform.
     /// rate > 1.0 speeds up, rate < 1.0 slows down.
-    #[must_use] pub fn new(rate: f32) -> Self {
+    #[must_use]
+    pub fn new(rate: f32) -> Self {
         Self {
             rate: rate.max(0.1).min(10.0),
         }
@@ -356,7 +361,8 @@ pub struct PitchShift {
 impl PitchShift {
     /// Creates a new `PitchShift` transform.
     /// Positive semitones shift up, negative shift down.
-    #[must_use] pub fn new(semitones: f32) -> Self {
+    #[must_use]
+    pub fn new(semitones: f32) -> Self {
         Self { semitones }
     }
 }
@@ -421,7 +427,8 @@ pub struct AddNoise {
 
 impl AddNoise {
     /// Creates a new `AddNoise` transform with specified SNR in dB.
-    #[must_use] pub fn new(snr_db: f32) -> Self {
+    #[must_use]
+    pub fn new(snr_db: f32) -> Self {
         Self { snr_db }
     }
 }
@@ -463,7 +470,8 @@ pub struct NormalizeAudio;
 
 impl NormalizeAudio {
     /// Creates a new `NormalizeAudio` transform.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self
     }
 }
@@ -499,12 +507,14 @@ pub struct TrimSilence {
 
 impl TrimSilence {
     /// Creates a `TrimSilence` transform with specified threshold in dB.
-    #[must_use] pub fn new(threshold_db: f32) -> Self {
+    #[must_use]
+    pub fn new(threshold_db: f32) -> Self {
         Self { threshold_db }
     }
 
     /// Creates with default -60dB threshold.
-    #[must_use] pub fn default_threshold() -> Self {
+    #[must_use]
+    pub fn default_threshold() -> Self {
         Self::new(-60.0)
     }
 }

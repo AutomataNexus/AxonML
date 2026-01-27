@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{forms::*, icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{forms::*, icons::*, spinner::*};
 
 /// Login page component
 #[component]
@@ -351,7 +351,11 @@ pub fn RegisterPage() -> impl IntoView {
             spawn_local(async move {
                 match api::auth::register(&request).await {
                     Ok(token_pair) => {
-                        state.set_auth(&token_pair.access_token, &token_pair.refresh_token, token_pair.user);
+                        state.set_auth(
+                            &token_pair.access_token,
+                            &token_pair.refresh_token,
+                            token_pair.user,
+                        );
                         navigate("/dashboard", Default::default());
                     }
                     Err(e) => {

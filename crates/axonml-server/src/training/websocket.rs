@@ -55,10 +55,7 @@ pub struct MetricsStreamer;
 
 impl MetricsStreamer {
     /// Stream metrics to a WebSocket connection
-    pub async fn stream(
-        socket: WebSocket,
-        mut receiver: broadcast::Receiver<TrainingMetrics>,
-    ) {
+    pub async fn stream(socket: WebSocket, mut receiver: broadcast::Receiver<TrainingMetrics>) {
         let (mut sender, mut ws_receiver) = socket.split();
 
         // Spawn task to handle incoming messages (ping/pong, close)

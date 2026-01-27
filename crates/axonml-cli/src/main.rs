@@ -87,12 +87,12 @@
 use clap::Parser;
 use colored::Colorize;
 
+#[cfg(feature = "server-sync")]
+mod api_client;
 mod cli;
 mod commands;
 mod config;
 mod error;
-#[cfg(feature = "server-sync")]
-mod api_client;
 
 use cli::{Cli, Commands};
 use error::CliResult;
@@ -170,8 +170,7 @@ fn execute_kaggle(args: cli::KaggleArgs) -> CliResult<()> {
                 .map_err(|e| error::CliError::Other(e))
         }
         KaggleSubcommand::Status => {
-            commands::kaggle::execute_status()
-                .map_err(|e| error::CliError::Other(e))
+            commands::kaggle::execute_status().map_err(|e| error::CliError::Other(e))
         }
         KaggleSubcommand::Search(search_args) => {
             commands::kaggle::execute_search(&search_args.query, search_args.limit)
@@ -182,8 +181,7 @@ fn execute_kaggle(args: cli::KaggleArgs) -> CliResult<()> {
                 .map_err(|e| error::CliError::Other(e))
         }
         KaggleSubcommand::List => {
-            commands::kaggle::execute_list()
-                .map_err(|e| error::CliError::Other(e))
+            commands::kaggle::execute_list().map_err(|e| error::CliError::Other(e))
         }
     }
 }
@@ -192,21 +190,16 @@ fn execute_hub(args: cli::HubArgs) -> CliResult<()> {
     use cli::HubSubcommand;
 
     match args.action {
-        HubSubcommand::List => {
-            commands::hub::execute_list()
-                .map_err(|e| error::CliError::Other(e))
-        }
+        HubSubcommand::List => commands::hub::execute_list().map_err(|e| error::CliError::Other(e)),
         HubSubcommand::Info(info_args) => {
-            commands::hub::execute_info(&info_args.model)
-                .map_err(|e| error::CliError::Other(e))
+            commands::hub::execute_info(&info_args.model).map_err(|e| error::CliError::Other(e))
         }
         HubSubcommand::Download(dl_args) => {
             commands::hub::execute_download(&dl_args.model, dl_args.force)
                 .map_err(|e| error::CliError::Other(e))
         }
         HubSubcommand::Cached => {
-            commands::hub::execute_cached()
-                .map_err(|e| error::CliError::Other(e))
+            commands::hub::execute_cached().map_err(|e| error::CliError::Other(e))
         }
         HubSubcommand::Clear(clear_args) => {
             commands::hub::execute_clear(clear_args.model.as_deref())
@@ -223,21 +216,20 @@ fn execute_dataset(args: cli::DatasetArgs) -> CliResult<()> {
             commands::dataset::execute_list(list_args.source.as_deref())
                 .map_err(|e| error::CliError::Other(e))
         }
-        DatasetSubcommand::Info(info_args) => {
-            commands::dataset::execute_info(&info_args.dataset)
-                .map_err(|e| error::CliError::Other(e))
-        }
-        DatasetSubcommand::Search(search_args) => {
-            commands::dataset::execute_search(&search_args.query, search_args.source.as_deref(), search_args.limit)
-                .map_err(|e| error::CliError::Other(e))
-        }
+        DatasetSubcommand::Info(info_args) => commands::dataset::execute_info(&info_args.dataset)
+            .map_err(|e| error::CliError::Other(e)),
+        DatasetSubcommand::Search(search_args) => commands::dataset::execute_search(
+            &search_args.query,
+            search_args.source.as_deref(),
+            search_args.limit,
+        )
+        .map_err(|e| error::CliError::Other(e)),
         DatasetSubcommand::Download(dl_args) => {
             commands::dataset::execute_download(&dl_args.dataset, dl_args.output.as_deref())
                 .map_err(|e| error::CliError::Other(e))
         }
         DatasetSubcommand::Sources => {
-            commands::dataset::execute_sources()
-                .map_err(|e| error::CliError::Other(e))
+            commands::dataset::execute_sources().map_err(|e| error::CliError::Other(e))
         }
     }
 }

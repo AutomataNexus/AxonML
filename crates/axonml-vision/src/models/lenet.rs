@@ -32,7 +32,8 @@ pub struct LeNet {
 
 impl LeNet {
     /// Creates a new LeNet-5 for MNIST (28x28 input, 10 classes).
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             conv1: Conv2d::new(1, 6, 5),       // 28x28 -> 24x24
             conv2: Conv2d::new(6, 16, 5),      // 12x12 -> 8x8 (after pool)
@@ -43,7 +44,8 @@ impl LeNet {
     }
 
     /// Creates a `LeNet` for CIFAR-10 (32x32 input, 10 classes).
-    #[must_use] pub fn for_cifar10() -> Self {
+    #[must_use]
+    pub fn for_cifar10() -> Self {
         Self {
             conv1: Conv2d::new(3, 6, 5),       // 32x32 -> 28x28
             conv2: Conv2d::new(6, 16, 5),      // 14x14 -> 10x10 (after pool)
@@ -210,7 +212,8 @@ pub struct SimpleCNN {
 impl SimpleCNN {
     /// Creates a new `SimpleCNN`.
     /// Note: Conv2d with kernel 3 and no padding: 28-3+1=26, after pool: 13
-    #[must_use] pub fn new(input_channels: usize, num_classes: usize) -> Self {
+    #[must_use]
+    pub fn new(input_channels: usize, num_classes: usize) -> Self {
         Self {
             conv1: Conv2d::new(input_channels, 32, 3),
             fc1: Linear::new(32 * 13 * 13, 128), // 28x28 -> 26x26 (conv) -> 13x13 (pool)
@@ -221,12 +224,14 @@ impl SimpleCNN {
     }
 
     /// Creates a `SimpleCNN` for MNIST.
-    #[must_use] pub fn for_mnist() -> Self {
+    #[must_use]
+    pub fn for_mnist() -> Self {
         Self::new(1, 10)
     }
 
     /// Creates a `SimpleCNN` for CIFAR-10.
-    #[must_use] pub fn for_cifar10() -> Self {
+    #[must_use]
+    pub fn for_cifar10() -> Self {
         // 32x32 -> 30x30 (conv with k=3) -> 15x15 (pool)
         Self {
             conv1: Conv2d::new(3, 32, 3),
@@ -238,12 +243,14 @@ impl SimpleCNN {
     }
 
     /// Returns the number of input channels.
-    #[must_use] pub fn input_channels(&self) -> usize {
+    #[must_use]
+    pub fn input_channels(&self) -> usize {
         self.input_channels
     }
 
     /// Returns the number of classes.
-    #[must_use] pub fn num_classes(&self) -> usize {
+    #[must_use]
+    pub fn num_classes(&self) -> usize {
         self.num_classes
     }
 
@@ -343,7 +350,8 @@ pub struct MLP {
 
 impl MLP {
     /// Creates a new MLP.
-    #[must_use] pub fn new(input_size: usize, hidden_size: usize, num_classes: usize) -> Self {
+    #[must_use]
+    pub fn new(input_size: usize, hidden_size: usize, num_classes: usize) -> Self {
         Self {
             fc1: Linear::new(input_size, hidden_size),
             fc2: Linear::new(hidden_size, hidden_size / 2),
@@ -352,12 +360,14 @@ impl MLP {
     }
 
     /// Creates an MLP for MNIST (784 -> 256 -> 128 -> 10).
-    #[must_use] pub fn for_mnist() -> Self {
+    #[must_use]
+    pub fn for_mnist() -> Self {
         Self::new(784, 256, 10)
     }
 
     /// Creates an MLP for CIFAR-10 (3072 -> 512 -> 256 -> 10).
-    #[must_use] pub fn for_cifar10() -> Self {
+    #[must_use]
+    pub fn for_cifar10() -> Self {
         Self::new(3072, 512, 10)
     }
 }

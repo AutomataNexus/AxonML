@@ -3,11 +3,11 @@
 //! Transformer encoder and decoder layers, blocks, and stacks.
 
 use axonml_autograd::Variable;
-use axonml_nn::{Module, Linear, Dropout, Parameter};
+use axonml_nn::{Dropout, Linear, Module, Parameter};
+use axonml_tensor::creation::{ones, zeros};
 use axonml_tensor::Tensor;
-use axonml_tensor::creation::{zeros, ones};
 
-use crate::attention::{MultiHeadSelfAttention, CausalSelfAttention};
+use crate::attention::{CausalSelfAttention, MultiHeadSelfAttention};
 
 /// Layer normalization.
 #[derive(Debug)]
@@ -43,8 +43,12 @@ impl Module for LayerNorm {
         let x_normalized = input.sub(&mean).div(&variance.add_scalar(self.eps).sqrt());
 
         // Scale and shift
-        let weight_var = Variable::from_tensor_with_grad(self.weight.data().clone(), self.weight.requires_grad());
-        let bias_var = Variable::from_tensor_with_grad(self.bias.data().clone(), self.bias.requires_grad());
+        let weight_var = Variable::from_tensor_with_grad(
+            self.weight.data().clone(),
+            self.weight.requires_grad(),
+        );
+        let bias_var =
+            Variable::from_tensor_with_grad(self.bias.data().clone(), self.bias.requires_grad());
 
         x_normalized.mul(&weight_var).add(&bias_var)
     }
@@ -69,7 +73,12 @@ pub struct FeedForward {
 
 impl FeedForward {
     /// Creates a new feed-forward network.
-    pub fn new(hidden_size: usize, intermediate_size: usize, dropout: f32, activation: &str) -> Self {
+    pub fn new(
+        hidden_size: usize,
+        intermediate_size: usize,
+        dropout: f32,
+        activation: &str,
+    ) -> Self {
         Self {
             fc1: Linear::new(hidden_size, intermediate_size),
             fc2: Linear::new(intermediate_size, hidden_size),
@@ -174,7 +183,9 @@ impl TransformerEncoderBlock {
         } else {
             // Post-norm: Attention -> Residual -> LN, FFN -> Residual -> LN
             let residual = hidden_states.clone();
-            let x = self.attention.forward_with_mask(hidden_states, attention_mask);
+            let x = self
+                .attention
+                .forward_with_mask(hidden_states, attention_mask);
             let x = self.dropout.forward(&x);
             let x = self.ln1.forward(&x.add(&residual));
 

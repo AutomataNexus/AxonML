@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{charts::*, icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, charts::*};
 
 /// Inference metrics page
 #[component]
@@ -57,29 +57,41 @@ pub fn InferenceMetricsPage() -> impl IntoView {
         vec![
             ChartSeries {
                 name: "P50".to_string(),
-                data: m.iter().enumerate().map(|(i, metric)| DataPoint {
-                    x: i as f64,
-                    y: metric.latency_p50,
-                    label: None,
-                }).collect(),
+                data: m
+                    .iter()
+                    .enumerate()
+                    .map(|(i, metric)| DataPoint {
+                        x: i as f64,
+                        y: metric.latency_p50,
+                        label: None,
+                    })
+                    .collect(),
                 color: "var(--teal)".to_string(),
             },
             ChartSeries {
                 name: "P95".to_string(),
-                data: m.iter().enumerate().map(|(i, metric)| DataPoint {
-                    x: i as f64,
-                    y: metric.latency_p95,
-                    label: None,
-                }).collect(),
+                data: m
+                    .iter()
+                    .enumerate()
+                    .map(|(i, metric)| DataPoint {
+                        x: i as f64,
+                        y: metric.latency_p95,
+                        label: None,
+                    })
+                    .collect(),
                 color: "var(--terracotta)".to_string(),
             },
             ChartSeries {
                 name: "P99".to_string(),
-                data: m.iter().enumerate().map(|(i, metric)| DataPoint {
-                    x: i as f64,
-                    y: metric.latency_p99,
-                    label: None,
-                }).collect(),
+                data: m
+                    .iter()
+                    .enumerate()
+                    .map(|(i, metric)| DataPoint {
+                        x: i as f64,
+                        y: metric.latency_p99,
+                        label: None,
+                    })
+                    .collect(),
                 color: "var(--error)".to_string(),
             },
         ]
@@ -90,29 +102,35 @@ pub fn InferenceMetricsPage() -> impl IntoView {
         vec![
             ChartSeries {
                 name: "Success".to_string(),
-                data: m.iter().enumerate().map(|(i, metric)| DataPoint {
-                    x: i as f64,
-                    y: metric.requests_success as f64,
-                    label: None,
-                }).collect(),
+                data: m
+                    .iter()
+                    .enumerate()
+                    .map(|(i, metric)| DataPoint {
+                        x: i as f64,
+                        y: metric.requests_success as f64,
+                        label: None,
+                    })
+                    .collect(),
                 color: "var(--success)".to_string(),
             },
             ChartSeries {
                 name: "Error".to_string(),
-                data: m.iter().enumerate().map(|(i, metric)| DataPoint {
-                    x: i as f64,
-                    y: metric.requests_error as f64,
-                    label: None,
-                }).collect(),
+                data: m
+                    .iter()
+                    .enumerate()
+                    .map(|(i, metric)| DataPoint {
+                        x: i as f64,
+                        y: metric.requests_error as f64,
+                        label: None,
+                    })
+                    .collect(),
                 color: "var(--error)".to_string(),
             },
         ]
     };
 
     // Aggregate stats
-    let total_requests = move || {
-        metrics.get().iter().map(|m| m.requests_total).sum::<u64>()
-    };
+    let total_requests = move || metrics.get().iter().map(|m| m.requests_total).sum::<u64>();
 
     let avg_latency = move || {
         let m = metrics.get();

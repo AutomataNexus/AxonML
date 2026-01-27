@@ -3,16 +3,19 @@
 //! Provides JWT, TOTP, WebAuthn, and recovery code authentication.
 
 pub mod jwt;
+pub mod middleware;
+pub mod recovery;
 pub mod totp;
 pub mod webauthn;
-pub mod recovery;
-pub mod middleware;
 
-pub use jwt::{JwtAuth, Claims};
+pub use jwt::{Claims, JwtAuth};
+pub use middleware::{
+    auth_middleware, optional_auth_middleware, require_admin_middleware, require_mfa_middleware,
+    AuthLayer, AuthUser,
+};
+pub use recovery::RecoveryAuth;
 pub use totp::TotpAuth;
 pub use webauthn::WebAuthnAuth;
-pub use recovery::RecoveryAuth;
-pub use middleware::{AuthUser, AuthLayer, auth_middleware, require_admin_middleware, require_mfa_middleware, optional_auth_middleware};
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
