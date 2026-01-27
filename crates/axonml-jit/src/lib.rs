@@ -38,24 +38,24 @@
 #![warn(missing_docs)]
 #![allow(clippy::module_name_repetitions)]
 
-pub mod ir;
-pub mod trace;
-pub mod optimize;
-pub mod codegen;
 pub mod cache;
+pub mod codegen;
 pub mod compile;
 pub mod error;
+pub mod ir;
+pub mod optimize;
+pub mod trace;
 
-pub use ir::{Graph, Node, NodeId, Op, DataType, Shape};
-pub use trace::{Tracer, TracedValue, trace};
-pub use optimize::{Optimizer, OptimizationPass};
-pub use codegen::{JitCompiler, CompiledFunction};
 pub use cache::FunctionCache;
+pub use codegen::{CompiledFunction, JitCompiler};
 pub use compile::{
-    compile_fn, compile_fn_with_config, compile_graph, compile_graph_with_config,
-    Backend, CompileConfig, CompiledModel, CompileStats, LazyCompiled, Mode,
+    compile_fn, compile_fn_with_config, compile_graph, compile_graph_with_config, Backend,
+    CompileConfig, CompileStats, CompiledModel, LazyCompiled, Mode,
 };
 pub use error::{JitError, JitResult};
+pub use ir::{DataType, Graph, Node, NodeId, Op, Shape};
+pub use optimize::{OptimizationPass, Optimizer};
+pub use trace::{trace, TracedValue, Tracer};
 
 #[cfg(test)]
 mod tests {

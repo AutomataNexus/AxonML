@@ -1,8 +1,8 @@
 //! Modal Dialog Components
 
+use crate::components::icons::*;
 use leptos::*;
 use wasm_bindgen::JsCast;
-use crate::components::icons::*;
 
 /// Modal size variants
 #[derive(Debug, Clone, Copy, Default)]
@@ -44,14 +44,17 @@ pub fn Modal(
     let close_on_esc = close_on_escape;
     create_effect(move |_| {
         if show.get() && close_on_esc {
-            let handler = wasm_bindgen::closure::Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
-                if e.key() == "Escape" {
-                    show.set(false);
-                }
-            });
+            let handler = wasm_bindgen::closure::Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(
+                move |e: web_sys::KeyboardEvent| {
+                    if e.key() == "Escape" {
+                        show.set(false);
+                    }
+                },
+            );
 
             let window = web_sys::window().unwrap();
-            let _ = window.add_event_listener_with_callback("keydown", handler.as_ref().unchecked_ref());
+            let _ = window
+                .add_event_listener_with_callback("keydown", handler.as_ref().unchecked_ref());
             handler.forget();
         }
     });

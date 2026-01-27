@@ -27,11 +27,11 @@ fn test_autograd_training_step() {
     // Create variables with gradients
     let x = Variable::new(
         Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap(),
-        true
+        true,
     );
     let target = Variable::new(
         Tensor::from_vec(vec![2.0, 4.0, 6.0, 8.0], &[2, 2]).unwrap(),
-        false
+        false,
     );
 
     // Forward pass
@@ -60,7 +60,7 @@ fn test_neural_network() {
     // Forward pass
     let input = Variable::new(
         Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 4]).unwrap(),
-        false
+        false,
     );
     let output = model.forward(&input);
 
@@ -80,12 +80,9 @@ fn test_optimizer() {
     // Do a training step
     let input = Variable::new(
         Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 4]).unwrap(),
-        false
+        false,
     );
-    let target = Variable::new(
-        Tensor::from_vec(vec![1.0, 0.0], &[1, 2]).unwrap(),
-        false
-    );
+    let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[1, 2]).unwrap(), false);
 
     let output = model.forward(&input);
     let loss = output.mse_loss(&target);
@@ -104,7 +101,10 @@ fn test_optimizer() {
 
     // Weights should have changed
     let updated_weight = model.parameters()[0].data().to_vec();
-    assert_ne!(initial_weight, updated_weight, "Weights should be updated by optimizer");
+    assert_ne!(
+        initial_weight, updated_weight,
+        "Weights should be updated by optimizer"
+    );
 
     println!("✓ Optimizer updates weights");
     println!("  Initial weight[0]: {:.4}", initial_weight[0]);
@@ -114,7 +114,7 @@ fn test_optimizer() {
 /// Test 5: DataLoader batches data correctly
 #[test]
 fn test_dataloader() {
-    use axonml::data::{Dataset, DataLoader, InMemoryDataset};
+    use axonml::data::{DataLoader, Dataset, InMemoryDataset};
 
     // Create a simple dataset
     let data: Vec<(Tensor<f32>, Tensor<f32>)> = (0..100)
@@ -166,14 +166,8 @@ fn test_full_training_loop() {
         let mut epoch_loss = 0.0;
 
         for (input, &target) in inputs.iter().zip(targets.iter()) {
-            let x = Variable::new(
-                Tensor::from_vec(input.clone(), &[1, 2]).unwrap(),
-                false
-            );
-            let y = Variable::new(
-                Tensor::from_vec(vec![target], &[1, 1]).unwrap(),
-                false
-            );
+            let x = Variable::new(Tensor::from_vec(input.clone(), &[1, 2]).unwrap(), false);
+            let y = Variable::new(Tensor::from_vec(vec![target], &[1, 1]).unwrap(), false);
 
             let pred = model.forward(&x);
             let loss = pred.mse_loss(&y);
@@ -189,7 +183,11 @@ fn test_full_training_loop() {
     }
 
     // Training should converge - XOR is a simple problem
-    assert!(final_loss < 0.01, "Training didn't converge, loss: {}", final_loss);
+    assert!(
+        final_loss < 0.01,
+        "Training didn't converge, loss: {}",
+        final_loss
+    );
     assert!(!final_loss.is_nan(), "Loss is NaN");
 
     println!("✓ Full training loop works (final loss: {:.4})", final_loss);
@@ -198,8 +196,8 @@ fn test_full_training_loop() {
 /// Test 7: Vision transforms work
 #[test]
 fn test_vision_transforms() {
-    use axonml::vision::{Resize, ImageNormalize, CenterCrop};
     use axonml::data::Transform;
+    use axonml::vision::{CenterCrop, ImageNormalize, Resize};
 
     // Create a fake image tensor [C, H, W]
     let image = Tensor::<f32>::ones(&[3, 32, 32]);
@@ -220,7 +218,7 @@ fn test_vision_transforms() {
 /// Test 8: Text tokenization works
 #[test]
 fn test_text_tokenization() {
-    use axonml::text::{WhitespaceTokenizer, Tokenizer, Vocab};
+    use axonml::text::{Tokenizer, Vocab, WhitespaceTokenizer};
 
     let tokenizer = WhitespaceTokenizer::new();
     let tokens = tokenizer.tokenize("hello world from axonml");
@@ -247,8 +245,8 @@ fn test_text_tokenization() {
 /// Test 9: Complete CNN on synthetic MNIST
 #[test]
 fn test_cnn_mnist() {
-    use axonml::vision::{SyntheticMNIST, SimpleCNN};
     use axonml::data::DataLoader;
+    use axonml::vision::{SimpleCNN, SyntheticMNIST};
 
     // Load synthetic dataset
     let dataset = SyntheticMNIST::new(32);

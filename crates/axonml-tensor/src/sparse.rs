@@ -67,13 +67,21 @@ impl SparseCOO {
     /// * `values` - Non-zero values
     /// * `shape` - Shape of the tensor
     pub fn new(indices: Vec<Vec<usize>>, values: Vec<f32>, shape: Vec<usize>) -> Self {
-        assert_eq!(indices.len(), shape.len(), "indices dimensions must match shape");
+        assert_eq!(
+            indices.len(),
+            shape.len(),
+            "indices dimensions must match shape"
+        );
         if !indices.is_empty() {
             let nnz = indices[0].len();
             for idx in &indices {
                 assert_eq!(idx.len(), nnz, "all index arrays must have same length");
             }
-            assert_eq!(values.len(), nnz, "values length must match number of indices");
+            assert_eq!(
+                values.len(),
+                nnz,
+                "values length must match number of indices"
+            );
         }
 
         Self {
@@ -87,7 +95,11 @@ impl SparseCOO {
     /// Creates from a list of 2D coordinate tuples.
     pub fn from_coo_2d(coords: &[(usize, usize)], values: &[f32], shape: &[usize]) -> Self {
         assert_eq!(shape.len(), 2, "shape must be 2D");
-        assert_eq!(coords.len(), values.len(), "coords and values must have same length");
+        assert_eq!(
+            coords.len(),
+            values.len(),
+            "coords and values must have same length"
+        );
 
         let rows: Vec<usize> = coords.iter().map(|(r, _)| *r).collect();
         let cols: Vec<usize> = coords.iter().map(|(_, c)| *c).collect();
@@ -249,8 +261,16 @@ impl SparseCSR {
         shape: Vec<usize>,
     ) -> Self {
         assert_eq!(shape.len(), 2, "CSR only supports 2D tensors");
-        assert_eq!(row_ptr.len(), shape[0] + 1, "row_ptr length must be nrows + 1");
-        assert_eq!(col_indices.len(), values.len(), "col_indices and values must match");
+        assert_eq!(
+            row_ptr.len(),
+            shape[0] + 1,
+            "row_ptr length must be nrows + 1"
+        );
+        assert_eq!(
+            col_indices.len(),
+            values.len(),
+            "col_indices and values must match"
+        );
 
         Self {
             row_ptr,
@@ -515,7 +535,11 @@ impl SparseTensor {
         match self {
             Self::COO(coo) => {
                 let values: Vec<f32> = coo.values.iter().map(|v| v * scalar).collect();
-                Self::COO(SparseCOO::new(coo.indices.clone(), values, coo.shape.clone()))
+                Self::COO(SparseCOO::new(
+                    coo.indices.clone(),
+                    values,
+                    coo.shape.clone(),
+                ))
             }
             Self::CSR(csr) => {
                 let values: Vec<f32> = csr.values.iter().map(|v| v * scalar).collect();

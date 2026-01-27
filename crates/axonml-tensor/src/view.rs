@@ -45,7 +45,8 @@ pub enum SliceSpec {
 
 impl SliceSpec {
     /// Creates a range slice from start to stop.
-    #[must_use] pub fn range(start: isize, stop: isize) -> Self {
+    #[must_use]
+    pub fn range(start: isize, stop: isize) -> Self {
         Self::Range {
             start: Some(start),
             stop: Some(stop),
@@ -54,7 +55,8 @@ impl SliceSpec {
     }
 
     /// Creates a range slice with step.
-    #[must_use] pub fn range_step(start: isize, stop: isize, step: isize) -> Self {
+    #[must_use]
+    pub fn range_step(start: isize, stop: isize, step: isize) -> Self {
         Self::Range {
             start: Some(start),
             stop: Some(stop),
@@ -63,7 +65,8 @@ impl SliceSpec {
     }
 
     /// Creates a slice from start to end.
-    #[must_use] pub fn from(start: isize) -> Self {
+    #[must_use]
+    pub fn from(start: isize) -> Self {
         Self::Range {
             start: Some(start),
             stop: None,
@@ -72,7 +75,8 @@ impl SliceSpec {
     }
 
     /// Creates a slice from beginning to stop.
-    #[must_use] pub fn to(stop: isize) -> Self {
+    #[must_use]
+    pub fn to(stop: isize) -> Self {
         Self::Range {
             start: None,
             stop: Some(stop),

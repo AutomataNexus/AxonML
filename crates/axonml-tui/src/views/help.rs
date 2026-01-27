@@ -66,78 +66,205 @@ impl HelpView {
             HelpCategory {
                 name: "Navigation",
                 bindings: vec![
-                    KeyBinding { key: "Tab / Shift+Tab", description: "Switch between views" },
-                    KeyBinding { key: "1-6", description: "Jump to specific view (Model, Data, Training, Graphs, Files, Help)" },
-                    KeyBinding { key: "j / Down", description: "Move selection down" },
-                    KeyBinding { key: "k / Up", description: "Move selection up" },
-                    KeyBinding { key: "h / Left", description: "Collapse / Previous" },
-                    KeyBinding { key: "l / Right", description: "Expand / Next" },
-                    KeyBinding { key: "g / Home", description: "Go to first item" },
-                    KeyBinding { key: "G / End", description: "Go to last item" },
-                    KeyBinding { key: "Ctrl+u / PageUp", description: "Page up" },
-                    KeyBinding { key: "Ctrl+d / PageDown", description: "Page down" },
+                    KeyBinding {
+                        key: "Tab / Shift+Tab",
+                        description: "Switch between views",
+                    },
+                    KeyBinding {
+                        key: "1-6",
+                        description:
+                            "Jump to specific view (Model, Data, Training, Graphs, Files, Help)",
+                    },
+                    KeyBinding {
+                        key: "j / Down",
+                        description: "Move selection down",
+                    },
+                    KeyBinding {
+                        key: "k / Up",
+                        description: "Move selection up",
+                    },
+                    KeyBinding {
+                        key: "h / Left",
+                        description: "Collapse / Previous",
+                    },
+                    KeyBinding {
+                        key: "l / Right",
+                        description: "Expand / Next",
+                    },
+                    KeyBinding {
+                        key: "g / Home",
+                        description: "Go to first item",
+                    },
+                    KeyBinding {
+                        key: "G / End",
+                        description: "Go to last item",
+                    },
+                    KeyBinding {
+                        key: "Ctrl+u / PageUp",
+                        description: "Page up",
+                    },
+                    KeyBinding {
+                        key: "Ctrl+d / PageDown",
+                        description: "Page down",
+                    },
                 ],
             },
             HelpCategory {
                 name: "Model View",
                 bindings: vec![
-                    KeyBinding { key: "o", description: "Open model file" },
-                    KeyBinding { key: "Enter", description: "View layer details" },
-                    KeyBinding { key: "d", description: "Toggle detailed view" },
-                    KeyBinding { key: "e", description: "Export model info" },
-                    KeyBinding { key: "v", description: "Visualize model graph" },
+                    KeyBinding {
+                        key: "o",
+                        description: "Open model file",
+                    },
+                    KeyBinding {
+                        key: "Enter",
+                        description: "View layer details",
+                    },
+                    KeyBinding {
+                        key: "d",
+                        description: "Toggle detailed view",
+                    },
+                    KeyBinding {
+                        key: "e",
+                        description: "Export model info",
+                    },
+                    KeyBinding {
+                        key: "v",
+                        description: "Visualize model graph",
+                    },
                 ],
             },
             HelpCategory {
                 name: "Data View",
                 bindings: vec![
-                    KeyBinding { key: "o", description: "Open dataset file" },
-                    KeyBinding { key: "Tab", description: "Switch panel (classes/features)" },
-                    KeyBinding { key: "s", description: "View data statistics" },
-                    KeyBinding { key: "p", description: "Preview samples" },
+                    KeyBinding {
+                        key: "o",
+                        description: "Open dataset file",
+                    },
+                    KeyBinding {
+                        key: "Tab",
+                        description: "Switch panel (classes/features)",
+                    },
+                    KeyBinding {
+                        key: "s",
+                        description: "View data statistics",
+                    },
+                    KeyBinding {
+                        key: "p",
+                        description: "Preview samples",
+                    },
                 ],
             },
             HelpCategory {
                 name: "Training View",
                 bindings: vec![
-                    KeyBinding { key: "t", description: "Start training" },
-                    KeyBinding { key: "Space", description: "Pause/Resume training" },
-                    KeyBinding { key: "s", description: "Stop training" },
-                    KeyBinding { key: "c", description: "Open training config" },
-                    KeyBinding { key: "Ctrl+s", description: "Save checkpoint" },
-                    KeyBinding { key: "d", description: "Toggle detailed metrics" },
+                    KeyBinding {
+                        key: "t",
+                        description: "Start training",
+                    },
+                    KeyBinding {
+                        key: "Space",
+                        description: "Pause/Resume training",
+                    },
+                    KeyBinding {
+                        key: "s",
+                        description: "Stop training",
+                    },
+                    KeyBinding {
+                        key: "c",
+                        description: "Open training config",
+                    },
+                    KeyBinding {
+                        key: "Ctrl+s",
+                        description: "Save checkpoint",
+                    },
+                    KeyBinding {
+                        key: "d",
+                        description: "Toggle detailed metrics",
+                    },
                 ],
             },
             HelpCategory {
                 name: "Graphs View",
                 bindings: vec![
-                    KeyBinding { key: "< / >", description: "Switch chart type" },
-                    KeyBinding { key: "+/-", description: "Zoom in/out" },
-                    KeyBinding { key: "r", description: "Reset zoom" },
-                    KeyBinding { key: "e", description: "Export chart as image" },
-                    KeyBinding { key: "l", description: "Toggle legend" },
+                    KeyBinding {
+                        key: "< / >",
+                        description: "Switch chart type",
+                    },
+                    KeyBinding {
+                        key: "+/-",
+                        description: "Zoom in/out",
+                    },
+                    KeyBinding {
+                        key: "r",
+                        description: "Reset zoom",
+                    },
+                    KeyBinding {
+                        key: "e",
+                        description: "Export chart as image",
+                    },
+                    KeyBinding {
+                        key: "l",
+                        description: "Toggle legend",
+                    },
                 ],
             },
             HelpCategory {
                 name: "Files View",
                 bindings: vec![
-                    KeyBinding { key: "Enter", description: "Open file/Toggle directory" },
-                    KeyBinding { key: "Backspace", description: "Go to parent directory" },
-                    KeyBinding { key: ".", description: "Toggle hidden files" },
-                    KeyBinding { key: "/", description: "Search files" },
-                    KeyBinding { key: "n", description: "New file/directory" },
-                    KeyBinding { key: "Delete", description: "Delete file" },
-                    KeyBinding { key: "r", description: "Rename file" },
+                    KeyBinding {
+                        key: "Enter",
+                        description: "Open file/Toggle directory",
+                    },
+                    KeyBinding {
+                        key: "Backspace",
+                        description: "Go to parent directory",
+                    },
+                    KeyBinding {
+                        key: ".",
+                        description: "Toggle hidden files",
+                    },
+                    KeyBinding {
+                        key: "/",
+                        description: "Search files",
+                    },
+                    KeyBinding {
+                        key: "n",
+                        description: "New file/directory",
+                    },
+                    KeyBinding {
+                        key: "Delete",
+                        description: "Delete file",
+                    },
+                    KeyBinding {
+                        key: "r",
+                        description: "Rename file",
+                    },
                 ],
             },
             HelpCategory {
                 name: "Global",
                 bindings: vec![
-                    KeyBinding { key: "?", description: "Show/Hide help" },
-                    KeyBinding { key: ":", description: "Command mode" },
-                    KeyBinding { key: "Ctrl+c / q", description: "Quit application" },
-                    KeyBinding { key: "Ctrl+l", description: "Redraw screen" },
-                    KeyBinding { key: "Esc", description: "Cancel / Close popup" },
+                    KeyBinding {
+                        key: "?",
+                        description: "Show/Hide help",
+                    },
+                    KeyBinding {
+                        key: ":",
+                        description: "Command mode",
+                    },
+                    KeyBinding {
+                        key: "Ctrl+c / q",
+                        description: "Quit application",
+                    },
+                    KeyBinding {
+                        key: "Ctrl+l",
+                        description: "Redraw screen",
+                    },
+                    KeyBinding {
+                        key: "Esc",
+                        description: "Cancel / Close popup",
+                    },
                 ],
             },
         ]
@@ -165,9 +292,9 @@ impl HelpView {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(5),  // Header
-                Constraint::Min(10),    // Keybindings
-                Constraint::Length(3),  // Footer
+                Constraint::Length(5), // Header
+                Constraint::Min(10),   // Keybindings
+                Constraint::Length(3), // Footer
             ])
             .split(area);
 
@@ -203,7 +330,13 @@ impl HelpView {
 
     fn render_keybindings(&self, frame: &mut Frame, area: Rect) {
         // Calculate column layout based on available width
-        let num_columns = if area.width > 120 { 3 } else if area.width > 80 { 2 } else { 1 };
+        let num_columns = if area.width > 120 {
+            3
+        } else if area.width > 80 {
+            2
+        } else {
+            1
+        };
 
         let column_constraints: Vec<Constraint> = (0..num_columns)
             .map(|_| Constraint::Percentage(100 / num_columns as u16))
@@ -252,12 +385,11 @@ impl HelpView {
             lines.push(Line::from(""));
         }
 
-        let content = Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border()),
-            );
+        let content = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border()),
+        );
 
         frame.render_widget(content, area);
     }

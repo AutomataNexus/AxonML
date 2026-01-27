@@ -2,14 +2,16 @@
 
 use leptos::*;
 use leptos_router::*;
-use web_sys::{WebSocket, MessageEvent, CloseEvent};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use web_sys::{CloseEvent, MessageEvent, WebSocket};
 
 use crate::api;
+use crate::components::{
+    charts::*, icons::*, modal::*, progress::*, spinner::*, table::StatusBadge,
+};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, charts::*, progress::*, modal::*, table::StatusBadge};
 
 /// Training run detail page
 #[component]
@@ -111,7 +113,10 @@ pub fn TrainingDetailPage() -> impl IntoView {
                                         }
                                     });
                                 }
-                                WsMessage::Status { run_id: msg_run_id, status } => {
+                                WsMessage::Status {
+                                    run_id: msg_run_id,
+                                    status,
+                                } => {
                                     // Only update if the message is for the current run
                                     if msg_run_id == id {
                                         set_run.update(|r| {

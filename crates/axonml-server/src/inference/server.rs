@@ -28,7 +28,10 @@ pub struct ModelArchitecture {
 /// Layer information for reconstruction
 #[derive(Debug, Clone)]
 pub enum LayerInfo {
-    Linear { in_features: usize, out_features: usize },
+    Linear {
+        in_features: usize,
+        out_features: usize,
+    },
     ReLU,
     Sigmoid,
     Tanh,
@@ -97,10 +100,7 @@ impl InferenceServer {
     ) -> Result<(), String> {
         // Check if file exists
         if !Path::new(file_path).exists() {
-            return Err(format!(
-                "Model file not found: {}",
-                file_path
-            ));
+            return Err(format!("Model file not found: {}", file_path));
         }
 
         // Load the state dict from file
@@ -135,8 +135,8 @@ impl InferenceServer {
 
     /// Load model from file and detect architecture
     fn load_model_from_file(file_path: &str) -> Result<LoadedModel, String> {
-        let state_dict = load_state_dict(file_path)
-            .map_err(|e| format!("Failed to load state dict: {}", e))?;
+        let state_dict =
+            load_state_dict(file_path).map_err(|e| format!("Failed to load state dict: {}", e))?;
 
         // Detect architecture from state dict parameter names and shapes
         let architecture = Self::detect_architecture(&state_dict)?;
@@ -266,26 +266,37 @@ impl InferenceServer {
 
         for layer_info in loaded.architecture.layers.iter() {
             match layer_info {
-                LayerInfo::Linear { in_features, out_features } => {
+                LayerInfo::Linear {
+                    in_features,
+                    out_features,
+                } => {
                     // Load weights from state dict
                     let weight_key = format!("{}.weight", linear_idx);
                     let bias_key = format!("{}.bias", linear_idx);
 
-                    let weight_tensor = loaded.state_dict.get(&weight_key)
+                    let weight_tensor = loaded
+                        .state_dict
+                        .get(&weight_key)
                         .ok_or_else(|| format!("Missing weight for layer {}", linear_idx))?
-                        .data.to_tensor()
+                        .data
+                        .to_tensor()
                         .map_err(|e| format!("Failed to load weight tensor: {}", e))?;
 
                     // Validate weight dimensions match expected
                     let weight_shape = weight_tensor.shape();
-                    if weight_shape.len() != 2 || weight_shape[0] != *out_features || weight_shape[1] != *in_features {
+                    if weight_shape.len() != 2
+                        || weight_shape[0] != *out_features
+                        || weight_shape[1] != *in_features
+                    {
                         return Err(format!(
                             "Weight shape mismatch for layer {}: expected [{}, {}], got {:?}",
                             linear_idx, out_features, in_features, weight_shape
                         ));
                     }
 
-                    let bias_tensor = loaded.state_dict.get(&bias_key)
+                    let bias_tensor = loaded
+                        .state_dict
+                        .get(&bias_key)
                         .map(|e| e.data.to_tensor())
                         .transpose()
                         .map_err(|e| format!("Failed to load bias tensor: {}", e))?;
@@ -358,11 +369,18 @@ impl InferenceServer {
     }
 
     /// Run real inference using loaded model
-    fn run_inference(loaded: &LoadedModel, inputs: serde_json::Value) -> Result<serde_json::Value, String> {
+    fn run_inference(
+        loaded: &LoadedModel,
+        inputs: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
         // Parse input data
         let input_array = Self::parse_input(&inputs)?;
         let batch_size = input_array.len();
-        let input_size = if batch_size > 0 { input_array[0].len() } else { 0 };
+        let input_size = if batch_size > 0 {
+            input_array[0].len()
+        } else {
+            0
+        };
 
         // Validate input size matches model
         if input_size != loaded.architecture.input_size {
@@ -457,13 +475,19 @@ impl InferenceServer {
     /// Check if a model is loaded
     pub async fn is_loaded(&self, endpoint_id: &str) -> bool {
         let models = self.models.read().await;
-        models.get(endpoint_id).map(|e| e.instance.loaded).unwrap_or(false)
+        models
+            .get(endpoint_id)
+            .map(|e| e.instance.loaded)
+            .unwrap_or(false)
     }
 
     /// Check if a model has weights loaded
     pub async fn has_weights(&self, endpoint_id: &str) -> bool {
         let models = self.models.read().await;
-        models.get(endpoint_id).map(|e| e.model.is_some()).unwrap_or(false)
+        models
+            .get(endpoint_id)
+            .map(|e| e.model.is_some())
+            .unwrap_or(false)
     }
 
     /// Get loaded models count
@@ -500,16 +524,14 @@ impl InferenceServer {
     /// Get model info for an endpoint
     pub async fn get_model_info(&self, endpoint_id: &str) -> Option<ModelInfo> {
         let models = self.models.read().await;
-        models.get(endpoint_id).map(|entry| {
-            ModelInfo {
-                model_id: entry.instance.model_id.clone(),
-                version_id: entry.instance.version_id.clone(),
-                version: entry.instance.version,
-                file_path: entry.instance.file_path.clone(),
-                loaded: entry.instance.loaded,
-                has_weights: entry.model.is_some(),
-                architecture: entry.model.as_ref().map(|m| m.architecture.clone()),
-            }
+        models.get(endpoint_id).map(|entry| ModelInfo {
+            model_id: entry.instance.model_id.clone(),
+            version_id: entry.instance.version_id.clone(),
+            version: entry.instance.version,
+            file_path: entry.instance.file_path.clone(),
+            loaded: entry.instance.loaded,
+            has_weights: entry.model.is_some(),
+            architecture: entry.model.as_ref().map(|m| m.architecture.clone()),
         })
     }
 }
@@ -532,7 +554,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_unload_model() {
-        use axonml_serialize::{save_state_dict, StateDict, TensorData, Format};
+        use axonml_serialize::{save_state_dict, Format, StateDict, TensorData};
         use axonml_tensor::Tensor;
 
         // Create a temporary model file

@@ -30,7 +30,8 @@ pub struct Batch {
 
 impl Batch {
     /// Creates a new Batch.
-    #[must_use] pub fn new(data: Tensor<f32>, targets: Tensor<f32>) -> Self {
+    #[must_use]
+    pub fn new(data: Tensor<f32>, targets: Tensor<f32>) -> Self {
         let size = data.shape()[0];
         Self {
             data,
@@ -40,12 +41,14 @@ impl Batch {
     }
 
     /// Returns the batch size.
-    #[must_use] pub fn len(&self) -> usize {
+    #[must_use]
+    pub fn len(&self) -> usize {
         self.size
     }
 
     /// Returns true if the batch is empty.
-    #[must_use] pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
         self.size == 0
     }
 }
@@ -226,7 +229,8 @@ where
     D: Dataset<Item = (Tensor<f32>, Tensor<f32>)>,
 {
     /// Returns the number of remaining batches.
-    #[must_use] pub fn remaining(&self) -> usize {
+    #[must_use]
+    pub fn remaining(&self) -> usize {
         let remaining_samples = self.indices.len().saturating_sub(self.position);
         if self.drop_last {
             remaining_samples / self.batch_size
@@ -575,16 +579,17 @@ mod tests {
         // Same data (no shuffle, so order should be same)
         for i in 0..batches_seq.len() {
             assert_eq!(batches_seq[i].data.to_vec(), batches_par[i].data.to_vec());
-            assert_eq!(batches_seq[i].targets.to_vec(), batches_par[i].targets.to_vec());
+            assert_eq!(
+                batches_seq[i].targets.to_vec(),
+                batches_par[i].targets.to_vec()
+            );
         }
     }
 
     #[test]
     fn test_parallel_dataloader_drop_last() {
         let dataset = create_test_dataset(95);
-        let loader = DataLoader::new(dataset, 10)
-            .drop_last(true)
-            .num_workers(4);
+        let loader = DataLoader::new(dataset, 10).drop_last(true).num_workers(4);
 
         let batches: Vec<Batch> = loader.iter().collect();
         assert_eq!(batches.len(), 9); // 95 / 10 = 9 full batches

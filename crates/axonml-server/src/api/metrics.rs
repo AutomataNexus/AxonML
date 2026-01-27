@@ -71,9 +71,7 @@ axonml_server_info{{version="0.1.0"}} 1
 }
 
 /// Get system statistics (admin only)
-pub async fn get_stats(
-    State(state): State<AppState>,
-) -> Result<Json<SystemStats>, AuthError> {
+pub async fn get_stats(State(state): State<AppState>) -> Result<Json<SystemStats>, AuthError> {
     let user_repo = UserRepository::new(&state.db);
     let run_repo = RunRepository::new(&state.db);
     let model_repo = ModelRepository::new(&state.db);
@@ -81,11 +79,17 @@ pub async fn get_stats(
     // Collect stats
     let users_total = user_repo.count().await.unwrap_or(0);
 
-    let runs = run_repo.list_all(None, Some(10000), Some(0)).await.unwrap_or_default();
+    let runs = run_repo
+        .list_all(None, Some(10000), Some(0))
+        .await
+        .unwrap_or_default();
     let runs_total = runs.len() as u64;
     let runs_running = run_repo.count_running().await.unwrap_or(0);
 
-    let models = model_repo.list_all(Some(10000), Some(0)).await.unwrap_or_default();
+    let models = model_repo
+        .list_all(Some(10000), Some(0))
+        .await
+        .unwrap_or_default();
     let models_total = models.len() as u64;
 
     let endpoints = model_repo.list_endpoints().await.unwrap_or_default();

@@ -247,7 +247,9 @@ fn get_cache_dir() -> PathBuf {
 }
 
 fn is_model_cached(cache_dir: &PathBuf, model_name: &str) -> bool {
-    cache_dir.join(format!("{}.safetensors", model_name)).exists()
+    cache_dir
+        .join(format!("{}.safetensors", model_name))
+        .exists()
 }
 
 fn get_cached_path(cache_dir: &PathBuf, model_name: &str) -> Option<String> {
@@ -325,16 +327,19 @@ pub async fn download_model(
 
     // Check if already cached
     if weights_path.exists() && !request.force.unwrap_or(false) {
-        let metadata = fs::metadata(&weights_path)
-            .map_err(|e| AuthError::Internal(e.to_string()))?;
+        let metadata =
+            fs::metadata(&weights_path).map_err(|e| AuthError::Internal(e.to_string()))?;
 
-        return Ok((StatusCode::OK, Json(DownloadResponse {
-            model_name: model.name.clone(),
-            path: weights_path.to_string_lossy().to_string(),
-            size_bytes: metadata.len(),
-            downloaded: false,
-            was_cached: true,
-        })));
+        return Ok((
+            StatusCode::OK,
+            Json(DownloadResponse {
+                model_name: model.name.clone(),
+                path: weights_path.to_string_lossy().to_string(),
+                size_bytes: metadata.len(),
+                downloaded: false,
+                was_cached: true,
+            }),
+        ));
     }
 
     // Create cache directory
@@ -359,13 +364,16 @@ pub async fn download_model(
 
     tracing::info!(model = %model.name, size = size_bytes, "Downloaded pretrained model");
 
-    Ok((StatusCode::CREATED, Json(DownloadResponse {
-        model_name: model.name.clone(),
-        path: weights_path.to_string_lossy().to_string(),
-        size_bytes,
-        downloaded: true,
-        was_cached: false,
-    })))
+    Ok((
+        StatusCode::CREATED,
+        Json(DownloadResponse {
+            model_name: model.name.clone(),
+            path: weights_path.to_string_lossy().to_string(),
+            size_bytes,
+            downloaded: true,
+            was_cached: false,
+        }),
+    ))
 }
 
 /// Get cache information
@@ -378,15 +386,14 @@ pub async fn get_cache_info(
     let mut total_size = 0u64;
 
     if cache_dir.exists() {
-        let entries = fs::read_dir(&cache_dir)
-            .map_err(|e| AuthError::Internal(e.to_string()))?;
+        let entries = fs::read_dir(&cache_dir).map_err(|e| AuthError::Internal(e.to_string()))?;
 
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() {
                 if let Some(name) = path.file_stem() {
-                    let metadata = fs::metadata(&path)
-                        .map_err(|e| AuthError::Internal(e.to_string()))?;
+                    let metadata =
+                        fs::metadata(&path).map_err(|e| AuthError::Internal(e.to_string()))?;
                     let size = metadata.len();
                     total_size += size;
 
@@ -420,15 +427,13 @@ pub async fn clear_cache(
         // Clear specific model
         let path = cache_dir.join(format!("{}.safetensors", name));
         if path.exists() {
-            fs::remove_file(&path)
-                .map_err(|e| AuthError::Internal(e.to_string()))?;
+            fs::remove_file(&path).map_err(|e| AuthError::Internal(e.to_string()))?;
             tracing::info!(model = %name, "Cleared cached model");
         }
     } else {
         // Clear all cached models
         if cache_dir.exists() {
-            fs::remove_dir_all(&cache_dir)
-                .map_err(|e| AuthError::Internal(e.to_string()))?;
+            fs::remove_dir_all(&cache_dir).map_err(|e| AuthError::Internal(e.to_string()))?;
             tracing::info!("Cleared all cached models");
         }
     }
@@ -454,7 +459,8 @@ async fn download_weights_from_hub(
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-    let response = client.get(&url)
+    let response = client
+        .get(&url)
         .send()
         .await
         .map_err(|e| format!("Download failed: {}", e))?;
@@ -469,7 +475,8 @@ async fn download_weights_from_hub(
         return generate_synthetic_weights(model_name);
     }
 
-    let bytes = response.bytes()
+    let bytes = response
+        .bytes()
         .await
         .map_err(|e| format!("Failed to read response: {}", e))?;
 
@@ -544,25 +551,31 @@ fn generate_synthetic_weights(model_name: &str) -> Result<Vec<u8>, String> {
             data_buffer.extend_from_slice(&val.to_le_bytes());
         }
 
-        header.insert(name.to_string(), serde_json::json!({
-            "dtype": "F32",
-            "shape": shape,
-            "data_offsets": [offset, offset + byte_size]
-        }));
+        header.insert(
+            name.to_string(),
+            serde_json::json!({
+                "dtype": "F32",
+                "shape": shape,
+                "data_offsets": [offset, offset + byte_size]
+            }),
+        );
 
         offset += byte_size;
     }
 
     // Add metadata
-    header.insert("__metadata__".to_string(), serde_json::json!({
-        "format": "pt",
-        "framework": "axonml",
-        "model": model_name
-    }));
+    header.insert(
+        "__metadata__".to_string(),
+        serde_json::json!({
+            "format": "pt",
+            "framework": "axonml",
+            "model": model_name
+        }),
+    );
 
     // Serialize header
-    let header_json = serde_json::to_string(&header)
-        .map_err(|e| format!("Failed to serialize header: {}", e))?;
+    let header_json =
+        serde_json::to_string(&header).map_err(|e| format!("Failed to serialize header: {}", e))?;
     let header_bytes = header_json.as_bytes();
     let header_size = header_bytes.len() as u64;
 

@@ -114,8 +114,12 @@ pub async fn create_credential(
         .map_err(|_| WebAuthnError::InvalidResponse("Failed to set user id".into()))?;
     Reflect::set(&user, &"name".into(), &JsValue::from_str(user_name))
         .map_err(|_| WebAuthnError::InvalidResponse("Failed to set user name".into()))?;
-    Reflect::set(&user, &"displayName".into(), &JsValue::from_str(user_display_name))
-        .map_err(|_| WebAuthnError::InvalidResponse("Failed to set display name".into()))?;
+    Reflect::set(
+        &user,
+        &"displayName".into(),
+        &JsValue::from_str(user_display_name),
+    )
+    .map_err(|_| WebAuthnError::InvalidResponse("Failed to set display name".into()))?;
     Reflect::set(&public_key, &"user".into(), &user)
         .map_err(|_| WebAuthnError::InvalidResponse("Failed to set user".into()))?;
 
@@ -132,8 +136,12 @@ pub async fn create_credential(
     Reflect::set(&rs256, &"alg".into(), &JsValue::from_f64(-257.0)).unwrap(); // RS256
     pub_key_cred_params.push(&rs256);
 
-    Reflect::set(&public_key, &"pubKeyCredParams".into(), &pub_key_cred_params)
-        .map_err(|_| WebAuthnError::InvalidResponse("Failed to set algorithms".into()))?;
+    Reflect::set(
+        &public_key,
+        &"pubKeyCredParams".into(),
+        &pub_key_cred_params,
+    )
+    .map_err(|_| WebAuthnError::InvalidResponse("Failed to set algorithms".into()))?;
 
     // Timeout (60 seconds)
     Reflect::set(&public_key, &"timeout".into(), &JsValue::from_f64(60000.0))
@@ -149,16 +157,14 @@ pub async fn create_credential(
         .create_with_options(&options.unchecked_into())
         .map_err(|e| WebAuthnError::SecurityError(format!("{:?}", e)))?;
 
-    let credential = JsFuture::from(credential_promise)
-        .await
-        .map_err(|e| {
-            let error_str = format!("{:?}", e);
-            if error_str.contains("NotAllowedError") {
-                WebAuthnError::UserCancelled
-            } else {
-                WebAuthnError::SecurityError(error_str)
-            }
-        })?;
+    let credential = JsFuture::from(credential_promise).await.map_err(|e| {
+        let error_str = format!("{:?}", e);
+        if error_str.contains("NotAllowedError") {
+            WebAuthnError::UserCancelled
+        } else {
+            WebAuthnError::SecurityError(error_str)
+        }
+    })?;
 
     // Extract response data
     let credential: PublicKeyCredential = credential.unchecked_into();
@@ -166,7 +172,8 @@ pub async fn create_credential(
 
     let id = credential.id();
     let raw_id = base64_url_encode(&js_array_buffer_to_vec(&credential.raw_id()));
-    let attestation_object = base64_url_encode(&js_array_buffer_to_vec(&response.attestation_object()));
+    let attestation_object =
+        base64_url_encode(&js_array_buffer_to_vec(&response.attestation_object()));
     let client_data_json = base64_url_encode(&js_array_buffer_to_vec(&response.client_data_json()));
 
     Ok(WebAuthnRegistrationResponse {
@@ -220,8 +227,9 @@ pub async fn get_assertion(
     if !allow_credentials.is_empty() {
         let allowed = Array::new();
         for cred_id in allow_credentials {
-            let cred_id_bytes = base64_url_decode(cred_id)
-                .map_err(|e| WebAuthnError::InvalidResponse(format!("Invalid credential ID: {}", e)))?;
+            let cred_id_bytes = base64_url_decode(cred_id).map_err(|e| {
+                WebAuthnError::InvalidResponse(format!("Invalid credential ID: {}", e))
+            })?;
 
             let cred = Object::new();
             Reflect::set(&cred, &"type".into(), &JsValue::from_str("public-key")).unwrap();
@@ -243,16 +251,14 @@ pub async fn get_assertion(
         .get_with_options(&options.unchecked_into())
         .map_err(|e| WebAuthnError::SecurityError(format!("{:?}", e)))?;
 
-    let credential = JsFuture::from(credential_promise)
-        .await
-        .map_err(|e| {
-            let error_str = format!("{:?}", e);
-            if error_str.contains("NotAllowedError") {
-                WebAuthnError::UserCancelled
-            } else {
-                WebAuthnError::SecurityError(error_str)
-            }
-        })?;
+    let credential = JsFuture::from(credential_promise).await.map_err(|e| {
+        let error_str = format!("{:?}", e);
+        if error_str.contains("NotAllowedError") {
+            WebAuthnError::UserCancelled
+        } else {
+            WebAuthnError::SecurityError(error_str)
+        }
+    })?;
 
     // Extract response data
     let credential: PublicKeyCredential = credential.unchecked_into();
@@ -260,11 +266,13 @@ pub async fn get_assertion(
 
     let id = credential.id();
     let raw_id = base64_url_encode(&js_array_buffer_to_vec(&credential.raw_id()));
-    let authenticator_data = base64_url_encode(&js_array_buffer_to_vec(&response.authenticator_data()));
+    let authenticator_data =
+        base64_url_encode(&js_array_buffer_to_vec(&response.authenticator_data()));
     let client_data_json = base64_url_encode(&js_array_buffer_to_vec(&response.client_data_json()));
     let signature = base64_url_encode(&js_array_buffer_to_vec(&response.signature()));
 
-    let user_handle = response.user_handle()
+    let user_handle = response
+        .user_handle()
         .map(|uh| base64_url_encode(&js_array_buffer_to_vec(&uh)));
 
     Ok(WebAuthnAuthenticationResponse {
@@ -286,9 +294,7 @@ fn js_array_buffer_to_vec(buffer: &js_sys::ArrayBuffer) -> Vec<u8> {
 
 fn base64_url_decode(input: &str) -> Result<Vec<u8>, String> {
     // Convert base64url to standard base64
-    let standard = input
-        .replace('-', "+")
-        .replace('_', "/");
+    let standard = input.replace('-', "+").replace('_', "/");
 
     // Add padding if necessary
     let padded = match standard.len() % 4 {

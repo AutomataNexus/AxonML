@@ -203,7 +203,11 @@ impl GpuTestReport {
         if self.failed_count() > 0 {
             println!("\nFailed tests:");
             for result in self.results.iter().filter(|r| !r.passed) {
-                println!("  - {}: {}", result.name, result.error.as_deref().unwrap_or("Unknown"));
+                println!(
+                    "  - {}: {}",
+                    result.name,
+                    result.error.as_deref().unwrap_or("Unknown")
+                );
             }
         }
     }
@@ -232,7 +236,11 @@ pub fn assert_close(expected: &[f32], actual: &[f32], atol: f32, rtol: f32) -> R
         if abs_err > atol + rel_tol {
             return Err(format!(
                 "Mismatch at index {}: expected {}, got {} (abs_err: {:.2e}, tol: {:.2e})",
-                i, e, a, abs_err, atol + rel_tol
+                i,
+                e,
+                a,
+                abs_err,
+                atol + rel_tol
             ));
         }
     }
@@ -306,7 +314,7 @@ pub fn cpu_gemm(a: &[f32], b: &[f32], m: usize, n: usize, k: usize) -> Vec<f32> 
 #[cfg(feature = "cuda")]
 pub mod cuda_tests {
     use super::*;
-    use crate::backends::cuda::{is_available, device_count, CudaBackend};
+    use crate::backends::cuda::{device_count, is_available, CudaBackend};
 
     /// Run all CUDA tests.
     pub fn run_all_tests(config: &GpuTestConfig) -> GpuTestReport {
@@ -566,11 +574,7 @@ pub mod cuda_tests {
         }
     }
 
-    fn test_gemm_square(
-        backend: &CudaBackend,
-        n: usize,
-        config: &GpuTestConfig,
-    ) -> GpuTestResult {
+    fn test_gemm_square(backend: &CudaBackend, n: usize, config: &GpuTestConfig) -> GpuTestResult {
         test_gemm_rectangular(backend, n, n, n, config)
     }
 
@@ -608,11 +612,10 @@ pub mod cuda_tests {
         // cuBLAS GEMM: C = alpha * A @ B + beta * C
         if let Err(e) = backend.gemm_f32(
             false, false, // no transpose
-            m, n, k,
-            1.0,          // alpha
-            &gpu_a, m,    // A, lda
-            &gpu_b, k,    // B, ldb
-            0.0,          // beta
+            m, n, k, 1.0, // alpha
+            &gpu_a, m, // A, lda
+            &gpu_b, k,   // B, ldb
+            0.0, // beta
             &mut gpu_c, m, // C, ldc
         ) {
             return GpuTestResult::fail(&name, &format!("gemm_f32: {}", e));
@@ -719,10 +722,7 @@ pub fn print_gpu_info() {
             for i in 0..crate::backends::cuda::device_count() {
                 let caps = crate::backends::cuda::get_capabilities(i);
                 println!("  [{}] {}", i, caps.name);
-                println!(
-                    "      Memory: {:.1} GB",
-                    caps.total_memory as f64 / 1e9
-                );
+                println!("      Memory: {:.1} GB", caps.total_memory as f64 / 1e9);
                 if let Some(cc) = caps.compute_capability {
                     println!("      Compute: {}.{}", cc.0, cc.1);
                 }

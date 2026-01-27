@@ -15,11 +15,11 @@ use axonml_nn::{Linear, Module, ReLU, Sequential};
 use axonml_optim::{Adam, Optimizer};
 use axonml_serialize::{load_checkpoint, load_state_dict, save_state_dict, Format, StateDict};
 use axonml_tensor::Tensor;
-use axonml_vision::{CIFAR10, FashionMNIST, MNIST};
+use axonml_vision::{FashionMNIST, CIFAR10, MNIST};
 
 use super::utils::{
-    ensure_dir, epoch_progress_bar, path_exists, print_header, print_info, print_kv,
-    print_success, print_warning,
+    ensure_dir, epoch_progress_bar, path_exists, print_header, print_info, print_kv, print_success,
+    print_warning,
 };
 use crate::cli::ResumeArgs;
 use crate::error::{CliError, CliResult};
@@ -55,8 +55,10 @@ pub fn execute(args: ResumeArgs) -> CliResult<()> {
 
     // Determine output directory
     let output_dir = args.output.clone().unwrap_or_else(|| {
-        checkpoint_path
-            .parent().map_or_else(|| "./output".to_string(), |p| p.to_string_lossy().to_string())
+        checkpoint_path.parent().map_or_else(
+            || "./output".to_string(),
+            |p| p.to_string_lossy().to_string(),
+        )
     });
     ensure_dir(&output_dir)?;
 
@@ -140,20 +142,24 @@ fn load_checkpoint_info(checkpoint_path: &PathBuf) -> CliResult<CheckpointInfo> 
     // Try to load as a full Checkpoint first
     if let Ok(checkpoint) = load_checkpoint(checkpoint_path) {
         // Extract loss from loss history
-        let loss = f64::from(checkpoint
-            .training_state
-            .loss_history
-            .last()
-            .copied()
-            .unwrap_or(0.5));
+        let loss = f64::from(
+            checkpoint
+                .training_state
+                .loss_history
+                .last()
+                .copied()
+                .unwrap_or(0.5),
+        );
 
         // Extract learning rate from lr history
-        let learning_rate = f64::from(checkpoint
-            .training_state
-            .lr_history
-            .last()
-            .copied()
-            .unwrap_or(0.001));
+        let learning_rate = f64::from(
+            checkpoint
+                .training_state
+                .lr_history
+                .last()
+                .copied()
+                .unwrap_or(0.001),
+        );
 
         // Get model name from config or default
         let model_name = checkpoint

@@ -1,8 +1,8 @@
 //! Data Table Components
 
-use std::rc::Rc;
-use leptos::*;
 use crate::components::icons::*;
+use leptos::*;
+use std::rc::Rc;
 
 /// Sort direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

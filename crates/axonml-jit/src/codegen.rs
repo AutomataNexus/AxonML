@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
-use crate::ir::{Graph, Node, NodeId, Op};
-use crate::error::{JitError, JitResult};
 use crate::cache::FunctionCache;
+use crate::error::{JitError, JitResult};
+use crate::ir::{Graph, Node, NodeId, Op};
 use crate::optimize::Optimizer;
 
 /// A compiled function ready for execution.
@@ -54,12 +54,16 @@ impl CompiledFunction {
     pub fn run(&self, inputs: &[(&str, &[f32])]) -> JitResult<Vec<f32>> {
         match &self.kind {
             CompiledKind::Interpreted => self.run_interpreted(inputs),
-            CompiledKind::Native { code_ptr, code_size } => {
+            CompiledKind::Native {
+                code_ptr,
+                code_size,
+            } => {
                 // Native execution via function pointer call
                 // Safety: code_ptr points to valid compiled code from Cranelift
                 unsafe {
                     let func: extern "C" fn(*const f32, *mut f32) = std::mem::transmute(code_ptr);
-                    let flat_inputs: Vec<f32> = inputs.iter().flat_map(|(_, d)| d.iter().copied()).collect();
+                    let flat_inputs: Vec<f32> =
+                        inputs.iter().flat_map(|(_, d)| d.iter().copied()).collect();
                     let mut output = vec![0.0f32; self.graph.outputs().len() * 1024]; // Max output size
                     func(flat_inputs.as_ptr(), output.as_mut_ptr());
                     let _ = code_size; // Used for memory management
@@ -112,9 +116,7 @@ impl CompiledFunction {
                 Ok(values[node.id.index()].clone().unwrap_or_default())
             }
 
-            Op::Output { input, .. } => {
-                Ok(get(*input)?.clone())
-            }
+            Op::Output { input, .. } => Ok(get(*input)?.clone()),
 
             Op::Constant { value } => {
                 let numel = node.shape.numel();
@@ -230,9 +232,9 @@ impl CompiledFunction {
             Op::Gelu { input } => {
                 let a = get(*input)?;
                 const SQRT_2_OVER_PI: f32 = 0.7978845608;
-                Ok(a.iter().map(|x| {
-                    0.5 * x * (1.0 + (SQRT_2_OVER_PI * (x + 0.044715 * x.powi(3))).tanh())
-                }).collect())
+                Ok(a.iter()
+                    .map(|x| 0.5 * x * (1.0 + (SQRT_2_OVER_PI * (x + 0.044715 * x.powi(3))).tanh()))
+                    .collect())
             }
 
             Op::Silu { input } => {
@@ -252,7 +254,11 @@ impl CompiledFunction {
                 Ok(vec![sum / a.len() as f32])
             }
 
-            Op::SumAxis { input, axis, keepdim } => {
+            Op::SumAxis {
+                input,
+                axis,
+                keepdim,
+            } => {
                 // Simplified: just sum all for now
                 let a = get(*input)?;
                 let input_node = self.graph.node(*input);
@@ -261,7 +267,11 @@ impl CompiledFunction {
                 reduce_axis(a, input_shape, *axis, *keepdim, |x, y| x + y, 0.0)
             }
 
-            Op::MeanAxis { input, axis, keepdim } => {
+            Op::MeanAxis {
+                input,
+                axis,
+                keepdim,
+            } => {
                 let a = get(*input)?;
                 let input_node = self.graph.node(*input);
                 let input_shape = input_node.shape.dims();
@@ -271,7 +281,11 @@ impl CompiledFunction {
                 Ok(sum.iter().map(|x| x / axis_size as f32).collect())
             }
 
-            Op::MaxAxis { input, axis, keepdim } => {
+            Op::MaxAxis {
+                input,
+                axis,
+                keepdim,
+            } => {
                 let a = get(*input)?;
                 let input_node = self.graph.node(*input);
                 let input_shape = input_node.shape.dims();
@@ -280,14 +294,12 @@ impl CompiledFunction {
             }
 
             // Shape ops - for interpreter, just pass through
-            Op::Reshape { input, .. } |
-            Op::Transpose { input, .. } |
-            Op::Squeeze { input, .. } |
-            Op::Unsqueeze { input, .. } |
-            Op::Broadcast { input, .. } |
-            Op::Contiguous { input } => {
-                Ok(get(*input)?.clone())
-            }
+            Op::Reshape { input, .. }
+            | Op::Transpose { input, .. }
+            | Op::Squeeze { input, .. }
+            | Op::Unsqueeze { input, .. }
+            | Op::Broadcast { input, .. }
+            | Op::Contiguous { input } => Ok(get(*input)?.clone()),
 
             // Matrix multiplication
             Op::MatMul { lhs, rhs } => {
@@ -306,28 +318,45 @@ impl CompiledFunction {
             Op::Gt { lhs, rhs } => {
                 let a = get(*lhs)?;
                 let b = get(*rhs)?;
-                Ok(a.iter().zip(b.iter()).map(|(x, y)| if x > y { 1.0 } else { 0.0 }).collect())
+                Ok(a.iter()
+                    .zip(b.iter())
+                    .map(|(x, y)| if x > y { 1.0 } else { 0.0 })
+                    .collect())
             }
 
             Op::Lt { lhs, rhs } => {
                 let a = get(*lhs)?;
                 let b = get(*rhs)?;
-                Ok(a.iter().zip(b.iter()).map(|(x, y)| if x < y { 1.0 } else { 0.0 }).collect())
+                Ok(a.iter()
+                    .zip(b.iter())
+                    .map(|(x, y)| if x < y { 1.0 } else { 0.0 })
+                    .collect())
             }
 
             Op::Eq { lhs, rhs } => {
                 let a = get(*lhs)?;
                 let b = get(*rhs)?;
-                Ok(a.iter().zip(b.iter()).map(|(x, y)| if (x - y).abs() < f32::EPSILON { 1.0 } else { 0.0 }).collect())
+                Ok(a.iter()
+                    .zip(b.iter())
+                    .map(|(x, y)| {
+                        if (x - y).abs() < f32::EPSILON {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect())
             }
 
             Op::Where { condition, x, y } => {
                 let cond = get(*condition)?;
                 let a = get(*x)?;
                 let b = get(*y)?;
-                Ok(cond.iter().zip(a.iter().zip(b.iter())).map(|(c, (a, b))| {
-                    if *c != 0.0 { *a } else { *b }
-                }).collect())
+                Ok(cond
+                    .iter()
+                    .zip(a.iter().zip(b.iter()))
+                    .map(|(c, (a, b))| if *c != 0.0 { *a } else { *b })
+                    .collect())
             }
 
             Op::Cast { input, .. } => {
@@ -427,7 +456,9 @@ fn reduce_axis(
 fn matmul_impl(a: &[f32], b: &[f32], a_shape: &[usize], b_shape: &[usize]) -> JitResult<Vec<f32>> {
     // Simple 2D matmul
     if a_shape.len() != 2 || b_shape.len() != 2 {
-        return Err(JitError::UnsupportedOp("Only 2D matmul supported in interpreter".to_string()));
+        return Err(JitError::UnsupportedOp(
+            "Only 2D matmul supported in interpreter".to_string(),
+        ));
     }
 
     let m = a_shape[0];
@@ -541,7 +572,9 @@ impl JitCompiler {
 
         let func_id = module
             .declare_function("jit_kernel", Linkage::Export, &sig)
-            .map_err(|e| JitError::CompilationFailed(format!("Failed to declare function: {}", e)))?;
+            .map_err(|e| {
+                JitError::CompilationFailed(format!("Failed to declare function: {}", e))
+            })?;
 
         let mut ctx = module.make_context();
         ctx.func.signature = sig;
@@ -581,9 +614,9 @@ impl JitCompiler {
         }
 
         // Compile the function
-        module
-            .define_function(func_id, &mut ctx)
-            .map_err(|e| JitError::CompilationFailed(format!("Failed to define function: {}", e)))?;
+        module.define_function(func_id, &mut ctx).map_err(|e| {
+            JitError::CompilationFailed(format!("Failed to define function: {}", e))
+        })?;
         module.clear_context(&mut ctx);
         module
             .finalize_definitions()
@@ -622,7 +655,9 @@ impl JitCompiler {
             Op::Input { name, .. } => {
                 // Load from input pointer at appropriate offset
                 let offset = self.get_input_offset(name);
-                Ok(builder.ins().load(types::F32, MemFlags::new(), input_ptr, offset))
+                Ok(builder
+                    .ins()
+                    .load(types::F32, MemFlags::new(), input_ptr, offset))
             }
 
             Op::Output { input, .. } => get(*input),

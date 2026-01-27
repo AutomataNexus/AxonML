@@ -59,9 +59,15 @@ impl TensorDataType {
         match self {
             TensorDataType::Undefined => 0,
             TensorDataType::Bool | TensorDataType::Int8 | TensorDataType::Uint8 => 1,
-            TensorDataType::Float16 | TensorDataType::Bfloat16 | TensorDataType::Int16 | TensorDataType::Uint16 => 2,
+            TensorDataType::Float16
+            | TensorDataType::Bfloat16
+            | TensorDataType::Int16
+            | TensorDataType::Uint16 => 2,
             TensorDataType::Float | TensorDataType::Int32 | TensorDataType::Uint32 => 4,
-            TensorDataType::Double | TensorDataType::Int64 | TensorDataType::Uint64 | TensorDataType::Complex64 => 8,
+            TensorDataType::Double
+            | TensorDataType::Int64
+            | TensorDataType::Uint64
+            | TensorDataType::Complex64 => 8,
             TensorDataType::Complex128 => 16,
             TensorDataType::String => 0, // Variable
         }
@@ -272,8 +278,8 @@ impl TensorProto {
             if self.raw_data.len() >= bytes_needed {
                 for (i, chunk) in self.raw_data[..bytes_needed].chunks_exact(8).enumerate() {
                     result[i] = i64::from_le_bytes([
-                        chunk[0], chunk[1], chunk[2], chunk[3],
-                        chunk[4], chunk[5], chunk[6], chunk[7],
+                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6],
+                        chunk[7],
                     ]);
                 }
             }
@@ -399,7 +405,9 @@ impl AttributeProto {
 
     /// Gets the string value.
     pub fn get_string(&self) -> Option<String> {
-        self.s.as_ref().and_then(|bytes| String::from_utf8(bytes.clone()).ok())
+        self.s
+            .as_ref()
+            .and_then(|bytes| String::from_utf8(bytes.clone()).ok())
     }
 }
 
@@ -485,7 +493,10 @@ impl GraphProto {
 
     /// Returns a map of initializer name to tensor.
     pub fn initializer_map(&self) -> HashMap<String, &TensorProto> {
-        self.initializer.iter().map(|t| (t.name.clone(), t)).collect()
+        self.initializer
+            .iter()
+            .map(|t| (t.name.clone(), t))
+            .collect()
     }
 }
 

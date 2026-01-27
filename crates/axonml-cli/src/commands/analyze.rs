@@ -122,7 +122,8 @@ fn execute_analyze_model(args: AnalyzeModelArgs) -> CliResult<()> {
             return Err(CliError::Model(format!("Model not found: {p}")));
         }
         let name = path
-            .file_stem().map_or_else(|| "model".to_string(), |s| s.to_string_lossy().to_string());
+            .file_stem()
+            .map_or_else(|| "model".to_string(), |s| s.to_string_lossy().to_string());
         (path, name)
     } else {
         // Use workspace
@@ -158,8 +159,8 @@ fn execute_analyze_model(args: AnalyzeModelArgs) -> CliResult<()> {
 }
 
 fn analyze_model(path: &PathBuf, name: &str) -> CliResult<ModelAnalysis> {
-    let state_dict = load_state_dict(path)
-        .map_err(|e| CliError::Model(format!("Failed to load model: {e}")))?;
+    let state_dict =
+        load_state_dict(path).map_err(|e| CliError::Model(format!("Failed to load model: {e}")))?;
 
     let file_size = fs::metadata(path)?.len();
     let format = detect_format(path);
@@ -287,8 +288,10 @@ fn execute_analyze_data(args: AnalyzeDataArgs) -> CliResult<()> {
         if !path_exists(&path) {
             return Err(CliError::Data(format!("Dataset not found: {p}")));
         }
-        let name = path
-            .file_name().map_or_else(|| "dataset".to_string(), |s| s.to_string_lossy().to_string());
+        let name = path.file_name().map_or_else(
+            || "dataset".to_string(),
+            |s| s.to_string_lossy().to_string(),
+        );
         (path, name)
     } else {
         let workspace = load_workspace()?;
@@ -332,7 +335,10 @@ fn analyze_data(path: &PathBuf, name: &str, max_samples: usize) -> CliResult<Dat
     let mut class_distribution: HashMap<String, usize> = HashMap::new();
 
     // Scan files
-    for entry in WalkDir::new(path).into_iter().filter_map(std::result::Result::ok) {
+    for entry in WalkDir::new(path)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+    {
         if entry.file_type().is_file() {
             file_stats.total_files += 1;
             if let Ok(meta) = entry.metadata() {
@@ -882,7 +888,8 @@ fn detect_data_type(path: &PathBuf) -> String {
 
     counts
         .into_iter()
-        .max_by_key(|(_, count)| *count).map_or_else(|| "unknown".to_string(), |(t, _)| t.to_string())
+        .max_by_key(|(_, count)| *count)
+        .map_or_else(|| "unknown".to_string(), |(t, _)| t.to_string())
 }
 
 fn infer_layer_type(name: &str, shape: &[usize]) -> String {
@@ -1001,14 +1008,12 @@ fn count_image_samples(
                         .filter_map(std::result::Result::ok)
                         .filter(|e| {
                             e.file_type().is_file()
-                                && e.path()
-                                    .extension()
-                                    .is_some_and(|ext| {
-                                        matches!(
-                                            ext.to_string_lossy().to_lowercase().as_str(),
-                                            "jpg" | "jpeg" | "png" | "bmp" | "gif"
-                                        )
-                                    })
+                                && e.path().extension().is_some_and(|ext| {
+                                    matches!(
+                                        ext.to_string_lossy().to_lowercase().as_str(),
+                                        "jpg" | "jpeg" | "png" | "bmp" | "gif"
+                                    )
+                                })
                         })
                         .count();
 
@@ -1039,11 +1044,7 @@ fn count_tabular_samples(
         .into_iter()
         .filter_map(std::result::Result::ok)
     {
-        if entry
-            .path()
-            .extension()
-            .is_some_and(|e| e == "csv")
-        {
+        if entry.path().extension().is_some_and(|e| e == "csv") {
             if let Ok(content) = fs::read_to_string(entry.path()) {
                 let lines: Vec<&str> = content.lines().collect();
                 let num_samples = lines.len().saturating_sub(1);

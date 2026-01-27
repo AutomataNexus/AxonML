@@ -164,7 +164,8 @@ pub fn log_softmax<T: Float>(x: &Tensor<T>, dim: i64) -> Result<Tensor<T>> {
 }
 
 /// Applies GELU (Gaussian Error Linear Unit) activation.
-#[must_use] pub fn gelu<T: Float>(x: &Tensor<T>) -> Tensor<T> {
+#[must_use]
+pub fn gelu<T: Float>(x: &Tensor<T>) -> Tensor<T> {
     let data = x.to_vec();
     let sqrt_2_over_pi = T::from(0.7978845608028654).unwrap();
     let coeff = T::from(0.044715).unwrap();
@@ -209,7 +210,8 @@ pub fn elu<T: Float>(x: &Tensor<T>, alpha: T) -> Tensor<T> {
 }
 
 /// Applies `SiLU` (Sigmoid Linear Unit) / Swish activation.
-#[must_use] pub fn silu<T: Float>(x: &Tensor<T>) -> Tensor<T> {
+#[must_use]
+pub fn silu<T: Float>(x: &Tensor<T>) -> Tensor<T> {
     let sig = x.sigmoid();
     x.mul(&sig).unwrap()
 }
@@ -349,16 +351,19 @@ pub fn topk<T: Numeric>(
     };
 
     if dim >= shape.len() {
-        return Err(axonml_core::error::Error::invalid_operation(
-            format!("Dimension {} out of range for tensor with {} dimensions", dim, shape.len()),
-        ));
+        return Err(axonml_core::error::Error::invalid_operation(format!(
+            "Dimension {} out of range for tensor with {} dimensions",
+            dim,
+            shape.len()
+        )));
     }
 
     let dim_size = shape[dim];
     if k > dim_size {
-        return Err(axonml_core::error::Error::invalid_operation(
-            format!("k ({}) is larger than dimension size ({})", k, dim_size),
-        ));
+        return Err(axonml_core::error::Error::invalid_operation(format!(
+            "k ({}) is larger than dimension size ({})",
+            k, dim_size
+        )));
     }
 
     let data = x.to_vec();
@@ -510,13 +515,16 @@ pub fn scatter<T: Scalar>(
     let src_shape = src.shape();
 
     if idx_shape != src_shape {
-        return Err(axonml_core::error::Error::shape_mismatch(idx_shape, src_shape));
+        return Err(axonml_core::error::Error::shape_mismatch(
+            idx_shape, src_shape,
+        ));
     }
 
     if dim >= dst_shape.len() {
-        return Err(axonml_core::error::Error::invalid_operation(
-            format!("Dimension {} out of range", dim),
-        ));
+        return Err(axonml_core::error::Error::invalid_operation(format!(
+            "Dimension {} out of range",
+            dim
+        )));
     }
 
     let mut result = dst.to_vec();
@@ -679,7 +687,10 @@ pub fn unique<T: Numeric>(
         }
 
         let sorted_vals: Vec<T> = indexed.iter().map(|(_, v)| *v).collect();
-        let sorted_counts: Vec<i64> = indexed.iter().map(|(old_idx, _)| counts_map[*old_idx]).collect();
+        let sorted_counts: Vec<i64> = indexed
+            .iter()
+            .map(|(old_idx, _)| counts_map[*old_idx])
+            .collect();
         let updated_inverse: Vec<i64> = inverse.iter().map(|&i| old_to_new[i as usize]).collect();
 
         (sorted_vals, updated_inverse, sorted_counts)
@@ -716,9 +727,10 @@ pub fn flip<T: Numeric>(x: &Tensor<T>, dims: &[usize]) -> Result<Tensor<T>> {
 
     for &d in dims {
         if d >= ndim {
-            return Err(axonml_core::error::Error::invalid_operation(
-                format!("Dimension {} out of range for tensor with {} dimensions", d, ndim),
-            ));
+            return Err(axonml_core::error::Error::invalid_operation(format!(
+                "Dimension {} out of range for tensor with {} dimensions",
+                d, ndim
+            )));
         }
     }
 
@@ -778,9 +790,10 @@ pub fn roll<T: Numeric>(x: &Tensor<T>, shifts: &[i64], dims: &[usize]) -> Result
 
     for &d in dims {
         if d >= ndim {
-            return Err(axonml_core::error::Error::invalid_operation(
-                format!("Dimension {} out of range", d),
-            ));
+            return Err(axonml_core::error::Error::invalid_operation(format!(
+                "Dimension {} out of range",
+                d
+            )));
         }
     }
 
@@ -932,7 +945,10 @@ mod tests {
         let result = unique(&t, true, true, true);
 
         assert_eq!(result.values.to_vec(), vec![1.0, 2.0, 3.0]);
-        assert_eq!(result.inverse_indices.unwrap().to_vec(), vec![0, 1, 0, 2, 1, 0]);
+        assert_eq!(
+            result.inverse_indices.unwrap().to_vec(),
+            vec![0, 1, 0, 2, 1, 0]
+        );
         assert_eq!(result.counts.unwrap().to_vec(), vec![3, 2, 1]);
     }
 

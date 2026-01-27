@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 /// Latency histogram bucket
 #[derive(Debug, Clone)]
 pub struct LatencyBucket {
-    pub le: f64,     // Less than or equal to (milliseconds)
+    pub le: f64, // Less than or equal to (milliseconds)
     pub count: u64,
 }
 
@@ -21,7 +21,7 @@ pub struct EndpointMetrics {
     pub requests_total: u64,
     pub requests_success: u64,
     pub requests_error: u64,
-    pub latencies: Vec<f64>,  // Last N latencies for percentile calculation
+    pub latencies: Vec<f64>, // Last N latencies for percentile calculation
     pub created_at: Instant,
     pub last_request_at: Option<Instant>,
 }
@@ -114,11 +114,16 @@ impl EndpointMetrics {
 
     /// Get latency histogram buckets for Prometheus-style metrics
     pub fn latency_histogram(&self) -> Vec<LatencyBucket> {
-        let buckets = [1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0];
-        buckets.iter().map(|&le| {
-            let count = self.latencies.iter().filter(|&&l| l <= le).count() as u64;
-            LatencyBucket { le, count }
-        }).collect()
+        let buckets = [
+            1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0,
+        ];
+        buckets
+            .iter()
+            .map(|&le| {
+                let count = self.latencies.iter().filter(|&&l| l <= le).count() as u64;
+                LatencyBucket { le, count }
+            })
+            .collect()
     }
 
     /// Get requests per second

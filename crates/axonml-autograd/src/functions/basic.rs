@@ -26,7 +26,8 @@ pub struct AddBackward {
 
 impl AddBackward {
     /// Creates a new `AddBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         lhs_grad_fn: Option<GradFn>,
         rhs_grad_fn: Option<GradFn>,
         lhs_shape: Vec<usize>,
@@ -75,7 +76,8 @@ pub struct SubBackward {
 
 impl SubBackward {
     /// Creates a new `SubBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         lhs_grad_fn: Option<GradFn>,
         rhs_grad_fn: Option<GradFn>,
         lhs_shape: Vec<usize>,
@@ -124,7 +126,8 @@ pub struct MulBackward {
 
 impl MulBackward {
     /// Creates a new `MulBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         lhs_grad_fn: Option<GradFn>,
         rhs_grad_fn: Option<GradFn>,
         lhs: Tensor<f32>,
@@ -180,7 +183,8 @@ pub struct DivBackward {
 
 impl DivBackward {
     /// Creates a new `DivBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         lhs_grad_fn: Option<GradFn>,
         rhs_grad_fn: Option<GradFn>,
         lhs: Tensor<f32>,
@@ -236,7 +240,8 @@ pub struct NegBackward {
 
 impl NegBackward {
     /// Creates a new `NegBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
         }
@@ -277,7 +282,8 @@ pub struct PowBackward {
 
 impl PowBackward {
     /// Creates a new `PowBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, input: Tensor<f32>, exponent: f32) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, input: Tensor<f32>, exponent: f32) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             saved_input: input,
@@ -323,7 +329,8 @@ pub struct SumBackward {
 
 impl SumBackward {
     /// Creates a new `SumBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, input_shape: Vec<usize>) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, input_shape: Vec<usize>) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             input_shape,
@@ -368,7 +375,8 @@ pub struct MeanBackward {
 
 impl MeanBackward {
     /// Creates a new `MeanBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, input_shape: Vec<usize>) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, input_shape: Vec<usize>) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             input_shape,
@@ -416,7 +424,12 @@ pub struct NarrowBackward {
 impl NarrowBackward {
     /// Creates a new `NarrowBackward`.
     #[must_use]
-    pub fn new(input_grad_fn: Option<GradFn>, input_shape: Vec<usize>, dim: usize, start: usize) -> Self {
+    pub fn new(
+        input_grad_fn: Option<GradFn>,
+        input_shape: Vec<usize>,
+        dim: usize,
+        start: usize,
+    ) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             input_shape,
@@ -457,7 +470,11 @@ impl GradientFunction for NarrowBackward {
             indices[self.dim] += self.start;
 
             // Compute linear index in input
-            let in_idx: usize = indices.iter().zip(strides.iter()).map(|(&i, &s)| i * s).sum();
+            let in_idx: usize = indices
+                .iter()
+                .zip(strides.iter())
+                .map(|(&i, &s)| i * s)
+                .sum();
             grad_data[in_idx] = grad_out_data[out_idx];
         }
 

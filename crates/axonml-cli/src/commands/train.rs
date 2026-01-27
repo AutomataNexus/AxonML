@@ -17,7 +17,7 @@ use axonml_nn::{Conv2d, Dropout, Linear, MaxPool2d, Module, ReLU, Sequential};
 use axonml_optim::{Adam, AdamW, Optimizer, RMSprop, SGD};
 use axonml_serialize::{save_state_dict, Format, StateDict};
 use axonml_tensor::Tensor;
-use axonml_vision::{MNIST, CIFAR10, FashionMNIST};
+use axonml_vision::{FashionMNIST, CIFAR10, MNIST};
 
 use super::utils::{
     ensure_dir, epoch_progress_bar, parse_device, print_header, print_info, print_kv, print_success,
@@ -336,7 +336,6 @@ impl TrainableModel for SimpleCNN {
         } else {
             x
         };
-        
 
         self.fc2.forward(&x)
     }
@@ -533,8 +532,7 @@ fn load_dataset(args: &TrainArgs) -> Result<TrainDataset, String> {
 
     // Detect or use specified format
     let format = args.format.clone().unwrap_or_else(|| {
-        TrainDataset::detect_format(&data_path)
-            .unwrap_or_else(|| "mnist".to_string())
+        TrainDataset::detect_format(&data_path).unwrap_or_else(|| "mnist".to_string())
     });
 
     TrainDataset::load(&data_path, &format, true) // true = training set

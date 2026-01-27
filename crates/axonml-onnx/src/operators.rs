@@ -5,12 +5,12 @@
 //! @version 0.1.0
 //! @author AutomataNexus Development Team
 
-use axonml_tensor::Tensor;
-use axonml_tensor::ops::{softmax, leaky_relu, gelu, clamp, eq, lt, gt};
-use axonml_tensor::view::cat;
-use axonml_tensor::creation::zeros;
-use crate::proto::NodeProto;
 use crate::error::{OnnxError, OnnxResult};
+use crate::proto::NodeProto;
+use axonml_tensor::creation::zeros;
+use axonml_tensor::ops::{clamp, eq, gelu, gt, leaky_relu, lt, softmax};
+use axonml_tensor::view::cat;
+use axonml_tensor::Tensor;
 use std::fmt::Debug;
 
 // =============================================================================
@@ -212,14 +212,17 @@ pub struct ReluOp;
 
 impl OnnxOperator for ReluOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first()
+        let input = inputs
+            .first()
             .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         Ok(vec![input.relu()])
     }
 
-    fn name(&self) -> &str { "Relu" }
+    fn name(&self) -> &str {
+        "Relu"
+    }
 }
 
 /// Sigmoid activation: 1 / (1 + exp(-x))
@@ -228,14 +231,17 @@ pub struct SigmoidOp;
 
 impl OnnxOperator for SigmoidOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first()
+        let input = inputs
+            .first()
             .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         Ok(vec![input.sigmoid()])
     }
 
-    fn name(&self) -> &str { "Sigmoid" }
+    fn name(&self) -> &str {
+        "Sigmoid"
+    }
 }
 
 /// Tanh activation
@@ -244,14 +250,17 @@ pub struct TanhOp;
 
 impl OnnxOperator for TanhOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first()
+        let input = inputs
+            .first()
             .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         Ok(vec![input.tanh()])
     }
 
-    fn name(&self) -> &str { "Tanh" }
+    fn name(&self) -> &str {
+        "Tanh"
+    }
 }
 
 /// Softmax activation
@@ -269,7 +278,8 @@ impl SoftmaxOp {
 
 impl OnnxOperator for SoftmaxOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first()
+        let input = inputs
+            .first()
             .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
@@ -278,7 +288,9 @@ impl OnnxOperator for SoftmaxOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Softmax" }
+    fn name(&self) -> &str {
+        "Softmax"
+    }
 }
 
 /// LeakyReLU activation
@@ -296,14 +308,17 @@ impl LeakyReluOp {
 
 impl OnnxOperator for LeakyReluOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first()
+        let input = inputs
+            .first()
             .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         Ok(vec![leaky_relu(input, self.alpha)])
     }
 
-    fn name(&self) -> &str { "LeakyRelu" }
+    fn name(&self) -> &str {
+        "LeakyRelu"
+    }
 }
 
 /// GELU activation
@@ -312,14 +327,17 @@ pub struct GeluOp;
 
 impl OnnxOperator for GeluOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first()
+        let input = inputs
+            .first()
             .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         Ok(vec![gelu(input)])
     }
 
-    fn name(&self) -> &str { "Gelu" }
+    fn name(&self) -> &str {
+        "Gelu"
+    }
 }
 
 // =============================================================================
@@ -332,9 +350,13 @@ pub struct AddOp;
 
 impl OnnxOperator for AddOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let a = inputs.first().and_then(|i| *i)
+        let a = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("A".to_string()))?;
-        let b = inputs.get(1).and_then(|i| *i)
+        let b = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("B".to_string()))?;
 
         a.add(b)
@@ -342,7 +364,9 @@ impl OnnxOperator for AddOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Add" }
+    fn name(&self) -> &str {
+        "Add"
+    }
 }
 
 /// Element-wise subtraction
@@ -351,9 +375,13 @@ pub struct SubOp;
 
 impl OnnxOperator for SubOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let a = inputs.first().and_then(|i| *i)
+        let a = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("A".to_string()))?;
-        let b = inputs.get(1).and_then(|i| *i)
+        let b = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("B".to_string()))?;
 
         a.sub(b)
@@ -361,7 +389,9 @@ impl OnnxOperator for SubOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Sub" }
+    fn name(&self) -> &str {
+        "Sub"
+    }
 }
 
 /// Element-wise multiplication
@@ -370,9 +400,13 @@ pub struct MulOp;
 
 impl OnnxOperator for MulOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let a = inputs.first().and_then(|i| *i)
+        let a = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("A".to_string()))?;
-        let b = inputs.get(1).and_then(|i| *i)
+        let b = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("B".to_string()))?;
 
         a.mul(b)
@@ -380,7 +414,9 @@ impl OnnxOperator for MulOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Mul" }
+    fn name(&self) -> &str {
+        "Mul"
+    }
 }
 
 /// Element-wise division
@@ -389,9 +425,13 @@ pub struct DivOp;
 
 impl OnnxOperator for DivOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let a = inputs.first().and_then(|i| *i)
+        let a = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("A".to_string()))?;
-        let b = inputs.get(1).and_then(|i| *i)
+        let b = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("B".to_string()))?;
 
         a.div(b)
@@ -399,7 +439,9 @@ impl OnnxOperator for DivOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Div" }
+    fn name(&self) -> &str {
+        "Div"
+    }
 }
 
 /// Matrix multiplication
@@ -408,9 +450,13 @@ pub struct MatMulOp;
 
 impl OnnxOperator for MatMulOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let a = inputs.first().and_then(|i| *i)
+        let a = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("A".to_string()))?;
-        let b = inputs.get(1).and_then(|i| *i)
+        let b = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("B".to_string()))?;
 
         a.matmul(b)
@@ -418,7 +464,9 @@ impl OnnxOperator for MatMulOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "MatMul" }
+    fn name(&self) -> &str {
+        "MatMul"
+    }
 }
 
 /// Gemm: Y = alpha * A @ B + beta * C
@@ -443,24 +491,31 @@ impl GemmOp {
 
 impl OnnxOperator for GemmOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let a = inputs.first().and_then(|i| *i)
+        let a = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("A".to_string()))?;
-        let b = inputs.get(1).and_then(|i| *i)
+        let b = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("B".to_string()))?;
 
         let a_t = if self.trans_a {
-            a.transpose(0, 1).map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?
+            a.transpose(0, 1)
+                .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?
         } else {
             a.clone()
         };
 
         let b_t = if self.trans_b {
-            b.transpose(0, 1).map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?
+            b.transpose(0, 1)
+                .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?
         } else {
             b.clone()
         };
 
-        let mut result = a_t.matmul(&b_t)
+        let mut result = a_t
+            .matmul(&b_t)
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
 
         if (self.alpha - 1.0).abs() > 1e-6 {
@@ -474,14 +529,17 @@ impl OnnxOperator for GemmOp {
             } else {
                 (*c).clone()
             };
-            result = result.add(&bias_scaled)
+            result = result
+                .add(&bias_scaled)
                 .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
         }
 
         Ok(vec![result])
     }
 
-    fn name(&self) -> &str { "Gemm" }
+    fn name(&self) -> &str {
+        "Gemm"
+    }
 }
 
 /// Square root
@@ -490,13 +548,17 @@ pub struct SqrtOp;
 
 impl OnnxOperator for SqrtOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         Ok(vec![input.sqrt()])
     }
 
-    fn name(&self) -> &str { "Sqrt" }
+    fn name(&self) -> &str {
+        "Sqrt"
+    }
 }
 
 /// Power
@@ -505,9 +567,13 @@ pub struct PowOp;
 
 impl OnnxOperator for PowOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let base = inputs.first().and_then(|i| *i)
+        let base = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("base".to_string()))?;
-        let exp = inputs.get(1).and_then(|i| *i)
+        let exp = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("exponent".to_string()))?;
 
         // Get exponent value (assume scalar or broadcast)
@@ -515,7 +581,9 @@ impl OnnxOperator for PowOp {
         Ok(vec![base.pow(exp_val)])
     }
 
-    fn name(&self) -> &str { "Pow" }
+    fn name(&self) -> &str {
+        "Pow"
+    }
 }
 
 /// Exponential
@@ -524,13 +592,17 @@ pub struct ExpOp;
 
 impl OnnxOperator for ExpOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         Ok(vec![input.exp()])
     }
 
-    fn name(&self) -> &str { "Exp" }
+    fn name(&self) -> &str {
+        "Exp"
+    }
 }
 
 /// Natural logarithm
@@ -539,13 +611,17 @@ pub struct LogOp;
 
 impl OnnxOperator for LogOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         Ok(vec![input.ln()])
     }
 
-    fn name(&self) -> &str { "Log" }
+    fn name(&self) -> &str {
+        "Log"
+    }
 }
 
 // =============================================================================
@@ -558,22 +634,25 @@ pub struct ReshapeOp;
 
 impl OnnxOperator for ReshapeOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let data = inputs.first().and_then(|i| *i)
+        let data = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("data".to_string()))?;
-        let shape_tensor = inputs.get(1).and_then(|i| *i)
+        let shape_tensor = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("shape".to_string()))?;
 
-        let shape: Vec<isize> = shape_tensor.to_vec()
-            .iter()
-            .map(|&x| x as isize)
-            .collect();
+        let shape: Vec<isize> = shape_tensor.to_vec().iter().map(|&x| x as isize).collect();
 
         data.reshape(&shape)
             .map(|t| vec![t])
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Reshape" }
+    fn name(&self) -> &str {
+        "Reshape"
+    }
 }
 
 /// Transpose operator
@@ -591,7 +670,9 @@ impl TransposeOp {
 
 impl OnnxOperator for TransposeOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         let perm: Vec<usize> = if let Some(ref p) = self.perm {
@@ -601,12 +682,15 @@ impl OnnxOperator for TransposeOp {
             (0..input.ndim()).rev().collect()
         };
 
-        input.permute(&perm)
+        input
+            .permute(&perm)
             .map(|t| vec![t])
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Transpose" }
+    fn name(&self) -> &str {
+        "Transpose"
+    }
 }
 
 /// Flatten operator
@@ -624,7 +708,9 @@ impl FlattenOp {
 
 impl OnnxOperator for FlattenOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         let axis = if self.axis < 0 {
@@ -637,12 +723,15 @@ impl OnnxOperator for FlattenOp {
         let dim0: usize = shape[..axis].iter().product();
         let dim1: usize = shape[axis..].iter().product();
 
-        input.reshape(&[dim0 as isize, dim1 as isize])
+        input
+            .reshape(&[dim0 as isize, dim1 as isize])
             .map(|t| vec![t])
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Flatten" }
+    fn name(&self) -> &str {
+        "Flatten"
+    }
 }
 
 /// Squeeze operator
@@ -660,11 +749,15 @@ impl SqueezeOp {
 
 impl OnnxOperator for SqueezeOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         // If axes tensor provided (ONNX opset >= 13), use it
-        let axes_from_input = inputs.get(1).and_then(|i| *i)
+        let axes_from_input = inputs
+            .get(1)
+            .and_then(|i| *i)
             .map(|t| t.to_vec().iter().map(|&x| x as i64).collect::<Vec<_>>());
 
         let axes = axes_from_input.or_else(|| self.axes.clone());
@@ -672,19 +765,23 @@ impl OnnxOperator for SqueezeOp {
         if let Some(axes) = axes {
             let mut result = input.clone();
             for &axis in axes.iter().rev() {
-                result = result.squeeze(Some(axis))
+                result = result
+                    .squeeze(Some(axis))
                     .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
             }
             Ok(vec![result])
         } else {
             // Squeeze all dimensions of size 1
-            input.squeeze(None)
+            input
+                .squeeze(None)
                 .map(|t| vec![t])
                 .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
         }
     }
 
-    fn name(&self) -> &str { "Squeeze" }
+    fn name(&self) -> &str {
+        "Squeeze"
+    }
 }
 
 /// Unsqueeze operator
@@ -702,13 +799,18 @@ impl UnsqueezeOp {
 
 impl OnnxOperator for UnsqueezeOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
-        let axes_from_input = inputs.get(1).and_then(|i| *i)
+        let axes_from_input = inputs
+            .get(1)
+            .and_then(|i| *i)
             .map(|t| t.to_vec().iter().map(|&x| x as i64).collect::<Vec<_>>());
 
-        let axes = axes_from_input.or_else(|| self.axes.clone())
+        let axes = axes_from_input
+            .or_else(|| self.axes.clone())
             .ok_or_else(|| OnnxError::MissingAttribute("axes".to_string()))?;
 
         let mut result = input.clone();
@@ -716,14 +818,17 @@ impl OnnxOperator for UnsqueezeOp {
         sorted_axes.sort();
 
         for &axis in &sorted_axes {
-            result = result.unsqueeze(axis)
+            result = result
+                .unsqueeze(axis)
                 .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
         }
 
         Ok(vec![result])
     }
 
-    fn name(&self) -> &str { "Unsqueeze" }
+    fn name(&self) -> &str {
+        "Unsqueeze"
+    }
 }
 
 /// Concat operator
@@ -734,7 +839,8 @@ pub struct ConcatOp {
 
 impl ConcatOp {
     fn from_node(node: &NodeProto) -> OnnxResult<Self> {
-        let axis = node.get_int("axis")
+        let axis = node
+            .get_int("axis")
             .ok_or_else(|| OnnxError::MissingAttribute("axis".to_string()))?;
         Ok(Self { axis })
     }
@@ -742,9 +848,8 @@ impl ConcatOp {
 
 impl OnnxOperator for ConcatOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let tensors: Vec<Tensor<f32>> = inputs.iter()
-            .filter_map(|i| i.map(|t| t.clone()))
-            .collect();
+        let tensors: Vec<Tensor<f32>> =
+            inputs.iter().filter_map(|i| i.map(|t| t.clone())).collect();
 
         if tensors.is_empty() {
             return Err(OnnxError::MissingAttribute("inputs".to_string()));
@@ -761,7 +866,9 @@ impl OnnxOperator for ConcatOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Concat" }
+    fn name(&self) -> &str {
+        "Concat"
+    }
 }
 
 /// Gather operator
@@ -779,16 +886,17 @@ impl GatherOp {
 
 impl OnnxOperator for GatherOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let data = inputs.first().and_then(|i| *i)
+        let data = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("data".to_string()))?;
-        let indices_f32 = inputs.get(1).and_then(|i| *i)
+        let indices_f32 = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("indices".to_string()))?;
 
         // Convert f32 indices to i64
-        let indices_data: Vec<i64> = indices_f32.to_vec()
-            .iter()
-            .map(|&x| x as i64)
-            .collect();
+        let indices_data: Vec<i64> = indices_f32.to_vec().iter().map(|&x| x as i64).collect();
         let indices = Tensor::<i64>::from_vec(indices_data, indices_f32.shape())
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
 
@@ -803,7 +911,9 @@ impl OnnxOperator for GatherOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Gather" }
+    fn name(&self) -> &str {
+        "Gather"
+    }
 }
 
 // =============================================================================
@@ -827,11 +937,15 @@ impl ReduceSumOp {
 
 impl OnnxOperator for ReduceSumOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         // Check for axes from second input (opset >= 13)
-        let axes_from_input = inputs.get(1).and_then(|i| *i)
+        let axes_from_input = inputs
+            .get(1)
+            .and_then(|i| *i)
             .map(|t| t.to_vec().iter().map(|&x| x as i64).collect::<Vec<_>>());
 
         let axes = axes_from_input.or_else(|| self.axes.clone());
@@ -839,9 +953,8 @@ impl OnnxOperator for ReduceSumOp {
         if let Some(ref axes_vec) = axes {
             if !axes_vec.is_empty() {
                 // Perform dimension-specific reduction
-                let result = reduce_along_axes(input, axes_vec, self.keepdims, |data| {
-                    data.iter().sum()
-                })?;
+                let result =
+                    reduce_along_axes(input, axes_vec, self.keepdims, |data| data.iter().sum())?;
                 return Ok(vec![result]);
             }
         }
@@ -849,7 +962,9 @@ impl OnnxOperator for ReduceSumOp {
         Ok(vec![input.sum()])
     }
 
-    fn name(&self) -> &str { "ReduceSum" }
+    fn name(&self) -> &str {
+        "ReduceSum"
+    }
 }
 
 /// ReduceMean operator
@@ -869,25 +984,34 @@ impl ReduceMeanOp {
 
 impl OnnxOperator for ReduceMeanOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         if let Some(ref axes_vec) = self.axes {
             if !axes_vec.is_empty() {
                 // Perform dimension-specific reduction
                 let result = reduce_along_axes(input, axes_vec, self.keepdims, |data| {
-                    if data.is_empty() { 0.0 } else { data.iter().sum::<f32>() / data.len() as f32 }
+                    if data.is_empty() {
+                        0.0
+                    } else {
+                        data.iter().sum::<f32>() / data.len() as f32
+                    }
                 })?;
                 return Ok(vec![result]);
             }
         }
         // Global mean
-        input.mean()
+        input
+            .mean()
             .map(|t| vec![t])
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "ReduceMean" }
+    fn name(&self) -> &str {
+        "ReduceMean"
+    }
 }
 
 /// ReduceMax operator
@@ -907,7 +1031,9 @@ impl ReduceMaxOp {
 
 impl OnnxOperator for ReduceMaxOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         if let Some(ref axes_vec) = self.axes {
@@ -920,12 +1046,15 @@ impl OnnxOperator for ReduceMaxOp {
             }
         }
         // Global max
-        input.max()
+        input
+            .max()
             .map(|t| vec![t])
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "ReduceMax" }
+    fn name(&self) -> &str {
+        "ReduceMax"
+    }
 }
 
 // =============================================================================
@@ -945,10 +1074,22 @@ pub struct ConvOp {
 impl ConvOp {
     fn from_node(node: &NodeProto) -> OnnxResult<Self> {
         Ok(Self {
-            kernel_shape: node.get_ints("kernel_shape").map(|k| k.to_vec()).unwrap_or_default(),
-            strides: node.get_ints("strides").map(|s| s.to_vec()).unwrap_or_else(|| vec![1, 1]),
-            pads: node.get_ints("pads").map(|p| p.to_vec()).unwrap_or_else(|| vec![0, 0, 0, 0]),
-            dilations: node.get_ints("dilations").map(|d| d.to_vec()).unwrap_or_else(|| vec![1, 1]),
+            kernel_shape: node
+                .get_ints("kernel_shape")
+                .map(|k| k.to_vec())
+                .unwrap_or_default(),
+            strides: node
+                .get_ints("strides")
+                .map(|s| s.to_vec())
+                .unwrap_or_else(|| vec![1, 1]),
+            pads: node
+                .get_ints("pads")
+                .map(|p| p.to_vec())
+                .unwrap_or_else(|| vec![0, 0, 0, 0]),
+            dilations: node
+                .get_ints("dilations")
+                .map(|d| d.to_vec())
+                .unwrap_or_else(|| vec![1, 1]),
             group: node.get_int("group").unwrap_or(1),
         })
     }
@@ -956,9 +1097,13 @@ impl ConvOp {
 
 impl OnnxOperator for ConvOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("X".to_string()))?;
-        let weight = inputs.get(1).and_then(|i| *i)
+        let weight = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("W".to_string()))?;
         let bias = inputs.get(2).and_then(|i| *i);
 
@@ -969,7 +1114,7 @@ impl OnnxOperator for ConvOp {
 
         if input_shape.len() != 4 || weight_shape.len() != 4 {
             return Err(OnnxError::InvalidShape(
-                "Conv requires 4D input and weight tensors".to_string()
+                "Conv requires 4D input and weight tensors".to_string(),
             ));
         }
 
@@ -979,8 +1124,16 @@ impl OnnxOperator for ConvOp {
         let in_w = input_shape[3];
 
         let out_channels = weight_shape[0];
-        let kernel_h = self.kernel_shape.get(0).copied().unwrap_or(weight_shape[2] as i64) as usize;
-        let kernel_w = self.kernel_shape.get(1).copied().unwrap_or(weight_shape[3] as i64) as usize;
+        let kernel_h = self
+            .kernel_shape
+            .get(0)
+            .copied()
+            .unwrap_or(weight_shape[2] as i64) as usize;
+        let kernel_w = self
+            .kernel_shape
+            .get(1)
+            .copied()
+            .unwrap_or(weight_shape[3] as i64) as usize;
 
         let stride_h = self.strides.get(0).copied().unwrap_or(1) as usize;
         let stride_w = self.strides.get(1).copied().unwrap_or(1) as usize;
@@ -996,8 +1149,10 @@ impl OnnxOperator for ConvOp {
         let group = self.group as usize;
 
         // Calculate output dimensions
-        let out_h = (in_h + pad_h_begin + pad_h_end - dilation_h * (kernel_h - 1) - 1) / stride_h + 1;
-        let out_w = (in_w + pad_w_begin + pad_w_end - dilation_w * (kernel_w - 1) - 1) / stride_w + 1;
+        let out_h =
+            (in_h + pad_h_begin + pad_h_end - dilation_h * (kernel_h - 1) - 1) / stride_h + 1;
+        let out_w =
+            (in_w + pad_w_begin + pad_w_end - dilation_w * (kernel_w - 1) - 1) / stride_w + 1;
 
         let input_data = input.to_vec();
         let weight_data = weight.to_vec();
@@ -1023,16 +1178,23 @@ impl OnnxOperator for ConvOp {
 
                                 for kh in 0..kernel_h {
                                     for kw in 0..kernel_w {
-                                        let ih = (oh * stride_h + kh * dilation_h) as isize - pad_h_begin as isize;
-                                        let iw = (ow * stride_w + kw * dilation_w) as isize - pad_w_begin as isize;
+                                        let ih = (oh * stride_h + kh * dilation_h) as isize
+                                            - pad_h_begin as isize;
+                                        let iw = (ow * stride_w + kw * dilation_w) as isize
+                                            - pad_w_begin as isize;
 
-                                        if ih >= 0 && ih < in_h as isize && iw >= 0 && iw < in_w as isize {
+                                        if ih >= 0
+                                            && ih < in_h as isize
+                                            && iw >= 0
+                                            && iw < in_w as isize
+                                        {
                                             let input_idx = b * in_channels * in_h * in_w
                                                 + in_c * in_h * in_w
                                                 + ih as usize * in_w
                                                 + iw as usize;
 
-                                            let weight_idx = out_c * (in_channels_per_group * kernel_h * kernel_w)
+                                            let weight_idx = out_c
+                                                * (in_channels_per_group * kernel_h * kernel_w)
                                                 + ic * kernel_h * kernel_w
                                                 + kh * kernel_w
                                                 + kw;
@@ -1064,7 +1226,9 @@ impl OnnxOperator for ConvOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Conv" }
+    fn name(&self) -> &str {
+        "Conv"
+    }
 }
 
 /// MaxPool operator - 2D max pooling
@@ -1078,22 +1242,34 @@ pub struct MaxPoolOp {
 impl MaxPoolOp {
     fn from_node(node: &NodeProto) -> OnnxResult<Self> {
         Ok(Self {
-            kernel_shape: node.get_ints("kernel_shape").map(|k| k.to_vec()).unwrap_or_default(),
-            strides: node.get_ints("strides").map(|s| s.to_vec()).unwrap_or_else(|| vec![1, 1]),
-            pads: node.get_ints("pads").map(|p| p.to_vec()).unwrap_or_else(|| vec![0, 0, 0, 0]),
+            kernel_shape: node
+                .get_ints("kernel_shape")
+                .map(|k| k.to_vec())
+                .unwrap_or_default(),
+            strides: node
+                .get_ints("strides")
+                .map(|s| s.to_vec())
+                .unwrap_or_else(|| vec![1, 1]),
+            pads: node
+                .get_ints("pads")
+                .map(|p| p.to_vec())
+                .unwrap_or_else(|| vec![0, 0, 0, 0]),
         })
     }
 }
 
 impl OnnxOperator for MaxPoolOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let x = inputs.first().and_then(|i| *i)
+        let x = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("X".to_string()))?;
 
         let shape = x.shape();
         if shape.len() != 4 {
             return Err(OnnxError::InvalidShape(format!(
-                "MaxPool requires 4D input [N,C,H,W], got {:?}", shape
+                "MaxPool requires 4D input [N,C,H,W], got {:?}",
+                shape
             )));
         }
 
@@ -1125,13 +1301,17 @@ impl OnnxOperator for MaxPoolOp {
                                 let iw = (ow * sw + kwi) as isize - pad_left as isize;
 
                                 if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
-                                    let idx = batch * c * h * w + channel * h * w + ih as usize * w + iw as usize;
+                                    let idx = batch * c * h * w
+                                        + channel * h * w
+                                        + ih as usize * w
+                                        + iw as usize;
                                     max_val = max_val.max(x_data[idx]);
                                 }
                             }
                         }
 
-                        let out_idx = batch * c * out_h * out_w + channel * out_h * out_w + oh * out_w + ow;
+                        let out_idx =
+                            batch * c * out_h * out_w + channel * out_h * out_w + oh * out_w + ow;
                         output[out_idx] = max_val;
                     }
                 }
@@ -1143,7 +1323,9 @@ impl OnnxOperator for MaxPoolOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "MaxPool" }
+    fn name(&self) -> &str {
+        "MaxPool"
+    }
 }
 
 /// AveragePool operator - 2D average pooling
@@ -1158,9 +1340,18 @@ pub struct AvgPoolOp {
 impl AvgPoolOp {
     fn from_node(node: &NodeProto) -> OnnxResult<Self> {
         Ok(Self {
-            kernel_shape: node.get_ints("kernel_shape").map(|k| k.to_vec()).unwrap_or_default(),
-            strides: node.get_ints("strides").map(|s| s.to_vec()).unwrap_or_else(|| vec![1, 1]),
-            pads: node.get_ints("pads").map(|p| p.to_vec()).unwrap_or_else(|| vec![0, 0, 0, 0]),
+            kernel_shape: node
+                .get_ints("kernel_shape")
+                .map(|k| k.to_vec())
+                .unwrap_or_default(),
+            strides: node
+                .get_ints("strides")
+                .map(|s| s.to_vec())
+                .unwrap_or_else(|| vec![1, 1]),
+            pads: node
+                .get_ints("pads")
+                .map(|p| p.to_vec())
+                .unwrap_or_else(|| vec![0, 0, 0, 0]),
             count_include_pad: node.get_int("count_include_pad").unwrap_or(0) != 0,
         })
     }
@@ -1168,13 +1359,16 @@ impl AvgPoolOp {
 
 impl OnnxOperator for AvgPoolOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let x = inputs.first().and_then(|i| *i)
+        let x = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("X".to_string()))?;
 
         let shape = x.shape();
         if shape.len() != 4 {
             return Err(OnnxError::InvalidShape(format!(
-                "AveragePool requires 4D input [N,C,H,W], got {:?}", shape
+                "AveragePool requires 4D input [N,C,H,W], got {:?}",
+                shape
             )));
         }
 
@@ -1207,7 +1401,10 @@ impl OnnxOperator for AvgPoolOp {
                                 let iw = (ow * sw + kwi) as isize - pad_left as isize;
 
                                 if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
-                                    let idx = batch * c * h * w + channel * h * w + ih as usize * w + iw as usize;
+                                    let idx = batch * c * h * w
+                                        + channel * h * w
+                                        + ih as usize * w
+                                        + iw as usize;
                                     sum += x_data[idx];
                                     count += 1;
                                 } else if self.count_include_pad {
@@ -1216,7 +1413,8 @@ impl OnnxOperator for AvgPoolOp {
                             }
                         }
 
-                        let out_idx = batch * c * out_h * out_w + channel * out_h * out_w + oh * out_w + ow;
+                        let out_idx =
+                            batch * c * out_h * out_w + channel * out_h * out_w + oh * out_w + ow;
                         output[out_idx] = if count > 0 { sum / count as f32 } else { 0.0 };
                     }
                 }
@@ -1228,7 +1426,9 @@ impl OnnxOperator for AvgPoolOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "AveragePool" }
+    fn name(&self) -> &str {
+        "AveragePool"
+    }
 }
 
 /// BatchNormalization operator
@@ -1250,37 +1450,53 @@ impl BatchNormOp {
 
 impl OnnxOperator for BatchNormOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let x = inputs.first().and_then(|i| *i)
+        let x = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("X".to_string()))?;
-        let scale = inputs.get(1).and_then(|i| *i)
+        let scale = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("scale".to_string()))?;
-        let bias = inputs.get(2).and_then(|i| *i)
+        let bias = inputs
+            .get(2)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("B".to_string()))?;
-        let mean = inputs.get(3).and_then(|i| *i)
+        let mean = inputs
+            .get(3)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("mean".to_string()))?;
-        let var = inputs.get(4).and_then(|i| *i)
+        let var = inputs
+            .get(4)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("var".to_string()))?;
 
         // Batch norm: y = scale * (x - mean) / sqrt(var + eps) + bias
         // Simplified implementation for inference mode
-        let x_centered = x.sub(mean)
+        let x_centered = x
+            .sub(mean)
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
 
         let std = var.add_scalar(self.epsilon).sqrt();
 
-        let x_norm = x_centered.div(&std)
+        let x_norm = x_centered
+            .div(&std)
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
 
-        let scaled = x_norm.mul(scale)
+        let scaled = x_norm
+            .mul(scale)
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
 
-        let result = scaled.add(bias)
+        let result = scaled
+            .add(bias)
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
 
         Ok(vec![result])
     }
 
-    fn name(&self) -> &str { "BatchNormalization" }
+    fn name(&self) -> &str {
+        "BatchNormalization"
+    }
 }
 
 /// Dropout operator (inference mode - identity)
@@ -1289,14 +1505,18 @@ pub struct DropoutOp;
 
 impl OnnxOperator for DropoutOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("data".to_string()))?;
 
         // In inference mode, dropout is identity
         Ok(vec![input.clone()])
     }
 
-    fn name(&self) -> &str { "Dropout" }
+    fn name(&self) -> &str {
+        "Dropout"
+    }
 }
 
 // =============================================================================
@@ -1311,11 +1531,13 @@ pub struct ConstantOp {
 
 impl ConstantOp {
     fn from_node(node: &NodeProto) -> OnnxResult<Self> {
-        let attr = node.get_attribute("value")
+        let attr = node
+            .get_attribute("value")
             .ok_or_else(|| OnnxError::MissingAttribute("value".to_string()))?;
 
-        let tensor_proto = attr.t.as_ref()
-            .ok_or_else(|| OnnxError::InvalidAttribute("value".to_string(), "not a tensor".to_string()))?;
+        let tensor_proto = attr.t.as_ref().ok_or_else(|| {
+            OnnxError::InvalidAttribute("value".to_string(), "not a tensor".to_string())
+        })?;
 
         let shape: Vec<usize> = tensor_proto.dims.iter().map(|&d| d as usize).collect();
         let data = tensor_proto.get_float_data();
@@ -1336,7 +1558,9 @@ impl OnnxOperator for ConstantOp {
         Ok(vec![self.value.clone()])
     }
 
-    fn name(&self) -> &str { "Constant" }
+    fn name(&self) -> &str {
+        "Constant"
+    }
 }
 
 /// Identity operator
@@ -1345,13 +1569,17 @@ pub struct IdentityOp;
 
 impl OnnxOperator for IdentityOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         Ok(vec![input.clone()])
     }
 
-    fn name(&self) -> &str { "Identity" }
+    fn name(&self) -> &str {
+        "Identity"
+    }
 }
 
 /// Cast operator (simplified - assumes f32)
@@ -1360,14 +1588,18 @@ pub struct CastOp;
 
 impl OnnxOperator for CastOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         // For now, just return the input (already f32)
         Ok(vec![input.clone()])
     }
 
-    fn name(&self) -> &str { "Cast" }
+    fn name(&self) -> &str {
+        "Cast"
+    }
 }
 
 /// Shape operator
@@ -1376,7 +1608,9 @@ pub struct ShapeOp;
 
 impl OnnxOperator for ShapeOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("data".to_string()))?;
 
         let shape_data: Vec<f32> = input.shape().iter().map(|&d| d as f32).collect();
@@ -1387,7 +1621,9 @@ impl OnnxOperator for ShapeOp {
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Shape" }
+    fn name(&self) -> &str {
+        "Shape"
+    }
 }
 
 // =============================================================================
@@ -1400,20 +1636,25 @@ pub struct EqualOp;
 
 impl OnnxOperator for EqualOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let a = inputs.first().and_then(|i| *i)
+        let a = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("A".to_string()))?;
-        let b = inputs.get(1).and_then(|i| *i)
+        let b = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("B".to_string()))?;
 
-        let result = eq(a, b)
-            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
+        let result = eq(a, b).map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
         let float_result: Vec<f32> = result.iter().map(|&b| if b { 1.0 } else { 0.0 }).collect();
         Tensor::from_vec(float_result, a.shape())
             .map(|t| vec![t])
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Equal" }
+    fn name(&self) -> &str {
+        "Equal"
+    }
 }
 
 /// Greater comparison
@@ -1422,20 +1663,25 @@ pub struct GreaterOp;
 
 impl OnnxOperator for GreaterOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let a = inputs.first().and_then(|i| *i)
+        let a = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("A".to_string()))?;
-        let b = inputs.get(1).and_then(|i| *i)
+        let b = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("B".to_string()))?;
 
-        let result = gt(a, b)
-            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
+        let result = gt(a, b).map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
         let float_result: Vec<f32> = result.iter().map(|&b| if b { 1.0 } else { 0.0 }).collect();
         Tensor::from_vec(float_result, a.shape())
             .map(|t| vec![t])
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Greater" }
+    fn name(&self) -> &str {
+        "Greater"
+    }
 }
 
 /// Less comparison
@@ -1444,20 +1690,25 @@ pub struct LessOp;
 
 impl OnnxOperator for LessOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let a = inputs.first().and_then(|i| *i)
+        let a = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("A".to_string()))?;
-        let b = inputs.get(1).and_then(|i| *i)
+        let b = inputs
+            .get(1)
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("B".to_string()))?;
 
-        let result = lt(a, b)
-            .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
+        let result = lt(a, b).map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))?;
         let float_result: Vec<f32> = result.iter().map(|&b| if b { 1.0 } else { 0.0 }).collect();
         Tensor::from_vec(float_result, a.shape())
             .map(|t| vec![t])
             .map_err(|e| OnnxError::TensorConversion(format!("{:?}", e)))
     }
 
-    fn name(&self) -> &str { "Less" }
+    fn name(&self) -> &str {
+        "Less"
+    }
 }
 
 /// Clip operator
@@ -1478,16 +1729,22 @@ impl ClipOp {
 
 impl OnnxOperator for ClipOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let input = inputs.first().and_then(|i| *i)
+        let input = inputs
+            .first()
+            .and_then(|i| *i)
             .ok_or_else(|| OnnxError::MissingAttribute("input".to_string()))?;
 
         // Get min/max from inputs (opset >= 11) or attributes
-        let min_val = inputs.get(1).and_then(|i| *i)
+        let min_val = inputs
+            .get(1)
+            .and_then(|i| *i)
             .map(|t| t.to_vec()[0])
             .or(self.min)
             .unwrap_or(f32::NEG_INFINITY);
 
-        let max_val = inputs.get(2).and_then(|i| *i)
+        let max_val = inputs
+            .get(2)
+            .and_then(|i| *i)
             .map(|t| t.to_vec()[0])
             .or(self.max)
             .unwrap_or(f32::INFINITY);
@@ -1495,7 +1752,9 @@ impl OnnxOperator for ClipOp {
         Ok(vec![clamp(input, min_val, max_val)])
     }
 
-    fn name(&self) -> &str { "Clip" }
+    fn name(&self) -> &str {
+        "Clip"
+    }
 }
 
 // =============================================================================

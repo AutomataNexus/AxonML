@@ -5,9 +5,9 @@
 use leptos::*;
 
 use crate::api;
+use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*};
 
 /// Data analysis page
 #[component]
@@ -19,7 +19,8 @@ pub fn DataAnalyzePage() -> impl IntoView {
     let (analysis, set_analysis) = create_signal::<Option<DatasetAnalysis>>(None);
     let (preview, set_preview) = create_signal::<Option<DataPreviewResponse>>(None);
     let (validation, set_validation) = create_signal::<Option<ValidationResult>>(None);
-    let (generated_config, set_generated_config) = create_signal::<Option<GeneratedTrainingConfig>>(None);
+    let (generated_config, set_generated_config) =
+        create_signal::<Option<GeneratedTrainingConfig>>(None);
     let (loading, set_loading) = create_signal(true);
     let (analyzing, set_analyzing) = create_signal(false);
     let (active_tab, set_active_tab) = create_signal("analysis".to_string());

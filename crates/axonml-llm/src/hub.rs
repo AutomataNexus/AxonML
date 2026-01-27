@@ -122,7 +122,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "bert-tiny".to_string(),
         PretrainedLLM {
             name: "bert-tiny".to_string(),
-            url: "https://huggingface.co/axonml-ml/bert-tiny/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/bert-tiny/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 17_000_000,
             vocab_size: 30522,
@@ -140,7 +141,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "bert-mini".to_string(),
         PretrainedLLM {
             name: "bert-mini".to_string(),
-            url: "https://huggingface.co/axonml-ml/bert-mini/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/bert-mini/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 45_000_000,
             vocab_size: 30522,
@@ -158,7 +160,9 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "bert-base-uncased".to_string(),
         PretrainedLLM {
             name: "bert-base-uncased".to_string(),
-            url: "https://huggingface.co/axonml-ml/bert-base-uncased/resolve/main/model.safetensors".to_string(),
+            url:
+                "https://huggingface.co/axonml-ml/bert-base-uncased/resolve/main/model.safetensors"
+                    .to_string(),
             checksum: None,
             size_bytes: 440_000_000,
             vocab_size: 30522,
@@ -176,7 +180,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "bert-base-cased".to_string(),
         PretrainedLLM {
             name: "bert-base-cased".to_string(),
-            url: "https://huggingface.co/axonml-ml/bert-base-cased/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/bert-base-cased/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 440_000_000,
             vocab_size: 28996,
@@ -194,7 +199,9 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "bert-large-uncased".to_string(),
         PretrainedLLM {
             name: "bert-large-uncased".to_string(),
-            url: "https://huggingface.co/axonml-ml/bert-large-uncased/resolve/main/model.safetensors".to_string(),
+            url:
+                "https://huggingface.co/axonml-ml/bert-large-uncased/resolve/main/model.safetensors"
+                    .to_string(),
             checksum: None,
             size_bytes: 1_340_000_000,
             vocab_size: 30522,
@@ -234,7 +241,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "gpt2-medium".to_string(),
         PretrainedLLM {
             name: "gpt2-medium".to_string(),
-            url: "https://huggingface.co/axonml-ml/gpt2-medium/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/gpt2-medium/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 1_420_000_000,
             vocab_size: 50257,
@@ -252,7 +260,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "gpt2-large".to_string(),
         PretrainedLLM {
             name: "gpt2-large".to_string(),
-            url: "https://huggingface.co/axonml-ml/gpt2-large/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/gpt2-large/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 3_100_000_000,
             vocab_size: 50257,
@@ -270,7 +279,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "gpt2-xl".to_string(),
         PretrainedLLM {
             name: "gpt2-xl".to_string(),
-            url: "https://huggingface.co/axonml-ml/gpt2-xl/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/gpt2-xl/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 6_200_000_000,
             vocab_size: 50257,
@@ -314,7 +324,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "roberta-base".to_string(),
         PretrainedLLM {
             name: "roberta-base".to_string(),
-            url: "https://huggingface.co/axonml-ml/roberta-base/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/roberta-base/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 500_000_000,
             vocab_size: 50265,
@@ -332,7 +343,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "roberta-large".to_string(),
         PretrainedLLM {
             name: "roberta-large".to_string(),
-            url: "https://huggingface.co/axonml-ml/roberta-large/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/roberta-large/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 1_420_000_000,
             vocab_size: 50265,
@@ -354,7 +366,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "albert-base-v2".to_string(),
         PretrainedLLM {
             name: "albert-base-v2".to_string(),
-            url: "https://huggingface.co/axonml-ml/albert-base-v2/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/albert-base-v2/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 47_000_000,
             vocab_size: 30000,
@@ -372,7 +385,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "albert-large-v2".to_string(),
         PretrainedLLM {
             name: "albert-large-v2".to_string(),
-            url: "https://huggingface.co/axonml-ml/albert-large-v2/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/albert-large-v2/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 70_000_000,
             vocab_size: 30000,
@@ -394,7 +408,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "llama-2-7b".to_string(),
         PretrainedLLM {
             name: "llama-2-7b".to_string(),
-            url: "https://huggingface.co/meta-llama/Llama-2-7b-hf/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/meta-llama/Llama-2-7b-hf/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 13_500_000_000,
             vocab_size: 32000,
@@ -412,7 +427,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "llama-2-13b".to_string(),
         PretrainedLLM {
             name: "llama-2-13b".to_string(),
-            url: "https://huggingface.co/meta-llama/Llama-2-13b-hf/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/meta-llama/Llama-2-13b-hf/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 26_000_000_000,
             vocab_size: 32000,
@@ -452,7 +468,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "mistral-7b".to_string(),
         PretrainedLLM {
             name: "mistral-7b".to_string(),
-            url: "https://huggingface.co/mistralai/Mistral-7B-v0.1/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/mistralai/Mistral-7B-v0.1/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 14_500_000_000,
             vocab_size: 32000,
@@ -492,7 +509,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "phi-2".to_string(),
         PretrainedLLM {
             name: "phi-2".to_string(),
-            url: "https://huggingface.co/microsoft/phi-2/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/microsoft/phi-2/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 5_600_000_000,
             vocab_size: 51200,
@@ -510,7 +528,8 @@ pub fn llm_registry() -> HashMap<String, PretrainedLLM> {
         "phi-1.5".to_string(),
         PretrainedLLM {
             name: "phi-1.5".to_string(),
-            url: "https://huggingface.co/microsoft/phi-1_5/resolve/main/model.safetensors".to_string(),
+            url: "https://huggingface.co/microsoft/phi-1_5/resolve/main/model.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 2_800_000_000,
             vocab_size: 51200,

@@ -7,9 +7,7 @@
 
 use std::path::PathBuf;
 
-use crate::views::{
-    DataView, FilesView, GraphsView, HelpView, ModelView, TrainingView,
-};
+use crate::views::{DataView, FilesView, GraphsView, HelpView, ModelView, TrainingView};
 
 // =============================================================================
 // Application State

@@ -29,12 +29,14 @@ pub struct Compose {
 
 impl Compose {
     /// Creates a new Compose from a vector of transforms.
-    #[must_use] pub fn new(transforms: Vec<Box<dyn Transform>>) -> Self {
+    #[must_use]
+    pub fn new(transforms: Vec<Box<dyn Transform>>) -> Self {
         Self { transforms }
     }
 
     /// Creates an empty Compose.
-    #[must_use] pub fn empty() -> Self {
+    #[must_use]
+    pub fn empty() -> Self {
         Self {
             transforms: Vec::new(),
         }
@@ -66,7 +68,8 @@ pub struct ToTensor;
 
 impl ToTensor {
     /// Creates a new `ToTensor` transform.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self
     }
 }
@@ -95,17 +98,20 @@ pub struct Normalize {
 
 impl Normalize {
     /// Creates a new Normalize transform.
-    #[must_use] pub fn new(mean: f32, std: f32) -> Self {
+    #[must_use]
+    pub fn new(mean: f32, std: f32) -> Self {
         Self { mean, std }
     }
 
     /// Creates a Normalize for standard normal distribution (mean=0, std=1).
-    #[must_use] pub fn standard() -> Self {
+    #[must_use]
+    pub fn standard() -> Self {
         Self::new(0.0, 1.0)
     }
 
     /// Creates a Normalize for [0,1] to [-1,1] conversion (mean=0.5, std=0.5).
-    #[must_use] pub fn zero_centered() -> Self {
+    #[must_use]
+    pub fn zero_centered() -> Self {
         Self::new(0.5, 0.5)
     }
 }
@@ -129,7 +135,8 @@ pub struct RandomNoise {
 
 impl RandomNoise {
     /// Creates a new `RandomNoise` transform.
-    #[must_use] pub fn new(std: f32) -> Self {
+    #[must_use]
+    pub fn new(std: f32) -> Self {
         Self { std }
     }
 }
@@ -167,12 +174,14 @@ pub struct RandomCrop {
 
 impl RandomCrop {
     /// Creates a new `RandomCrop` with target size.
-    #[must_use] pub fn new(size: Vec<usize>) -> Self {
+    #[must_use]
+    pub fn new(size: Vec<usize>) -> Self {
         Self { size }
     }
 
     /// Creates a `RandomCrop` for 2D images.
-    #[must_use] pub fn new_2d(height: usize, width: usize) -> Self {
+    #[must_use]
+    pub fn new_2d(height: usize, width: usize) -> Self {
         Self::new(vec![height, width])
     }
 }
@@ -288,7 +297,8 @@ pub struct RandomFlip {
 
 impl RandomFlip {
     /// Creates a new `RandomFlip`.
-    #[must_use] pub fn new(dim: usize, probability: f32) -> Self {
+    #[must_use]
+    pub fn new(dim: usize, probability: f32) -> Self {
         Self {
             dim,
             probability: probability.clamp(0.0, 1.0),
@@ -296,12 +306,14 @@ impl RandomFlip {
     }
 
     /// Creates a horizontal flip (dim=1 for `HxW` images).
-    #[must_use] pub fn horizontal() -> Self {
+    #[must_use]
+    pub fn horizontal() -> Self {
         Self::new(1, 0.5)
     }
 
     /// Creates a vertical flip (dim=0 for `HxW` images).
-    #[must_use] pub fn vertical() -> Self {
+    #[must_use]
+    pub fn vertical() -> Self {
         Self::new(0, 0.5)
     }
 }
@@ -365,7 +377,8 @@ pub struct Scale {
 
 impl Scale {
     /// Creates a new Scale transform.
-    #[must_use] pub fn new(factor: f32) -> Self {
+    #[must_use]
+    pub fn new(factor: f32) -> Self {
         Self { factor }
     }
 }
@@ -388,17 +401,20 @@ pub struct Clamp {
 
 impl Clamp {
     /// Creates a new Clamp transform.
-    #[must_use] pub fn new(min: f32, max: f32) -> Self {
+    #[must_use]
+    pub fn new(min: f32, max: f32) -> Self {
         Self { min, max }
     }
 
     /// Creates a Clamp for [0, 1] range.
-    #[must_use] pub fn zero_one() -> Self {
+    #[must_use]
+    pub fn zero_one() -> Self {
         Self::new(0.0, 1.0)
     }
 
     /// Creates a Clamp for [-1, 1] range.
-    #[must_use] pub fn symmetric() -> Self {
+    #[must_use]
+    pub fn symmetric() -> Self {
         Self::new(-1.0, 1.0)
     }
 }
@@ -420,7 +436,8 @@ pub struct Flatten;
 
 impl Flatten {
     /// Creates a new Flatten transform.
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self
     }
 }
@@ -449,7 +466,8 @@ pub struct Reshape {
 
 impl Reshape {
     /// Creates a new Reshape transform.
-    #[must_use] pub fn new(shape: Vec<usize>) -> Self {
+    #[must_use]
+    pub fn new(shape: Vec<usize>) -> Self {
         Self { shape }
     }
 }
@@ -479,7 +497,8 @@ pub struct DropoutTransform {
 
 impl DropoutTransform {
     /// Creates a new `DropoutTransform`.
-    #[must_use] pub fn new(probability: f32) -> Self {
+    #[must_use]
+    pub fn new(probability: f32) -> Self {
         Self {
             probability: probability.clamp(0.0, 1.0),
         }

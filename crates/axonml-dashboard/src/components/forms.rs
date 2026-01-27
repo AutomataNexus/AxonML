@@ -1,8 +1,8 @@
 //! Form Input Components
 
+use crate::components::icons::*;
 use leptos::*;
 use wasm_bindgen::JsCast;
-use crate::components::icons::*;
 
 /// Input field types
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

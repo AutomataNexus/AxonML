@@ -1,8 +1,8 @@
 //! Session Management Utilities
 
-use leptos::*;
 use gloo_storage::{LocalStorage, Storage};
 use gloo_timers::callback::Interval;
+use leptos::*;
 use wasm_bindgen::JsCast;
 
 use crate::api;
@@ -291,14 +291,16 @@ pub fn use_session_timeout(timeout_minutes: u32) {
         let handler = wasm_bindgen::closure::Closure::<dyn Fn()>::new(move || {
             set_last_activity_mouse.set(js_sys::Date::now());
         });
-        let _ = window.add_event_listener_with_callback("mousemove", handler.as_ref().unchecked_ref());
+        let _ =
+            window.add_event_listener_with_callback("mousemove", handler.as_ref().unchecked_ref());
         handler.forget();
 
         // Keypress
         let handler = wasm_bindgen::closure::Closure::<dyn Fn()>::new(move || {
             set_last_activity_key.set(js_sys::Date::now());
         });
-        let _ = window.add_event_listener_with_callback("keypress", handler.as_ref().unchecked_ref());
+        let _ =
+            window.add_event_listener_with_callback("keypress", handler.as_ref().unchecked_ref());
         handler.forget();
 
         // Click
@@ -314,14 +316,18 @@ pub fn use_session_timeout(timeout_minutes: u32) {
     let state_for_timeout = state.clone();
     create_effect(move |_| {
         let state = state_for_timeout.clone();
-        let _interval = Interval::new(60_000, move || { // Check every minute
+        let _interval = Interval::new(60_000, move || {
+            // Check every minute
             let now = js_sys::Date::now();
             let last = last_activity.get();
             let elapsed = now - last;
 
             if elapsed > timeout_ms {
                 // Session timed out
-                state.toast_warning("Session Expired", "You have been logged out due to inactivity");
+                state.toast_warning(
+                    "Session Expired",
+                    "You have been logged out due to inactivity",
+                );
                 logout();
             }
         });

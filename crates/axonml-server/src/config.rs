@@ -95,25 +95,59 @@ pub struct HubConfig {
 }
 
 // Default value functions
-fn default_host() -> String { "0.0.0.0".to_string() }
-fn default_port() -> u16 { 3000 }
-fn default_data_dir() -> String { "~/.axonml".to_string() }
-fn default_aegis_host() -> String { "localhost".to_string() }
-fn default_aegis_port() -> u16 { 3020 }
+fn default_host() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_port() -> u16 {
+    3000
+}
+fn default_data_dir() -> String {
+    "~/.axonml".to_string()
+}
+fn default_aegis_host() -> String {
+    "localhost".to_string()
+}
+fn default_aegis_port() -> u16 {
+    3020
+}
 // SECURITY: No default database credentials - must be explicitly configured
-fn default_aegis_user() -> String { String::new() }
-fn default_aegis_pass() -> String { String::new() }
+fn default_aegis_user() -> String {
+    String::new()
+}
+fn default_aegis_pass() -> String {
+    String::new()
+}
 // SECURITY: No default JWT secret - must be explicitly configured
-fn default_jwt_secret() -> String { String::new() }
-fn default_jwt_expiry() -> u64 { 24 }
-fn default_session_timeout() -> u64 { 30 }
-fn default_allow_registration() -> bool { true }
-fn default_port_start() -> u16 { 8100 }
-fn default_port_end() -> u16 { 8199 }
-fn default_max_endpoints() -> u32 { 10 }
-fn default_dashboard_port() -> u16 { 8080 }
-fn default_hub_url() -> String { "https://hub.axonml.dev/v1".to_string() }
-fn default_hub_cache_dir() -> String { "~/.axonml/hub_cache".to_string() }
+fn default_jwt_secret() -> String {
+    String::new()
+}
+fn default_jwt_expiry() -> u64 {
+    24
+}
+fn default_session_timeout() -> u64 {
+    30
+}
+fn default_allow_registration() -> bool {
+    true
+}
+fn default_port_start() -> u16 {
+    8100
+}
+fn default_port_end() -> u16 {
+    8199
+}
+fn default_max_endpoints() -> u32 {
+    10
+}
+fn default_dashboard_port() -> u16 {
+    8080
+}
+fn default_hub_url() -> String {
+    "https://hub.axonml.dev/v1".to_string()
+}
+fn default_hub_cache_dir() -> String {
+    "~/.axonml/hub_cache".to_string()
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -216,11 +250,12 @@ impl Config {
 
     /// Get the data directory path (expanded)
     pub fn data_dir(&self) -> PathBuf {
-        let path = self.server.data_dir.replace("~",
+        let path = self.server.data_dir.replace(
+            "~",
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .to_str()
-                .unwrap_or(".")
+                .unwrap_or("."),
         );
         PathBuf::from(path)
     }
@@ -247,11 +282,12 @@ impl Config {
 
     /// Get the hub cache directory
     pub fn hub_cache_dir(&self) -> PathBuf {
-        let path = self.hub.cache_dir.replace("~",
+        let path = self.hub.cache_dir.replace(
+            "~",
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .to_str()
-                .unwrap_or(".")
+                .unwrap_or("."),
         );
         PathBuf::from(path)
     }
@@ -284,7 +320,7 @@ impl Config {
         // Check if JWT secret is long enough (at least 32 bytes for HS256)
         if self.auth.jwt_secret.len() < 32 {
             return Err(ConfigError::MissingConfig(
-                "jwt_secret must be at least 32 characters long for security.".to_string()
+                "jwt_secret must be at least 32 characters long for security.".to_string(),
             ));
         }
 

@@ -26,9 +26,9 @@ use crate::theme::AxonmlTheme;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileType {
     Directory,
-    Model,      // .axonml, .onnx, .pt, .safetensors
-    Dataset,    // .npz, .csv, .parquet
-    Config,     // .toml, .yaml, .json
+    Model,   // .axonml, .onnx, .pt, .safetensors
+    Dataset, // .npz, .csv, .parquet
+    Config,  // .toml, .yaml, .json
     Other,
 }
 
@@ -37,11 +37,11 @@ impl FileType {
     #[allow(dead_code)]
     pub fn icon(&self) -> &'static str {
         match self {
-            FileType::Directory => "\u{1F4C1}",  // Folder
-            FileType::Model => "\u{1F9E0}",      // Brain (model)
-            FileType::Dataset => "\u{1F4CA}",    // Chart (data)
-            FileType::Config => "\u{2699}",      // Gear (config)
-            FileType::Other => "\u{1F4C4}",      // Document
+            FileType::Directory => "\u{1F4C1}", // Folder
+            FileType::Model => "\u{1F9E0}",     // Brain (model)
+            FileType::Dataset => "\u{1F4CA}",   // Chart (data)
+            FileType::Config => "\u{2699}",     // Gear (config)
+            FileType::Other => "\u{1F4C4}",     // Document
         }
     }
 
@@ -307,7 +307,10 @@ impl FilesView {
                 "Path: {}\nType: {:?}\nSize: {}",
                 entry.path.display(),
                 entry.file_type,
-                entry.size.map(format_size).unwrap_or_else(|| "-".to_string())
+                entry
+                    .size
+                    .map(format_size)
+                    .unwrap_or_else(|| "-".to_string())
             ));
         }
     }
@@ -317,8 +320,8 @@ impl FilesView {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(60),  // File list
-                Constraint::Percentage(40),  // Preview
+                Constraint::Percentage(60), // File list
+                Constraint::Percentage(40), // Preview
             ])
             .split(area);
 
@@ -330,24 +333,26 @@ impl FilesView {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Path bar
-                Constraint::Min(10),    // File list
+                Constraint::Length(3), // Path bar
+                Constraint::Min(10),   // File list
             ])
             .split(area);
 
         // Path bar
         let path_text = Line::from(vec![
             Span::styled("Path: ", AxonmlTheme::muted()),
-            Span::styled(self.current_dir.display().to_string(), AxonmlTheme::accent()),
+            Span::styled(
+                self.current_dir.display().to_string(),
+                AxonmlTheme::accent(),
+            ),
         ]);
 
-        let path_bar = Paragraph::new(path_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border())
-                    .title(Span::styled(" Location ", AxonmlTheme::header())),
-            );
+        let path_bar = Paragraph::new(path_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border())
+                .title(Span::styled(" Location ", AxonmlTheme::header())),
+        );
 
         frame.render_widget(path_bar, chunks[0]);
 
@@ -368,7 +373,11 @@ impl FilesView {
 
                 // Expansion indicator for directories
                 let expand_char = if entry.file_type == FileType::Directory {
-                    if entry.is_expanded { "\u{25BC} " } else { "\u{25B6} " }
+                    if entry.is_expanded {
+                        "\u{25BC} "
+                    } else {
+                        "\u{25B6} "
+                    }
                 } else {
                     "  "
                 };
@@ -435,7 +444,10 @@ impl FilesView {
                 Line::from(vec![
                     Span::styled("Size: ", AxonmlTheme::muted()),
                     Span::styled(
-                        entry.size.map(format_size).unwrap_or_else(|| "-".to_string()),
+                        entry
+                            .size
+                            .map(format_size)
+                            .unwrap_or_else(|| "-".to_string()),
                         AxonmlTheme::metric_value(),
                     ),
                 ]),
@@ -447,7 +459,10 @@ impl FilesView {
                 Line::from(Span::styled(type_info, AxonmlTheme::info())),
             ]
         } else {
-            vec![Line::from(Span::styled("No file selected", AxonmlTheme::muted()))]
+            vec![Line::from(Span::styled(
+                "No file selected",
+                AxonmlTheme::muted(),
+            ))]
         };
 
         let preview = Paragraph::new(preview_text)

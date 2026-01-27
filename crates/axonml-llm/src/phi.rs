@@ -14,11 +14,11 @@
 //! ```
 
 use axonml_autograd::Variable;
-use axonml_nn::{Module, Linear, Dropout, Parameter, Embedding};
-use axonml_tensor::{Tensor, view::cat};
+use axonml_nn::{Dropout, Embedding, Linear, Module, Parameter};
+use axonml_tensor::{view::cat, Tensor};
 
 use crate::attention::{KVCache, LayerKVCache};
-use crate::llama::{RotaryEmbedding, RMSNorm};
+use crate::llama::{RMSNorm, RotaryEmbedding};
 
 // =============================================================================
 // Phi Configuration
@@ -186,7 +186,11 @@ impl PhiAttention {
             k_proj: Linear::new(config.hidden_size, kv_hidden),
             v_proj: Linear::new(config.hidden_size, kv_hidden),
             dense: Linear::new(config.hidden_size, config.hidden_size),
-            rotary_emb: RotaryEmbedding::new(rotary_dim, config.max_position_embeddings, config.rope_theta),
+            rotary_emb: RotaryEmbedding::new(
+                rotary_dim,
+                config.max_position_embeddings,
+                config.rope_theta,
+            ),
             num_heads: config.num_attention_heads,
             num_kv_heads: config.num_key_value_heads,
             head_dim,
@@ -214,9 +218,15 @@ impl PhiAttention {
         let v = self.v_proj.forward(hidden_states);
 
         // Reshape for multi-head attention
-        let q = q.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
-        let k = k.reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim]).transpose(1, 2);
-        let v = v.reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim]).transpose(1, 2);
+        let q = q
+            .reshape(&[batch_size, seq_len, self.num_heads, self.head_dim])
+            .transpose(1, 2);
+        let k = k
+            .reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim])
+            .transpose(1, 2);
+        let v = v
+            .reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim])
+            .transpose(1, 2);
 
         // Apply partial rotary embeddings (only to first rotary_dim dimensions)
         let (q, k) = if self.rotary_dim < self.head_dim {
@@ -259,7 +269,10 @@ impl PhiAttention {
 
         // Compute output
         let attn_output = attn_weights.matmul(&v);
-        let attn_output = attn_output.transpose(1, 2).reshape(&[batch_size, seq_len, self.hidden_size]);
+        let attn_output =
+            attn_output
+                .transpose(1, 2)
+                .reshape(&[batch_size, seq_len, self.hidden_size]);
 
         self.dense.forward(&attn_output)
     }
@@ -280,15 +293,32 @@ impl PhiAttention {
 
         // Split into rotary and pass-through parts
         let q_rot = q_data.slice(&[0..batch_size, 0..num_heads, 0..seq_len, 0..self.rotary_dim]);
-        let q_pass = q_data.slice(&[0..batch_size, 0..num_heads, 0..seq_len, self.rotary_dim..self.head_dim]);
+        let q_pass = q_data.slice(&[
+            0..batch_size,
+            0..num_heads,
+            0..seq_len,
+            self.rotary_dim..self.head_dim,
+        ]);
 
-        let k_rot = k_data.slice(&[0..batch_size, 0..self.num_kv_heads, 0..seq_len, 0..self.rotary_dim]);
-        let k_pass = k_data.slice(&[0..batch_size, 0..self.num_kv_heads, 0..seq_len, self.rotary_dim..self.head_dim]);
+        let k_rot = k_data.slice(&[
+            0..batch_size,
+            0..self.num_kv_heads,
+            0..seq_len,
+            0..self.rotary_dim,
+        ]);
+        let k_pass = k_data.slice(&[
+            0..batch_size,
+            0..self.num_kv_heads,
+            0..seq_len,
+            self.rotary_dim..self.head_dim,
+        ]);
 
         // Apply rotary to the rotary part
         let q_rot_var = Variable::new(q_rot, q.requires_grad());
         let k_rot_var = Variable::new(k_rot, k.requires_grad());
-        let (q_rotated, k_rotated) = self.rotary_emb.apply(&q_rot_var, &k_rot_var, position_offset);
+        let (q_rotated, k_rotated) = self
+            .rotary_emb
+            .apply(&q_rot_var, &k_rot_var, position_offset);
 
         // Concatenate back
         let q_out = cat(&[q_rotated.data(), q_pass], 3).unwrap();
@@ -430,12 +460,16 @@ impl PhiDecoderLayer {
 
         if self.parallel_attn {
             // Parallel: attention and MLP computed on same input, then summed
-            let attn_output = self.self_attn.forward_with_cache(&hidden_states, kv_cache, position_offset);
+            let attn_output =
+                self.self_attn
+                    .forward_with_cache(&hidden_states, kv_cache, position_offset);
             let mlp_output = self.mlp.forward(&hidden_states);
             residual.add(&attn_output).add(&mlp_output)
         } else {
             // Sequential: standard transformer block
-            let attn_output = self.self_attn.forward_with_cache(&hidden_states, kv_cache, position_offset);
+            let attn_output =
+                self.self_attn
+                    .forward_with_cache(&hidden_states, kv_cache, position_offset);
             let hidden_states = residual.add(&attn_output);
             let residual = hidden_states.clone();
             let hidden_states = self.input_layernorm.forward(&hidden_states);
@@ -506,10 +540,7 @@ impl Phi {
 
         // Convert token IDs to Variable for embedding lookup
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var = Variable::new(
-            Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(),
-            false,
-        );
+        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
 
         // Embed tokens
         let mut hidden_states = self.embed_tokens.forward(&ids_var);
@@ -518,7 +549,8 @@ impl Phi {
         if let Some(cache) = kv_cache {
             for (i, layer) in self.layers.iter().enumerate() {
                 let layer_cache = cache.get_mut(i);
-                hidden_states = layer.forward_with_cache(&hidden_states, layer_cache, position_offset);
+                hidden_states =
+                    layer.forward_with_cache(&hidden_states, layer_cache, position_offset);
             }
         } else {
             for layer in &self.layers {
@@ -619,11 +651,15 @@ impl PhiForCausalLM {
             num_attention_heads: config_json["num_attention_heads"].as_u64().unwrap_or(32) as usize,
             num_key_value_heads: config_json["num_key_value_heads"]
                 .as_u64()
-                .unwrap_or(config_json["num_attention_heads"].as_u64().unwrap_or(32)) as usize,
-            max_position_embeddings: config_json["max_position_embeddings"].as_u64().unwrap_or(2048) as usize,
+                .unwrap_or(config_json["num_attention_heads"].as_u64().unwrap_or(32))
+                as usize,
+            max_position_embeddings: config_json["max_position_embeddings"]
+                .as_u64()
+                .unwrap_or(2048) as usize,
             layer_norm_eps: config_json["layer_norm_eps"].as_f64().unwrap_or(1e-5) as f32,
             rope_theta: config_json["rope_theta"].as_f64().unwrap_or(10000.0) as f32,
-            partial_rotary_factor: config_json["partial_rotary_factor"].as_f64().unwrap_or(0.5) as f32,
+            partial_rotary_factor: config_json["partial_rotary_factor"].as_f64().unwrap_or(0.5)
+                as f32,
             attention_dropout: 0.0,
             hidden_dropout: 0.0,
             use_bias: config_json["use_bias"].as_bool().unwrap_or(true),

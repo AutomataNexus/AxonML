@@ -145,7 +145,9 @@ impl<'a> ModelRepository<'a> {
 
         let model_json = serde_json::to_value(&model)?;
 
-        self.db.doc_insert(MODELS_COLLECTION, Some(&model.id), model_json).await?;
+        self.db
+            .doc_insert(MODELS_COLLECTION, Some(&model.id), model_json)
+            .await?;
 
         Ok(model)
     }
@@ -217,8 +219,15 @@ impl<'a> ModelRepository<'a> {
     }
 
     /// Update model
-    pub async fn update(&self, id: &str, name: Option<String>, description: Option<String>) -> Result<Model, DbError> {
-        let mut model = self.find_by_id(id).await?
+    pub async fn update(
+        &self,
+        id: &str,
+        name: Option<String>,
+        description: Option<String>,
+    ) -> Result<Model, DbError> {
+        let mut model = self
+            .find_by_id(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Model {} not found", id)))?;
 
         if let Some(n) = name {
@@ -231,7 +240,9 @@ impl<'a> ModelRepository<'a> {
 
         let model_json = serde_json::to_value(&model)?;
 
-        self.db.doc_update(MODELS_COLLECTION, id, model_json).await?;
+        self.db
+            .doc_update(MODELS_COLLECTION, id, model_json)
+            .await?;
 
         Ok(model)
     }
@@ -255,10 +266,14 @@ impl<'a> ModelRepository<'a> {
     // ========================================================================
 
     /// Create a new model version
-    pub async fn create_version(&self, new_version: NewModelVersion) -> Result<ModelVersion, DbError> {
+    pub async fn create_version(
+        &self,
+        new_version: NewModelVersion,
+    ) -> Result<ModelVersion, DbError> {
         // Get the next version number
         let versions = self.list_versions(&new_version.model_id).await?;
-        let next_version = versions.iter()
+        let next_version = versions
+            .iter()
             .map(|v| v.version)
             .max()
             .map(|v| v + 1)
@@ -277,7 +292,9 @@ impl<'a> ModelRepository<'a> {
 
         let version_json = serde_json::to_value(&version)?;
 
-        self.db.doc_insert(VERSIONS_COLLECTION, Some(&version.id), version_json).await?;
+        self.db
+            .doc_insert(VERSIONS_COLLECTION, Some(&version.id), version_json)
+            .await?;
 
         Ok(version)
     }
@@ -296,7 +313,11 @@ impl<'a> ModelRepository<'a> {
     }
 
     /// Get model version by model ID and version number
-    pub async fn get_version_by_number(&self, model_id: &str, version: u32) -> Result<Option<ModelVersion>, DbError> {
+    pub async fn get_version_by_number(
+        &self,
+        model_id: &str,
+        version: u32,
+    ) -> Result<Option<ModelVersion>, DbError> {
         let filter = serde_json::json!({
             "model_id": { "$eq": model_id },
             "version": { "$eq": version }
@@ -373,7 +394,9 @@ impl<'a> ModelRepository<'a> {
 
         let endpoint_json = serde_json::to_value(&endpoint)?;
 
-        self.db.doc_insert(ENDPOINTS_COLLECTION, Some(&endpoint.id), endpoint_json).await?;
+        self.db
+            .doc_insert(ENDPOINTS_COLLECTION, Some(&endpoint.id), endpoint_json)
+            .await?;
 
         Ok(endpoint)
     }
@@ -435,7 +458,9 @@ impl<'a> ModelRepository<'a> {
         status: EndpointStatus,
         error_message: Option<String>,
     ) -> Result<Endpoint, DbError> {
-        let mut endpoint = self.get_endpoint(id).await?
+        let mut endpoint = self
+            .get_endpoint(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Endpoint {} not found", id)))?;
 
         endpoint.status = status;
@@ -444,7 +469,9 @@ impl<'a> ModelRepository<'a> {
 
         let endpoint_json = serde_json::to_value(&endpoint)?;
 
-        self.db.doc_update(ENDPOINTS_COLLECTION, id, endpoint_json).await?;
+        self.db
+            .doc_update(ENDPOINTS_COLLECTION, id, endpoint_json)
+            .await?;
 
         Ok(endpoint)
     }
@@ -456,7 +483,9 @@ impl<'a> ModelRepository<'a> {
         replicas: Option<u32>,
         config: Option<serde_json::Value>,
     ) -> Result<Endpoint, DbError> {
-        let mut endpoint = self.get_endpoint(id).await?
+        let mut endpoint = self
+            .get_endpoint(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Endpoint {} not found", id)))?;
 
         if let Some(r) = replicas {
@@ -469,7 +498,9 @@ impl<'a> ModelRepository<'a> {
 
         let endpoint_json = serde_json::to_value(&endpoint)?;
 
-        self.db.doc_update(ENDPOINTS_COLLECTION, id, endpoint_json).await?;
+        self.db
+            .doc_update(ENDPOINTS_COLLECTION, id, endpoint_json)
+            .await?;
 
         Ok(endpoint)
     }
@@ -501,52 +532,64 @@ impl<'a> ModelRepository<'a> {
         // Record request metrics
         let mut req_tags = tags.clone();
         req_tags.insert("metric".to_string(), "requests_total".to_string());
-        self.db.ts_write_one(
-            &format!("axonml.inference.{}.requests_total", endpoint_id),
-            requests_total as f64,
-            req_tags
-        ).await?;
+        self.db
+            .ts_write_one(
+                &format!("axonml.inference.{}.requests_total", endpoint_id),
+                requests_total as f64,
+                req_tags,
+            )
+            .await?;
 
         let mut success_tags = tags.clone();
         success_tags.insert("metric".to_string(), "requests_success".to_string());
-        self.db.ts_write_one(
-            &format!("axonml.inference.{}.requests_success", endpoint_id),
-            requests_success as f64,
-            success_tags
-        ).await?;
+        self.db
+            .ts_write_one(
+                &format!("axonml.inference.{}.requests_success", endpoint_id),
+                requests_success as f64,
+                success_tags,
+            )
+            .await?;
 
         let mut error_tags = tags.clone();
         error_tags.insert("metric".to_string(), "requests_error".to_string());
-        self.db.ts_write_one(
-            &format!("axonml.inference.{}.requests_error", endpoint_id),
-            requests_error as f64,
-            error_tags
-        ).await?;
+        self.db
+            .ts_write_one(
+                &format!("axonml.inference.{}.requests_error", endpoint_id),
+                requests_error as f64,
+                error_tags,
+            )
+            .await?;
 
         // Record latency metrics
         let mut p50_tags = tags.clone();
         p50_tags.insert("metric".to_string(), "latency_p50".to_string());
-        self.db.ts_write_one(
-            &format!("axonml.inference.{}.latency_p50", endpoint_id),
-            latency_p50,
-            p50_tags
-        ).await?;
+        self.db
+            .ts_write_one(
+                &format!("axonml.inference.{}.latency_p50", endpoint_id),
+                latency_p50,
+                p50_tags,
+            )
+            .await?;
 
         let mut p95_tags = tags.clone();
         p95_tags.insert("metric".to_string(), "latency_p95".to_string());
-        self.db.ts_write_one(
-            &format!("axonml.inference.{}.latency_p95", endpoint_id),
-            latency_p95,
-            p95_tags
-        ).await?;
+        self.db
+            .ts_write_one(
+                &format!("axonml.inference.{}.latency_p95", endpoint_id),
+                latency_p95,
+                p95_tags,
+            )
+            .await?;
 
         let mut p99_tags = tags.clone();
         p99_tags.insert("metric".to_string(), "latency_p99".to_string());
-        self.db.ts_write_one(
-            &format!("axonml.inference.{}.latency_p99", endpoint_id),
-            latency_p99,
-            p99_tags
-        ).await?;
+        self.db
+            .ts_write_one(
+                &format!("axonml.inference.{}.latency_p99", endpoint_id),
+                latency_p99,
+                p99_tags,
+            )
+            .await?;
 
         Ok(())
     }
@@ -570,12 +613,15 @@ impl<'a> ModelRepository<'a> {
         let points = self.db.ts_query(query).await?;
 
         // Convert to JSON for API compatibility
-        let metrics: Vec<serde_json::Value> = points.into_iter().map(|p| {
-            serde_json::json!({
-                "latency_p50": p.value,
-                "timestamp": p.timestamp.to_rfc3339()
+        let metrics: Vec<serde_json::Value> = points
+            .into_iter()
+            .map(|p| {
+                serde_json::json!({
+                    "latency_p50": p.value,
+                    "timestamp": p.timestamp.to_rfc3339()
+                })
             })
-        }).collect();
+            .collect();
 
         Ok(metrics)
     }

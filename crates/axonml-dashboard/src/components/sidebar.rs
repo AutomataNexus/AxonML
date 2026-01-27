@@ -3,8 +3,8 @@
 use leptos::*;
 use leptos_router::*;
 
-use crate::state::use_app_state;
 use crate::components::icons::*;
+use crate::state::use_app_state;
 
 /// Sidebar navigation item
 #[component]
@@ -52,10 +52,7 @@ where
 
 /// Sidebar section header
 #[component]
-fn SidebarSection(
-    #[prop(into)] label: String,
-    children: Children,
-) -> impl IntoView {
+fn SidebarSection(#[prop(into)] label: String, children: Children) -> impl IntoView {
     let state = use_app_state();
     let collapsed = move || state.sidebar_collapsed.get();
 

@@ -26,7 +26,8 @@ pub fn execute(args: InitArgs) -> CliResult<()> {
     let project_name = args.name.unwrap_or_else(|| {
         current_dir
             .file_name()
-            .and_then(|n| n.to_str()).map_or_else(|| "axonml-project".to_string(), String::from)
+            .and_then(|n| n.to_str())
+            .map_or_else(|| "axonml-project".to_string(), String::from)
     });
 
     // Check if axonml.toml already exists

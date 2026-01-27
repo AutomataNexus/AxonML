@@ -109,33 +109,93 @@ impl GraphsView {
     pub fn load_demo_data(&mut self) {
         // Simulated training data over 15 epochs
         self.train_loss = vec![
-            (1.0, 2.31), (2.0, 1.85), (3.0, 1.23), (4.0, 0.86), (5.0, 0.61),
-            (6.0, 0.48), (7.0, 0.39), (8.0, 0.32), (9.0, 0.27), (10.0, 0.23),
-            (11.0, 0.20), (12.0, 0.17), (13.0, 0.15), (14.0, 0.13), (15.0, 0.12),
+            (1.0, 2.31),
+            (2.0, 1.85),
+            (3.0, 1.23),
+            (4.0, 0.86),
+            (5.0, 0.61),
+            (6.0, 0.48),
+            (7.0, 0.39),
+            (8.0, 0.32),
+            (9.0, 0.27),
+            (10.0, 0.23),
+            (11.0, 0.20),
+            (12.0, 0.17),
+            (13.0, 0.15),
+            (14.0, 0.13),
+            (15.0, 0.12),
         ];
 
         self.val_loss = vec![
-            (1.0, 2.30), (2.0, 1.76), (3.0, 1.19), (4.0, 0.82), (5.0, 0.60),
-            (6.0, 0.49), (7.0, 0.41), (8.0, 0.36), (9.0, 0.32), (10.0, 0.29),
-            (11.0, 0.27), (12.0, 0.25), (13.0, 0.24), (14.0, 0.23), (15.0, 0.22),
+            (1.0, 2.30),
+            (2.0, 1.76),
+            (3.0, 1.19),
+            (4.0, 0.82),
+            (5.0, 0.60),
+            (6.0, 0.49),
+            (7.0, 0.41),
+            (8.0, 0.36),
+            (9.0, 0.32),
+            (10.0, 0.29),
+            (11.0, 0.27),
+            (12.0, 0.25),
+            (13.0, 0.24),
+            (14.0, 0.23),
+            (15.0, 0.22),
         ];
 
         self.train_acc = vec![
-            (1.0, 11.2), (2.0, 34.2), (3.0, 56.7), (4.0, 71.2), (5.0, 79.8),
-            (6.0, 84.5), (7.0, 87.8), (8.0, 90.2), (9.0, 91.8), (10.0, 93.1),
-            (11.0, 94.0), (12.0, 94.7), (13.0, 95.2), (14.0, 95.6), (15.0, 95.9),
+            (1.0, 11.2),
+            (2.0, 34.2),
+            (3.0, 56.7),
+            (4.0, 71.2),
+            (5.0, 79.8),
+            (6.0, 84.5),
+            (7.0, 87.8),
+            (8.0, 90.2),
+            (9.0, 91.8),
+            (10.0, 93.1),
+            (11.0, 94.0),
+            (12.0, 94.7),
+            (13.0, 95.2),
+            (14.0, 95.6),
+            (15.0, 95.9),
         ];
 
         self.val_acc = vec![
-            (1.0, 11.8), (2.0, 35.8), (3.0, 58.2), (4.0, 72.4), (5.0, 80.5),
-            (6.0, 84.2), (7.0, 86.9), (8.0, 89.1), (9.0, 90.5), (10.0, 91.4),
-            (11.0, 92.1), (12.0, 92.6), (13.0, 93.0), (14.0, 93.3), (15.0, 93.5),
+            (1.0, 11.8),
+            (2.0, 35.8),
+            (3.0, 58.2),
+            (4.0, 72.4),
+            (5.0, 80.5),
+            (6.0, 84.2),
+            (7.0, 86.9),
+            (8.0, 89.1),
+            (9.0, 90.5),
+            (10.0, 91.4),
+            (11.0, 92.1),
+            (12.0, 92.6),
+            (13.0, 93.0),
+            (14.0, 93.3),
+            (15.0, 93.5),
         ];
 
         self.learning_rate = vec![
-            (1.0, 1.0), (2.0, 1.0), (3.0, 1.0), (4.0, 1.0), (5.0, 0.5),
-            (6.0, 0.5), (7.0, 0.5), (8.0, 0.25), (9.0, 0.25), (10.0, 0.25),
-            (11.0, 0.125), (12.0, 0.125), (13.0, 0.125), (14.0, 0.0625), (15.0, 0.0625),
+            (1.0, 1.0),
+            (2.0, 1.0),
+            (3.0, 1.0),
+            (4.0, 1.0),
+            (5.0, 0.5),
+            (6.0, 0.5),
+            (7.0, 0.5),
+            (8.0, 0.25),
+            (9.0, 0.25),
+            (10.0, 0.25),
+            (11.0, 0.125),
+            (12.0, 0.125),
+            (13.0, 0.125),
+            (14.0, 0.0625),
+            (15.0, 0.0625),
         ];
 
         self.x_bounds = [0.0, 16.0];
@@ -169,9 +229,9 @@ impl GraphsView {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Chart selector
-                Constraint::Min(15),    // Main chart
-                Constraint::Length(5),  // Legend/info
+                Constraint::Length(3), // Chart selector
+                Constraint::Min(15),   // Main chart
+                Constraint::Length(5), // Legend/info
             ])
             .split(area);
 
@@ -181,25 +241,31 @@ impl GraphsView {
     }
 
     fn render_selector(&self, frame: &mut Frame, area: Rect) {
-        let tabs: Vec<Span> = [ChartType::Loss, ChartType::Accuracy, ChartType::LearningRate]
-            .iter()
-            .map(|ct| {
-                let style = if *ct == self.active_chart {
-                    AxonmlTheme::tab_active()
-                } else {
-                    AxonmlTheme::tab_inactive()
-                };
-                Span::styled(format!(" {} ", ct.as_str()), style)
-            })
-            .collect();
+        let tabs: Vec<Span> = [
+            ChartType::Loss,
+            ChartType::Accuracy,
+            ChartType::LearningRate,
+        ]
+        .iter()
+        .map(|ct| {
+            let style = if *ct == self.active_chart {
+                AxonmlTheme::tab_active()
+            } else {
+                AxonmlTheme::tab_inactive()
+            };
+            Span::styled(format!(" {} ", ct.as_str()), style)
+        })
+        .collect();
 
-        let selector = Paragraph::new(Line::from(tabs))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border())
-                    .title(Span::styled(" Chart Type (</> to switch) ", AxonmlTheme::header())),
-            );
+        let selector = Paragraph::new(Line::from(tabs)).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border())
+                .title(Span::styled(
+                    " Chart Type (</> to switch) ",
+                    AxonmlTheme::header(),
+                )),
+        );
 
         frame.render_widget(selector, area);
     }
@@ -252,11 +318,7 @@ impl GraphsView {
                     .title(Span::styled("Loss", AxonmlTheme::graph_label()))
                     .style(AxonmlTheme::graph_axis())
                     .bounds(self.loss_bounds)
-                    .labels(vec![
-                        Span::raw("0.0"),
-                        Span::raw("1.0"),
-                        Span::raw("2.0"),
-                    ]),
+                    .labels(vec![Span::raw("0.0"), Span::raw("1.0"), Span::raw("2.0")]),
             );
 
         frame.render_widget(chart, area);
@@ -302,32 +364,29 @@ impl GraphsView {
                     .title(Span::styled("Accuracy %", AxonmlTheme::graph_label()))
                     .style(AxonmlTheme::graph_axis())
                     .bounds(self.acc_bounds)
-                    .labels(vec![
-                        Span::raw("0"),
-                        Span::raw("50"),
-                        Span::raw("100"),
-                    ]),
+                    .labels(vec![Span::raw("0"), Span::raw("50"), Span::raw("100")]),
             );
 
         frame.render_widget(chart, area);
     }
 
     fn render_lr_chart(&self, frame: &mut Frame, area: Rect) {
-        let datasets = vec![
-            Dataset::default()
-                .name("Learning Rate")
-                .marker(symbols::Marker::Braille)
-                .graph_type(GraphType::Line)
-                .style(Style::default().fg(INFO))
-                .data(&self.learning_rate),
-        ];
+        let datasets = vec![Dataset::default()
+            .name("Learning Rate")
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(INFO))
+            .data(&self.learning_rate)];
 
         let chart = Chart::new(datasets)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(AxonmlTheme::border_focused())
-                    .title(Span::styled(" Learning Rate Schedule ", AxonmlTheme::header())),
+                    .title(Span::styled(
+                        " Learning Rate Schedule ",
+                        AxonmlTheme::header(),
+                    )),
             )
             .x_axis(
                 Axis::default()
@@ -346,11 +405,7 @@ impl GraphsView {
                     .title(Span::styled("LR (relative)", AxonmlTheme::graph_label()))
                     .style(AxonmlTheme::graph_axis())
                     .bounds([0.0, 1.2])
-                    .labels(vec![
-                        Span::raw("0"),
-                        Span::raw("0.5"),
-                        Span::raw("1.0"),
-                    ]),
+                    .labels(vec![Span::raw("0"), Span::raw("0.5"), Span::raw("1.0")]),
             );
 
         frame.render_widget(chart, area);
@@ -369,12 +424,18 @@ impl GraphsView {
                 Line::from(vec![
                     Span::styled("Latest: ", AxonmlTheme::muted()),
                     Span::styled(
-                        format!("Train {:.4}", self.train_loss.last().map(|p| p.1).unwrap_or(0.0)),
+                        format!(
+                            "Train {:.4}",
+                            self.train_loss.last().map(|p| p.1).unwrap_or(0.0)
+                        ),
                         AxonmlTheme::metric_value(),
                     ),
                     Span::raw("  "),
                     Span::styled(
-                        format!("Val {:.4}", self.val_loss.last().map(|p| p.1).unwrap_or(0.0)),
+                        format!(
+                            "Val {:.4}",
+                            self.val_loss.last().map(|p| p.1).unwrap_or(0.0)
+                        ),
                         AxonmlTheme::accent(),
                     ),
                 ]),
@@ -390,12 +451,18 @@ impl GraphsView {
                 Line::from(vec![
                     Span::styled("Latest: ", AxonmlTheme::muted()),
                     Span::styled(
-                        format!("Train {:.1}%", self.train_acc.last().map(|p| p.1).unwrap_or(0.0)),
+                        format!(
+                            "Train {:.1}%",
+                            self.train_acc.last().map(|p| p.1).unwrap_or(0.0)
+                        ),
                         AxonmlTheme::success(),
                     ),
                     Span::raw("  "),
                     Span::styled(
-                        format!("Val {:.1}%", self.val_acc.last().map(|p| p.1).unwrap_or(0.0)),
+                        format!(
+                            "Val {:.1}%",
+                            self.val_acc.last().map(|p| p.1).unwrap_or(0.0)
+                        ),
                         AxonmlTheme::success(),
                     ),
                 ]),
@@ -408,20 +475,22 @@ impl GraphsView {
                 Line::from(vec![
                     Span::styled("Current: ", AxonmlTheme::muted()),
                     Span::styled(
-                        format!("{:.4}x initial", self.learning_rate.last().map(|p| p.1).unwrap_or(1.0)),
+                        format!(
+                            "{:.4}x initial",
+                            self.learning_rate.last().map(|p| p.1).unwrap_or(1.0)
+                        ),
                         AxonmlTheme::metric_value(),
                     ),
                 ]),
             ],
         };
 
-        let legend = Paragraph::new(legend_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border())
-                    .title(Span::styled(" Legend ", AxonmlTheme::header())),
-            );
+        let legend = Paragraph::new(legend_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border())
+                .title(Span::styled(" Legend ", AxonmlTheme::header())),
+        );
 
         frame.render_widget(legend, area);
     }

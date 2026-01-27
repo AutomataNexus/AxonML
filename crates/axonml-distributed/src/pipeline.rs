@@ -321,10 +321,7 @@ impl<M: Module + Clone> Module for Pipeline<M> {
     }
 
     fn parameters(&self) -> Vec<Parameter> {
-        self.stages
-            .iter()
-            .flat_map(|s| s.parameters())
-            .collect()
+        self.stages.iter().flat_map(|s| s.parameters()).collect()
     }
 
     fn train(&mut self) {
@@ -340,7 +337,10 @@ impl<M: Module + Clone> Module for Pipeline<M> {
     }
 
     fn is_training(&self) -> bool {
-        self.stages.first().map(|s| s.is_training()).unwrap_or(false)
+        self.stages
+            .first()
+            .map(|s| s.is_training())
+            .unwrap_or(false)
     }
 }
 
@@ -393,7 +393,10 @@ mod tests {
 
     impl IdentityModule {
         fn new(size: usize) -> Self {
-            Self { size, training: true }
+            Self {
+                size,
+                training: true,
+            }
         }
     }
 
@@ -421,7 +424,10 @@ mod tests {
 
     #[test]
     fn test_pipeline_schedule_default() {
-        assert_eq!(PipelineSchedule::default(), PipelineSchedule::OneFOneBSchedule);
+        assert_eq!(
+            PipelineSchedule::default(),
+            PipelineSchedule::OneFOneBSchedule
+        );
     }
 
     #[test]
@@ -451,9 +457,7 @@ mod tests {
 
     #[test]
     fn test_pipeline_forward() {
-        let modules = vec![
-            IdentityModule::new(4),
-        ];
+        let modules = vec![IdentityModule::new(4)];
         let pg = ProcessGroup::mock();
         let pipeline = Pipeline::from_modules(modules, pg);
 

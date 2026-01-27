@@ -19,9 +19,9 @@ use cudarc::cublas::{sys::cublasOperation_t, CudaBlas, Gemm, GemmConfig};
 #[cfg(feature = "cuda")]
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceRepr, LaunchAsync, ValidAsZeroBits};
 
-use super::Backend;
 #[cfg(feature = "cuda")]
 use super::cuda_kernels::{self, CudaKernels};
+use super::Backend;
 use crate::device::DeviceCapabilities;
 use std::sync::Arc;
 
@@ -523,7 +523,12 @@ impl CudaBackend {
     }
 
     /// Scalar multiplication using CUDA kernel.
-    pub fn scale_f32(&self, dst: &mut CudaSlice<f32>, alpha: f32, len: usize) -> Result<(), CudaError> {
+    pub fn scale_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        alpha: f32,
+        len: usize,
+    ) -> Result<(), CudaError> {
         let func = self
             .kernels
             .get("scale_f32")

@@ -64,7 +64,8 @@ pub fn execute(args: UploadArgs) -> CliResult<()> {
     // Determine model name
     let model_name = args.name.clone().unwrap_or_else(|| {
         source_path
-            .file_stem().map_or_else(|| "model".to_string(), |s| s.to_string_lossy().to_string())
+            .file_stem()
+            .map_or_else(|| "model".to_string(), |s| s.to_string_lossy().to_string())
     });
 
     print_kv("Source", &args.path);

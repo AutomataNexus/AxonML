@@ -1,7 +1,7 @@
 //! Admin pages module
 
-mod users;
 mod system;
+mod users;
 
-pub use users::UserManagementPage;
 pub use system::SystemStatsPage;
+pub use users::UserManagementPage;

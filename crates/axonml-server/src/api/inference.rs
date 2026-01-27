@@ -191,7 +191,8 @@ pub async fn delete_endpoint(
     let repo = ModelRepository::new(&state.db);
 
     // Check if endpoint exists
-    let endpoint = repo.get_endpoint(&id)
+    let endpoint = repo
+        .get_endpoint(&id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or(AuthError::NotFound("Endpoint not found".to_string()))?;
@@ -254,13 +255,17 @@ pub async fn start_endpoint(
         .ok_or(AuthError::Internal("Model not found".to_string()))?;
 
     // Load the model into the inference server
-    if let Err(e) = state.inference.load_model(
-        &id,
-        &model.id,
-        &version.id,
-        version.version,
-        &version.file_path,
-    ).await {
+    if let Err(e) = state
+        .inference
+        .load_model(
+            &id,
+            &model.id,
+            &version.id,
+            version.version,
+            &version.file_path,
+        )
+        .await
+    {
         // Update status to error if loading fails
         let endpoint = repo
             .update_endpoint_status(&id, EndpointStatus::Error, Some(e.clone()))
@@ -270,7 +275,9 @@ pub async fn start_endpoint(
     }
 
     // Add model to pool for capacity management
-    state.model_pool.add(&id, &model.id, &version.id, endpoint.replicas)
+    state
+        .model_pool
+        .add(&id, &model.id, &version.id, endpoint.replicas)
         .await
         .map_err(|e| AuthError::Internal(e))?;
 
@@ -369,18 +376,9 @@ pub async fn get_endpoint_metrics(
                 .get("requests_error")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0),
-            latency_p50: m
-                .get("latency_p50")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0),
-            latency_p95: m
-                .get("latency_p95")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0),
-            latency_p99: m
-                .get("latency_p99")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0),
+            latency_p50: m.get("latency_p50").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            latency_p95: m.get("latency_p95").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            latency_p99: m.get("latency_p99").and_then(|v| v.as_f64()).unwrap_or(0.0),
             timestamp: m
                 .get("timestamp")
                 .and_then(|v| v.as_str())
@@ -415,7 +413,9 @@ pub async fn predict(
     }
 
     // Acquire a slot from the model pool for capacity management
-    state.model_pool.acquire(&endpoint.id)
+    state
+        .model_pool
+        .acquire(&endpoint.id)
         .await
         .map_err(|e| AuthError::Internal(e))?;
 
@@ -438,9 +438,7 @@ pub async fn predict(
     }
 
     // Run inference using the inference server
-    let result = state.inference
-        .predict(&endpoint.id, input_json)
-        .await;
+    let result = state.inference.predict(&endpoint.id, input_json).await;
 
     // Calculate latency from timer
     let latency_ms = timer.elapsed().as_secs_f64() * 1000.0;

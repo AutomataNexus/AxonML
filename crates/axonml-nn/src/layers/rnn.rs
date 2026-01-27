@@ -725,7 +725,6 @@ impl GRUCell {
     }
 }
 
-
 impl Module for GRUCell {
     fn forward(&self, input: &Variable) -> Variable {
         let batch_size = input.shape()[0];
@@ -945,7 +944,9 @@ impl GRU {
         }
 
         // Return last hidden state from last layer
-        hidden_states.pop().unwrap_or_else(|| Variable::new(zeros(&[batch_size, self.hidden_size]), false))
+        hidden_states
+            .pop()
+            .unwrap_or_else(|| Variable::new(zeros(&[batch_size, self.hidden_size]), false))
     }
 
     /// Stack output Variables into a single [batch, seq, hidden] tensor.
@@ -953,10 +954,7 @@ impl GRU {
     /// For gradient flow, use forward_mean() or forward_last() instead.
     fn stack_outputs(&self, outputs: &[Variable], batch_size: usize, seq_len: usize) -> Variable {
         if outputs.is_empty() {
-            return Variable::new(
-                zeros(&[batch_size, 0, self.hidden_size]),
-                false,
-            );
+            return Variable::new(zeros(&[batch_size, 0, self.hidden_size]), false);
         }
 
         let output_shape = [batch_size, seq_len, self.hidden_size];

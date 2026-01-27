@@ -16,7 +16,8 @@ use colored::Colorize;
 // =============================================================================
 
 /// NexusConnectBridge API base URL.
-pub const NEXUS_API_URL: &str = "https://nexusconnectbridge.automatanexus.com/api/v1/bridge/datasets";
+pub const NEXUS_API_URL: &str =
+    "https://nexusconnectbridge.automatanexus.com/api/v1/bridge/datasets";
 
 /// Tailscale fallback URL.
 pub const NEXUS_TAILSCALE_URL: &str = "http://100.85.154.94:8000/api/v1/bridge/datasets";
@@ -40,7 +41,8 @@ pub fn builtin_datasets() -> Vec<BuiltinDataset> {
         BuiltinDataset {
             id: "mnist".to_string(),
             name: "MNIST Handwritten Digits".to_string(),
-            description: "70k grayscale images of handwritten digits (0-9), 28x28 pixels".to_string(),
+            description: "70k grayscale images of handwritten digits (0-9), 28x28 pixels"
+                .to_string(),
             samples: 70000,
             features: 784,
             classes: 10,
@@ -50,7 +52,8 @@ pub fn builtin_datasets() -> Vec<BuiltinDataset> {
         BuiltinDataset {
             id: "fashion-mnist".to_string(),
             name: "Fashion MNIST".to_string(),
-            description: "70k grayscale images of clothing items (10 categories), 28x28 pixels".to_string(),
+            description: "70k grayscale images of clothing items (10 categories), 28x28 pixels"
+                .to_string(),
             samples: 70000,
             features: 784,
             classes: 10,
@@ -60,7 +63,8 @@ pub fn builtin_datasets() -> Vec<BuiltinDataset> {
         BuiltinDataset {
             id: "cifar-10".to_string(),
             name: "CIFAR-10".to_string(),
-            description: "60k color images in 10 classes (airplane, car, bird, etc.), 32x32 RGB".to_string(),
+            description: "60k color images in 10 classes (airplane, car, bird, etc.), 32x32 RGB"
+                .to_string(),
             samples: 60000,
             features: 3072,
             classes: 10,
@@ -90,7 +94,8 @@ pub fn builtin_datasets() -> Vec<BuiltinDataset> {
         BuiltinDataset {
             id: "wine-quality".to_string(),
             name: "Wine Quality Dataset".to_string(),
-            description: "6,497 samples of wine with chemical properties, predict quality (0-10)".to_string(),
+            description: "6,497 samples of wine with chemical properties, predict quality (0-10)"
+                .to_string(),
             samples: 6497,
             features: 11,
             classes: 10,
@@ -100,7 +105,8 @@ pub fn builtin_datasets() -> Vec<BuiltinDataset> {
         BuiltinDataset {
             id: "breast-cancer".to_string(),
             name: "Breast Cancer Wisconsin".to_string(),
-            description: "569 samples for breast cancer classification, 30 features, binary".to_string(),
+            description: "569 samples for breast cancer classification, 30 features, binary"
+                .to_string(),
             samples: 569,
             features: 30,
             classes: 2,
@@ -158,7 +164,7 @@ impl NexusClient {
             Ok(response) if response.status().is_success() => {
                 match response.json::<Vec<BuiltinDataset>>() {
                     Ok(datasets) => Ok(datasets),
-                    Err(_) => Ok(builtin_datasets()) // Fallback on parse error
+                    Err(_) => Ok(builtin_datasets()), // Fallback on parse error
                 }
             }
             _ => {
@@ -169,8 +175,16 @@ impl NexusClient {
     }
 
     /// Search datasets across sources via NexusConnectBridge API.
-    pub fn search(&self, query: &str, source: Option<&str>, max_results: usize) -> Result<Vec<SearchResult>, String> {
-        let mut url = format!("{}/search?query={}&maxResults={}", self.base_url, query, max_results);
+    pub fn search(
+        &self,
+        query: &str,
+        source: Option<&str>,
+        max_results: usize,
+    ) -> Result<Vec<SearchResult>, String> {
+        let mut url = format!(
+            "{}/search?query={}&maxResults={}",
+            self.base_url, query, max_results
+        );
         if let Some(src) = source {
             url.push_str(&format!("&source={}", src));
         }
@@ -183,7 +197,10 @@ impl NexusClient {
             .map_err(|e| format!("Network error: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("API error: {} - check NexusConnectBridge service", response.status()));
+            return Err(format!(
+                "API error: {} - check NexusConnectBridge service",
+                response.status()
+            ));
         }
 
         let results: Vec<SearchResult> = response.json().map_err(|e| e.to_string())?;
@@ -260,10 +277,7 @@ pub fn execute_list(source: Option<&str>) -> Result<(), String> {
             }
 
             println!("{}", "─".repeat(90));
-            println!(
-                "Get info: {} <dataset-id>",
-                "axonml dataset info".cyan()
-            );
+            println!("Get info: {} <dataset-id>", "axonml dataset info".cyan());
         }
         Some(src) => {
             println!("Listing datasets from source: {}", src);
@@ -348,10 +362,7 @@ pub fn execute_search(query: &str, source: Option<&str>, limit: usize) -> Result
             format!("({})", result.id).dimmed(),
             result.source.cyan()
         );
-        println!(
-            "    {} | Downloads: {}",
-            result.size, result.downloads
-        );
+        println!("    {} | Downloads: {}", result.size, result.downloads);
         println!("    {}", result.description.dimmed());
     }
 
@@ -450,10 +461,26 @@ pub fn execute_sources() -> Result<(), String> {
     println!("{}", "═".repeat(60));
 
     let sources = [
-        ("builtin", "Built-in datasets (MNIST, CIFAR, Iris, etc.)", "axonml dataset list"),
-        ("kaggle", "Kaggle (65,000+ datasets)", "axonml dataset search --source kaggle"),
-        ("uci", "UCI ML Repository", "axonml dataset search --source uci"),
-        ("data.gov", "US Government Open Data", "axonml dataset search --source data.gov"),
+        (
+            "builtin",
+            "Built-in datasets (MNIST, CIFAR, Iris, etc.)",
+            "axonml dataset list",
+        ),
+        (
+            "kaggle",
+            "Kaggle (65,000+ datasets)",
+            "axonml dataset search --source kaggle",
+        ),
+        (
+            "uci",
+            "UCI ML Repository",
+            "axonml dataset search --source uci",
+        ),
+        (
+            "data.gov",
+            "US Government Open Data",
+            "axonml dataset search --source data.gov",
+        ),
     ];
 
     for (name, desc, cmd) in &sources {

@@ -11,7 +11,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
     Frame,
 };
 
@@ -96,18 +99,14 @@ impl ModelView {
 
     /// Parse model file using axonml-serialize
     fn parse_model_file(&self, path: &Path) -> Result<ModelInfo, String> {
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("model");
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("model");
 
         // Get file size
-        let file_size = std::fs::metadata(path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
         // Detect format from extension
-        let format = path.extension()
+        let format = path
+            .extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| match ext.to_lowercase().as_str() {
                 "axonml" => "Axonml",
@@ -121,12 +120,14 @@ impl ModelView {
             .to_string();
 
         // Load the actual state dict
-        let state_dict = load_state_dict(path)
-            .map_err(|e| format!("Failed to load model: {}", e))?;
+        let state_dict =
+            load_state_dict(path).map_err(|e| format!("Failed to load model: {}", e))?;
 
         // Group parameters by layer prefix and extract layer info
-        let mut layer_map: std::collections::BTreeMap<String, Vec<(String, Vec<usize>, usize, bool)>> =
-            std::collections::BTreeMap::new();
+        let mut layer_map: std::collections::BTreeMap<
+            String,
+            Vec<(String, Vec<usize>, usize, bool)>,
+        > = std::collections::BTreeMap::new();
 
         for (param_name, entry) in state_dict.entries() {
             let shape = entry.data.shape.clone();
@@ -139,10 +140,12 @@ impl ModelView {
                 param_name.clone()
             };
 
-            layer_map
-                .entry(layer_name)
-                .or_default()
-                .push((param_name.clone(), shape, num_params, entry.requires_grad));
+            layer_map.entry(layer_name).or_default().push((
+                param_name.clone(),
+                shape,
+                num_params,
+                entry.requires_grad,
+            ));
         }
 
         // Create LayerInfo for each unique layer
@@ -215,9 +218,9 @@ impl ModelView {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(5),  // Header
-                    Constraint::Min(10),    // Layers list
-                    Constraint::Length(8),  // Details panel
+                    Constraint::Length(5), // Header
+                    Constraint::Min(10),   // Layers list
+                    Constraint::Length(8), // Details panel
                 ])
                 .split(area);
 
@@ -244,20 +247,25 @@ impl ModelView {
             ]),
             Line::from(vec![
                 Span::styled("Total Params: ", AxonmlTheme::muted()),
-                Span::styled(format_number(model.total_params), AxonmlTheme::metric_value()),
+                Span::styled(
+                    format_number(model.total_params),
+                    AxonmlTheme::metric_value(),
+                ),
                 Span::raw("  "),
                 Span::styled("Trainable: ", AxonmlTheme::muted()),
-                Span::styled(format_number(model.trainable_params), AxonmlTheme::success()),
+                Span::styled(
+                    format_number(model.trainable_params),
+                    AxonmlTheme::success(),
+                ),
             ]),
         ];
 
-        let header = Paragraph::new(header_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border())
-                    .title(Span::styled(" Model Info ", AxonmlTheme::header())),
-            );
+        let header = Paragraph::new(header_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border())
+                .title(Span::styled(" Model Info ", AxonmlTheme::header())),
+        );
 
         frame.render_widget(header, area);
     }
@@ -275,18 +283,9 @@ impl ModelView {
                 };
 
                 let content = Line::from(vec![
-                    Span::styled(
-                        format!("{:>2}. ", i + 1),
-                        AxonmlTheme::muted(),
-                    ),
-                    Span::styled(
-                        format!("{:<12}", layer.name),
-                        AxonmlTheme::layer_type(),
-                    ),
-                    Span::styled(
-                        format!("{:<15}", layer.layer_type),
-                        AxonmlTheme::accent(),
-                    ),
+                    Span::styled(format!("{:>2}. ", i + 1), AxonmlTheme::muted()),
+                    Span::styled(format!("{:<12}", layer.name), AxonmlTheme::layer_type()),
+                    Span::styled(format!("{:<15}", layer.layer_type), AxonmlTheme::accent()),
                     Span::styled(
                         format!("{:>15}", layer.output_shape),
                         AxonmlTheme::layer_shape(),
@@ -323,7 +322,10 @@ impl ModelView {
 
         frame.render_stateful_widget(
             scrollbar,
-            area.inner(ratatui::layout::Margin { vertical: 1, horizontal: 0 }),
+            area.inner(ratatui::layout::Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
             &mut self.scroll_state,
         );
     }
@@ -363,13 +365,12 @@ impl ModelView {
             ]),
         ];
 
-        let details_widget = Paragraph::new(details)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(AxonmlTheme::border())
-                    .title(Span::styled(" Layer Details ", AxonmlTheme::header())),
-            );
+        let details_widget = Paragraph::new(details).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(AxonmlTheme::border())
+                .title(Span::styled(" Layer Details ", AxonmlTheme::header())),
+        );
 
         frame.render_widget(details_widget, area);
     }
@@ -377,10 +378,7 @@ impl ModelView {
     fn render_empty(&self, frame: &mut Frame, area: Rect) {
         let text = vec![
             Line::from(""),
-            Line::from(Span::styled(
-                "No model loaded",
-                AxonmlTheme::muted(),
-            )),
+            Line::from(Span::styled("No model loaded", AxonmlTheme::muted())),
             Line::from(""),
             Line::from(Span::styled(
                 "Press 'o' to open a model file",

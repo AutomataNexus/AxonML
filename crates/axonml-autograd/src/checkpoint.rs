@@ -276,10 +276,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_sequential_single_segment() {
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(),
-            true,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(), true);
 
         let output = checkpoint_sequential(3, 1, &input, |_layer_idx, x| x.clone());
 
@@ -288,10 +285,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_sequential_zero_segments() {
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(),
-            true,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(), true);
 
         let output = checkpoint_sequential(3, 0, &input, |_layer_idx, x| x.clone());
 

@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*};
 
 /// Inference overview page
 #[component]
@@ -34,7 +34,9 @@ pub fn InferenceOverviewPage() -> impl IntoView {
 
                     for endpoint in &data {
                         if endpoint.status == EndpointStatus::Running {
-                            if let Ok(metrics_response) = api::inference::get_metrics(&endpoint.id, None, None).await {
+                            if let Ok(metrics_response) =
+                                api::inference::get_metrics(&endpoint.id, None, None).await
+                            {
                                 for m in &metrics_response.metrics {
                                     total_reqs += m.requests_total;
                                     total_errors += m.requests_error;
@@ -64,11 +66,19 @@ pub fn InferenceOverviewPage() -> impl IntoView {
     });
 
     let active_endpoints = move || {
-        endpoints.get().iter().filter(|e| e.status == EndpointStatus::Running).count()
+        endpoints
+            .get()
+            .iter()
+            .filter(|e| e.status == EndpointStatus::Running)
+            .count()
     };
 
     let stopped_endpoints = move || {
-        endpoints.get().iter().filter(|e| e.status == EndpointStatus::Stopped).count()
+        endpoints
+            .get()
+            .iter()
+            .filter(|e| e.status == EndpointStatus::Stopped)
+            .count()
     };
 
     view! {

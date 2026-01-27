@@ -34,7 +34,8 @@ pub struct PositionalEncoding {
 
 impl PositionalEncoding {
     /// Create positional encoding.
-    #[must_use] pub fn new(d_model: usize, max_len: usize) -> Self {
+    #[must_use]
+    pub fn new(d_model: usize, max_len: usize) -> Self {
         let mut pe = vec![0.0f32; max_len * d_model];
 
         for pos in 0..max_len {
@@ -56,7 +57,8 @@ impl PositionalEncoding {
     }
 
     /// Add positional encoding to input.
-    #[must_use] pub fn forward(&self, x: &Variable) -> Variable {
+    #[must_use]
+    pub fn forward(&self, x: &Variable) -> Variable {
         let shape = x.shape();
         let seq_len = shape[1];
         let x_data = x.data().to_vec();
@@ -96,7 +98,8 @@ pub struct TransformerEncoderLayer {
 
 impl TransformerEncoderLayer {
     /// Create encoder layer.
-    #[must_use] pub fn new(d_model: usize, nhead: usize, dim_feedforward: usize, dropout: f32) -> Self {
+    #[must_use]
+    pub fn new(d_model: usize, nhead: usize, dim_feedforward: usize, dropout: f32) -> Self {
         Self {
             self_attn: MultiHeadAttention::with_options(d_model, nhead, dropout, true),
             ff_linear1: Linear::new(d_model, dim_feedforward),
@@ -173,7 +176,8 @@ pub struct TransformerEncoder {
 
 impl TransformerEncoder {
     /// Create encoder with specified layers.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         d_model: usize,
         nhead: usize,
         num_layers: usize,
@@ -191,7 +195,8 @@ impl TransformerEncoder {
     }
 
     /// Forward with optional mask.
-    #[must_use] pub fn forward_with_mask(&self, src: &Variable, mask: Option<&Variable>) -> Variable {
+    #[must_use]
+    pub fn forward_with_mask(&self, src: &Variable, mask: Option<&Variable>) -> Variable {
         let mut output = src.clone();
         for layer in &self.layers {
             output = layer.forward_with_mask(&output, mask);
@@ -232,7 +237,9 @@ impl Module for TransformerEncoder {
     }
 
     fn is_training(&self) -> bool {
-        self.layers.first().map_or(true, axonml_nn::Module::is_training)
+        self.layers
+            .first()
+            .map_or(true, axonml_nn::Module::is_training)
     }
 }
 
@@ -254,7 +261,8 @@ pub struct TransformerDecoderLayer {
 
 impl TransformerDecoderLayer {
     /// Create decoder layer.
-    #[must_use] pub fn new(d_model: usize, nhead: usize, dim_feedforward: usize, dropout: f32) -> Self {
+    #[must_use]
+    pub fn new(d_model: usize, nhead: usize, dim_feedforward: usize, dropout: f32) -> Self {
         Self {
             self_attn: MultiHeadAttention::with_options(d_model, nhead, dropout, true),
             cross_attn: MultiHeadAttention::with_options(d_model, nhead, dropout, true),
@@ -342,7 +350,8 @@ pub struct TransformerDecoder {
 
 impl TransformerDecoder {
     /// Create decoder with specified layers.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         d_model: usize,
         nhead: usize,
         num_layers: usize,
@@ -360,7 +369,8 @@ impl TransformerDecoder {
     }
 
     /// Forward with memory and masks.
-    #[must_use] pub fn forward_with_memory(
+    #[must_use]
+    pub fn forward_with_memory(
         &self,
         tgt: &Variable,
         memory: &Variable,
@@ -414,7 +424,9 @@ impl Module for TransformerDecoder {
     }
 
     fn is_training(&self) -> bool {
-        self.layers.first().map_or(true, axonml_nn::Module::is_training)
+        self.layers
+            .first()
+            .map_or(true, axonml_nn::Module::is_training)
     }
 }
 
@@ -431,7 +443,8 @@ pub struct Transformer {
 
 impl Transformer {
     /// Create a Transformer model.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         d_model: usize,
         nhead: usize,
         num_encoder_layers: usize,
@@ -459,12 +472,14 @@ impl Transformer {
     }
 
     /// Returns the model dimension.
-    #[must_use] pub fn d_model(&self) -> usize {
+    #[must_use]
+    pub fn d_model(&self) -> usize {
         self.d_model
     }
 
     /// Forward pass with source and target.
-    #[must_use] pub fn forward_full(
+    #[must_use]
+    pub fn forward_full(
         &self,
         src: &Variable,
         tgt: &Variable,
@@ -537,7 +552,8 @@ impl VisionTransformer {
     /// * `num_layers` - Number of encoder layers
     /// * `dim_feedforward` - Feed-forward dimension
     /// * `dropout` - Dropout probability
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         image_size: usize,
         patch_size: usize,
         in_channels: usize,
@@ -573,22 +589,26 @@ impl VisionTransformer {
     }
 
     /// Create ViT-Tiny.
-    #[must_use] pub fn vit_tiny(image_size: usize, num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vit_tiny(image_size: usize, num_classes: usize) -> Self {
         Self::new(image_size, 16, 3, num_classes, 192, 3, 12, 768, 0.0)
     }
 
     /// Create ViT-Small.
-    #[must_use] pub fn vit_small(image_size: usize, num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vit_small(image_size: usize, num_classes: usize) -> Self {
         Self::new(image_size, 16, 3, num_classes, 384, 6, 12, 1536, 0.0)
     }
 
     /// Create ViT-Base.
-    #[must_use] pub fn vit_base(image_size: usize, num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vit_base(image_size: usize, num_classes: usize) -> Self {
         Self::new(image_size, 16, 3, num_classes, 768, 12, 12, 3072, 0.0)
     }
 
     /// Create ViT-Large.
-    #[must_use] pub fn vit_large(image_size: usize, num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vit_large(image_size: usize, num_classes: usize) -> Self {
         Self::new(image_size, 16, 3, num_classes, 1024, 16, 24, 4096, 0.0)
     }
 
@@ -730,12 +750,14 @@ impl Module for VisionTransformer {
 // =============================================================================
 
 /// Create ViT-Base for `ImageNet` (224x224, 1000 classes).
-#[must_use] pub fn vit_base() -> VisionTransformer {
+#[must_use]
+pub fn vit_base() -> VisionTransformer {
     VisionTransformer::vit_base(224, 1000)
 }
 
 /// Create ViT-Large for `ImageNet` (224x224, 1000 classes).
-#[must_use] pub fn vit_large() -> VisionTransformer {
+#[must_use]
+pub fn vit_large() -> VisionTransformer {
     VisionTransformer::vit_large(224, 1000)
 }
 

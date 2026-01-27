@@ -29,7 +29,8 @@ pub struct MatMulBackward {
 
 impl MatMulBackward {
     /// Creates a new `MatMulBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         lhs_grad_fn: Option<GradFn>,
         rhs_grad_fn: Option<GradFn>,
         lhs: Tensor<f32>,
@@ -85,7 +86,8 @@ pub struct TransposeBackward {
 
 impl TransposeBackward {
     /// Creates a new `TransposeBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, dim0: usize, dim1: usize) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, dim0: usize, dim1: usize) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             dim0,
@@ -131,7 +133,8 @@ pub struct ReshapeBackward {
 
 impl ReshapeBackward {
     /// Creates a new `ReshapeBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, original_shape: Vec<usize>) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, original_shape: Vec<usize>) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             original_shape,
@@ -172,7 +175,8 @@ pub struct SqueezeBackward {
 
 impl SqueezeBackward {
     /// Creates a new `SqueezeBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, original_shape: Vec<usize>) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, original_shape: Vec<usize>) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             original_shape,
@@ -213,7 +217,8 @@ pub struct UnsqueezeBackward {
 
 impl UnsqueezeBackward {
     /// Creates a new `UnsqueezeBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, dim: usize) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, dim: usize) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             dim,
@@ -253,7 +258,8 @@ pub struct ViewBackward {
 
 impl ViewBackward {
     /// Creates a new `ViewBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, original_shape: Vec<usize>) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, original_shape: Vec<usize>) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             original_shape,

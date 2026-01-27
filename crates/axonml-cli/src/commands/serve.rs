@@ -136,7 +136,10 @@ fn load_model(path: &PathBuf) -> CliResult<ModelInfo> {
                 input_size = shape[1];
             }
         }
-        if param_name.contains("fc") || param_name.contains("classifier") || param_name.contains("head") {
+        if param_name.contains("fc")
+            || param_name.contains("classifier")
+            || param_name.contains("head")
+        {
             if param_name.ends_with(".weight") && shape.len() == 2 {
                 output_size = shape[0];
             }
@@ -144,8 +147,12 @@ fn load_model(path: &PathBuf) -> CliResult<ModelInfo> {
     }
 
     // Default shapes if not found
-    if input_size == 0 { input_size = 784; }
-    if output_size == 0 { output_size = 10; }
+    if input_size == 0 {
+        input_size = 784;
+    }
+    if output_size == 0 {
+        output_size = 10;
+    }
 
     Ok(ModelInfo {
         name,
@@ -272,7 +279,10 @@ async fn predict_handler(
         // Apply softmax
         let max_logit = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let exp_sum: f64 = logits.iter().map(|x| (x - max_logit).exp()).sum();
-        logits.iter().map(|x| (x - max_logit).exp() / exp_sum).collect()
+        logits
+            .iter()
+            .map(|x| (x - max_logit).exp() / exp_sum)
+            .collect()
     } else {
         // No model loaded - return uniform distribution with warning
         vec![1.0 / output_size as f64; output_size]

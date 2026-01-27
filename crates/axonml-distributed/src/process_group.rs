@@ -36,37 +36,44 @@ impl ProcessGroup {
     }
 
     /// Creates a mock process group for testing.
-    #[must_use] pub fn mock() -> Self {
+    #[must_use]
+    pub fn mock() -> Self {
         Self::new(Arc::new(MockBackend::single()))
     }
 
     /// Returns the backend.
-    #[must_use] pub fn backend(&self) -> &dyn Backend {
+    #[must_use]
+    pub fn backend(&self) -> &dyn Backend {
         self.backend.as_ref()
     }
 
     /// Returns the rank of this process.
-    #[must_use] pub fn rank(&self) -> usize {
+    #[must_use]
+    pub fn rank(&self) -> usize {
         self.backend.rank()
     }
 
     /// Returns the world size.
-    #[must_use] pub fn world_size(&self) -> usize {
+    #[must_use]
+    pub fn world_size(&self) -> usize {
         self.backend.world_size()
     }
 
     /// Returns the number of processes in this group.
-    #[must_use] pub fn size(&self) -> usize {
+    #[must_use]
+    pub fn size(&self) -> usize {
         self.ranks.len()
     }
 
     /// Returns the ranks in this group.
-    #[must_use] pub fn ranks(&self) -> &[usize] {
+    #[must_use]
+    pub fn ranks(&self) -> &[usize] {
         &self.ranks
     }
 
     /// Checks if this process is part of the group.
-    #[must_use] pub fn contains(&self, rank: usize) -> bool {
+    #[must_use]
+    pub fn contains(&self, rank: usize) -> bool {
         self.ranks.contains(&rank)
     }
 
@@ -90,7 +97,8 @@ impl ProcessGroup {
     }
 
     /// Performs all-gather on tensors.
-    #[must_use] pub fn all_gather_tensor(&self, send_tensor: &Tensor<f32>) -> Tensor<f32> {
+    #[must_use]
+    pub fn all_gather_tensor(&self, send_tensor: &Tensor<f32>) -> Tensor<f32> {
         let send_data = send_tensor.to_vec();
         let mut recv_data = vec![0.0; send_data.len() * self.world_size()];
         self.backend.all_gather(&send_data, &mut recv_data);
@@ -102,7 +110,8 @@ impl ProcessGroup {
     }
 
     /// Performs reduce-scatter on a tensor.
-    #[must_use] pub fn reduce_scatter_tensor(&self, send_tensor: &Tensor<f32>, op: ReduceOp) -> Tensor<f32> {
+    #[must_use]
+    pub fn reduce_scatter_tensor(&self, send_tensor: &Tensor<f32>, op: ReduceOp) -> Tensor<f32> {
         let send_data = send_tensor.to_vec();
         let chunk_size = send_data.len() / self.world_size();
         let mut recv_data = vec![0.0; chunk_size];
@@ -124,7 +133,8 @@ impl ProcessGroup {
     }
 
     /// Receives a tensor from a source rank.
-    #[must_use] pub fn recv_tensor(&self, src: usize, shape: &[usize]) -> Tensor<f32> {
+    #[must_use]
+    pub fn recv_tensor(&self, src: usize, shape: &[usize]) -> Tensor<f32> {
         let size: usize = shape.iter().product();
         let mut data = vec![0.0; size];
         self.backend.recv(&mut data, src, 0);
@@ -150,29 +160,34 @@ impl World {
     }
 
     /// Creates a mock world for testing.
-    #[must_use] pub fn mock() -> Self {
+    #[must_use]
+    pub fn mock() -> Self {
         Self {
             default_group: ProcessGroup::mock(),
         }
     }
 
     /// Returns the default process group.
-    #[must_use] pub fn default_group(&self) -> &ProcessGroup {
+    #[must_use]
+    pub fn default_group(&self) -> &ProcessGroup {
         &self.default_group
     }
 
     /// Returns the rank of this process.
-    #[must_use] pub fn rank(&self) -> usize {
+    #[must_use]
+    pub fn rank(&self) -> usize {
         self.default_group.rank()
     }
 
     /// Returns the world size.
-    #[must_use] pub fn world_size(&self) -> usize {
+    #[must_use]
+    pub fn world_size(&self) -> usize {
         self.default_group.world_size()
     }
 
     /// Checks if this is the main process (rank 0).
-    #[must_use] pub fn is_main(&self) -> bool {
+    #[must_use]
+    pub fn is_main(&self) -> bool {
         self.rank() == 0
     }
 
@@ -182,7 +197,8 @@ impl World {
     }
 
     /// Creates a new process group with specific ranks.
-    #[must_use] pub fn new_group(&self, ranks: Vec<usize>) -> ProcessGroup {
+    #[must_use]
+    pub fn new_group(&self, ranks: Vec<usize>) -> ProcessGroup {
         ProcessGroup::with_ranks(Arc::clone(&self.default_group.backend), ranks)
     }
 }

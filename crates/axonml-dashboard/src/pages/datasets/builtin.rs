@@ -5,9 +5,9 @@
 use leptos::*;
 
 use crate::api;
+use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*};
 
 /// Built-in datasets browser page
 #[component]
@@ -19,7 +19,8 @@ pub fn BuiltinDatasetsPage() -> impl IntoView {
     let (sources, set_sources) = create_signal::<Vec<DatasetSource>>(vec![]);
     let (selected_source, set_selected_source) = create_signal::<Option<String>>(None);
     let (search_query, set_search_query) = create_signal(String::new());
-    let (search_results, set_search_results) = create_signal::<Option<Vec<DatasetSearchResult>>>(None);
+    let (search_results, set_search_results) =
+        create_signal::<Option<Vec<DatasetSearchResult>>>(None);
     let (searching, set_searching) = create_signal(false);
     let (selected_dataset, set_selected_dataset) = create_signal::<Option<BuiltinDataset>>(None);
     let (preparing, set_preparing) = create_signal::<Option<String>>(None);

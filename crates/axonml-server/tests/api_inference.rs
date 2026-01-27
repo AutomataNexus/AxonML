@@ -27,7 +27,11 @@ async fn test_list_endpoints_authenticated() {
 
     let status = response.status().as_u16();
     // Endpoint may or may not exist
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -42,7 +46,11 @@ async fn test_list_endpoints_unauthenticated() {
         .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 401 || status == 404, "Should return 401 or 404, got: {}", status);
+    assert!(
+        status == 401 || status == 404,
+        "Should return 401 or 404, got: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -87,11 +95,19 @@ async fn test_get_endpoint_not_found() {
     let client = test_client();
     let token = login_as_admin(&client).await.expect("Login failed");
 
-    let response = auth_get(&client, "/api/inference/endpoints/nonexistent-endpoint-id", &token)
-        .await
-        .expect("Request failed");
+    let response = auth_get(
+        &client,
+        "/api/inference/endpoints/nonexistent-endpoint-id",
+        &token,
+    )
+    .await
+    .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 404, "Should return 404 for nonexistent endpoint");
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "Should return 404 for nonexistent endpoint"
+    );
 }
 
 #[tokio::test]
@@ -106,7 +122,11 @@ async fn test_inference_metrics() {
         .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -121,7 +141,11 @@ async fn test_inference_overview() {
         .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -141,7 +165,11 @@ async fn test_start_endpoint() {
     .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -161,7 +189,11 @@ async fn test_stop_endpoint() {
     .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -171,11 +203,19 @@ async fn test_delete_endpoint_not_found() {
     let client = test_client();
     let token = login_as_admin(&client).await.expect("Login failed");
 
-    let response = auth_delete(&client, "/api/inference/endpoints/nonexistent-endpoint-id", &token)
-        .await
-        .expect("Request failed");
+    let response = auth_delete(
+        &client,
+        "/api/inference/endpoints/nonexistent-endpoint-id",
+        &token,
+    )
+    .await
+    .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 404, "Should return 404 for nonexistent endpoint");
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "Should return 404 for nonexistent endpoint"
+    );
 }
 
 #[tokio::test]
@@ -244,5 +284,9 @@ async fn test_endpoint_scaling() {
     .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }

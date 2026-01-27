@@ -1,8 +1,8 @@
 //! Toast Notification Components
 
-use leptos::*;
-use crate::state::{use_app_state, Toast, ToastType};
 use crate::components::icons::*;
+use crate::state::{use_app_state, Toast, ToastType};
+use leptos::*;
 
 /// Toast container component - renders all active toasts
 #[component]
@@ -26,10 +26,7 @@ pub fn ToastContainer() -> impl IntoView {
 
 /// Individual toast item
 #[component]
-fn ToastItem(
-    toast: Toast,
-    on_close: Callback<()>,
-) -> impl IntoView {
+fn ToastItem(toast: Toast, on_close: Callback<()>) -> impl IntoView {
     let visible = create_rw_signal(true);
     let exiting = create_rw_signal(false);
 

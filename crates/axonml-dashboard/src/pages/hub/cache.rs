@@ -6,9 +6,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, modal::*};
 
 /// Hub cache page
 #[component]
@@ -62,7 +62,10 @@ pub fn HubCachePage() -> impl IntoView {
             spawn_local(async move {
                 match api::hub::clear_cache(Some(&name)).await {
                     Ok(_) => {
-                        state.toast_success("Model Removed", &format!("{} removed from cache", name));
+                        state.toast_success(
+                            "Model Removed",
+                            &format!("{} removed from cache", name),
+                        );
                         if let Ok(info) = api::hub::get_cache_info().await {
                             set_cache_info.set(Some(info));
                         }
@@ -76,7 +79,10 @@ pub fn HubCachePage() -> impl IntoView {
     };
 
     let has_cached_models = move || {
-        cache_info.get().map(|c| !c.models.is_empty()).unwrap_or(false)
+        cache_info
+            .get()
+            .map(|c| !c.models.is_empty())
+            .unwrap_or(false)
     };
 
     view! {

@@ -177,9 +177,7 @@ impl VaultBackend {
             // Login with AppRole
             let auth_info = vaultrs::auth::approle::login(&*client, mount, role_id, secret_id)
                 .await
-                .map_err(|e| {
-                    SecretsError::AuthFailed(format!("AppRole login failed: {}", e))
-                })?;
+                .map_err(|e| SecretsError::AuthFailed(format!("AppRole login failed: {}", e)))?;
 
             drop(client);
 

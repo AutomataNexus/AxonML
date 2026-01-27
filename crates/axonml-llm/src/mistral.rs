@@ -14,7 +14,7 @@
 //! ```
 
 use axonml_autograd::Variable;
-use axonml_nn::{Module, Linear, Dropout, Parameter, Embedding};
+use axonml_nn::{Dropout, Embedding, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
 
 use crate::attention::{KVCache, LayerKVCache};
@@ -156,7 +156,11 @@ impl MistralAttention {
             k_proj: Linear::new(config.hidden_size, kv_hidden),
             v_proj: Linear::new(config.hidden_size, kv_hidden),
             o_proj: Linear::new(config.hidden_size, config.hidden_size),
-            rotary_emb: RotaryEmbedding::new(head_dim, config.max_position_embeddings, config.rope_theta),
+            rotary_emb: RotaryEmbedding::new(
+                head_dim,
+                config.max_position_embeddings,
+                config.rope_theta,
+            ),
             num_heads: config.num_attention_heads,
             num_kv_heads: config.num_key_value_heads,
             head_dim,
@@ -184,9 +188,15 @@ impl MistralAttention {
         let v = self.v_proj.forward(hidden_states);
 
         // Reshape for multi-head attention
-        let q = q.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
-        let k = k.reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim]).transpose(1, 2);
-        let v = v.reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim]).transpose(1, 2);
+        let q = q
+            .reshape(&[batch_size, seq_len, self.num_heads, self.head_dim])
+            .transpose(1, 2);
+        let k = k
+            .reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim])
+            .transpose(1, 2);
+        let v = v
+            .reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim])
+            .transpose(1, 2);
 
         // Apply rotary embeddings
         let (q, k) = self.rotary_emb.apply(&q, &k, position_offset);
@@ -249,7 +259,10 @@ impl MistralAttention {
 
         // Compute output
         let attn_output = attn_weights.matmul(&v);
-        let attn_output = attn_output.transpose(1, 2).reshape(&[batch_size, seq_len, self.hidden_size]);
+        let attn_output =
+            attn_output
+                .transpose(1, 2)
+                .reshape(&[batch_size, seq_len, self.hidden_size]);
 
         self.o_proj.forward(&attn_output)
     }
@@ -287,7 +300,12 @@ impl MistralAttention {
     }
 
     /// Create sliding window causal mask.
-    fn create_sliding_window_mask(&self, q_len: usize, kv_len: usize, offset: usize) -> Tensor<f32> {
+    fn create_sliding_window_mask(
+        &self,
+        q_len: usize,
+        kv_len: usize,
+        offset: usize,
+    ) -> Tensor<f32> {
         let mut mask_data = vec![0.0f32; q_len * kv_len];
 
         for i in 0..q_len {
@@ -392,7 +410,9 @@ impl MistralDecoderLayer {
         // Self attention with pre-norm
         let residual = hidden_states.clone();
         let hidden_states = self.input_layernorm.forward(hidden_states);
-        let hidden_states = self.self_attn.forward_with_cache(&hidden_states, kv_cache, position_offset);
+        let hidden_states =
+            self.self_attn
+                .forward_with_cache(&hidden_states, kv_cache, position_offset);
         let hidden_states = residual.add(&hidden_states);
 
         // MLP with pre-norm
@@ -460,10 +480,7 @@ impl Mistral {
 
         // Convert token IDs to Variable for embedding lookup
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var = Variable::new(
-            Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(),
-            false,
-        );
+        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
 
         // Embed tokens
         let mut hidden_states = self.embed_tokens.forward(&ids_var);
@@ -472,7 +489,8 @@ impl Mistral {
         if let Some(cache) = kv_cache {
             for (i, layer) in self.layers.iter().enumerate() {
                 let layer_cache = cache.get_mut(i);
-                hidden_states = layer.forward_with_cache(&hidden_states, layer_cache, position_offset);
+                hidden_states =
+                    layer.forward_with_cache(&hidden_states, layer_cache, position_offset);
             }
         } else {
             for layer in &self.layers {
@@ -572,7 +590,9 @@ impl MistralForCausalLM {
             num_hidden_layers: config_json["num_hidden_layers"].as_u64().unwrap_or(32) as usize,
             num_attention_heads: config_json["num_attention_heads"].as_u64().unwrap_or(32) as usize,
             num_key_value_heads: config_json["num_key_value_heads"].as_u64().unwrap_or(8) as usize,
-            max_position_embeddings: config_json["max_position_embeddings"].as_u64().unwrap_or(32768) as usize,
+            max_position_embeddings: config_json["max_position_embeddings"]
+                .as_u64()
+                .unwrap_or(32768) as usize,
             sliding_window: config_json["sliding_window"].as_u64().unwrap_or(4096) as usize,
             rms_norm_eps: config_json["rms_norm_eps"].as_f64().unwrap_or(1e-5) as f32,
             rope_theta: config_json["rope_theta"].as_f64().unwrap_or(10000.0) as f32,

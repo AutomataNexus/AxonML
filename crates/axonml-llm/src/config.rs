@@ -2,7 +2,7 @@
 //!
 //! Configuration structs for BERT, GPT-2, and transformer models.
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Base transformer configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]

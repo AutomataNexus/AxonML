@@ -5,7 +5,7 @@
 use leptos::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{WebSocket, MessageEvent, CloseEvent, ErrorEvent};
+use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 
 use crate::state::use_app_state;
 
@@ -149,17 +149,15 @@ pub fn Terminal() -> impl IntoView {
     };
 
     // Toggle terminal (for main button)
-    let toggle = move |_| {
-        match terminal_state.get() {
-            TerminalState::Closed => {
-                connect(());
-            }
-            TerminalState::Open => {
-                set_terminal_state.set(TerminalState::Minimized);
-            }
-            TerminalState::Minimized => {
-                set_terminal_state.set(TerminalState::Open);
-            }
+    let toggle = move |_| match terminal_state.get() {
+        TerminalState::Closed => {
+            connect(());
+        }
+        TerminalState::Open => {
+            set_terminal_state.set(TerminalState::Minimized);
+        }
+        TerminalState::Minimized => {
+            set_terminal_state.set(TerminalState::Open);
         }
     };
 

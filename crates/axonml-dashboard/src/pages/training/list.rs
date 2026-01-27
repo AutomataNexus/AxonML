@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{icons::*, modal::*, spinner::*, table::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, table::*, modal::*};
 
 /// Training runs list page
 #[component]
@@ -211,10 +211,7 @@ pub fn TrainingListPage() -> impl IntoView {
 
 /// Training run card component
 #[component]
-fn TrainingRunCard(
-    run: TrainingRun,
-    #[prop(into)] on_delete: Callback<()>,
-) -> impl IntoView {
+fn TrainingRunCard(run: TrainingRun, #[prop(into)] on_delete: Callback<()>) -> impl IntoView {
     let status_class = run.status.color_class();
     let is_running = run.status == RunStatus::Running;
     let run_id = run.id.clone();

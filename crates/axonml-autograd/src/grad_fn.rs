@@ -70,17 +70,20 @@ impl GradFn {
     }
 
     /// Applies the gradient function.
-    #[must_use] pub fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+    #[must_use]
+    pub fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         self.inner.apply(grad_output)
     }
 
     /// Returns the name of the gradient function.
-    #[must_use] pub fn name(&self) -> &'static str {
+    #[must_use]
+    pub fn name(&self) -> &'static str {
         self.inner.name()
     }
 
     /// Returns the next functions in the graph.
-    #[must_use] pub fn next_functions(&self) -> &[Option<GradFn>] {
+    #[must_use]
+    pub fn next_functions(&self) -> &[Option<GradFn>] {
         self.inner.next_functions()
     }
 
@@ -89,7 +92,8 @@ impl GradFn {
     /// This uses the Arc's pointer address, which remains the same
     /// when the `GradFn` is cloned (since `Arc::clone` just increments
     /// the reference count).
-    #[must_use] pub fn id(&self) -> GradFnId {
+    #[must_use]
+    pub fn id(&self) -> GradFnId {
         // For trait objects, we need to extract just the data pointer (not vtable)
         let ptr = Arc::as_ptr(&self.inner);
         ptr.cast::<()>() as GradFnId

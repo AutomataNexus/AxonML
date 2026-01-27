@@ -280,7 +280,10 @@ impl WebAuthnAuth {
 
         // Return the matched credential with updated counter
         let mut updated = credential.clone();
-        updated.counter = response.client_data.counter.unwrap_or(credential.counter + 1);
+        updated.counter = response
+            .client_data
+            .counter
+            .unwrap_or(credential.counter + 1);
 
         Ok(updated)
     }
@@ -304,7 +307,9 @@ mod tests {
     #[test]
     fn test_start_registration() {
         let webauthn = WebAuthnAuth::new("localhost", "AxonML", "http://localhost:8080");
-        let challenge = webauthn.start_registration("user-123", "test@example.com", "Test User").unwrap();
+        let challenge = webauthn
+            .start_registration("user-123", "test@example.com", "Test User")
+            .unwrap();
 
         assert!(!challenge.challenge.is_empty());
         assert_eq!(challenge.rp.id, "localhost");

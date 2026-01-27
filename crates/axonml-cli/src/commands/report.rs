@@ -14,7 +14,7 @@ use axonml_nn::CrossEntropyLoss;
 use axonml_nn::{Linear, Module, ReLU, Sequential};
 use axonml_serialize::{load_checkpoint, load_state_dict, StateDict};
 use axonml_tensor::Tensor;
-use axonml_vision::{MNIST, CIFAR10, FashionMNIST};
+use axonml_vision::{FashionMNIST, CIFAR10, MNIST};
 
 use super::utils::{
     ensure_dir, path_exists, print_header, print_info, print_kv, print_success,
@@ -289,8 +289,8 @@ fn load_model(path: &PathBuf) -> CliResult<ModelInfo> {
     }
 
     // Fallback: try to load as a state dict directly
-    let state_dict = load_state_dict(path)
-        .map_err(|e| CliError::Model(format!("Failed to load model: {e}")))?;
+    let state_dict =
+        load_state_dict(path).map_err(|e| CliError::Model(format!("Failed to load model: {e}")))?;
 
     let num_params = state_dict.len();
 
@@ -413,8 +413,7 @@ fn evaluate_model(args: &ReportArgs, model_info: &ModelInfo) -> CliResult<Classi
     let data_path = PathBuf::from(&args.data);
 
     let format = args.dataset_format.clone().unwrap_or_else(|| {
-        ReportDataset::detect_format(&data_path)
-            .unwrap_or_else(|| "mnist".to_string())
+        ReportDataset::detect_format(&data_path).unwrap_or_else(|| "mnist".to_string())
     });
 
     print_info(&format!("Loading {} dataset from: {}", format, args.data));
@@ -1481,12 +1480,16 @@ fn generate_loss_curve_svg_from_history(history: &TrainingHistory) -> String {
 
     // Legend - only show Val Loss if we have validation data
     if val_loss.is_empty() {
-        svg.push_str(&format!(r##"    <!-- Legend -->
+        svg.push_str(&format!(
+            r##"    <!-- Legend -->
     <g transform="translate({}, {})">
         <line x1="0" y1="0" x2="20" y2="0" stroke="#4f46e5" stroke-width="2"/>
         <text x="25" y="4" font-size="11" fill="#64748b">Train Loss</text>
     </g>
-"##, width - 150, 20));
+"##,
+            width - 150,
+            20
+        ));
     } else {
         svg.push_str(&format!(r##"    <!-- Legend -->
     <g transform="translate({}, {})">
@@ -1501,7 +1504,8 @@ fn generate_loss_curve_svg_from_history(history: &TrainingHistory) -> String {
     // Y-axis tick labels
     for i in 0..=5 {
         let y_val = f64::from(i) * y_max / 5.0;
-        let y_pos = height - padding - (f64::from(i) * f64::from(height - 2 * padding) / 5.0) as i32;
+        let y_pos =
+            height - padding - (f64::from(i) * f64::from(height - 2 * padding) / 5.0) as i32;
         svg.push_str(&format!(
             r##"    <text x="{}" y="{}" font-size="10" fill="#64748b" text-anchor="end">{:.1}</text>
 "##,

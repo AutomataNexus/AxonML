@@ -137,7 +137,9 @@ impl<'a> UserRepository<'a> {
         let user_json = serde_json::to_value(&user)?;
 
         // Insert using document store
-        self.db.doc_insert(COLLECTION, Some(&user.id), user_json).await?;
+        self.db
+            .doc_insert(COLLECTION, Some(&user.id), user_json)
+            .await?;
 
         Ok(user)
     }
@@ -193,7 +195,9 @@ impl<'a> UserRepository<'a> {
 
     /// Update user
     pub async fn update(&self, id: &str, update: UpdateUser) -> Result<User, DbError> {
-        let mut user = self.find_by_id(id).await?
+        let mut user = self
+            .find_by_id(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("User {} not found", id)))?;
 
         // Apply updates
@@ -244,7 +248,9 @@ impl<'a> UserRepository<'a> {
     /// Delete user
     pub async fn delete(&self, id: &str) -> Result<(), DbError> {
         // Check if user exists first
-        let _ = self.find_by_id(id).await?
+        let _ = self
+            .find_by_id(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("User {} not found", id)))?;
 
         self.db.doc_delete(COLLECTION, id).await?;
@@ -253,7 +259,11 @@ impl<'a> UserRepository<'a> {
     }
 
     /// List all users
-    pub async fn list(&self, limit: Option<u32>, offset: Option<u32>) -> Result<Vec<User>, DbError> {
+    pub async fn list(
+        &self,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<Vec<User>, DbError> {
         let query = DocumentQuery {
             filter: None,
             sort: Some(serde_json::json!({ "field": "created_at", "ascending": false })),
@@ -288,16 +298,22 @@ impl<'a> UserRepository<'a> {
 
     /// Enable TOTP for user
     pub async fn enable_totp(&self, id: &str, secret: &str) -> Result<User, DbError> {
-        self.update(id, UpdateUser {
-            mfa_enabled: Some(true),
-            totp_secret: Some(secret.to_string()),
-            ..Default::default()
-        }).await
+        self.update(
+            id,
+            UpdateUser {
+                mfa_enabled: Some(true),
+                totp_secret: Some(secret.to_string()),
+                ..Default::default()
+            },
+        )
+        .await
     }
 
     /// Disable MFA for user
     pub async fn disable_mfa(&self, id: &str) -> Result<User, DbError> {
-        let mut user = self.find_by_id(id).await?
+        let mut user = self
+            .find_by_id(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("User {} not found", id)))?;
 
         user.mfa_enabled = false;
@@ -315,15 +331,21 @@ impl<'a> UserRepository<'a> {
 
     /// Set recovery codes for user
     pub async fn set_recovery_codes(&self, id: &str, codes: Vec<String>) -> Result<User, DbError> {
-        self.update(id, UpdateUser {
-            recovery_codes: Some(codes),
-            ..Default::default()
-        }).await
+        self.update(
+            id,
+            UpdateUser {
+                recovery_codes: Some(codes),
+                ..Default::default()
+            },
+        )
+        .await
     }
 
     /// Use a recovery code
     pub async fn use_recovery_code(&self, id: &str, code_hash: &str) -> Result<bool, DbError> {
-        let mut user = self.find_by_id(id).await?
+        let mut user = self
+            .find_by_id(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("User {} not found", id)))?;
 
         // Find and remove the code

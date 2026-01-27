@@ -26,7 +26,8 @@ pub struct ReluBackward {
 
 impl ReluBackward {
     /// Creates a new `ReluBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, input: Tensor<f32>) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, input: Tensor<f32>) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             saved_input: input,
@@ -79,7 +80,8 @@ pub struct SigmoidBackward {
 
 impl SigmoidBackward {
     /// Creates a new `SigmoidBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, output: Tensor<f32>) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, output: Tensor<f32>) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             saved_output: output,
@@ -132,7 +134,8 @@ pub struct TanhBackward {
 
 impl TanhBackward {
     /// Creates a new `TanhBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, output: Tensor<f32>) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, output: Tensor<f32>) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             saved_output: output,
@@ -192,7 +195,8 @@ impl SoftmaxBackward {
     /// * `input_grad_fn` - The gradient function from the input
     /// * `output` - The softmax output (saved for backward computation)
     /// * `dim` - The dimension along which softmax was applied
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, output: Tensor<f32>, dim: i64) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, output: Tensor<f32>, dim: i64) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             saved_output: output,
@@ -329,7 +333,8 @@ pub struct LeakyReluBackward {
 
 impl LeakyReluBackward {
     /// Creates a new `LeakyReluBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, input: Tensor<f32>, negative_slope: f32) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, input: Tensor<f32>, negative_slope: f32) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             saved_input: input,
@@ -383,7 +388,8 @@ pub struct GeluBackward {
 
 impl GeluBackward {
     /// Creates a new `GeluBackward`.
-    #[must_use] pub fn new(input_grad_fn: Option<GradFn>, input: Tensor<f32>) -> Self {
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, input: Tensor<f32>) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             saved_input: input,

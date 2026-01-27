@@ -5,8 +5,8 @@ use leptos_router::*;
 use web_sys::{File, FileList};
 
 use crate::api;
+use crate::components::{forms::*, icons::*, progress::*, spinner::*};
 use crate::state::use_app_state;
-use crate::components::{icons::*, spinner::*, forms::*, progress::*};
 
 /// Dataset upload page
 #[component]

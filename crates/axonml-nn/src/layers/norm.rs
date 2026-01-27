@@ -539,7 +539,8 @@ impl GroupNorm {
         assert!(
             num_channels % num_groups == 0,
             "num_channels ({}) must be divisible by num_groups ({})",
-            num_channels, num_groups
+            num_channels,
+            num_groups
         );
 
         Self {
@@ -703,7 +704,10 @@ impl Module for InstanceNorm2d {
         let input_data = input.data();
         let shape = input_data.shape().to_vec();
 
-        assert!(shape.len() == 4, "InstanceNorm2d expects 4D input (N, C, H, W)");
+        assert!(
+            shape.len() == 4,
+            "InstanceNorm2d expects 4D input (N, C, H, W)"
+        );
 
         let batch_size = shape[0];
         let channels = shape[1];
@@ -851,10 +855,7 @@ mod tests {
     fn test_groupnorm_normalization() {
         let gn = GroupNorm::with_options(2, 4, 1e-5, false); // No affine
         let input = Variable::new(
-            Tensor::from_vec(
-                vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-                &[1, 4, 1, 2]
-            ).unwrap(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[1, 4, 1, 2]).unwrap(),
             false,
         );
         let output = gn.forward(&input);

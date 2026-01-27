@@ -40,7 +40,8 @@ pub enum Reduction {
 
 impl MseLossBackward {
     /// Creates a new `MseLossBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         input_grad_fn: Option<GradFn>,
         pred: Tensor<f32>,
         target: Tensor<f32>,
@@ -103,7 +104,8 @@ pub struct CrossEntropyLossBackward {
 
 impl CrossEntropyLossBackward {
     /// Creates a new `CrossEntropyLossBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         input_grad_fn: Option<GradFn>,
         softmax: Tensor<f32>,
         target: Tensor<i64>,
@@ -176,7 +178,8 @@ pub struct NllLossBackward {
 
 impl NllLossBackward {
     /// Creates a new `NllLossBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         input_grad_fn: Option<GradFn>,
         input: Tensor<f32>,
         target: Tensor<i64>,
@@ -246,7 +249,8 @@ pub struct BceLossBackward {
 
 impl BceLossBackward {
     /// Creates a new `BceLossBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         input_grad_fn: Option<GradFn>,
         input: Tensor<f32>,
         target: Tensor<f32>,
@@ -320,7 +324,8 @@ pub struct L1LossBackward {
 
 impl L1LossBackward {
     /// Creates a new `L1LossBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         input_grad_fn: Option<GradFn>,
         pred: Tensor<f32>,
         target: Tensor<f32>,
@@ -399,7 +404,8 @@ pub struct SmoothL1LossBackward {
 
 impl SmoothL1LossBackward {
     /// Creates a new `SmoothL1LossBackward`.
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         input_grad_fn: Option<GradFn>,
         pred: Tensor<f32>,
         target: Tensor<f32>,

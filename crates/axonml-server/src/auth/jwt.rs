@@ -2,10 +2,10 @@
 //!
 //! Provides JWT token creation and validation.
 
+use super::AuthError;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
 use serde::{Deserialize, Serialize};
-use super::AuthError;
 
 /// JWT claims structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,10 +174,12 @@ impl JwtAuth {
 
     /// Validate a token and return claims
     pub fn validate_token(&self, token: &str) -> Result<Claims, AuthError> {
-        let token_data: TokenData<Claims> = decode(token, &self.decoding_key, &Validation::default())
-            .map_err(|e| match e.kind() {
-                jsonwebtoken::errors::ErrorKind::ExpiredSignature => AuthError::TokenExpired,
-                _ => AuthError::InvalidToken,
+        let token_data: TokenData<Claims> =
+            decode(token, &self.decoding_key, &Validation::default()).map_err(|e| {
+                match e.kind() {
+                    jsonwebtoken::errors::ErrorKind::ExpiredSignature => AuthError::TokenExpired,
+                    _ => AuthError::InvalidToken,
+                }
             })?;
 
         Ok(token_data.claims)
@@ -241,7 +243,9 @@ mod tests {
     fn test_create_and_validate_access_token() {
         let jwt = JwtAuth::new("test_secret_key_32_bytes_long!", 24);
 
-        let token = jwt.create_access_token("user-123", "test@example.com", "user", true).unwrap();
+        let token = jwt
+            .create_access_token("user-123", "test@example.com", "user", true)
+            .unwrap();
         let claims = jwt.validate_access_token(&token).unwrap();
 
         assert_eq!(claims.sub, "user-123");
@@ -254,7 +258,9 @@ mod tests {
     fn test_token_pair() {
         let jwt = JwtAuth::new("test_secret_key_32_bytes_long!", 24);
 
-        let pair = jwt.create_token_pair("user-123", "test@example.com", "admin", true).unwrap();
+        let pair = jwt
+            .create_token_pair("user-123", "test@example.com", "admin", true)
+            .unwrap();
 
         assert!(!pair.access_token.is_empty());
         assert!(!pair.refresh_token.is_empty());
@@ -265,7 +271,9 @@ mod tests {
     fn test_mfa_token() {
         let jwt = JwtAuth::new("test_secret_key_32_bytes_long!", 24);
 
-        let mfa_token = jwt.create_mfa_token("user-123", "test@example.com").unwrap();
+        let mfa_token = jwt
+            .create_mfa_token("user-123", "test@example.com")
+            .unwrap();
         let claims = jwt.validate_mfa_token(&mfa_token.mfa_token).unwrap();
 
         assert_eq!(claims.sub, "user-123");

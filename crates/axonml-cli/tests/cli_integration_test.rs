@@ -66,9 +66,18 @@ fn test_new_project_creates_structure() {
     // Verify project structure was created
     let project_path = temp_dir.path().join(project_name);
     assert!(project_path.exists(), "Project directory should exist");
-    assert!(project_path.join("axonml.toml").exists(), "Config file should exist");
-    assert!(project_path.join("src").exists(), "src directory should exist");
-    assert!(project_path.join("data").exists(), "data directory should exist");
+    assert!(
+        project_path.join("axonml.toml").exists(),
+        "Config file should exist"
+    );
+    assert!(
+        project_path.join("src").exists(),
+        "src directory should exist"
+    );
+    assert!(
+        project_path.join("data").exists(),
+        "data directory should exist"
+    );
 }
 
 #[test]
@@ -115,30 +124,18 @@ fn test_init_in_existing_directory() {
 
 #[test]
 fn test_gpu_list() {
-    axonml_cmd()
-        .arg("gpu")
-        .arg("list")
-        .assert()
-        .success();
+    axonml_cmd().arg("gpu").arg("list").assert().success();
     // Output depends on actual hardware, just verify it runs
 }
 
 #[test]
 fn test_gpu_info() {
-    axonml_cmd()
-        .arg("gpu")
-        .arg("info")
-        .assert()
-        .success();
+    axonml_cmd().arg("gpu").arg("info").assert().success();
 }
 
 #[test]
 fn test_gpu_status() {
-    axonml_cmd()
-        .arg("gpu")
-        .arg("status")
-        .assert()
-        .success();
+    axonml_cmd().arg("gpu").arg("status").assert().success();
 }
 
 // =============================================================================
@@ -152,7 +149,11 @@ fn test_hub_list() {
         .arg("list")
         .assert()
         .success()
-        .stdout(predicate::str::contains("resnet").or(predicate::str::contains("ResNet")).or(predicate::str::contains("Model")));
+        .stdout(
+            predicate::str::contains("resnet")
+                .or(predicate::str::contains("ResNet"))
+                .or(predicate::str::contains("Model")),
+        );
 }
 
 #[test]
@@ -168,11 +169,7 @@ fn test_hub_info() {
 
 #[test]
 fn test_hub_cached() {
-    axonml_cmd()
-        .arg("hub")
-        .arg("cached")
-        .assert()
-        .success();
+    axonml_cmd().arg("hub").arg("cached").assert().success();
 }
 
 // =============================================================================
@@ -186,7 +183,11 @@ fn test_dataset_list() {
         .arg("list")
         .assert()
         .success()
-        .stdout(predicate::str::contains("mnist").or(predicate::str::contains("MNIST")).or(predicate::str::contains("Dataset")));
+        .stdout(
+            predicate::str::contains("mnist")
+                .or(predicate::str::contains("MNIST"))
+                .or(predicate::str::contains("Dataset")),
+        );
 }
 
 #[test]
@@ -284,20 +285,12 @@ fn test_scaffold_generate() {
 
 #[test]
 fn test_load_status() {
-    axonml_cmd()
-        .arg("load")
-        .arg("status")
-        .assert()
-        .success();
+    axonml_cmd().arg("load").arg("status").assert().success();
 }
 
 #[test]
 fn test_load_clear() {
-    axonml_cmd()
-        .arg("load")
-        .arg("clear")
-        .assert()
-        .success();
+    axonml_cmd().arg("load").arg("clear").assert().success();
 }
 
 // =============================================================================
@@ -308,10 +301,7 @@ fn test_load_clear() {
 fn test_analyze_model_without_loaded() {
     // Should provide helpful message when no model is loaded
     // May either succeed with a warning or fail - both are acceptable
-    let result = axonml_cmd()
-        .arg("analyze")
-        .arg("model")
-        .assert();
+    let result = axonml_cmd().arg("analyze").arg("model").assert();
 
     // Just verify the command runs without panic
     let _ = result;
@@ -371,20 +361,12 @@ fn test_zip_create_and_list() {
 
 #[test]
 fn test_kaggle_status() {
-    axonml_cmd()
-        .arg("kaggle")
-        .arg("status")
-        .assert()
-        .success(); // Should report not configured, but not crash
+    axonml_cmd().arg("kaggle").arg("status").assert().success(); // Should report not configured, but not crash
 }
 
 #[test]
 fn test_kaggle_list() {
-    axonml_cmd()
-        .arg("kaggle")
-        .arg("list")
-        .assert()
-        .success();
+    axonml_cmd().arg("kaggle").arg("list").assert().success();
 }
 
 // =============================================================================
@@ -493,10 +475,7 @@ fn test_export_help() {
 
 #[test]
 fn test_invalid_command() {
-    axonml_cmd()
-        .arg("nonexistent_command")
-        .assert()
-        .failure();
+    axonml_cmd().arg("nonexistent_command").assert().failure();
 }
 
 #[test]
@@ -568,10 +547,6 @@ fn test_full_project_workflow() {
 fn test_multiple_help_commands() {
     // Verify CLI can handle multiple rapid invocations
     for cmd in &["new", "train", "eval", "hub", "dataset", "gpu"] {
-        axonml_cmd()
-            .arg(cmd)
-            .arg("--help")
-            .assert()
-            .success();
+        axonml_cmd().arg(cmd).arg("--help").assert().success();
     }
 }

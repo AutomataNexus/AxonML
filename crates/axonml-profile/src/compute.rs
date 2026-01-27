@@ -2,9 +2,9 @@
 //!
 //! Tracks operation execution times, FLOPS, and throughput.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use serde::{Serialize, Deserialize};
 
 /// Statistics for a single profiled operation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -159,13 +159,14 @@ impl ComputeProfiler {
                 let elapsed = op.start.elapsed();
 
                 // Update stats
-                let stats = self.stats.entry(name.to_string()).or_insert_with(|| {
-                    OperationStats {
+                let stats = self
+                    .stats
+                    .entry(name.to_string())
+                    .or_insert_with(|| OperationStats {
                         name: name.to_string(),
                         min_time_ns: u64::MAX,
                         ..Default::default()
-                    }
-                });
+                    });
 
                 let elapsed_ns = elapsed.as_nanos() as u64;
                 stats.call_count += 1;

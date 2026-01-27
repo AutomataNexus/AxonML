@@ -50,7 +50,8 @@ impl TensorDataset {
     /// Creates a new `TensorDataset` from input and target tensors.
     ///
     /// The first dimension of both tensors must match.
-    #[must_use] pub fn new(data: Tensor<f32>, targets: Tensor<f32>) -> Self {
+    #[must_use]
+    pub fn new(data: Tensor<f32>, targets: Tensor<f32>) -> Self {
         let len = data.shape()[0];
         assert_eq!(
             len,
@@ -61,7 +62,8 @@ impl TensorDataset {
     }
 
     /// Creates a `TensorDataset` from just input data (no targets).
-    #[must_use] pub fn from_data(data: Tensor<f32>) -> Self {
+    #[must_use]
+    pub fn from_data(data: Tensor<f32>) -> Self {
         let len = data.shape()[0];
         let targets = Tensor::from_vec(vec![0.0; len], &[len]).unwrap();
         Self { data, targets, len }
@@ -165,7 +167,8 @@ pub struct ConcatDataset<D: Dataset> {
 
 impl<D: Dataset> ConcatDataset<D> {
     /// Creates a new `ConcatDataset` from multiple datasets.
-    #[must_use] pub fn new(datasets: Vec<D>) -> Self {
+    #[must_use]
+    pub fn new(datasets: Vec<D>) -> Self {
         let mut cumulative_sizes = Vec::with_capacity(datasets.len());
         let mut total = 0;
         for d in &datasets {
@@ -280,7 +283,8 @@ pub struct InMemoryDataset<T: Clone + Send> {
 
 impl<T: Clone + Send> InMemoryDataset<T> {
     /// Creates a new `InMemoryDataset` from a vector.
-    #[must_use] pub fn new(items: Vec<T>) -> Self {
+    #[must_use]
+    pub fn new(items: Vec<T>) -> Self {
         Self { items }
     }
 }

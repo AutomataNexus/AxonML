@@ -5,8 +5,8 @@
 use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};
 use crate::db::notebooks::{
-    CellOutput, CellStatus, CellType, NewCheckpoint, NewNotebook, NotebookCell,
-    NotebookCheckpoint, NotebookRepository, NotebookStatus, TrainingNotebook, UpdateNotebook,
+    CellOutput, CellStatus, CellType, NewCheckpoint, NewNotebook, NotebookCell, NotebookCheckpoint,
+    NotebookRepository, NotebookStatus, TrainingNotebook, UpdateNotebook,
 };
 use crate::training::notebook_executor::result_to_cell_output;
 use axum::{
@@ -311,14 +311,13 @@ pub async fn list_notebooks(
     let notebooks = if user.role == "admin" {
         repo.list_all(Some(query.limit), Some(query.offset)).await
     } else {
-        repo.list_by_user(&user.id, Some(query.limit), Some(query.offset)).await
+        repo.list_by_user(&user.id, Some(query.limit), Some(query.offset))
+            .await
     }
     .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-    let response: Vec<NotebookListItem> = notebooks
-        .into_iter()
-        .map(notebook_to_list_item)
-        .collect();
+    let response: Vec<NotebookListItem> =
+        notebooks.into_iter().map(notebook_to_list_item).collect();
 
     Ok(Json(response))
 }
@@ -390,7 +389,9 @@ pub async fn update_notebook(
         return Err(AuthError::Unauthorized);
     }
 
-    let cells = req.cells.map(|c| c.into_iter().map(request_to_cell).collect());
+    let cells = req
+        .cells
+        .map(|c| c.into_iter().map(request_to_cell).collect());
 
     let notebook = repo
         .update(
@@ -529,7 +530,9 @@ pub async fn update_cell(
         .cells
         .into_iter()
         .find(|c| c.id == cell_id)
-        .ok_or(AuthError::Internal("Cell not found after update".to_string()))?;
+        .ok_or(AuthError::Internal(
+            "Cell not found after update".to_string(),
+        ))?;
 
     Ok(Json(cell_to_response(updated_cell)))
 }
@@ -609,7 +612,8 @@ pub async fn execute_cell(
     let execution_count = cell.execution_count.unwrap_or(0) + 1;
 
     // Execute the cell using the notebook executor
-    let result = state.notebook_executor
+    let result = state
+        .notebook_executor
         .execute_cell(&cell, &previous_cells, timeout_ms)
         .await;
 
@@ -664,7 +668,10 @@ pub async fn ai_assist(
         };
         return Ok(Json(AiAssistResponse {
             suggestion,
-            explanation: Some("Ollama LLM service is not available. Please start it with 'ollama serve'.".to_string()),
+            explanation: Some(
+                "Ollama LLM service is not available. Please start it with 'ollama serve'."
+                    .to_string(),
+            ),
             confidence: 0.0,
             model: String::new(),
             tokens_generated: 0,
@@ -685,27 +692,22 @@ pub async fn ai_assist(
     // Generate with Ollama
     let result = match parse_cell_type(&req.cell_type) {
         CellType::Code => {
-            state.ollama.generate_code(
-                &req.prompt,
-                Some(&context),
-                req.include_imports,
-            ).await
+            state
+                .ollama
+                .generate_code(&req.prompt, Some(&context), req.include_imports)
+                .await
         }
-        CellType::Markdown => {
-            state.ollama.generate_markdown(&req.prompt).await
-        }
+        CellType::Markdown => state.ollama.generate_markdown(&req.prompt).await,
     };
 
     match result {
-        Ok(suggestion) => {
-            Ok(Json(AiAssistResponse {
-                suggestion: suggestion.code,
-                explanation: suggestion.explanation,
-                confidence: 0.85,
-                model: suggestion.model,
-                tokens_generated: suggestion.tokens_generated,
-            }))
-        }
+        Ok(suggestion) => Ok(Json(AiAssistResponse {
+            suggestion: suggestion.code,
+            explanation: suggestion.explanation,
+            confidence: 0.85,
+            model: suggestion.model,
+            tokens_generated: suggestion.tokens_generated,
+        })),
         Err(e) => {
             tracing::error!("AI assist generation failed: {}", e);
             Ok(Json(AiAssistResponse {
@@ -767,41 +769,55 @@ async fn build_notebook_context(
     }
 
     // Find selected cell position
-    let selected_idx = selected_cell_id.and_then(|id| {
-        notebook.cells.iter().position(|c| c.id == id)
-    });
+    let selected_idx =
+        selected_cell_id.and_then(|id| notebook.cells.iter().position(|c| c.id == id));
 
     // Include all cells as context, marking the selected one
     context.push_str("## Notebook Cells\n\n");
     for (i, cell) in notebook.cells.iter().enumerate() {
         let is_selected = selected_idx == Some(i);
-        let cell_marker = if is_selected { " [SELECTED - Generate for this cell]" } else { "" };
+        let cell_marker = if is_selected {
+            " [SELECTED - Generate for this cell]"
+        } else {
+            ""
+        };
 
         match cell.cell_type {
             crate::db::notebooks::CellType::Code => {
-                context.push_str(&format!("### Cell {} (Code){}\n```python\n{}\n```\n\n",
-                    i + 1, cell_marker, cell.source));
+                context.push_str(&format!(
+                    "### Cell {} (Code){}\n```python\n{}\n```\n\n",
+                    i + 1,
+                    cell_marker,
+                    cell.source
+                ));
             }
             crate::db::notebooks::CellType::Markdown => {
-                context.push_str(&format!("### Cell {} (Markdown){}\n{}\n\n",
-                    i + 1, cell_marker, cell.source));
+                context.push_str(&format!(
+                    "### Cell {} (Markdown){}\n{}\n\n",
+                    i + 1,
+                    cell_marker,
+                    cell.source
+                ));
             }
         }
     }
 
     // Add hints based on what's in the notebook
-    let has_model_def = notebook.cells.iter().any(|c|
+    let has_model_def = notebook.cells.iter().any(|c| {
         c.source.contains("class") && (c.source.contains("nn.Module") || c.source.contains("Model"))
-    );
-    let has_dataloader = notebook.cells.iter().any(|c|
-        c.source.contains("DataLoader") || c.source.contains("Dataset")
-    );
-    let has_optimizer = notebook.cells.iter().any(|c|
-        c.source.contains("optim.") || c.source.contains("optimizer")
-    );
-    let has_training_loop = notebook.cells.iter().any(|c|
-        c.source.contains("for epoch") || c.source.contains("train(")
-    );
+    });
+    let has_dataloader = notebook
+        .cells
+        .iter()
+        .any(|c| c.source.contains("DataLoader") || c.source.contains("Dataset"));
+    let has_optimizer = notebook
+        .cells
+        .iter()
+        .any(|c| c.source.contains("optim.") || c.source.contains("optimizer"));
+    let has_training_loop = notebook
+        .cells
+        .iter()
+        .any(|c| c.source.contains("for epoch") || c.source.contains("train("));
 
     context.push_str("## Current State\n");
     context.push_str(&format!("# Has model definition: {}\n", has_model_def));
@@ -861,11 +877,11 @@ pub async fn save_checkpoint(
 
     // Optionally save optimizer state
     let optimizer_state_path = if let Some(opt_state_b64) = req.optimizer_state_base64 {
-        let opt_state = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &opt_state_b64,
-        )
-        .map_err(|e| AuthError::Internal(format!("Invalid base64 for optimizer state: {}", e)))?;
+        let opt_state =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &opt_state_b64)
+                .map_err(|e| {
+                    AuthError::Internal(format!("Invalid base64 for optimizer state: {}", e))
+                })?;
 
         let opt_path = checkpoints_dir.join(format!("{}_optimizer.bin", checkpoint_id));
         std::fs::write(&opt_path, &opt_state)
@@ -889,7 +905,10 @@ pub async fn save_checkpoint(
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-    Ok((StatusCode::CREATED, Json(checkpoint_to_response(checkpoint))))
+    Ok((
+        StatusCode::CREATED,
+        Json(checkpoint_to_response(checkpoint)),
+    ))
 }
 
 /// List checkpoints for a notebook
@@ -1177,10 +1196,7 @@ pub async fn export_notebook(
             let content = serde_json::to_string_pretty(&ipynb)
                 .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-            let filename = format!(
-                "{}.ipynb",
-                notebook.name.to_lowercase().replace(' ', "_")
-            );
+            let filename = format!("{}.ipynb", notebook.name.to_lowercase().replace(' ', "_"));
 
             (content, filename)
         }

@@ -47,11 +47,7 @@ impl EnvBackend {
             SecretKey::RESEND_API_KEY => "RESEND_API_KEY",
             // For unknown keys, convert to uppercase with underscores
             other => {
-                return format!(
-                    "{}_{}",
-                    self.prefix,
-                    other.to_uppercase().replace('-', "_")
-                );
+                return format!("{}_{}", self.prefix, other.to_uppercase().replace('-', "_"));
             }
         };
 

@@ -2,15 +2,15 @@
 //!
 //! Page for importing Jupyter notebooks (.ipynb files)
 
+use gloo_file::callbacks::FileReader;
 use leptos::*;
 use leptos_router::*;
-use gloo_file::callbacks::FileReader;
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::api;
-use crate::state::use_app_state;
 use crate::components::{icons::*, spinner::*};
+use crate::state::use_app_state;
 
 /// Notebook import page
 #[component]
@@ -46,16 +46,18 @@ pub fn NotebookImportPage() -> impl IntoView {
                     set_file_name.set(Some(name));
 
                     let gloo_file = gloo_file::File::from(file);
-                    let reader = gloo_file::callbacks::read_as_text(&gloo_file, move |result| {
-                        match result {
-                            Ok(content) => {
-                                set_file_content.set(Some(content));
-                            }
-                            Err(e) => {
-                                set_error.set(Some(format!("Failed to read file: {:?}", e)));
-                            }
-                        }
-                    });
+                    let reader =
+                        gloo_file::callbacks::read_as_text(
+                            &gloo_file,
+                            move |result| match result {
+                                Ok(content) => {
+                                    set_file_content.set(Some(content));
+                                }
+                                Err(e) => {
+                                    set_error.set(Some(format!("Failed to read file: {:?}", e)));
+                                }
+                            },
+                        );
                     *reader_ref.borrow_mut() = Some(reader);
                 }
             }
@@ -75,7 +77,10 @@ pub fn NotebookImportPage() -> impl IntoView {
                     match api::notebooks::import_notebook(&content, "ipynb").await {
                         Ok(notebook) => {
                             state.toast_success("Imported", "Notebook imported successfully");
-                            navigate(&format!("/training/notebooks/{}", notebook.id), Default::default());
+                            navigate(
+                                &format!("/training/notebooks/{}", notebook.id),
+                                Default::default(),
+                            );
                         }
                         Err(e) => {
                             state.toast_error("Import Failed", e.message);

@@ -16,11 +16,7 @@ use std::path::PathBuf;
 
 /// Execute the tui command
 pub fn execute(args: TuiArgs) -> CliResult<()> {
-    println!(
-        "{} {}",
-        "Axonml TUI".cyan().bold(),
-        "v0.1.0".dimmed()
-    );
+    println!("{} {}", "Axonml TUI".cyan().bold(), "v0.1.0".dimmed());
     println!();
 
     // Convert paths
@@ -50,16 +46,12 @@ pub fn execute(args: TuiArgs) -> CliResult<()> {
 
     // Launch the TUI
     println!("{}", "Starting terminal user interface...".dimmed());
-    println!(
-        "{}",
-        "Press 'q' to quit, '?' for help".dimmed()
-    );
+    println!("{}", "Press 'q' to quit, '?' for help".dimmed());
     println!();
 
     // Run the TUI application
-    axonml_tui::run(model_path, data_path).map_err(|e| {
-        crate::error::CliError::Other(format!("TUI error: {}", e))
-    })?;
+    axonml_tui::run(model_path, data_path)
+        .map_err(|e| crate::error::CliError::Other(format!("TUI error: {}", e)))?;
 
     println!();
     println!("{}", "TUI session ended.".green());

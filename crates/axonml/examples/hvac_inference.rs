@@ -4,9 +4,9 @@
 //!
 //! Usage: cargo run --example hvac_inference
 
-use std::collections::HashMap;
 use axonml::onnx::import_onnx;
 use axonml::tensor::Tensor;
+use std::collections::HashMap;
 
 fn main() {
     println!("╔════════════════════════════════════════════════════════════╗");
@@ -14,7 +14,8 @@ fn main() {
     println!("╚════════════════════════════════════════════════════════════╝");
     println!();
 
-    let model_path = "/opt/EdgeModels/warren/innis/output/realtime/hvac_multi_horizon_predictor.onnx";
+    let model_path =
+        "/opt/EdgeModels/warren/innis/output/realtime/hvac_multi_horizon_predictor.onnx";
 
     println!("Loading model: {}", model_path);
     println!();
@@ -96,10 +97,8 @@ fn main() {
         input_data[base + 27] = 0.0;
     }
 
-    let input_tensor = Tensor::from_vec(
-        input_data,
-        &[batch_size, seq_len, num_features],
-    ).expect("Failed to create input tensor");
+    let input_tensor = Tensor::from_vec(input_data, &[batch_size, seq_len, num_features])
+        .expect("Failed to create input tensor");
 
     println!("Input shape: {:?}", input_tensor.shape());
 
@@ -115,12 +114,26 @@ fn main() {
 
             // Failure types from model_info.json
             let failure_types = [
-                "normal", "pump_failure_hw_5", "pump_failure_hw_6", "pump_failure_cw_3",
-                "pump_failure_cw_4", "pump_failure_2pipe_a", "pump_failure_2pipe_b",
-                "pressure_low_hw", "pressure_high_hw", "pressure_low_cw", "pressure_high_cw",
-                "temp_anomaly_hw_supply", "temp_anomaly_cw_supply", "temp_anomaly_space",
-                "valve_stuck_1_3", "valve_stuck_2_3", "vfd_fault", "sensor_drift",
-                "chiller_fault", "interlock_violation"
+                "normal",
+                "pump_failure_hw_5",
+                "pump_failure_hw_6",
+                "pump_failure_cw_3",
+                "pump_failure_cw_4",
+                "pump_failure_2pipe_a",
+                "pump_failure_2pipe_b",
+                "pressure_low_hw",
+                "pressure_high_hw",
+                "pressure_low_cw",
+                "pressure_high_cw",
+                "temp_anomaly_hw_supply",
+                "temp_anomaly_cw_supply",
+                "temp_anomaly_space",
+                "valve_stuck_1_3",
+                "valve_stuck_2_3",
+                "vfd_fault",
+                "sensor_drift",
+                "chiller_fault",
+                "interlock_violation",
             ];
 
             println!("Predictions:");

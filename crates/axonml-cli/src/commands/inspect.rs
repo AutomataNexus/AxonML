@@ -101,10 +101,12 @@ fn inspect_model(path: &PathBuf, format: &str) -> CliResult<ModelInfo> {
             param_name.clone()
         };
 
-        layer_params
-            .entry(layer_name)
-            .or_default()
-            .push((param_name.clone(), shape, num_params, entry.requires_grad));
+        layer_params.entry(layer_name).or_default().push((
+            param_name.clone(),
+            shape,
+            num_params,
+            entry.requires_grad,
+        ));
     }
 
     // Create LayerInfo for each unique layer

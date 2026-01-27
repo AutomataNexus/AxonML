@@ -19,10 +19,10 @@ use core::ops::{Add, Div, Mul, Neg, Sub};
 
 use axonml_core::backends::CpuBackend;
 use axonml_core::dtype::{Float, Numeric, Scalar};
-use num_traits::NumCast;
 use axonml_core::error::{Error, Result};
 use axonml_core::storage::Storage;
 use axonml_core::Device;
+use num_traits::NumCast;
 
 use crate::shape::{
     broadcast_shape, broadcast_strides, contiguous_strides, is_contiguous, linear_index,
@@ -365,7 +365,8 @@ impl<T: Scalar> Tensor<T> {
     }
 
     /// Returns a new tensor with a flattened shape.
-    #[must_use] pub fn flatten(&self) -> Self {
+    #[must_use]
+    pub fn flatten(&self) -> Self {
         self.reshape(&[-1]).expect("Flatten should never fail")
     }
 
@@ -578,14 +579,16 @@ impl<T: Numeric> Tensor<T> {
     // =========================================================================
 
     /// Returns the sum of all elements.
-    #[must_use] pub fn sum(&self) -> Self {
+    #[must_use]
+    pub fn sum(&self) -> Self {
         let data = self.to_vec();
         let result = CpuBackend::sum(&data);
         Self::scalar(result)
     }
 
     /// Returns the product of all elements.
-    #[must_use] pub fn prod(&self) -> Self {
+    #[must_use]
+    pub fn prod(&self) -> Self {
         let data = self.to_vec();
         let result = CpuBackend::prod(&data);
         Self::scalar(result)
@@ -740,7 +743,11 @@ impl<T: Float> Tensor<T> {
     #[must_use]
     pub fn mean_dim(&self, dim: i32, keepdim: bool) -> Self {
         let ndim = self.ndim();
-        let dim = if dim < 0 { (ndim as i32 + dim) as usize } else { dim as usize };
+        let dim = if dim < 0 {
+            (ndim as i32 + dim) as usize
+        } else {
+            dim as usize
+        };
 
         if dim >= ndim {
             return self.clone();
@@ -871,7 +878,15 @@ impl<T: Float> Tensor<T> {
         };
 
         for i in start..end {
-            Self::slice_recursive(data, shape, ranges, dim + 1, offset + i * stride, result, result_idx);
+            Self::slice_recursive(
+                data,
+                shape,
+                ranges,
+                dim + 1,
+                offset + i * stride,
+                result,
+                result_idx,
+            );
         }
     }
 }

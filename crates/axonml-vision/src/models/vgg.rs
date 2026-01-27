@@ -57,7 +57,8 @@ pub enum VggLayer {
 }
 
 /// Get VGG11 configuration.
-#[must_use] pub fn vgg11_config() -> Vec<VggLayer> {
+#[must_use]
+pub fn vgg11_config() -> Vec<VggLayer> {
     use VggLayer::{Conv, MaxPool};
     vec![
         Conv(64),
@@ -77,7 +78,8 @@ pub enum VggLayer {
 }
 
 /// Get VGG13 configuration.
-#[must_use] pub fn vgg13_config() -> Vec<VggLayer> {
+#[must_use]
+pub fn vgg13_config() -> Vec<VggLayer> {
     use VggLayer::{Conv, MaxPool};
     vec![
         Conv(64),
@@ -99,7 +101,8 @@ pub enum VggLayer {
 }
 
 /// Get VGG16 configuration.
-#[must_use] pub fn vgg16_config() -> Vec<VggLayer> {
+#[must_use]
+pub fn vgg16_config() -> Vec<VggLayer> {
     use VggLayer::{Conv, MaxPool};
     vec![
         Conv(64),
@@ -124,7 +127,8 @@ pub enum VggLayer {
 }
 
 /// Get VGG19 configuration.
-#[must_use] pub fn vgg19_config() -> Vec<VggLayer> {
+#[must_use]
+pub fn vgg19_config() -> Vec<VggLayer> {
     use VggLayer::{Conv, MaxPool};
     vec![
         Conv(64),
@@ -169,7 +173,8 @@ enum VggFeatureLayer {
 
 impl VggFeatures {
     /// Create VGG feature layers from configuration.
-    #[must_use] pub fn new(config: &[VggLayer], batch_norm: bool) -> Self {
+    #[must_use]
+    pub fn new(config: &[VggLayer], batch_norm: bool) -> Self {
         let mut layers = Vec::new();
         let mut in_channels = 3;
 
@@ -271,7 +276,8 @@ pub struct VggClassifier {
 
 impl VggClassifier {
     /// Create classifier for VGG (assuming 7x7 feature maps).
-    #[must_use] pub fn new(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn new(num_classes: usize) -> Self {
         Self {
             fc1: Linear::new(512 * 7 * 7, 4096),
             fc2: Linear::new(4096, 4096),
@@ -282,7 +288,8 @@ impl VggClassifier {
     }
 
     /// Create classifier with custom input size.
-    #[must_use] pub fn with_input_size(input_features: usize, num_classes: usize) -> Self {
+    #[must_use]
+    pub fn with_input_size(input_features: usize, num_classes: usize) -> Self {
         Self {
             fc1: Linear::new(input_features, 4096),
             fc2: Linear::new(4096, 4096),
@@ -339,7 +346,8 @@ pub struct VGG {
 
 impl VGG {
     /// Create VGG with custom configuration.
-    #[must_use] pub fn new(config: &[VggLayer], num_classes: usize, batch_norm: bool) -> Self {
+    #[must_use]
+    pub fn new(config: &[VggLayer], num_classes: usize, batch_norm: bool) -> Self {
         Self {
             features: VggFeatures::new(config, batch_norm),
             classifier: VggClassifier::new(num_classes),
@@ -347,42 +355,50 @@ impl VGG {
     }
 
     /// Create VGG11.
-    #[must_use] pub fn vgg11(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vgg11(num_classes: usize) -> Self {
         Self::new(&vgg11_config(), num_classes, false)
     }
 
     /// Create VGG11 with batch normalization.
-    #[must_use] pub fn vgg11_bn(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vgg11_bn(num_classes: usize) -> Self {
         Self::new(&vgg11_config(), num_classes, true)
     }
 
     /// Create VGG13.
-    #[must_use] pub fn vgg13(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vgg13(num_classes: usize) -> Self {
         Self::new(&vgg13_config(), num_classes, false)
     }
 
     /// Create VGG13 with batch normalization.
-    #[must_use] pub fn vgg13_bn(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vgg13_bn(num_classes: usize) -> Self {
         Self::new(&vgg13_config(), num_classes, true)
     }
 
     /// Create VGG16.
-    #[must_use] pub fn vgg16(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vgg16(num_classes: usize) -> Self {
         Self::new(&vgg16_config(), num_classes, false)
     }
 
     /// Create VGG16 with batch normalization.
-    #[must_use] pub fn vgg16_bn(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vgg16_bn(num_classes: usize) -> Self {
         Self::new(&vgg16_config(), num_classes, true)
     }
 
     /// Create VGG19.
-    #[must_use] pub fn vgg19(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vgg19(num_classes: usize) -> Self {
         Self::new(&vgg19_config(), num_classes, false)
     }
 
     /// Create VGG19 with batch normalization.
-    #[must_use] pub fn vgg19_bn(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn vgg19_bn(num_classes: usize) -> Self {
         Self::new(&vgg19_config(), num_classes, true)
     }
 }
@@ -424,22 +440,26 @@ impl Module for VGG {
 // =============================================================================
 
 /// Create VGG11 for `ImageNet` (1000 classes).
-#[must_use] pub fn vgg11() -> VGG {
+#[must_use]
+pub fn vgg11() -> VGG {
     VGG::vgg11(1000)
 }
 
 /// Create VGG13 for `ImageNet` (1000 classes).
-#[must_use] pub fn vgg13() -> VGG {
+#[must_use]
+pub fn vgg13() -> VGG {
     VGG::vgg13(1000)
 }
 
 /// Create VGG16 for `ImageNet` (1000 classes).
-#[must_use] pub fn vgg16() -> VGG {
+#[must_use]
+pub fn vgg16() -> VGG {
     VGG::vgg16(1000)
 }
 
 /// Create VGG19 for `ImageNet` (1000 classes).
-#[must_use] pub fn vgg19() -> VGG {
+#[must_use]
+pub fn vgg19() -> VGG {
     VGG::vgg19(1000)
 }
 

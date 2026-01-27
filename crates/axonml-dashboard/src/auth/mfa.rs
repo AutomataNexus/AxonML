@@ -3,8 +3,8 @@
 use leptos::*;
 
 use crate::api;
-use crate::types::*;
 use crate::components::{forms::*, icons::*, spinner::*};
+use crate::types::*;
 use crate::utils::webauthn;
 
 /// MFA challenge page (shown when login requires MFA)
@@ -24,46 +24,48 @@ pub fn MfaChallengePage(
     let on_success_for_click = on_success.clone();
     let on_success_for_complete = on_success.clone();
 
-    let do_verify = move |on_success: Callback<TokenPair>, token: String, current_method: MfaMethod| {
-        let code_val = code.get();
-        if code_val.is_empty() {
-            error.set(Some("Please enter a code".to_string()));
-            return;
-        }
-
-        loading.set(true);
-        error.set(None);
-
-        spawn_local(async move {
-            let result = match current_method {
-                MfaMethod::Totp => {
-                    api::auth::verify_mfa(&MfaVerifyRequest {
-                        mfa_token: token,
-                        code: code_val,
-                    })
-                    .await
-                }
-                MfaMethod::Recovery => api::auth::use_recovery_code(&token, &code_val).await,
-                MfaMethod::WebAuthn => {
-                    // WebAuthn uses the dedicated WebAuthnAuthenticator component, not code input
-                    Err(api::ApiClientError {
-                        status: 400,
-                        message: "Use the security key button instead of entering a code".to_string(),
-                    })
-                }
-            };
-
-            match result {
-                Ok(token_pair) => {
-                    on_success.call(token_pair);
-                }
-                Err(e) => {
-                    error.set(Some(e.message));
-                }
+    let do_verify =
+        move |on_success: Callback<TokenPair>, token: String, current_method: MfaMethod| {
+            let code_val = code.get();
+            if code_val.is_empty() {
+                error.set(Some("Please enter a code".to_string()));
+                return;
             }
-            loading.set(false);
-        });
-    };
+
+            loading.set(true);
+            error.set(None);
+
+            spawn_local(async move {
+                let result = match current_method {
+                    MfaMethod::Totp => {
+                        api::auth::verify_mfa(&MfaVerifyRequest {
+                            mfa_token: token,
+                            code: code_val,
+                        })
+                        .await
+                    }
+                    MfaMethod::Recovery => api::auth::use_recovery_code(&token, &code_val).await,
+                    MfaMethod::WebAuthn => {
+                        // WebAuthn uses the dedicated WebAuthnAuthenticator component, not code input
+                        Err(api::ApiClientError {
+                            status: 400,
+                            message: "Use the security key button instead of entering a code"
+                                .to_string(),
+                        })
+                    }
+                };
+
+                match result {
+                    Ok(token_pair) => {
+                        on_success.call(token_pair);
+                    }
+                    Err(e) => {
+                        error.set(Some(e.message));
+                    }
+                }
+                loading.set(false);
+            });
+        };
 
     let on_click_verify = {
         let token = mfa_token_for_click.clone();
@@ -184,7 +186,9 @@ pub fn WebAuthnAuthenticator(
         move |_| {
             // Check if WebAuthn is available
             if !webauthn::is_webauthn_available() {
-                error.set(Some("WebAuthn is not supported in this browser".to_string()));
+                error.set(Some(
+                    "WebAuthn is not supported in this browser".to_string(),
+                ));
                 return;
             }
 
@@ -208,7 +212,9 @@ pub fn WebAuthnAuthenticator(
                             &challenge.challenge,
                             &rp_id,
                             &challenge.allowed_credentials,
-                        ).await {
+                        )
+                        .await
+                        {
                             Ok(assertion) => {
                                 // Step 3: Send assertion to server for verification
                                 let finish_request = api::auth::WebAuthnAuthFinishRequest {
@@ -219,12 +225,20 @@ pub fn WebAuthnAuthenticator(
                                     user_handle: assertion.user_handle,
                                 };
 
-                                match api::auth::webauthn_authenticate_finish(&token, &finish_request).await {
+                                match api::auth::webauthn_authenticate_finish(
+                                    &token,
+                                    &finish_request,
+                                )
+                                .await
+                                {
                                     Ok(token_pair) => {
                                         on_success.call(token_pair);
                                     }
                                     Err(e) => {
-                                        error.set(Some(format!("Verification failed: {}", e.message)));
+                                        error.set(Some(format!(
+                                            "Verification failed: {}",
+                                            e.message
+                                        )));
                                         if let Some(cb) = on_error.as_ref() {
                                             cb.call(e.message);
                                         }

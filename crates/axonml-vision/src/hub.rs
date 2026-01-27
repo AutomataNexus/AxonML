@@ -44,7 +44,11 @@ impl std::fmt::Display for HubError {
             HubError::ModelNotFound(name) => write!(f, "Model not found: {}", name),
             HubError::InvalidFormat(msg) => write!(f, "Invalid format: {}", msg),
             HubError::ChecksumMismatch { expected, actual } => {
-                write!(f, "Checksum mismatch: expected {}, got {}", expected, actual)
+                write!(
+                    f,
+                    "Checksum mismatch: expected {}, got {}",
+                    expected, actual
+                )
             }
         }
     }
@@ -146,7 +150,8 @@ pub fn model_registry() -> HashMap<String, PretrainedModel> {
         "vgg16".to_string(),
         PretrainedModel {
             name: "vgg16".to_string(),
-            url: "https://huggingface.co/axonml-ml/vgg16-imagenet/resolve/main/vgg16.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/vgg16-imagenet/resolve/main/vgg16.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 528_000_000,
             num_classes: 1000,
@@ -160,7 +165,8 @@ pub fn model_registry() -> HashMap<String, PretrainedModel> {
         "vgg19".to_string(),
         PretrainedModel {
             name: "vgg19".to_string(),
-            url: "https://huggingface.co/axonml-ml/vgg19-imagenet/resolve/main/vgg19.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/vgg19-imagenet/resolve/main/vgg19.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 548_000_000,
             num_classes: 1000,
@@ -463,7 +469,11 @@ pub fn download_weights(model_name: &str, force: bool) -> HubResult<PathBuf> {
     }
 
     // Download weights from pretrained model hub
-    println!("Downloading {} weights ({:.1} MB)...", model_name, model_info.size_bytes as f64 / 1_000_000.0);
+    println!(
+        "Downloading {} weights ({:.1} MB)...",
+        model_name,
+        model_info.size_bytes as f64 / 1_000_000.0
+    );
 
     let response = reqwest::blocking::get(&model_info.url)
         .map_err(|e| HubError::NetworkError(e.to_string()))?;
@@ -476,7 +486,8 @@ pub fn download_weights(model_name: &str, force: bool) -> HubResult<PathBuf> {
         )));
     }
 
-    let bytes = response.bytes()
+    let bytes = response
+        .bytes()
         .map_err(|e| HubError::NetworkError(e.to_string()))?;
 
     let mut file = File::create(&cache_path)?;
@@ -634,7 +645,11 @@ mod tests {
         let registry = model_registry();
         for (name, model) in &registry {
             assert!(!model.url.is_empty(), "Model {} has empty URL", name);
-            assert!(model.url.starts_with("https://"), "Model {} URL should be HTTPS", name);
+            assert!(
+                model.url.starts_with("https://"),
+                "Model {} URL should be HTTPS",
+                name
+            );
             assert!(model.size_bytes > 0, "Model {} has zero size", name);
         }
     }
@@ -650,8 +665,14 @@ mod tests {
     fn test_save_load_state_dict() {
         // Create a simple state dict for testing
         let mut state = StateDict::new();
-        state.insert("layer.weight".to_string(), Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap());
-        state.insert("layer.bias".to_string(), Tensor::from_vec(vec![0.1, 0.2], &[2]).unwrap());
+        state.insert(
+            "layer.weight".to_string(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap(),
+        );
+        state.insert(
+            "layer.bias".to_string(),
+            Tensor::from_vec(vec![0.1, 0.2], &[2]).unwrap(),
+        );
 
         let temp_path = std::env::temp_dir().join("test_weights.bin");
         save_state_dict(&state, &temp_path).unwrap();

@@ -57,7 +57,8 @@ pub fn broadcast_from(tensor: &mut Tensor<f32>, src: usize, pg: &ProcessGroup) {
 // =============================================================================
 
 /// All-gathers a tensor across all ranks.
-#[must_use] pub fn all_gather(tensor: &Tensor<f32>, pg: &ProcessGroup) -> Tensor<f32> {
+#[must_use]
+pub fn all_gather(tensor: &Tensor<f32>, pg: &ProcessGroup) -> Tensor<f32> {
     pg.all_gather_tensor(tensor)
 }
 
@@ -66,12 +67,14 @@ pub fn broadcast_from(tensor: &mut Tensor<f32>, src: usize, pg: &ProcessGroup) {
 // =============================================================================
 
 /// Reduce-scatters a tensor with sum.
-#[must_use] pub fn reduce_scatter_sum(tensor: &Tensor<f32>, pg: &ProcessGroup) -> Tensor<f32> {
+#[must_use]
+pub fn reduce_scatter_sum(tensor: &Tensor<f32>, pg: &ProcessGroup) -> Tensor<f32> {
     pg.reduce_scatter_tensor(tensor, ReduceOp::Sum)
 }
 
 /// Reduce-scatters a tensor with mean.
-#[must_use] pub fn reduce_scatter_mean(tensor: &Tensor<f32>, pg: &ProcessGroup) -> Tensor<f32> {
+#[must_use]
+pub fn reduce_scatter_mean(tensor: &Tensor<f32>, pg: &ProcessGroup) -> Tensor<f32> {
     pg.reduce_scatter_tensor(tensor, ReduceOp::Average)
 }
 
@@ -85,17 +88,20 @@ pub fn barrier(pg: &ProcessGroup) {
 }
 
 /// Checks if this is the main process (rank 0).
-#[must_use] pub fn is_main_process(pg: &ProcessGroup) -> bool {
+#[must_use]
+pub fn is_main_process(pg: &ProcessGroup) -> bool {
     pg.rank() == 0
 }
 
 /// Returns the world size.
-#[must_use] pub fn world_size(pg: &ProcessGroup) -> usize {
+#[must_use]
+pub fn world_size(pg: &ProcessGroup) -> usize {
     pg.world_size()
 }
 
 /// Returns the current rank.
-#[must_use] pub fn rank(pg: &ProcessGroup) -> usize {
+#[must_use]
+pub fn rank(pg: &ProcessGroup) -> usize {
     pg.rank()
 }
 
@@ -104,7 +110,8 @@ pub fn barrier(pg: &ProcessGroup) {
 // =============================================================================
 
 /// Splits a tensor along a dimension for model parallelism.
-#[must_use] pub fn scatter_tensor(tensor: &Tensor<f32>, dim: usize, pg: &ProcessGroup) -> Tensor<f32> {
+#[must_use]
+pub fn scatter_tensor(tensor: &Tensor<f32>, dim: usize, pg: &ProcessGroup) -> Tensor<f32> {
     let shape = tensor.shape();
     if dim >= shape.len() {
         return tensor.clone();
@@ -146,7 +153,8 @@ pub fn barrier(pg: &ProcessGroup) {
 }
 
 /// Gathers scattered tensor chunks back together.
-#[must_use] pub fn gather_tensor(tensor: &Tensor<f32>, dim: usize, pg: &ProcessGroup) -> Tensor<f32> {
+#[must_use]
+pub fn gather_tensor(tensor: &Tensor<f32>, dim: usize, pg: &ProcessGroup) -> Tensor<f32> {
     let gathered = pg.all_gather_tensor(tensor);
 
     // Reshape gathered tensor

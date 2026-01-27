@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{icons::*, modal::*, spinner::*, StatusBadge};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, modal::*, StatusBadge};
 
 /// Notebooks list page
 #[component]
@@ -43,12 +43,16 @@ pub fn NotebookListPage() -> impl IntoView {
     // Filtered notebooks based on search
     let filtered_notebooks = move || {
         let search_term = search.get().to_lowercase();
-        notebooks.get()
+        notebooks
+            .get()
             .into_iter()
             .filter(|n| {
                 search_term.is_empty()
                     || n.name.to_lowercase().contains(&search_term)
-                    || n.description.as_ref().map(|d| d.to_lowercase().contains(&search_term)).unwrap_or(false)
+                    || n.description
+                        .as_ref()
+                        .map(|d| d.to_lowercase().contains(&search_term))
+                        .unwrap_or(false)
             })
             .collect::<Vec<_>>()
     };

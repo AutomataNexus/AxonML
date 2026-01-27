@@ -88,7 +88,9 @@ pub async fn save_credentials(
 ) -> Result<Json<KaggleStatusResponse>, AuthError> {
     // Validate non-empty credentials
     if credentials.username.trim().is_empty() || credentials.key.trim().is_empty() {
-        return Err(AuthError::Forbidden("Username and API key are required".to_string()));
+        return Err(AuthError::Forbidden(
+            "Username and API key are required".to_string(),
+        ));
     }
 
     // Validate credentials by making a test API call
@@ -102,7 +104,9 @@ pub async fn save_credentials(
         .map_err(|e| AuthError::Internal(format!("Failed to validate credentials: {}", e)))?;
 
     if !response.status().is_success() {
-        return Err(AuthError::Forbidden("Invalid Kaggle credentials".to_string()));
+        return Err(AuthError::Forbidden(
+            "Invalid Kaggle credentials".to_string(),
+        ));
     }
 
     // Save credentials to user's config directory
@@ -140,10 +144,10 @@ pub async fn get_status(
     let config_path = get_kaggle_config_dir(&user.id).join("kaggle.json");
 
     if config_path.exists() {
-        let content = fs::read_to_string(&config_path)
-            .map_err(|e| AuthError::Internal(e.to_string()))?;
-        let credentials: KaggleCredentials = serde_json::from_str(&content)
-            .map_err(|e| AuthError::Internal(e.to_string()))?;
+        let content =
+            fs::read_to_string(&config_path).map_err(|e| AuthError::Internal(e.to_string()))?;
+        let credentials: KaggleCredentials =
+            serde_json::from_str(&content).map_err(|e| AuthError::Internal(e.to_string()))?;
 
         Ok(Json(KaggleStatusResponse {
             configured: true,
@@ -217,18 +221,24 @@ pub async fn search_datasets(
 fn validate_dataset_ref(dataset_ref: &str) -> Result<(), AuthError> {
     // Check for path traversal patterns
     if dataset_ref.contains("..") || dataset_ref.contains("./") || dataset_ref.starts_with('/') {
-        return Err(AuthError::InvalidInput("Invalid dataset reference: path traversal detected".to_string()));
+        return Err(AuthError::InvalidInput(
+            "Invalid dataset reference: path traversal detected".to_string(),
+        ));
     }
     // Only allow alphanumeric, hyphens, underscores, and single forward slash
-    let valid = dataset_ref.chars().all(|c| {
-        c.is_alphanumeric() || c == '-' || c == '_' || c == '/'
-    });
+    let valid = dataset_ref
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/');
     if !valid {
-        return Err(AuthError::InvalidInput("Invalid dataset reference: contains invalid characters".to_string()));
+        return Err(AuthError::InvalidInput(
+            "Invalid dataset reference: contains invalid characters".to_string(),
+        ));
     }
     // Must contain exactly one slash (owner/dataset format)
     if dataset_ref.matches('/').count() != 1 {
-        return Err(AuthError::InvalidInput("Invalid dataset reference: must be in format 'owner/dataset'".to_string()));
+        return Err(AuthError::InvalidInput(
+            "Invalid dataset reference: must be in format 'owner/dataset'".to_string(),
+        ));
     }
     Ok(())
 }
@@ -236,14 +246,16 @@ fn validate_dataset_ref(dataset_ref: &str) -> Result<(), AuthError> {
 /// SECURITY: Validate that a path is within the allowed base directory
 fn validate_path_within_base(path: &PathBuf, base: &PathBuf) -> Result<(), AuthError> {
     // Canonicalize both paths to resolve any .. or symlinks
-    let canonical_base = base.canonicalize()
+    let canonical_base = base
+        .canonicalize()
         .map_err(|_| AuthError::Internal("Failed to resolve base path".to_string()))?;
 
     // Create the directory first so we can canonicalize it
     fs::create_dir_all(path)
         .map_err(|e| AuthError::Internal(format!("Failed to create directory: {}", e)))?;
 
-    let canonical_path = path.canonicalize()
+    let canonical_path = path
+        .canonicalize()
         .map_err(|_| AuthError::Internal("Failed to resolve output path".to_string()))?;
 
     if !canonical_path.starts_with(&canonical_base) {
@@ -252,7 +264,9 @@ fn validate_path_within_base(path: &PathBuf, base: &PathBuf) -> Result<(), AuthE
             base = %canonical_base.display(),
             "Path traversal attempt detected"
         );
-        return Err(AuthError::InvalidInput("Invalid output directory: path traversal detected".to_string()));
+        return Err(AuthError::InvalidInput(
+            "Invalid output directory: path traversal detected".to_string(),
+        ));
     }
     Ok(())
 }
@@ -276,7 +290,9 @@ pub async fn download_dataset(
         // SECURITY: Custom directory must be within user's data directory
         let requested = PathBuf::from(custom_dir);
         if requested.is_absolute() {
-            return Err(AuthError::InvalidInput("Absolute paths not allowed for output directory".to_string()));
+            return Err(AuthError::InvalidInput(
+                "Absolute paths not allowed for output directory".to_string(),
+            ));
         }
         base_dir.join(requested)
     } else {
@@ -314,7 +330,9 @@ pub async fn download_dataset(
     let filename = request.dataset_ref.replace('/', "_") + ".zip";
     let output_path = output_dir.join(&filename);
 
-    let bytes = response.bytes().await
+    let bytes = response
+        .bytes()
+        .await
         .map_err(|e| AuthError::Internal(format!("Failed to read response: {}", e)))?;
 
     let size_bytes = bytes.len() as u64;

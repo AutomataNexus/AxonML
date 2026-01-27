@@ -115,8 +115,8 @@ fn load_model(path: &PathBuf) -> CliResult<ModelInfo> {
     }
 
     // Fallback: try to load as a state dict directly
-    let state_dict = load_state_dict(path)
-        .map_err(|e| CliError::Model(format!("Failed to load model: {e}")))?;
+    let state_dict =
+        load_state_dict(path).map_err(|e| CliError::Model(format!("Failed to load model: {e}")))?;
 
     let num_params = state_dict.len();
 

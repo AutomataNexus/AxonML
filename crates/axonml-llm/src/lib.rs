@@ -34,40 +34,40 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-pub mod error;
-pub mod config;
 pub mod attention;
-pub mod embedding;
-pub mod hub;
-pub mod hf_loader;
-pub mod tokenizer;
-pub mod state_dict;
-pub mod transformer;
 pub mod bert;
+pub mod config;
+pub mod embedding;
+pub mod error;
+pub mod generation;
 pub mod gpt2;
+pub mod hf_loader;
+pub mod hub;
 pub mod llama;
 pub mod mistral;
 pub mod phi;
-pub mod generation;
+pub mod state_dict;
+pub mod tokenizer;
+pub mod transformer;
 
-pub use error::{LLMError, LLMResult};
-pub use config::{BertConfig, GPT2Config, TransformerConfig};
 pub use attention::{
-    CausalSelfAttention, FlashAttention, FlashAttentionConfig, KVCache, LayerKVCache,
-    MultiHeadSelfAttention, scaled_dot_product_attention,
+    scaled_dot_product_attention, CausalSelfAttention, FlashAttention, FlashAttentionConfig,
+    KVCache, LayerKVCache, MultiHeadSelfAttention,
 };
-pub use embedding::{TokenEmbedding, PositionalEmbedding, BertEmbedding, GPT2Embedding};
-pub use hub::{PretrainedLLM, llm_registry, download_weights as download_llm_weights};
-pub use hf_loader::{HFLoader, load_llama_from_hf, load_mistral_from_hf};
-pub use tokenizer::{HFTokenizer, SpecialTokens};
-pub use state_dict::{LoadStateDict, LoadResult};
-pub use transformer::{TransformerBlock, TransformerEncoder, TransformerDecoder};
-pub use bert::{Bert, BertForSequenceClassification, BertForMaskedLM};
-pub use gpt2::{GPT2, GPT2LMHead};
+pub use bert::{Bert, BertForMaskedLM, BertForSequenceClassification};
+pub use config::{BertConfig, GPT2Config, TransformerConfig};
+pub use embedding::{BertEmbedding, GPT2Embedding, PositionalEmbedding, TokenEmbedding};
+pub use error::{LLMError, LLMResult};
+pub use generation::{GenerationConfig, TextGenerator};
+pub use gpt2::{GPT2LMHead, GPT2};
+pub use hf_loader::{load_llama_from_hf, load_mistral_from_hf, HFLoader};
+pub use hub::{download_weights as download_llm_weights, llm_registry, PretrainedLLM};
 pub use llama::{LLaMA, LLaMAConfig, LLaMAForCausalLM};
 pub use mistral::{Mistral, MistralConfig, MistralForCausalLM};
 pub use phi::{Phi, PhiConfig, PhiForCausalLM};
-pub use generation::{GenerationConfig, TextGenerator};
+pub use state_dict::{LoadResult, LoadStateDict};
+pub use tokenizer::{HFTokenizer, SpecialTokens};
+pub use transformer::{TransformerBlock, TransformerDecoder, TransformerEncoder};
 
 // =============================================================================
 // Tests

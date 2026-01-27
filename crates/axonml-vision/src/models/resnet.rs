@@ -285,12 +285,14 @@ pub struct ResNet {
 
 impl ResNet {
     /// Create `ResNet18`.
-    #[must_use] pub fn resnet18(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn resnet18(num_classes: usize) -> Self {
         Self::new_basic(&[2, 2, 2, 2], num_classes)
     }
 
     /// Create `ResNet34`.
-    #[must_use] pub fn resnet34(num_classes: usize) -> Self {
+    #[must_use]
+    pub fn resnet34(num_classes: usize) -> Self {
         Self::new_basic(&[3, 4, 6, 3], num_classes)
     }
 
@@ -443,12 +445,14 @@ impl Module for ResNet {
 // =============================================================================
 
 /// Create `ResNet18` for `ImageNet` (1000 classes).
-#[must_use] pub fn resnet18() -> ResNet {
+#[must_use]
+pub fn resnet18() -> ResNet {
     ResNet::resnet18(1000)
 }
 
 /// Create `ResNet34` for `ImageNet` (1000 classes).
-#[must_use] pub fn resnet34() -> ResNet {
+#[must_use]
+pub fn resnet34() -> ResNet {
     ResNet::resnet34(1000)
 }
 

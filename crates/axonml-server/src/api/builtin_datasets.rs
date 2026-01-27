@@ -82,7 +82,9 @@ fn get_builtin_datasets() -> Vec<BuiltinDataset> {
         BuiltinDataset {
             id: "mnist".to_string(),
             name: "MNIST Handwritten Digits".to_string(),
-            description: "Classic handwritten digit recognition dataset with 70,000 grayscale images".to_string(),
+            description:
+                "Classic handwritten digit recognition dataset with 70,000 grayscale images"
+                    .to_string(),
             num_samples: 70000,
             num_features: 784,
             num_classes: 10,
@@ -91,13 +93,18 @@ fn get_builtin_datasets() -> Vec<BuiltinDataset> {
             task_type: "classification".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_vision::datasets::MNIST;
-let dataset = MNIST::new("./data", true)?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_vision::datasets::MNIST;
+let dataset = MNIST::new("./data", true)?;"#
+                    .to_string(),
+            ),
         },
         BuiltinDataset {
             id: "fashion-mnist".to_string(),
             name: "Fashion MNIST".to_string(),
-            description: "Fashion product images dataset - a more challenging drop-in replacement for MNIST".to_string(),
+            description:
+                "Fashion product images dataset - a more challenging drop-in replacement for MNIST"
+                    .to_string(),
             num_samples: 70000,
             num_features: 784,
             num_classes: 10,
@@ -106,8 +113,11 @@ let dataset = MNIST::new("./data", true)?;"#.to_string()),
             task_type: "classification".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_vision::datasets::FashionMNIST;
-let dataset = FashionMNIST::new("./data", true)?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_vision::datasets::FashionMNIST;
+let dataset = FashionMNIST::new("./data", true)?;"#
+                    .to_string(),
+            ),
         },
         BuiltinDataset {
             id: "cifar-10".to_string(),
@@ -121,8 +131,11 @@ let dataset = FashionMNIST::new("./data", true)?;"#.to_string()),
             task_type: "classification".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_vision::datasets::CIFAR10;
-let dataset = CIFAR10::new("./data", true)?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_vision::datasets::CIFAR10;
+let dataset = CIFAR10::new("./data", true)?;"#
+                    .to_string(),
+            ),
         },
         BuiltinDataset {
             id: "cifar-100".to_string(),
@@ -136,13 +149,17 @@ let dataset = CIFAR10::new("./data", true)?;"#.to_string()),
             task_type: "classification".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_vision::datasets::CIFAR100;
-let dataset = CIFAR100::new("./data", true)?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_vision::datasets::CIFAR100;
+let dataset = CIFAR100::new("./data", true)?;"#
+                    .to_string(),
+            ),
         },
         BuiltinDataset {
             id: "iris".to_string(),
             name: "Iris Flower Dataset".to_string(),
-            description: "Classic dataset for classification - 150 samples with 4 features".to_string(),
+            description: "Classic dataset for classification - 150 samples with 4 features"
+                .to_string(),
             num_samples: 150,
             num_features: 4,
             num_classes: 3,
@@ -151,8 +168,11 @@ let dataset = CIFAR100::new("./data", true)?;"#.to_string()),
             task_type: "classification".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_data::datasets::Iris;
-let dataset = Iris::load()?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_data::datasets::Iris;
+let dataset = Iris::load()?;"#
+                    .to_string(),
+            ),
         },
         BuiltinDataset {
             id: "wine-quality".to_string(),
@@ -166,8 +186,11 @@ let dataset = Iris::load()?;"#.to_string()),
             task_type: "classification".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_data::datasets::WineQuality;
-let dataset = WineQuality::load()?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_data::datasets::WineQuality;
+let dataset = WineQuality::load()?;"#
+                    .to_string(),
+            ),
         },
         BuiltinDataset {
             id: "breast-cancer".to_string(),
@@ -181,8 +204,11 @@ let dataset = WineQuality::load()?;"#.to_string()),
             task_type: "classification".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_data::datasets::BreastCancer;
-let dataset = BreastCancer::load()?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_data::datasets::BreastCancer;
+let dataset = BreastCancer::load()?;"#
+                    .to_string(),
+            ),
         },
         BuiltinDataset {
             id: "boston-housing".to_string(),
@@ -196,8 +222,11 @@ let dataset = BreastCancer::load()?;"#.to_string()),
             task_type: "regression".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_data::datasets::BostonHousing;
-let dataset = BostonHousing::load()?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_data::datasets::BostonHousing;
+let dataset = BostonHousing::load()?;"#
+                    .to_string(),
+            ),
         },
         BuiltinDataset {
             id: "imdb".to_string(),
@@ -211,8 +240,11 @@ let dataset = BostonHousing::load()?;"#.to_string()),
             task_type: "classification".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_text::datasets::IMDB;
-let dataset = IMDB::new("./data", true)?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_text::datasets::IMDB;
+let dataset = IMDB::new("./data", true)?;"#
+                    .to_string(),
+            ),
         },
         BuiltinDataset {
             id: "ag-news".to_string(),
@@ -226,8 +258,11 @@ let dataset = IMDB::new("./data", true)?;"#.to_string()),
             task_type: "classification".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_text::datasets::AGNews;
-let dataset = AGNews::new("./data", true)?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_text::datasets::AGNews;
+let dataset = AGNews::new("./data", true)?;"#
+                    .to_string(),
+            ),
         },
         BuiltinDataset {
             id: "speech-commands".to_string(),
@@ -241,8 +276,11 @@ let dataset = AGNews::new("./data", true)?;"#.to_string()),
             task_type: "classification".to_string(),
             source: "builtin".to_string(),
             download_url: None,
-            loading_code: Some(r#"use axonml_audio::datasets::SpeechCommands;
-let dataset = SpeechCommands::new("./data", true)?;"#.to_string()),
+            loading_code: Some(
+                r#"use axonml_audio::datasets::SpeechCommands;
+let dataset = SpeechCommands::new("./data", true)?;"#
+                    .to_string(),
+            ),
         },
     ]
 }
@@ -308,7 +346,8 @@ pub async fn get_dataset_info(
 ) -> Result<Json<BuiltinDataset>, AuthError> {
     // Return from local registry immediately
     let datasets = get_builtin_datasets();
-    let dataset = datasets.into_iter()
+    let dataset = datasets
+        .into_iter()
         .find(|d| d.id == dataset_id)
         .ok_or_else(|| AuthError::NotFound(format!("Dataset '{}' not found", dataset_id)))?;
 
@@ -327,11 +366,12 @@ pub async fn search_datasets(
     let datasets = get_builtin_datasets();
     let query_lower = query.query.to_lowercase();
 
-    let results: Vec<SearchResult> = datasets.into_iter()
+    let results: Vec<SearchResult> = datasets
+        .into_iter()
         .filter(|d| {
-            d.name.to_lowercase().contains(&query_lower) ||
-            d.description.to_lowercase().contains(&query_lower) ||
-            d.id.to_lowercase().contains(&query_lower)
+            d.name.to_lowercase().contains(&query_lower)
+                || d.description.to_lowercase().contains(&query_lower)
+                || d.id.to_lowercase().contains(&query_lower)
         })
         .take(limit)
         .map(|d| SearchResult {
@@ -362,7 +402,8 @@ pub async fn prepare_dataset(
     Path(dataset_id): Path<String>,
 ) -> Result<Json<BuiltinDataset>, AuthError> {
     let datasets = get_builtin_datasets();
-    let dataset = datasets.into_iter()
+    let dataset = datasets
+        .into_iter()
         .find(|d| d.id == dataset_id)
         .ok_or_else(|| AuthError::NotFound(format!("Dataset '{}' not found", dataset_id)))?;
 
@@ -444,7 +485,12 @@ async fn search_nexus(
 ) -> Result<Vec<SearchResult>, String> {
     let client = Client::new();
 
-    let mut url = format!("{}/search?q={}&limit={}", NEXUS_API_URL, urlencoding::encode(query), limit);
+    let mut url = format!(
+        "{}/search?q={}&limit={}",
+        NEXUS_API_URL,
+        urlencoding::encode(query),
+        limit
+    );
     if let Some(s) = source {
         url.push_str(&format!("&source={}", s));
     }

@@ -187,8 +187,8 @@ pub use sgd::SGD;
 /// Common imports for optimization.
 pub mod prelude {
     pub use crate::{
-        Adam, AdamW, CosineAnnealingLR, ExponentialLR, GradScaler, LRScheduler, LAMB, MultiStepLR,
-        OneCycleLR, Optimizer, RMSprop, ReduceLROnPlateau, StepLR, WarmupLR, SGD,
+        Adam, AdamW, CosineAnnealingLR, ExponentialLR, GradScaler, LRScheduler, MultiStepLR,
+        OneCycleLR, Optimizer, RMSprop, ReduceLROnPlateau, StepLR, WarmupLR, LAMB, SGD,
     };
 }
 

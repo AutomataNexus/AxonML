@@ -29,7 +29,8 @@ pub enum ReduceOp {
 
 impl ReduceOp {
     /// Applies the reduction operation to two f32 values.
-    #[must_use] pub fn apply_f32(&self, a: f32, b: f32) -> f32 {
+    #[must_use]
+    pub fn apply_f32(&self, a: f32, b: f32) -> f32 {
         match self {
             ReduceOp::Sum => a + b,
             ReduceOp::Product => a * b,
@@ -40,7 +41,8 @@ impl ReduceOp {
     }
 
     /// Applies the reduction operation to slices.
-    #[must_use] pub fn reduce_slices(&self, slices: &[Vec<f32>]) -> Vec<f32> {
+    #[must_use]
+    pub fn reduce_slices(&self, slices: &[Vec<f32>]) -> Vec<f32> {
         if slices.is_empty() {
             return Vec::new();
         }
@@ -152,7 +154,8 @@ pub struct MockBackend {
 
 impl MockBackend {
     /// Creates a collection of mock backends for testing.
-    #[must_use] pub fn create_world(world_size: usize) -> Vec<Self> {
+    #[must_use]
+    pub fn create_world(world_size: usize) -> Vec<Self> {
         let state = Arc::new(Mutex::new(SharedState {
             buffers: HashMap::new(),
             barrier_count: 0,
@@ -169,7 +172,8 @@ impl MockBackend {
     }
 
     /// Creates a single mock backend (rank 0, world size 1).
-    #[must_use] pub fn single() -> Self {
+    #[must_use]
+    pub fn single() -> Self {
         MockBackend::create_world(1).pop().unwrap()
     }
 }

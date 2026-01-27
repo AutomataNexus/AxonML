@@ -4,8 +4,7 @@
 
 use crate::api::AppState;
 use crate::auth::{
-    hash_password, verify_password, AuthError, AuthUser, RecoveryAuth, TotpAuth,
-    WebAuthnAuth,
+    hash_password, verify_password, AuthError, AuthUser, RecoveryAuth, TotpAuth, WebAuthnAuth,
 };
 use crate::db::users::{NewUser, UpdateUser, UserRepository, UserRole};
 use axum::{
@@ -189,7 +188,9 @@ pub async fn register(
 ) -> Result<(StatusCode, Json<RegisterResponse>), AuthError> {
     // Check if public registration is allowed
     if !state.config.auth.allow_public_registration {
-        return Err(AuthError::Forbidden("Public registration is disabled".to_string()));
+        return Err(AuthError::Forbidden(
+            "Public registration is disabled".to_string(),
+        ));
     }
 
     let repo = UserRepository::new(&state.db);
@@ -198,8 +199,14 @@ pub async fn register(
     let password_hash = hash_password(&req.password)?;
 
     // Check if email already exists
-    if let Some(_) = repo.find_by_email(&req.email).await.map_err(|e| AuthError::Internal(e.to_string()))? {
-        return Err(AuthError::Forbidden("Email address is already registered".to_string()));
+    if let Some(_) = repo
+        .find_by_email(&req.email)
+        .await
+        .map_err(|e| AuthError::Internal(e.to_string()))?
+    {
+        return Err(AuthError::Forbidden(
+            "Email address is already registered".to_string(),
+        ));
     }
 
     // Create user (with email_pending=true, email_verified=false, verification_token set)
@@ -214,26 +221,30 @@ pub async fn register(
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
     // Send verification email to user
-    let base_url = format!("http://{}:{}", state.config.server.host, state.config.server.port);
-    let verification_token = user.verification_token.as_ref().ok_or_else(||
-        AuthError::Internal("Verification token not generated".to_string())
-    )?;
+    let base_url = format!(
+        "http://{}:{}",
+        state.config.server.host, state.config.server.port
+    );
+    let verification_token = user
+        .verification_token
+        .as_ref()
+        .ok_or_else(|| AuthError::Internal("Verification token not generated".to_string()))?;
 
-    if let Err(e) = state.email.send_verification_email(
-        &user.email,
-        &user.name,
-        verification_token,
-        &base_url,
-    ).await {
+    if let Err(e) = state
+        .email
+        .send_verification_email(&user.email, &user.name, verification_token, &base_url)
+        .await
+    {
         tracing::error!("Failed to send verification email: {}", e);
         // Don't fail registration if email fails, user can request new verification email
     }
 
     // Send notification email to admin
-    if let Err(e) = state.email.send_admin_signup_notification(
-        &user.email,
-        &user.name,
-    ).await {
+    if let Err(e) = state
+        .email
+        .send_admin_signup_notification(&user.email, &user.name)
+        .await
+    {
         tracing::error!("Failed to send admin notification: {}", e);
     }
 
@@ -241,7 +252,8 @@ pub async fn register(
         StatusCode::CREATED,
         Json(RegisterResponse {
             success: true,
-            message: "Registration successful! Please check your email to verify your account.".to_string(),
+            message: "Registration successful! Please check your email to verify your account."
+                .to_string(),
         }),
     ))
 }
@@ -280,7 +292,10 @@ pub async fn login(
         if user.email_pending && !user.email_verified {
             return Err(AuthError::Forbidden("Please verify your email address before logging in. Check your inbox for the verification link.".to_string()));
         } else if user.email_verified && user.email_pending {
-            return Err(AuthError::Forbidden("Your account is pending admin approval. You will receive an email once approved.".to_string()));
+            return Err(AuthError::Forbidden(
+                "Your account is pending admin approval. You will receive an email once approved."
+                    .to_string(),
+            ));
         }
     }
 
@@ -529,12 +544,15 @@ pub async fn use_recovery_code(
         .ok_or(AuthError::InvalidMfaCode)?;
 
     // Get the hash of the used code
-    let code_hash = user.recovery_codes.get(index)
+    let code_hash = user
+        .recovery_codes
+        .get(index)
         .ok_or(AuthError::InvalidMfaCode)?
         .clone();
 
     // Remove the used code using dedicated repository method
-    let removed = repo.use_recovery_code(&user.id, &code_hash)
+    let removed = repo
+        .use_recovery_code(&user.id, &code_hash)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
@@ -580,8 +598,7 @@ pub async fn webauthn_register_finish(
 
     // Parse response
     let response: crate::auth::webauthn::RegistrationResponse =
-        serde_json::from_value(req.response)
-            .map_err(|e| AuthError::Internal(e.to_string()))?;
+        serde_json::from_value(req.response).map_err(|e| AuthError::Internal(e.to_string()))?;
 
     let name = req.name.unwrap_or_else(|| "Security Key".to_string());
     let credential = webauthn.finish_registration("", &response, &name)?;
@@ -671,8 +688,7 @@ pub async fn webauthn_auth_finish(
 
     // Parse response and credentials
     let response: crate::auth::webauthn::AuthenticationResponse =
-        serde_json::from_value(req.response)
-            .map_err(|e| AuthError::Internal(e.to_string()))?;
+        serde_json::from_value(req.response).map_err(|e| AuthError::Internal(e.to_string()))?;
 
     let credentials: Vec<crate::auth::webauthn::WebAuthnCredential> = user
         .webauthn_credentials
@@ -852,13 +868,17 @@ pub async fn delete_user(
 ) -> Result<StatusCode, AuthError> {
     // Prevent self-deletion
     if user.id == id {
-        return Err(AuthError::Forbidden("Cannot delete your own account".into()));
+        return Err(AuthError::Forbidden(
+            "Cannot delete your own account".into(),
+        ));
     }
 
     let repo = UserRepository::new(&state.db);
 
     // Check if user exists first
-    let existing = repo.find_by_id(&id).await
+    let existing = repo
+        .find_by_id(&id)
+        .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
     if existing.is_none() {
@@ -881,8 +901,7 @@ pub async fn verify_email(
 ) -> Result<axum::response::Redirect, AuthError> {
     // Extract client IP for admin notification
     let client_ip = extract_client_ip(&headers, conn_info.as_ref().map(|c| &c.0));
-    let token = params.get("token")
-        .ok_or_else(|| AuthError::InvalidToken)?;
+    let token = params.get("token").ok_or_else(|| AuthError::InvalidToken)?;
 
     let repo = UserRepository::new(&state.db);
 
@@ -891,12 +910,15 @@ pub async fn verify_email(
         "verification_token": { "$eq": token }
     });
 
-    let user_doc = state.db.doc_find_one("axonml_users", filter).await
+    let user_doc = state
+        .db
+        .doc_find_one("axonml_users", filter)
+        .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or(AuthError::InvalidToken)?;
 
-    let user: crate::db::users::User = serde_json::from_value(user_doc)
-        .map_err(|e| AuthError::Internal(e.to_string()))?;
+    let user: crate::db::users::User =
+        serde_json::from_value(user_doc).map_err(|e| AuthError::Internal(e.to_string()))?;
 
     // Check if already verified
     if user.email_verified {
@@ -908,26 +930,37 @@ pub async fn verify_email(
     let approval_token = uuid::Uuid::new_v4().to_string();
 
     // Update user - email verified but still pending admin approval
-    repo.update(&user.id, UpdateUser {
-        verification_token: Some(approval_token.clone()),
-        ..Default::default()
-    }).await
-        .map_err(|e| AuthError::Internal(e.to_string()))?;
+    repo.update(
+        &user.id,
+        UpdateUser {
+            verification_token: Some(approval_token.clone()),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| AuthError::Internal(e.to_string()))?;
 
     // Send approval request to admin
-    let base_url = format!("http://{}:{}", state.config.server.host, state.config.server.port);
+    let base_url = format!(
+        "http://{}:{}",
+        state.config.server.host, state.config.server.port
+    );
 
     // Location lookup could be done via IP geolocation service if needed
     // For now, we pass the IP which admin can look up manually
-    if let Err(e) = state.email.send_admin_approval_request(
-        &user.id,
-        &user.email,
-        &user.name,
-        None, // location - would require external geolocation API
-        client_ip.as_deref(),
-        &approval_token,
-        &base_url,
-    ).await {
+    if let Err(e) = state
+        .email
+        .send_admin_approval_request(
+            &user.id,
+            &user.email,
+            &user.name,
+            None, // location - would require external geolocation API
+            client_ip.as_deref(),
+            &approval_token,
+            &base_url,
+        )
+        .await
+    {
         tracing::error!("Failed to send admin approval request: {}", e);
     }
 
@@ -976,7 +1009,8 @@ pub async fn approve_user(
         Err(e) => {
             tracing::error!("Failed to parse user: {}", e);
             return axum::response::Html(
-                "<html><body><h1>Error</h1><p>Failed to process user data.</p></body></html>".to_string()
+                "<html><body><h1>Error</h1><p>Failed to process user data.</p></body></html>"
+                    .to_string(),
             );
         }
     };
@@ -996,25 +1030,34 @@ pub async fn approve_user(
     }
 
     // Approve user - set email_verified=true, email_pending=false
-    if let Err(e) = repo.update(&user.id, UpdateUser {
-        email_verified: Some(true),
-        email_pending: Some(false),
-        verification_token: None, // Clear token after use
-        ..Default::default()
-    }).await {
+    if let Err(e) = repo
+        .update(
+            &user.id,
+            UpdateUser {
+                email_verified: Some(true),
+                email_pending: Some(false),
+                verification_token: None, // Clear token after use
+                ..Default::default()
+            },
+        )
+        .await
+    {
         tracing::error!("Failed to approve user: {}", e);
         return axum::response::Html(
-            "<html><body><h1>Error</h1><p>Failed to approve user.</p></body></html>".to_string()
+            "<html><body><h1>Error</h1><p>Failed to approve user.</p></body></html>".to_string(),
         );
     }
 
     // Send welcome email to user
-    let dashboard_url = format!("http://{}:{}", state.config.server.host, state.config.dashboard.port);
-    if let Err(e) = state.email.send_welcome_email(
-        &user.email,
-        &user.name,
-        &dashboard_url,
-    ).await {
+    let dashboard_url = format!(
+        "http://{}:{}",
+        state.config.server.host, state.config.dashboard.port
+    );
+    if let Err(e) = state
+        .email
+        .send_welcome_email(&user.email, &user.name, &dashboard_url)
+        .await
+    {
         tracing::error!("Failed to send welcome email: {}", e);
     }
 

@@ -81,7 +81,8 @@ impl CIFAR10 {
                     labels.push(buffer[0]);
 
                     // Image is stored as R, G, B channels (each 1024 bytes)
-                    let image: Vec<f32> = buffer[1..].iter().map(|&b| f32::from(b) / 255.0).collect();
+                    let image: Vec<f32> =
+                        buffer[1..].iter().map(|&b| f32::from(b) / 255.0).collect();
                     images.push(image);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
@@ -93,7 +94,8 @@ impl CIFAR10 {
     }
 
     /// Returns the class names.
-    #[must_use] pub fn class_names() -> Vec<&'static str> {
+    #[must_use]
+    pub fn class_names() -> Vec<&'static str> {
         vec![
             "airplane",
             "automobile",
@@ -109,17 +111,20 @@ impl CIFAR10 {
     }
 
     /// Returns whether this is the training set.
-    #[must_use] pub fn is_train(&self) -> bool {
+    #[must_use]
+    pub fn is_train(&self) -> bool {
         self.train
     }
 
     /// Returns the number of classes.
-    #[must_use] pub fn num_classes(&self) -> usize {
+    #[must_use]
+    pub fn num_classes(&self) -> usize {
         10
     }
 
     /// Returns the image dimensions (3, 32, 32).
-    #[must_use] pub fn image_size(&self) -> (usize, usize, usize) {
+    #[must_use]
+    pub fn image_size(&self) -> (usize, usize, usize) {
         (3, 32, 32)
     }
 }
@@ -190,7 +195,8 @@ impl CIFAR100 {
                     coarse_labels.push(buffer[0]);
                     fine_labels.push(buffer[1]);
 
-                    let image: Vec<f32> = buffer[2..].iter().map(|&b| f32::from(b) / 255.0).collect();
+                    let image: Vec<f32> =
+                        buffer[2..].iter().map(|&b| f32::from(b) / 255.0).collect();
                     images.push(image);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
@@ -207,22 +213,26 @@ impl CIFAR100 {
     }
 
     /// Returns the number of fine classes.
-    #[must_use] pub fn num_fine_classes(&self) -> usize {
+    #[must_use]
+    pub fn num_fine_classes(&self) -> usize {
         100
     }
 
     /// Returns the number of coarse classes.
-    #[must_use] pub fn num_coarse_classes(&self) -> usize {
+    #[must_use]
+    pub fn num_coarse_classes(&self) -> usize {
         20
     }
 
     /// Returns whether this is the training set.
-    #[must_use] pub fn is_train(&self) -> bool {
+    #[must_use]
+    pub fn is_train(&self) -> bool {
         self.train
     }
 
     /// Gets an item with both fine and coarse labels.
-    #[must_use] pub fn get_with_coarse(&self, index: usize) -> Option<(Tensor<f32>, Tensor<f32>, Tensor<f32>)> {
+    #[must_use]
+    pub fn get_with_coarse(&self, index: usize) -> Option<(Tensor<f32>, Tensor<f32>, Tensor<f32>)> {
         if index >= self.images.len() {
             return None;
         }
@@ -276,7 +286,8 @@ pub struct SyntheticCIFAR {
 
 impl SyntheticCIFAR {
     /// Creates a synthetic CIFAR-10 dataset with the specified size.
-    #[must_use] pub fn cifar10(size: usize) -> Self {
+    #[must_use]
+    pub fn cifar10(size: usize) -> Self {
         Self {
             size,
             num_classes: 10,
@@ -284,7 +295,8 @@ impl SyntheticCIFAR {
     }
 
     /// Creates a synthetic CIFAR-100 dataset with the specified size.
-    #[must_use] pub fn cifar100(size: usize) -> Self {
+    #[must_use]
+    pub fn cifar100(size: usize) -> Self {
         Self {
             size,
             num_classes: 100,
@@ -292,22 +304,26 @@ impl SyntheticCIFAR {
     }
 
     /// Creates a small test dataset (100 samples, CIFAR-10 style).
-    #[must_use] pub fn small() -> Self {
+    #[must_use]
+    pub fn small() -> Self {
         Self::cifar10(100)
     }
 
     /// Creates a standard training-size dataset (50000 samples).
-    #[must_use] pub fn train() -> Self {
+    #[must_use]
+    pub fn train() -> Self {
         Self::cifar10(50000)
     }
 
     /// Creates a standard test-size dataset (10000 samples).
-    #[must_use] pub fn test() -> Self {
+    #[must_use]
+    pub fn test() -> Self {
         Self::cifar10(10000)
     }
 
     /// Returns the class names for CIFAR-10.
-    #[must_use] pub fn class_names(&self) -> Option<Vec<&'static str>> {
+    #[must_use]
+    pub fn class_names(&self) -> Option<Vec<&'static str>> {
         if self.num_classes == 10 {
             Some(CIFAR10::class_names())
         } else {

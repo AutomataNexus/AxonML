@@ -4,8 +4,8 @@
 //! for transformer models with KV-cache support for efficient inference.
 
 use axonml_autograd::Variable;
-use axonml_nn::{Module, Linear, Dropout, Parameter};
-use axonml_tensor::{Tensor, view::cat};
+use axonml_nn::{Dropout, Linear, Module, Parameter};
+use axonml_tensor::{view::cat, Tensor};
 
 // =============================================================================
 // KV Cache
@@ -43,7 +43,11 @@ impl KVCache {
     ///
     /// # Returns
     /// Updated key and value tensors including cached values
-    pub fn update(&mut self, new_key: &Tensor<f32>, new_value: &Tensor<f32>) -> (Tensor<f32>, Tensor<f32>) {
+    pub fn update(
+        &mut self,
+        new_key: &Tensor<f32>,
+        new_value: &Tensor<f32>,
+    ) -> (Tensor<f32>, Tensor<f32>) {
         let new_seq_len = new_key.shape()[2];
 
         if self.seq_len == 0 {
@@ -90,7 +94,13 @@ pub struct LayerKVCache {
 
 impl LayerKVCache {
     /// Create cache for all layers.
-    pub fn new(num_layers: usize, batch_size: usize, num_heads: usize, max_seq_len: usize, head_dim: usize) -> Self {
+    pub fn new(
+        num_layers: usize,
+        batch_size: usize,
+        num_heads: usize,
+        max_seq_len: usize,
+        head_dim: usize,
+    ) -> Self {
         let layers = (0..num_layers)
             .map(|_| KVCache::new(batch_size, num_heads, max_seq_len, head_dim))
             .collect();
@@ -338,8 +348,8 @@ impl CausalSelfAttention {
 
         // Split along last dimension: [batch, seq, 3*n_embd] -> 3x [batch, seq, n_embd]
         let q_data = qkv_data.slice(&[0..batch_size, 0..seq_len, 0..self.n_embd]);
-        let k_data = qkv_data.slice(&[0..batch_size, 0..seq_len, self.n_embd..2*self.n_embd]);
-        let v_data = qkv_data.slice(&[0..batch_size, 0..seq_len, 2*self.n_embd..3*self.n_embd]);
+        let k_data = qkv_data.slice(&[0..batch_size, 0..seq_len, self.n_embd..2 * self.n_embd]);
+        let v_data = qkv_data.slice(&[0..batch_size, 0..seq_len, 2 * self.n_embd..3 * self.n_embd]);
 
         let q = Variable::new(q_data, qkv.requires_grad());
         let k_new = Variable::new(k_data.clone(), qkv.requires_grad());
@@ -347,9 +357,15 @@ impl CausalSelfAttention {
 
         // Reshape for multi-head attention
         // [batch, seq, n_embd] -> [batch, seq, num_heads, head_dim] -> [batch, num_heads, seq, head_dim]
-        let q = q.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
-        let k_new = k_new.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
-        let v_new = v_new.reshape(&[batch_size, seq_len, self.num_heads, self.head_dim]).transpose(1, 2);
+        let q = q
+            .reshape(&[batch_size, seq_len, self.num_heads, self.head_dim])
+            .transpose(1, 2);
+        let k_new = k_new
+            .reshape(&[batch_size, seq_len, self.num_heads, self.head_dim])
+            .transpose(1, 2);
+        let v_new = v_new
+            .reshape(&[batch_size, seq_len, self.num_heads, self.head_dim])
+            .transpose(1, 2);
 
         // Apply KV cache if provided
         let (k, v, total_seq_len, new_cache) = if let Some(cache) = kv_cache {
@@ -362,7 +378,12 @@ impl CausalSelfAttention {
                 Some((cached_k, cached_v)),
             )
         } else {
-            (k_new.clone(), v_new.clone(), seq_len, Some((k_new.data(), v_new.data())))
+            (
+                k_new.clone(),
+                v_new.clone(),
+                seq_len,
+                Some((k_new.data(), v_new.data())),
+            )
         };
 
         // Scaled dot-product attention
@@ -384,7 +405,9 @@ impl CausalSelfAttention {
         let output = attn.matmul(&v);
 
         // Reshape back: [batch, num_heads, seq, head_dim] -> [batch, seq, n_embd]
-        let output = output.transpose(1, 2).reshape(&[batch_size, seq_len, self.n_embd]);
+        let output = output
+            .transpose(1, 2)
+            .reshape(&[batch_size, seq_len, self.n_embd]);
 
         // Output projection and dropout
         let output = self.c_proj.forward(&output);
@@ -679,7 +702,12 @@ impl FlashAttention {
     }
 
     /// Creates Flash Attention with custom block size.
-    pub fn with_block_size(num_heads: usize, dropout_p: f32, causal: bool, block_size: usize) -> Self {
+    pub fn with_block_size(
+        num_heads: usize,
+        dropout_p: f32,
+        causal: bool,
+        block_size: usize,
+    ) -> Self {
         Self {
             num_heads,
             dropout_p,
@@ -716,7 +744,13 @@ impl FlashAttention {
     }
 
     /// Standard attention implementation for small sequences.
-    fn standard_attention(&self, q: &Tensor<f32>, k: &Tensor<f32>, v: &Tensor<f32>, scale: f32) -> Tensor<f32> {
+    fn standard_attention(
+        &self,
+        q: &Tensor<f32>,
+        k: &Tensor<f32>,
+        v: &Tensor<f32>,
+        scale: f32,
+    ) -> Tensor<f32> {
         let shape = q.shape();
         let batch_size = shape[0];
         let num_heads = shape[1];
@@ -882,7 +916,8 @@ impl FlashAttention {
                                     row_sum[i] += p;
 
                                     for d in 0..head_dim {
-                                        let v_idx = ((b * num_heads + h) * seq_len + j) * head_dim + d;
+                                        let v_idx =
+                                            ((b * num_heads + h) * seq_len + j) * head_dim + d;
                                         row_out[i][d] += p * v_data[v_idx];
                                     }
                                 }
@@ -917,7 +952,12 @@ impl FlashAttention {
     ///
     /// # Returns
     /// Tuple of (standard_memory_mb, flash_memory_mb)
-    pub fn memory_estimate(batch_size: usize, seq_len: usize, num_heads: usize, head_dim: usize) -> (f32, f32) {
+    pub fn memory_estimate(
+        batch_size: usize,
+        seq_len: usize,
+        num_heads: usize,
+        head_dim: usize,
+    ) -> (f32, f32) {
         let bytes_per_float = 4;
 
         // Standard attention stores full N×N attention matrix

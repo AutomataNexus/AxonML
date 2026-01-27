@@ -54,7 +54,13 @@ impl ElementwiseOp {
             ElementwiseOp::AddConst(c) => x + c,
             ElementwiseOp::MulConst(c) => x * c,
             ElementwiseOp::Relu => x.max(0.0),
-            ElementwiseOp::LeakyRelu(alpha) => if x > 0.0 { x } else { x * alpha },
+            ElementwiseOp::LeakyRelu(alpha) => {
+                if x > 0.0 {
+                    x
+                } else {
+                    x * alpha
+                }
+            }
             ElementwiseOp::Sigmoid => 1.0 / (1.0 + (-x).exp()),
             ElementwiseOp::Tanh => x.tanh(),
             ElementwiseOp::Exp => x.exp(),
@@ -103,10 +109,7 @@ impl FusedElementwise {
     pub fn forward(&self, input: &Tensor<f32>) -> FusionResult<Tensor<f32>> {
         let data = input.to_vec();
 
-        let result: Vec<f32> = data
-            .par_iter()
-            .map(|&x| self.apply_chain(x))
-            .collect();
+        let result: Vec<f32> = data.par_iter().map(|&x| self.apply_chain(x)).collect();
 
         Tensor::from_vec(result, input.shape())
             .map_err(|e| FusionError::TensorError(format!("{:?}", e)))
@@ -115,7 +118,8 @@ impl FusedElementwise {
 
 impl FusedOp for FusedElementwise {
     fn execute(&self, inputs: &[&Tensor<f32>]) -> FusionResult<Tensor<f32>> {
-        let input = inputs.first()
+        let input = inputs
+            .first()
             .ok_or_else(|| FusionError::InvalidConfig("No input provided".to_string()))?;
         self.forward(input)
     }
@@ -240,18 +244,12 @@ pub fn fuse_elementwise(ops: Vec<ElementwiseOp>) -> FusedElementwise {
 
 /// Creates a fused add + relu operation.
 pub fn fused_add_relu(bias: f32) -> FusedElementwise {
-    FusedElementwise::builder()
-        .add(bias)
-        .relu()
-        .build()
+    FusedElementwise::builder().add(bias).relu().build()
 }
 
 /// Creates a fused multiply + add operation (FMA).
 pub fn fused_mul_add(scale: f32, bias: f32) -> FusedElementwise {
-    FusedElementwise::builder()
-        .mul(scale)
-        .add(bias)
-        .build()
+    FusedElementwise::builder().mul(scale).add(bias).build()
 }
 
 /// Creates a fused scale + bias + relu (common in normalization).
@@ -282,11 +280,7 @@ mod tests {
 
     #[test]
     fn test_fused_chain() {
-        let fused = FusedElementwise::builder()
-            .mul(2.0)
-            .add(1.0)
-            .relu()
-            .build();
+        let fused = FusedElementwise::builder().mul(2.0).add(1.0).relu().build();
 
         let input = Tensor::from_vec(vec![-2.0, -1.0, 0.0, 1.0], &[4]).unwrap();
         let output = fused.forward(&input).unwrap();
@@ -325,9 +319,7 @@ mod tests {
 
     #[test]
     fn test_clamp() {
-        let fused = FusedElementwise::builder()
-            .clamp(-1.0, 1.0)
-            .build();
+        let fused = FusedElementwise::builder().clamp(-1.0, 1.0).build();
 
         let input = Tensor::from_vec(vec![-5.0, 0.0, 5.0], &[3]).unwrap();
         let output = fused.forward(&input).unwrap();

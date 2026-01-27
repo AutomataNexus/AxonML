@@ -2,12 +2,12 @@
 //!
 //! Provides model inspection, conversion, quantization, and export functionality.
 
+use axonml_serialize::{load_state_dict, save_state_dict, Format, StateDict, TensorData};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
-use axonml_serialize::{load_state_dict, save_state_dict, Format, StateDict, TensorData};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -133,7 +133,8 @@ pub async fn inspect_model(
     let repo = ModelRepository::new(&state.db);
 
     // Get model and version
-    let model = repo.find_by_id(&model_id)
+    let model = repo
+        .find_by_id(&model_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Model not found".to_string()))?;
@@ -143,7 +144,8 @@ pub async fn inspect_model(
         return Err(AuthError::Forbidden("Access denied".to_string()));
     }
 
-    let version = repo.get_version(&version_id)
+    let version = repo
+        .get_version(&version_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Model version not found".to_string()))?;
@@ -231,7 +233,10 @@ fn infer_layer_type(name: &str) -> String {
         }
     } else if name_lower.contains("bn") || name_lower.contains("batchnorm") {
         "BatchNorm2d".to_string()
-    } else if name_lower.contains("fc") || name_lower.contains("linear") || name_lower.contains("classifier") {
+    } else if name_lower.contains("fc")
+        || name_lower.contains("linear")
+        || name_lower.contains("classifier")
+    {
         "Linear".to_string()
     } else if name_lower.contains("embed") {
         "Embedding".to_string()
@@ -266,7 +271,8 @@ pub async fn convert_model(
     let repo = ModelRepository::new(&state.db);
 
     // Get model and version
-    let model = repo.find_by_id(&model_id)
+    let model = repo
+        .find_by_id(&model_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Model not found".to_string()))?;
@@ -275,7 +281,8 @@ pub async fn convert_model(
         return Err(AuthError::Forbidden("Access denied".to_string()));
     }
 
-    let version = repo.get_version(&version_id)
+    let version = repo
+        .get_version(&version_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Model version not found".to_string()))?;
@@ -329,16 +336,19 @@ pub async fn convert_model(
         "Converted model"
     );
 
-    Ok((StatusCode::CREATED, Json(ConvertResponse {
-        input_file: version.file_path,
-        output_file: output_path.to_string_lossy().to_string(),
-        input_format,
-        output_format: target_format,
-        input_size,
-        output_size,
-        num_parameters,
-        warnings,
-    })))
+    Ok((
+        StatusCode::CREATED,
+        Json(ConvertResponse {
+            input_file: version.file_path,
+            output_file: output_path.to_string_lossy().to_string(),
+            input_format,
+            output_format: target_format,
+            input_size,
+            output_size,
+            num_parameters,
+            warnings,
+        }),
+    ))
 }
 
 fn validate_format(format: &str) -> Result<String, AuthError> {
@@ -425,7 +435,8 @@ pub async fn quantize_model(
 ) -> Result<(StatusCode, Json<QuantizeResponse>), AuthError> {
     let repo = ModelRepository::new(&state.db);
 
-    let model = repo.find_by_id(&model_id)
+    let model = repo
+        .find_by_id(&model_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Model not found".to_string()))?;
@@ -434,7 +445,8 @@ pub async fn quantize_model(
         return Err(AuthError::Forbidden("Access denied".to_string()));
     }
 
-    let version = repo.get_version(&version_id)
+    let version = repo
+        .get_version(&version_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Model version not found".to_string()))?;
@@ -448,7 +460,8 @@ pub async fn quantize_model(
     let quant_type = parse_quant_type(&request.target_type)?;
 
     // Generate output path
-    let output_path = input_path.with_extension(format!("{}.safetensors", quant_type.to_lowercase()));
+    let output_path =
+        input_path.with_extension(format!("{}.safetensors", quant_type.to_lowercase()));
 
     // Load model
     let state_dict = load_state_dict(&input_path)
@@ -476,16 +489,19 @@ pub async fn quantize_model(
         "Quantized model"
     );
 
-    Ok((StatusCode::CREATED, Json(QuantizeResponse {
-        input_file: version.file_path,
-        output_file: output_path.to_string_lossy().to_string(),
-        source_type: "F32".to_string(),
-        target_type: quant_type,
-        input_size,
-        output_size,
-        compression_ratio,
-        num_parameters,
-    })))
+    Ok((
+        StatusCode::CREATED,
+        Json(QuantizeResponse {
+            input_file: version.file_path,
+            output_file: output_path.to_string_lossy().to_string(),
+            source_type: "F32".to_string(),
+            target_type: quant_type,
+            input_size,
+            output_size,
+            compression_ratio,
+            num_parameters,
+        }),
+    ))
 }
 
 fn parse_quant_type(type_str: &str) -> Result<String, AuthError> {
@@ -534,7 +550,9 @@ fn quantize_state_dict(state_dict: &StateDict, quant_type: &str) -> Result<State
 
 fn quantize_tensor_f16(data: &TensorData) -> TensorData {
     // Convert to f16 representation (stored as f32 with reduced precision)
-    let quantized: Vec<f32> = data.values.iter()
+    let quantized: Vec<f32> = data
+        .values
+        .iter()
         .map(|&v| {
             let half = half::f16::from_f32(v);
             half.to_f32()
@@ -554,9 +572,14 @@ fn quantize_tensor_q8(data: &TensorData) -> TensorData {
         (min.min(v), max.max(v))
     });
 
-    let scale = if max - min > 0.0 { 255.0 / (max - min) } else { 1.0 };
+    let scale = if max - min > 0.0 {
+        255.0 / (max - min)
+    } else {
+        1.0
+    };
 
-    let quantized: Vec<f32> = values.iter()
+    let quantized: Vec<f32> = values
+        .iter()
         .map(|&v| {
             let q = ((v - min) * scale).round().clamp(0.0, 255.0) as u8;
             (f32::from(q) / scale) + min
@@ -576,9 +599,14 @@ fn quantize_tensor_q5(data: &TensorData) -> TensorData {
         (min.min(v), max.max(v))
     });
 
-    let scale = if max - min > 0.0 { 31.0 / (max - min) } else { 1.0 };
+    let scale = if max - min > 0.0 {
+        31.0 / (max - min)
+    } else {
+        1.0
+    };
 
-    let quantized: Vec<f32> = values.iter()
+    let quantized: Vec<f32> = values
+        .iter()
         .map(|&v| {
             let q = ((v - min) * scale).round().clamp(0.0, 31.0) as u8;
             (f32::from(q) / scale) + min
@@ -598,9 +626,14 @@ fn quantize_tensor_q4(data: &TensorData) -> TensorData {
         (min.min(v), max.max(v))
     });
 
-    let scale = if max - min > 0.0 { 15.0 / (max - min) } else { 1.0 };
+    let scale = if max - min > 0.0 {
+        15.0 / (max - min)
+    } else {
+        1.0
+    };
 
-    let quantized: Vec<f32> = values.iter()
+    let quantized: Vec<f32> = values
+        .iter()
         .map(|&v| {
             let q = ((v - min) * scale).round().clamp(0.0, 15.0) as u8;
             (f32::from(q) / scale) + min
@@ -626,7 +659,8 @@ pub async fn export_model(
 ) -> Result<(StatusCode, Json<ExportResponse>), AuthError> {
     let repo = ModelRepository::new(&state.db);
 
-    let model = repo.find_by_id(&model_id)
+    let model = repo
+        .find_by_id(&model_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Model not found".to_string()))?;
@@ -635,7 +669,8 @@ pub async fn export_model(
         return Err(AuthError::Forbidden("Access denied".to_string()));
     }
 
-    let version = repo.get_version(&version_id)
+    let version = repo
+        .get_version(&version_id)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or_else(|| AuthError::NotFound("Model version not found".to_string()))?;
@@ -659,7 +694,10 @@ pub async fn export_model(
         "onnx" => {
             // Export to ONNX format using axonml-onnx
             export_to_onnx(&state_dict, &output_path)?;
-            ("ONNX", vec!["ONNX Runtime", "TensorRT", "OpenVINO", "CoreML"])
+            (
+                "ONNX",
+                vec!["ONNX Runtime", "TensorRT", "OpenVINO", "CoreML"],
+            )
         }
         "json" => {
             save_state_dict(&state_dict, &output_path, Format::Json)
@@ -683,12 +721,15 @@ pub async fn export_model(
         "Exported model"
     );
 
-    Ok((StatusCode::CREATED, Json(ExportResponse {
-        output_file: output_path.to_string_lossy().to_string(),
-        format: format.to_string(),
-        size,
-        compatible_with: compatible_with.into_iter().map(String::from).collect(),
-    })))
+    Ok((
+        StatusCode::CREATED,
+        Json(ExportResponse {
+            output_file: output_path.to_string_lossy().to_string(),
+            format: format.to_string(),
+            size,
+            compatible_with: compatible_with.into_iter().map(String::from).collect(),
+        }),
+    ))
 }
 
 fn export_to_onnx(state_dict: &StateDict, output_path: &PathBuf) -> Result<(), AuthError> {
@@ -734,7 +775,10 @@ fn export_to_onnx(state_dict: &StateDict, output_path: &PathBuf) -> Result<(), A
         model_proto.extend_from_slice(&1u32.to_le_bytes());
 
         // Raw data
-        let data_bytes: Vec<u8> = entry.data.values.iter()
+        let data_bytes: Vec<u8> = entry
+            .data
+            .values
+            .iter()
             .flat_map(|v| v.to_le_bytes())
             .collect();
         model_proto.extend_from_slice(&(data_bytes.len() as u64).to_le_bytes());
@@ -770,7 +814,8 @@ fn detect_format(path: &PathBuf) -> String {
 }
 
 fn count_parameters(state_dict: &StateDict) -> u64 {
-    state_dict.entries()
+    state_dict
+        .entries()
         .map(|(_, entry)| entry.data.shape.iter().product::<usize>() as u64)
         .sum()
 }

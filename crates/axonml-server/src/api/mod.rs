@@ -3,30 +3,33 @@
 //! Defines all REST API endpoints.
 
 pub mod auth;
-pub mod training;
-pub mod models;
-pub mod datasets;
-pub mod inference;
-pub mod metrics;
-pub mod system;
-pub mod hub;
-pub mod tools;
-pub mod data;
-pub mod kaggle;
 pub mod builtin_datasets;
+pub mod data;
+pub mod datasets;
+pub mod hub;
+pub mod inference;
+pub mod kaggle;
+pub mod metrics;
+pub mod models;
 pub mod notebooks;
+pub mod system;
 pub mod terminal;
+pub mod tools;
+pub mod training;
 
-use crate::auth::{JwtAuth, AuthLayer, auth_middleware, require_admin_middleware, require_mfa_middleware, optional_auth_middleware};
+use crate::auth::{
+    auth_middleware, optional_auth_middleware, require_admin_middleware, require_mfa_middleware,
+    AuthLayer, JwtAuth,
+};
 use crate::config::Config;
 use crate::db::Database;
-use crate::inference::server::InferenceServer;
-use crate::inference::pool::ModelPool;
 use crate::inference::metrics::InferenceMetrics;
-use crate::training::tracker::TrainingTracker;
+use crate::inference::pool::ModelPool;
+use crate::inference::server::InferenceServer;
+use crate::llm::OllamaClient;
 use crate::training::executor::TrainingExecutor;
 use crate::training::notebook_executor::NotebookExecutor;
-use crate::llm::OllamaClient;
+use crate::training::tracker::TrainingTracker;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -63,12 +66,24 @@ pub fn create_router(state: AppState) -> Router {
     // These are known valid origins, expect will never fail for these static strings
     let cors = CorsLayer::new()
         .allow_origin([
-            "http://127.0.0.1:8081".parse::<axum::http::HeaderValue>().expect("valid origin"),
-            "http://localhost:8081".parse::<axum::http::HeaderValue>().expect("valid origin"),
-            "http://127.0.0.1:8083".parse::<axum::http::HeaderValue>().expect("valid origin"),
-            "http://localhost:8083".parse::<axum::http::HeaderValue>().expect("valid origin"),
-            "http://127.0.0.1:3021".parse::<axum::http::HeaderValue>().expect("valid origin"),
-            "http://localhost:3021".parse::<axum::http::HeaderValue>().expect("valid origin"),
+            "http://127.0.0.1:8081"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "http://localhost:8081"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "http://127.0.0.1:8083"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "http://localhost:8083"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "http://127.0.0.1:3021"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "http://localhost:3021"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
         ])
         .allow_methods([
             axum::http::Method::GET,
@@ -98,8 +113,14 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/auth/verify-email", get(auth::verify_email))
         .route("/api/auth/approve-user", get(auth::approve_user))
         .route("/api/auth/mfa/totp/verify", post(auth::verify_totp))
-        .route("/api/auth/mfa/webauthn/authenticate/start", post(auth::webauthn_auth_start))
-        .route("/api/auth/mfa/webauthn/authenticate/finish", post(auth::webauthn_auth_finish))
+        .route(
+            "/api/auth/mfa/webauthn/authenticate/start",
+            post(auth::webauthn_auth_start),
+        )
+        .route(
+            "/api/auth/mfa/webauthn/authenticate/finish",
+            post(auth::webauthn_auth_finish),
+        )
         .route("/api/auth/mfa/recovery", post(auth::use_recovery_code));
 
     // Protected routes (auth required)
@@ -110,9 +131,18 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/auth/me", get(auth::me))
         .route("/api/auth/mfa/totp/setup", post(auth::setup_totp))
         .route("/api/auth/mfa/totp/enable", post(auth::enable_totp))
-        .route("/api/auth/mfa/webauthn/register/start", post(auth::webauthn_register_start))
-        .route("/api/auth/mfa/webauthn/register/finish", post(auth::webauthn_register_finish))
-        .route("/api/auth/mfa/recovery/generate", get(auth::generate_recovery_codes))
+        .route(
+            "/api/auth/mfa/webauthn/register/start",
+            post(auth::webauthn_register_start),
+        )
+        .route(
+            "/api/auth/mfa/webauthn/register/finish",
+            post(auth::webauthn_register_finish),
+        )
+        .route(
+            "/api/auth/mfa/recovery/generate",
+            get(auth::generate_recovery_codes),
+        )
         .route("/api/auth/mfa/disable", post(auth::disable_mfa))
         // Training
         .route("/api/training/runs", get(training::list_runs))
@@ -120,9 +150,15 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/training/runs/:id", get(training::get_run))
         .route("/api/training/runs/:id", delete(training::delete_run))
         .route("/api/training/runs/:id/stop", post(training::stop_run))
-        .route("/api/training/runs/:id/complete", post(training::complete_run))
+        .route(
+            "/api/training/runs/:id/complete",
+            post(training::complete_run),
+        )
         .route("/api/training/runs/:id/metrics", get(training::get_metrics))
-        .route("/api/training/runs/:id/metrics", post(training::record_metrics))
+        .route(
+            "/api/training/runs/:id/metrics",
+            post(training::record_metrics),
+        )
         .route("/api/training/runs/:id/logs", get(training::get_logs))
         .route("/api/training/runs/:id/logs", post(training::append_log))
         // Models
@@ -133,10 +169,22 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/models/:id", delete(models::delete_model))
         .route("/api/models/:id/versions", get(models::list_versions))
         .route("/api/models/:id/versions", post(models::upload_version))
-        .route("/api/models/:id/versions/:version", get(models::get_version))
-        .route("/api/models/:id/versions/:version", delete(models::delete_version))
-        .route("/api/models/:id/versions/:version/download", get(models::download_version))
-        .route("/api/models/:id/versions/:version/deploy", post(models::deploy_version))
+        .route(
+            "/api/models/:id/versions/:version",
+            get(models::get_version),
+        )
+        .route(
+            "/api/models/:id/versions/:version",
+            delete(models::delete_version),
+        )
+        .route(
+            "/api/models/:id/versions/:version/download",
+            get(models::download_version),
+        )
+        .route(
+            "/api/models/:id/versions/:version/deploy",
+            post(models::deploy_version),
+        )
         // Datasets
         .route("/api/datasets", get(datasets::list_datasets))
         .route("/api/datasets", post(datasets::upload_dataset))
@@ -146,11 +194,26 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/inference/endpoints", get(inference::list_endpoints))
         .route("/api/inference/endpoints", post(inference::create_endpoint))
         .route("/api/inference/endpoints/:id", get(inference::get_endpoint))
-        .route("/api/inference/endpoints/:id", put(inference::update_endpoint))
-        .route("/api/inference/endpoints/:id", delete(inference::delete_endpoint))
-        .route("/api/inference/endpoints/:id/start", post(inference::start_endpoint))
-        .route("/api/inference/endpoints/:id/stop", post(inference::stop_endpoint))
-        .route("/api/inference/endpoints/:id/metrics", get(inference::get_endpoint_metrics))
+        .route(
+            "/api/inference/endpoints/:id",
+            put(inference::update_endpoint),
+        )
+        .route(
+            "/api/inference/endpoints/:id",
+            delete(inference::delete_endpoint),
+        )
+        .route(
+            "/api/inference/endpoints/:id/start",
+            post(inference::start_endpoint),
+        )
+        .route(
+            "/api/inference/endpoints/:id/stop",
+            post(inference::stop_endpoint),
+        )
+        .route(
+            "/api/inference/endpoints/:id/metrics",
+            get(inference::get_endpoint_metrics),
+        )
         .route("/api/inference/endpoints/:id/info", get(get_inference_info))
         .route("/api/inference/predict/:name", post(inference::predict))
         // Metrics
@@ -160,7 +223,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/system/gpus", get(system::list_gpus))
         .route("/api/system/benchmark", post(system::run_benchmark))
         .route("/api/system/metrics", get(system::get_realtime_metrics))
-        .route("/api/system/metrics/history", get(system::get_metrics_history))
+        .route(
+            "/api/system/metrics/history",
+            get(system::get_metrics_history),
+        )
         .route("/api/system/correlation", get(system::get_correlation_data))
         // Hub (Pretrained Models)
         .route("/api/hub/models", get(hub::list_models))
@@ -170,11 +236,26 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/hub/cache", delete(hub::clear_cache))
         .route("/api/hub/cache/:name", delete(hub::clear_cache))
         // Model Tools
-        .route("/api/models/:model_id/versions/:version_id/inspect", get(tools::inspect_model))
-        .route("/api/models/:model_id/versions/:version_id/convert", post(tools::convert_model))
-        .route("/api/models/:model_id/versions/:version_id/quantize", post(tools::quantize_model))
-        .route("/api/models/:model_id/versions/:version_id/export", post(tools::export_model))
-        .route("/api/tools/quantization-types", get(tools::list_quantization_types))
+        .route(
+            "/api/models/:model_id/versions/:version_id/inspect",
+            get(tools::inspect_model),
+        )
+        .route(
+            "/api/models/:model_id/versions/:version_id/convert",
+            post(tools::convert_model),
+        )
+        .route(
+            "/api/models/:model_id/versions/:version_id/quantize",
+            post(tools::quantize_model),
+        )
+        .route(
+            "/api/models/:model_id/versions/:version_id/export",
+            post(tools::export_model),
+        )
+        .route(
+            "/api/tools/quantization-types",
+            get(tools::list_quantization_types),
+        )
         // Data Analysis
         .route("/api/data/:id/analyze", post(data::analyze_dataset))
         .route("/api/data/:id/preview", post(data::preview_dataset))
@@ -182,17 +263,35 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/data/:id/generate-config", post(data::generate_config))
         // Kaggle Integration
         .route("/api/kaggle/credentials", post(kaggle::save_credentials))
-        .route("/api/kaggle/credentials", delete(kaggle::delete_credentials))
+        .route(
+            "/api/kaggle/credentials",
+            delete(kaggle::delete_credentials),
+        )
         .route("/api/kaggle/status", get(kaggle::get_status))
         .route("/api/kaggle/search", get(kaggle::search_datasets))
         .route("/api/kaggle/download", post(kaggle::download_dataset))
         .route("/api/kaggle/downloaded", get(kaggle::list_downloaded))
         // Built-in Datasets
-        .route("/api/builtin-datasets", get(builtin_datasets::list_datasets))
-        .route("/api/builtin-datasets/search", get(builtin_datasets::search_datasets))
-        .route("/api/builtin-datasets/sources", get(builtin_datasets::list_sources))
-        .route("/api/builtin-datasets/:id", get(builtin_datasets::get_dataset_info))
-        .route("/api/builtin-datasets/:id/prepare", post(builtin_datasets::prepare_dataset))
+        .route(
+            "/api/builtin-datasets",
+            get(builtin_datasets::list_datasets),
+        )
+        .route(
+            "/api/builtin-datasets/search",
+            get(builtin_datasets::search_datasets),
+        )
+        .route(
+            "/api/builtin-datasets/sources",
+            get(builtin_datasets::list_sources),
+        )
+        .route(
+            "/api/builtin-datasets/:id",
+            get(builtin_datasets::get_dataset_info),
+        )
+        .route(
+            "/api/builtin-datasets/:id/prepare",
+            post(builtin_datasets::prepare_dataset),
+        )
         // Training Notebooks
         .route("/api/notebooks", get(notebooks::list_notebooks))
         .route("/api/notebooks", post(notebooks::create_notebook))
@@ -204,14 +303,35 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/notebooks/:id/start", post(notebooks::start_notebook))
         .route("/api/notebooks/:id/stop", post(notebooks::stop_notebook))
         .route("/api/notebooks/:id/cells", post(notebooks::add_cell))
-        .route("/api/notebooks/:id/cells/:cell_id", put(notebooks::update_cell))
-        .route("/api/notebooks/:id/cells/:cell_id", delete(notebooks::delete_cell))
-        .route("/api/notebooks/:id/cells/:cell_id/execute", post(notebooks::execute_cell))
+        .route(
+            "/api/notebooks/:id/cells/:cell_id",
+            put(notebooks::update_cell),
+        )
+        .route(
+            "/api/notebooks/:id/cells/:cell_id",
+            delete(notebooks::delete_cell),
+        )
+        .route(
+            "/api/notebooks/:id/cells/:cell_id/execute",
+            post(notebooks::execute_cell),
+        )
         .route("/api/notebooks/:id/ai-assist", post(notebooks::ai_assist))
-        .route("/api/notebooks/:id/checkpoints", get(notebooks::list_checkpoints))
-        .route("/api/notebooks/:id/checkpoints", post(notebooks::save_checkpoint))
-        .route("/api/notebooks/:id/checkpoints/best", get(notebooks::get_best_checkpoint))
-        .route("/api/notebooks/:id/upload-version", post(notebooks::upload_model_version))
+        .route(
+            "/api/notebooks/:id/checkpoints",
+            get(notebooks::list_checkpoints),
+        )
+        .route(
+            "/api/notebooks/:id/checkpoints",
+            post(notebooks::save_checkpoint),
+        )
+        .route(
+            "/api/notebooks/:id/checkpoints/best",
+            get(notebooks::get_best_checkpoint),
+        )
+        .route(
+            "/api/notebooks/:id/upload-version",
+            post(notebooks::upload_model_version),
+        )
         .layer(middleware::from_fn_with_state(
             state.jwt.clone(),
             auth_middleware,
@@ -235,7 +355,10 @@ pub fn create_router(state: AppState) -> Router {
 
     // Sensitive routes (MFA required when user has MFA enabled)
     let mfa_protected_routes = Router::new()
-        .route("/api/inference/endpoints/:id/delete-secure", delete(inference::delete_endpoint))
+        .route(
+            "/api/inference/endpoints/:id/delete-secure",
+            delete(inference::delete_endpoint),
+        )
         .layer(middleware::from_fn_with_state(
             state.jwt.clone(),
             require_mfa_middleware,
@@ -251,7 +374,10 @@ pub fn create_router(state: AppState) -> Router {
 
     // WebSocket routes (handled separately due to upgrade, auth via query params)
     let ws_routes = Router::new()
-        .route("/api/training/runs/:id/stream", get(training::stream_metrics))
+        .route(
+            "/api/training/runs/:id/stream",
+            get(training::stream_metrics),
+        )
         .route("/api/terminal", get(terminal::terminal_ws))
         .route("/api/terminal/info", get(terminal::terminal_info));
 
@@ -362,11 +488,17 @@ async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<Health
 
     // Store health check timestamp in KV store for monitoring
     let check_time = chrono::Utc::now();
-    let _ = state.db.kv_set("health:last_check", serde_json::json!({
-        "timestamp": check_time.to_rfc3339(),
-        "db_healthy": db_healthy,
-        "inference_healthy": inference_healthy,
-    })).await;
+    let _ = state
+        .db
+        .kv_set(
+            "health:last_check",
+            serde_json::json!({
+                "timestamp": check_time.to_rfc3339(),
+                "db_healthy": db_healthy,
+                "inference_healthy": inference_healthy,
+            }),
+        )
+        .await;
 
     let all_healthy = db_healthy;
     let status_code = if all_healthy {
@@ -375,15 +507,22 @@ async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<Health
         StatusCode::SERVICE_UNAVAILABLE
     };
 
-    (status_code, Json(HealthResponse {
-        status: if all_healthy { "healthy".to_string() } else { "unhealthy".to_string() },
-        database: db_healthy,
-        inference: inference_healthy,
-        models_loaded,
-        pool_size: pool_stats.total_entries,
-        pool_utilization: pool_stats.utilization,
-        last_check: check_time.to_rfc3339(),
-    }))
+    (
+        status_code,
+        Json(HealthResponse {
+            status: if all_healthy {
+                "healthy".to_string()
+            } else {
+                "unhealthy".to_string()
+            },
+            database: db_healthy,
+            inference: inference_healthy,
+            models_loaded,
+            pool_size: pool_stats.total_entries,
+            pool_utilization: pool_stats.utilization,
+            last_check: check_time.to_rfc3339(),
+        }),
+    )
 }
 
 /// Inference server info response
@@ -532,18 +671,13 @@ struct AdminQueryRequest {
 }
 
 /// SECURITY: Whitelist of allowed query patterns for admin endpoint
-const ALLOWED_QUERY_PREFIXES: &[&str] = &[
-    "SELECT ",
-    "SHOW ",
-    "DESCRIBE ",
-    "COUNT(",
-];
+const ALLOWED_QUERY_PREFIXES: &[&str] = &["SELECT ", "SHOW ", "DESCRIBE ", "COUNT("];
 
 /// SECURITY: Forbidden patterns in queries
 const FORBIDDEN_PATTERNS: &[&str] = &[
-    ";",      // Multiple statements
-    "--",     // SQL comments
-    "/*",     // SQL block comments
+    ";",  // Multiple statements
+    "--", // SQL comments
+    "/*", // SQL block comments
     "DROP ",
     "DELETE ",
     "TRUNCATE ",
@@ -555,8 +689,8 @@ const FORBIDDEN_PATTERNS: &[&str] = &[
     "REVOKE ",
     "EXEC ",
     "EXECUTE ",
-    "xp_",    // SQL Server extended procedures
-    "sp_",    // SQL Server stored procedures
+    "xp_", // SQL Server extended procedures
+    "sp_", // SQL Server stored procedures
 ];
 
 /// Validate query against whitelist
@@ -569,7 +703,10 @@ fn validate_admin_query(query: &str) -> Result<(), String> {
         .any(|prefix| query_upper.starts_with(prefix));
 
     if !is_allowed {
-        return Err("Query type not allowed. Only SELECT, SHOW, DESCRIBE, and COUNT queries permitted.".to_string());
+        return Err(
+            "Query type not allowed. Only SELECT, SHOW, DESCRIBE, and COUNT queries permitted."
+                .to_string(),
+        );
     }
 
     // Check for forbidden patterns
@@ -609,7 +746,10 @@ async fn admin_query(
             "rows": response.rows,
             "affected_rows": response.affected_rows,
         }))),
-        Err(_) => Err((StatusCode::BAD_REQUEST, "Query execution failed".to_string())),
+        Err(_) => Err((
+            StatusCode::BAD_REQUEST,
+            "Query execution failed".to_string(),
+        )),
     }
 }
 
@@ -643,9 +783,15 @@ async fn admin_record_metrics(
 ) -> Json<serde_json::Value> {
     // Use the InferenceMetrics record_success/record_error methods directly
     if req.success {
-        state.inference_metrics.record_success(&req.endpoint_id, req.latency_ms).await;
+        state
+            .inference_metrics
+            .record_success(&req.endpoint_id, req.latency_ms)
+            .await;
     } else {
-        state.inference_metrics.record_error(&req.endpoint_id, req.latency_ms).await;
+        state
+            .inference_metrics
+            .record_error(&req.endpoint_id, req.latency_ms)
+            .await;
     }
 
     Json(serde_json::json!({

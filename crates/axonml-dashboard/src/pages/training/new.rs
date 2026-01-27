@@ -4,9 +4,9 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
+use crate::components::{forms::*, icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, forms::*};
 
 /// New training run form page
 #[component]
@@ -85,7 +85,10 @@ pub fn NewTrainingPage() -> impl IntoView {
     let model_types = store_value(vec![
         ("neural_network".to_string(), "Neural Network".to_string()),
         ("transformer".to_string(), "Transformer".to_string()),
-        ("cnn".to_string(), "Convolutional Neural Network".to_string()),
+        (
+            "cnn".to_string(),
+            "Convolutional Neural Network".to_string(),
+        ),
         ("rnn".to_string(), "Recurrent Neural Network".to_string()),
         ("lstm".to_string(), "LSTM".to_string()),
         ("gpt".to_string(), "GPT-style LLM".to_string()),
@@ -106,7 +109,10 @@ pub fn NewTrainingPage() -> impl IntoView {
         ("cross_entropy".to_string(), "Cross Entropy".to_string()),
         ("mse".to_string(), "Mean Squared Error".to_string()),
         ("mae".to_string(), "Mean Absolute Error".to_string()),
-        ("binary_cross_entropy".to_string(), "Binary Cross Entropy".to_string()),
+        (
+            "binary_cross_entropy".to_string(),
+            "Binary Cross Entropy".to_string(),
+        ),
         ("huber".to_string(), "Huber Loss".to_string()),
     ]);
 

@@ -31,22 +31,22 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+pub mod bottleneck;
+pub mod compute;
 pub mod error;
 pub mod memory;
-pub mod compute;
-pub mod timeline;
-pub mod bottleneck;
 pub mod report;
+pub mod timeline;
 
-pub use error::{ProfileError, ProfileResult};
-pub use memory::{MemoryProfiler, MemoryStats, AllocationRecord};
+pub use bottleneck::{Bottleneck, BottleneckAnalyzer, BottleneckType};
 pub use compute::{ComputeProfiler, OperationStats, ProfiledOp};
-pub use timeline::{TimelineProfiler, Event, EventType};
-pub use bottleneck::{BottleneckAnalyzer, Bottleneck, BottleneckType};
+pub use error::{ProfileError, ProfileResult};
+pub use memory::{AllocationRecord, MemoryProfiler, MemoryStats};
 pub use report::{ProfileReport, ReportFormat};
+pub use timeline::{Event, EventType, TimelineProfiler};
 
-use std::sync::Arc;
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 // =============================================================================
 // Unified Profiler

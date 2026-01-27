@@ -122,7 +122,8 @@ impl Embedding {
                 #[cfg(debug_assertions)]
                 eprintln!(
                     "Warning: embedding index {} out of range (max {}), using padding index 0",
-                    idx, self.num_embeddings - 1
+                    idx,
+                    self.num_embeddings - 1
                 );
                 0
             } else {
@@ -130,7 +131,8 @@ impl Embedding {
             };
 
             for d in 0..self.embedding_dim {
-                output_data[i * self.embedding_dim + d] = weight_vec[safe_idx * self.embedding_dim + d];
+                output_data[i * self.embedding_dim + d] =
+                    weight_vec[safe_idx * self.embedding_dim + d];
             }
         }
 

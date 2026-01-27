@@ -55,10 +55,7 @@ fn main() {
     let total_passed: usize = reports.iter().map(|r| r.passed_count()).sum();
     let total_failed: usize = reports.iter().map(|r| r.failed_count()).sum();
 
-    println!(
-        "Total: {} passed, {} failed",
-        total_passed, total_failed
-    );
+    println!("Total: {} passed, {} failed", total_passed, total_failed);
 
     if total_failed > 0 {
         println!("\nSome tests failed. Check the output above for details.");

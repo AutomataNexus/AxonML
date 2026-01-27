@@ -188,10 +188,19 @@ pub async fn upload_dataset(
     // Generate unique filename
     let file_ext = file_name
         .as_ref()
-        .and_then(|n| PathBuf::from(n).extension().map(|e| e.to_string_lossy().to_string()))
+        .and_then(|n| {
+            PathBuf::from(n)
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+        })
         .unwrap_or_else(|| "csv".to_string());
 
-    let unique_name = format!("{}_{}.{}", uuid::Uuid::new_v4(), name.replace(' ', "_"), file_ext);
+    let unique_name = format!(
+        "{}_{}.{}",
+        uuid::Uuid::new_v4(),
+        name.replace(' ', "_"),
+        file_ext
+    );
     let file_path = datasets_dir.join(&unique_name);
 
     // Write file
@@ -296,9 +305,7 @@ fn detect_csv_properties(data: &[u8]) -> (Option<u64>, Option<u64>) {
     };
 
     // Count columns from header
-    let num_features = lines.first().map(|header| {
-        header.split(',').count() as u64
-    });
+    let num_features = lines.first().map(|header| header.split(',').count() as u64);
 
     (num_samples, num_features)
 }

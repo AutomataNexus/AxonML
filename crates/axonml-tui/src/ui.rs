@@ -74,7 +74,12 @@ fn render_header(app: &App, frame: &mut Frame, area: Rect) {
                     AxonmlTheme::header(),
                 )),
         )
-        .select(Tab::all().iter().position(|t| *t == app.active_tab).unwrap_or(0))
+        .select(
+            Tab::all()
+                .iter()
+                .position(|t| *t == app.active_tab)
+                .unwrap_or(0),
+        )
         .highlight_style(AxonmlTheme::tab_active().add_modifier(Modifier::UNDERLINED));
 
     frame.render_widget(tabs, area);
@@ -132,12 +137,11 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         ]
     };
 
-    let status = Paragraph::new(status_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(AxonmlTheme::border()),
-        );
+    let status = Paragraph::new(status_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(AxonmlTheme::border()),
+    );
 
     frame.render_widget(status, area);
 }
@@ -151,10 +155,7 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
     let popup_area = centered_rect(60, 70, area);
 
     // Clear the background
-    frame.render_widget(
-        Block::default().style(AxonmlTheme::default()),
-        popup_area,
-    );
+    frame.render_widget(Block::default().style(AxonmlTheme::default()), popup_area);
 
     let help_text = vec![
         Line::from(""),
@@ -214,13 +215,12 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
         )),
     ];
 
-    let help = Paragraph::new(help_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(AxonmlTheme::border_active())
-                .title(Span::styled(" Help ", AxonmlTheme::header())),
-        );
+    let help = Paragraph::new(help_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(AxonmlTheme::border_active())
+            .title(Span::styled(" Help ", AxonmlTheme::header())),
+    );
 
     frame.render_widget(help, popup_area);
 }

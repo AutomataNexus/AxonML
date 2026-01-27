@@ -535,17 +535,21 @@ pub async fn record_metrics(
     }
 
     // Use the tracker to record metrics - this handles both storage AND broadcasting
-    state.tracker.record_metrics(
-        &id,
-        req.epoch,
-        req.step,
-        req.loss,
-        req.accuracy,
-        req.lr,
-        req.gpu_util,
-        req.memory_mb,
-        req.custom.clone(),
-    ).await.map_err(|e| AuthError::Internal(e))?;
+    state
+        .tracker
+        .record_metrics(
+            &id,
+            req.epoch,
+            req.step,
+            req.loss,
+            req.accuracy,
+            req.lr,
+            req.gpu_util,
+            req.memory_mb,
+            req.custom.clone(),
+        )
+        .await
+        .map_err(|e| AuthError::Internal(e))?;
 
     // Update status to running if pending
     if run.status == RunStatus::Pending {

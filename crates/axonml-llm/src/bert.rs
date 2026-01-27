@@ -3,13 +3,13 @@
 //! Bidirectional Encoder Representations from Transformers.
 
 use axonml_autograd::Variable;
-use axonml_nn::{Module, Linear, Dropout, Parameter};
+use axonml_nn::{Dropout, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
 
 use crate::config::BertConfig;
 use crate::embedding::BertEmbedding;
 use crate::error::{LLMError, LLMResult};
-use crate::transformer::{TransformerEncoder, LayerNorm};
+use crate::transformer::{LayerNorm, TransformerEncoder};
 
 /// BERT model (encoder-only transformer).
 #[derive(Debug)]
@@ -112,10 +112,14 @@ impl Bert {
         attention_mask: Option<&Tensor<f32>>,
     ) -> (Variable, Option<Variable>) {
         // Get embeddings
-        let hidden_states = self.embeddings.forward_with_ids(input_ids, token_type_ids, None);
+        let hidden_states = self
+            .embeddings
+            .forward_with_ids(input_ids, token_type_ids, None);
 
         // Encode
-        let sequence_output = self.encoder.forward_with_mask(&hidden_states, attention_mask);
+        let sequence_output = self
+            .encoder
+            .forward_with_mask(&hidden_states, attention_mask);
 
         // Pool if pooler exists
         let pooled_output = self.pooler.as_ref().map(|p| p.forward(&sequence_output));
@@ -193,7 +197,7 @@ impl BertForSequenceClassification {
             Ok(self.classifier.forward(&pooled))
         } else {
             Err(LLMError::InvalidConfig(
-                "BERT model must have pooler for sequence classification".to_string()
+                "BERT model must have pooler for sequence classification".to_string(),
             ))
         }
     }
@@ -293,7 +297,12 @@ impl Module for BertPredictionHeadTransform {
 
 impl BertLMPredictionHead {
     /// Creates a new LM prediction head.
-    pub fn new(hidden_size: usize, vocab_size: usize, layer_norm_eps: f32, activation: &str) -> Self {
+    pub fn new(
+        hidden_size: usize,
+        vocab_size: usize,
+        layer_norm_eps: f32,
+        activation: &str,
+    ) -> Self {
         Self {
             transform: BertPredictionHeadTransform::new(hidden_size, layer_norm_eps, activation),
             decoder: Linear::new(hidden_size, vocab_size),

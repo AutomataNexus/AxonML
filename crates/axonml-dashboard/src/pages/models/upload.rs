@@ -5,9 +5,9 @@ use leptos_router::*;
 use web_sys::{File, FileList};
 
 use crate::api;
+use crate::components::{forms::*, icons::*, progress::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
-use crate::components::{icons::*, spinner::*, forms::*, progress::*};
 
 /// Model upload page
 #[component]
@@ -109,7 +109,8 @@ pub fn ModelUploadPage() -> impl IntoView {
                             Some(training_run_id.get())
                         };
 
-                        match api::models::upload_version(&model.id, file, run_id.as_deref()).await {
+                        match api::models::upload_version(&model.id, file, run_id.as_deref()).await
+                        {
                             Ok(_version) => {
                                 set_upload_progress.set(100.0);
                                 state.toast_success("Uploaded", "Model uploaded successfully");

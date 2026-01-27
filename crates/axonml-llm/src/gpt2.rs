@@ -3,7 +3,7 @@
 //! Generative Pre-trained Transformer 2.
 
 use axonml_autograd::Variable;
-use axonml_nn::{Module, Linear, Parameter};
+use axonml_nn::{Linear, Module, Parameter};
 use axonml_tensor::Tensor;
 
 use crate::config::GPT2Config;
@@ -208,7 +208,8 @@ impl GPT2LMHead {
                     shift_labels_data.push(labels_vec[b * seq_len + s]);
                 }
             }
-            let shift_labels = Tensor::from_vec(shift_labels_data, &[batch_size, seq_len - 1]).unwrap();
+            let shift_labels =
+                Tensor::from_vec(shift_labels_data, &[batch_size, seq_len - 1]).unwrap();
 
             // Compute cross-entropy loss
             let loss = Self::cross_entropy_loss(&shift_logits, &shift_labels);
@@ -257,7 +258,10 @@ impl GPT2LMHead {
             0.0
         };
 
-        Variable::new(Tensor::from_vec(vec![mean_loss], &[1]).unwrap(), logits.requires_grad())
+        Variable::new(
+            Tensor::from_vec(vec![mean_loss], &[1]).unwrap(),
+            logits.requires_grad(),
+        )
     }
 
     /// Generates text autoregressively.
@@ -299,8 +303,9 @@ impl GPT2LMHead {
             // For each batch item
             for b in 0..batch_size {
                 let batch_offset = b * current_len * vocab_size;
-                let mut last_logits: Vec<f32> = logits_data.to_vec()
-                    [batch_offset + last_logits_start..batch_offset + last_logits_start + vocab_size]
+                let mut last_logits: Vec<f32> = logits_data.to_vec()[batch_offset
+                    + last_logits_start
+                    ..batch_offset + last_logits_start + vocab_size]
                     .to_vec();
 
                 // Apply temperature
@@ -312,8 +317,11 @@ impl GPT2LMHead {
 
                 // Apply top-k filtering
                 if let Some(k) = top_k {
-                    let mut indexed: Vec<(usize, f32)> =
-                        last_logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+                    let mut indexed: Vec<(usize, f32)> = last_logits
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &v)| (i, v))
+                        .collect();
                     indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
                     let threshold = if k < indexed.len() {
@@ -330,8 +338,12 @@ impl GPT2LMHead {
                 }
 
                 // Softmax to get probabilities
-                let max_logit = last_logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                let exp_logits: Vec<f32> = last_logits.iter().map(|x| (x - max_logit).exp()).collect();
+                let max_logit = last_logits
+                    .iter()
+                    .cloned()
+                    .fold(f32::NEG_INFINITY, f32::max);
+                let exp_logits: Vec<f32> =
+                    last_logits.iter().map(|x| (x - max_logit).exp()).collect();
                 let sum_exp: f32 = exp_logits.iter().sum();
                 let probs: Vec<f32> = exp_logits.iter().map(|x| x / sum_exp).collect();
 

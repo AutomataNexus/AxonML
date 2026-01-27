@@ -187,13 +187,14 @@ fn export_to_onnx(
     _precision: &str,
 ) -> Result<u64, String> {
     // Load the Axonml state dict
-    let state_dict = load_state_dict(model_path)
-        .map_err(|e| format!("Failed to load model: {}", e))?;
+    let state_dict =
+        load_state_dict(model_path).map_err(|e| format!("Failed to load model: {}", e))?;
 
     let num_params = count_parameters(&state_dict);
 
     // Create ONNX exporter from state dict
-    let model_name = model_path.file_stem()
+    let model_name = model_path
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("model");
 
@@ -222,9 +223,22 @@ fn export_to_onnx(
     }
 
     // Add input/output
-    exporter.add_input("input", &[1, input_size as i64], axonml_onnx::proto::TensorDataType::Float);
-    exporter.add_output("output", &[1, output_size as i64], axonml_onnx::proto::TensorDataType::Float);
-    exporter.add_node("Identity", &["input"], &["output"], std::collections::HashMap::new());
+    exporter.add_input(
+        "input",
+        &[1, input_size as i64],
+        axonml_onnx::proto::TensorDataType::Float,
+    );
+    exporter.add_output(
+        "output",
+        &[1, output_size as i64],
+        axonml_onnx::proto::TensorDataType::Float,
+    );
+    exporter.add_node(
+        "Identity",
+        &["input"],
+        &["output"],
+        std::collections::HashMap::new(),
+    );
 
     // Export to ONNX file
     axonml_onnx::export_onnx(&exporter, output_path)
@@ -240,8 +254,8 @@ fn export_to_torchscript(
 ) -> Result<u64, String> {
     // TorchScript is not directly supported - export as Axonml format with .pt extension
     // The user can use PyTorch to load and convert
-    let state_dict = load_state_dict(model_path)
-        .map_err(|e| format!("Failed to load model: {}", e))?;
+    let state_dict =
+        load_state_dict(model_path).map_err(|e| format!("Failed to load model: {}", e))?;
 
     let num_params = count_parameters(&state_dict);
 
@@ -257,8 +271,8 @@ fn export_to_torchscript(
 
 fn export_to_safetensors(model_path: &PathBuf, output_path: &str) -> Result<u64, String> {
     // Load the model
-    let state_dict = load_state_dict(model_path)
-        .map_err(|e| format!("Failed to load model: {}", e))?;
+    let state_dict =
+        load_state_dict(model_path).map_err(|e| format!("Failed to load model: {}", e))?;
 
     let num_params = count_parameters(&state_dict);
 
@@ -277,8 +291,8 @@ fn export_to_tflite(
 ) -> Result<u64, String> {
     // TFLite format is not directly supported
     // We export the weights in JSON format which can be converted using TensorFlow tools
-    let state_dict = load_state_dict(model_path)
-        .map_err(|e| format!("Failed to load model: {}", e))?;
+    let state_dict =
+        load_state_dict(model_path).map_err(|e| format!("Failed to load model: {}", e))?;
 
     let num_params = count_parameters(&state_dict);
 
@@ -292,8 +306,8 @@ fn export_to_tflite(
 fn export_to_coreml(model_path: &PathBuf, output_path: &str) -> Result<u64, String> {
     // CoreML is not directly supported
     // Export weights in JSON format for conversion using coremltools
-    let state_dict = load_state_dict(model_path)
-        .map_err(|e| format!("Failed to load model: {}", e))?;
+    let state_dict =
+        load_state_dict(model_path).map_err(|e| format!("Failed to load model: {}", e))?;
 
     let num_params = count_parameters(&state_dict);
 
@@ -411,9 +425,9 @@ fn format_number(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-    use axonml_tensor::Tensor;
     use axonml_serialize::TensorData;
+    use axonml_tensor::Tensor;
+    use tempfile::tempdir;
 
     #[test]
     fn test_export_to_onnx() {
@@ -427,9 +441,15 @@ mod tests {
         let fc2_weight = Tensor::from_vec(vec![0.1f32; 128 * 10], &[10, 128]).unwrap();
         let fc2_bias = Tensor::from_vec(vec![0.0f32; 10], &[10]).unwrap();
 
-        state_dict.insert("fc1.weight".to_string(), TensorData::from_tensor(&fc1_weight));
+        state_dict.insert(
+            "fc1.weight".to_string(),
+            TensorData::from_tensor(&fc1_weight),
+        );
         state_dict.insert("fc1.bias".to_string(), TensorData::from_tensor(&fc1_bias));
-        state_dict.insert("fc2.weight".to_string(), TensorData::from_tensor(&fc2_weight));
+        state_dict.insert(
+            "fc2.weight".to_string(),
+            TensorData::from_tensor(&fc2_weight),
+        );
         state_dict.insert("fc2.bias".to_string(), TensorData::from_tensor(&fc2_bias));
         save_state_dict(&state_dict, &input, Format::Axonml).unwrap();
 

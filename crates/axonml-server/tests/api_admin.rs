@@ -25,7 +25,10 @@ async fn test_list_users_as_admin() {
         .await
         .expect("Request failed");
 
-    assert!(response.status().is_success(), "Admin should access user list");
+    assert!(
+        response.status().is_success(),
+        "Admin should access user list"
+    );
 
     let body: Value = response.json().await.expect("Failed to parse JSON");
     assert!(body.is_array() || body.get("users").is_some());
@@ -42,7 +45,11 @@ async fn test_list_users_unauthenticated() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should return 401 without auth");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should return 401 without auth"
+    );
 }
 
 #[tokio::test]
@@ -58,7 +65,11 @@ async fn test_get_user_by_id() {
         .expect("Request failed");
 
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -72,7 +83,11 @@ async fn test_get_user_not_found() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 404, "Should return 404 for nonexistent user");
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "Should return 404 for nonexistent user"
+    );
 }
 
 #[tokio::test]
@@ -82,7 +97,10 @@ async fn test_create_user_as_admin() {
     let client = test_client();
     let token = login_as_admin(&client).await.expect("Login failed");
 
-    let unique_email = format!("newuser_{}@test.local", chrono::Utc::now().timestamp_millis());
+    let unique_email = format!(
+        "newuser_{}@test.local",
+        chrono::Utc::now().timestamp_millis()
+    );
 
     let response = auth_post(
         &client,
@@ -123,7 +141,9 @@ async fn test_update_user_role() {
     }
 
     let users: Value = list_response.json().await.expect("Failed to parse JSON");
-    let users_arr = users.as_array().or_else(|| users.get("users").and_then(|u| u.as_array()));
+    let users_arr = users
+        .as_array()
+        .or_else(|| users.get("users").and_then(|u| u.as_array()));
 
     if let Some(arr) = users_arr {
         // Find a non-admin user
@@ -143,7 +163,11 @@ async fn test_update_user_role() {
                     .expect("Request failed");
 
                     let status = response.status().as_u16();
-                    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+                    assert!(
+                        status == 200 || status == 404,
+                        "Got unexpected status: {}",
+                        status
+                    );
                     break;
                 }
             }
@@ -163,7 +187,11 @@ async fn test_delete_user() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 404, "Should return 404 for nonexistent user");
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "Should return 404 for nonexistent user"
+    );
 }
 
 #[tokio::test]
@@ -200,7 +228,11 @@ async fn test_system_stats() {
 
     // Stats endpoint may or may not exist
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -216,7 +248,11 @@ async fn test_system_health() {
 
     // Health endpoint may or may not exist under admin
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -232,5 +268,9 @@ async fn test_database_status() {
 
     // Database status endpoint may or may not exist
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }

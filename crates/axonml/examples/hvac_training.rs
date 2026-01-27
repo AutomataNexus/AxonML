@@ -8,9 +8,9 @@
 //!
 //! Usage: cargo run --example hvac_training --release
 
-use axonml::nn::{Module, Parameter, GRU, Linear, LayerNorm, ReLU, Dropout, CrossEntropyLoss};
-use axonml::optim::{Adam, Optimizer};
 use axonml::autograd::Variable;
+use axonml::nn::{CrossEntropyLoss, Dropout, LayerNorm, Linear, Module, Parameter, ReLU, GRU};
+use axonml::optim::{Adam, Optimizer};
 use axonml::tensor::Tensor;
 use std::time::Instant;
 
@@ -109,7 +109,10 @@ impl HvacDataGenerator {
 
     /// Simple LCG random number generator
     fn rand(&mut self) -> f32 {
-        self.rng_state = self.rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        self.rng_state = self
+            .rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1);
         ((self.rng_state >> 33) as f32) / (u32::MAX as f32)
     }
 
@@ -152,19 +155,35 @@ impl HvacDataGenerator {
             // ===== PUMP CURRENTS (0-5) =====
             // 4-Pipe HW Pumps
             if conditions.hw_lead_pump == 0 {
-                data[base + 0] = if is_heating { base_current + self.noise(2.0) } else { 0.5 };
+                data[base + 0] = if is_heating {
+                    base_current + self.noise(2.0)
+                } else {
+                    0.5
+                };
                 data[base + 1] = 0.3 + self.noise(0.1);
             } else {
-                data[base + 1] = if is_heating { base_current + self.noise(2.0) } else { 0.5 };
+                data[base + 1] = if is_heating {
+                    base_current + self.noise(2.0)
+                } else {
+                    0.5
+                };
                 data[base + 0] = 0.3 + self.noise(0.1);
             }
 
             // 4-Pipe CW Pumps
             if conditions.cw_lead_pump == 0 {
-                data[base + 2] = if is_cooling { base_current + self.noise(2.0) } else { 0.5 };
+                data[base + 2] = if is_cooling {
+                    base_current + self.noise(2.0)
+                } else {
+                    0.5
+                };
                 data[base + 3] = 0.3 + self.noise(0.1);
             } else {
-                data[base + 3] = if is_cooling { base_current + self.noise(2.0) } else { 0.5 };
+                data[base + 3] = if is_cooling {
+                    base_current + self.noise(2.0)
+                } else {
+                    0.5
+                };
                 data[base + 2] = 0.3 + self.noise(0.1);
             }
 
@@ -184,10 +203,18 @@ impl HvacDataGenerator {
 
             // ===== TEMPERATURES (6-13) =====
             // 4-Pipe HW Supply
-            data[base + 6] = if is_heating { 160.0 + self.noise(3.0) } else { 90.0 + self.noise(2.0) };
+            data[base + 6] = if is_heating {
+                160.0 + self.noise(3.0)
+            } else {
+                90.0 + self.noise(2.0)
+            };
 
             // 4-Pipe CW Supply
-            data[base + 7] = if is_cooling { 45.0 + self.noise(1.5) } else { 55.0 + self.noise(2.0) };
+            data[base + 7] = if is_cooling {
+                45.0 + self.noise(1.5)
+            } else {
+                55.0 + self.noise(2.0)
+            };
 
             // 2-Pipe HW Supply (OA reset)
             let oa_reset = 155.0 - (outdoor_temp - 40.0) * (155.0 - 115.0) / 32.0;
@@ -256,7 +283,8 @@ impl HvacDataGenerator {
             data[base + pump_index] = (data[base + pump_index] - degradation).max(0.0);
 
             // VFD speed also decreases
-            data[base + 16 + pump_index] = (data[base + 16 + pump_index] - degradation * 2.0).max(0.0);
+            data[base + 16 + pump_index] =
+                (data[base + 16 + pump_index] - degradation * 2.0).max(0.0);
 
             // Mark as failure when current drops below threshold
             if data[base + pump_index] < 3.0 {
@@ -278,9 +306,9 @@ impl HvacDataGenerator {
     ) {
         let feat_idx = if is_hw { 14 } else { 15 };
         let failure_type = match (is_hw, is_low) {
-            (true, true) => 7,   // pressure_low_hw
-            (true, false) => 8,  // pressure_high_hw
-            (false, true) => 9,  // pressure_low_cw
+            (true, true) => 7,    // pressure_low_hw
+            (true, false) => 8,   // pressure_high_hw
+            (false, true) => 9,   // pressure_low_cw
             (false, false) => 10, // pressure_high_cw
         };
         let setpoint = if is_hw { 16.0 } else { 12.0 };
@@ -343,7 +371,8 @@ impl HvacDataGenerator {
 
         println!("Generating normal operation data...");
         // Generate normal data for various conditions
-        for season in [false, true] { // summer, winter
+        for season in [false, true] {
+            // summer, winter
             for oat_idx in 0..10 {
                 let oat = 20.0 + oat_idx as f32 * 7.5;
                 let conditions = OperatingConditions {
@@ -369,10 +398,18 @@ impl HvacDataGenerator {
                     is_winter: self.rand() > 0.5,
                     ..Default::default()
                 };
-                let (mut data, mut labels) = self.generate_normal_operation(failure_duration, &conditions);
+                let (mut data, mut labels) =
+                    self.generate_normal_operation(failure_duration, &conditions);
                 let failure_start = failure_duration / 3;
                 let rate = 0.005 + self.rand() * 0.015;
-                self.inject_pump_failure(&mut data, &mut labels, failure_duration, pump_idx, failure_start, rate);
+                self.inject_pump_failure(
+                    &mut data,
+                    &mut labels,
+                    failure_duration,
+                    pump_idx,
+                    failure_start,
+                    rate,
+                );
                 all_data.extend(data);
                 all_labels.extend(labels);
             }
@@ -386,10 +423,19 @@ impl HvacDataGenerator {
                     outdoor_temp: 30.0 + self.rand() * 55.0,
                     ..Default::default()
                 };
-                let (mut data, mut labels) = self.generate_normal_operation(failure_duration, &conditions);
+                let (mut data, mut labels) =
+                    self.generate_normal_operation(failure_duration, &conditions);
                 let failure_start = failure_duration / 3;
                 let magnitude = 3.0 + self.rand() * 5.0;
-                self.inject_pressure_anomaly(&mut data, &mut labels, failure_duration, is_hw, is_low, failure_start, magnitude);
+                self.inject_pressure_anomaly(
+                    &mut data,
+                    &mut labels,
+                    failure_duration,
+                    is_hw,
+                    is_low,
+                    failure_start,
+                    magnitude,
+                );
                 all_data.extend(data);
                 all_labels.extend(labels);
             }
@@ -403,9 +449,16 @@ impl HvacDataGenerator {
                     outdoor_temp: 30.0 + self.rand() * 55.0,
                     ..Default::default()
                 };
-                let (mut data, mut labels) = self.generate_normal_operation(failure_duration, &conditions);
+                let (mut data, mut labels) =
+                    self.generate_normal_operation(failure_duration, &conditions);
                 let failure_start = failure_duration / 3;
-                self.inject_temperature_anomaly(&mut data, &mut labels, failure_duration, temp_type, failure_start);
+                self.inject_temperature_anomaly(
+                    &mut data,
+                    &mut labels,
+                    failure_duration,
+                    temp_type,
+                    failure_start,
+                );
                 all_data.extend(data);
                 all_labels.extend(labels);
             }
@@ -419,9 +472,11 @@ impl HvacDataGenerator {
         for &label in &all_labels {
             label_counts[label as usize] += 1;
         }
-        println!("Label distribution: Normal={}, Failures={}",
+        println!(
+            "Label distribution: Normal={}, Failures={}",
             label_counts[0],
-            label_counts[1..].iter().sum::<usize>());
+            label_counts[1..].iter().sum::<usize>()
+        );
 
         (all_data, all_labels)
     }
@@ -537,8 +592,16 @@ impl HvacPredictor {
             input_norm: LayerNorm::new(vec![config.hidden_size]),
             input_relu: ReLU,
             gru: GRU::new(config.hidden_size, config.hidden_size, config.num_layers),
-            head_imminent: PredictionHead::new(config.hidden_size, config.num_classes, config.dropout),
-            head_warning: PredictionHead::new(config.hidden_size, config.num_classes, config.dropout),
+            head_imminent: PredictionHead::new(
+                config.hidden_size,
+                config.num_classes,
+                config.dropout,
+            ),
+            head_warning: PredictionHead::new(
+                config.hidden_size,
+                config.num_classes,
+                config.dropout,
+            ),
             head_early: PredictionHead::new(config.hidden_size, config.num_classes, config.dropout),
             config,
         }
@@ -568,7 +631,10 @@ impl HvacPredictor {
     }
 
     pub fn num_parameters(&self) -> usize {
-        self.parameters().iter().map(|p| p.variable().data().numel()).sum()
+        self.parameters()
+            .iter()
+            .map(|p| p.variable().data().numel())
+            .sum()
     }
 }
 
@@ -618,12 +684,12 @@ fn normalize_data(data: &mut [f32], n_samples: usize) {
         (0.0, 100.0),
         (0.0, 100.0),
         (0.0, 100.0),
-        (0.0, 100.0),   // 22: steam_valve_1_3_pos
-        (0.0, 100.0),   // 23: steam_valve_2_3_pos
-        (0.0, 1.0),     // 24: summer_winter_mode
-        (0.0, 1.0),     // 25: hw_lead_pump_id
-        (0.0, 1.0),     // 26: cw_lead_pump_id
-        (0.0, 1.0),     // 27: 2pipe_lead_pump_id
+        (0.0, 100.0), // 22: steam_valve_1_3_pos
+        (0.0, 100.0), // 23: steam_valve_2_3_pos
+        (0.0, 1.0),   // 24: summer_winter_mode
+        (0.0, 1.0),   // 25: hw_lead_pump_id
+        (0.0, 1.0),   // 26: cw_lead_pump_id
+        (0.0, 1.0),   // 27: 2pipe_lead_pump_id
     ];
 
     for i in 0..n_samples {
@@ -713,7 +779,8 @@ fn train_epoch(
         let y_imm_tensor = Tensor::from_vec(
             batch_y_imm.iter().map(|&y| y as f32).collect(),
             &[batch_size],
-        ).expect("Failed to create label tensor");
+        )
+        .expect("Failed to create label tensor");
         let y_imm_var = Variable::new(y_imm_tensor, false);
 
         let loss = loss_fn.compute(&logits_imm, &y_imm_var);
@@ -731,7 +798,12 @@ fn train_epoch(
     }
 
     let n = n_batches as f32;
-    (total_loss / n, total_acc_imm / n, total_acc_warn / n, total_acc_early / n)
+    (
+        total_loss / n,
+        total_acc_imm / n,
+        total_acc_warn / n,
+        total_acc_early / n,
+    )
 }
 
 // =============================================================================
@@ -763,9 +835,9 @@ fn main() {
     let model_config = if quick_mode {
         HvacConfig {
             num_features: 28,
-            seq_len: 30,      // Reduced from 120
-            hidden_size: 64,  // Reduced from 128
-            num_layers: 1,    // Reduced from 2
+            seq_len: 30,     // Reduced from 120
+            hidden_size: 64, // Reduced from 128
+            num_layers: 1,   // Reduced from 2
             num_classes: 20,
             dropout: 0.1,
         }
@@ -788,16 +860,13 @@ fn main() {
     let mut generator = HvacDataGenerator::new(42);
 
     let (normal_samples, failure_scenarios, failure_duration) = if quick_mode {
-        (5000, 5, 300)  // Much smaller for quick testing
+        (5000, 5, 300) // Much smaller for quick testing
     } else {
-        (50000, 30, 1800)  // Full dataset
+        (50000, 30, 1800) // Full dataset
     };
 
-    let (mut raw_data, raw_labels) = generator.generate_training_dataset(
-        normal_samples,
-        failure_scenarios,
-        failure_duration,
-    );
+    let (mut raw_data, raw_labels) =
+        generator.generate_training_dataset(normal_samples, failure_scenarios, failure_duration);
 
     // Normalize data
     let n_samples = raw_labels.len();
@@ -822,7 +891,10 @@ fn main() {
     // Split train/val
     let val_size = (n_sequences as f32 * train_config.val_split) as usize;
     let train_size = n_sequences - val_size;
-    println!("Train: {} sequences, Val: {} sequences", train_size, val_size);
+    println!(
+        "Train: {} sequences, Val: {} sequences",
+        train_size, val_size
+    );
 
     // Create model
     println!();

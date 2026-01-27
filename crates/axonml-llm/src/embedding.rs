@@ -3,9 +3,9 @@
 //! Token, positional, and combined embeddings for transformer models.
 
 use axonml_autograd::Variable;
-use axonml_nn::{Module, Embedding, Parameter, Dropout};
+use axonml_nn::{Dropout, Embedding, Module, Parameter};
+use axonml_tensor::creation::{ones, zeros};
 use axonml_tensor::Tensor;
-use axonml_tensor::creation::{zeros, ones};
 
 /// Token embedding layer.
 #[derive(Debug)]
@@ -47,7 +47,8 @@ impl TokenEmbedding {
             }
         }
 
-        let output_tensor = Tensor::from_vec(output_data, &[batch_size, seq_len, embed_dim]).unwrap();
+        let output_tensor =
+            Tensor::from_vec(output_data, &[batch_size, seq_len, embed_dim]).unwrap();
         Variable::new(output_tensor, weight.requires_grad())
     }
 }
@@ -191,8 +192,12 @@ impl LayerNorm {
         let x_normalized = x.sub(&mean).div(&variance.add_scalar(self.eps).sqrt());
 
         // Scale and shift
-        let weight_var = Variable::from_tensor_with_grad(self.weight.data().clone(), self.weight.requires_grad());
-        let bias_var = Variable::from_tensor_with_grad(self.bias.data().clone(), self.bias.requires_grad());
+        let weight_var = Variable::from_tensor_with_grad(
+            self.weight.data().clone(),
+            self.weight.requires_grad(),
+        );
+        let bias_var =
+            Variable::from_tensor_with_grad(self.bias.data().clone(), self.bias.requires_grad());
 
         x_normalized.mul(&weight_var).add(&bias_var)
     }
@@ -234,17 +239,23 @@ impl BertEmbedding {
 
         // Token embeddings
         let input_ids_f32 = Self::u32_to_f32_tensor(input_ids);
-        let word_embeds = self.word_embeddings.forward(&Variable::new(input_ids_f32, false));
+        let word_embeds = self
+            .word_embeddings
+            .forward(&Variable::new(input_ids_f32, false));
 
         // Position embeddings
         let pos_ids = if let Some(ids) = position_ids {
             Self::u32_to_f32_tensor(ids)
         } else {
             let positions: Vec<f32> = (0..seq_len).map(|p| p as f32).collect();
-            let pos_data: Vec<f32> = (0..batch_size).flat_map(|_| positions.iter().cloned()).collect();
+            let pos_data: Vec<f32> = (0..batch_size)
+                .flat_map(|_| positions.iter().cloned())
+                .collect();
             Tensor::from_vec(pos_data, &[batch_size, seq_len]).unwrap()
         };
-        let position_embeds = self.position_embeddings.forward(&Variable::new(pos_ids, false));
+        let position_embeds = self
+            .position_embeddings
+            .forward(&Variable::new(pos_ids, false));
 
         // Token type embeddings
         let type_ids = if let Some(ids) = token_type_ids {
@@ -252,7 +263,9 @@ impl BertEmbedding {
         } else {
             zeros::<f32>(&[batch_size, seq_len])
         };
-        let token_type_embeds = self.token_type_embeddings.forward(&Variable::new(type_ids, false));
+        let token_type_embeds = self
+            .token_type_embeddings
+            .forward(&Variable::new(type_ids, false));
 
         // Combine embeddings
         let embeddings = word_embeds.add(&position_embeds).add(&token_type_embeds);
@@ -280,13 +293,19 @@ impl Module for BertEmbedding {
 
         // Generate position IDs
         let positions: Vec<f32> = (0..seq_len).map(|p| p as f32).collect();
-        let pos_data: Vec<f32> = (0..batch_size).flat_map(|_| positions.iter().cloned()).collect();
+        let pos_data: Vec<f32> = (0..batch_size)
+            .flat_map(|_| positions.iter().cloned())
+            .collect();
         let pos_tensor = Tensor::from_vec(pos_data, &[batch_size, seq_len]).unwrap();
-        let position_embeds = self.position_embeddings.forward(&Variable::new(pos_tensor, false));
+        let position_embeds = self
+            .position_embeddings
+            .forward(&Variable::new(pos_tensor, false));
 
         // Token type embeddings (assume all zeros)
         let type_tensor = zeros::<f32>(&[batch_size, seq_len]);
-        let token_type_embeds = self.token_type_embeddings.forward(&Variable::new(type_tensor, false));
+        let token_type_embeds = self
+            .token_type_embeddings
+            .forward(&Variable::new(type_tensor, false));
 
         let embeddings = word_embeds.add(&position_embeds).add(&token_type_embeds);
         let embeddings = self.layer_norm.forward(&embeddings);
@@ -346,7 +365,9 @@ impl GPT2Embedding {
 
         // Position embeddings
         let positions: Vec<f32> = (0..seq_len).map(|p| p as f32).collect();
-        let pos_data: Vec<f32> = (0..batch_size).flat_map(|_| positions.iter().cloned()).collect();
+        let pos_data: Vec<f32> = (0..batch_size)
+            .flat_map(|_| positions.iter().cloned())
+            .collect();
         let pos_tensor = Tensor::from_vec(pos_data, &[batch_size, seq_len]).unwrap();
         let position_embeds = self.wpe.forward(&Variable::new(pos_tensor, false));
 
@@ -372,7 +393,9 @@ impl Module for GPT2Embedding {
 
         // Position embeddings
         let positions: Vec<f32> = (0..seq_len).map(|p| p as f32).collect();
-        let pos_data: Vec<f32> = (0..batch_size).flat_map(|_| positions.iter().cloned()).collect();
+        let pos_data: Vec<f32> = (0..batch_size)
+            .flat_map(|_| positions.iter().cloned())
+            .collect();
         let pos_tensor = Tensor::from_vec(pos_data, &[batch_size, seq_len]).unwrap();
         let position_embeds = self.wpe.forward(&Variable::new(pos_tensor, false));
 

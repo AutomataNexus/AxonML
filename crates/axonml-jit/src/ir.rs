@@ -199,19 +199,35 @@ pub enum Op {
     /// Sum over all elements.
     Sum { input: NodeId },
     /// Sum over axis.
-    SumAxis { input: NodeId, axis: i32, keepdim: bool },
+    SumAxis {
+        input: NodeId,
+        axis: i32,
+        keepdim: bool,
+    },
     /// Mean over all elements.
     Mean { input: NodeId },
     /// Mean over axis.
-    MeanAxis { input: NodeId, axis: i32, keepdim: bool },
+    MeanAxis {
+        input: NodeId,
+        axis: i32,
+        keepdim: bool,
+    },
     /// Maximum over axis.
-    MaxAxis { input: NodeId, axis: i32, keepdim: bool },
+    MaxAxis {
+        input: NodeId,
+        axis: i32,
+        keepdim: bool,
+    },
 
     // Shape operations
     /// Reshape tensor.
     Reshape { input: NodeId, shape: Vec<isize> },
     /// Transpose dimensions.
-    Transpose { input: NodeId, dim0: usize, dim1: usize },
+    Transpose {
+        input: NodeId,
+        dim0: usize,
+        dim1: usize,
+    },
     /// Squeeze dimension.
     Squeeze { input: NodeId, dim: i32 },
     /// Unsqueeze (add dimension).
@@ -233,7 +249,11 @@ pub enum Op {
 
     // Conditional
     /// Where/select operation.
-    Where { condition: NodeId, x: NodeId, y: NodeId },
+    Where {
+        condition: NodeId,
+        x: NodeId,
+        y: NodeId,
+    },
 
     // Special
     /// Cast to different dtype.
@@ -278,7 +298,10 @@ impl Op {
             | Self::Sub { lhs, rhs }
             | Self::Mul { lhs, rhs }
             | Self::Div { lhs, rhs }
-            | Self::Pow { base: lhs, exp: rhs }
+            | Self::Pow {
+                base: lhs,
+                exp: rhs,
+            }
             | Self::Max { lhs, rhs }
             | Self::Min { lhs, rhs }
             | Self::MatMul { lhs, rhs }
@@ -371,7 +394,12 @@ impl Graph {
     /// Adds a node to the graph.
     pub fn add_node(&mut self, op: Op, dtype: DataType, shape: Shape) -> NodeId {
         let id = NodeId(self.nodes.len());
-        self.nodes.push(Node { id, op, dtype, shape });
+        self.nodes.push(Node {
+            id,
+            op,
+            dtype,
+            shape,
+        });
         id
     }
 
@@ -500,20 +528,21 @@ mod tests {
         let mut graph = Graph::new();
 
         let input = graph.add_node(
-            Op::Input { name: "x".to_string() },
+            Op::Input {
+                name: "x".to_string(),
+            },
             DataType::F32,
             Shape::new(&[2, 3]),
         );
         graph.register_input("x", input);
 
-        let relu = graph.add_node(
-            Op::Relu { input },
-            DataType::F32,
-            Shape::new(&[2, 3]),
-        );
+        let relu = graph.add_node(Op::Relu { input }, DataType::F32, Shape::new(&[2, 3]));
 
         let output = graph.add_node(
-            Op::Output { name: "y".to_string(), input: relu },
+            Op::Output {
+                name: "y".to_string(),
+                input: relu,
+            },
             DataType::F32,
             Shape::new(&[2, 3]),
         );
@@ -525,13 +554,18 @@ mod tests {
 
     #[test]
     fn test_op_inputs() {
-        let add = Op::Add { lhs: NodeId(0), rhs: NodeId(1) };
+        let add = Op::Add {
+            lhs: NodeId(0),
+            rhs: NodeId(1),
+        };
         assert_eq!(add.inputs(), vec![NodeId(0), NodeId(1)]);
 
         let relu = Op::Relu { input: NodeId(2) };
         assert_eq!(relu.inputs(), vec![NodeId(2)]);
 
-        let input = Op::Input { name: "x".to_string() };
+        let input = Op::Input {
+            name: "x".to_string(),
+        };
         assert!(input.inputs().is_empty());
     }
 }

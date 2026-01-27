@@ -5,8 +5,8 @@
 //! @version 0.1.0
 //! @author AutomataNexus Development Team
 
-use std::fmt;
 use half::f16;
+use std::fmt;
 
 // =============================================================================
 // Quantization Type Enum
@@ -44,8 +44,11 @@ impl QuantType {
     /// Returns the block size for this quantization type.
     pub fn block_size(&self) -> usize {
         match self {
-            QuantType::Q8_0 | QuantType::Q4_0 | QuantType::Q4_1 |
-            QuantType::Q5_0 | QuantType::Q5_1 => 32,
+            QuantType::Q8_0
+            | QuantType::Q4_0
+            | QuantType::Q4_1
+            | QuantType::Q5_0
+            | QuantType::Q5_1 => 32,
             QuantType::F16 | QuantType::F32 => 1,
         }
     }
@@ -53,11 +56,11 @@ impl QuantType {
     /// Returns the number of bytes per block.
     pub fn bytes_per_block(&self) -> usize {
         match self {
-            QuantType::Q8_0 => 2 + 32,      // f16 scale + 32 int8
-            QuantType::Q4_0 => 2 + 16,      // f16 scale + 16 bytes (32 x 4-bit)
-            QuantType::Q4_1 => 4 + 16,      // f16 scale + f16 min + 16 bytes
-            QuantType::Q5_0 => 2 + 20,      // f16 scale + 20 bytes (32 x 5-bit)
-            QuantType::Q5_1 => 4 + 20,      // f16 scale + f16 min + 20 bytes
+            QuantType::Q8_0 => 2 + 32, // f16 scale + 32 int8
+            QuantType::Q4_0 => 2 + 16, // f16 scale + 16 bytes (32 x 4-bit)
+            QuantType::Q4_1 => 4 + 16, // f16 scale + f16 min + 16 bytes
+            QuantType::Q5_0 => 2 + 20, // f16 scale + 20 bytes (32 x 5-bit)
+            QuantType::Q5_1 => 4 + 20, // f16 scale + f16 min + 20 bytes
             QuantType::F16 => 2,
             QuantType::F32 => 4,
         }
@@ -81,8 +84,10 @@ impl QuantType {
 
     /// Returns true if this type uses block quantization.
     pub fn is_block_quantized(&self) -> bool {
-        matches!(self, QuantType::Q8_0 | QuantType::Q4_0 | QuantType::Q4_1 |
-                       QuantType::Q5_0 | QuantType::Q5_1)
+        matches!(
+            self,
+            QuantType::Q8_0 | QuantType::Q4_0 | QuantType::Q4_1 | QuantType::Q5_0 | QuantType::Q5_1
+        )
     }
 
     /// Parses a quantization type from a string.
@@ -361,8 +366,8 @@ mod tests {
     #[test]
     fn test_q4_pack_unpack() {
         let values: [i8; 32] = [
-            -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7,
-            -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7,
+            -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, -8, -7, -6, -5, -4, -3, -2, -1,
+            0, 1, 2, 3, 4, 5, 6, 7,
         ];
 
         let packed = Q4Block::pack(&values);

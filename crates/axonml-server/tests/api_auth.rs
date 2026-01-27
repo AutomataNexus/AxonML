@@ -55,7 +55,11 @@ async fn test_login_with_invalid_credentials() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should return 401 Unauthorized");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should return 401 Unauthorized"
+    );
 }
 
 #[tokio::test]
@@ -73,7 +77,10 @@ async fn test_login_with_missing_fields() {
         .await
         .expect("Request failed");
 
-    assert!(response.status().is_client_error(), "Should return client error");
+    assert!(
+        response.status().is_client_error(),
+        "Should return client error"
+    );
 }
 
 #[tokio::test]
@@ -104,7 +111,11 @@ async fn test_me_endpoint_without_token() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should return 401 without token");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should return 401 without token"
+    );
 }
 
 #[tokio::test]
@@ -119,7 +130,11 @@ async fn test_me_endpoint_with_invalid_token() {
         .await
         .expect("Request failed");
 
-    assert_eq!(response.status().as_u16(), 401, "Should return 401 with invalid token");
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "Should return 401 with invalid token"
+    );
 }
 
 #[tokio::test]
@@ -127,7 +142,10 @@ async fn test_register_new_user() {
     require_server!();
 
     let client = test_client();
-    let unique_email = format!("testuser_{}@test.local", chrono::Utc::now().timestamp_millis());
+    let unique_email = format!(
+        "testuser_{}@test.local",
+        chrono::Utc::now().timestamp_millis()
+    );
 
     let response = client
         .post(format!("{}/api/auth/register", TEST_API_URL))
@@ -167,7 +185,10 @@ async fn test_register_duplicate_email() {
         .await
         .expect("Request failed");
 
-    assert!(response.status().is_client_error(), "Should reject duplicate email");
+    assert!(
+        response.status().is_client_error(),
+        "Should reject duplicate email"
+    );
 }
 
 #[tokio::test]
@@ -183,7 +204,11 @@ async fn test_logout() {
 
     // Logout should succeed (200/204) or endpoint might not exist (404)
     let status = response.status().as_u16();
-    assert!(status == 200 || status == 204 || status == 404, "Got unexpected status: {}", status);
+    assert!(
+        status == 200 || status == 204 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
 }
 
 #[tokio::test]
@@ -223,6 +248,10 @@ async fn test_refresh_token() {
 
         // Refresh might succeed, return 401 for invalid token, or endpoint might not exist
         let status = response.status().as_u16();
-        assert!(status == 200 || status == 401 || status == 404, "Got unexpected status: {}", status);
+        assert!(
+            status == 200 || status == 401 || status == 404,
+            "Got unexpected status: {}",
+            status
+        );
     }
 }

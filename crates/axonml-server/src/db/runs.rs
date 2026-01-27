@@ -131,7 +131,9 @@ impl<'a> RunRepository<'a> {
         let run_json = serde_json::to_value(&run)?;
 
         // Insert using document store
-        self.db.doc_insert(COLLECTION, Some(&run.id), run_json).await?;
+        self.db
+            .doc_insert(COLLECTION, Some(&run.id), run_json)
+            .await?;
 
         Ok(run)
     }
@@ -168,7 +170,7 @@ impl<'a> RunRepository<'a> {
             if let Some(obj) = filter.as_object_mut() {
                 obj.insert(
                     "status".to_string(),
-                    serde_json::json!({ "$eq": status_str })
+                    serde_json::json!({ "$eq": status_str }),
                 );
             }
         }
@@ -228,11 +230,16 @@ impl<'a> RunRepository<'a> {
 
     /// Update run status
     pub async fn update_status(&self, id: &str, status: RunStatus) -> Result<TrainingRun, DbError> {
-        let mut run = self.find_by_id(id).await?
+        let mut run = self
+            .find_by_id(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Run {} not found", id)))?;
 
         run.status = status.clone();
-        if status == RunStatus::Completed || status == RunStatus::Failed || status == RunStatus::Stopped {
+        if status == RunStatus::Completed
+            || status == RunStatus::Failed
+            || status == RunStatus::Stopped
+        {
             run.completed_at = Some(Utc::now());
         }
 
@@ -244,8 +251,14 @@ impl<'a> RunRepository<'a> {
     }
 
     /// Update latest metrics (stored in document)
-    pub async fn update_metrics(&self, id: &str, metrics: TrainingMetrics) -> Result<TrainingRun, DbError> {
-        let mut run = self.find_by_id(id).await?
+    pub async fn update_metrics(
+        &self,
+        id: &str,
+        metrics: TrainingMetrics,
+    ) -> Result<TrainingRun, DbError> {
+        let mut run = self
+            .find_by_id(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Run {} not found", id)))?;
 
         run.latest_metrics = Some(metrics);
@@ -260,7 +273,9 @@ impl<'a> RunRepository<'a> {
     /// Delete run
     pub async fn delete(&self, id: &str) -> Result<(), DbError> {
         // Check if run exists
-        let _ = self.find_by_id(id).await?
+        let _ = self
+            .find_by_id(id)
+            .await?
             .ok_or_else(|| DbError::NotFound(format!("Run {} not found", id)))?;
 
         // Note: Time series data is retained (metrics history remains for analysis)
@@ -271,7 +286,11 @@ impl<'a> RunRepository<'a> {
     }
 
     /// Record training metrics to time series
-    pub async fn record_metrics(&self, run_id: &str, metrics: &TrainingMetrics) -> Result<(), DbError> {
+    pub async fn record_metrics(
+        &self,
+        run_id: &str,
+        metrics: &TrainingMetrics,
+    ) -> Result<(), DbError> {
         // Create tags for this run
         let mut tags: HashMap<String, String> = HashMap::new();
         tags.insert("run_id".to_string(), run_id.to_string());
@@ -282,55 +301,57 @@ impl<'a> RunRepository<'a> {
         if let Some(loss) = metrics.loss {
             let mut loss_tags = tags.clone();
             loss_tags.insert("metric".to_string(), "loss".to_string());
-            self.db.ts_write_one(
-                &format!("axonml.training.{}.loss", run_id),
-                loss,
-                loss_tags
-            ).await?;
+            self.db
+                .ts_write_one(&format!("axonml.training.{}.loss", run_id), loss, loss_tags)
+                .await?;
         }
 
         // Record accuracy metric
         if let Some(accuracy) = metrics.accuracy {
             let mut acc_tags = tags.clone();
             acc_tags.insert("metric".to_string(), "accuracy".to_string());
-            self.db.ts_write_one(
-                &format!("axonml.training.{}.accuracy", run_id),
-                accuracy,
-                acc_tags
-            ).await?;
+            self.db
+                .ts_write_one(
+                    &format!("axonml.training.{}.accuracy", run_id),
+                    accuracy,
+                    acc_tags,
+                )
+                .await?;
         }
 
         // Record learning rate
         if let Some(lr) = metrics.lr {
             let mut lr_tags = tags.clone();
             lr_tags.insert("metric".to_string(), "learning_rate".to_string());
-            self.db.ts_write_one(
-                &format!("axonml.training.{}.lr", run_id),
-                lr,
-                lr_tags
-            ).await?;
+            self.db
+                .ts_write_one(&format!("axonml.training.{}.lr", run_id), lr, lr_tags)
+                .await?;
         }
 
         // Record GPU utilization
         if let Some(gpu_util) = metrics.gpu_util {
             let mut gpu_tags = tags.clone();
             gpu_tags.insert("metric".to_string(), "gpu_util".to_string());
-            self.db.ts_write_one(
-                &format!("axonml.training.{}.gpu_util", run_id),
-                gpu_util,
-                gpu_tags
-            ).await?;
+            self.db
+                .ts_write_one(
+                    &format!("axonml.training.{}.gpu_util", run_id),
+                    gpu_util,
+                    gpu_tags,
+                )
+                .await?;
         }
 
         // Record memory usage
         if let Some(memory_mb) = metrics.memory_mb {
             let mut mem_tags = tags.clone();
             mem_tags.insert("metric".to_string(), "memory_mb".to_string());
-            self.db.ts_write_one(
-                &format!("axonml.training.{}.memory_mb", run_id),
-                memory_mb,
-                mem_tags
-            ).await?;
+            self.db
+                .ts_write_one(
+                    &format!("axonml.training.{}.memory_mb", run_id),
+                    memory_mb,
+                    mem_tags,
+                )
+                .await?;
         }
 
         Ok(())
@@ -358,10 +379,14 @@ impl<'a> RunRepository<'a> {
         // This is a simplified version - in production you might want to join multiple metrics
         let mut metrics = Vec::new();
         for point in loss_points {
-            let epoch = point.tags.get("epoch")
+            let epoch = point
+                .tags
+                .get("epoch")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0);
-            let step = point.tags.get("step")
+            let step = point
+                .tags
+                .get("step")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0);
 

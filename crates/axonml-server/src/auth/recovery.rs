@@ -4,7 +4,10 @@
 
 use super::AuthError;
 use argon2::{
-    password_hash::{rand_core::OsRng, rand_core::RngCore, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{
+        rand_core::OsRng, rand_core::RngCore, PasswordHash, PasswordHasher, PasswordVerifier,
+        SaltString,
+    },
     Argon2,
 };
 
@@ -33,7 +36,10 @@ impl RecoveryAuth {
             hashed_codes.push(hash);
         }
 
-        Ok(RecoveryCodes { codes, hashed_codes })
+        Ok(RecoveryCodes {
+            codes,
+            hashed_codes,
+        })
     }
 
     /// Generate a single recovery code
@@ -136,10 +142,7 @@ mod tests {
 
     #[test]
     fn test_format_for_display() {
-        let codes = vec![
-            "12345-67890".to_string(),
-            "11111-22222".to_string(),
-        ];
+        let codes = vec!["12345-67890".to_string(), "11111-22222".to_string()];
 
         let formatted = RecoveryAuth::format_for_display(&codes);
         assert!(formatted.contains("1. 12345-67890"));

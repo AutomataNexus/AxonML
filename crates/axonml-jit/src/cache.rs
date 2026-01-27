@@ -2,13 +2,13 @@
 //!
 //! Caches compiled functions for reuse.
 
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
-use crate::ir::Graph;
 use crate::codegen::CompiledFunction;
+use crate::ir::Graph;
 
 /// Cache for compiled functions.
 pub struct FunctionCache {
@@ -55,8 +55,8 @@ impl FunctionCache {
                 crate::ir::Op::Constant { value } => {
                     value.to_bits().hash(&mut hasher);
                 }
-                crate::ir::Op::AddScalar { input, scalar } |
-                crate::ir::Op::MulScalar { input, scalar } => {
+                crate::ir::Op::AddScalar { input, scalar }
+                | crate::ir::Op::MulScalar { input, scalar } => {
                     input.index().hash(&mut hasher);
                     scalar.to_bits().hash(&mut hasher);
                 }
@@ -69,15 +69,26 @@ impl FunctionCache {
                     dim0.hash(&mut hasher);
                     dim1.hash(&mut hasher);
                 }
-                crate::ir::Op::SumAxis { input, axis, keepdim } |
-                crate::ir::Op::MeanAxis { input, axis, keepdim } |
-                crate::ir::Op::MaxAxis { input, axis, keepdim } => {
+                crate::ir::Op::SumAxis {
+                    input,
+                    axis,
+                    keepdim,
+                }
+                | crate::ir::Op::MeanAxis {
+                    input,
+                    axis,
+                    keepdim,
+                }
+                | crate::ir::Op::MaxAxis {
+                    input,
+                    axis,
+                    keepdim,
+                } => {
                     input.index().hash(&mut hasher);
                     axis.hash(&mut hasher);
                     keepdim.hash(&mut hasher);
                 }
-                crate::ir::Op::Squeeze { input, dim } |
-                crate::ir::Op::Unsqueeze { input, dim } => {
+                crate::ir::Op::Squeeze { input, dim } | crate::ir::Op::Unsqueeze { input, dim } => {
                     input.index().hash(&mut hasher);
                     dim.hash(&mut hasher);
                 }
@@ -90,17 +101,20 @@ impl FunctionCache {
                     dtype.hash(&mut hasher);
                 }
                 // Binary ops
-                crate::ir::Op::Add { lhs, rhs } |
-                crate::ir::Op::Sub { lhs, rhs } |
-                crate::ir::Op::Mul { lhs, rhs } |
-                crate::ir::Op::Div { lhs, rhs } |
-                crate::ir::Op::Pow { base: lhs, exp: rhs } |
-                crate::ir::Op::Max { lhs, rhs } |
-                crate::ir::Op::Min { lhs, rhs } |
-                crate::ir::Op::MatMul { lhs, rhs } |
-                crate::ir::Op::Gt { lhs, rhs } |
-                crate::ir::Op::Lt { lhs, rhs } |
-                crate::ir::Op::Eq { lhs, rhs } => {
+                crate::ir::Op::Add { lhs, rhs }
+                | crate::ir::Op::Sub { lhs, rhs }
+                | crate::ir::Op::Mul { lhs, rhs }
+                | crate::ir::Op::Div { lhs, rhs }
+                | crate::ir::Op::Pow {
+                    base: lhs,
+                    exp: rhs,
+                }
+                | crate::ir::Op::Max { lhs, rhs }
+                | crate::ir::Op::Min { lhs, rhs }
+                | crate::ir::Op::MatMul { lhs, rhs }
+                | crate::ir::Op::Gt { lhs, rhs }
+                | crate::ir::Op::Lt { lhs, rhs }
+                | crate::ir::Op::Eq { lhs, rhs } => {
                     lhs.index().hash(&mut hasher);
                     rhs.index().hash(&mut hasher);
                 }

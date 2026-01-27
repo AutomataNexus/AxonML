@@ -10,7 +10,7 @@ use half::f16;
 use rayon::prelude::*;
 
 use crate::error::QuantResult;
-use crate::types::{QuantType, QuantizedTensor, QuantizedBlock, Q8Block, Q4Block, Q4_1Block};
+use crate::types::{Q4Block, Q4_1Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
 use crate::DEFAULT_BLOCK_SIZE;
 
 // =============================================================================
@@ -33,7 +33,10 @@ use crate::DEFAULT_BLOCK_SIZE;
 /// let tensor = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[4])?;
 /// let quantized = quantize_tensor(&tensor, QuantType::Q8_0)?;
 /// ```
-pub fn quantize_tensor(tensor: &Tensor<f32>, quant_type: QuantType) -> QuantResult<QuantizedTensor> {
+pub fn quantize_tensor(
+    tensor: &Tensor<f32>,
+    quant_type: QuantType,
+) -> QuantResult<QuantizedTensor> {
     let data = tensor.to_vec();
     let shape = tensor.shape().to_vec();
 
@@ -94,11 +97,7 @@ fn quantize_q8_0(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor
                 .fold(0.0f32, |a, b| a.max(b));
 
             // Compute scale (avoid division by zero)
-            let scale = if max_abs > 0.0 {
-                max_abs / 127.0
-            } else {
-                1.0
-            };
+            let scale = if max_abs > 0.0 { max_abs / 127.0 } else { 1.0 };
 
             // Quantize to int8
             let mut quantized = [0i8; 32];
@@ -137,11 +136,7 @@ fn quantize_q4_0(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor
                 .fold(0.0f32, |a, b| a.max(b));
 
             // Compute scale (4-bit range is -8 to 7)
-            let scale = if max_abs > 0.0 {
-                max_abs / 7.0
-            } else {
-                1.0
-            };
+            let scale = if max_abs > 0.0 { max_abs / 7.0 } else { 1.0 };
 
             // Quantize to 4-bit (stored as i8 in range -8 to 7)
             let mut quantized = [0i8; 32];
@@ -177,19 +172,11 @@ fn quantize_q4_1(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor
             let block_data = &data[start..end];
 
             // Find min and max
-            let min = block_data
-                .iter()
-                .fold(f32::INFINITY, |a, &b| a.min(b));
-            let max = block_data
-                .iter()
-                .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+            let min = block_data.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+            let max = block_data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
 
             // Compute scale (4-bit unsigned range is 0 to 15)
-            let scale = if max > min {
-                (max - min) / 15.0
-            } else {
-                1.0
-            };
+            let scale = if max > min { (max - min) / 15.0 } else { 1.0 };
 
             // Quantize to 4-bit unsigned
             let mut quantized = [0u8; 32];
@@ -223,10 +210,7 @@ fn quantize_q4_1(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor
 
 /// Quantizes data to F16 format (half precision).
 fn quantize_f16(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor> {
-    let f16_data: Vec<f16> = data
-        .par_iter()
-        .map(|&x| f16::from_f32(x))
-        .collect();
+    let f16_data: Vec<f16> = data.par_iter().map(|&x| f16::from_f32(x)).collect();
 
     let blocks = vec![QuantizedBlock::F16(f16_data)];
 

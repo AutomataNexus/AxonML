@@ -248,7 +248,9 @@ fn algebraic_simplification(graph: Graph) -> Graph {
                         continue;
                     }
                 }
-                Op::Neg { input: actual_input }
+                Op::Neg {
+                    input: actual_input,
+                }
             }
             other => remap_op(other, &node_map),
         };
@@ -318,56 +320,175 @@ fn remap_op(op: &Op, node_map: &FxHashMap<NodeId, NodeId>) -> Op {
 
     match op {
         Op::Input { name } => Op::Input { name: name.clone() },
-        Op::Output { name, input } => Op::Output { name: name.clone(), input: remap(input) },
+        Op::Output { name, input } => Op::Output {
+            name: name.clone(),
+            input: remap(input),
+        },
         Op::Constant { value } => Op::Constant { value: *value },
 
-        Op::Add { lhs, rhs } => Op::Add { lhs: remap(lhs), rhs: remap(rhs) },
-        Op::Sub { lhs, rhs } => Op::Sub { lhs: remap(lhs), rhs: remap(rhs) },
-        Op::Mul { lhs, rhs } => Op::Mul { lhs: remap(lhs), rhs: remap(rhs) },
-        Op::Div { lhs, rhs } => Op::Div { lhs: remap(lhs), rhs: remap(rhs) },
-        Op::Pow { base, exp } => Op::Pow { base: remap(base), exp: remap(exp) },
-        Op::Max { lhs, rhs } => Op::Max { lhs: remap(lhs), rhs: remap(rhs) },
-        Op::Min { lhs, rhs } => Op::Min { lhs: remap(lhs), rhs: remap(rhs) },
+        Op::Add { lhs, rhs } => Op::Add {
+            lhs: remap(lhs),
+            rhs: remap(rhs),
+        },
+        Op::Sub { lhs, rhs } => Op::Sub {
+            lhs: remap(lhs),
+            rhs: remap(rhs),
+        },
+        Op::Mul { lhs, rhs } => Op::Mul {
+            lhs: remap(lhs),
+            rhs: remap(rhs),
+        },
+        Op::Div { lhs, rhs } => Op::Div {
+            lhs: remap(lhs),
+            rhs: remap(rhs),
+        },
+        Op::Pow { base, exp } => Op::Pow {
+            base: remap(base),
+            exp: remap(exp),
+        },
+        Op::Max { lhs, rhs } => Op::Max {
+            lhs: remap(lhs),
+            rhs: remap(rhs),
+        },
+        Op::Min { lhs, rhs } => Op::Min {
+            lhs: remap(lhs),
+            rhs: remap(rhs),
+        },
 
-        Op::Neg { input } => Op::Neg { input: remap(input) },
-        Op::Abs { input } => Op::Abs { input: remap(input) },
-        Op::Sqrt { input } => Op::Sqrt { input: remap(input) },
-        Op::Exp { input } => Op::Exp { input: remap(input) },
-        Op::Log { input } => Op::Log { input: remap(input) },
-        Op::Sin { input } => Op::Sin { input: remap(input) },
-        Op::Cos { input } => Op::Cos { input: remap(input) },
-        Op::Tanh { input } => Op::Tanh { input: remap(input) },
+        Op::Neg { input } => Op::Neg {
+            input: remap(input),
+        },
+        Op::Abs { input } => Op::Abs {
+            input: remap(input),
+        },
+        Op::Sqrt { input } => Op::Sqrt {
+            input: remap(input),
+        },
+        Op::Exp { input } => Op::Exp {
+            input: remap(input),
+        },
+        Op::Log { input } => Op::Log {
+            input: remap(input),
+        },
+        Op::Sin { input } => Op::Sin {
+            input: remap(input),
+        },
+        Op::Cos { input } => Op::Cos {
+            input: remap(input),
+        },
+        Op::Tanh { input } => Op::Tanh {
+            input: remap(input),
+        },
 
-        Op::Relu { input } => Op::Relu { input: remap(input) },
-        Op::Sigmoid { input } => Op::Sigmoid { input: remap(input) },
-        Op::Gelu { input } => Op::Gelu { input: remap(input) },
-        Op::Silu { input } => Op::Silu { input: remap(input) },
+        Op::Relu { input } => Op::Relu {
+            input: remap(input),
+        },
+        Op::Sigmoid { input } => Op::Sigmoid {
+            input: remap(input),
+        },
+        Op::Gelu { input } => Op::Gelu {
+            input: remap(input),
+        },
+        Op::Silu { input } => Op::Silu {
+            input: remap(input),
+        },
 
-        Op::AddScalar { input, scalar } => Op::AddScalar { input: remap(input), scalar: *scalar },
-        Op::MulScalar { input, scalar } => Op::MulScalar { input: remap(input), scalar: *scalar },
+        Op::AddScalar { input, scalar } => Op::AddScalar {
+            input: remap(input),
+            scalar: *scalar,
+        },
+        Op::MulScalar { input, scalar } => Op::MulScalar {
+            input: remap(input),
+            scalar: *scalar,
+        },
 
-        Op::Sum { input } => Op::Sum { input: remap(input) },
-        Op::SumAxis { input, axis, keepdim } => Op::SumAxis { input: remap(input), axis: *axis, keepdim: *keepdim },
-        Op::Mean { input } => Op::Mean { input: remap(input) },
-        Op::MeanAxis { input, axis, keepdim } => Op::MeanAxis { input: remap(input), axis: *axis, keepdim: *keepdim },
-        Op::MaxAxis { input, axis, keepdim } => Op::MaxAxis { input: remap(input), axis: *axis, keepdim: *keepdim },
+        Op::Sum { input } => Op::Sum {
+            input: remap(input),
+        },
+        Op::SumAxis {
+            input,
+            axis,
+            keepdim,
+        } => Op::SumAxis {
+            input: remap(input),
+            axis: *axis,
+            keepdim: *keepdim,
+        },
+        Op::Mean { input } => Op::Mean {
+            input: remap(input),
+        },
+        Op::MeanAxis {
+            input,
+            axis,
+            keepdim,
+        } => Op::MeanAxis {
+            input: remap(input),
+            axis: *axis,
+            keepdim: *keepdim,
+        },
+        Op::MaxAxis {
+            input,
+            axis,
+            keepdim,
+        } => Op::MaxAxis {
+            input: remap(input),
+            axis: *axis,
+            keepdim: *keepdim,
+        },
 
-        Op::Reshape { input, shape } => Op::Reshape { input: remap(input), shape: shape.clone() },
-        Op::Transpose { input, dim0, dim1 } => Op::Transpose { input: remap(input), dim0: *dim0, dim1: *dim1 },
-        Op::Squeeze { input, dim } => Op::Squeeze { input: remap(input), dim: *dim },
-        Op::Unsqueeze { input, dim } => Op::Unsqueeze { input: remap(input), dim: *dim },
-        Op::Broadcast { input, shape } => Op::Broadcast { input: remap(input), shape: shape.clone() },
+        Op::Reshape { input, shape } => Op::Reshape {
+            input: remap(input),
+            shape: shape.clone(),
+        },
+        Op::Transpose { input, dim0, dim1 } => Op::Transpose {
+            input: remap(input),
+            dim0: *dim0,
+            dim1: *dim1,
+        },
+        Op::Squeeze { input, dim } => Op::Squeeze {
+            input: remap(input),
+            dim: *dim,
+        },
+        Op::Unsqueeze { input, dim } => Op::Unsqueeze {
+            input: remap(input),
+            dim: *dim,
+        },
+        Op::Broadcast { input, shape } => Op::Broadcast {
+            input: remap(input),
+            shape: shape.clone(),
+        },
 
-        Op::MatMul { lhs, rhs } => Op::MatMul { lhs: remap(lhs), rhs: remap(rhs) },
+        Op::MatMul { lhs, rhs } => Op::MatMul {
+            lhs: remap(lhs),
+            rhs: remap(rhs),
+        },
 
-        Op::Gt { lhs, rhs } => Op::Gt { lhs: remap(lhs), rhs: remap(rhs) },
-        Op::Lt { lhs, rhs } => Op::Lt { lhs: remap(lhs), rhs: remap(rhs) },
-        Op::Eq { lhs, rhs } => Op::Eq { lhs: remap(lhs), rhs: remap(rhs) },
+        Op::Gt { lhs, rhs } => Op::Gt {
+            lhs: remap(lhs),
+            rhs: remap(rhs),
+        },
+        Op::Lt { lhs, rhs } => Op::Lt {
+            lhs: remap(lhs),
+            rhs: remap(rhs),
+        },
+        Op::Eq { lhs, rhs } => Op::Eq {
+            lhs: remap(lhs),
+            rhs: remap(rhs),
+        },
 
-        Op::Where { condition, x, y } => Op::Where { condition: remap(condition), x: remap(x), y: remap(y) },
+        Op::Where { condition, x, y } => Op::Where {
+            condition: remap(condition),
+            x: remap(x),
+            y: remap(y),
+        },
 
-        Op::Cast { input, dtype } => Op::Cast { input: remap(input), dtype: *dtype },
-        Op::Contiguous { input } => Op::Contiguous { input: remap(input) },
+        Op::Cast { input, dtype } => Op::Cast {
+            input: remap(input),
+            dtype: *dtype,
+        },
+        Op::Contiguous { input } => Op::Contiguous {
+            input: remap(input),
+        },
     }
 }
 
@@ -392,7 +513,10 @@ mod tests {
         let optimized = opt.optimize(graph);
 
         // Mul node should be eliminated
-        let has_mul = optimized.nodes().iter().any(|n| matches!(n.op, Op::Mul { .. }));
+        let has_mul = optimized
+            .nodes()
+            .iter()
+            .any(|n| matches!(n.op, Op::Mul { .. }));
         assert!(!has_mul);
     }
 
@@ -409,7 +533,10 @@ mod tests {
         let optimized = optimizer.optimize(graph);
 
         // MulScalar(1.0) should be eliminated
-        let has_mul_scalar = optimized.nodes().iter().any(|n| matches!(n.op, Op::MulScalar { .. }));
+        let has_mul_scalar = optimized
+            .nodes()
+            .iter()
+            .any(|n| matches!(n.op, Op::MulScalar { .. }));
         assert!(!has_mul_scalar);
     }
 
@@ -426,7 +553,10 @@ mod tests {
         let optimized = optimizer.optimize(graph);
 
         // Should have a Constant node
-        let has_constant = optimized.nodes().iter().any(|n| matches!(n.op, Op::Constant { .. }));
+        let has_constant = optimized
+            .nodes()
+            .iter()
+            .any(|n| matches!(n.op, Op::Constant { .. }));
         assert!(has_constant);
     }
 }

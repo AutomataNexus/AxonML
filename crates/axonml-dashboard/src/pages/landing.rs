@@ -3,7 +3,7 @@
 use leptos::*;
 use leptos_router::*;
 
-use crate::components::{navbar::PublicNavbar, icons::*};
+use crate::components::{icons::*, navbar::PublicNavbar};
 
 /// Landing page for non-authenticated users
 #[component]
@@ -185,10 +185,7 @@ fn FeatureCard(
 
 /// Stat card component
 #[component]
-fn StatCard(
-    #[prop(into)] value: String,
-    #[prop(into)] label: String,
-) -> impl IntoView {
+fn StatCard(#[prop(into)] value: String, #[prop(into)] label: String) -> impl IntoView {
     view! {
         <div class="stat-card">
             <div class="stat-value">{value}</div>

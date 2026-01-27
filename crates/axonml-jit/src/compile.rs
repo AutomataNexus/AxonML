@@ -258,7 +258,10 @@ impl CompiledModel {
     }
 
     /// Interprets the graph (fallback when not compiled).
-    fn interpret(&self, inputs: &HashMap<String, Vec<f32>>) -> JitResult<HashMap<String, Vec<f32>>> {
+    fn interpret(
+        &self,
+        inputs: &HashMap<String, Vec<f32>>,
+    ) -> JitResult<HashMap<String, Vec<f32>>> {
         // Simple interpreter for the graph
         let mut values: HashMap<String, Vec<f32>> = HashMap::new();
 
@@ -290,18 +293,12 @@ impl CompiledModel {
     }
 
     /// Executes a single node.
-    fn execute_node(
-        &self,
-        node: &Node,
-        values: &HashMap<String, Vec<f32>>,
-    ) -> JitResult<Vec<f32>> {
+    fn execute_node(&self, node: &Node, values: &HashMap<String, Vec<f32>>) -> JitResult<Vec<f32>> {
         match &node.op {
-            Op::Input { name } => {
-                values
-                    .get(name)
-                    .cloned()
-                    .ok_or_else(|| JitError::InputNotFound(name.clone()))
-            }
+            Op::Input { name } => values
+                .get(name)
+                .cloned()
+                .ok_or_else(|| JitError::InputNotFound(name.clone())),
             Op::Output { input, .. } => {
                 let key = format!("node_{}", input.index());
                 values

@@ -154,14 +154,13 @@ impl OllamaClient {
     }
 
     /// Generate markdown content
-    pub async fn generate_markdown(
-        &self,
-        prompt: &str,
-    ) -> Result<CodeSuggestion, OllamaError> {
-        let system_prompt = r#"You are a technical documentation writer for machine learning projects.
+    pub async fn generate_markdown(&self, prompt: &str) -> Result<CodeSuggestion, OllamaError> {
+        let system_prompt =
+            r#"You are a technical documentation writer for machine learning projects.
 Generate clear, well-structured markdown documentation.
 Use proper headings, lists, and code blocks where appropriate.
-Be concise but comprehensive."#.to_string();
+Be concise but comprehensive."#
+                .to_string();
 
         let request = GenerateRequest {
             model: self.model.clone(),
@@ -188,14 +187,13 @@ Be concise but comprehensive."#.to_string();
     }
 
     /// Raw generate call to Ollama
-    pub async fn generate(&self, request: GenerateRequest) -> Result<GenerateResponse, OllamaError> {
+    pub async fn generate(
+        &self,
+        request: GenerateRequest,
+    ) -> Result<GenerateResponse, OllamaError> {
         let url = format!("{}/api/generate", self.base_url);
 
-        let response = self.client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&request).send().await?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(OllamaError::ModelNotFound(request.model));
@@ -205,7 +203,8 @@ Be concise but comprehensive."#.to_string();
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             return Err(OllamaError::GenerationFailed(format!(
-                "Status {}: {}", status, body
+                "Status {}: {}",
+                status, body
             )));
         }
 
@@ -237,7 +236,8 @@ fn build_code_system_prompt(include_imports: bool) -> String {
         "Do not include imports, assume they are already available."
     };
 
-    format!(r#"You are an expert machine learning engineer and Python/Rust programmer.
+    format!(
+        r#"You are an expert machine learning engineer and Python/Rust programmer.
 You are helping a user write code for the AxonML machine learning framework.
 
 AxonML is similar to PyTorch with these key modules:
@@ -254,7 +254,9 @@ Guidelines:
 - Keep code concise but readable
 
 Respond with ONLY the code, no explanations unless asked.
-If you need to explain, put explanations in code comments."#, import_instruction)
+If you need to explain, put explanations in code comments."#,
+        import_instruction
+    )
 }
 
 /// Extract code and explanation from LLM response
