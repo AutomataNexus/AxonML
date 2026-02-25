@@ -229,6 +229,24 @@ pub use axonml_jit as jit;
 pub use axonml_onnx as onnx;
 
 // =============================================================================
+// HVAC Diagnostic System
+// =============================================================================
+
+/// HVAC 8-model diagnostic system (~8.6M total parameters).
+#[cfg(feature = "nn")]
+pub mod hvac;
+
+// =============================================================================
+// Adversarial Training
+// =============================================================================
+
+/// Adversarial training utilities (FGSM, PGD, adversarial trainer).
+pub mod adversarial;
+
+#[cfg(feature = "nn")]
+pub use adversarial::{fgsm_attack, pgd_attack, adversarial_training_step, AdversarialTrainer};
+
+// =============================================================================
 // Training Utilities
 // =============================================================================
 

@@ -73,14 +73,14 @@ impl RNNCell {
         );
         // x @ W_ih^T + b_ih
         let weight_ih = self.weight_ih.variable();
-        let weight_ih_t = Variable::new(weight_ih.data().t().unwrap(), weight_ih.requires_grad());
+        let weight_ih_t = weight_ih.transpose(0, 1);
         let ih = input.matmul(&weight_ih_t);
         let bias_ih = self.bias_ih.variable();
         let ih = ih.add_var(&bias_ih);
 
         // h @ W_hh^T + b_hh
         let weight_hh = self.weight_hh.variable();
-        let weight_hh_t = Variable::new(weight_hh.data().t().unwrap(), weight_hh.requires_grad());
+        let weight_hh_t = weight_hh.transpose(0, 1);
         let hh = hidden.matmul(&weight_hh_t);
         let bias_hh = self.bias_hh.variable();
         let hh = hh.add_var(&bias_hh);
@@ -244,35 +244,13 @@ impl Module for RNN {
             outputs.push(hiddens[self.num_layers - 1].clone());
         }
 
-        // Stack outputs
-        let output_size = batch_size * seq_len * self.hidden_size;
-        let mut output_data = vec![0.0f32; output_size];
-
-        for (t, out) in outputs.iter().enumerate() {
-            let out_vec = out.data().to_vec();
-            for b in 0..batch_size {
-                for h in 0..self.hidden_size {
-                    let src_idx = b * self.hidden_size + h;
-                    let dst_idx = if self.batch_first {
-                        b * seq_len * self.hidden_size + t * self.hidden_size + h
-                    } else {
-                        t * batch_size * self.hidden_size + b * self.hidden_size + h
-                    };
-                    output_data[dst_idx] = out_vec[src_idx];
-                }
-            }
-        }
-
-        let output_shape = if self.batch_first {
-            vec![batch_size, seq_len, self.hidden_size]
-        } else {
-            vec![seq_len, batch_size, self.hidden_size]
-        };
-
-        Variable::new(
-            Tensor::from_vec(output_data, &output_shape).unwrap(),
-            input.requires_grad(),
-        )
+        // Stack outputs using graph-tracked cat (unsqueeze + cat along time dim)
+        let time_dim = if self.batch_first { 1 } else { 0 };
+        let unsqueezed: Vec<Variable> = outputs.iter()
+            .map(|o| o.unsqueeze(time_dim))
+            .collect();
+        let refs: Vec<&Variable> = unsqueezed.iter().collect();
+        Variable::cat(&refs, time_dim)
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -353,13 +331,13 @@ impl LSTMCell {
 
         // Compute all gates at once (x @ W^T + b)
         let weight_ih = self.weight_ih.variable();
-        let weight_ih_t = Variable::new(weight_ih.data().t().unwrap(), weight_ih.requires_grad());
+        let weight_ih_t = weight_ih.transpose(0, 1);
         let ih = input.matmul(&weight_ih_t);
         let bias_ih = self.bias_ih.variable();
         let ih = ih.add_var(&bias_ih);
 
         let weight_hh = self.weight_hh.variable();
-        let weight_hh_t = Variable::new(weight_hh.data().t().unwrap(), weight_hh.requires_grad());
+        let weight_hh_t = weight_hh.transpose(0, 1);
         let hh = h.matmul(&weight_hh_t);
         let bias_hh = self.bias_hh.variable();
         let hh = hh.add_var(&bias_hh);
@@ -566,32 +544,13 @@ impl Module for LSTM {
             outputs.push(states[self.num_layers - 1].0.clone());
         }
 
-        // Stack outputs
-        let mut output_data = vec![0.0f32; batch_size * seq_len * self.hidden_size];
-        for (t, out) in outputs.iter().enumerate() {
-            let out_vec = out.data().to_vec();
-            for b in 0..batch_size {
-                for h in 0..self.hidden_size {
-                    let dst_idx = if self.batch_first {
-                        b * seq_len * self.hidden_size + t * self.hidden_size + h
-                    } else {
-                        t * batch_size * self.hidden_size + b * self.hidden_size + h
-                    };
-                    output_data[dst_idx] = out_vec[b * self.hidden_size + h];
-                }
-            }
-        }
-
-        let output_shape = if self.batch_first {
-            vec![batch_size, seq_len, self.hidden_size]
-        } else {
-            vec![seq_len, batch_size, self.hidden_size]
-        };
-
-        Variable::new(
-            Tensor::from_vec(output_data, &output_shape).unwrap(),
-            input.requires_grad(),
-        )
+        // Stack outputs using graph-tracked cat (unsqueeze + cat along time dim)
+        let time_dim = if self.batch_first { 1 } else { 0 };
+        let unsqueezed: Vec<Variable> = outputs.iter()
+            .map(|o| o.unsqueeze(time_dim))
+            .collect();
+        let refs: Vec<&Variable> = unsqueezed.iter().collect();
+        Variable::cat(&refs, time_dim)
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -683,12 +642,12 @@ impl GRUCell {
 
         // Compute input transformation: x @ W_ih^T + b_ih
         // Shape: [batch, 3*hidden_size]
-        let weight_ih_t = Variable::new(weight_ih.data().t().unwrap(), weight_ih.requires_grad());
+        let weight_ih_t = weight_ih.transpose(0, 1);
         let ih = input.matmul(&weight_ih_t).add_var(&bias_ih);
 
         // Compute hidden transformation: h @ W_hh^T + b_hh
         // Shape: [batch, 3*hidden_size]
-        let weight_hh_t = Variable::new(weight_hh.data().t().unwrap(), weight_hh.requires_grad());
+        let weight_hh_t = weight_hh.transpose(0, 1);
         let hh = hidden.matmul(&weight_hh_t).add_var(&bias_hh);
 
         // Use narrow to split into gates (preserves gradient flow)
@@ -952,29 +911,17 @@ impl GRU {
     /// Stack output Variables into a single [batch, seq, hidden] tensor.
     /// Note: This creates a new tensor without gradient connections to individual timesteps.
     /// For gradient flow, use forward_mean() or forward_last() instead.
-    fn stack_outputs(&self, outputs: &[Variable], batch_size: usize, seq_len: usize) -> Variable {
+    fn stack_outputs(&self, outputs: &[Variable], batch_size: usize, _seq_len: usize) -> Variable {
         if outputs.is_empty() {
             return Variable::new(zeros(&[batch_size, 0, self.hidden_size]), false);
         }
 
-        let output_shape = [batch_size, seq_len, self.hidden_size];
-        let requires_grad = outputs.iter().any(|o| o.requires_grad());
-
-        let mut stacked_data = vec![0.0f32; batch_size * seq_len * self.hidden_size];
-        for (t, out) in outputs.iter().enumerate() {
-            let out_data = out.data().to_vec();
-            for b in 0..batch_size {
-                for h in 0..self.hidden_size {
-                    let idx = b * seq_len * self.hidden_size + t * self.hidden_size + h;
-                    stacked_data[idx] = out_data[b * self.hidden_size + h];
-                }
-            }
-        }
-
-        Variable::new(
-            Tensor::from_vec(stacked_data, &output_shape).unwrap(),
-            requires_grad,
-        )
+        // Unsqueeze each (batch, hidden) → (batch, 1, hidden), then cat along dim=1
+        let unsqueezed: Vec<Variable> = outputs.iter()
+            .map(|o| o.unsqueeze(1))
+            .collect();
+        let refs: Vec<&Variable> = unsqueezed.iter().collect();
+        Variable::cat(&refs, 1)
     }
 }
 
@@ -1015,5 +962,45 @@ mod tests {
         );
         let output = lstm.forward(&input);
         assert_eq!(output.shape(), vec![2, 5, 20]);
+    }
+
+    #[test]
+    fn test_gru_gradients_reach_parameters() {
+        let gru = GRU::new(4, 8, 1);
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.5f32; 2 * 3 * 4], &[2, 3, 4]).unwrap(),
+            true,
+        );
+        let output = gru.forward(&input);
+        println!("Output shape: {:?}, requires_grad: {}", output.shape(), output.requires_grad());
+        let loss = output.sum();
+        println!("Loss: {:?}, requires_grad: {}", loss.data().to_vec(), loss.requires_grad());
+        loss.backward();
+
+        // Check input gradient
+        println!("Input grad: {:?}", input.grad().map(|g| g.to_vec().iter().map(|x| x.abs()).sum::<f32>()));
+
+        let params = gru.parameters();
+        println!("Number of parameters: {}", params.len());
+        let mut has_grad = false;
+        for (i, p) in params.iter().enumerate() {
+            let grad = p.grad();
+            match grad {
+                Some(g) => {
+                    let gv = g.to_vec();
+                    let sum_abs: f32 = gv.iter().map(|x| x.abs()).sum();
+                    println!("Param {} shape {:?} requires_grad={}: grad sum_abs={:.6}",
+                        i, p.shape(), p.requires_grad(), sum_abs);
+                    if sum_abs > 0.0 {
+                        has_grad = true;
+                    }
+                }
+                None => {
+                    println!("Param {} shape {:?} requires_grad={}: NO GRADIENT",
+                        i, p.shape(), p.requires_grad());
+                }
+            }
+        }
+        assert!(has_grad, "At least one GRU parameter should have non-zero gradients");
     }
 }

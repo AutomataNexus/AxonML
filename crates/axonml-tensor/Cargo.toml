@@ -27,6 +27,7 @@ categories = ["science", "mathematics"]
 [features]
 default = ["std"]
 std = ["axonml-core/std"]
+cuda = ["axonml-core/cuda"]
 
 [dependencies]
 axonml-core.workspace = true
