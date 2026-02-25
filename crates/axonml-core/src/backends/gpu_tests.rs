@@ -314,6 +314,7 @@ pub fn cpu_gemm(a: &[f32], b: &[f32], m: usize, n: usize, k: usize) -> Vec<f32> 
 #[cfg(feature = "cuda")]
 pub mod cuda_tests {
     use super::*;
+    use crate::backends::Backend;
     use crate::backends::cuda::{device_count, is_available, CudaBackend};
 
     /// Run all CUDA tests.

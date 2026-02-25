@@ -1,0 +1,366 @@
+//! HVAC 4-Stage Inference Pipeline
+//!
+//! Orchestrates the full 8-model diagnostic pipeline:
+//! Stage 1: 5 specialist models (parallel)
+//! Stage 2: Colossus aggregator
+//! Stage 3: Gaia safety validator
+//! Stage 4: Apollo master coordinator
+//!
+//! @version 0.1.0
+//! @author AutomataNexus Development Team
+
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
+
+use super::{
+    aquilo::Aquilo,
+    boreas::Boreas,
+    naiad::Naiad,
+    vulcan::Vulcan,
+    zephyrus::Zephyrus,
+    colossus::Colossus,
+    gaia::Gaia,
+    apollo::{Apollo, RAW_SENSOR_DIM},
+    data::{HvacSensorData, PipelineOutput},
+};
+
+// =============================================================================
+// HvacPipeline
+// =============================================================================
+
+/// Full 4-stage HVAC diagnostic pipeline.
+///
+/// Runs all 8 models in the correct dependency order and produces
+/// a comprehensive diagnostic output.
+pub struct HvacPipeline {
+    /// Stage 1: Electrical systems specialist.
+    pub aquilo: Aquilo,
+    /// Stage 1: Refrigeration systems specialist.
+    pub boreas: Boreas,
+    /// Stage 1: Water systems specialist.
+    pub naiad: Naiad,
+    /// Stage 1: Mechanical systems specialist.
+    pub vulcan: Vulcan,
+    /// Stage 1: Airflow systems specialist.
+    pub zephyrus: Zephyrus,
+    /// Stage 2: Cross-specialist aggregator.
+    pub colossus: Colossus,
+    /// Stage 3: Safety validator.
+    pub gaia: Gaia,
+    /// Stage 4: Master coordinator.
+    pub apollo: Apollo,
+}
+
+impl HvacPipeline {
+    /// Creates a new pipeline with all models initialized.
+    pub fn new() -> Self {
+        Self {
+            aquilo: Aquilo::new(),
+            boreas: Boreas::new(),
+            naiad: Naiad::new(),
+            vulcan: Vulcan::new(),
+            zephyrus: Zephyrus::new(),
+            colossus: Colossus::new(),
+            gaia: Gaia::new(),
+            apollo: Apollo::new(),
+        }
+    }
+
+    /// Run the full diagnostic pipeline.
+    ///
+    /// # Arguments
+    /// * `sensor_data` - Raw HVAC sensor readings from all subsystems
+    ///
+    /// # Returns
+    /// Complete pipeline output including all model results
+    pub fn diagnose(&self, sensor_data: &HvacSensorData) -> PipelineOutput {
+        let batch = sensor_data.electrical.shape()[0];
+
+        // =====================================================================
+        // Stage 1: Specialist Models (can run in parallel)
+        // =====================================================================
+
+        // Aquilo: flatten (batch, 64, 7) → (batch, 448), take first 168
+        let elec_flat = flatten_sensor(&sensor_data.electrical, batch, 64, 7, 168);
+        let (aquilo_fault, _, _, _, aquilo_emb) = self.aquilo.forward_all(&elec_flat);
+
+        // Boreas: (batch, 80, 7) as-is
+        let (boreas_fault, _, _, _, boreas_emb) = self.boreas.forward_all(&sensor_data.refrigeration);
+
+        // Naiad: transpose (batch, 64, 7) → (batch, 7, 64) for Conv1d
+        let water_t = transpose_last_two(&sensor_data.water, batch, 64, 7);
+        let (naiad_fault, _, _, _, naiad_emb) = self.naiad.forward_all(&water_t);
+
+        // Vulcan: flatten (batch, 96, 7) → (batch, 672)
+        let mech_flat = flatten_sensor(&sensor_data.mechanical, batch, 96, 7, 672);
+        let (vulcan_fault, _, _, _, vulcan_emb) = self.vulcan.forward_all(&mech_flat);
+
+        // Zephyrus: transpose (batch, 72, 7) → (batch, 7, 72) for Conv1d/GCN
+        let air_t = transpose_last_two(&sensor_data.airflow, batch, 72, 7);
+        let (zephyrus_fault, _, _, _, zephyrus_emb) = self.zephyrus.forward_all(&air_t);
+
+        // Concatenate specialist embeddings
+        let specialist_features = super::aquilo::concat_variables(
+            &[&aquilo_emb, &boreas_emb, &naiad_emb, &vulcan_emb, &zephyrus_emb],
+            batch,
+        );
+
+        // =====================================================================
+        // Stage 2: Colossus Aggregator
+        // =====================================================================
+
+        let (_, _, _, _, colossus_emb) = self.colossus.forward_specialists(
+            &aquilo_emb, &boreas_emb, &naiad_emb, &vulcan_emb, &zephyrus_emb,
+        );
+
+        // =====================================================================
+        // Stage 3: Gaia Safety Validator
+        // =====================================================================
+
+        let (_, safety_score, _, _, gaia_emb) = self.gaia.forward_parts(
+            &specialist_features, &colossus_emb,
+        );
+
+        // =====================================================================
+        // Stage 4: Apollo Master Coordinator
+        // =====================================================================
+
+        // Summarize raw sensors: mean across time for each channel
+        let raw_sensor_summary = summarize_sensors(sensor_data, batch);
+
+        let model_embs = [
+            &aquilo_emb, &boreas_emb, &naiad_emb, &vulcan_emb,
+            &zephyrus_emb, &colossus_emb, &gaia_emb,
+        ];
+        let model_refs: Vec<&Variable> = model_embs.to_vec();
+
+        let (diagnosis, _, _, _, _) = self.apollo.forward_parts(&model_refs, &raw_sensor_summary);
+
+        // =====================================================================
+        // Collect outputs
+        // =====================================================================
+
+        PipelineOutput {
+            specialist_features,
+            aggregator_output: colossus_emb,
+            safety_output: safety_score,
+            diagnosis,
+            specialist_faults: vec![
+                aquilo_fault, boreas_fault, naiad_fault, vulcan_fault, zephyrus_fault,
+            ],
+        }
+    }
+
+    /// Returns total parameter count across all 8 models.
+    pub fn total_parameters(&self) -> usize {
+        use axonml_nn::Module;
+        self.aquilo.num_parameters()
+            + self.boreas.num_parameters()
+            + self.naiad.num_parameters()
+            + self.vulcan.num_parameters()
+            + self.zephyrus.num_parameters()
+            + self.colossus.num_parameters()
+            + self.gaia.num_parameters()
+            + self.apollo.num_parameters()
+    }
+
+    /// Sets all models to eval mode.
+    pub fn eval(&mut self) {
+        use axonml_nn::Module;
+        self.aquilo.set_training(false);
+        self.boreas.set_training(false);
+        self.naiad.set_training(false);
+        self.vulcan.set_training(false);
+        self.zephyrus.set_training(false);
+        self.colossus.set_training(false);
+        self.gaia.set_training(false);
+        self.apollo.set_training(false);
+    }
+
+    /// Sets all models to train mode.
+    pub fn train(&mut self) {
+        use axonml_nn::Module;
+        self.aquilo.set_training(true);
+        self.boreas.set_training(true);
+        self.naiad.set_training(true);
+        self.vulcan.set_training(true);
+        self.zephyrus.set_training(true);
+        self.colossus.set_training(true);
+        self.gaia.set_training(true);
+        self.apollo.set_training(true);
+    }
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/// Flatten sensor data from (batch, time, channels) to (batch, flat_dim).
+fn flatten_sensor(input: &Variable, batch: usize, time: usize, channels: usize, target_dim: usize) -> Variable {
+    let data = input.data().to_vec();
+    let full_dim = time * channels;
+    let dim = target_dim.min(full_dim);
+
+    let mut output = Vec::with_capacity(batch * dim);
+    for b in 0..batch {
+        let offset = b * full_dim;
+        output.extend_from_slice(&data[offset..offset + dim]);
+    }
+
+    Variable::new(
+        Tensor::from_vec(output, &[batch, dim]).unwrap(), false)
+}
+
+/// Transpose last two dimensions: (batch, T, C) → (batch, C, T).
+fn transpose_last_two(input: &Variable, batch: usize, time: usize, channels: usize) -> Variable {
+    let data = input.data().to_vec();
+    let mut output = vec![0.0f32; batch * channels * time];
+
+    for b in 0..batch {
+        for t in 0..time {
+            for c in 0..channels {
+                output[(b * channels + c) * time + t] = data[(b * time + t) * channels + c];
+            }
+        }
+    }
+
+    Variable::new(
+        Tensor::from_vec(output, &[batch, channels, time]).unwrap(), false)
+}
+
+/// Compute mean sensor values across time for raw sensor summary.
+fn summarize_sensors(data: &HvacSensorData, batch: usize) -> Variable {
+    let mut summary = Vec::with_capacity(batch * RAW_SENSOR_DIM);
+
+    for b in 0..batch {
+        // Electrical: 7 channels, mean over 64 timesteps
+        let elec_data = data.electrical.data().to_vec();
+        for c in 0..7 {
+            let mut sum = 0.0;
+            for t in 0..64 {
+                sum += elec_data[(b * 64 + t) * 7 + c];
+            }
+            summary.push(sum / 64.0);
+        }
+
+        // Refrigeration: 7 channels, mean over 80 timesteps
+        let refrig_data = data.refrigeration.data().to_vec();
+        for c in 0..7 {
+            let mut sum = 0.0;
+            for t in 0..80 {
+                sum += refrig_data[(b * 80 + t) * 7 + c];
+            }
+            summary.push(sum / 80.0);
+        }
+
+        // Water: 7 channels, mean over 64 timesteps
+        let water_data = data.water.data().to_vec();
+        for c in 0..7 {
+            let mut sum = 0.0;
+            for t in 0..64 {
+                sum += water_data[(b * 64 + t) * 7 + c];
+            }
+            summary.push(sum / 64.0);
+        }
+
+        // Mechanical: 7 channels, mean over 96 timesteps
+        let mech_data = data.mechanical.data().to_vec();
+        for c in 0..7 {
+            let mut sum = 0.0;
+            for t in 0..96 {
+                sum += mech_data[(b * 96 + t) * 7 + c];
+            }
+            summary.push(sum / 96.0);
+        }
+
+        // Airflow: 7 channels, mean over 72 timesteps
+        let air_data = data.airflow.data().to_vec();
+        for c in 0..7 {
+            let mut sum = 0.0;
+            for t in 0..72 {
+                sum += air_data[(b * 72 + t) * 7 + c];
+            }
+            summary.push(sum / 72.0);
+        }
+    }
+
+    Variable::new(
+        Tensor::from_vec(summary, &[batch, RAW_SENSOR_DIM]).unwrap(), false)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::data::SyntheticHvacGenerator;
+    use axonml_nn::Module;
+
+    #[test]
+    fn test_pipeline_creation() {
+        let pipeline = HvacPipeline::new();
+        let total = pipeline.total_parameters();
+        // 8-model pipeline total
+        assert!(total > 3_000_000 && total < 15_000_000,
+            "Total pipeline has {} params", total);
+    }
+
+    #[test]
+    fn test_pipeline_end_to_end() {
+        let pipeline = HvacPipeline::new();
+        let gen = SyntheticHvacGenerator::new(42);
+        let (sensor_data, _labels) = gen.generate_normal(2);
+
+        let output = pipeline.diagnose(&sensor_data);
+
+        // Verify output shapes
+        assert_eq!(output.diagnosis.shape(), vec![2, 12]);
+        assert_eq!(output.specialist_faults.len(), 5);
+        assert_eq!(output.specialist_faults[0].shape(), vec![2, 13]); // Aquilo
+        assert_eq!(output.specialist_faults[1].shape(), vec![2, 16]); // Boreas
+        assert_eq!(output.safety_output.shape(), vec![2, 1]);
+    }
+
+    #[test]
+    fn test_pipeline_eval_mode() {
+        let mut pipeline = HvacPipeline::new();
+        pipeline.eval();
+        assert!(!pipeline.aquilo.is_training());
+        assert!(!pipeline.boreas.is_training());
+
+        pipeline.train();
+        assert!(pipeline.aquilo.is_training());
+    }
+
+    #[test]
+    fn test_transpose_last_two() {
+        let input = Variable::new(
+            Tensor::from_vec(vec![
+                1.0, 2.0, 3.0,  // t=0: [c0, c1, c2]
+                4.0, 5.0, 6.0,  // t=1
+            ], &[1, 2, 3]).unwrap(), false);
+
+        let output = transpose_last_two(&input, 1, 2, 3);
+        let data = output.data().to_vec();
+        assert_eq!(output.shape(), vec![1, 3, 2]);
+        // c0: [1, 4], c1: [2, 5], c2: [3, 6]
+        assert_eq!(data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    }
+
+    #[test]
+    fn test_summarize_sensors() {
+        let gen = SyntheticHvacGenerator::new(42);
+        let (sensor_data, _) = gen.generate_normal(2);
+
+        let summary = summarize_sensors(&sensor_data, 2);
+        assert_eq!(summary.shape(), vec![2, 35]);
+
+        // Values should be reasonable (not NaN or extreme)
+        let data = summary.data().to_vec();
+        for val in &data {
+            assert!(val.is_finite(), "Sensor summary contains non-finite value");
+        }
+    }
+}

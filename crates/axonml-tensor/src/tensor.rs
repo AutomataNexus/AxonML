@@ -18,11 +18,64 @@ use core::fmt;
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
 use axonml_core::backends::CpuBackend;
+#[cfg(feature = "cuda")]
+use axonml_core::backends::CudaBackend;
 use axonml_core::dtype::{Float, Numeric, Scalar};
 use axonml_core::error::{Error, Result};
 use axonml_core::storage::Storage;
 use axonml_core::Device;
 use num_traits::NumCast;
+
+// =============================================================================
+// CUDA Acceleration
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+mod cuda_accel {
+    use super::*;
+    use std::sync::OnceLock;
+
+    static CUDA_BACKEND: OnceLock<Option<CudaBackend>> = OnceLock::new();
+
+    /// Get the global CUDA backend (initialized lazily on first call).
+    pub fn get_cuda() -> Option<&'static CudaBackend> {
+        CUDA_BACKEND
+            .get_or_init(|| {
+                let backend = CudaBackend::new(0);
+                if backend.is_some() {
+                    eprintln!("[AxonML] CUDA backend initialized (GPU 0)");
+                }
+                backend
+            })
+            .as_ref()
+    }
+
+    /// GPU-accelerated matmul: copies data to GPU, runs cuBLAS GEMM, copies back.
+    /// Returns None if GPU is unavailable or an error occurs.
+    pub fn cuda_matmul(a: &[f32], b: &[f32], m: usize, n: usize, k: usize) -> Option<Vec<f32>> {
+        let cuda = get_cuda()?;
+
+        // cuBLAS uses column-major, so we compute C = B^T @ A^T in col-major
+        // which gives us C in row-major (the layout we want).
+        let a_gpu = cuda.htod_copy(a).ok()?;
+        let b_gpu = cuda.htod_copy(b).ok()?;
+        let mut c_gpu = cuda.alloc::<f32>(m * n).ok()?;
+
+        // cuBLAS GEMM: C(m,n) = A(m,k) @ B(k,n) in row-major
+        // In column-major terms: C^T(n,m) = B^T(n,k) @ A^T(k,m)
+        cuda.gemm_f32(
+            false, false,  // no transpose (we swap A and B)
+            n, m, k,       // dimensions swapped for col-major
+            1.0,
+            &b_gpu, n,     // B is "A" in col-major, lda = n
+            &a_gpu, k,     // A is "B" in col-major, ldb = k
+            0.0,
+            &mut c_gpu, n, // ldc = n
+        ).ok()?;
+
+        cuda.dtoh_copy(&c_gpu).ok()
+    }
+}
 
 use crate::shape::{
     broadcast_shape, broadcast_strides, contiguous_strides, is_contiguous, linear_index,
@@ -631,6 +684,59 @@ impl<T: Numeric> Tensor<T> {
         let data = self.to_vec();
         Ok(CpuBackend::argmin(&data).unwrap())
     }
+
+    /// Concatenates tensors along a dimension.
+    ///
+    /// All tensors must have the same shape except along the cat dimension.
+    pub fn cat(tensors: &[&Self], dim: usize) -> Result<Self> {
+        if tensors.is_empty() {
+            return Err(Error::invalid_operation("cat requires at least one tensor"));
+        }
+        let ndim = tensors[0].ndim();
+        if dim >= ndim {
+            return Err(Error::invalid_operation("cat dimension out of range"));
+        }
+
+        for t in &tensors[1..] {
+            if t.ndim() != ndim {
+                return Err(Error::invalid_operation("cat: all tensors must have same ndim"));
+            }
+            for d in 0..ndim {
+                if d != dim && t.shape[d] != tensors[0].shape[d] {
+                    return Err(Error::invalid_operation("cat: shapes must match on non-cat dims"));
+                }
+            }
+        }
+
+        let total_dim_size: usize = tensors.iter().map(|t| t.shape[dim]).sum();
+        let mut out_shape: Vec<usize> = tensors[0].shape.to_vec();
+        out_shape[dim] = total_dim_size;
+
+        let outer_size: usize = out_shape[..dim].iter().product();
+        let inner_size: usize = out_shape[dim + 1..].iter().product();
+        let total_numel: usize = out_shape.iter().product();
+        let mut result = vec![T::zero(); total_numel];
+
+        let mut dim_offset = 0;
+        for t in tensors {
+            let t_data = t.contiguous().to_vec();
+            let t_dim_size = t.shape[dim];
+            for outer in 0..outer_size {
+                for d in 0..t_dim_size {
+                    for inner in 0..inner_size {
+                        let src_idx = outer * t_dim_size * inner_size + d * inner_size + inner;
+                        let dst_idx = outer * total_dim_size * inner_size
+                            + (dim_offset + d) * inner_size
+                            + inner;
+                        result[dst_idx] = t_data[src_idx];
+                    }
+                }
+            }
+            dim_offset += t_dim_size;
+        }
+
+        Self::from_vec(result, &out_shape)
+    }
 }
 
 // =============================================================================
@@ -784,6 +890,55 @@ impl<T: Float> Tensor<T> {
                 let mean = sum / NumCast::from(dim_size).unwrap();
                 let result_idx = outer * inner_size + inner;
                 result[result_idx] = mean;
+            }
+        }
+
+        Self::from_vec(result, &new_shape).unwrap()
+    }
+
+    /// Sum along a dimension.
+    #[must_use]
+    pub fn sum_dim(&self, dim: i32, keepdim: bool) -> Self {
+        let ndim = self.ndim();
+        let dim = if dim < 0 {
+            (ndim as i32 + dim) as usize
+        } else {
+            dim as usize
+        };
+
+        if dim >= ndim {
+            return self.clone();
+        }
+
+        let dim_size = self.shape[dim];
+        let data = self.to_vec();
+        let mut new_shape = self.shape.clone();
+
+        if keepdim {
+            new_shape[dim] = 1;
+        } else {
+            new_shape.remove(dim);
+        }
+
+        if new_shape.is_empty() {
+            new_shape = smallvec::smallvec![1];
+        }
+
+        let new_numel: usize = new_shape.iter().product();
+        let mut result = vec![T::zero(); new_numel];
+
+        let outer_size: usize = self.shape[..dim].iter().product();
+        let inner_size: usize = self.shape[dim + 1..].iter().product();
+
+        for outer in 0..outer_size {
+            for inner in 0..inner_size {
+                let mut sum = T::zero();
+                for d in 0..dim_size {
+                    let idx = outer * dim_size * inner_size + d * inner_size + inner;
+                    sum = sum + data[idx];
+                }
+                let result_idx = outer * inner_size + inner;
+                result[result_idx] = sum;
             }
         }
 
@@ -1039,6 +1194,24 @@ impl<T: Numeric> Tensor<T> {
         if self.ndim() == 2 && other.ndim() == 2 {
             let a_data = self.contiguous().to_vec();
             let b_data = other.contiguous().to_vec();
+
+            // Try GPU acceleration for f32 tensors
+            #[cfg(feature = "cuda")]
+            {
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
+                    // Safety: we verified T == f32
+                    let a_f32: &[f32] = unsafe { std::mem::transmute(a_data.as_slice()) };
+                    let b_f32: &[f32] = unsafe { std::mem::transmute(b_data.as_slice()) };
+                    if let Some(c_f32) = cuda_accel::cuda_matmul(a_f32, b_f32, m, n, k1) {
+                        let c_t: Vec<T> = unsafe {
+                            let mut v = std::mem::ManuallyDrop::new(c_f32);
+                            Vec::from_raw_parts(v.as_mut_ptr() as *mut T, v.len(), v.capacity())
+                        };
+                        return Self::from_vec(c_t, &[m, n]);
+                    }
+                }
+            }
+
             let mut c_data = vec![T::zero(); m * n];
             CpuBackend::matmul(&mut c_data, &a_data, &b_data, m, n, k1);
             return Self::from_vec(c_data, &[m, n]);
@@ -1064,7 +1237,36 @@ impl<T: Numeric> Tensor<T> {
         let b_data = other.contiguous().to_vec();
         let mut c_data = vec![T::zero(); batch_size * m * n];
 
-        // Loop over batches and compute matmul for each
+        // Try GPU acceleration for f32 batched matmul
+        #[cfg(feature = "cuda")]
+        {
+            if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
+                let a_f32: &[f32] = unsafe { std::mem::transmute(a_data.as_slice()) };
+                let b_f32: &[f32] = unsafe { std::mem::transmute(b_data.as_slice()) };
+                let mut gpu_ok = true;
+                for batch in 0..batch_size {
+                    let a_slice = &a_f32[batch * a_stride..(batch + 1) * a_stride];
+                    let b_slice = &b_f32[batch * b_stride..(batch + 1) * b_stride];
+                    if let Some(c_batch) = cuda_accel::cuda_matmul(a_slice, b_slice, m, n, k1) {
+                        c_data[batch * c_stride..(batch + 1) * c_stride]
+                            .copy_from_slice(unsafe { std::mem::transmute(c_batch.as_slice()) });
+                    } else {
+                        gpu_ok = false;
+                        break;
+                    }
+                }
+                if gpu_ok {
+                    let mut output_shape = batch_dims_self;
+                    output_shape.push(m);
+                    output_shape.push(n);
+                    return Self::from_vec(c_data, &output_shape);
+                }
+                // Fall through to CPU if GPU failed
+                c_data = vec![T::zero(); batch_size * m * n];
+            }
+        }
+
+        // CPU fallback: loop over batches
         for batch in 0..batch_size {
             let a_slice = &a_data[batch * a_stride..(batch + 1) * a_stride];
             let b_slice = &b_data[batch * b_stride..(batch + 1) * b_stride];

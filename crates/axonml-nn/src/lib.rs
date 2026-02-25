@@ -123,7 +123,8 @@ pub use sequential::Sequential;
 pub use layers::{
     AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, BatchNorm1d, BatchNorm2d, Conv1d, Conv2d, Dropout,
     Embedding, GRUCell, GroupNorm, InstanceNorm2d, LSTMCell, LayerNorm, Linear, MaxPool1d,
-    MaxPool2d, MultiHeadAttention, RNNCell, GRU, LSTM, RNN,
+    MaxPool2d, MultiHeadAttention, RNNCell, ResidualBlock, GRU, LSTM, RNN,
+    FFT1d, STFT, GCNConv, GATConv,
 };
 
 // Activation re-exports
