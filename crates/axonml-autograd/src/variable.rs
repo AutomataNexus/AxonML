@@ -15,9 +15,10 @@ use parking_lot::RwLock;
 use axonml_tensor::Tensor;
 
 use crate::functions::{
-    AddBackward, DivBackward, MatMulBackward, MeanBackward, MulBackward, NarrowBackward,
-    NegBackward, PowBackward, ReluBackward, ReshapeBackward, SigmoidBackward, SubBackward,
-    SumBackward, TanhBackward, TransposeBackward,
+    AddBackward, CatBackward, DivBackward, ExpandBackward, MatMulBackward, MeanBackward,
+    MulBackward, NarrowBackward, NegBackward, PowBackward, ReluBackward, ReshapeBackward,
+    SelectBackward, SigmoidBackward, SubBackward, SumBackward, SumDimBackward, TanhBackward,
+    TransposeBackward, UnsqueezeBackward,
 };
 use crate::grad_fn::{AccumulateGrad, GradAccumulator, GradFn};
 use crate::graph::{with_graph, GraphNode};
@@ -88,8 +89,11 @@ impl Variable {
         Self::new(data, false)
     }
 
-    /// Creates a new variable from an operation result.
-    fn from_operation(data: Tensor<f32>, grad_fn: GradFn, requires_grad: bool) -> Self {
+    /// Creates a new variable from an operation result with an attached gradient function.
+    ///
+    /// This connects the variable to the computational graph, allowing gradients
+    /// to flow backward through the operation that produced this variable.
+    pub fn from_operation(data: Tensor<f32>, grad_fn: GradFn, requires_grad: bool) -> Self {
         let node = if requires_grad {
             Some(with_graph(|g| g.register_operation(grad_fn.clone(), true)))
         } else {
@@ -423,6 +427,25 @@ impl Variable {
         }
     }
 
+    /// Sum along a dimension, removing that dimension.
+    #[must_use]
+    pub fn sum_dim(&self, dim: usize) -> Variable {
+        let self_data = self.data.read().clone();
+        let result = self_data.sum_dim(dim as i32, false);
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(SumDimBackward::new(
+                self.grad_fn.clone(),
+                self.shape(),
+                dim,
+            ));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
+    }
+
     /// Mean of all elements.
     #[must_use]
     pub fn mean(&self) -> Variable {
@@ -542,10 +565,84 @@ impl Variable {
     }
 
     /// Expands the variable to a new shape (broadcast).
+    ///
+    /// Tracks the computational graph for backward pass.
     #[must_use]
     pub fn expand(&self, shape: &[usize]) -> Variable {
+        let input_shape = self.shape();
         let new_data = self.data().broadcast_to(shape);
-        Variable::new(new_data, self.requires_grad())
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(ExpandBackward::new(self.grad_fn.clone(), input_shape));
+            Variable::from_operation(new_data, grad_fn, true)
+        } else {
+            Variable::from_tensor(new_data)
+        }
+    }
+
+    /// Selects a single index along a dimension, reducing rank by 1.
+    ///
+    /// For a tensor of shape (A, B, C), `select(1, i)` returns shape (A, C).
+    /// Tracks the computational graph for backward pass.
+    #[must_use]
+    pub fn select(&self, dim: usize, index: usize) -> Variable {
+        let input_shape = self.shape();
+        let new_data = self.data().select(dim, index)
+            .unwrap_or_else(|_| self.data().clone());
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(SelectBackward::new(
+                self.grad_fn.clone(),
+                input_shape,
+                dim,
+                index,
+            ));
+            Variable::from_operation(new_data, grad_fn, true)
+        } else {
+            Variable::from_tensor(new_data)
+        }
+    }
+
+    /// Adds a dimension of size 1 at the given position.
+    ///
+    /// Tracks the computational graph for backward pass.
+    #[must_use]
+    pub fn unsqueeze(&self, dim: usize) -> Variable {
+        let new_data = self.data().unsqueeze(dim as i64)
+            .unwrap_or_else(|_| self.data().clone());
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(UnsqueezeBackward::new(self.grad_fn.clone(), dim));
+            Variable::from_operation(new_data, grad_fn, true)
+        } else {
+            Variable::from_tensor(new_data)
+        }
+    }
+
+    /// Concatenates variables along a dimension.
+    ///
+    /// All variables must have the same shape except along the cat dimension.
+    /// Tracks the computational graph for backpropagation.
+    #[must_use]
+    pub fn cat(variables: &[&Variable], dim: usize) -> Variable {
+        let tensors: Vec<Tensor<f32>> = variables.iter().map(|v| v.data()).collect();
+        let tensor_refs: Vec<&Tensor<f32>> = tensors.iter().collect();
+        let result = Tensor::cat(&tensor_refs, dim).unwrap();
+
+        let requires_grad = variables.iter().any(|v| v.requires_grad) && is_grad_enabled();
+
+        if requires_grad {
+            let next_fns: Vec<Option<GradFn>> =
+                variables.iter().map(|v| v.grad_fn.clone()).collect();
+            let sizes: Vec<usize> = variables.iter().map(|v| v.shape()[dim]).collect();
+            let grad_fn = GradFn::new(CatBackward::new(next_fns, sizes, dim));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
     }
 
     // =========================================================================

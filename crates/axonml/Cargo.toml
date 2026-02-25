@@ -36,7 +36,7 @@ jit = ["core", "dep:axonml-jit"]
 # ONNX import/export
 onnx = ["core", "dep:axonml-onnx"]
 # CUDA GPU acceleration
-cuda = ["axonml-core/cuda"]
+cuda = ["axonml-core/cuda", "axonml-tensor/cuda"]
 # WebGPU/Vulkan GPU acceleration
 wgpu = ["axonml-core/wgpu"]
 # Full feature set
@@ -57,3 +57,4 @@ axonml-profile = { workspace = true, optional = true }
 axonml-llm = { workspace = true, optional = true }
 axonml-jit = { workspace = true, optional = true }
 axonml-onnx = { workspace = true, optional = true }
+rand = "0.8"
