@@ -23,7 +23,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with 1076+ passin
 
 ## Features
 
-### Core (v0.2.8)
+### Core (v0.3.0)
 
 - **Tensor Operations** (`axonml-tensor`)
   - N-dimensional tensors with arbitrary shapes
@@ -423,7 +423,7 @@ Add Axonml to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = "0.1"
+axonml = "0.3"
 ```
 
 ### Basic Usage
@@ -537,6 +537,23 @@ let u = s.squeeze(Some(0)).unwrap();  // Remove dimension
 let v = t.slice_dim0(0, 1).unwrap();
 let n = t.narrow(1, 0, 2).unwrap();
 ```
+
+## Production Edge Deployment
+
+AxonML powers real-time predictive maintenance on HVAC systems across commercial buildings. 12 models (6 LSTM autoencoders for anomaly detection + 6 GRU failure predictors) run live inference on Raspberry Pi edge controllers, processing sensor data at 1 Hz.
+
+| Building | Unit | Anomaly Detector | Failure Predictor | Params | RSS |
+|----------|------|-------------------|-------------------|--------|-----|
+| FCOG | Mechroom | Erebus (LSTM-AE) | Kairos (GRU-FDD) | 416K | 2.5 MB |
+| Warren | AHU-1 | Aether | Moros | 105K | 2.1 MB |
+| Warren | AHU-2 | Phanes | Hecate | 233K | 2.4 MB |
+| Warren | AHU-4 | Nyctos | Cassandra | 105K | 2.1 MB |
+| Warren | AHU-7 | Poseidon | Triton | 105K | 2.1 MB |
+| Huntington | Mechroom | Plutus | Moira | 415K | 3.2 MB |
+
+**Stack:** AxonML training (CPU) → `.axonml` model files → cross-compiled ARM inference daemons (`armv7-unknown-linux-musleabihf`) → PM2-managed services on Raspberry Pi → REST API (`/api/inference/latest`)
+
+Each daemon runs pure-tensor inference (no autograd overhead), polls local NexusEdge for sensor data, maintains rolling time-series buffers, and exposes anomaly scores + failure predictions via HTTP.
 
 ## Architecture
 

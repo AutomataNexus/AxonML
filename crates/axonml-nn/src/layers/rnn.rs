@@ -417,6 +417,15 @@ impl Module for LSTMCell {
         ]
     }
 
+    fn named_parameters(&self) -> HashMap<String, Parameter> {
+        let mut params = HashMap::new();
+        params.insert("weight_ih".to_string(), self.weight_ih.clone());
+        params.insert("weight_hh".to_string(), self.weight_hh.clone());
+        params.insert("bias_ih".to_string(), self.bias_ih.clone());
+        params.insert("bias_hh".to_string(), self.bias_hh.clone());
+        params
+    }
+
     fn name(&self) -> &'static str {
         "LSTMCell"
     }
@@ -555,6 +564,23 @@ impl Module for LSTM {
 
     fn parameters(&self) -> Vec<Parameter> {
         self.cells.iter().flat_map(|c| c.parameters()).collect()
+    }
+
+    fn named_parameters(&self) -> HashMap<String, Parameter> {
+        let mut params = HashMap::new();
+        if self.cells.len() == 1 {
+            // Single layer: expose directly without cell index prefix
+            for (n, p) in self.cells[0].named_parameters() {
+                params.insert(n, p);
+            }
+        } else {
+            for (i, cell) in self.cells.iter().enumerate() {
+                for (n, p) in cell.named_parameters() {
+                    params.insert(format!("cells.{i}.{n}"), p);
+                }
+            }
+        }
+        params
     }
 
     fn name(&self) -> &'static str {
@@ -706,6 +732,15 @@ impl Module for GRUCell {
         ]
     }
 
+    fn named_parameters(&self) -> HashMap<String, Parameter> {
+        let mut params = HashMap::new();
+        params.insert("weight_ih".to_string(), self.weight_ih.clone());
+        params.insert("weight_hh".to_string(), self.weight_hh.clone());
+        params.insert("bias_ih".to_string(), self.bias_ih.clone());
+        params.insert("bias_hh".to_string(), self.bias_hh.clone());
+        params
+    }
+
     fn name(&self) -> &'static str {
         "GRUCell"
     }
@@ -806,6 +841,22 @@ impl Module for GRU {
 
     fn parameters(&self) -> Vec<Parameter> {
         self.cells.iter().flat_map(|c| c.parameters()).collect()
+    }
+
+    fn named_parameters(&self) -> HashMap<String, Parameter> {
+        let mut params = HashMap::new();
+        if self.cells.len() == 1 {
+            for (n, p) in self.cells[0].named_parameters() {
+                params.insert(n, p);
+            }
+        } else {
+            for (i, cell) in self.cells.iter().enumerate() {
+                for (n, p) in cell.named_parameters() {
+                    params.insert(format!("cells.{i}.{n}"), p);
+                }
+            }
+        }
+        params
     }
 
     fn name(&self) -> &'static str {

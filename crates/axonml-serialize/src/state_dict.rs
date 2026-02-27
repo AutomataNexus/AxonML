@@ -106,14 +106,28 @@ impl StateDict {
     }
 
     /// Create a state dictionary from a module.
+    ///
+    /// Uses `named_parameters()` to get fully-qualified parameter names
+    /// (e.g., "encoder_lstm1.weight_ih") that are unique across sub-modules.
+    /// Falls back to `parameters()` if `named_parameters()` returns empty.
     pub fn from_module<M: Module>(module: &M) -> Self {
         let mut state_dict = Self::new();
 
-        for param in module.parameters() {
-            let name = param.name().to_string();
-            let tensor_data = TensorData::from_tensor(&param.data());
-            let entry = StateDictEntry::new(tensor_data, param.requires_grad());
-            state_dict.entries.insert(name, entry);
+        let named = module.named_parameters();
+        if !named.is_empty() {
+            for (name, param) in named {
+                let tensor_data = TensorData::from_tensor(&param.data());
+                let entry = StateDictEntry::new(tensor_data, param.requires_grad());
+                state_dict.entries.insert(name, entry);
+            }
+        } else {
+            // Fallback for modules that don't implement named_parameters
+            for param in module.parameters() {
+                let name = param.name().to_string();
+                let tensor_data = TensorData::from_tensor(&param.data());
+                let entry = StateDictEntry::new(tensor_data, param.requires_grad());
+                state_dict.entries.insert(name, entry);
+            }
         }
 
         state_dict
