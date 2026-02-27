@@ -36,7 +36,7 @@ axonml-nn.workspace = true
 axonml-serialize.workspace = true
 
 # ONNX parsing
-prost = "0.13"
+prost = "0.14"
 
 # Serialization
 serde = { workspace = true }
@@ -52,7 +52,7 @@ indexmap = "2.0"
 bytemuck = { workspace = true }
 
 [build-dependencies]
-prost-build = "0.13"
+prost-build = "0.14"
 
 [dev-dependencies]
 tempfile = "3.0"

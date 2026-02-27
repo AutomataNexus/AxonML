@@ -122,7 +122,10 @@ pub fn run(model_path: Option<PathBuf>, data_path: Option<PathBuf>) -> io::Resul
 }
 
 /// Main application loop
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()>
+where
+    std::io::Error: From<B::Error>,
+{
     loop {
         // Render
         terminal.draw(|frame| {
