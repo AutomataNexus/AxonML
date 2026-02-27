@@ -270,6 +270,92 @@ impl Module for MultiHeadAttention {
 }
 
 // =============================================================================
+// CrossAttention
+// =============================================================================
+
+/// Cross-Attention mechanism for encoder-decoder architectures.
+///
+/// Queries come from the decoder, keys and values come from the encoder.
+/// This is the standard cross-attention used in Transformer decoders,
+/// seq2seq models, and vision-language models.
+///
+/// # Shape (batch_first=true)
+/// - Query (decoder): (N, T, E)
+/// - Memory (encoder): (N, S, E)
+/// - Output: (N, T, E)
+///
+/// where N=batch, T=target seq len, S=source seq len, E=embed_dim.
+pub struct CrossAttention {
+    /// Underlying multi-head attention.
+    mha: MultiHeadAttention,
+}
+
+impl CrossAttention {
+    /// Creates a new CrossAttention module.
+    pub fn new(embed_dim: usize, num_heads: usize) -> Self {
+        Self {
+            mha: MultiHeadAttention::new(embed_dim, num_heads),
+        }
+    }
+
+    /// Creates CrossAttention with all options.
+    pub fn with_options(embed_dim: usize, num_heads: usize, dropout: f32, batch_first: bool) -> Self {
+        Self {
+            mha: MultiHeadAttention::with_options(embed_dim, num_heads, dropout, batch_first),
+        }
+    }
+
+    /// Computes cross-attention.
+    ///
+    /// # Arguments
+    /// * `query` - Decoder hidden states (N, T, E)
+    /// * `memory` - Encoder output (N, S, E)
+    /// * `attn_mask` - Optional attention mask
+    pub fn cross_attention(
+        &self,
+        query: &Variable,
+        memory: &Variable,
+        attn_mask: Option<&Variable>,
+    ) -> Variable {
+        self.mha.attention(query, memory, memory, attn_mask)
+    }
+
+    /// Returns the embedding dimension.
+    pub fn embed_dim(&self) -> usize {
+        self.mha.embed_dim
+    }
+
+    /// Returns the number of heads.
+    pub fn num_heads(&self) -> usize {
+        self.mha.num_heads
+    }
+}
+
+impl Module for CrossAttention {
+    fn forward(&self, input: &Variable) -> Variable {
+        // When called as Module (single input), acts as self-attention.
+        // Use cross_attention() for encoder-decoder attention.
+        self.mha.forward(input)
+    }
+
+    fn parameters(&self) -> Vec<Parameter> {
+        self.mha.parameters()
+    }
+
+    fn named_parameters(&self) -> HashMap<String, Parameter> {
+        let mut params = HashMap::new();
+        for (name, param) in self.mha.named_parameters() {
+            params.insert(format!("mha.{name}"), param);
+        }
+        params
+    }
+
+    fn name(&self) -> &'static str {
+        "CrossAttention"
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -317,5 +403,51 @@ mod tests {
         let params = mha.parameters();
         // Q, K, V, Out projections each have weight + bias = 8 total
         assert_eq!(params.len(), 8);
+    }
+
+    #[test]
+    fn test_cross_attention_creation() {
+        let ca = CrossAttention::new(256, 8);
+        assert_eq!(ca.embed_dim(), 256);
+        assert_eq!(ca.num_heads(), 8);
+    }
+
+    #[test]
+    fn test_cross_attention_forward() {
+        let ca = CrossAttention::new(64, 4);
+        // Decoder query: (batch=2, tgt_len=5, embed=64)
+        let query = Variable::new(
+            Tensor::from_vec(vec![0.1; 2 * 5 * 64], &[2, 5, 64]).unwrap(),
+            false,
+        );
+        // Encoder memory: (batch=2, src_len=10, embed=64)
+        let memory = Variable::new(
+            Tensor::from_vec(vec![0.2; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            false,
+        );
+        let output = ca.cross_attention(&query, &memory, None);
+        assert_eq!(output.shape(), vec![2, 5, 64]);
+    }
+
+    #[test]
+    fn test_cross_attention_self_attention_fallback() {
+        let ca = CrossAttention::new(64, 4);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 2 * 8 * 64], &[2, 8, 64]).unwrap(),
+            false,
+        );
+        // Module::forward does self-attention
+        let output = ca.forward(&input);
+        assert_eq!(output.shape(), vec![2, 8, 64]);
+    }
+
+    #[test]
+    fn test_cross_attention_parameters() {
+        let ca = CrossAttention::new(64, 4);
+        let params = ca.parameters();
+        assert_eq!(params.len(), 8); // Q, K, V, Out × (weight + bias)
+        let named = ca.named_parameters();
+        assert!(named.contains_key("mha.q_proj.weight"));
+        assert!(named.contains_key("mha.out_proj.bias"));
     }
 }
