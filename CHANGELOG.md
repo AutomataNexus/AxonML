@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-27
+
+### Milestone: Production Edge Inference
+
+AxonML models are running live production inference on 6 edge controllers (Raspberry Pi),
+monitoring HVAC equipment across 5 buildings. 12 models (6 anomaly detectors + 6 failure
+predictors) deployed via cross-compiled ARM binaries, each running at ~2-3 MB RSS.
+
+### Added
+
+#### Autograd Fixes (`axonml-autograd`, `axonml-nn`)
+- Fixed critical autograd graph-severing bug where `Variable::new()` was used for
+  intermediate results, creating leaf variables that blocked gradient flow
+- Fixed LSTM/GRU weight transpose operations (6 instances in `rnn.rs`)
+- Fixed `stack_outputs` in RNN/LSTM/GRU to use `unsqueeze` + `Variable::cat`
+- Added `CrossEntropyBackward` gradient function for proper backpropagation
+- Made `Variable::from_operation` public for custom gradient-tracked operations
+
+#### Tensor Operations (`axonml-tensor`)
+- `Tensor::cat(tensors, dim)` with `CatBackward` gradient function
+- `Variable::cat(vars, dim)` for autograd-tracked concatenation
+- `Tensor::sum_dim(dim, keepdim)` with `SumDimBackward` gradient function
+- `Variable::sum_dim(dim)` for autograd-tracked dimension reduction
+
+#### CUDA Backend (`axonml-core`, `axonml-tensor`)
+- CUDA matrix multiplication dispatch via cuBLAS GEMM
+
+#### Serialization (`axonml-serialize`)
+- Model save/load for production deployment (`.axonml` format)
+- StateDict extraction for weight export
+
+#### Production Edge Inference
+- Pure-tensor inference daemons (no autograd overhead) for ARM deployment
+- Cross-compilation pipeline for `armv7-unknown-linux-musleabihf` (static musl)
+- HTTP API endpoints (`/health`, `/api/inference/latest`) for integration
+- Rolling window buffers for time-series LSTM/GRU inference
+- PM2 process management for production uptime
+
+### Production Deployments
+
+| Building | Unit | Anomaly Model | Failure Predictor | Controller |
+|----------|------|---------------|-------------------|------------|
+| FCOG | Mechroom | Erebus (128K params) | Kairos (288K params) | 100.123.60.69 |
+| Warren | AHU-1 | Aether (32K params) | Moros (73K params) | 100.124.76.93 |
+| Warren | AHU-2 | Phanes (71K params) | Hecate (162K params) | 100.95.58.104 |
+| Warren | AHU-4 | Nyctos (32K params) | Cassandra (73K params) | 100.121.143.51 |
+| Warren | AHU-7 | Poseidon (32K params) | Triton (73K params) | 100.125.245.8 |
+| Huntington | Mechroom | Plutus (127K params) | Moira (288K params) | 100.73.201.107 |
+
+### Changed
+- Bumped version from 0.2.8 to 0.3.0
+
 ## [0.1.0] - 2024-XX-XX
 
 ### Added
@@ -120,7 +172,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
+- **0.3.0**: Production edge inference — 12 models deployed across 6 controllers
 - **0.1.0**: Initial release with complete ML framework
 
-[Unreleased]: https://github.com/automatanexus/axonml/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/automatanexus/axonml/releases/tag/v0.1.0
+[Unreleased]: https://github.com/AutomataNexus/AxonML/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/AutomataNexus/AxonML/compare/v0.1.0...v0.3.0
+[0.1.0]: https://github.com/AutomataNexus/AxonML/releases/tag/v0.1.0
