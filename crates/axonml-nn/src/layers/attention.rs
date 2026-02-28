@@ -88,7 +88,7 @@ impl MultiHeadAttention {
         }
     }
 
-    /// Computes attention.
+    /// Computes attention using batched matmul (BLAS-accelerated).
     pub fn attention(
         &self,
         query: &Variable,
@@ -108,127 +108,94 @@ impl MultiHeadAttention {
             key.shape()[0]
         };
 
-        // Project Q, K, V
+        // Project Q, K, V  (all tracked through autograd)
         let q = self.q_proj.forward(query);
         let k = self.k_proj.forward(key);
         let v = self.v_proj.forward(value);
 
-        // Reshape for multi-head: (batch, seq, embed) -> (batch, heads, seq, head_dim)
-        // For simplicity, we'll work with the flat representation
-        let q_vec = q.data().to_vec();
-        let k_vec = k.data().to_vec();
-        let v_vec = v.data().to_vec();
+        // Reshape to multi-head: [batch, seq, embed] → [batch, seq, heads, head_dim]
+        // Then transpose to:     [batch, heads, seq, head_dim]
+        let q = q
+            .reshape(&[batch_size, tgt_len, self.num_heads, self.head_dim])
+            .transpose(1, 2);
+        let k = k
+            .reshape(&[batch_size, src_len, self.num_heads, self.head_dim])
+            .transpose(1, 2);
+        let v = v
+            .reshape(&[batch_size, src_len, self.num_heads, self.head_dim])
+            .transpose(1, 2);
 
-        // Compute attention scores: Q @ K^T / sqrt(d_k)
-        let mut attn_scores = vec![0.0f32; batch_size * self.num_heads * tgt_len * src_len];
+        // Scaled dot-product attention: scores = Q @ K^T * scale
+        // K^T: [batch, heads, head_dim, src_len]
+        let k_t = k.transpose(2, 3);
+        // scores: [batch, heads, tgt_len, src_len]
+        let scores = q.matmul(&k_t).mul_scalar(self.scale);
 
-        for b in 0..batch_size {
-            for h in 0..self.num_heads {
-                for i in 0..tgt_len {
-                    for j in 0..src_len {
-                        let mut score = 0.0f32;
-                        for d in 0..self.head_dim {
-                            let q_idx = b * tgt_len * self.embed_dim
-                                + i * self.embed_dim
-                                + h * self.head_dim
-                                + d;
-                            let k_idx = b * src_len * self.embed_dim
-                                + j * self.embed_dim
-                                + h * self.head_dim
-                                + d;
-                            score += q_vec[q_idx] * k_vec[k_idx];
+        // Apply attention mask (0 → -1e9 additive mask)
+        // Mask shapes: [tgt_len, src_len] (causal) or [batch, src_len] (padding)
+        // Scores shape: [batch, heads, tgt_len, src_len]
+        let scores = if let Some(mask) = attn_mask {
+            let mask_shape = mask.shape();
+            let mask_data = mask.data();
+            let mask_vec = mask_data.to_vec();
+
+            // Convert to additive mask: 0 → -1e9, nonzero → 0
+            let additive: Vec<f32> = mask_vec
+                .iter()
+                .map(|&v| if v == 0.0 { -1e9 } else { 0.0 })
+                .collect();
+
+            // Expand mask to [batch, heads, tgt_len, src_len]
+            let scores_shape = scores.shape();
+            let total = scores_shape.iter().product::<usize>();
+            let mut expanded = vec![0.0f32; total];
+
+            if mask_shape.len() == 2 && mask_shape[0] == tgt_len && mask_shape[1] == src_len {
+                // Causal mask [tgt_len, src_len] → broadcast over batch & heads
+                for b in 0..batch_size {
+                    for h in 0..self.num_heads {
+                        for i in 0..tgt_len {
+                            for j in 0..src_len {
+                                let idx = b * self.num_heads * tgt_len * src_len
+                                    + h * tgt_len * src_len
+                                    + i * src_len
+                                    + j;
+                                expanded[idx] = additive[i * src_len + j];
+                            }
                         }
-                        let attn_idx = b * self.num_heads * tgt_len * src_len
-                            + h * tgt_len * src_len
-                            + i * src_len
-                            + j;
-                        attn_scores[attn_idx] = score * self.scale;
                     }
                 }
-            }
-        }
-
-        // Apply attention mask if provided
-        if let Some(mask) = attn_mask {
-            let mask_vec = mask.data().to_vec();
-            for (i, score) in attn_scores.iter_mut().enumerate() {
-                if mask_vec[i % mask_vec.len()] == 0.0 {
-                    *score = f32::NEG_INFINITY;
+            } else {
+                // General: tile mask across scores using modular indexing
+                for (i, val) in expanded.iter_mut().enumerate() {
+                    *val = additive[i % additive.len()];
                 }
             }
-        }
 
-        // Softmax over source sequence
-        let mut attn_weights = vec![0.0f32; batch_size * self.num_heads * tgt_len * src_len];
-        for b in 0..batch_size {
-            for h in 0..self.num_heads {
-                for i in 0..tgt_len {
-                    let base = b * self.num_heads * tgt_len * src_len
-                        + h * tgt_len * src_len
-                        + i * src_len;
-
-                    // Find max for numerical stability
-                    let max_score = (0..src_len)
-                        .map(|j| attn_scores[base + j])
-                        .fold(f32::NEG_INFINITY, f32::max);
-
-                    // Compute exp and sum
-                    let mut sum = 0.0f32;
-                    for j in 0..src_len {
-                        let exp_val = (attn_scores[base + j] - max_score).exp();
-                        attn_weights[base + j] = exp_val;
-                        sum += exp_val;
-                    }
-
-                    // Normalize
-                    for j in 0..src_len {
-                        attn_weights[base + j] /= sum;
-                    }
-                }
-            }
-        }
-
-        // Apply attention to values
-        let mut output_vec = vec![0.0f32; batch_size * tgt_len * self.embed_dim];
-        for b in 0..batch_size {
-            for h in 0..self.num_heads {
-                for i in 0..tgt_len {
-                    for d in 0..self.head_dim {
-                        let mut weighted_sum = 0.0f32;
-                        for j in 0..src_len {
-                            let attn_idx = b * self.num_heads * tgt_len * src_len
-                                + h * tgt_len * src_len
-                                + i * src_len
-                                + j;
-                            let v_idx = b * src_len * self.embed_dim
-                                + j * self.embed_dim
-                                + h * self.head_dim
-                                + d;
-                            weighted_sum += attn_weights[attn_idx] * v_vec[v_idx];
-                        }
-                        let out_idx = b * tgt_len * self.embed_dim
-                            + i * self.embed_dim
-                            + h * self.head_dim
-                            + d;
-                        output_vec[out_idx] = weighted_sum;
-                    }
-                }
-            }
-        }
-
-        let output_shape = if self.batch_first {
-            vec![batch_size, tgt_len, self.embed_dim]
+            let additive_mask = Variable::new(
+                Tensor::from_vec(expanded, &scores_shape).unwrap(),
+                false,
+            );
+            scores.add_var(&additive_mask)
         } else {
-            vec![tgt_len, batch_size, self.embed_dim]
+            scores
         };
 
-        let output = Variable::new(
-            Tensor::from_vec(output_vec, &output_shape).unwrap(),
-            query.requires_grad(),
-        );
+        // Softmax over last dim (src_len)
+        let attn_weights = scores.softmax(-1);
+
+        // Weighted sum: output = attn_weights @ V
+        // [batch, heads, tgt_len, src_len] @ [batch, heads, src_len, head_dim]
+        // → [batch, heads, tgt_len, head_dim]
+        let attn_output = attn_weights.matmul(&v);
+
+        // Reshape back: [batch, heads, tgt_len, head_dim] → [batch, tgt_len, embed]
+        let attn_output = attn_output
+            .transpose(1, 2)
+            .reshape(&[batch_size, tgt_len, self.embed_dim]);
 
         // Output projection
-        self.out_proj.forward(&output)
+        self.out_proj.forward(&attn_output)
     }
 }
 
