@@ -46,12 +46,29 @@ impl MatMulBackward {
 
 impl GradientFunction for MatMulBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // grad_lhs = grad_output @ rhs^T
-        let rhs_t = self.saved_rhs.t().unwrap();
-        let grad_lhs = grad_output.matmul(&rhs_t).unwrap();
+        let ndim = self.saved_rhs.ndim();
 
+        // Transpose last two dims — works for 2D, 3D, 4D+
+        let rhs_t = if ndim == 2 {
+            self.saved_rhs.t().unwrap()
+        } else {
+            self.saved_rhs
+                .transpose((ndim - 2) as i64, (ndim - 1) as i64)
+                .unwrap()
+        };
+
+        let lhs_ndim = self.saved_lhs.ndim();
+        let lhs_t = if lhs_ndim == 2 {
+            self.saved_lhs.t().unwrap()
+        } else {
+            self.saved_lhs
+                .transpose((lhs_ndim - 2) as i64, (lhs_ndim - 1) as i64)
+                .unwrap()
+        };
+
+        // grad_lhs = grad_output @ rhs^T
+        let grad_lhs = grad_output.matmul(&rhs_t).unwrap();
         // grad_rhs = lhs^T @ grad_output
-        let lhs_t = self.saved_lhs.t().unwrap();
         let grad_rhs = lhs_t.matmul(grad_output).unwrap();
 
         vec![Some(grad_lhs), Some(grad_rhs)]

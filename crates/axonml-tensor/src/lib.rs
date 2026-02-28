@@ -98,6 +98,8 @@
 // =============================================================================
 
 pub mod creation;
+#[cfg(feature = "cuda")]
+pub mod cuda_ops;
 pub mod ops;
 pub mod shape;
 pub mod sparse;

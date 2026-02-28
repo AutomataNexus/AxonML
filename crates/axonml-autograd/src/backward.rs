@@ -60,12 +60,19 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
 
         // Apply the gradient function to get input gradients
         let input_grads = node.apply(&grad);
+        let device = grad.device();
 
         // Propagate gradients to input nodes
         let next_fns = node.next_functions();
         for (i, maybe_next) in next_fns.iter().enumerate() {
             if let Some(next_fn) = maybe_next {
-                if let Some(input_grad) = input_grads.get(i).and_then(std::clone::Clone::clone) {
+                if let Some(mut input_grad) = input_grads.get(i).and_then(std::clone::Clone::clone)
+                {
+                    // Ensure gradient is on the same device as the forward pass
+                    if input_grad.device() != device && device.is_gpu() {
+                        input_grad = input_grad.to_device(device).unwrap();
+                    }
+
                     let next_id = next_fn.id();
 
                     // Accumulate gradient

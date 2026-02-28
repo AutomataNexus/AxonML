@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use axonml_autograd::Variable;
+use axonml_core::Device;
 use axonml_tensor::Tensor;
 use parking_lot::RwLock;
 
@@ -122,6 +123,16 @@ impl Parameter {
         let current = self.data();
         let updated = f(&current);
         self.update_data(updated);
+    }
+
+    /// Moves the parameter data to the specified device.
+    pub fn to_device(&self, device: Device) {
+        let current = self.data();
+        if current.device() == device {
+            return;
+        }
+        let moved = current.to_device(device).expect("Failed to move parameter to device");
+        self.update_data(moved);
     }
 }
 
