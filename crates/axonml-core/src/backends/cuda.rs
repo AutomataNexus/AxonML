@@ -24,6 +24,35 @@ use super::cuda_kernels::{self, CudaKernels};
 use super::Backend;
 use crate::device::DeviceCapabilities;
 use std::sync::Arc;
+#[cfg(feature = "cuda")]
+use std::sync::OnceLock;
+
+// =============================================================================
+// Global CUDA Backend Singleton
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+static CUDA_BACKEND: OnceLock<Option<CudaBackend>> = OnceLock::new();
+
+/// Get the global CUDA backend singleton (initialized lazily on first call).
+#[cfg(feature = "cuda")]
+pub fn get_cuda_backend() -> Option<&'static CudaBackend> {
+    CUDA_BACKEND
+        .get_or_init(|| {
+            let backend = CudaBackend::new(0);
+            if backend.is_some() {
+                eprintln!("[AxonML] CUDA backend initialized (GPU 0)");
+            }
+            backend
+        })
+        .as_ref()
+}
+
+/// Get the global CUDA backend singleton (stub when cuda feature disabled).
+#[cfg(not(feature = "cuda"))]
+pub fn get_cuda_backend() -> Option<&'static CudaBackend> {
+    None
+}
 
 // =============================================================================
 // CUDA Backend Struct
@@ -623,6 +652,294 @@ impl CudaBackend {
         unsafe {
             func.clone()
                 .launch(cfg, (src, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Element-wise subtraction using CUDA kernel.
+    pub fn sub_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("sub_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("sub_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (a, b, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Element-wise division using CUDA kernel.
+    pub fn div_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("div_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("div_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (a, b, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Element-wise negation using CUDA kernel.
+    pub fn neg_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("neg_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("neg_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Element-wise power using CUDA kernel: dst[i] = a[i] ^ b[i].
+    pub fn pow_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("pow_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("pow_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (a, b, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Element-wise power with scalar exponent: dst[i] = src[i] ^ exp.
+    pub fn pow_scalar_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        exp: f32,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("pow_scalar_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("pow_scalar_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, exp, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Element-wise exp using CUDA kernel.
+    pub fn exp_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("exp_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("exp_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Element-wise log using CUDA kernel.
+    pub fn log_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("log_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("log_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Element-wise sqrt using CUDA kernel.
+    pub fn sqrt_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("sqrt_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("sqrt_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// GELU activation using CUDA kernel.
+    pub fn gelu_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("gelu_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("gelu_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// SiLU activation using CUDA kernel.
+    pub fn silu_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("silu_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("silu_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Scalar addition: dst[i] = src[i] + scalar.
+    pub fn add_scalar_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        scalar: f32,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("add_scalar_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("add_scalar_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, scalar, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// ReLU backward using CUDA kernel.
+    pub fn relu_backward_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        grad_output: &CudaSlice<f32>,
+        input: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("relu_backward_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("relu_backward_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (grad_output, input, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Sigmoid backward using CUDA kernel.
+    pub fn sigmoid_backward_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        grad_output: &CudaSlice<f32>,
+        output: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("sigmoid_backward_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("sigmoid_backward_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (grad_output, output, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Tanh backward using CUDA kernel.
+    pub fn tanh_backward_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        grad_output: &CudaSlice<f32>,
+        output: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("tanh_backward_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("tanh_backward_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (grad_output, output, dst, len as u32))
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())

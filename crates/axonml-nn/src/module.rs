@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
+use axonml_core::Device;
 
 use crate::parameter::Parameter;
 
@@ -79,6 +80,13 @@ pub trait Module: Send + Sync {
     fn zero_grad(&self) {
         for param in self.parameters() {
             param.zero_grad();
+        }
+    }
+
+    /// Moves all parameters to the specified device.
+    fn to_device(&self, device: Device) {
+        for param in self.parameters() {
+            param.to_device(device);
         }
     }
 

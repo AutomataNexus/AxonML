@@ -5,20 +5,11 @@
 //!
 //! # Key Features
 //! - Reference-counted memory for efficient views
-//! - Device-agnostic storage interface
+//! - Device-agnostic storage interface (CPU and GPU)
 //! - Zero-copy slicing through offset/length
 //! - Automatic memory cleanup
 //!
-//! # Example
-//! ```rust
-//! use axonml_core::{Storage, Device};
-//!
-//! // Create storage for 100 f32 values on CPU
-//! let storage = Storage::<f32>::zeros(100, Device::Cpu);
-//! assert_eq!(storage.len(), 100);
-//! ```
-//!
-//! @version 0.1.0
+//! @version 0.2.0
 //! @author `AutomataNexus` Development Team
 
 use core::ops::{Deref, DerefMut};
@@ -29,6 +20,23 @@ use parking_lot::RwLock;
 use crate::device::Device;
 use crate::dtype::Scalar;
 use crate::error::{Error, Result};
+
+#[cfg(feature = "cuda")]
+use cudarc::driver::CudaSlice;
+
+// =============================================================================
+// Storage Data Enum
+// =============================================================================
+
+/// Holds either CPU or GPU data.
+#[derive(Debug)]
+enum StorageData<T: Scalar> {
+    /// CPU data stored as a Vec.
+    Cpu(Vec<T>),
+    /// GPU data stored as a CudaSlice (f32 only on GPU).
+    #[cfg(feature = "cuda")]
+    Cuda(CudaSlice<f32>),
+}
 
 // =============================================================================
 // Storage Struct
@@ -52,53 +60,35 @@ pub struct Storage<T: Scalar> {
 /// Inner storage data that can be shared between views.
 #[derive(Debug)]
 struct StorageInner<T: Scalar> {
-    /// Raw data pointer (owned).
-    data: Vec<T>,
+    /// Raw data (CPU or GPU).
+    data: StorageData<T>,
     /// The device this storage resides on.
     device: Device,
 }
 
 impl<T: Scalar> Storage<T> {
     /// Creates new storage with the given capacity, initialized to zero.
-    ///
-    /// # Arguments
-    /// * `len` - Number of elements to allocate
-    /// * `device` - Device to allocate on
-    ///
-    /// # Returns
-    /// New storage initialized to zeros.
     #[must_use]
     pub fn zeros(len: usize, device: Device) -> Self {
         let data = vec![T::zeroed(); len];
         Self::from_vec(data, device)
     }
 
-    /// Creates storage from an existing vector.
-    ///
-    /// # Arguments
-    /// * `data` - Vector of data
-    /// * `device` - Device the storage is on
-    ///
-    /// # Returns
-    /// New storage wrapping the data.
+    /// Creates storage from an existing vector (always on CPU).
     #[must_use]
     pub fn from_vec(data: Vec<T>, device: Device) -> Self {
         let len = data.len();
         Self {
-            inner: Arc::new(RwLock::new(StorageInner { data, device })),
+            inner: Arc::new(RwLock::new(StorageInner {
+                data: StorageData::Cpu(data),
+                device,
+            })),
             offset: 0,
             len,
         }
     }
 
     /// Creates storage from a slice by copying the data.
-    ///
-    /// # Arguments
-    /// * `data` - Slice of data to copy
-    /// * `device` - Device to allocate on
-    ///
-    /// # Returns
-    /// New storage containing a copy of the data.
     #[must_use]
     pub fn from_slice(data: &[T], device: Device) -> Self {
         Self::from_vec(data.to_vec(), device)
@@ -128,6 +118,18 @@ impl<T: Scalar> Storage<T> {
         self.inner.read().device
     }
 
+    /// Returns true if data is on CPU.
+    #[must_use]
+    pub fn is_cpu(&self) -> bool {
+        matches!(self.inner.read().data, StorageData::Cpu(_))
+    }
+
+    /// Returns true if data is on GPU.
+    #[must_use]
+    pub fn is_gpu(&self) -> bool {
+        !self.is_cpu()
+    }
+
     /// Returns the size in bytes of this storage.
     #[must_use]
     pub fn size_bytes(&self) -> usize {
@@ -135,13 +137,6 @@ impl<T: Scalar> Storage<T> {
     }
 
     /// Creates a view into a portion of this storage.
-    ///
-    /// # Arguments
-    /// * `offset` - Starting offset relative to this view
-    /// * `len` - Number of elements in the new view
-    ///
-    /// # Returns
-    /// A new storage view, or error if bounds are invalid.
     pub fn slice(&self, offset: usize, len: usize) -> Result<Self> {
         if offset + len > self.len {
             return Err(Error::IndexOutOfBounds {
@@ -163,10 +158,10 @@ impl<T: Scalar> Storage<T> {
         Arc::strong_count(&self.inner) == 1
     }
 
-    /// Returns an immutable reference to the data.
+    /// Returns an immutable reference to the CPU data.
     ///
     /// # Panics
-    /// Panics if the lock is poisoned.
+    /// Panics if the storage is on GPU. Use `to_vec()` for device-safe access.
     #[must_use]
     pub fn as_slice(&self) -> StorageReadGuard<'_, T> {
         StorageReadGuard {
@@ -176,10 +171,10 @@ impl<T: Scalar> Storage<T> {
         }
     }
 
-    /// Returns a mutable reference to the data.
+    /// Returns a mutable reference to the CPU data.
     ///
     /// # Panics
-    /// Panics if the lock is poisoned.
+    /// Panics if the storage is on GPU.
     #[must_use]
     pub fn as_slice_mut(&self) -> StorageWriteGuard<'_, T> {
         StorageWriteGuard {
@@ -190,12 +185,6 @@ impl<T: Scalar> Storage<T> {
     }
 
     /// Copies data from another storage into this one.
-    ///
-    /// # Arguments
-    /// * `other` - Source storage to copy from
-    ///
-    /// # Returns
-    /// Ok if successful, error if lengths don't match.
     pub fn copy_from(&self, other: &Self) -> Result<()> {
         if self.len != other.len {
             return Err(Error::shape_mismatch(&[self.len], &[other.len]));
@@ -208,30 +197,204 @@ impl<T: Scalar> Storage<T> {
     }
 
     /// Makes a deep copy of this storage.
+    ///
+    /// For GPU storage, this only works for `Storage<f32>`.
+    /// Other types will panic on GPU storage.
     #[must_use]
     pub fn deep_copy(&self) -> Self {
-        let data = self.as_slice().to_vec();
-        Self::from_vec(data, self.device())
+        let inner = self.inner.read();
+        match &inner.data {
+            StorageData::Cpu(cpu_data) => {
+                let data = cpu_data[self.offset..self.offset + self.len].to_vec();
+                Self::from_vec(data, inner.device)
+            }
+            #[cfg(feature = "cuda")]
+            StorageData::Cuda(_) => {
+                panic!("deep_copy() on GPU storage requires Storage<f32>. Use deep_copy_f32().");
+            }
+        }
+    }
+
+    /// Returns the data as a Vec from CPU storage.
+    ///
+    /// For GPU-resident f32 tensors, use the `Tensor::to_vec()` method which
+    /// handles device-aware copies via `Storage<f32>::to_vec_f32()`.
+    ///
+    /// # Panics
+    /// Panics if storage is on GPU (use `to_vec_f32()` on `Storage<f32>` instead).
+    pub fn to_vec(&self) -> Vec<T> {
+        let inner = self.inner.read();
+        match &inner.data {
+            StorageData::Cpu(cpu_data) => {
+                cpu_data[self.offset..self.offset + self.len].to_vec()
+            }
+            #[cfg(feature = "cuda")]
+            StorageData::Cuda(_) => {
+                panic!("Cannot call to_vec() on GPU storage for generic T. Use to_vec_f32() on Storage<f32>.");
+            }
+        }
     }
 
     /// Transfers this storage to a different device.
     ///
-    /// # Arguments
-    /// * `device` - Target device
-    ///
-    /// # Returns
-    /// New storage on the target device.
+    /// For GPU transfers, only `Storage<f32>` is supported. Use the
+    /// `Storage<f32>::to_device()` specialization for CPU↔GPU transfers.
     pub fn to_device(&self, device: Device) -> Result<Self> {
         if self.device() == device {
             return Ok(self.clone());
         }
 
-        // For now, only CPU is supported
-        if !device.is_cpu() {
-            return Err(Error::DeviceNotAvailable { device });
+        // Generic path: only CPU→CPU is supported
+        if device.is_cpu() && self.device().is_cpu() {
+            return Ok(self.deep_copy());
         }
 
-        Ok(self.deep_copy())
+        Err(Error::DeviceNotAvailable { device })
+    }
+}
+
+// =============================================================================
+// f32-specific Storage for GPU transfers
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+impl Storage<f32> {
+    /// Transfers f32 storage between CPU and GPU.
+    pub fn to_device_f32(&self, device: Device) -> Result<Self> {
+        if self.device() == device {
+            return Ok(self.clone());
+        }
+
+        let inner = self.inner.read();
+
+        match (&inner.data, device) {
+            // CPU → CPU: just deep copy
+            (StorageData::Cpu(_), Device::Cpu) => {
+                drop(inner);
+                Ok(self.deep_copy())
+            }
+            // CPU → GPU: htod_copy
+            (StorageData::Cpu(cpu_data), Device::Cuda(_idx)) => {
+                let backend = crate::backends::cuda::get_cuda_backend()
+                    .ok_or(Error::DeviceNotAvailable { device })?;
+                let slice = &cpu_data[self.offset..self.offset + self.len];
+                let cuda_slice = backend.htod_copy(slice)
+                    .map_err(|_| Error::DeviceNotAvailable { device })?;
+                let len = self.len;
+                Ok(Self {
+                    inner: Arc::new(RwLock::new(StorageInner {
+                        data: StorageData::Cuda(cuda_slice),
+                        device,
+                    })),
+                    offset: 0,
+                    len,
+                })
+            }
+            // GPU → CPU: dtoh_copy
+            (StorageData::Cuda(cuda_slice), Device::Cpu) => {
+                let backend = crate::backends::cuda::get_cuda_backend()
+                    .ok_or(Error::DeviceNotAvailable { device: self.device() })?;
+                let full_vec = backend.dtoh_copy(cuda_slice)
+                    .map_err(|_| Error::DeviceNotAvailable { device })?;
+                let sliced: Vec<f32> = if self.offset == 0 && self.len == full_vec.len() {
+                    full_vec
+                } else {
+                    full_vec[self.offset..self.offset + self.len].to_vec()
+                };
+                Ok(Self::from_vec(sliced, Device::Cpu))
+            }
+            // GPU → GPU: D2H then H2D (simple path)
+            (StorageData::Cuda(_), Device::Cuda(_)) => {
+                drop(inner);
+                let cpu_storage = self.to_device_f32(Device::Cpu)?;
+                cpu_storage.to_device_f32(device)
+            }
+            _ => Err(Error::DeviceNotAvailable { device }),
+        }
+    }
+}
+
+// =============================================================================
+// CUDA-specific Storage methods
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+impl Storage<f32> {
+    /// Returns data as a Vec<f32>, performing D2H copy if on GPU.
+    pub fn to_vec_f32(&self) -> Vec<f32> {
+        let inner = self.inner.read();
+        match &inner.data {
+            StorageData::Cpu(cpu_data) => {
+                cpu_data[self.offset..self.offset + self.len].to_vec()
+            }
+            StorageData::Cuda(cuda_slice) => {
+                if let Some(backend) = crate::backends::cuda::get_cuda_backend() {
+                    if let Ok(full_vec) = backend.dtoh_copy(cuda_slice) {
+                        if self.offset == 0 && self.len == full_vec.len() {
+                            return full_vec;
+                        }
+                        return full_vec[self.offset..self.offset + self.len].to_vec();
+                    }
+                }
+                vec![0.0f32; self.len]
+            }
+        }
+    }
+
+    /// Deep copy that works for both CPU and GPU f32 storage.
+    pub fn deep_copy_f32(&self) -> Self {
+        let device = self.device();
+        let vec = self.to_vec_f32();
+        if device.is_gpu() {
+            if let Some(backend) = crate::backends::cuda::get_cuda_backend() {
+                if let Ok(new_slice) = backend.htod_copy(&vec) {
+                    return Self::from_cuda_slice(new_slice, self.len, device);
+                }
+            }
+        }
+        Self::from_vec(vec, device)
+    }
+
+    /// Creates storage from an existing CudaSlice.
+    pub fn from_cuda_slice(slice: CudaSlice<f32>, len: usize, device: Device) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(StorageInner {
+                data: StorageData::Cuda(slice),
+                device,
+            })),
+            offset: 0,
+            len,
+        }
+    }
+
+    /// Returns a reference to the CudaSlice if on GPU.
+    ///
+    /// # Panics
+    /// Panics if storage is not on GPU.
+    pub fn as_cuda_slice(&self) -> CudaSliceReadGuard<'_> {
+        CudaSliceReadGuard {
+            guard: self.inner.read(),
+        }
+    }
+}
+
+/// Read guard that provides access to the CudaSlice.
+#[cfg(feature = "cuda")]
+pub struct CudaSliceReadGuard<'a> {
+    guard: parking_lot::RwLockReadGuard<'a, StorageInner<f32>>,
+}
+
+#[cfg(feature = "cuda")]
+impl<'a> CudaSliceReadGuard<'a> {
+    /// Returns a reference to the CudaSlice.
+    ///
+    /// # Panics
+    /// Panics if storage is CPU.
+    pub fn slice(&self) -> &CudaSlice<f32> {
+        match &self.guard.data {
+            StorageData::Cuda(s) => s,
+            StorageData::Cpu(_) => panic!("Storage is on CPU, not GPU"),
+        }
     }
 }
 
@@ -260,7 +423,11 @@ impl<T: Scalar> Deref for StorageReadGuard<'_, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
-        &self.guard.data[self.offset..self.offset + self.len]
+        match &self.guard.data {
+            StorageData::Cpu(data) => &data[self.offset..self.offset + self.len],
+            #[cfg(feature = "cuda")]
+            StorageData::Cuda(_) => panic!("Cannot access GPU storage as CPU slice. Use to_vec() for device-safe access."),
+        }
     }
 }
 
@@ -275,13 +442,21 @@ impl<T: Scalar> Deref for StorageWriteGuard<'_, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
-        &self.guard.data[self.offset..self.offset + self.len]
+        match &self.guard.data {
+            StorageData::Cpu(data) => &data[self.offset..self.offset + self.len],
+            #[cfg(feature = "cuda")]
+            StorageData::Cuda(_) => panic!("Cannot access GPU storage as CPU slice."),
+        }
     }
 }
 
 impl<T: Scalar> DerefMut for StorageWriteGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.guard.data[self.offset..self.offset + self.len]
+        match &mut self.guard.data {
+            StorageData::Cpu(data) => &mut data[self.offset..self.offset + self.len],
+            #[cfg(feature = "cuda")]
+            StorageData::Cuda(_) => panic!("Cannot access GPU storage as mutable CPU slice."),
+        }
     }
 }
 
@@ -365,5 +540,18 @@ mod tests {
         let storage = Storage::<f32>::zeros(10, Device::Cpu);
         let result = storage.slice(5, 10);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_storage_to_vec_cpu() {
+        let storage = Storage::from_vec(vec![1.0_f32, 2.0, 3.0], Device::Cpu);
+        assert_eq!(storage.to_vec(), vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_storage_is_cpu() {
+        let storage = Storage::from_vec(vec![1.0_f32], Device::Cpu);
+        assert!(storage.is_cpu());
+        assert!(!storage.is_gpu());
     }
 }

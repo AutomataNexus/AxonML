@@ -222,8 +222,12 @@ impl Variable {
             "backward() can only be called on scalar tensors"
         );
 
-        // Start with gradient of 1.0 for the output
-        let grad_output = Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap();
+        // Start with gradient of 1.0 for the output, on the same device
+        let mut grad_output = Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap();
+        let device = self.data.read().device();
+        if device.is_gpu() {
+            grad_output = grad_output.to_device(device).unwrap();
+        }
         crate::backward::backward(self, &grad_output);
     }
 

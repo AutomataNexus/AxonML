@@ -26,7 +26,6 @@ use crate::device::DeviceCapabilities;
 
 pub mod cpu;
 
-#[cfg(feature = "cuda")]
 pub mod cuda;
 
 #[cfg(feature = "cuda")]
@@ -50,7 +49,6 @@ pub mod gpu_tests;
 
 pub use cpu::CpuBackend;
 
-#[cfg(feature = "cuda")]
 pub use cuda::CudaBackend;
 
 #[cfg(feature = "vulkan")]
