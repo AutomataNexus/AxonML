@@ -202,7 +202,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing::warn!("========================================");
             tracing::warn!("DEFAULT ADMIN ACCOUNT CREATED");
             tracing::warn!("Email: admin@axonml.local");
-            tracing::warn!("Password: {}", random_password);
+            let pw_file = std::env::temp_dir().join("axonml-admin-password.txt");
+            std::fs::write(&pw_file, &random_password).ok();
+            tracing::warn!("Password written to: {}", pw_file.display());
+            tracing::warn!("Delete this file after noting the password!");
             tracing::warn!("PLEASE CHANGE THIS PASSWORD IMMEDIATELY!");
             tracing::warn!("========================================");
         }
@@ -212,14 +215,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Create DevOps admin user (Andrew Jewell)
-    let devops_password_hash = auth::hash_password("Invertedskynet2$")?;
-    match Schema::create_devops_admin(&db, &devops_password_hash).await {
-        Ok(_) => {
-            info!("DevOps admin user ready (DevOps@AutomataNexus.com)");
-        }
-        Err(e) => {
-            tracing::debug!("DevOps user creation: {}", e);
+    // Create DevOps admin user (Andrew Jewell) — password from environment
+    if let Ok(devops_pw) = std::env::var("AXONML_DEVOPS_PASSWORD") {
+        let devops_password_hash = auth::hash_password(&devops_pw)?;
+        match Schema::create_devops_admin(&db, &devops_password_hash).await {
+            Ok(_) => {
+                info!("DevOps admin user ready (DevOps@AutomataNexus.com)");
+            }
+            Err(e) => {
+                tracing::debug!("DevOps user creation: {}", e);
+            }
         }
     }
 

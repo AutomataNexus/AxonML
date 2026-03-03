@@ -424,6 +424,10 @@ pub async fn clear_cache(
     let cache_dir = get_cache_dir();
 
     if let Some(Path(name)) = model_name {
+        // Sanitize: reject path traversal attempts
+        if name.contains('/') || name.contains('\\') || name.contains("..") {
+            return Err(AuthError::InvalidInput("Invalid model name".into()));
+        }
         // Clear specific model
         let path = cache_dir.join(format!("{}.safetensors", name));
         if path.exists() {
