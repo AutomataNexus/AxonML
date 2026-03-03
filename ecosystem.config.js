@@ -38,10 +38,12 @@ module.exports = {
       env: {
         RUST_LOG: 'info',
         RUST_BACKTRACE: '1',
+        AXONML_DEVOPS_PASSWORD: process.env.AXONML_DEVOPS_PASSWORD || '',
       },
       env_production: {
         RUST_LOG: 'warn',
         RUST_BACKTRACE: '0',
+        AXONML_DEVOPS_PASSWORD: process.env.AXONML_DEVOPS_PASSWORD || '',
       },
       // Graceful shutdown
       kill_timeout: 5000,

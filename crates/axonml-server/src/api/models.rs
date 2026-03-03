@@ -429,11 +429,12 @@ pub async fn upload_version(
     let file_data = file_data.ok_or(AuthError::Internal("No file uploaded".to_string()))?;
     let file_size = file_data.len() as u64;
 
-    // Determine file extension
+    // Determine file extension (sanitize to prevent path traversal)
     let extension = file_name
         .as_ref()
         .and_then(|n| n.rsplit('.').next())
-        .unwrap_or("bin");
+        .unwrap_or("bin")
+        .replace(['/', '\\', '.'], "");
 
     // Create version to get the version number
     let version = repo

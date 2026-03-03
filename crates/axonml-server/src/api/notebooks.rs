@@ -330,6 +330,14 @@ pub async fn create_notebook(
 ) -> Result<(StatusCode, Json<NotebookResponse>), AuthError> {
     let repo = NotebookRepository::new(&state.db);
 
+    const MAX_CELLS: usize = 1000;
+    if req.cells.len() > MAX_CELLS {
+        return Err(AuthError::InvalidInput(format!(
+            "Too many cells (max {})",
+            MAX_CELLS
+        )));
+    }
+
     let cells: Vec<NotebookCell> = req.cells.into_iter().map(request_to_cell).collect();
 
     let notebook = repo
@@ -387,6 +395,16 @@ pub async fn update_notebook(
 
     if existing.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
+    }
+
+    const MAX_CELLS: usize = 1000;
+    if let Some(ref c) = req.cells {
+        if c.len() > MAX_CELLS {
+            return Err(AuthError::InvalidInput(format!(
+                "Too many cells (max {})",
+                MAX_CELLS
+            )));
+        }
     }
 
     let cells = req
