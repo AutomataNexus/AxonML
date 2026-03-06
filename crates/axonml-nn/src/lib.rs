@@ -121,12 +121,13 @@ pub use sequential::Sequential;
 
 // Layer re-exports
 pub use layers::{
-    AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, BatchNorm1d, BatchNorm2d, Conv1d, Conv2d,
+    AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, BatchNorm1d, BatchNorm2d, Conv1d, Conv2d, ConvTranspose2d,
     CrossAttention, Dropout, Embedding, GRUCell, GroupNorm, InstanceNorm2d, LSTMCell, LayerNorm,
     Linear, MaxPool1d, MaxPool2d, MultiHeadAttention, RNNCell, ResidualBlock,
     Seq2SeqTransformer, TransformerDecoder, TransformerDecoderLayer, TransformerEncoder,
     TransformerEncoderLayer, GRU, LSTM, RNN,
     FFT1d, STFT, GCNConv, GATConv,
+    SparseLinear, GroupSparsity, LotteryTicket,
 };
 
 // Activation re-exports

@@ -343,17 +343,11 @@ impl CausalSelfAttention {
         // Combined Q, K, V projection
         let qkv = self.c_attn.forward(x);
 
-        // Split into Q, K, V
-        let qkv_data = qkv.data();
-
-        // Split along last dimension: [batch, seq, 3*n_embd] -> 3x [batch, seq, n_embd]
-        let q_data = qkv_data.slice(&[0..batch_size, 0..seq_len, 0..self.n_embd]);
-        let k_data = qkv_data.slice(&[0..batch_size, 0..seq_len, self.n_embd..2 * self.n_embd]);
-        let v_data = qkv_data.slice(&[0..batch_size, 0..seq_len, 2 * self.n_embd..3 * self.n_embd]);
-
-        let q = Variable::new(q_data, qkv.requires_grad());
-        let k_new = Variable::new(k_data.clone(), qkv.requires_grad());
-        let v_new = Variable::new(v_data.clone(), qkv.requires_grad());
+        // Split into Q, K, V using narrow (preserves autograd graph)
+        // [batch, seq, 3*n_embd] -> 3x [batch, seq, n_embd]
+        let q = qkv.narrow(2, 0, self.n_embd);
+        let k_new = qkv.narrow(2, self.n_embd, self.n_embd);
+        let v_new = qkv.narrow(2, 2 * self.n_embd, self.n_embd);
 
         // Reshape for multi-head attention
         // [batch, seq, n_embd] -> [batch, seq, num_heads, head_dim] -> [batch, num_heads, seq, head_dim]

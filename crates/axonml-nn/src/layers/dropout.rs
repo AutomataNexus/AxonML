@@ -5,13 +5,57 @@
 //! @version 0.1.0
 //! @author AutomataNexus Development Team
 
+use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use axonml_autograd::Variable;
+use axonml_autograd::no_grad::is_grad_enabled;
+use axonml_autograd::{GradFn, GradientFunction, Variable};
 use axonml_tensor::Tensor;
 use rand::Rng;
 
 use crate::module::Module;
+
+// =============================================================================
+// DropoutBackward
+// =============================================================================
+
+/// Gradient function for Dropout.
+///
+/// Applies the same mask used in the forward pass: gradient is scaled where
+/// elements were kept, and zeroed where elements were dropped.
+#[derive(Debug)]
+struct DropoutBackward {
+    next_fns: Vec<Option<GradFn>>,
+    /// The mask applied during forward: 0.0 for dropped, scale for kept.
+    mask: Vec<f32>,
+    shape: Vec<usize>,
+}
+
+impl GradientFunction for DropoutBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        // GPU path: create mask tensor on CPU, move to GPU, multiply
+        let mask_tensor = Tensor::from_vec(self.mask.clone(), &self.shape).unwrap();
+        let result = if grad_output.device().is_gpu() {
+            let mask_gpu = mask_tensor.to_device(grad_output.device()).unwrap();
+            grad_output.mul(&mask_gpu).unwrap()
+        } else {
+            grad_output.mul(&mask_tensor).unwrap()
+        };
+        vec![Some(result)]
+    }
+
+    fn name(&self) -> &'static str {
+        "DropoutBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 // =============================================================================
 // Dropout
@@ -71,25 +115,45 @@ impl Module for Dropout {
         }
 
         let input_data = input.data();
-        let input_vec = input_data.to_vec();
+        let shape = input_data.shape().to_vec();
+        let numel = input_data.numel();
         let mut rng = rand::thread_rng();
 
         // Scale factor for inverted dropout
         let scale = 1.0 / (1.0 - self.p);
 
-        let output_vec: Vec<f32> = input_vec
-            .iter()
-            .map(|&x| {
+        // Build mask on CPU: 0.0 for dropped, scale for kept
+        let mask: Vec<f32> = (0..numel)
+            .map(|_| {
                 if rng.gen::<f32>() < self.p {
                     0.0
                 } else {
-                    x * scale
+                    scale
                 }
             })
             .collect();
 
-        let output = Tensor::from_vec(output_vec, input_data.shape()).unwrap();
-        Variable::new(output, input.requires_grad())
+        // Create mask tensor and move to input device — multiply on GPU, no input copy needed
+        let mask_tensor = Tensor::from_vec(mask.clone(), &shape).unwrap();
+        let output = if input_data.device().is_gpu() {
+            let mask_gpu = mask_tensor.to_device(input_data.device()).unwrap();
+            input_data.mul(&mask_gpu).unwrap()
+        } else {
+            input_data.mul(&mask_tensor).unwrap()
+        };
+
+        let requires_grad = input.requires_grad() && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(DropoutBackward {
+                next_fns: vec![input.grad_fn().cloned()],
+                mask,
+                shape,
+            });
+            Variable::from_operation(output, grad_fn, true)
+        } else {
+            Variable::from_tensor(output)
+        }
     }
 
     fn set_training(&mut self, training: bool) {
@@ -159,30 +223,42 @@ impl Module for Dropout2d {
         let spatial_size: usize = shape[2..].iter().product();
 
         let input_vec = input_data.to_vec();
-        let mut output_vec = input_vec.clone();
+        let total = input_vec.len();
+        let mut mask = vec![0.0f32; total];
         let mut rng = rand::thread_rng();
         let scale = 1.0 / (1.0 - self.p);
 
         for b in 0..batch_size {
             for c in 0..channels {
-                if rng.gen::<f32>() < self.p {
-                    // Zero out entire channel
-                    let start = b * channels * spatial_size + c * spatial_size;
+                let keep = rng.gen::<f32>() >= self.p;
+                let start = b * channels * spatial_size + c * spatial_size;
+                if keep {
                     for i in 0..spatial_size {
-                        output_vec[start + i] = 0.0;
-                    }
-                } else {
-                    // Scale the channel
-                    let start = b * channels * spatial_size + c * spatial_size;
-                    for i in 0..spatial_size {
-                        output_vec[start + i] *= scale;
+                        mask[start + i] = scale;
                     }
                 }
             }
         }
 
+        let output_vec: Vec<f32> = input_vec
+            .iter()
+            .zip(mask.iter())
+            .map(|(&x, &m)| x * m)
+            .collect();
+
         let output = Tensor::from_vec(output_vec, &shape).unwrap();
-        Variable::new(output, input.requires_grad())
+        let requires_grad = input.requires_grad() && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(DropoutBackward {
+                next_fns: vec![input.grad_fn().cloned()],
+                mask,
+                shape,
+            });
+            Variable::from_operation(output, grad_fn, true)
+        } else {
+            Variable::from_tensor(output)
+        }
     }
 
     fn set_training(&mut self, training: bool) {
@@ -244,21 +320,41 @@ impl Module for AlphaDropout {
 
         let input_data = input.data();
         let input_vec = input_data.to_vec();
+        let shape = input_data.shape().to_vec();
         let mut rng = rand::thread_rng();
+
+        // For alpha dropout, the mask stores the scale factor 'a' where kept
+        // and 0.0 where dropped (the additive term b is a constant, no gradient)
+        let mask: Vec<f32> = input_vec
+            .iter()
+            .map(|_| if rng.gen::<f32>() < self.p { 0.0 } else { a })
+            .collect();
 
         let output_vec: Vec<f32> = input_vec
             .iter()
-            .map(|&x| {
-                if rng.gen::<f32>() < self.p {
+            .zip(mask.iter())
+            .map(|(&x, &m)| {
+                if m == 0.0 {
                     a * alpha_p + b
                 } else {
-                    a * x + b
+                    m * x + b
                 }
             })
             .collect();
 
-        let output = Tensor::from_vec(output_vec, input_data.shape()).unwrap();
-        Variable::new(output, input.requires_grad())
+        let output = Tensor::from_vec(output_vec, &shape).unwrap();
+        let requires_grad = input.requires_grad() && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(DropoutBackward {
+                next_fns: vec![input.grad_fn().cloned()],
+                mask,
+                shape,
+            });
+            Variable::from_operation(output, grad_fn, true)
+        } else {
+            Variable::from_tensor(output)
+        }
     }
 
     fn set_training(&mut self, training: bool) {

@@ -28,11 +28,71 @@
 //! - Memory: O(n/k)
 //! - Compute: O(n) forward + O(n/k * k) recompute + O(n) backward = O(2n)
 //!
-//! @version 0.1.0
+//! @version 0.2.0
 
-use crate::no_grad::no_grad;
+use crate::grad_fn::{GradFn, GradientFunction};
+use crate::no_grad::{enable_grad, no_grad};
 use crate::Variable;
+use axonml_tensor::Tensor;
+use std::any::Any;
 use std::sync::Arc;
+
+// =============================================================================
+// CheckpointBackward
+// =============================================================================
+
+/// Gradient function that recomputes the forward pass during backward.
+///
+/// Instead of storing all intermediate activations from the forward pass,
+/// this stores only the function and input. During backward, it re-runs
+/// the forward pass with gradients enabled to recompute activations,
+/// then calls backward on the recomputed output.
+struct CheckpointBackward {
+    /// The function to re-run during backward
+    func: Arc<dyn Fn(&Variable) -> Variable + Send + Sync>,
+    /// The saved input (detached, to avoid circular references)
+    saved_input: Variable,
+    /// next_functions pointing to the input's grad_fn
+    next_fns: Vec<Option<GradFn>>,
+}
+
+impl std::fmt::Debug for CheckpointBackward {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CheckpointBackward")
+            .field("saved_input_shape", &self.saved_input.shape())
+            .finish()
+    }
+}
+
+impl GradientFunction for CheckpointBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        // Re-run the forward pass with gradients enabled
+        let input_for_recompute =
+            Variable::new(self.saved_input.data(), true);
+
+        let recomputed_output = enable_grad(|| (self.func)(&input_for_recompute));
+
+        // Now run backward on the recomputed output to get gradients
+        recomputed_output.backward_with_grad(grad_output);
+
+        // Extract the gradient that flowed to our recomputed input
+        let input_grad = input_for_recompute.grad();
+
+        vec![input_grad]
+    }
+
+    fn name(&self) -> &'static str {
+        "CheckpointBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 // =============================================================================
 // Checkpoint Function
@@ -51,18 +111,6 @@ use std::sync::Arc;
 /// # Returns
 /// The output of the function, with gradient support if input requires grad.
 ///
-/// # Example
-/// ```rust,ignore
-/// use axonml_autograd::checkpoint::checkpoint;
-///
-/// // Save memory by not storing intermediate activations
-/// let output = checkpoint(|x| {
-///     let h1 = layer1.forward(x);
-///     let h2 = layer2.forward(&h1);
-///     layer3.forward(&h2)
-/// }, &input);
-/// ```
-///
 /// # Notes
 /// - The function must be deterministic for correct gradients
 /// - RNG states should be saved/restored if using dropout, etc.
@@ -79,19 +127,18 @@ where
         return output;
     }
 
-    // Create a checkpointed variable that will recompute on backward
-    // For now, we return the output as-is with a marker
-    // Full implementation would require modifying Variable to support
-    // custom backward functions with recomputation
+    // Save input data (detached) and the function for recomputation
+    let func_arc: Arc<dyn Fn(&Variable) -> Variable + Send + Sync> = Arc::new(func);
 
-    // Store the function and input for potential recomputation
-    let _recompute_fn = Arc::new(func);
-    let _saved_input = input.clone();
+    let next_fns = vec![input.grad_fn().cloned()];
 
-    // Return output with gradient tracking based on input
-    // In a full implementation, this would set up a custom grad_fn
-    // that recomputes the forward pass during backward
-    Variable::new(output.data(), input.requires_grad())
+    let grad_fn = GradFn::new(CheckpointBackward {
+        func: func_arc,
+        saved_input: Variable::new(input.data(), false), // detached copy
+        next_fns,
+    });
+
+    Variable::from_operation(output.data(), grad_fn, true)
 }
 
 /// Checkpoints a sequential model by dividing it into segments.
@@ -104,19 +151,6 @@ where
 /// * `segments` - Number of checkpoint segments (more segments = less memory, more compute)
 /// * `input` - The input variable
 /// * `layer_fn` - Function that runs layer i on an input
-///
-/// # Example
-/// ```rust,ignore
-/// use axonml_autograd::checkpoint::checkpoint_sequential;
-///
-/// // Checkpoint a 12-layer transformer into 4 segments
-/// let output = checkpoint_sequential(
-///     12,  // num_layers
-///     4,   // segments
-///     &input,
-///     |layer_idx, x| transformer_layers[layer_idx].forward(x)
-/// );
-/// ```
 pub fn checkpoint_sequential<F>(
     num_layers: usize,
     segments: usize,
@@ -257,6 +291,41 @@ mod tests {
         let output = checkpoint(|x| x.clone(), &input);
 
         assert!(!output.requires_grad());
+    }
+
+    #[test]
+    fn test_checkpoint_gradient_flow() {
+        // Test that gradients actually flow through checkpointed computation
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap(),
+            true,
+        );
+
+        // Checkpoint a simple multiply-by-2 operation
+        let output = checkpoint(
+            |x| {
+                let two = Variable::new(
+                    Tensor::from_vec(vec![2.0, 2.0, 2.0, 2.0], &[2, 2]).unwrap(),
+                    false,
+                );
+                x.mul_var(&two)
+            },
+            &input,
+        );
+
+        // output = input * 2, so d(output)/d(input) = 2
+        let grad = Tensor::from_vec(vec![1.0, 1.0, 1.0, 1.0], &[2, 2]).unwrap();
+        output.backward_with_grad(&grad);
+
+        let input_grad = input.grad().expect("Input should have gradient");
+        let grad_data = input_grad.to_vec();
+        for &v in &grad_data {
+            assert!(
+                (v - 2.0).abs() < 1e-5,
+                "Expected gradient 2.0 but got {}",
+                v
+            );
+        }
     }
 
     #[test]

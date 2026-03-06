@@ -213,27 +213,8 @@ impl Module for Aquilo {
 // =============================================================================
 
 /// Concatenate multiple Variables along the last dimension.
-pub(crate) fn concat_variables(vars: &[&Variable], batch: usize) -> Variable {
-    let total_features: usize = vars.iter().map(|v| {
-        let s = v.shape();
-        if s.len() == 1 { s[0] / batch } else { s[s.len() - 1] }
-    }).sum();
-
-    let mut output = Vec::with_capacity(batch * total_features);
-    for b in 0..batch {
-        for var in vars {
-            let data = var.data().to_vec();
-            let s = var.shape();
-            let features = if s.len() == 1 { s[0] / batch } else { s[s.len() - 1] };
-            let offset = b * features;
-            output.extend_from_slice(&data[offset..offset + features]);
-        }
-    }
-
-    Variable::new(
-        axonml_tensor::Tensor::from_vec(output, &[batch, total_features]).unwrap(),
-        false,
-    )
+pub(crate) fn concat_variables(vars: &[&Variable], _batch: usize) -> Variable {
+    Variable::cat(vars, vars[0].shape().len() - 1)
 }
 
 // =============================================================================

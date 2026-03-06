@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-04
+
+### Milestone: Novel Capabilities Beyond PyTorch
+
+AxonML now includes features that don't exist in any other ML framework. Five novel
+subsystems extend the core crates, and a complete biometric identity framework (Aegis Identity)
+demonstrates the framework's unique temporal, event-driven, and uncertainty-aware primitives.
+
+### Added
+
+#### Aegis Identity — Unified Biometric Framework (`axonml-vision`)
+- **Mnemosyne** (~115K params) - Face identity via temporal crystallization: GRU hidden state
+  converges to an identity attractor over multiple observations, quality-gated updates,
+  attention-weighted multi-frame aggregation, temporal liveness detection, drift monitoring
+- **Ariadne** (~65K params) - Fingerprint via ridge event fields: learned Gabor wavelet bank
+  extracts 8-orientation ridge responses, ridge density mapping, core/delta singularity
+  detection via Poincare index, partial fingerprint matching
+- **Echo** (~68K params) - Voice via predictive speaker residuals: a generic speech predictor
+  learns to predict the next mel frame; prediction errors ARE the speaker identity (identity =
+  what cannot be predicted), replay detection, VAD, speaking rate estimation
+- **Argus** (~65K params) - Iris via polar-native radial phase encoding: separate radial and
+  angular 1D convolutions on polar-unwrapped iris, multi-resolution encoding at 3 scales,
+  Hamming distance matching with binarized codes, fragile bit masking
+- **Themis** (~49K params) - Multimodal belief propagation fusion: uncertainty-aware dynamic
+  weighting, cross-modal consistency checking, GRU temporal belief accumulation, evidential
+  uncertainty (Dirichlet-based), conflict detection, modality reliability tracking
+- **AegisIdentity** unified API - enroll/verify/identify with any subset of modalities,
+  forensic verification with audit trails, batch operations, identity drift detection,
+  quality assessment, liveness detection, secure verification pipeline, operating curve computation
+- Biometric-specific losses: CrystallizationLoss, ContrastiveLoss, PredictiveCodingLoss,
+  PhaseConsistencyLoss, CenterLoss, AngularMarginLoss, DiversityRegularization, LivenessLoss
+- Iris polar unwrap utilities with rotation estimation via cross-correlation
+- Total: ~362K params, <2MB, each modality independently deployable on Raspberry Pi
+
+#### Graph Inspection API (`axonml-autograd`)
+- `trace_backward(variable)` — DFS walk through grad_fn chain to capture computation graph
+- `to_dot(snapshot)` — Export computation graph to Graphviz DOT format for visualization
+- `GraphSnapshot` with `node_count()`, `depth()`, `leaf_count()`, `operation_names()`
+- `gradient_flow_summary()` — Analyze gradient flow health through the graph
+- Native capability (unlike PyTorch which requires external `torchviz` package)
+
+#### Lazy Tensor Computation (`axonml-tensor`)
+- `LazyTensor` — Deferred execution model where operations build an expression tree
+- Algebraic optimization pass before materialization: constant folding, identity elimination,
+  double negation cancellation, inverse operation cancellation, scalar folding
+- Supports all unary, binary, reduction, and shape operations
+- `materialize()` evaluates the optimized expression tree into a concrete Tensor
+- Built into the tensor type — no external JIT compiler needed
+
+#### Differentiable Structured Sparsity (`axonml-nn`)
+- `SparseLinear` — Linear layer with learnable pruning mask via soft thresholding:
+  `sigmoid((|weight| - threshold) * temperature)` makes the mask differentiable
+- `GroupSparsity` — Group L1/L2 regularization for structured (row/column/block) sparsity
+- `LotteryTicket` — Lottery Ticket Hypothesis implementation: snapshot initial weights,
+  iterative magnitude pruning, rewind to initial weights with discovered mask
+- The pruning mask is end-to-end differentiable, unlike PyTorch's binary masking
+
+#### Training Health Monitor (`axonml-optim`)
+- `TrainingMonitor` — Self-monitoring training diagnostics attached to the optimizer
+- Detects: NaN loss/gradients, gradient explosion/vanishing, loss plateau, loss oscillation,
+  learning rate too high/low, dead neurons, training divergence
+- `LossTrend` analysis: Decreasing, Stable, Increasing, Oscillating, Converged
+- `suggest_lr()` — Automatic learning rate suggestions based on gradient statistics
+- `convergence_score()` — Quantified convergence metric
+- `HealthReport` with per-step alerts at Info/Warning/Critical severity levels
+
+### Changed
+- Test count: 1076+ → 1575+ across all crates
+- axonml-autograd: 52 → 105 tests
+- axonml-tensor: 64 → 98 tests
+- axonml-nn: 76 → 171 tests
+- axonml-optim: 40 → 79 tests
+- axonml-vision: 75 → 607 tests
+
 ## [0.3.0] - 2026-02-27
 
 ### Milestone: Production Edge Inference
@@ -172,9 +246,11 @@ predictors) deployed via cross-compiled ARM binaries, each running at ~2-3 MB RS
 
 ## Version History
 
+- **0.4.0**: Novel capabilities beyond PyTorch — Aegis Identity biometric framework, graph inspection, lazy tensors, differentiable sparsity, training health monitor
 - **0.3.0**: Production edge inference — 12 models deployed across 6 controllers
 - **0.1.0**: Initial release with complete ML framework
 
-[Unreleased]: https://github.com/AutomataNexus/AxonML/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/AutomataNexus/AxonML/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/AutomataNexus/AxonML/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/AutomataNexus/AxonML/compare/v0.1.0...v0.3.0
 [0.1.0]: https://github.com/AutomataNexus/AxonML/releases/tag/v0.1.0

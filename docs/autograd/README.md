@@ -215,11 +215,42 @@ no_grad(|| {
 
 - `std` (default) - Enable standard library
 
+### inspect.rs *(novel)*
+
+Graph inspection and visualization — native to AxonML, no external tools required.
+
+**Core Types:**
+- `GraphSnapshot` — Frozen snapshot of a computation graph for analysis
+- `SnapshotNode` — Individual node with operation name, shape, and edges
+
+**Functions:**
+```rust
+use axonml_autograd::inspect::{trace_backward, to_dot};
+
+// Capture the computation graph from any Variable
+let snapshot = trace_backward(&loss);
+
+// Query graph structure
+snapshot.node_count();         // Total nodes in the graph
+snapshot.depth();              // Longest path from root to leaf
+snapshot.leaf_count();         // Number of leaf (input) nodes
+snapshot.operation_names();    // All unique operation types used
+
+// Export to Graphviz DOT format
+let dot = to_dot(&snapshot);
+std::fs::write("graph.dot", &dot).unwrap();
+
+// Analyze gradient flow health
+let summary = snapshot.gradient_flow_summary();
+```
+
+**Why novel:** PyTorch requires the external `torchviz` package and `make_dot()` to visualize computation graphs. AxonML provides this natively with richer analysis (depth, leaf count, gradient flow summary).
+
 ## Related Modules
 
 - [Tensor](../tensor/README.md) - Underlying data structure
 - [Neural Networks](../nn/README.md) - Modules using autograd
 - [Optimizers](../optim/README.md) - Gradient-based optimization
 
-@version 0.1.0
+@version 0.4.0
 @author AutomataNexus Development Team

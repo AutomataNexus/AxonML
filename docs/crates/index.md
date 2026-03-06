@@ -87,7 +87,7 @@ AxonML is built as a Rust workspace with **22 specialized crates**.
 
 | Crate | Description | Key Types |
 |:------|:------------|:----------|
-| [axonml-vision](https://docs.rs/axonml-vision) | Computer vision utilities | `MNIST`, `CIFAR10`, `ResNet`, `transforms` |
+| [axonml-vision](https://docs.rs/axonml-vision) | Computer vision, detection training | `MNIST`, `CIFAR10`, `ResNet`, `Nexus`, `Phantom`, `CocoDataset`, `FocalLoss` |
 | [axonml-audio](https://docs.rs/axonml-audio) | Audio processing | `MelSpectrogram`, `MFCC` |
 | [axonml-text](https://docs.rs/axonml-text) | Text processing | `Tokenizer`, `BPE`, `Vocabulary` |
 | [axonml-llm](https://docs.rs/axonml-llm) | Large language models | `BERT`, `GPT2`, `Transformer` |

@@ -121,13 +121,7 @@ impl Vulcan {
         // Vibration branch: FFT → Linear → ReLU → Linear
         let fft_out = self.fft.forward(input);  // (batch, 337)
         let vib_hidden = self.vib_linear1.forward(&fft_out);  // (batch, 256)
-        let vib_hidden = Variable::new(
-            axonml_tensor::Tensor::from_vec(
-                vib_hidden.data().to_vec().iter().map(|&x| x.max(0.0)).collect(),
-                &vib_hidden.shape(),
-            ).unwrap(),
-            false,
-        );  // ReLU
+        let vib_hidden = vib_hidden.relu();  // ReLU
         let vib_out = self.vib_linear2.forward(&vib_hidden);  // (batch, 64)
 
         // Fusion: concat wide(256) + deep(128) + vibration(64) = 448

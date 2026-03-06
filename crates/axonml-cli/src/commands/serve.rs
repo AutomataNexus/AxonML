@@ -316,14 +316,18 @@ async fn batch_handler(
         ));
     }
 
-    if request.data.len() > state.max_batch_size {
+    // SECURITY: Hard cap on batch size to prevent uncontrolled allocation
+    const MAX_BATCH_SIZE: usize = 1024;
+    let effective_max = state.max_batch_size.min(MAX_BATCH_SIZE);
+
+    if request.data.len() > effective_max {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
                 error: format!(
                     "Batch size {} exceeds maximum {}",
                     request.data.len(),
-                    state.max_batch_size
+                    effective_max
                 ),
             }),
         ));

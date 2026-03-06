@@ -124,64 +124,43 @@ impl GCNConv {
         let nodes = shape[1];
         let adj_shape = adj.shape();
 
-        let x_data = x.data().to_vec();
-        let adj_data = adj.data().to_vec();
-        let w_data = self.weight.data().to_vec();
+        // GCN: output = adj @ x @ weight + bias
+        // Use Variable operations to preserve gradient flow
+        //
+        // Process per-sample: for each batch element, compute adj @ x_b @ weight
+        // This preserves gradient flow through x and weight via matmul backward.
+        let weight = self.weight.variable();
 
-        let mut output = vec![0.0f32; batch * nodes * self.out_features];
-
+        let mut per_sample: Vec<Variable> = Vec::with_capacity(batch);
         for b in 0..batch {
-            // Get adjacency for this batch
-            let adj_offset = if adj_shape.len() == 3 {
-                b * nodes * nodes
+            // x_b: (nodes, in_features)
+            let x_b = x.select(0, b);
+
+            // adj_b: (nodes, nodes)
+            let adj_b = if adj_shape.len() == 3 {
+                adj.select(0, b)
             } else {
-                0 // shared adjacency
+                adj.clone()
             };
 
-            // Step 1: message = adj @ x  → (nodes, in_features)
-            // Step 2: output = message @ weight → (nodes, out_features)
-            for i in 0..nodes {
-                // Aggregate neighbor features: message_i = sum_j adj[i,j] * x[b,j,:]
-                let mut message = vec![0.0f32; self.in_features];
-                for j in 0..nodes {
-                    let a_ij = adj_data[adj_offset + i * nodes + j];
-                    if a_ij != 0.0 {
-                        let x_offset = (b * nodes + j) * self.in_features;
-                        for f in 0..self.in_features {
-                            message[f] += a_ij * x_data[x_offset + f];
-                        }
-                    }
-                }
+            // message_b = adj_b @ x_b → (nodes, in_features)
+            let msg_b = adj_b.matmul(&x_b);
 
-                // Transform: out_i = message_i @ weight
-                let out_offset = (b * nodes + i) * self.out_features;
-                for o in 0..self.out_features {
-                    let mut val = 0.0;
-                    for f in 0..self.in_features {
-                        val += message[f] * w_data[f * self.out_features + o];
-                    }
-                    output[out_offset + o] = val;
-                }
+            // out_b = msg_b @ weight → (nodes, out_features)
+            let mut out_b = msg_b.matmul(&weight);
+
+            // Add bias
+            if let Some(bias) = &self.bias {
+                out_b = out_b.add_var(&bias.variable());
             }
+
+            // Unsqueeze to (1, nodes, out_features) for stacking
+            per_sample.push(out_b.unsqueeze(0));
         }
 
-        // Add bias
-        if let Some(bias) = &self.bias {
-            let bias_data = bias.data().to_vec();
-            for b in 0..batch {
-                for i in 0..nodes {
-                    let offset = (b * nodes + i) * self.out_features;
-                    for o in 0..self.out_features {
-                        output[offset + o] += bias_data[o];
-                    }
-                }
-            }
-        }
-
-        Variable::new(
-            Tensor::from_vec(output, &[batch, nodes, self.out_features]).unwrap(),
-            x.requires_grad() || adj.requires_grad(),
-        )
+        // Stack along batch dimension
+        let refs: Vec<&Variable> = per_sample.iter().collect();
+        Variable::cat(&refs, 0)
     }
 
     /// Returns the input feature dimension.

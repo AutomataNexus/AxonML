@@ -41,6 +41,7 @@
 | `grad_fn` | `GradientFunction` trait and implementations for all differentiable operations |
 | `no_grad` | Context managers for disabling gradient computation (`NoGradGuard`, `InferenceModeGuard`) |
 | `functions` | Gradient implementations for arithmetic, activation, loss, and linear algebra operations |
+| `inspect` | **Graph Inspection API** *(novel)* — Trace, visualize, and analyze computation graphs natively |
 
 ## Usage
 
@@ -189,9 +190,36 @@ let analytical = x.grad().unwrap();
 assert!(gradcheck(&analytical, &numerical, 1e-3, 1e-3));
 ```
 
+### Graph Inspection *(novel)*
+
+Trace and visualize the computation graph — no external tools required (unlike PyTorch's `torchviz`).
+
+```rust
+use axonml_autograd::{Variable, inspect::{trace_backward, to_dot}};
+use axonml_tensor::Tensor;
+
+let x = Variable::new(Tensor::from_vec(vec![2.0, 3.0], &[2]).unwrap(), true);
+let y = x.pow(2.0).relu().sum();
+y.backward();
+
+// Capture the computation graph
+let snapshot = trace_backward(&y);
+println!("Nodes: {}, Depth: {}", snapshot.node_count(), snapshot.depth());
+println!("Operations: {:?}", snapshot.operation_names());
+
+// Export to Graphviz DOT format
+let dot = to_dot(&snapshot);
+std::fs::write("graph.dot", &dot).unwrap();
+// Then: dot -Tpng graph.dot -o graph.png
+
+// Analyze gradient flow health
+let summary = snapshot.gradient_flow_summary();
+println!("{}", summary);
+```
+
 ## Tests
 
-Run the test suite:
+Run the test suite (105 tests):
 
 ```bash
 cargo test -p axonml-autograd

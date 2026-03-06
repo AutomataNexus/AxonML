@@ -283,11 +283,53 @@ let optimizer = Adam::with_param_groups(vec![
 | AdamW | Transformers, large models | 0.0001 - 0.001 |
 | RMSprop | RNNs, non-stationary objectives | 0.001 |
 
+### Training Health Monitor *(novel)*
+
+#### health.rs - Self-Monitoring Training
+
+`TrainingMonitor` watches your training run and detects problems automatically:
+
+```rust
+use axonml_optim::health::{TrainingMonitor, MonitorConfig};
+
+let mut monitor = TrainingMonitor::new(MonitorConfig::default());
+
+for step in 0..1000 {
+    let loss = train_step(&model, &batch);
+    let grad_norm = compute_grad_norm(&model);
+    monitor.record_step(loss, grad_norm, optimizer.get_lr());
+
+    // Check for problems
+    for alert in monitor.alerts_since_last_check() {
+        eprintln!("[{:?}] {}", alert.severity, alert.message);
+    }
+}
+
+// Training summary
+let report = monitor.health_report();
+println!("Loss trend: {:?}", report.loss_trend);
+println!("Convergence: {:.2}", monitor.convergence_score());
+println!("Suggested LR: {:?}", monitor.suggest_lr());
+```
+
+**Detects:**
+| Alert | Severity | Description |
+|-------|----------|-------------|
+| NaN Loss | Critical | Loss became NaN — likely LR too high |
+| Gradient Explosion | Critical | Grad norm > threshold — clip gradients |
+| Gradient Vanishing | Warning | Grad norm near zero — check architecture |
+| Loss Plateau | Warning | No improvement for N steps — reduce LR |
+| Loss Oscillation | Warning | Loss swinging up/down — LR too high |
+| Dead Neurons | Info | Neurons with zero gradient — check activation |
+| Divergence | Critical | Loss increasing consistently — training failing |
+
+**Why novel:** No ML framework has a built-in training health monitor. PyTorch users rely on external tools (W&B, TensorBoard) or manual checks. AxonML's monitor is integrated into the optimizer itself.
+
 ## Related Modules
 
 - [Neural Networks](../nn/README.md) - Models to optimize
 - [Autograd](../autograd/README.md) - Gradient computation
 - [Data](../data/README.md) - Data loading for training
 
-@version 0.1.0
+@version 0.4.0
 @author AutomataNexus Development Team

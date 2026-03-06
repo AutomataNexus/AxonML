@@ -963,10 +963,9 @@ impl<T: Float> Tensor<T> {
     pub fn softmax(&self, dim: i32) -> Self {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            // Fall back to CPU for softmax (complex reduction)
-            let cpu = self.to_device(Device::Cpu).unwrap();
-            let result = crate::ops::softmax(&cpu, dim as i64).unwrap_or_else(|_| cpu.clone());
-            return result.to_device(self.device()).unwrap();
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = unsafe { gpu_ref(self) };
+            return unsafe { gpu_into(self_f32.softmax_cuda(dim).expect("CUDA softmax failed")) };
         }
         crate::ops::softmax(self, dim as i64).unwrap_or_else(|_| self.clone())
     }
@@ -992,6 +991,21 @@ impl<T: Float> Tensor<T> {
             return self.clone();
         }
 
+        // GPU fast path: sum_dim then divide by dim_size (all on GPU)
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = unsafe { gpu_ref(self) };
+            let summed = if keepdim {
+                self_f32.sum_dim_keepdim_cuda(dim)
+            } else {
+                self_f32.sum_dim_cuda(dim)
+            };
+            let dim_size = self.shape[dim];
+            let result = summed.mul_scalar_cuda(1.0 / dim_size as f32);
+            return unsafe { gpu_into(result) };
+        }
+
         let dim_size = self.shape[dim];
         let data = self.to_vec();
         let mut new_shape = self.shape.clone();
@@ -1009,7 +1023,6 @@ impl<T: Float> Tensor<T> {
         let new_numel: usize = new_shape.iter().product();
         let mut result = vec![T::zero(); new_numel];
 
-        // Compute strides for iteration
         let outer_size: usize = self.shape[..dim].iter().product();
         let inner_size: usize = self.shape[dim + 1..].iter().product();
 
@@ -1026,12 +1039,7 @@ impl<T: Float> Tensor<T> {
             }
         }
 
-        let out = Self::from_vec(result, &new_shape).unwrap();
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            return out.to_device(self.device()).unwrap();
-        }
-        out
+        Self::from_vec(result, &new_shape).unwrap()
     }
 
     /// Sum along a dimension.
@@ -1046,6 +1054,19 @@ impl<T: Float> Tensor<T> {
 
         if dim >= ndim {
             return self.clone();
+        }
+
+        // GPU fast path: use CUDA sum_dim kernel (no CPU copies)
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = unsafe { gpu_ref(self) };
+            let result = if keepdim {
+                self_f32.sum_dim_keepdim_cuda(dim)
+            } else {
+                self_f32.sum_dim_cuda(dim)
+            };
+            return unsafe { gpu_into(result) };
         }
 
         let dim_size = self.shape[dim];
@@ -1080,12 +1101,7 @@ impl<T: Float> Tensor<T> {
             }
         }
 
-        let out = Self::from_vec(result, &new_shape).unwrap();
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            return out.to_device(self.device()).unwrap();
-        }
-        out
+        Self::from_vec(result, &new_shape).unwrap()
     }
 
     /// Variance along a dimension.
@@ -1106,10 +1122,9 @@ impl<T: Float> Tensor<T> {
 
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            // Fall back: D2H, broadcast on CPU, H2D
-            let cpu = self.to_device(Device::Cpu).unwrap();
-            let result = cpu.broadcast_to(shape);
-            return result.to_device(self.device()).unwrap();
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = unsafe { gpu_ref(self) };
+            return unsafe { gpu_into(self_f32.broadcast_to_cuda(shape).expect("CUDA broadcast_to failed")) };
         }
 
         let result_shape = broadcast_shape(&self.shape, shape).unwrap_or_else(|_| shape.into());
@@ -1215,21 +1230,19 @@ impl<T: Numeric> Tensor<T> {
             let other_gpu = other.device().is_gpu();
             if self_gpu || other_gpu {
                 assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-                // Ensure both on same device
-                if self_gpu && other_gpu && self.shape == other.shape {
+                if self_gpu && other_gpu {
                     let (s, o) = unsafe { (gpu_ref(self), gpu_ref(other)) };
-                    return Ok(unsafe { gpu_into(s.add_cuda(o)?) });
+                    if self.shape == other.shape {
+                        return Ok(unsafe { gpu_into(s.add_cuda(o)?) });
+                    } else {
+                        return Ok(unsafe { gpu_into(s.broadcast_add_cuda(o)?) });
+                    }
                 }
-                // Mixed device or broadcasting needed — fall back to CPU
-                let a_cpu = if self_gpu { self.to_device(Device::Cpu)? } else { self.clone() };
-                let b_cpu = if other_gpu { other.to_device(Device::Cpu)? } else { other.clone() };
-                let result_cpu = a_cpu.add(&b_cpu)?;
+                // Mixed device — move to GPU, then operate
                 let target_device = if self_gpu { self.device() } else { other.device() };
-                return if target_device.is_gpu() {
-                    result_cpu.to_device(target_device)
-                } else {
-                    Ok(result_cpu)
-                };
+                let a_gpu = if self_gpu { self.clone() } else { self.to_device(target_device)? };
+                let b_gpu = if other_gpu { other.clone() } else { other.to_device(target_device)? };
+                return a_gpu.add(&b_gpu);
             }
         }
         let result_shape = broadcast_shape(&self.shape, &other.shape)?;
@@ -1260,15 +1273,18 @@ impl<T: Numeric> Tensor<T> {
             let other_gpu = other.device().is_gpu();
             if self_gpu || other_gpu {
                 assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-                if self_gpu && other_gpu && self.shape == other.shape {
+                if self_gpu && other_gpu {
                     let (s, o) = unsafe { (gpu_ref(self), gpu_ref(other)) };
-                    return Ok(unsafe { gpu_into(s.sub_cuda(o)?) });
+                    if self.shape == other.shape {
+                        return Ok(unsafe { gpu_into(s.sub_cuda(o)?) });
+                    } else {
+                        return Ok(unsafe { gpu_into(s.broadcast_sub_cuda(o)?) });
+                    }
                 }
-                let a_cpu = if self_gpu { self.to_device(Device::Cpu)? } else { self.clone() };
-                let b_cpu = if other_gpu { other.to_device(Device::Cpu)? } else { other.clone() };
-                let result_cpu = a_cpu.sub(&b_cpu)?;
                 let target = if self_gpu { self.device() } else { other.device() };
-                return if target.is_gpu() { result_cpu.to_device(target) } else { Ok(result_cpu) };
+                let a_gpu = if self_gpu { self.clone() } else { self.to_device(target)? };
+                let b_gpu = if other_gpu { other.clone() } else { other.to_device(target)? };
+                return a_gpu.sub(&b_gpu);
             }
         }
         let result_shape = broadcast_shape(&self.shape, &other.shape)?;
@@ -1299,15 +1315,18 @@ impl<T: Numeric> Tensor<T> {
             let other_gpu = other.device().is_gpu();
             if self_gpu || other_gpu {
                 assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-                if self_gpu && other_gpu && self.shape == other.shape {
+                if self_gpu && other_gpu {
                     let (s, o) = unsafe { (gpu_ref(self), gpu_ref(other)) };
-                    return Ok(unsafe { gpu_into(s.mul_cuda(o)?) });
+                    if self.shape == other.shape {
+                        return Ok(unsafe { gpu_into(s.mul_cuda(o)?) });
+                    } else {
+                        return Ok(unsafe { gpu_into(s.broadcast_mul_cuda(o)?) });
+                    }
                 }
-                let a_cpu = if self_gpu { self.to_device(Device::Cpu)? } else { self.clone() };
-                let b_cpu = if other_gpu { other.to_device(Device::Cpu)? } else { other.clone() };
-                let result_cpu = a_cpu.mul(&b_cpu)?;
                 let target = if self_gpu { self.device() } else { other.device() };
-                return if target.is_gpu() { result_cpu.to_device(target) } else { Ok(result_cpu) };
+                let a_gpu = if self_gpu { self.clone() } else { self.to_device(target)? };
+                let b_gpu = if other_gpu { other.clone() } else { other.to_device(target)? };
+                return a_gpu.mul(&b_gpu);
             }
         }
         let result_shape = broadcast_shape(&self.shape, &other.shape)?;
@@ -1338,15 +1357,18 @@ impl<T: Numeric> Tensor<T> {
             let other_gpu = other.device().is_gpu();
             if self_gpu || other_gpu {
                 assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-                if self_gpu && other_gpu && self.shape == other.shape {
+                if self_gpu && other_gpu {
                     let (s, o) = unsafe { (gpu_ref(self), gpu_ref(other)) };
-                    return Ok(unsafe { gpu_into(s.div_cuda(o)?) });
+                    if self.shape == other.shape {
+                        return Ok(unsafe { gpu_into(s.div_cuda(o)?) });
+                    } else {
+                        return Ok(unsafe { gpu_into(s.broadcast_div_cuda(o)?) });
+                    }
                 }
-                let a_cpu = if self_gpu { self.to_device(Device::Cpu)? } else { self.clone() };
-                let b_cpu = if other_gpu { other.to_device(Device::Cpu)? } else { other.clone() };
-                let result_cpu = a_cpu.div(&b_cpu)?;
                 let target = if self_gpu { self.device() } else { other.device() };
-                return if target.is_gpu() { result_cpu.to_device(target) } else { Ok(result_cpu) };
+                let a_gpu = if self_gpu { self.clone() } else { self.to_device(target)? };
+                let b_gpu = if other_gpu { other.clone() } else { other.to_device(target)? };
+                return a_gpu.div(&b_gpu);
             }
         }
         let result_shape = broadcast_shape(&self.shape, &other.shape)?;
@@ -1374,12 +1396,10 @@ impl<T: Numeric> Tensor<T> {
     pub fn add_scalar(&self, scalar: T) -> Self {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            // Fall back to CPU for add_scalar (no GPU kernel yet)
-            let data = self.to_vec();
-            let mut result = vec![T::zero(); data.len()];
-            CpuBackend::add_scalar(&mut result, &data, scalar);
-            let cpu_result = Self::from_vec(result, &self.shape).unwrap();
-            return cpu_result.to_device(self.device()).unwrap();
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = unsafe { gpu_ref(self) };
+            let scalar_f32: f32 = unsafe { *(&scalar as *const T as *const f32) };
+            return unsafe { gpu_into(self_f32.add_scalar_cuda(scalar_f32)) };
         }
         let data = self.to_vec();
         let mut result = vec![T::zero(); data.len()];

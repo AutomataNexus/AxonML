@@ -314,6 +314,60 @@ fn evaluate(model: &impl Module, test_loader: &DataLoader) -> f32 {
 }
 ```
 
+## Object Detection Training
+
+AxonML includes full training infrastructure for anchor-free object detection. See the dedicated [Object Detection Training Guide](detection.md) for complete documentation.
+
+### Detection-Specific Losses
+
+```rust
+use axonml_vision::losses::{FocalLoss, GIoULoss, UncertaintyLoss};
+use axonml_nn::{BCEWithLogitsLoss, SmoothL1Loss};
+
+// Focal Loss — essential for detection (background >> objects)
+let focal = FocalLoss::new();  // alpha=0.25, gamma=2.0
+let cls_loss = focal.compute(&pred_logits, &targets);
+
+// SmoothL1 (Huber) — robust bbox regression
+let smooth_l1 = SmoothL1Loss::new();
+let bbox_loss = smooth_l1.compute(&pred_boxes, &target_boxes);
+
+// GIoU — operates in IoU metric space
+let giou_loss = GIoULoss::compute(&pred_boxes, &target_boxes);
+
+// BCEWithLogits — numerically stable binary cross-entropy
+let bce = BCEWithLogitsLoss::new();
+let loss = bce.compute(&logits, &binary_targets);
+```
+
+### Training Loops
+
+Built-in training step functions handle the full forward-loss-backward-step pipeline:
+
+```rust
+use axonml_vision::training::{nexus_training_step, phantom_training_step};
+
+// Nexus (COCO object detection)
+let loss = nexus_training_step(
+    &mut nexus_model, &frame, &gt_boxes, &gt_classes, &mut optimizer,
+);
+
+// Phantom (WIDER FACE face detection)
+let loss = phantom_training_step(
+    &mut phantom_model, &frame, &gt_faces, &mut optimizer,
+);
+```
+
+### Detection Evaluation
+
+```rust
+use axonml_vision::training::{compute_ap, compute_map, compute_coco_map};
+
+let ap = compute_ap(&detections, &ground_truths, 0.5);       // AP@0.5
+let map = compute_map(&all_dets, &all_gts, num_classes, 0.5); // mAP@0.5
+let coco_map = compute_coco_map(&all_dets, &all_gts, num_classes); // mAP@[0.5:0.95]
+```
+
 ## Complete Training Script
 
 ```rust

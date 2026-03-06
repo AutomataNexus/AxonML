@@ -74,20 +74,25 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, AuthError> {
 mod tests {
     use super::*;
 
+    fn test_password() -> String {
+        format!("test_pw_{}", std::process::id())
+    }
+
     #[test]
     fn test_password_hashing() {
-        let password = "secure_password_123";
-        let hash = hash_password(password).unwrap();
+        let password = test_password();
+        let hash = hash_password(&password).unwrap();
 
         assert!(hash.starts_with("$argon2"));
-        assert!(verify_password(password, &hash).unwrap());
-        assert!(!verify_password("wrong_password", &hash).unwrap());
+        assert!(verify_password(&password, &hash).unwrap());
+        assert!(!verify_password(&format!("{}_wrong", password), &hash).unwrap());
     }
 
     #[test]
     fn test_different_passwords_different_hashes() {
-        let hash1 = hash_password("password1").unwrap();
-        let hash2 = hash_password("password1").unwrap();
+        let password = test_password();
+        let hash1 = hash_password(&password).unwrap();
+        let hash2 = hash_password(&password).unwrap();
 
         // Same password should produce different hashes (different salts)
         assert_ne!(hash1, hash2);

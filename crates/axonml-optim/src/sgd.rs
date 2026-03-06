@@ -192,7 +192,11 @@ impl Optimizer for SGD {
                 .map(|(p, g)| p - self.lr * g)
                 .collect();
 
-            let update = Tensor::from_vec(new_data, param_data.shape()).unwrap();
+            let mut update = Tensor::from_vec(new_data, param_data.shape()).unwrap();
+            let device = param_data.device();
+            if device.is_gpu() {
+                update = update.to_device(device).unwrap();
+            }
             param.update_data(update);
         }
     }

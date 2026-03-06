@@ -249,7 +249,12 @@ impl Optimizer for RMSprop {
                 }
             }
 
-            let update = Tensor::from_vec(param_vec, param_data.shape()).unwrap();
+            let mut update = Tensor::from_vec(param_vec, param_data.shape()).unwrap();
+            // Preserve device: from_vec creates CPU, move back to param device
+            let device = param_data.device();
+            if device.is_gpu() {
+                update = update.to_device(device).unwrap();
+            }
             param.update_data(update);
         }
     }

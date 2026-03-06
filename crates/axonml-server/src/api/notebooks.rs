@@ -338,7 +338,9 @@ pub async fn create_notebook(
         )));
     }
 
-    let cells: Vec<NotebookCell> = req.cells.into_iter().map(request_to_cell).collect();
+    // SECURITY: cell count is bounded by MAX_CELLS check above
+    let mut cells = Vec::with_capacity(req.cells.len().min(MAX_CELLS));
+    cells.extend(req.cells.into_iter().take(MAX_CELLS).map(request_to_cell));
 
     let notebook = repo
         .create(NewNotebook {
@@ -407,9 +409,13 @@ pub async fn update_notebook(
         }
     }
 
-    let cells = req
-        .cells
-        .map(|c| c.into_iter().map(request_to_cell).collect());
+    // SECURITY: cell count is bounded by MAX_CELLS check above
+    let cells = req.cells.map(|c| {
+        let len = c.len();
+        let mut result = Vec::with_capacity(len.min(MAX_CELLS));
+        result.extend(c.into_iter().take(MAX_CELLS).map(request_to_cell));
+        result
+    });
 
     let notebook = repo
         .update(
