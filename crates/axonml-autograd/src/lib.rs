@@ -138,6 +138,7 @@ pub mod checkpoint;
 pub mod functions;
 pub mod grad_fn;
 pub mod graph;
+pub mod inspect;
 pub mod no_grad;
 pub mod variable;
 
@@ -152,6 +153,7 @@ pub use backward::backward;
 pub use checkpoint::{checkpoint, checkpoint_sequential};
 pub use grad_fn::{GradFn, GradientFunction};
 pub use graph::{ComputationGraph, GraphNode};
+pub use inspect::{depth, node_count, to_dot, trace_backward, GraphSnapshot, SnapshotNode};
 pub use no_grad::{no_grad, NoGradGuard};
 pub use variable::Variable;
 

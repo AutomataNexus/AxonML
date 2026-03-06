@@ -122,27 +122,35 @@ impl CrossEntropyLossBackward {
 
 impl GradientFunction for CrossEntropyLossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let softmax_data = self.saved_softmax.to_vec();
         let target_data = self.saved_target.to_vec();
         let batch_size = self.saved_target.numel();
-        let num_classes = softmax_data.len() / batch_size;
+        let num_classes = self.saved_softmax.numel() / batch_size;
 
-        let mut grad_data = softmax_data.clone();
-
-        // For each sample, subtract 1 from the target class probability
+        // Build the one-hot subtraction tensor on CPU (targets are always small i64 indices)
+        let mut one_hot = vec![0.0f32; batch_size * num_classes];
         for i in 0..batch_size {
             let target_class = target_data[i] as usize;
-            grad_data[i * num_classes + target_class] -= 1.0;
+            one_hot[i * num_classes + target_class] = -1.0;
         }
+        let one_hot_tensor = Tensor::from_vec(one_hot, self.saved_softmax.shape()).unwrap();
 
+        // grad = softmax + one_hot (i.e., softmax - 1 at target positions)
+        // If softmax is on GPU, move one_hot there and do GPU add
+        let grad = if self.saved_softmax.device().is_gpu() {
+            let one_hot_gpu = one_hot_tensor.to_device(self.saved_softmax.device()).unwrap();
+            self.saved_softmax.add(&one_hot_gpu).unwrap()
+        } else {
+            self.saved_softmax.add(&one_hot_tensor).unwrap()
+        };
+
+        // Scale by grad_output / batch_size (scalar)
         let scale = match self.reduction {
             Reduction::Mean => grad_output.to_vec()[0] / batch_size as f32,
             Reduction::Sum => grad_output.to_vec()[0],
             Reduction::None => 1.0,
         };
 
-        let grad: Vec<f32> = grad_data.iter().map(|&v| v * scale).collect();
-        let grad = Tensor::from_vec(grad, self.saved_softmax.shape()).unwrap();
+        let grad = grad.mul_scalar(scale);
 
         vec![Some(grad)]
     }
@@ -214,7 +222,11 @@ impl GradientFunction for NllLossBackward {
             grad_data[i * num_classes + target_class] = scale;
         }
 
-        let grad = Tensor::from_vec(grad_data, input_shape).unwrap();
+        let mut grad = Tensor::from_vec(grad_data, input_shape).unwrap();
+        // Preserve device: input was on GPU, gradient should be too
+        if self.saved_input.device().is_gpu() {
+            grad = grad.to_device(self.saved_input.device()).unwrap();
+        }
         vec![Some(grad)]
     }
 

@@ -13,9 +13,12 @@
 //! let model = Phi::new(&config);
 //! ```
 
-use axonml_autograd::Variable;
+use axonml_autograd::no_grad::is_grad_enabled;
+use axonml_autograd::{GradFn, Variable};
 use axonml_nn::{Dropout, Embedding, Linear, Module, Parameter};
-use axonml_tensor::{view::cat, Tensor};
+use axonml_tensor::Tensor;
+
+use crate::llama::RepeatKVBackward;
 
 use crate::attention::{KVCache, LayerKVCache};
 use crate::llama::{RMSNorm, RotaryEmbedding};
@@ -284,50 +287,23 @@ impl PhiAttention {
         k: &Variable,
         position_offset: usize,
     ) -> (Variable, Variable) {
-        let q_data = q.data();
-        let k_data = k.data();
-        let shape = q_data.shape();
-        let batch_size = shape[0];
-        let num_heads = shape[1];
-        let seq_len = shape[2];
+        // Split into rotary and pass-through parts using narrow (preserves graph)
+        let q_rot_var = q.narrow(3, 0, self.rotary_dim);
+        let q_pass_var = q.narrow(3, self.rotary_dim, self.head_dim - self.rotary_dim);
 
-        // Split into rotary and pass-through parts
-        let q_rot = q_data.slice(&[0..batch_size, 0..num_heads, 0..seq_len, 0..self.rotary_dim]);
-        let q_pass = q_data.slice(&[
-            0..batch_size,
-            0..num_heads,
-            0..seq_len,
-            self.rotary_dim..self.head_dim,
-        ]);
-
-        let k_rot = k_data.slice(&[
-            0..batch_size,
-            0..self.num_kv_heads,
-            0..seq_len,
-            0..self.rotary_dim,
-        ]);
-        let k_pass = k_data.slice(&[
-            0..batch_size,
-            0..self.num_kv_heads,
-            0..seq_len,
-            self.rotary_dim..self.head_dim,
-        ]);
+        let k_rot_var = k.narrow(3, 0, self.rotary_dim);
+        let k_pass_var = k.narrow(3, self.rotary_dim, self.head_dim - self.rotary_dim);
 
         // Apply rotary to the rotary part
-        let q_rot_var = Variable::new(q_rot, q.requires_grad());
-        let k_rot_var = Variable::new(k_rot, k.requires_grad());
         let (q_rotated, k_rotated) = self
             .rotary_emb
             .apply(&q_rot_var, &k_rot_var, position_offset);
 
-        // Concatenate back
-        let q_out = cat(&[q_rotated.data(), q_pass], 3).unwrap();
-        let k_out = cat(&[k_rotated.data(), k_pass], 3).unwrap();
+        // Concatenate back using Variable::cat (preserves graph)
+        let q_out = Variable::cat(&[&q_rotated, &q_pass_var], 3);
+        let k_out = Variable::cat(&[&k_rotated, &k_pass_var], 3);
 
-        (
-            Variable::new(q_out, q.requires_grad()),
-            Variable::new(k_out, k.requires_grad()),
-        )
+        (q_out, k_out)
     }
 
     fn repeat_kv(&self, x: &Variable, n_rep: usize) -> Variable {
@@ -356,10 +332,19 @@ impl PhiAttention {
             }
         }
 
-        Variable::new(
-            Tensor::from_vec(output, &[batch, num_kv_heads * n_rep, seq_len, head_dim]).unwrap(),
-            x.requires_grad(),
-        )
+        let output_tensor =
+            Tensor::from_vec(output, &[batch, num_kv_heads * n_rep, seq_len, head_dim]).unwrap();
+
+        if x.requires_grad() && is_grad_enabled() {
+            let grad_fn = GradFn::new(RepeatKVBackward {
+                next_fns: vec![x.grad_fn().cloned()],
+                num_kv_heads,
+                n_rep,
+            });
+            Variable::from_operation(output_tensor, grad_fn, true)
+        } else {
+            Variable::new(output_tensor, false)
+        }
     }
 
     fn create_causal_mask(&self, q_len: usize, kv_len: usize, offset: usize) -> Tensor<f32> {

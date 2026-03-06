@@ -72,8 +72,8 @@ async fn test_change_password() {
         "/api/user/password",
         &token,
         serde_json::json!({
-            "current_password": ADMIN_PASSWORD,
-            "new_password": ADMIN_PASSWORD  // Keep same for testing
+            "current_password": admin_password(),
+            "new_password": admin_password()  // Keep same for testing
         }),
     )
     .await

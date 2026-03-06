@@ -31,6 +31,8 @@ pub mod cuda;
 #[cfg(feature = "cuda")]
 pub mod cuda_kernels;
 
+pub mod cuda_pool;
+
 #[cfg(feature = "vulkan")]
 pub mod vulkan;
 

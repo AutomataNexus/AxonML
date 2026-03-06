@@ -97,7 +97,7 @@ async fn test_me_endpoint_with_valid_token() {
     assert!(response.status().is_success(), "Should return success");
 
     let body: Value = response.json().await.expect("Failed to parse JSON");
-    assert_eq!(body["email"], ADMIN_EMAIL);
+    assert_eq!(body["email"], admin_email());
 }
 
 #[tokio::test]
@@ -178,7 +178,7 @@ async fn test_register_duplicate_email() {
         .post(format!("{}/api/auth/register", TEST_API_URL))
         .json(&serde_json::json!({
             "name": "Duplicate User",
-            "email": ADMIN_EMAIL,
+            "email": admin_email(),
             "password": "TestPassword123!"
         }))
         .send()
@@ -221,8 +221,8 @@ async fn test_refresh_token() {
     let login_response = client
         .post(format!("{}/api/auth/login", TEST_API_URL))
         .json(&serde_json::json!({
-            "email": ADMIN_EMAIL,
-            "password": ADMIN_PASSWORD
+            "email": admin_email(),
+            "password": admin_password()
         }))
         .send()
         .await

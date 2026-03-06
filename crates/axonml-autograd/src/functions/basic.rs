@@ -340,10 +340,8 @@ impl SumBackward {
 
 impl GradientFunction for SumBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // Broadcast the scalar gradient to the input shape
-        let grad_value = grad_output.to_vec()[0];
-        let numel: usize = self.input_shape.iter().product();
-        let grad = Tensor::from_vec(vec![grad_value; numel], &self.input_shape).unwrap();
+        // Broadcast the scalar gradient to the input shape (stays on GPU)
+        let grad = grad_output.broadcast_to(&self.input_shape);
         vec![Some(grad)]
     }
 
@@ -387,13 +385,304 @@ impl MeanBackward {
 impl GradientFunction for MeanBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         let numel: usize = self.input_shape.iter().product();
-        let grad_value = grad_output.to_vec()[0] / numel as f32;
-        let grad = Tensor::from_vec(vec![grad_value; numel], &self.input_shape).unwrap();
+        // Scale by 1/numel, then broadcast to input shape (stays on GPU)
+        let scaled = grad_output.mul_scalar(1.0 / numel as f32);
+        let grad = scaled.broadcast_to(&self.input_shape);
         vec![Some(grad)]
     }
 
     fn name(&self) -> &'static str {
         "MeanBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+// =============================================================================
+// MeanDim Backward
+// =============================================================================
+
+/// Gradient function for mean along a dimension.
+///
+/// d/dx(mean(x, dim, keepdim)) = grad_output / dim_size, expanded to input shape
+#[derive(Debug)]
+pub struct MeanDimBackward {
+    next_fns: Vec<Option<GradFn>>,
+    input_shape: Vec<usize>,
+    dim: usize,
+    keepdim: bool,
+}
+
+impl MeanDimBackward {
+    /// Creates a new `MeanDimBackward`.
+    #[must_use]
+    pub fn new(
+        input_grad_fn: Option<GradFn>,
+        input_shape: Vec<usize>,
+        dim: usize,
+        keepdim: bool,
+    ) -> Self {
+        Self {
+            next_fns: vec![input_grad_fn],
+            input_shape,
+            dim,
+            keepdim,
+        }
+    }
+}
+
+impl GradientFunction for MeanDimBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let dim_size = self.input_shape[self.dim];
+        let scale = 1.0 / dim_size as f32;
+
+        // GPU fast path: scale grad_output, then broadcast to input shape
+        // This uses tensor ops which dispatch to GPU natively
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            let scaled = grad_output.mul_scalar(scale);
+            // Ensure keepdim shape for broadcasting
+            let expanded = if self.keepdim {
+                // Already has dim=1, can broadcast directly
+                scaled.broadcast_to(&self.input_shape)
+            } else {
+                // Need to unsqueeze the reduced dim first
+                let mut expanded_shape = grad_output.shape().to_vec();
+                expanded_shape.insert(self.dim, 1);
+                let reshaped_dims: Vec<isize> = expanded_shape.iter().map(|&x| x as isize).collect();
+                let reshaped = scaled.reshape(&reshaped_dims).unwrap();
+                reshaped.broadcast_to(&self.input_shape)
+            };
+            return vec![Some(expanded.contiguous())];
+        }
+
+        // CPU path
+        let grad_vec = grad_output.to_vec();
+        let numel: usize = self.input_shape.iter().product();
+        let mut grad_input = vec![0.0f32; numel];
+
+        let ndim = self.input_shape.len();
+        let mut strides = vec![1usize; ndim];
+        for i in (0..ndim - 1).rev() {
+            strides[i] = strides[i + 1] * self.input_shape[i + 1];
+        }
+
+        let out_shape: Vec<usize> = if self.keepdim {
+            let mut s = self.input_shape.clone();
+            s[self.dim] = 1;
+            s
+        } else {
+            let mut s = Vec::with_capacity(ndim - 1);
+            for (i, &sz) in self.input_shape.iter().enumerate() {
+                if i != self.dim {
+                    s.push(sz);
+                }
+            }
+            s
+        };
+        let out_ndim = out_shape.len();
+        let mut out_strides = vec![1usize; out_ndim];
+        if out_ndim > 1 {
+            for i in (0..out_ndim - 1).rev() {
+                out_strides[i] = out_strides[i + 1] * out_shape[i + 1];
+            }
+        }
+
+        for flat_idx in 0..numel {
+            let mut remaining = flat_idx;
+            let mut out_flat = 0usize;
+            let mut out_d = 0;
+            for d in 0..ndim {
+                let coord = remaining / strides[d];
+                remaining %= strides[d];
+                if d == self.dim {
+                    if self.keepdim {
+                        out_d += 1;
+                    }
+                } else {
+                    out_flat += coord * out_strides[out_d];
+                    out_d += 1;
+                }
+            }
+            grad_input[flat_idx] = grad_vec[out_flat] * scale;
+        }
+
+        let grad = Tensor::from_vec(grad_input, &self.input_shape).unwrap();
+        vec![Some(grad)]
+    }
+
+    fn name(&self) -> &'static str {
+        "MeanDimBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+// =============================================================================
+// VarDim Backward
+// =============================================================================
+
+/// Gradient function for variance along a dimension.
+///
+/// d/dx(var(x, dim)) = 2 * (x - mean(x, dim)) / N
+#[derive(Debug)]
+pub struct VarDimBackward {
+    next_fns: Vec<Option<GradFn>>,
+    saved_input: Tensor<f32>,
+    dim: usize,
+    keepdim: bool,
+}
+
+impl VarDimBackward {
+    /// Creates a new `VarDimBackward`.
+    #[must_use]
+    pub fn new(
+        input_grad_fn: Option<GradFn>,
+        saved_input: Tensor<f32>,
+        dim: usize,
+        keepdim: bool,
+    ) -> Self {
+        Self {
+            next_fns: vec![input_grad_fn],
+            saved_input,
+            dim,
+            keepdim,
+        }
+    }
+}
+
+impl GradientFunction for VarDimBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        // GPU fast path: use tensor ops (mean_dim, sub, mul_scalar, mul, broadcast_to)
+        #[cfg(feature = "cuda")]
+        if self.saved_input.device().is_gpu() {
+            let dim = self.dim as i32;
+            let dim_size = self.saved_input.shape()[self.dim];
+            // mean along dim (keepdim=true for broadcasting)
+            let mean = self.saved_input.mean_dim(dim, true);
+            // x - mean (broadcasts)
+            let diff = self.saved_input.sub(&mean).unwrap();
+            // 2 * (x - mean) / N
+            let scale = 2.0 / dim_size as f32;
+            let scaled_diff = diff.mul_scalar(scale);
+            // Multiply by upstream gradient (broadcast grad_output to input shape)
+            let grad_expanded = if self.keepdim {
+                grad_output.broadcast_to(self.saved_input.shape())
+            } else {
+                // Insert dim=1 at the reduced dimension, then broadcast
+                let mut expanded_shape = grad_output.shape().to_vec();
+                expanded_shape.insert(self.dim, 1);
+                let reshaped_dims: Vec<isize> = expanded_shape.iter().map(|&x| x as isize).collect();
+                let reshaped = grad_output.reshape(&reshaped_dims).unwrap();
+                reshaped.broadcast_to(self.saved_input.shape())
+            };
+            let result = scaled_diff.mul(&grad_expanded).unwrap();
+            return vec![Some(result)];
+        }
+
+        let input_shape = self.saved_input.shape();
+        let input_vec = self.saved_input.to_vec();
+        let grad_vec = grad_output.to_vec();
+        let dim = self.dim;
+        let dim_size = input_shape[dim];
+        let ndim = input_shape.len();
+        let numel: usize = input_shape.iter().product();
+
+        // Compute strides
+        let mut strides = vec![1usize; ndim];
+        for i in (0..ndim - 1).rev() {
+            strides[i] = strides[i + 1] * input_shape[i + 1];
+        }
+
+        // Compute output strides
+        let out_shape: Vec<usize> = if self.keepdim {
+            let mut s = input_shape.to_vec();
+            s[dim] = 1;
+            s
+        } else {
+            let mut s = Vec::new();
+            for (i, &sz) in input_shape.iter().enumerate() {
+                if i != dim {
+                    s.push(sz);
+                }
+            }
+            s
+        };
+        let out_ndim = out_shape.len();
+        let mut out_strides = vec![1usize; out_ndim];
+        if out_ndim > 1 {
+            for i in (0..out_ndim - 1).rev() {
+                out_strides[i] = out_strides[i + 1] * out_shape[i + 1];
+            }
+        }
+
+        // Helper: map input flat index to output flat index (skipping dim)
+        let map_to_out = |flat_idx: usize| -> usize {
+            let mut remaining = flat_idx;
+            let mut out_flat = 0usize;
+            let mut out_d = 0;
+            for d in 0..ndim {
+                let coord = remaining / strides[d];
+                remaining %= strides[d];
+                if d == dim {
+                    if self.keepdim {
+                        out_d += 1;
+                    }
+                } else {
+                    out_flat += coord * out_strides[out_d];
+                    out_d += 1;
+                }
+            }
+            out_flat
+        };
+
+        // First pass: compute means along dim
+        let out_numel: usize = out_shape.iter().product();
+        let mut means = vec![0.0f32; out_numel];
+        let mut counts = vec![0usize; out_numel];
+
+        for flat_idx in 0..numel {
+            let out_idx = map_to_out(flat_idx);
+            means[out_idx] += input_vec[flat_idx];
+            counts[out_idx] += 1;
+        }
+        for i in 0..out_numel {
+            if counts[i] > 0 {
+                means[i] /= counts[i] as f32;
+            }
+        }
+
+        // Second pass: compute gradients = 2 * (x - mean) / N * grad_output
+        let mut grad_input = vec![0.0f32; numel];
+        let n = dim_size as f32;
+
+        for flat_idx in 0..numel {
+            let out_idx = map_to_out(flat_idx);
+            grad_input[flat_idx] = 2.0 * (input_vec[flat_idx] - means[out_idx]) / n * grad_vec[out_idx];
+        }
+
+        let mut grad = Tensor::from_vec(grad_input, input_shape).unwrap();
+        // Preserve device
+        if self.saved_input.device().is_gpu() {
+            grad = grad.to_device(self.saved_input.device()).unwrap();
+        }
+        vec![Some(grad)]
+    }
+
+    fn name(&self) -> &'static str {
+        "VarDimBackward"
     }
 
     fn next_functions(&self) -> &[Option<GradFn>] {
@@ -441,24 +730,30 @@ impl NarrowBackward {
 
 impl GradientFunction for NarrowBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // Create a zero tensor of input shape
+        // GPU fast path: use tensor-level narrow_backward_cuda
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            let grad = grad_output.narrow_backward_cuda(
+                &self.input_shape,
+                self.dim,
+                self.start,
+            );
+            return vec![Some(grad)];
+        }
+
+        // CPU path
         let numel: usize = self.input_shape.iter().product();
         let mut grad_data = vec![0.0f32; numel];
         let grad_out_data = grad_output.to_vec();
 
-        // Compute strides for the input shape
         let mut strides = vec![1usize; self.input_shape.len()];
         for i in (0..self.input_shape.len() - 1).rev() {
             strides[i] = strides[i + 1] * self.input_shape[i + 1];
         }
 
-        // Copy grad_output data into the correct positions in grad_data
         let output_shape = grad_output.shape();
-
-        // Iterate through all output indices and map to input indices
         let out_numel: usize = output_shape.iter().product();
         for out_idx in 0..out_numel {
-            // Compute multi-dimensional index in output
             let mut indices = vec![0usize; output_shape.len()];
             let mut remaining = out_idx;
             for d in (0..output_shape.len()).rev() {
@@ -466,10 +761,8 @@ impl GradientFunction for NarrowBackward {
                 remaining /= output_shape[d];
             }
 
-            // Map to input index (add start offset in the narrow dimension)
             indices[self.dim] += self.start;
 
-            // Compute linear index in input
             let in_idx: usize = indices
                 .iter()
                 .zip(strides.iter())
@@ -501,35 +794,165 @@ impl GradientFunction for NarrowBackward {
 
 /// Reduces gradient to match the original input shape after broadcasting.
 fn reduce_grad_for_broadcast(grad: &Tensor<f32>, target_shape: &[usize]) -> Tensor<f32> {
-    if grad.shape() == target_shape {
+    let grad_shape = grad.shape();
+    if grad_shape == target_shape {
         return grad.clone();
     }
 
     // Handle scalar target
     if target_shape.is_empty() || (target_shape.len() == 1 && target_shape[0] == 1) {
-        return Tensor::scalar(grad.to_vec().iter().sum::<f32>());
+        return grad.sum();
     }
 
-    // For now, handle the simple case where shapes match in numel
-    // A full implementation would handle arbitrary broadcasting
-    let grad_numel: usize = grad.shape().iter().product();
+    let grad_numel: usize = grad_shape.iter().product();
     let target_numel: usize = target_shape.iter().product();
 
     if grad_numel == target_numel {
-        // Same number of elements, just reshape
         let target_isize: Vec<isize> = target_shape.iter().map(|&x| x as isize).collect();
         return grad.reshape(&target_isize).unwrap_or_else(|_| grad.clone());
     }
 
-    // Sum over extra elements
-    let grad_data = grad.to_vec();
-    let mut result_data = vec![0.0f32; target_numel];
-
-    for (i, &val) in grad_data.iter().enumerate() {
-        result_data[i % target_numel] += val;
+    // Fast path: sum over leading dimensions only (common bias backward case)
+    // e.g., grad [4064, 4000] → target [4000]: sum dim 0
+    // e.g., grad [4064, 128] → target [128]: sum dim 0
+    let grad_ndim = grad_shape.len();
+    let target_ndim = target_shape.len();
+    if target_ndim < grad_ndim {
+        // Check if target matches trailing dims of grad
+        let trailing_match = target_shape
+            .iter()
+            .rev()
+            .zip(grad_shape.iter().rev())
+            .all(|(t, g)| t == g);
+        if trailing_match {
+            let dims_to_reduce = grad_ndim - target_ndim;
+            // For 2D grad summing along dim 0: use matmul for optimal GPU utilization
+            // ones(1, M) @ grad(M, N) = result(1, N) — cuBLAS GEMM is highly optimized
+            #[cfg(feature = "cuda")]
+            if dims_to_reduce == 1 && grad_ndim == 2 && grad.device().is_gpu() {
+                let m = grad_shape[0];
+                let n = grad_shape[1];
+                let ones_data = vec![1.0f32; m];
+                let ones = Tensor::from_vec(ones_data, &[1, m])
+                    .unwrap()
+                    .to_device(grad.device())
+                    .unwrap();
+                let result_2d = ones.matmul(grad).unwrap();
+                let target_isize: Vec<isize> =
+                    target_shape.iter().map(|&x| x as isize).collect();
+                return result_2d.reshape(&target_isize).unwrap();
+            }
+            // General case: iteratively sum_dim(0)
+            let mut result = grad.clone();
+            for _ in 0..dims_to_reduce {
+                result = result.sum_dim(0, false);
+            }
+            return result;
+        }
     }
 
-    Tensor::from_vec(result_data, target_shape).unwrap()
+    // General case: pad target_shape, sum over broadcast dims
+    let pad = grad_ndim.saturating_sub(target_ndim);
+    let mut padded_target = vec![1usize; pad];
+    padded_target.extend_from_slice(target_shape);
+
+    let mut result = grad.clone();
+    for d in 0..grad_ndim {
+        if padded_target[d] == 1 && result.shape()[d] > 1 {
+            result = result.sum_dim(d as i32, true);
+        }
+    }
+
+    // Reshape to target shape
+    if result.shape() != target_shape {
+        let target_isize: Vec<isize> = target_shape.iter().map(|&x| x as isize).collect();
+        result = result.reshape(&target_isize).unwrap_or_else(|_| result);
+    }
+    result
+}
+
+// =============================================================================
+// MulScalar Backward
+// =============================================================================
+
+/// Gradient function for scalar multiplication.
+///
+/// d/dx(x * scalar) = scalar
+#[derive(Debug)]
+pub struct MulScalarBackward {
+    next_fns: Vec<Option<GradFn>>,
+    scalar: f32,
+}
+
+impl MulScalarBackward {
+    /// Creates a new `MulScalarBackward`.
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>, scalar: f32) -> Self {
+        Self {
+            next_fns: vec![input_grad_fn],
+            scalar,
+        }
+    }
+}
+
+impl GradientFunction for MulScalarBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        // d/dx(x * scalar) = scalar → scale gradient by scalar (GPU-native via Tensor::mul_scalar)
+        vec![Some(grad_output.mul_scalar(self.scalar))]
+    }
+
+    fn name(&self) -> &'static str {
+        "MulScalarBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+// =============================================================================
+// AddScalar Backward
+// =============================================================================
+
+/// Gradient function for scalar addition.
+///
+/// d/dx(x + scalar) = 1
+#[derive(Debug)]
+pub struct AddScalarBackward {
+    next_fns: Vec<Option<GradFn>>,
+}
+
+impl AddScalarBackward {
+    /// Creates a new `AddScalarBackward`.
+    #[must_use]
+    pub fn new(input_grad_fn: Option<GradFn>) -> Self {
+        Self {
+            next_fns: vec![input_grad_fn],
+        }
+    }
+}
+
+impl GradientFunction for AddScalarBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        // d/dx(x + scalar) = 1 → pass gradient through unchanged
+        vec![Some(grad_output.clone())]
+    }
+
+    fn name(&self) -> &'static str {
+        "AddScalarBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 // =============================================================================

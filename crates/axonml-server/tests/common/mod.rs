@@ -5,8 +5,14 @@ use serde_json::Value;
 use std::time::Duration;
 
 pub const TEST_API_URL: &str = "http://localhost:3021";
-pub const ADMIN_EMAIL: &str = "admin@axonml.local";
-pub const ADMIN_PASSWORD: &str = "admin";
+
+pub fn admin_email() -> String {
+    std::env::var("AXONML_TEST_ADMIN_EMAIL").unwrap_or_else(|_| "admin@axonml.local".to_string())
+}
+
+pub fn admin_password() -> String {
+    std::env::var("AXONML_TEST_ADMIN_PASSWORD").unwrap_or_else(|_| "admin".to_string())
+}
 
 /// Check if a specific route exists by making an authenticated request
 /// and checking if it returns 404 (route not found) vs other responses
@@ -77,7 +83,7 @@ pub async fn login(client: &Client, email: &str, password: &str) -> Result<Strin
 
 /// Login as admin and get token
 pub async fn login_as_admin(client: &Client) -> Result<String, String> {
-    login(client, ADMIN_EMAIL, ADMIN_PASSWORD).await
+    login(client, &admin_email(), &admin_password()).await
 }
 
 /// Make authenticated GET request

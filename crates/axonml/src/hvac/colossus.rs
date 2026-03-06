@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_tensor::Tensor;
 use axonml_nn::{
     Dropout, Linear, Module, MultiHeadAttention,
     Parameter, Sequential, ReLU, GELU,
@@ -122,31 +121,17 @@ impl Colossus {
         let z = self.proj_zephyrus.forward(zephyrus_emb); // (batch, 256)
 
         // Stack as (batch, 5, 256) for attention
-        let a_d = a.data().to_vec();
-        let b_d = b.data().to_vec();
-        let n_d = n.data().to_vec();
-        let v_d = v.data().to_vec();
-        let z_d = z.data().to_vec();
-
-        let mut stacked = Vec::with_capacity(batch * 5 * 256);
-        for ba in 0..batch {
-            let off = ba * 256;
-            stacked.extend_from_slice(&a_d[off..off + 256]);
-            stacked.extend_from_slice(&b_d[off..off + 256]);
-            stacked.extend_from_slice(&n_d[off..off + 256]);
-            stacked.extend_from_slice(&v_d[off..off + 256]);
-            stacked.extend_from_slice(&z_d[off..off + 256]);
-        }
-        let stacked_var = Variable::new(
-            Tensor::from_vec(stacked, &[batch, 5, 256]).unwrap(), false);
+        let stacked_var = Variable::cat(
+            &[&a.unsqueeze(1), &b.unsqueeze(1), &n.unsqueeze(1),
+              &v.unsqueeze(1), &z.unsqueeze(1)],
+            1,
+        ); // (batch, 5, 256)
 
         // Cross-specialist attention
         let attn_out = self.attention.forward(&stacked_var); // (batch, 5, 256)
 
         // Flatten to (batch, 1280)
-        let attn_data = attn_out.data().to_vec();
-        let flat = Variable::new(
-            Tensor::from_vec(attn_data, &[batch, 1280]).unwrap(), false);
+        let flat = attn_out.reshape(&[batch, 1280]);
 
         // Decision network
         let embedding = self.decision_net.forward(&flat); // (batch, 256)
@@ -161,22 +146,13 @@ impl Colossus {
 
     /// Forward from concatenated specialist features.
     pub fn forward_concat(&self, specialist_concat: &Variable) -> (Variable, Variable, Variable, Variable, Variable) {
-        let batch = specialist_concat.shape()[0];
-        let data = specialist_concat.data().to_vec();
-
         // Split concatenated input into individual specialist embeddings
         let mut offset = 0;
         let dims = [AQUILO_DIM, BOREAS_DIM, NAIAD_DIM, VULCAN_DIM, ZEPHYRUS_DIM];
         let mut parts: Vec<Variable> = Vec::new();
 
         for &dim in &dims {
-            let mut part_data = Vec::with_capacity(batch * dim);
-            for b in 0..batch {
-                let start = b * TOTAL_SPECIALIST_DIM + offset;
-                part_data.extend_from_slice(&data[start..start + dim]);
-            }
-            parts.push(Variable::new(
-                Tensor::from_vec(part_data, &[batch, dim]).unwrap(), false));
+            parts.push(specialist_concat.narrow(1, offset, dim));
             offset += dim;
         }
 
@@ -253,6 +229,7 @@ impl Module for Colossus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axonml_tensor::Tensor;
 
     #[test]
     fn test_colossus_output_shapes() {

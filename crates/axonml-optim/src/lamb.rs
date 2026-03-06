@@ -274,7 +274,12 @@ impl Optimizer for LAMB {
                 .map(|(p, u)| p - effective_lr * u)
                 .collect();
 
-            let new_tensor = Tensor::from_vec(new_data, param_data.shape()).unwrap();
+            let mut new_tensor = Tensor::from_vec(new_data, param_data.shape()).unwrap();
+            // Preserve device: from_vec creates CPU, move back to param device
+            let device = param_data.device();
+            if device.is_gpu() {
+                new_tensor = new_tensor.to_device(device).unwrap();
+            }
             param.update_data(new_tensor);
         }
     }

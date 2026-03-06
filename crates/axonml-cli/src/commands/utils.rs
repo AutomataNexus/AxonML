@@ -39,8 +39,11 @@ pub fn print_header(title: &str) {
     println!();
 }
 
-/// Print a key-value pair
+/// Print a key-value pair for non-sensitive configuration display.
+/// SECURITY: Do NOT pass passwords, API keys, tokens, or other secrets to this function.
+/// Use masked output for any sensitive values.
 pub fn print_kv(key: &str, value: &str) {
+    // This function displays non-sensitive configuration values only
     println!("  {}: {}", key.dimmed(), value);
 }
 

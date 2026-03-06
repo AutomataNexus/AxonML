@@ -15,6 +15,26 @@ use crate::grad_fn::{GradFn, GradientFunction};
 // MatMul Backward
 // =============================================================================
 
+/// Reduces a matmul gradient back to the original operand's shape.
+/// When a 2D weight is broadcast into a batched 3D matmul, the gradient
+/// comes back as 3D and needs to be summed over the leading batch dimensions.
+fn reduce_matmul_grad(grad: &Tensor<f32>, original: &Tensor<f32>) -> Tensor<f32> {
+    let grad_ndim = grad.ndim();
+    let orig_ndim = original.ndim();
+
+    if grad_ndim <= orig_ndim {
+        return grad.clone();
+    }
+
+    // Sum over the extra leading dimensions
+    // e.g., grad is [B, D, V], original is [D, V] → sum over dim 0
+    let mut result = grad.clone();
+    for _ in 0..(grad_ndim - orig_ndim) {
+        result = result.sum_dim(0, false);
+    }
+    result
+}
+
 /// Gradient function for matrix multiplication.
 ///
 /// For C = A @ B:
@@ -66,10 +86,49 @@ impl GradientFunction for MatMulBackward {
                 .unwrap()
         };
 
+        // Ensure all operands are on the same device for matmul.
+        // If ANY tensor is on GPU, move all to GPU. This handles cases where
+        // the forward pass saved GPU tensors but the grad came back on CPU
+        // (or vice versa).
+        let go_dev = grad_output.device();
+        let rt_dev = rhs_t.device();
+        let lt_dev = lhs_t.device();
+        let target = if go_dev.is_gpu() {
+            go_dev
+        } else if rt_dev.is_gpu() {
+            rt_dev
+        } else if lt_dev.is_gpu() {
+            lt_dev
+        } else {
+            go_dev // all CPU
+        };
+
+        let go = if grad_output.device() != target {
+            grad_output.to_device(target).unwrap()
+        } else {
+            grad_output.clone()
+        };
+        let rt = if rhs_t.device() != target {
+            rhs_t.to_device(target).unwrap()
+        } else {
+            rhs_t
+        };
+        let lt = if lhs_t.device() != target {
+            lhs_t.to_device(target).unwrap()
+        } else {
+            lhs_t
+        };
+
         // grad_lhs = grad_output @ rhs^T
-        let grad_lhs = grad_output.matmul(&rhs_t).unwrap();
+        let grad_lhs_raw = go.matmul(&rt).unwrap();
         // grad_rhs = lhs^T @ grad_output
-        let grad_rhs = lhs_t.matmul(grad_output).unwrap();
+        let grad_rhs_raw = lt.matmul(&go).unwrap();
+
+        // When one operand was broadcast from lower dims (e.g., 2D weight used
+        // in 3D batched matmul), reduce the gradient back to the original shape
+        // by summing over the extra leading (batch) dimensions.
+        let grad_lhs = reduce_matmul_grad(&grad_lhs_raw, &self.saved_lhs);
+        let grad_rhs = reduce_matmul_grad(&grad_rhs_raw, &self.saved_rhs);
 
         vec![Some(grad_lhs), Some(grad_rhs)]
     }
@@ -334,54 +393,37 @@ impl GradientFunction for ExpandBackward {
         let out_shape = grad_output.shape();
         let in_shape = &self.input_shape;
 
-        // Sum over dimensions that were broadcast (size 1 -> size N)
-        let grad_data = grad_output.to_vec();
         let in_numel: usize = in_shape.iter().product();
         let out_numel: usize = out_shape.iter().product();
 
         if in_numel == out_numel {
             // No broadcast happened, just reshape
-            let grad = Tensor::from_vec(grad_data, in_shape).unwrap();
+            let target_isize: Vec<isize> = in_shape.iter().map(|&x| x as isize).collect();
+            let grad = grad_output.reshape(&target_isize).unwrap_or_else(|_| grad_output.clone());
             return vec![Some(grad)];
         }
 
-        // Compute strides for output shape
+        // Sum over broadcast dimensions using sum_dim (stays on GPU)
         let ndim = out_shape.len();
-        let mut out_strides = vec![1usize; ndim];
-        for i in (0..ndim - 1).rev() {
-            out_strides[i] = out_strides[i + 1] * out_shape[i + 1];
-        }
-
-        // Pad input shape with leading 1s to match output ndim
         let in_ndim = in_shape.len();
         let pad = ndim - in_ndim;
         let mut padded_in_shape = vec![1usize; pad];
         padded_in_shape.extend_from_slice(in_shape);
 
-        // Compute strides for padded input shape
-        let mut in_strides = vec![1usize; ndim];
-        for i in (0..ndim - 1).rev() {
-            in_strides[i] = in_strides[i + 1] * padded_in_shape[i + 1];
-        }
-
-        // Accumulate gradients
-        let mut grad_input = vec![0.0f32; in_numel];
-        for out_idx in 0..out_numel {
-            // Decompose out_idx into multi-dim indices
-            let mut remaining = out_idx;
-            let mut in_linear = 0usize;
-            for d in 0..ndim {
-                let coord = remaining / out_strides[d];
-                remaining %= out_strides[d];
-                // If input dim was 1 (broadcast), map to 0
-                let in_coord = if padded_in_shape[d] == 1 { 0 } else { coord };
-                in_linear += in_coord * in_strides[d];
+        let mut result = grad_output.clone();
+        // Sum over dimensions where input was 1 but output > 1
+        for d in 0..ndim {
+            if padded_in_shape[d] == 1 && result.shape()[d] > 1 {
+                result = result.sum_dim(d as i32, true);
             }
-            grad_input[in_linear] += grad_data[out_idx];
         }
 
-        let grad = Tensor::from_vec(grad_input, in_shape).unwrap();
-        vec![Some(grad)]
+        // Reshape to original input shape
+        if result.shape() != in_shape {
+            let target_isize: Vec<isize> = in_shape.iter().map(|&x| x as isize).collect();
+            result = result.reshape(&target_isize).unwrap_or_else(|_| result);
+        }
+        vec![Some(result)]
     }
 
     fn name(&self) -> &'static str {
@@ -433,19 +475,33 @@ impl SelectBackward {
 
 impl GradientFunction for SelectBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        // Select is narrow(dim, index, 1) then squeeze(dim).
+        // For backward: unsqueeze grad_output at dim, then narrow_backward scatter.
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            // Unsqueeze: insert dim of size 1 at self.dim
+            let mut unsqueezed_shape: Vec<isize> = grad_output.shape().iter().map(|&x| x as isize).collect();
+            unsqueezed_shape.insert(self.dim, 1);
+            let unsqueezed = grad_output.reshape(&unsqueezed_shape).unwrap();
+            let grad = unsqueezed.narrow_backward_cuda(
+                &self.input_shape,
+                self.dim,
+                self.index,
+            );
+            return vec![Some(grad)];
+        }
+
         let in_numel: usize = self.input_shape.iter().product();
         let mut grad_data = vec![0.0f32; in_numel];
         let grad_out_data = grad_output.to_vec();
         let out_shape = grad_output.shape();
 
-        // Compute input strides
         let ndim = self.input_shape.len();
         let mut in_strides = vec![1usize; ndim];
         for i in (0..ndim - 1).rev() {
             in_strides[i] = in_strides[i + 1] * self.input_shape[i + 1];
         }
 
-        // Compute output strides (output has dim removed)
         let out_ndim = out_shape.len();
         let mut out_strides = vec![1usize; out_ndim];
         if out_ndim > 0 {
@@ -456,13 +512,11 @@ impl GradientFunction for SelectBackward {
 
         let out_numel: usize = out_shape.iter().product();
         for out_idx in 0..out_numel {
-            // Decompose out_idx into multi-dim output indices
             let mut remaining = out_idx;
             let mut in_linear = 0usize;
             let mut out_d = 0;
             for d in 0..ndim {
                 if d == self.dim {
-                    // Insert the selected index
                     in_linear += self.index * in_strides[d];
                 } else {
                     let coord = remaining / out_strides[out_d];
@@ -526,11 +580,8 @@ impl GradientFunction for CatBackward {
         for &size in &self.sizes {
             let grad = grad_output.narrow(self.dim, offset, size)
                 .unwrap_or_else(|_| grad_output.clone());
-            // narrow returns a view; make it contiguous
-            let grad_data = grad.to_vec();
-            let mut grad_shape: Vec<usize> = grad_output.shape().to_vec();
-            grad_shape[self.dim] = size;
-            grads.push(Some(Tensor::from_vec(grad_data, &grad_shape).unwrap()));
+            // narrow returns a view; make it contiguous (stays on GPU if GPU tensor)
+            grads.push(Some(grad.contiguous()));
             offset += size;
         }
         grads
@@ -577,8 +628,18 @@ impl SumDimBackward {
 
 impl GradientFunction for SumDimBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // grad_output has input_shape with dim removed (or size 1 if keepdim).
-        // We need to broadcast it back to input_shape by repeating along dim.
+        // GPU fast path: reshape to insert dim=1, then broadcast to input_shape
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            // grad_output has reduced dim removed — insert dim=1 at self.dim
+            let mut unsqueezed_shape: Vec<isize> = grad_output.shape().iter().map(|&x| x as isize).collect();
+            unsqueezed_shape.insert(self.dim, 1);
+            let reshaped = grad_output.reshape(&unsqueezed_shape).unwrap();
+            let expanded = reshaped.broadcast_to(&self.input_shape);
+            return vec![Some(expanded.contiguous())];
+        }
+
+        // CPU path
         let dim_size = self.input_shape[self.dim];
         let grad_data = grad_output.to_vec();
 

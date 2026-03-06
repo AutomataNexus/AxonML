@@ -14,7 +14,10 @@
 //! let model = LLaMA::new(&config);
 //! ```
 
-use axonml_autograd::Variable;
+use std::any::Any;
+
+use axonml_autograd::no_grad::is_grad_enabled;
+use axonml_autograd::{GradFn, GradientFunction, Variable};
 use axonml_nn::{Dropout, Embedding, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
 
@@ -165,6 +168,7 @@ impl RMSNorm {
         let batch_elements: usize = shape.iter().take(shape.len() - 1).product();
 
         let mut output = vec![0.0f32; x_vec.len()];
+        let mut rms_vals = vec![0.0f32; batch_elements];
 
         for b in 0..batch_elements {
             let offset = b * last_dim;
@@ -175,6 +179,7 @@ impl RMSNorm {
                 sum_sq += x_vec[offset + i] * x_vec[offset + i];
             }
             let rms = (sum_sq / last_dim as f32 + self.eps).sqrt();
+            rms_vals[b] = rms;
 
             // Normalize and scale
             let weight_vec = self.weight.to_vec();
@@ -183,7 +188,20 @@ impl RMSNorm {
             }
         }
 
-        Variable::new(Tensor::from_vec(output, shape).unwrap(), x.requires_grad())
+        let output_tensor = Tensor::from_vec(output, shape).unwrap();
+        let requires_grad = x.requires_grad() && is_grad_enabled();
+        if requires_grad {
+            let grad_fn = GradFn::new(RMSNormBackward {
+                next_fns: vec![x.grad_fn().cloned()],
+                saved_input: x_data.clone(),
+                weight: self.weight.clone(),
+                rms_vals,
+                last_dim,
+            });
+            Variable::from_operation(output_tensor, grad_fn, true)
+        } else {
+            Variable::new(output_tensor, false)
+        }
     }
 
     /// Get parameters.
@@ -194,6 +212,69 @@ impl RMSNorm {
     /// Load weight from tensor.
     pub fn load_weight(&mut self, weight: &Tensor<f32>) {
         self.weight = weight.clone();
+    }
+}
+
+// =============================================================================
+// RMSNormBackward
+// =============================================================================
+
+/// Gradient function for RMSNorm.
+///
+/// y = (x / rms) * w
+/// dy/dx = w/rms - x * (x . (w * dy)) / (rms^3 * D)
+#[derive(Debug)]
+struct RMSNormBackward {
+    next_fns: Vec<Option<GradFn>>,
+    saved_input: Tensor<f32>,
+    weight: Tensor<f32>,
+    rms_vals: Vec<f32>,
+    last_dim: usize,
+}
+
+impl GradientFunction for RMSNormBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let x_vec = self.saved_input.to_vec();
+        let w_vec = self.weight.to_vec();
+        let g_vec = grad_output.to_vec();
+        let d = self.last_dim;
+        let batch_elements = self.rms_vals.len();
+
+        let mut grad_input = vec![0.0f32; x_vec.len()];
+
+        for b in 0..batch_elements {
+            let off = b * d;
+            let rms = self.rms_vals[b];
+            let rms_inv = 1.0 / rms;
+            let rms3_inv = rms_inv * rms_inv * rms_inv;
+
+            // dot product: sum_i( x_i * w_i * g_i )
+            let mut dot = 0.0f32;
+            for i in 0..d {
+                dot += x_vec[off + i] * w_vec[i] * g_vec[off + i];
+            }
+
+            for i in 0..d {
+                // d_out/d_x_i = w_i / rms - x_i * dot / (rms^3 * D)
+                grad_input[off + i] =
+                    w_vec[i] * g_vec[off + i] * rms_inv - x_vec[off + i] * dot * rms3_inv / d as f32;
+            }
+        }
+
+        let gi = Tensor::from_vec(grad_input, self.saved_input.shape()).unwrap();
+        vec![Some(gi)]
+    }
+
+    fn name(&self) -> &'static str {
+        "RMSNormBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -272,10 +353,33 @@ impl RotaryEmbedding {
         let q_rotated = self.rotate_tensor(&q_data, seq_len, head_dim, position_offset);
         let k_rotated = self.rotate_tensor(&k_data, seq_len, head_dim, position_offset);
 
-        (
-            Variable::new(q_rotated, q.requires_grad()),
-            Variable::new(k_rotated, k.requires_grad()),
-        )
+        let q_out = if q.requires_grad() && is_grad_enabled() {
+            let grad_fn = GradFn::new(RoPEBackward {
+                next_fns: vec![q.grad_fn().cloned()],
+                cos_cached: self.cos_cached.clone(),
+                sin_cached: self.sin_cached.clone(),
+                rope_dim: self.dim,
+                position_offset,
+            });
+            Variable::from_operation(q_rotated, grad_fn, true)
+        } else {
+            Variable::new(q_rotated, false)
+        };
+
+        let k_out = if k.requires_grad() && is_grad_enabled() {
+            let grad_fn = GradFn::new(RoPEBackward {
+                next_fns: vec![k.grad_fn().cloned()],
+                cos_cached: self.cos_cached.clone(),
+                sin_cached: self.sin_cached.clone(),
+                rope_dim: self.dim,
+                position_offset,
+            });
+            Variable::from_operation(k_rotated, grad_fn, true)
+        } else {
+            Variable::new(k_rotated, false)
+        };
+
+        (q_out, k_out)
     }
 
     fn rotate_tensor(
@@ -318,6 +422,139 @@ impl RotaryEmbedding {
         }
 
         Tensor::from_vec(output, shape).unwrap()
+    }
+}
+
+// =============================================================================
+// RoPEBackward
+// =============================================================================
+
+/// Gradient function for Rotary Position Embedding.
+///
+/// Forward: y1 = x1*cos - x2*sin, y2 = x1*sin + x2*cos
+/// Backward (transpose of rotation): dx1 = dy1*cos + dy2*sin, dx2 = -dy1*sin + dy2*cos
+#[derive(Debug)]
+struct RoPEBackward {
+    next_fns: Vec<Option<GradFn>>,
+    cos_cached: Tensor<f32>,
+    sin_cached: Tensor<f32>,
+    rope_dim: usize,
+    position_offset: usize,
+}
+
+impl GradientFunction for RoPEBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let shape = grad_output.shape();
+        let batch_size = shape[0];
+        let num_heads = shape[1];
+        let seq_len = shape[2];
+        let head_dim = shape[3];
+        let half_dim = head_dim / 2;
+
+        let g_vec = grad_output.to_vec();
+        let cos_vec = self.cos_cached.to_vec();
+        let sin_vec = self.sin_cached.to_vec();
+
+        let mut grad_input = vec![0.0f32; g_vec.len()];
+
+        for b in 0..batch_size {
+            for h in 0..num_heads {
+                for s in 0..seq_len {
+                    let pos = self.position_offset + s;
+                    let off = ((b * num_heads + h) * seq_len + s) * head_dim;
+                    let rope_off = pos * self.rope_dim;
+
+                    for i in 0..half_dim {
+                        let cos_val = cos_vec[rope_off + i];
+                        let sin_val = sin_vec[rope_off + i];
+
+                        let dy1 = g_vec[off + i];
+                        let dy2 = g_vec[off + half_dim + i];
+
+                        // Inverse rotation (transpose)
+                        grad_input[off + i] = dy1 * cos_val + dy2 * sin_val;
+                        grad_input[off + half_dim + i] = -dy1 * sin_val + dy2 * cos_val;
+                    }
+                }
+            }
+        }
+
+        let gi = Tensor::from_vec(grad_input, shape).unwrap();
+        vec![Some(gi)]
+    }
+
+    fn name(&self) -> &'static str {
+        "RoPEBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+// =============================================================================
+// RepeatKVBackward
+// =============================================================================
+
+/// Gradient function for repeat_kv (GQA key-value repeat).
+///
+/// Forward repeats each KV head n_rep times.
+/// Backward sums gradients over the repeated heads.
+#[derive(Debug)]
+pub(crate) struct RepeatKVBackward {
+    pub(crate) next_fns: Vec<Option<GradFn>>,
+    pub(crate) num_kv_heads: usize,
+    pub(crate) n_rep: usize,
+}
+
+impl GradientFunction for RepeatKVBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let shape = grad_output.shape();
+        let batch = shape[0];
+        let seq_len = shape[2];
+        let head_dim = shape[3];
+
+        let g_vec = grad_output.to_vec();
+        let mut grad_input = vec![0.0f32; batch * self.num_kv_heads * seq_len * head_dim];
+
+        for b in 0..batch {
+            for h in 0..self.num_kv_heads {
+                for r in 0..self.n_rep {
+                    for s in 0..seq_len {
+                        let src_off =
+                            ((b * self.num_kv_heads * self.n_rep + h * self.n_rep + r) * seq_len + s)
+                                * head_dim;
+                        let dst_off = ((b * self.num_kv_heads + h) * seq_len + s) * head_dim;
+                        for d in 0..head_dim {
+                            grad_input[dst_off + d] += g_vec[src_off + d];
+                        }
+                    }
+                }
+            }
+        }
+
+        let gi = Tensor::from_vec(
+            grad_input,
+            &[batch, self.num_kv_heads, seq_len, head_dim],
+        )
+        .unwrap();
+        vec![Some(gi)]
+    }
+
+    fn name(&self) -> &'static str {
+        "RepeatKVBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -473,10 +710,19 @@ impl LLaMAAttention {
             }
         }
 
-        Variable::new(
-            Tensor::from_vec(output, &[batch, num_kv_heads * n_rep, seq_len, head_dim]).unwrap(),
-            x.requires_grad(),
-        )
+        let output_tensor =
+            Tensor::from_vec(output, &[batch, num_kv_heads * n_rep, seq_len, head_dim]).unwrap();
+
+        if x.requires_grad() && is_grad_enabled() {
+            let grad_fn = GradFn::new(RepeatKVBackward {
+                next_fns: vec![x.grad_fn().cloned()],
+                num_kv_heads,
+                n_rep,
+            });
+            Variable::from_operation(output_tensor, grad_fn, true)
+        } else {
+            Variable::new(output_tensor, false)
+        }
     }
 
     fn create_causal_mask(&self, q_len: usize, kv_len: usize, offset: usize) -> Tensor<f32> {

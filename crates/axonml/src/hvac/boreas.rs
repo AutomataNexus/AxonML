@@ -194,15 +194,7 @@ impl Boreas {
         let flow_out = self.flow_analyzer.forward(&flow_var);          // (batch, 64)
 
         // Transpose input for Conv1d: (batch, 80, 7) → (batch, 7, 80)
-        let mut transposed = vec![0.0f32; batch * 7 * 80];
-        for b in 0..batch {
-            for t in 0..80 {
-                for c in 0..7 {
-                    transposed[(b * 7 + c) * 80 + t] = data[(b * 80 + t) * 7 + c];
-                }
-            }
-        }
-        let conv_input = Variable::new(Tensor::from_vec(transposed, &[batch, 7, 80]).unwrap(), false);
+        let conv_input = input.transpose(1, 2);
 
         // ResNet blocks
         let res_out = self.res_block1.forward(&conv_input); // (batch, 32, 76)
@@ -210,22 +202,7 @@ impl Boreas {
         let res_out = self.res_block3.forward(&res_out);    // (batch, 64, 68)
 
         // Transpose for LSTM: (batch, 64, T) → (batch, T, 64)
-        let res_shape = res_out.shape();
-        let channels = res_shape[1];
-        let time_len = res_shape[2];
-        let res_data = res_out.data().to_vec();
-
-        let mut lstm_input_data = vec![0.0f32; batch * time_len * channels];
-        for b in 0..batch {
-            for t in 0..time_len {
-                for c in 0..channels {
-                    lstm_input_data[(b * time_len + t) * channels + c] =
-                        res_data[(b * channels + c) * time_len + t];
-                }
-            }
-        }
-        let lstm_input = Variable::new(
-            Tensor::from_vec(lstm_input_data, &[batch, time_len, channels]).unwrap(), false);
+        let lstm_input = res_out.transpose(1, 2);
 
         // LSTM
         let lstm_out = self.lstm.forward(&lstm_input); // (batch, time_len, 256)
@@ -233,15 +210,9 @@ impl Boreas {
         // Attention on LSTM output
         let attn_out = self.attention.forward(&lstm_out); // (batch, time_len, 256)
 
-        // Take last timestep as the sequence representation
-        let attn_data = attn_out.data().to_vec();
+        // Take last timestep as the sequence representation: (batch, T, 256) → (batch, 256)
         let attn_time = attn_out.shape()[1];
-        let mut last_step = vec![0.0f32; batch * 256];
-        for b in 0..batch {
-            let offset = (b * attn_time + attn_time - 1) * 256;
-            last_step[b * 256..(b + 1) * 256].copy_from_slice(&attn_data[offset..offset + 256]);
-        }
-        let seq_features = Variable::new(Tensor::from_vec(last_step, &[batch, 256]).unwrap(), false);
+        let seq_features = attn_out.select(1, attn_time - 1);
 
         // Concat analyzers + sequence: (64+64+64) + 256 = 448
         let analyzer_features = super::aquilo::concat_variables(

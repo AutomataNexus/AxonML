@@ -100,6 +100,7 @@
 pub mod creation;
 #[cfg(feature = "cuda")]
 pub mod cuda_ops;
+pub mod lazy;
 pub mod ops;
 pub mod shape;
 pub mod sparse;
@@ -112,6 +113,7 @@ pub mod view;
 
 pub use axonml_core::{DType, Device, Error, Result};
 pub use creation::*;
+pub use lazy::{LazyOp, LazyTensor};
 pub use shape::{Shape, Strides};
 pub use tensor::Tensor;
 

@@ -30,7 +30,8 @@ async fn test_complete_registration_login_flow() {
     let client = test_client();
     let unique_id = chrono::Utc::now().timestamp_millis();
     let email = format!("e2e_user_{}@test.local", unique_id);
-    let password = "SecurePassword123!";
+    let password = std::env::var("AXONML_TEST_PASSWORD")
+        .unwrap_or_else(|_| format!("TestPw_{}!", unique_id));
 
     // Step 1: Register new user
     let register_response = client
@@ -38,7 +39,7 @@ async fn test_complete_registration_login_flow() {
         .json(&serde_json::json!({
             "name": "E2E Test User",
             "email": email,
-            "password": password
+            "password": &password
         }))
         .send()
         .await
@@ -52,7 +53,7 @@ async fn test_complete_registration_login_flow() {
     );
 
     // Step 2: Try login - should fail with 403 (email verification required)
-    let login_result = login(&client, &email, password).await;
+    let login_result = login(&client, &email, &password).await;
     // New users need email verification, so login should fail with 403
     // This is expected behavior - use admin account for full flow testing
     if login_result.is_err() {

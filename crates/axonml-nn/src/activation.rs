@@ -6,7 +6,6 @@
 //! @author AutomataNexus Development Team
 
 use axonml_autograd::Variable;
-use axonml_tensor::Tensor;
 
 use crate::module::Module;
 
@@ -71,16 +70,7 @@ impl Default for LeakyReLU {
 
 impl Module for LeakyReLU {
     fn forward(&self, input: &Variable) -> Variable {
-        let data = input.data();
-        let result: Vec<f32> = data
-            .to_vec()
-            .iter()
-            .map(|&x| if x > 0.0 { x } else { x * self.negative_slope })
-            .collect();
-        Variable::new(
-            Tensor::from_vec(result, data.shape()).unwrap(),
-            input.requires_grad(),
-        )
+        input.leaky_relu(self.negative_slope)
     }
 
     fn name(&self) -> &'static str {
@@ -169,54 +159,7 @@ impl Default for Softmax {
 
 impl Module for Softmax {
     fn forward(&self, input: &Variable) -> Variable {
-        // Simple implementation for last dimension
-        let data = input.data();
-        let shape = data.shape().to_vec();
-        let data_vec = data.to_vec();
-
-        let ndim = shape.len();
-        let dim = if self.dim < 0 {
-            (ndim as i64 + self.dim) as usize
-        } else {
-            self.dim as usize
-        };
-
-        let outer_size: usize = shape[..dim].iter().product();
-        let dim_size = shape[dim];
-        let inner_size: usize = shape[dim + 1..].iter().product();
-
-        let mut result = vec![0.0f32; data_vec.len()];
-
-        for outer in 0..outer_size {
-            for inner in 0..inner_size {
-                // Find max for numerical stability
-                let mut max_val = f32::NEG_INFINITY;
-                for d in 0..dim_size {
-                    let idx = outer * dim_size * inner_size + d * inner_size + inner;
-                    max_val = max_val.max(data_vec[idx]);
-                }
-
-                // Compute exp and sum
-                let mut sum = 0.0f32;
-                for d in 0..dim_size {
-                    let idx = outer * dim_size * inner_size + d * inner_size + inner;
-                    let exp_val = (data_vec[idx] - max_val).exp();
-                    result[idx] = exp_val;
-                    sum += exp_val;
-                }
-
-                // Normalize
-                for d in 0..dim_size {
-                    let idx = outer * dim_size * inner_size + d * inner_size + inner;
-                    result[idx] /= sum;
-                }
-            }
-        }
-
-        Variable::new(
-            Tensor::from_vec(result, &shape).unwrap(),
-            input.requires_grad(),
-        )
+        input.softmax(self.dim as i32)
     }
 
     fn name(&self) -> &'static str {
@@ -249,14 +192,7 @@ impl Default for LogSoftmax {
 
 impl Module for LogSoftmax {
     fn forward(&self, input: &Variable) -> Variable {
-        let softmax = Softmax::new(self.dim);
-        let sm = softmax.forward(input);
-        let sm_vec = sm.data().to_vec();
-        let result: Vec<f32> = sm_vec.iter().map(|&x| x.ln()).collect();
-        Variable::new(
-            Tensor::from_vec(result, sm.data().shape()).unwrap(),
-            input.requires_grad(),
-        )
+        input.log_softmax(self.dim as i32)
     }
 
     fn name(&self) -> &'static str {
@@ -283,21 +219,7 @@ impl GELU {
 
 impl Module for GELU {
     fn forward(&self, input: &Variable) -> Variable {
-        let data = input.data();
-        let data_vec = data.to_vec();
-        // GELU(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
-        let sqrt_2_over_pi = (2.0_f32 / std::f32::consts::PI).sqrt();
-        let result: Vec<f32> = data_vec
-            .iter()
-            .map(|&x| {
-                let inner = sqrt_2_over_pi * (x + 0.044715 * x.powi(3));
-                0.5 * x * (1.0 + inner.tanh())
-            })
-            .collect();
-        Variable::new(
-            Tensor::from_vec(result, data.shape()).unwrap(),
-            input.requires_grad(),
-        )
+        input.gelu()
     }
 
     fn name(&self) -> &'static str {
@@ -365,22 +287,7 @@ impl Default for ELU {
 
 impl Module for ELU {
     fn forward(&self, input: &Variable) -> Variable {
-        let data = input.data();
-        let result: Vec<f32> = data
-            .to_vec()
-            .iter()
-            .map(|&x| {
-                if x > 0.0 {
-                    x
-                } else {
-                    self.alpha * (x.exp() - 1.0)
-                }
-            })
-            .collect();
-        Variable::new(
-            Tensor::from_vec(result, data.shape()).unwrap(),
-            input.requires_grad(),
-        )
+        input.elu(self.alpha)
     }
 
     fn name(&self) -> &'static str {
@@ -420,6 +327,7 @@ impl Module for Identity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axonml_tensor::Tensor;
 
     #[test]
     fn test_relu() {

@@ -118,6 +118,24 @@ pub struct EndpointResponse {
 }
 
 // ============================================================================
+// Security Helpers
+// ============================================================================
+
+/// SECURITY: Validate that an ID is safe to use in file paths.
+/// Prevents path traversal by rejecting IDs with path separators or traversal patterns.
+fn validate_path_id(id: &str) -> Result<(), AuthError> {
+    if id.is_empty() {
+        return Err(AuthError::InvalidInput("ID cannot be empty".to_string()));
+    }
+    if id.contains("..") || id.contains('/') || id.contains('\\') || id.contains('\0') {
+        return Err(AuthError::InvalidInput(
+            "ID contains invalid characters".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -228,7 +246,8 @@ pub async fn create_model(
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-    // Create model directory
+    // Create model directory (model.id is server-generated UUID, safe for path use)
+    validate_path_id(&model.id)?;
     let model_dir = state.config.models_dir().join(&model.id);
     std::fs::create_dir_all(&model_dir).ok();
 
@@ -323,6 +342,9 @@ pub async fn delete_model(
         return Err(AuthError::Unauthorized);
     }
 
+    // SECURITY: Validate ID before using in file path
+    validate_path_id(&id)?;
+
     // Delete model directory
     let model_dir = state.config.models_dir().join(&id);
     std::fs::remove_dir_all(&model_dir).ok();
@@ -383,6 +405,9 @@ pub async fn upload_version(
     if model.user_id != user.id && user.role != "admin" {
         return Err(AuthError::Unauthorized);
     }
+
+    // SECURITY: Validate ID before using in file path
+    validate_path_id(&id)?;
 
     // Parse multipart
     let mut file_data: Option<Bytes> = None;
@@ -508,6 +533,9 @@ pub async fn delete_version(
     user: AuthUser,
     Path((id, version)): Path<(String, u32)>,
 ) -> Result<StatusCode, AuthError> {
+    // SECURITY: Validate ID before using in file path
+    validate_path_id(&id)?;
+
     let repo = ModelRepository::new(&state.db);
 
     // Check ownership
@@ -548,6 +576,9 @@ pub async fn download_version(
     user: AuthUser,
     Path((id, version)): Path<(String, u32)>,
 ) -> Result<impl IntoResponse, AuthError> {
+    // SECURITY: Validate ID before using in file path
+    validate_path_id(&id)?;
+
     let repo = ModelRepository::new(&state.db);
 
     // Check ownership

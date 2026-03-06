@@ -159,6 +159,7 @@
 
 pub mod adam;
 pub mod grad_scaler;
+pub mod health;
 pub mod lamb;
 pub mod lr_scheduler;
 pub mod optimizer;
@@ -171,6 +172,10 @@ pub mod sgd;
 
 pub use adam::{Adam, AdamW};
 pub use grad_scaler::{GradScaler, GradScalerState};
+pub use health::{
+    AlertKind, AlertSeverity, HealthReport, LossTrend, MonitorConfig, TrainingAlert,
+    TrainingMonitor,
+};
 pub use lamb::LAMB;
 pub use lr_scheduler::{
     CosineAnnealingLR, ExponentialLR, LRScheduler, MultiStepLR, OneCycleLR, ReduceLROnPlateau,

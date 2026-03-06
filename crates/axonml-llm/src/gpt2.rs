@@ -233,35 +233,23 @@ impl GPT2LMHead {
         // Flatten for loss computation
         let logits_flat = logits.reshape(&[batch_size * seq_len, vocab_size]);
 
-        // Softmax
-        let log_probs = logits_flat.log_softmax(-1);
+        // Use CrossEntropyLoss which has proper backward pass
+        // Filter out-of-range labels by clamping to valid range
+        let labels_vec = labels.to_vec();
+        let valid_labels: Vec<f32> = labels_vec
+            .iter()
+            .map(|&l| {
+                let label = l as usize;
+                if label < vocab_size { l as f32 } else { 0.0f32 }
+            })
+            .collect();
+        let target_var = Variable::new(
+            Tensor::from_vec(valid_labels, &[batch_size * seq_len]).unwrap(),
+            false,
+        );
 
-        // Gather log probs for correct labels
-        let labels_slice = labels.to_vec();
-        let log_probs_data = log_probs.data();
-        let log_probs_slice = log_probs_data.to_vec();
-
-        let mut total_loss = 0.0f32;
-        let mut count = 0;
-
-        for i in 0..(batch_size * seq_len) {
-            let label = labels_slice[i] as usize;
-            if label < vocab_size {
-                total_loss -= log_probs_slice[i * vocab_size + label];
-                count += 1;
-            }
-        }
-
-        let mean_loss = if count > 0 {
-            total_loss / count as f32
-        } else {
-            0.0
-        };
-
-        Variable::new(
-            Tensor::from_vec(vec![mean_loss], &[1]).unwrap(),
-            logits.requires_grad(),
-        )
+        use axonml_nn::loss::CrossEntropyLoss;
+        CrossEntropyLoss::new().compute(&logits_flat, &target_var)
     }
 
     /// Generates text autoregressively.

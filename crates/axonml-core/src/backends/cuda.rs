@@ -17,10 +17,10 @@
 #[cfg(feature = "cuda")]
 use cudarc::cublas::{sys::cublasOperation_t, CudaBlas, Gemm, GemmConfig};
 #[cfg(feature = "cuda")]
-use cudarc::driver::{CudaDevice, CudaSlice, DeviceRepr, LaunchAsync, ValidAsZeroBits};
+use cudarc::driver::{CudaDevice, CudaSlice, DeviceRepr, LaunchAsync, LaunchConfig, ValidAsZeroBits};
 
 #[cfg(feature = "cuda")]
-use super::cuda_kernels::{self, CudaKernels};
+use super::cuda_kernels::{self, CudaKernels, BLOCK_SIZE};
 use super::Backend;
 use crate::device::DeviceCapabilities;
 use std::sync::Arc;
@@ -99,7 +99,13 @@ impl CudaBackend {
         // CudaDevice::new returns Result<Arc<CudaDevice>, _>
         let device = CudaDevice::new(device_index).ok()?;
         let blas = CudaBlas::new(device.clone()).ok()?;
-        let kernels = CudaKernels::load(device.clone()).ok()?;
+        let kernels = match CudaKernels::load(device.clone()) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("[AxonML CUDA] Kernel loading failed: {:?}", e);
+                return None;
+            }
+        };
 
         Some(Self {
             device_index,
@@ -253,6 +259,23 @@ impl Backend for CudaBackend {
     fn synchronize(&self) {
         let _ = self.device.synchronize();
     }
+}
+
+/// Synchronize the CUDA device (wait for all GPU operations to complete).
+/// Returns true if sync was performed, false if CUDA is not available.
+#[cfg(feature = "cuda")]
+pub fn cuda_sync() -> bool {
+    if let Some(backend) = get_cuda_backend() {
+        let _ = backend.device.synchronize();
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(not(feature = "cuda"))]
+pub fn cuda_sync() -> bool {
+    false
 }
 
 #[cfg(not(feature = "cuda"))]
@@ -529,6 +552,72 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Strided batched GEMM using cublasSgemmStridedBatched.
+    /// All batch data in contiguous GPU memory with fixed strides between batches.
+    /// C[i] = alpha * A[i] @ B[i] + beta * C[i] for i in 0..batch_count
+    pub fn gemm_strided_batched_f32(
+        &self,
+        transa: bool,
+        transb: bool,
+        m: usize,
+        n: usize,
+        k: usize,
+        alpha: f32,
+        a: &CudaSlice<f32>,
+        lda: usize,
+        stride_a: i64,
+        b: &CudaSlice<f32>,
+        ldb: usize,
+        stride_b: i64,
+        beta: f32,
+        c: &mut CudaSlice<f32>,
+        ldc: usize,
+        stride_c: i64,
+        batch_count: usize,
+    ) -> Result<(), CudaError> {
+        use cudarc::cublas::result::sgemm_strided_batched;
+        use cudarc::driver::safe::DevicePtr;
+
+        let op_a = if transa {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+        let op_b = if transb {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+
+        let a_ptr = *a.device_ptr() as *const f32;
+        let b_ptr = *b.device_ptr() as *const f32;
+        let c_ptr = *c.device_ptr() as *mut f32;
+
+        unsafe {
+            sgemm_strided_batched(
+                *self.blas.handle(),
+                op_a,
+                op_b,
+                m as i32,
+                n as i32,
+                k as i32,
+                &alpha as *const f32,
+                a_ptr,
+                lda as i32,
+                stride_a,
+                b_ptr,
+                ldb as i32,
+                stride_b,
+                &beta as *const f32,
+                c_ptr,
+                ldc as i32,
+                stride_c,
+                batch_count as i32,
+            )
+            .map_err(CudaError::from)
+        }
+    }
+
     /// Element-wise addition using CUDA kernel.
     pub fn add_f32(
         &self,
@@ -694,6 +783,163 @@ impl CudaBackend {
         unsafe {
             func.clone()
                 .launch(cfg, (a, b, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    // =========================================================================
+    // Broadcast Element-wise Operations
+    // =========================================================================
+
+    /// Broadcast addition: out[i] = a[i] + b[i % b_len]
+    /// `a` is the larger tensor (n elements), `b` is broadcast (b_len elements).
+    pub fn broadcast_add_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        n: usize,
+        b_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self.kernels.get("broadcast_add_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("broadcast_add_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone().launch(cfg, (a, b, dst, n as u32, b_len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Broadcast subtraction: out[i] = a[i] - b[i % b_len]
+    pub fn broadcast_sub_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        n: usize,
+        b_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self.kernels.get("broadcast_sub_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("broadcast_sub_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone().launch(cfg, (a, b, dst, n as u32, b_len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Broadcast multiplication: out[i] = a[i] * b[i % b_len]
+    pub fn broadcast_mul_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        n: usize,
+        b_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self.kernels.get("broadcast_mul_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("broadcast_mul_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone().launch(cfg, (a, b, dst, n as u32, b_len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Broadcast division: out[i] = a[i] / b[i % b_len]
+    pub fn broadcast_div_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        n: usize,
+        b_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self.kernels.get("broadcast_div_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("broadcast_div_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone().launch(cfg, (a, b, dst, n as u32, b_len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Reverse broadcast addition: out[i] = a[i % a_len] + b[i]
+    pub fn broadcast_add_rev_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        n: usize,
+        a_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self.kernels.get("broadcast_add_rev_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("broadcast_add_rev_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone().launch(cfg, (a, b, dst, n as u32, a_len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Reverse broadcast subtraction: out[i] = a[i % a_len] - b[i]
+    pub fn broadcast_sub_rev_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        n: usize,
+        a_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self.kernels.get("broadcast_sub_rev_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("broadcast_sub_rev_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone().launch(cfg, (a, b, dst, n as u32, a_len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Reverse broadcast multiplication: out[i] = a[i % a_len] * b[i]
+    pub fn broadcast_mul_rev_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        n: usize,
+        a_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self.kernels.get("broadcast_mul_rev_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("broadcast_mul_rev_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone().launch(cfg, (a, b, dst, n as u32, a_len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Reverse broadcast division: out[i] = a[i % a_len] / b[i]
+    pub fn broadcast_div_rev_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        n: usize,
+        a_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self.kernels.get("broadcast_div_rev_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("broadcast_div_rev_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone().launch(cfg, (a, b, dst, n as u32, a_len as u32))
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -940,6 +1186,298 @@ impl CudaBackend {
         unsafe {
             func.clone()
                 .launch(cfg, (grad_output, output, dst, len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Sum along a dimension. Tensor viewed as [outer_size, dim_size, inner_size].
+    /// Output has outer_size * inner_size elements.
+    pub fn sum_dim_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        outer_size: usize,
+        dim_size: usize,
+        inner_size: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("sum_dim_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("sum_dim_f32".to_string()))?;
+        let out_len = outer_size * inner_size;
+        let cfg = cuda_kernels::launch_config(out_len);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, outer_size as u32, dim_size as u32, inner_size as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Softmax along last dimension, in-place.
+    /// Data layout: num_rows x row_size, each row gets softmax independently.
+    /// One block per row, 256 threads per block.
+    pub fn softmax_row_f32(
+        &self,
+        data: &mut CudaSlice<f32>,
+        num_rows: usize,
+        row_size: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("softmax_row_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("softmax_row_f32".to_string()))?;
+        // One block per row
+        let cfg = LaunchConfig {
+            grid_dim: (num_rows as u32, 1, 1),
+            block_dim: (BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: BLOCK_SIZE * 4,
+        };
+        unsafe {
+            func.clone()
+                .launch(cfg, (data, num_rows as u32, row_size as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Broadcast copy: out[i] = src[i % src_len], for n output elements.
+    pub fn broadcast_copy_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        n: usize,
+        src_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("broadcast_copy_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("broadcast_copy_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, n as u32, src_len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// LayerNorm: per-row normalization with affine transform on GPU.
+    /// One block per row, 256 threads. Computes mean, variance, normalize, apply gamma/beta.
+    pub fn layer_norm_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        input: &CudaSlice<f32>,
+        gamma: &CudaSlice<f32>,
+        beta: &CudaSlice<f32>,
+        norm_size: usize,
+        eps: f32,
+        num_rows: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("layer_norm_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("layer_norm_f32".to_string()))?;
+        let cfg = LaunchConfig {
+            grid_dim: (num_rows as u32, 1, 1),
+            block_dim: (BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: BLOCK_SIZE * 4,
+        };
+        unsafe {
+            func.clone()
+                .launch(cfg, (input, gamma, beta, dst, norm_size as u32, eps, num_rows as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Softmax backward: per-row backward pass.
+    /// result[i] = softmax[i] * (grad[i] - dot), where dot = sum(softmax * grad) per row.
+    /// One block per row, 256 threads.
+    pub fn softmax_backward_row_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        softmax_output: &CudaSlice<f32>,
+        grad_output: &CudaSlice<f32>,
+        num_rows: usize,
+        row_size: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("softmax_backward_row_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("softmax_backward_row_f32".to_string()))?;
+        let cfg = LaunchConfig {
+            grid_dim: (num_rows as u32, 1, 1),
+            block_dim: (BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: BLOCK_SIZE * 4,
+        };
+        unsafe {
+            func.clone()
+                .launch(cfg, (softmax_output, grad_output, dst, num_rows as u32, row_size as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// LayerNorm backward: compute d_input on GPU.
+    /// One block per row, 256 threads. Computes mean, var, sum_dy, sum_dy_xhat, then d_input.
+    pub fn layer_norm_backward_dinput_f32(
+        &self,
+        d_input: &mut CudaSlice<f32>,
+        grad_output: &CudaSlice<f32>,
+        input: &CudaSlice<f32>,
+        gamma: &CudaSlice<f32>,
+        norm_size: usize,
+        eps: f32,
+        num_rows: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("layer_norm_backward_dinput_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("layer_norm_backward_dinput_f32".to_string()))?;
+        let cfg = LaunchConfig {
+            grid_dim: (num_rows as u32, 1, 1),
+            block_dim: (BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: BLOCK_SIZE * 4 * 2, // two shared arrays
+        };
+        unsafe {
+            func.clone()
+                .launch(cfg, (grad_output, input, gamma, d_input, norm_size as u32, eps, num_rows as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// LayerNorm backward: compute d_weight and d_bias on GPU.
+    /// One thread per element in norm_size. Each thread loops over all rows.
+    pub fn layer_norm_backward_dweight_dbias_f32(
+        &self,
+        d_weight: &mut CudaSlice<f32>,
+        d_bias: &mut CudaSlice<f32>,
+        grad_output: &CudaSlice<f32>,
+        input: &CudaSlice<f32>,
+        norm_size: usize,
+        eps: f32,
+        num_rows: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("layer_norm_backward_dweight_dbias_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("layer_norm_backward_dweight_dbias_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(norm_size);
+        unsafe {
+            func.clone()
+                .launch(cfg, (grad_output, input, d_weight, d_bias, norm_size as u32, eps, num_rows as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Gather elements from src using index array: out[i] = src[indices[i]]
+    pub fn gather_contiguous_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        indices: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("gather_contiguous_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("gather_contiguous_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, indices, dst, n as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// CrossEntropy forward: fused softmax + NLL loss.
+    /// One block per batch item, 256 threads per block.
+    /// Returns per-sample losses and softmax probabilities (for backward).
+    pub fn cross_entropy_fwd_f32(
+        &self,
+        logits: &CudaSlice<f32>,
+        targets: &CudaSlice<f32>,
+        losses: &mut CudaSlice<f32>,
+        softmax_out: &mut CudaSlice<f32>,
+        batch_size: usize,
+        num_classes: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("cross_entropy_fwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("cross_entropy_fwd_f32".to_string()))?;
+        let cfg = LaunchConfig {
+            grid_dim: (batch_size as u32, 1, 1),
+            block_dim: (BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: BLOCK_SIZE * 4,
+        };
+        unsafe {
+            func.clone()
+                .launch(cfg, (logits, targets, losses, softmax_out, num_classes as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// CrossEntropy backward: grad = (softmax - one_hot(target)) * grad_output.
+    /// Elementwise kernel, one thread per element.
+    pub fn cross_entropy_bwd_f32(
+        &self,
+        softmax_probs: &CudaSlice<f32>,
+        targets: &CudaSlice<f32>,
+        grad_output: &CudaSlice<f32>,
+        grad_input: &mut CudaSlice<f32>,
+        batch_size: usize,
+        num_classes: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("cross_entropy_bwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("cross_entropy_bwd_f32".to_string()))?;
+        let total = batch_size * num_classes;
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(cfg, (softmax_probs, targets, grad_output, grad_input, batch_size as u32, num_classes as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Zero-fills a GPU allocation using cudaMemset.
+    #[cfg(feature = "cuda")]
+    pub fn memset_zeros_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+    ) -> Result<(), CudaError> {
+        self.device
+            .memset_zeros(dst)
+            .map_err(|e| CudaError::DriverError(e.to_string()))
+    }
+
+    /// Device-to-device copy of `count` f32 elements with source and destination offsets.
+    /// Copies src[src_offset..src_offset+count] → dst[dst_offset..dst_offset+count].
+    #[cfg(feature = "cuda")]
+    pub fn memcpy_dtod_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        dst_offset: usize,
+        src: &CudaSlice<f32>,
+        src_offset: usize,
+        count: usize,
+    ) -> Result<(), CudaError> {
+        use cudarc::driver::safe::{DevicePtr, DevicePtrMut};
+        let src_ptr = *src.device_ptr() as u64 + (src_offset * std::mem::size_of::<f32>()) as u64;
+        let dst_ptr =
+            *dst.device_ptr_mut() as u64 + (dst_offset * std::mem::size_of::<f32>()) as u64;
+        let size = count * std::mem::size_of::<f32>();
+        unsafe {
+            cudarc::driver::result::memcpy_dtod_sync(dst_ptr, src_ptr, size)
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())

@@ -32,8 +32,8 @@
     <!-- WASM bundle -->
     
 <script type="module">
-import init, * as bindings from '/axonml-dashboard-fec3f0cbd208a8f2.js';
-const wasm = await init({ module_or_path: '/axonml-dashboard-fec3f0cbd208a8f2_bg.wasm' });
+import init, * as bindings from '/axonml-dashboard-8234d51fe0041e18.js';
+const wasm = await init({ module_or_path: '/axonml-dashboard-8234d51fe0041e18_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -42,7 +42,7 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
-<link rel="modulepreload" href="/axonml-dashboard-fec3f0cbd208a8f2.js" crossorigin="anonymous" integrity="sha384-MjYZqOIOnuS7PUSiP9I3AjZZCXbMvFmm/1CYkkpkBNLkKkAmQclg/CScS1XV+YEC"><link rel="preload" href="/axonml-dashboard-fec3f0cbd208a8f2_bg.wasm" crossorigin="anonymous" integrity="sha384-jCf2pFe31QF3oceqRVbTakwLWGMbatdO4cXc28/iRM4XB0us7vC4bMIcK/25ZZQK" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/axonml-dashboard-8234d51fe0041e18.js" crossorigin="anonymous" integrity="sha384-A4MMi58bv3D2meoaCM+jbwRKeax4asJ7AT0DAZFYQtlsOYcazQiLcoJyVOplHpk0"><link rel="preload" href="/axonml-dashboard-8234d51fe0041e18_bg.wasm" crossorigin="anonymous" integrity="sha384-jRlRwNPfqe3EPmMY3Lr8mgkzrftYhGqU5yy6Ep8vbXHMZIapFGj1zhWm/5xIEVwa" as="fetch" type="application/wasm"></head>
 <body>
     <!-- Loading spinner shown while WASM loads -->
     <div id="loading" class="loading-container">
