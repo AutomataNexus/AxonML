@@ -5,7 +5,10 @@
 //! @version 0.1.0
 //! @author `AutomataNexus` Development Team
 
-use axonml_autograd::Variable;
+use std::any::Any;
+
+use axonml_autograd::no_grad::is_grad_enabled;
+use axonml_autograd::{GradFn, GradientFunction, Variable};
 use axonml_nn::{Conv2d, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
 
@@ -66,33 +69,47 @@ impl LeNet {
             let out_w = w / kernel_size;
 
             let data_vec = data.to_vec();
-            let mut result = vec![0.0f32; n * c * out_h * out_w];
+            let out_size = n * c * out_h * out_w;
+            let mut result = vec![0.0f32; out_size];
+            let mut max_indices = vec![0usize; out_size];
 
             for batch in 0..n {
                 for ch in 0..c {
                     for oh in 0..out_h {
                         for ow in 0..out_w {
                             let mut max_val = f32::NEG_INFINITY;
+                            let mut max_idx = 0usize;
                             for kh in 0..kernel_size {
                                 for kw in 0..kernel_size {
                                     let ih = oh * kernel_size + kh;
                                     let iw = ow * kernel_size + kw;
                                     let idx = batch * c * h * w + ch * h * w + ih * w + iw;
-                                    max_val = max_val.max(data_vec[idx]);
+                                    if data_vec[idx] > max_val {
+                                        max_val = data_vec[idx];
+                                        max_idx = idx;
+                                    }
                                 }
                             }
                             let out_idx =
                                 batch * c * out_h * out_w + ch * out_h * out_w + oh * out_w + ow;
                             result[out_idx] = max_val;
+                            max_indices[out_idx] = max_idx;
                         }
                     }
                 }
             }
 
-            Variable::new(
-                Tensor::from_vec(result, &[n, c, out_h, out_w]).unwrap(),
-                input.requires_grad(),
-            )
+            let output_tensor = Tensor::from_vec(result, &[n, c, out_h, out_w]).unwrap();
+            if input.requires_grad() && is_grad_enabled() {
+                let grad_fn = GradFn::new(MaxPool2dBackward {
+                    next_fns: vec![input.grad_fn().cloned()],
+                    max_indices,
+                    input_shape: shape.to_vec(),
+                });
+                Variable::from_operation(output_tensor, grad_fn, true)
+            } else {
+                Variable::new(output_tensor, false)
+            }
         } else if shape.len() == 3 {
             // Single image without batch
             let (c, h, w) = (shape[0], shape[1], shape[2]);
@@ -100,39 +117,53 @@ impl LeNet {
             let out_w = w / kernel_size;
 
             let data_vec = data.to_vec();
-            let mut result = vec![0.0f32; c * out_h * out_w];
+            let out_size = c * out_h * out_w;
+            let mut result = vec![0.0f32; out_size];
+            let mut max_indices = vec![0usize; out_size];
 
             for ch in 0..c {
                 for oh in 0..out_h {
                     for ow in 0..out_w {
                         let mut max_val = f32::NEG_INFINITY;
+                        let mut max_idx = 0usize;
                         for kh in 0..kernel_size {
                             for kw in 0..kernel_size {
                                 let ih = oh * kernel_size + kh;
                                 let iw = ow * kernel_size + kw;
                                 let idx = ch * h * w + ih * w + iw;
-                                max_val = max_val.max(data_vec[idx]);
+                                if data_vec[idx] > max_val {
+                                    max_val = data_vec[idx];
+                                    max_idx = idx;
+                                }
                             }
                         }
                         let out_idx = ch * out_h * out_w + oh * out_w + ow;
                         result[out_idx] = max_val;
+                        max_indices[out_idx] = max_idx;
                     }
                 }
             }
 
-            Variable::new(
-                Tensor::from_vec(result, &[c, out_h, out_w]).unwrap(),
-                input.requires_grad(),
-            )
+            let output_tensor = Tensor::from_vec(result, &[c, out_h, out_w]).unwrap();
+            if input.requires_grad() && is_grad_enabled() {
+                let grad_fn = GradFn::new(MaxPool2dBackward {
+                    next_fns: vec![input.grad_fn().cloned()],
+                    max_indices,
+                    input_shape: shape.to_vec(),
+                });
+                Variable::from_operation(output_tensor, grad_fn, true)
+            } else {
+                Variable::new(output_tensor, false)
+            }
         } else {
             input.clone()
         }
     }
 
     /// Flattens a tensor to 2D (batch, features).
+    /// Uses Variable::reshape() to preserve the autograd graph.
     fn flatten(&self, input: &Variable) -> Variable {
-        let data = input.data();
-        let shape = data.shape();
+        let shape = input.shape();
 
         if shape.len() <= 2 {
             return input.clone();
@@ -141,10 +172,7 @@ impl LeNet {
         let batch_size = shape[0];
         let features: usize = shape[1..].iter().product();
 
-        Variable::new(
-            Tensor::from_vec(data.to_vec(), &[batch_size, features]).unwrap(),
-            input.requires_grad(),
-        )
+        input.reshape(&[batch_size, features])
     }
 }
 
@@ -297,8 +325,7 @@ impl SimpleCNN {
     }
 
     fn flatten(&self, input: &Variable) -> Variable {
-        let data = input.data();
-        let shape = data.shape();
+        let shape = input.shape();
 
         if shape.len() <= 2 {
             return input.clone();
@@ -307,10 +334,7 @@ impl SimpleCNN {
         let batch_size = shape[0];
         let features: usize = shape[1..].iter().product();
 
-        Variable::new(
-            Tensor::from_vec(data.to_vec(), &[batch_size, features]).unwrap(),
-            input.requires_grad(),
-        )
+        input.reshape(&[batch_size, features])
     }
 }
 
@@ -411,6 +435,49 @@ impl Module for MLP {
 
     fn train(&mut self) {}
     fn eval(&mut self) {}
+}
+
+// =============================================================================
+// MaxPool2dBackward
+// =============================================================================
+
+/// Gradient function for MaxPool2d.
+///
+/// Backward pass routes gradient only to the max element in each pooling window.
+#[derive(Debug)]
+struct MaxPool2dBackward {
+    next_fns: Vec<Option<GradFn>>,
+    max_indices: Vec<usize>,
+    input_shape: Vec<usize>,
+}
+
+impl GradientFunction for MaxPool2dBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let g_vec = grad_output.to_vec();
+        let input_size: usize = self.input_shape.iter().product();
+        let mut grad_input = vec![0.0f32; input_size];
+
+        for (i, &idx) in self.max_indices.iter().enumerate() {
+            if i < g_vec.len() {
+                grad_input[idx] += g_vec[i];
+            }
+        }
+
+        let gi = Tensor::from_vec(grad_input, &self.input_shape).unwrap();
+        vec![Some(gi)]
+    }
+
+    fn name(&self) -> &'static str {
+        "MaxPool2dBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 // =============================================================================

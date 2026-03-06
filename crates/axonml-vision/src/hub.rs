@@ -421,6 +421,116 @@ pub fn model_registry() -> HashMap<String, PretrainedModel> {
         },
     );
 
+    // =========================================================================
+    // Detection Models
+    // =========================================================================
+
+    registry.insert(
+        "retinaface".to_string(),
+        PretrainedModel {
+            name: "retinaface".to_string(),
+            url: "https://huggingface.co/axonml-ml/retinaface-widerface/resolve/main/retinaface.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 108_000_000,
+            num_classes: 1,
+            input_size: (640, 640),
+            dataset: "WiderFace".to_string(),
+            accuracy: 94.5,
+        },
+    );
+
+    registry.insert(
+        "blazeface".to_string(),
+        PretrainedModel {
+            name: "blazeface".to_string(),
+            url: "https://huggingface.co/axonml-ml/blazeface-widerface/resolve/main/blazeface.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 400_000,
+            num_classes: 1,
+            input_size: (128, 128),
+            dataset: "WiderFace".to_string(),
+            accuracy: 88.2,
+        },
+    );
+
+    registry.insert(
+        "detr_resnet50".to_string(),
+        PretrainedModel {
+            name: "detr_resnet50".to_string(),
+            url: "https://huggingface.co/axonml-ml/detr-resnet50-coco/resolve/main/detr_resnet50.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 159_000_000,
+            num_classes: 91,
+            input_size: (800, 800),
+            dataset: "COCO-2017".to_string(),
+            accuracy: 42.0,
+        },
+    );
+
+    registry.insert(
+        "nanodet".to_string(),
+        PretrainedModel {
+            name: "nanodet".to_string(),
+            url: "https://huggingface.co/axonml-ml/nanodet-coco/resolve/main/nanodet.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 3_800_000,
+            num_classes: 80,
+            input_size: (320, 320),
+            dataset: "COCO-2017".to_string(),
+            accuracy: 27.0,
+        },
+    );
+
+    // =========================================================================
+    // Depth Estimation Models
+    // =========================================================================
+
+    registry.insert(
+        "dpt_hybrid".to_string(),
+        PretrainedModel {
+            name: "dpt_hybrid".to_string(),
+            url: "https://huggingface.co/axonml-ml/dpt-hybrid-midas/resolve/main/dpt_hybrid.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 123_000_000,
+            num_classes: 1,
+            input_size: (384, 384),
+            dataset: "MIX-6".to_string(),
+            accuracy: 0.0,
+        },
+    );
+
+    registry.insert(
+        "fastdepth".to_string(),
+        PretrainedModel {
+            name: "fastdepth".to_string(),
+            url: "https://huggingface.co/axonml-ml/fastdepth-nyudepthv2/resolve/main/fastdepth.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 15_000_000,
+            num_classes: 1,
+            input_size: (224, 224),
+            dataset: "NYU-Depth-V2".to_string(),
+            accuracy: 0.0,
+        },
+    );
+
+    // =========================================================================
+    // Anomaly Detection Models
+    // =========================================================================
+
+    registry.insert(
+        "patchcore_resnet18".to_string(),
+        PretrainedModel {
+            name: "patchcore_resnet18".to_string(),
+            url: "https://huggingface.co/axonml-ml/patchcore-mvtec/resolve/main/patchcore_resnet18.safetensors".to_string(),
+            checksum: None,
+            size_bytes: 44_700_000,
+            num_classes: 1,
+            input_size: (224, 224),
+            dataset: "MVTec-AD".to_string(),
+            accuracy: 99.1,
+        },
+    );
+
     registry
 }
 
