@@ -11,6 +11,10 @@ documentation.workspace = true
 description = "Neural network modules for Axonml ML framework"
 readme = "README.md"
 
+[features]
+default = []
+cuda = ["axonml-tensor/cuda", "axonml-core/cuda"]
+
 [dependencies]
 axonml-core.workspace = true
 axonml-tensor.workspace = true

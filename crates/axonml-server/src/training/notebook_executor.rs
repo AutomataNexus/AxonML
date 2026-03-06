@@ -17,15 +17,35 @@ pub struct ExecutionResult {
     pub duration_ms: u64,
 }
 
+/// Allowed base directories for notebook execution
+const ALLOWED_WORK_BASES: &[&str] = &["/tmp/", "/var/tmp/"];
+
 /// Notebook cell executor
 pub struct NotebookExecutor {
     work_dir: PathBuf,
 }
 
 impl NotebookExecutor {
-    /// Create a new executor with a working directory
+    /// Create a new executor with a working directory.
+    /// SECURITY: work_dir must be under an allowed temp base directory.
     pub fn new(work_dir: PathBuf) -> Self {
-        Self { work_dir }
+        // Validate the work directory is in an allowed location
+        let work_str = work_dir.to_string_lossy();
+        let is_allowed = ALLOWED_WORK_BASES
+            .iter()
+            .any(|base| work_str.starts_with(base));
+
+        let safe_dir = if is_allowed {
+            work_dir
+        } else {
+            tracing::warn!(
+                requested = %work_str,
+                "Work directory not in allowed base, using default /tmp/axonml-notebooks"
+            );
+            PathBuf::from("/tmp/axonml-notebooks")
+        };
+
+        Self { work_dir: safe_dir }
     }
 
     /// Execute a single cell with context from previous cells
@@ -51,7 +71,9 @@ impl NotebookExecutor {
         let source = self.build_source(cell, previous_cells);
 
         // Create temp directory for this execution
+        // SECURITY: exec_id is a UUID (safe for path use, no traversal possible)
         let exec_id = uuid::Uuid::new_v4().to_string();
+        debug_assert!(!exec_id.contains('/') && !exec_id.contains(".."));
         let exec_dir = self.work_dir.join(&exec_id);
 
         if let Err(e) = tokio::fs::create_dir_all(&exec_dir).await {
@@ -104,8 +126,10 @@ impl NotebookExecutor {
         // Run cargo build + run with timeout
         let result = self.run_cargo(&exec_dir, timeout_ms).await;
 
-        // Cleanup
-        if let Err(e) = tokio::fs::remove_dir_all(&exec_dir).await {
+        // Cleanup - SECURITY: verify exec_dir is under work_dir before deletion
+        if !exec_dir.starts_with(&self.work_dir) {
+            error!(exec_id = %exec_id, "Refusing to clean up directory outside work_dir");
+        } else if let Err(e) = tokio::fs::remove_dir_all(&exec_dir).await {
             error!(exec_id = %exec_id, error = %e, "Failed to cleanup execution directory");
         }
 

@@ -10,7 +10,6 @@
 //! @author AutomataNexus Development Team
 
 use axonml_autograd::Variable;
-use axonml_tensor::Tensor;
 
 use super::{
     aquilo::Aquilo,
@@ -20,7 +19,7 @@ use super::{
     zephyrus::Zephyrus,
     colossus::Colossus,
     gaia::Gaia,
-    apollo::{Apollo, RAW_SENSOR_DIM},
+    apollo::Apollo,
     data::{HvacSensorData, PipelineOutput},
 };
 
@@ -197,95 +196,33 @@ impl HvacPipeline {
 
 /// Flatten sensor data from (batch, time, channels) to (batch, flat_dim).
 fn flatten_sensor(input: &Variable, batch: usize, time: usize, channels: usize, target_dim: usize) -> Variable {
-    let data = input.data().to_vec();
     let full_dim = time * channels;
     let dim = target_dim.min(full_dim);
 
-    let mut output = Vec::with_capacity(batch * dim);
-    for b in 0..batch {
-        let offset = b * full_dim;
-        output.extend_from_slice(&data[offset..offset + dim]);
+    let flat = input.reshape(&[batch, full_dim]);
+    if dim < full_dim {
+        flat.narrow(1, 0, dim)
+    } else {
+        flat
     }
-
-    Variable::new(
-        Tensor::from_vec(output, &[batch, dim]).unwrap(), false)
 }
 
 /// Transpose last two dimensions: (batch, T, C) → (batch, C, T).
-fn transpose_last_two(input: &Variable, batch: usize, time: usize, channels: usize) -> Variable {
-    let data = input.data().to_vec();
-    let mut output = vec![0.0f32; batch * channels * time];
-
-    for b in 0..batch {
-        for t in 0..time {
-            for c in 0..channels {
-                output[(b * channels + c) * time + t] = data[(b * time + t) * channels + c];
-            }
-        }
-    }
-
-    Variable::new(
-        Tensor::from_vec(output, &[batch, channels, time]).unwrap(), false)
+fn transpose_last_two(input: &Variable, _batch: usize, _time: usize, _channels: usize) -> Variable {
+    input.transpose(1, 2)
 }
 
 /// Compute mean sensor values across time for raw sensor summary.
-fn summarize_sensors(data: &HvacSensorData, batch: usize) -> Variable {
-    let mut summary = Vec::with_capacity(batch * RAW_SENSOR_DIM);
+fn summarize_sensors(data: &HvacSensorData, _batch: usize) -> Variable {
+    // Mean over time dimension (dim=1) for each sensor: (batch, T, 7) → (batch, 7)
+    let elec_mean = data.electrical.mean_dim(1, false);    // (batch, 7)
+    let refrig_mean = data.refrigeration.mean_dim(1, false); // (batch, 7)
+    let water_mean = data.water.mean_dim(1, false);        // (batch, 7)
+    let mech_mean = data.mechanical.mean_dim(1, false);    // (batch, 7)
+    let air_mean = data.airflow.mean_dim(1, false);        // (batch, 7)
 
-    for b in 0..batch {
-        // Electrical: 7 channels, mean over 64 timesteps
-        let elec_data = data.electrical.data().to_vec();
-        for c in 0..7 {
-            let mut sum = 0.0;
-            for t in 0..64 {
-                sum += elec_data[(b * 64 + t) * 7 + c];
-            }
-            summary.push(sum / 64.0);
-        }
-
-        // Refrigeration: 7 channels, mean over 80 timesteps
-        let refrig_data = data.refrigeration.data().to_vec();
-        for c in 0..7 {
-            let mut sum = 0.0;
-            for t in 0..80 {
-                sum += refrig_data[(b * 80 + t) * 7 + c];
-            }
-            summary.push(sum / 80.0);
-        }
-
-        // Water: 7 channels, mean over 64 timesteps
-        let water_data = data.water.data().to_vec();
-        for c in 0..7 {
-            let mut sum = 0.0;
-            for t in 0..64 {
-                sum += water_data[(b * 64 + t) * 7 + c];
-            }
-            summary.push(sum / 64.0);
-        }
-
-        // Mechanical: 7 channels, mean over 96 timesteps
-        let mech_data = data.mechanical.data().to_vec();
-        for c in 0..7 {
-            let mut sum = 0.0;
-            for t in 0..96 {
-                sum += mech_data[(b * 96 + t) * 7 + c];
-            }
-            summary.push(sum / 96.0);
-        }
-
-        // Airflow: 7 channels, mean over 72 timesteps
-        let air_data = data.airflow.data().to_vec();
-        for c in 0..7 {
-            let mut sum = 0.0;
-            for t in 0..72 {
-                sum += air_data[(b * 72 + t) * 7 + c];
-            }
-            summary.push(sum / 72.0);
-        }
-    }
-
-    Variable::new(
-        Tensor::from_vec(summary, &[batch, RAW_SENSOR_DIM]).unwrap(), false)
+    // Concat along last dim: (batch, 35)
+    Variable::cat(&[&elec_mean, &refrig_mean, &water_mean, &mech_mean, &air_mean], 1)
 }
 
 // =============================================================================
@@ -297,6 +234,7 @@ mod tests {
     use super::*;
     use super::super::data::SyntheticHvacGenerator;
     use axonml_nn::Module;
+    use axonml_tensor::Tensor;
 
     #[test]
     fn test_pipeline_creation() {

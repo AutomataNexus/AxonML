@@ -38,6 +38,12 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use axonml_autograd::functions::{
+    BatchNorm1dBackward, BatchNorm2dBackward, GroupNormBackward, InstanceNorm2dBackward,
+    LayerNormBackward,
+};
+use axonml_autograd::grad_fn::GradFn;
+use axonml_autograd::no_grad::is_grad_enabled;
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
 use parking_lot::RwLock;
@@ -201,7 +207,27 @@ impl Module for BatchNorm1d {
         }
 
         let output = Tensor::from_vec(output_vec, &shape).unwrap();
-        Variable::new(output, input.requires_grad())
+
+        let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+        if requires_grad {
+            let weight_var = self.weight.variable();
+            let bias_var = self.bias.variable();
+
+            let grad_fn = GradFn::new(BatchNorm1dBackward::new(
+                input.grad_fn().cloned(),
+                weight_var.grad_fn().cloned(),
+                bias_var.grad_fn().cloned(),
+                input_data,
+                means.clone(),
+                vars.clone(),
+                weight_vec,
+                self.eps,
+                self.num_features,
+            ));
+            Variable::from_operation(output, grad_fn, true)
+        } else {
+            Variable::new(output, false)
+        }
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -374,7 +400,27 @@ impl Module for BatchNorm2d {
         }
 
         let output = Tensor::from_vec(output_vec, &shape).unwrap();
-        Variable::new(output, input.requires_grad())
+
+        let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+        if requires_grad {
+            let weight_var = self.weight.variable();
+            let bias_var = self.bias.variable();
+
+            let grad_fn = GradFn::new(BatchNorm2dBackward::new(
+                input.grad_fn().cloned(),
+                weight_var.grad_fn().cloned(),
+                bias_var.grad_fn().cloned(),
+                input_data,
+                means.clone(),
+                vars.clone(),
+                weight_vec,
+                self.eps,
+                self.num_features,
+            ));
+            Variable::from_operation(output, grad_fn, true)
+        } else {
+            Variable::new(output, false)
+        }
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -448,29 +494,63 @@ impl Module for LayerNorm {
     fn forward(&self, input: &Variable) -> Variable {
         let input_data = input.data();
         let shape = input_data.shape().to_vec();
-        let input_vec = input_data.to_vec();
+        let norm_size: usize = self.normalized_shape.iter().product();
+        let total_len = input_data.numel();
+        let num_rows = total_len / norm_size;
 
+        // GPU fast path: run LayerNorm entirely on GPU via CUDA kernel
+        #[cfg(feature = "cuda")]
+        if input_data.device().is_gpu() {
+            // Ensure weight and bias are on GPU
+            let weight_data = self.weight.data();
+            let weight_gpu = if weight_data.device().is_gpu() {
+                weight_data.clone()
+            } else {
+                weight_data.to_device(input_data.device().clone()).unwrap()
+            };
+            let bias_data = self.bias.data();
+            let bias_gpu = if bias_data.device().is_gpu() {
+                bias_data.clone()
+            } else {
+                bias_data.to_device(input_data.device().clone()).unwrap()
+            };
+
+            let output = input_data
+                .layer_norm_cuda(&weight_gpu, &bias_gpu, norm_size, self.eps)
+                .expect("CUDA LayerNorm failed");
+
+            let requires_grad = input.requires_grad() && is_grad_enabled();
+            return if requires_grad {
+                let grad_fn = GradFn::new(LayerNormBackward::new(
+                    input.grad_fn().cloned(),
+                    self.weight.variable().grad_fn().cloned(),
+                    self.bias.variable().grad_fn().cloned(),
+                    input_data.clone(),
+                    self.weight.data().clone(),
+                    self.normalized_shape.clone(),
+                    self.eps,
+                ));
+                Variable::from_operation(output, grad_fn, true)
+            } else {
+                Variable::from_tensor(output)
+            };
+        }
+
+        // CPU path
+        let input_vec = input_data.to_vec();
         let weight_vec = self.weight.data().to_vec();
         let bias_vec = self.bias.data().to_vec();
 
-        // Calculate the size of the normalized dimensions
-        let norm_size: usize = self.normalized_shape.iter().product();
-        let batch_size = input_vec.len() / norm_size;
-
         let mut output_vec = vec![0.0f32; input_vec.len()];
 
-        for b in 0..batch_size {
+        for b in 0..num_rows {
             let start = b * norm_size;
             let end = start + norm_size;
             let slice = &input_vec[start..end];
 
-            // Calculate mean
             let mean: f32 = slice.iter().sum::<f32>() / norm_size as f32;
-
-            // Calculate variance
             let var: f32 = slice.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / norm_size as f32;
 
-            // Normalize and apply affine transform
             for i in 0..norm_size {
                 let normalized = (slice[i] - mean) / (var + self.eps).sqrt();
                 output_vec[start + i] = normalized * weight_vec[i] + bias_vec[i];
@@ -478,7 +558,22 @@ impl Module for LayerNorm {
         }
 
         let output = Tensor::from_vec(output_vec, &shape).unwrap();
-        Variable::new(output, input.requires_grad())
+        let requires_grad = input.requires_grad() && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(LayerNormBackward::new(
+                input.grad_fn().cloned(),
+                self.weight.variable().grad_fn().cloned(),
+                self.bias.variable().grad_fn().cloned(),
+                input_data.clone(),
+                self.weight.data().clone(),
+                self.normalized_shape.clone(),
+                self.eps,
+            ));
+            Variable::from_operation(output, grad_fn, true)
+        } else {
+            Variable::from_tensor(output)
+        }
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -624,7 +719,22 @@ impl Module for GroupNorm {
         }
 
         let output = Tensor::from_vec(output_vec, &shape).unwrap();
-        Variable::new(output, input.requires_grad())
+        let requires_grad = input.requires_grad() && is_grad_enabled();
+
+        if requires_grad && self.affine {
+            let grad_fn = GradFn::new(GroupNormBackward::new(
+                input.grad_fn().cloned(),
+                self.weight.variable().grad_fn().cloned(),
+                self.bias.variable().grad_fn().cloned(),
+                input_data.clone(),
+                self.weight.data().clone(),
+                self.num_groups,
+                self.eps,
+            ));
+            Variable::from_operation(output, grad_fn, true)
+        } else {
+            Variable::from_tensor(output)
+        }
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -765,7 +875,22 @@ impl Module for InstanceNorm2d {
         }
 
         let output = Tensor::from_vec(output_vec, &shape).unwrap();
-        Variable::new(output, input.requires_grad())
+        let requires_grad = input.requires_grad() && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(InstanceNorm2dBackward::new(
+                input.grad_fn().cloned(),
+                if self.affine { self.weight.variable().grad_fn().cloned() } else { None },
+                if self.affine { self.bias.variable().grad_fn().cloned() } else { None },
+                input_data.clone(),
+                self.weight.data().clone(),
+                self.eps,
+                self.affine,
+            ));
+            Variable::from_operation(output, grad_fn, true)
+        } else {
+            Variable::from_tensor(output)
+        }
     }
 
     fn parameters(&self) -> Vec<Parameter> {

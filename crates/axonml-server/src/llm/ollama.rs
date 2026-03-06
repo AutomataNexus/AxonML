@@ -5,6 +5,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use url::Url;
 
 /// Default Ollama endpoint
 pub const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434";
@@ -25,6 +26,9 @@ pub enum OllamaError {
 
     #[error("Generation failed: {0}")]
     GenerationFailed(String),
+
+    #[error("Invalid URL: {0}")]
+    InvalidUrl(String),
 }
 
 /// Ollama generate request
@@ -96,19 +100,24 @@ impl OllamaClient {
         }
     }
 
-    /// Create with custom URL and model
-    pub fn with_config(base_url: &str, model: &str) -> Self {
-        Self {
+    /// Create with custom URL and model.
+    /// Only allows connections to loopback/private network addresses to prevent SSRF.
+    pub fn with_config(base_url: &str, model: &str) -> Result<Self, OllamaError> {
+        validate_internal_url(base_url)?;
+        Ok(Self {
             client: Client::new(),
             base_url: base_url.to_string(),
             model: model.to_string(),
-        }
+        })
     }
 
     /// Check if Ollama service is available
     pub async fn is_available(&self) -> bool {
-        let url = format!("{}/api/tags", self.base_url);
-        self.client.get(&url).send().await.is_ok()
+        let url = match Url::parse(&self.base_url).and_then(|u| u.join("/api/tags")) {
+            Ok(u) => u,
+            Err(_) => return false,
+        };
+        self.client.get(url).send().await.is_ok()
     }
 
     /// Generate code based on a prompt
@@ -191,9 +200,13 @@ Be concise but comprehensive."#
         &self,
         request: GenerateRequest,
     ) -> Result<GenerateResponse, OllamaError> {
-        let url = format!("{}/api/generate", self.base_url);
+        // SECURITY: base_url is validated at construction time (new() uses hardcoded localhost,
+        // with_config() validates via validate_internal_url). Build path from validated base.
+        let url = Url::parse(&self.base_url)
+            .and_then(|u| u.join("/api/generate"))
+            .map_err(|e| OllamaError::InvalidUrl(e.to_string()))?;
 
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = self.client.post(url).json(&request).send().await?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(OllamaError::ModelNotFound(request.model));
@@ -226,6 +239,43 @@ pub struct CodeSuggestion {
     pub explanation: Option<String>,
     pub model: String,
     pub tokens_generated: u32,
+}
+
+/// SECURITY: Validate that a URL points to a loopback or private network address.
+/// Prevents SSRF by ensuring we only connect to internal services.
+fn validate_internal_url(url_str: &str) -> Result<(), OllamaError> {
+    let parsed = Url::parse(url_str)
+        .map_err(|e| OllamaError::InvalidUrl(format!("Invalid URL '{}': {}", url_str, e)))?;
+
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err(OllamaError::InvalidUrl(format!(
+            "Only http/https schemes allowed, got '{}'",
+            scheme
+        )));
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| OllamaError::InvalidUrl("URL must have a host".to_string()))?;
+
+    // Allow loopback and private network addresses only
+    let is_allowed = host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host == "[::1]"
+        || host.starts_with("10.")
+        || host.starts_with("172.")
+        || host.starts_with("192.168.");
+
+    if !is_allowed {
+        return Err(OllamaError::InvalidUrl(format!(
+            "Only loopback/private network hosts allowed, got '{}'",
+            host
+        )));
+    }
+
+    Ok(())
 }
 
 /// Build system prompt for code generation

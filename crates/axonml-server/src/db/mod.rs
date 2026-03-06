@@ -16,6 +16,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
+use url::Url;
 
 #[derive(Error, Debug)]
 pub enum DbError {
@@ -143,9 +144,40 @@ struct TimeSeriesResponse {
     points: Vec<DataPoint>,
 }
 
+/// SECURITY: Validate that a database host is a loopback or private network address.
+/// Prevents SSRF by ensuring we only connect to internal database services.
+fn validate_db_host(host: &str, port: u16) -> Result<(), DbError> {
+    let is_allowed = host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host == "[::1]"
+        || host.starts_with("10.")
+        || host.starts_with("172.")
+        || host.starts_with("192.168.");
+
+    if !is_allowed {
+        return Err(DbError::ConnectionFailed(format!(
+            "Only loopback/private network database hosts allowed, got '{}'",
+            host
+        )));
+    }
+
+    if port == 0 {
+        return Err(DbError::ConnectionFailed(
+            "Invalid database port".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 impl Database {
-    /// Create a new database connection
+    /// Create a new database connection.
+    /// SECURITY: Only allows connections to loopback/private network addresses.
     pub async fn new(config: &AegisConfig) -> Result<Self, DbError> {
+        // SECURITY: Validate the database host to prevent SSRF
+        validate_db_host(&config.host, config.port)?;
+
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -172,7 +204,7 @@ impl Database {
         if let Some((username, password)) = &self.auth {
             let resp = self
                 .client
-                .post(format!("{}/api/v1/auth/login", self.base_url))
+                .post(self.build_url("/api/v1/auth/login")?)
                 .json(&serde_json::json!({
                     "username": username,
                     "password": password
@@ -197,6 +229,15 @@ impl Database {
         lock.as_ref().map(|t| format!("Bearer {}", t))
     }
 
+    /// SECURITY: Build a URL from the pre-validated base_url and a relative path.
+    /// base_url is validated in new() to only allow private/loopback addresses.
+    fn build_url(&self, path: &str) -> Result<Url, DbError> {
+        let base = Url::parse(&self.base_url)
+            .map_err(|e| DbError::ConnectionFailed(format!("Invalid base URL: {}", e)))?;
+        base.join(path)
+            .map_err(|e| DbError::ConnectionFailed(format!("Invalid URL path '{}': {}", path, e)))
+    }
+
     /// Execute a query and return results
     pub async fn query(&self, sql: &str) -> Result<QueryResponse, DbError> {
         self.query_with_params(sql, vec![]).await
@@ -210,7 +251,7 @@ impl Database {
     ) -> Result<QueryResponse, DbError> {
         let mut request = self
             .client
-            .post(format!("{}/api/v1/query", self.base_url))
+            .post(self.build_url("/api/v1/query")?)
             .json(&QueryRequest {
                 query: sql.to_string(),
                 params: if params.is_empty() {
@@ -253,7 +294,7 @@ impl Database {
     pub async fn kv_set(&self, key: &str, value: Value) -> Result<(), DbError> {
         let mut request = self
             .client
-            .post(format!("{}/api/v1/kv/keys", self.base_url))
+            .post(self.build_url("/api/v1/kv/keys")?)
             .json(&serde_json::json!({
                 "key": key,
                 "value": value
@@ -280,7 +321,7 @@ impl Database {
     pub async fn kv_get(&self, key: &str) -> Result<Option<Value>, DbError> {
         let mut request = self
             .client
-            .get(format!("{}/api/v1/kv/keys/{}", self.base_url, key));
+            .get(self.build_url(&format!("/api/v1/kv/keys/{}", key))?);
 
         if let Some(auth) = self.auth_header().await {
             request = request.header("Authorization", auth);
@@ -308,7 +349,7 @@ impl Database {
     pub async fn kv_delete(&self, key: &str) -> Result<(), DbError> {
         let mut request = self
             .client
-            .delete(format!("{}/api/v1/kv/keys/{}", self.base_url, key));
+            .delete(self.build_url(&format!("/api/v1/kv/keys/{}", key))?);
 
         if let Some(auth) = self.auth_header().await {
             request = request.header("Authorization", auth);
@@ -335,7 +376,7 @@ impl Database {
     pub async fn create_collection(&self, name: &str) -> Result<(), DbError> {
         let mut request = self
             .client
-            .post(format!("{}/api/v1/documents/collections", self.base_url))
+            .post(self.build_url("/api/v1/documents/collections")?)
             .json(&serde_json::json!({ "name": name }));
 
         if let Some(auth) = self.auth_header().await {
@@ -366,10 +407,10 @@ impl Database {
     ) -> Result<String, DbError> {
         let mut request = self
             .client
-            .post(format!(
-                "{}/api/v1/documents/collections/{}/documents",
-                self.base_url, collection
-            ))
+            .post(self.build_url(&format!(
+                "/api/v1/documents/collections/{}/documents",
+                collection
+            ))?)
             .json(&serde_json::json!({
                 "id": id,
                 "document": data
@@ -403,10 +444,10 @@ impl Database {
 
     /// Get a document by ID
     pub async fn doc_get(&self, collection: &str, id: &str) -> Result<Option<Value>, DbError> {
-        let mut request = self.client.get(format!(
-            "{}/api/v1/documents/collections/{}/documents/{}",
-            self.base_url, collection, id
-        ));
+        let mut request = self.client.get(self.build_url(&format!(
+            "/api/v1/documents/collections/{}/documents/{}",
+            collection, id
+        ))?);
 
         if let Some(auth) = self.auth_header().await {
             request = request.header("Authorization", auth);
@@ -434,10 +475,10 @@ impl Database {
     pub async fn doc_update(&self, collection: &str, id: &str, data: Value) -> Result<(), DbError> {
         let mut request = self
             .client
-            .put(format!(
-                "{}/api/v1/documents/collections/{}/documents/{}",
-                self.base_url, collection, id
-            ))
+            .put(self.build_url(&format!(
+                "/api/v1/documents/collections/{}/documents/{}",
+                collection, id
+            ))?)
             .json(&serde_json::json!({ "document": data }));
 
         if let Some(auth) = self.auth_header().await {
@@ -463,10 +504,10 @@ impl Database {
 
     /// Delete a document by ID
     pub async fn doc_delete(&self, collection: &str, id: &str) -> Result<(), DbError> {
-        let mut request = self.client.delete(format!(
-            "{}/api/v1/documents/collections/{}/documents/{}",
-            self.base_url, collection, id
-        ));
+        let mut request = self.client.delete(self.build_url(&format!(
+            "/api/v1/documents/collections/{}/documents/{}",
+            collection, id
+        ))?);
 
         if let Some(auth) = self.auth_header().await {
             request = request.header("Authorization", auth);
@@ -493,10 +534,10 @@ impl Database {
     ) -> Result<Vec<Value>, DbError> {
         let mut request = self
             .client
-            .post(format!(
-                "{}/api/v1/documents/collections/{}/query",
-                self.base_url, collection
-            ))
+            .post(self.build_url(&format!(
+                "/api/v1/documents/collections/{}/query",
+                collection
+            ))?)
             .json(&query);
 
         if let Some(auth) = self.auth_header().await {
@@ -560,7 +601,7 @@ impl Database {
 
         let mut request = self
             .client
-            .post(format!("{}/api/v1/timeseries/write", self.base_url))
+            .post(self.build_url("/api/v1/timeseries/write")?)
             .json(&serde_json::json!({
                 "metric": metric,
                 "points": [point]
@@ -587,7 +628,7 @@ impl Database {
     pub async fn ts_query(&self, query: TimeSeriesQuery) -> Result<Vec<DataPoint>, DbError> {
         let mut request = self
             .client
-            .post(format!("{}/api/v1/timeseries/query", self.base_url))
+            .post(self.build_url("/api/v1/timeseries/query")?)
             .json(&query);
 
         if let Some(auth) = self.auth_header().await {
@@ -610,12 +651,11 @@ impl Database {
 
     /// Check if database is healthy
     pub async fn health_check(&self) -> bool {
-        match self
-            .client
-            .get(format!("{}/health", self.base_url))
-            .send()
-            .await
-        {
+        let url = match self.build_url("/health") {
+            Ok(u) => u,
+            Err(_) => return false,
+        };
+        match self.client.get(url).send().await {
             Ok(resp) => resp.status().is_success(),
             Err(_) => false,
         }

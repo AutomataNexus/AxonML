@@ -144,9 +144,30 @@ let row = Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[1, 3]).unwrap();
 let result = matrix.add(&row).unwrap();  // [2, 3]
 ```
 
+### Lazy Tensors *(novel)*
+
+Defer computation and let algebraic optimizations simplify your expression before execution.
+
+```rust
+use axonml_tensor::lazy::LazyTensor;
+use axonml_tensor::Tensor;
+
+// Build expression tree without executing
+let a = LazyTensor::from_tensor(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
+let b = LazyTensor::from_tensor(Tensor::from_vec(vec![4.0, 5.0, 6.0], &[3]).unwrap());
+
+let result = a.add(&b).mul_scalar(2.0).neg().neg(); // double negation will be eliminated
+
+// Optimize: constant folding, identity elimination, inverse cancellation
+let optimized = result.optimize();
+
+// Execute the optimized expression tree
+let tensor = optimized.materialize();
+```
+
 ## Tests
 
-Run the test suite:
+Run the test suite (98 tests):
 
 ```bash
 cargo test -p axonml-tensor

@@ -284,11 +284,41 @@ model.eval();
 let output = model.forward(&test_input);
 ```
 
+### Differentiable Structured Sparsity *(novel)*
+
+#### sparse.rs - Learnable Pruning
+
+`SparseLinear` applies a differentiable magnitude-based pruning mask:
+
+```rust
+use axonml_nn::layers::sparse::{SparseLinear, GroupSparsity, LotteryTicket};
+
+// Soft-thresholded magnitude pruning
+let sparse = SparseLinear::new(256, 128, 0.5, 10.0);
+let output = sparse.forward(&input);
+println!("Sparsity: {:.1}%", sparse.sparsity() * 100.0);
+
+// Group sparsity regularization (row, column, or block)
+let group_reg = GroupSparsity::new(0.01, "row");
+let reg_loss = group_reg.compute(&sparse);
+
+// Lottery Ticket Hypothesis: snapshot → train → prune → rewind
+let mut ticket = LotteryTicket::new(&sparse);
+ticket.snapshot();
+// ... train ...
+ticket.prune(0.2); // prune 20% by magnitude
+ticket.rewind(&mut sparse); // rewind to init weights with mask
+```
+
+**Mask formula:** `sigmoid((|weight| - threshold) * temperature)`
+
+This makes the mask continuous and differentiable — gradients flow through the pruning decision. PyTorch's pruning (`torch.nn.utils.prune`) uses binary masks that are not differentiable.
+
 ## Related Modules
 
 - [Autograd](../autograd/README.md) - Gradient computation
 - [Optimizers](../optim/README.md) - Parameter updates
 - [Data](../data/README.md) - Data loading
 
-@version 0.1.0
+@version 0.4.0
 @author AutomataNexus Development Team

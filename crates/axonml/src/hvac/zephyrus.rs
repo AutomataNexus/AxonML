@@ -140,38 +140,12 @@ impl Zephyrus {
         let gcn_out = self.gcn_relu.forward(&gcn_out);
 
         // Global mean pool over nodes: (batch, 7, 256) → (batch, 256)
-        let gcn_data = gcn_out.data().to_vec();
-        let mut gcn_pooled = vec![0.0f32; batch * 256];
-        for b in 0..batch {
-            for f in 0..256 {
-                let mut sum = 0.0;
-                for n in 0..7 {
-                    sum += gcn_data[(b * 7 + n) * 256 + f];
-                }
-                gcn_pooled[b * 256 + f] = sum / 7.0;
-            }
-        }
-        let gcn_features = Variable::new(
-            Tensor::from_vec(gcn_pooled, &[batch, 256]).unwrap(), false);
+        let gcn_features = gcn_out.mean_dim(1, false);
 
         // --- Conv Branch ---
         let conv_out = self.conv_branch.forward(input); // (batch, 256, 66)
         // Global avg pool over time: (batch, 256, 66) → (batch, 256)
-        let conv_data = conv_out.data().to_vec();
-        let conv_shape = conv_out.shape();
-        let time_len = conv_shape[2];
-        let mut conv_pooled = vec![0.0f32; batch * 256];
-        for b in 0..batch {
-            for c in 0..256 {
-                let mut sum = 0.0;
-                for t in 0..time_len {
-                    sum += conv_data[(b * 256 + c) * time_len + t];
-                }
-                conv_pooled[b * 256 + c] = sum / time_len as f32;
-            }
-        }
-        let conv_features = Variable::new(
-            Tensor::from_vec(conv_pooled, &[batch, 256]).unwrap(), false);
+        let conv_features = conv_out.mean_dim(2, false);
 
         // --- Fusion ---
         let fused = super::aquilo::concat_variables(&[&gcn_features, &conv_features], batch);

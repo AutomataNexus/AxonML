@@ -10,6 +10,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use url::Url;
+
+/// Hardcoded Kaggle API base URL - all requests must go to this host
+const KAGGLE_API_BASE: &str = "https://www.kaggle.com/api/v1";
 
 use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};
@@ -95,8 +99,9 @@ pub async fn save_credentials(
 
     // Validate credentials by making a test API call
     let client = Client::new();
+    let validate_url = kaggle_url("datasets/list")?;
     let response = client
-        .get("https://www.kaggle.com/api/v1/datasets/list")
+        .get(validate_url)
         .basic_auth(&credentials.username, Some(&credentials.key))
         .timeout(std::time::Duration::from_secs(10))
         .send()
@@ -175,15 +180,15 @@ pub async fn search_datasets(
     let limit = query.limit.unwrap_or(10);
     let page = query.page.unwrap_or(1);
 
-    let url = format!(
-        "https://www.kaggle.com/api/v1/datasets/list?search={}&page={}&pageSize={}",
-        urlencoding::encode(&query.query),
-        page,
-        limit
-    );
+    // SECURITY: Build URL from validated base, append query params safely
+    let mut search_url = kaggle_url("datasets/list")?;
+    search_url.query_pairs_mut()
+        .append_pair("search", &query.query)
+        .append_pair("page", &page.to_string())
+        .append_pair("pageSize", &limit.to_string());
 
     let response = client
-        .get(&url)
+        .get(search_url)
         .basic_auth(&credentials.username, Some(&credentials.key))
         .timeout(std::time::Duration::from_secs(30))
         .send()
@@ -306,13 +311,11 @@ pub async fn download_dataset(
 
     // Download dataset
     let client = Client::new();
-    let url = format!(
-        "https://www.kaggle.com/api/v1/datasets/download/{}",
-        request.dataset_ref
-    );
+    // SECURITY: dataset_ref is validated above, build URL from trusted base
+    let download_url = kaggle_url(&format!("datasets/download/{}", request.dataset_ref))?;
 
     let response = client
-        .get(&url)
+        .get(download_url)
         .basic_auth(&credentials.username, Some(&credentials.key))
         .timeout(std::time::Duration::from_secs(300))
         .send()
@@ -400,6 +403,24 @@ pub async fn delete_credentials(
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/// SECURITY: Build a Kaggle API URL from a path, ensuring it always points to kaggle.com.
+fn kaggle_url(path: &str) -> Result<Url, AuthError> {
+    let base = Url::parse(KAGGLE_API_BASE)
+        .map_err(|e| AuthError::Internal(format!("Invalid Kaggle base URL: {}", e)))?;
+    let url = base
+        .join(path)
+        .map_err(|e| AuthError::Internal(format!("Invalid Kaggle API path: {}", e)))?;
+
+    // SECURITY: Verify the final URL still points to kaggle.com
+    if url.host_str() != Some("www.kaggle.com") {
+        return Err(AuthError::Internal(
+            "URL does not point to kaggle.com".to_string(),
+        ));
+    }
+
+    Ok(url)
+}
 
 fn get_kaggle_config_dir(user_id: &str) -> PathBuf {
     let base = dirs::data_dir()

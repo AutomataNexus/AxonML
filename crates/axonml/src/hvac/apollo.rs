@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_tensor::Tensor;
 use axonml_nn::{
     BatchNorm1d, Dropout, Linear, Module, MultiHeadAttention,
     Parameter, Sequential, ReLU, GELU,
@@ -128,34 +127,15 @@ impl Apollo {
             .collect();
 
         // Stack as (batch, 7, 256)
-        let mut stacked = Vec::with_capacity(batch * 7 * 256);
-        for b in 0..batch {
-            for proj in &projected {
-                let d = proj.data().to_vec();
-                let off = b * 256;
-                stacked.extend_from_slice(&d[off..off + 256]);
-            }
-        }
-        let stacked_var = Variable::new(
-            Tensor::from_vec(stacked, &[batch, 7, 256]).unwrap(), false);
+        let unsqueezed: Vec<Variable> = projected.iter().map(|p| p.unsqueeze(1)).collect();
+        let unsqueezed_refs: Vec<&Variable> = unsqueezed.iter().collect();
+        let stacked_var = Variable::cat(&unsqueezed_refs, 1); // (batch, 7, 256)
 
         // Cross-model attention
         let attn_out = self.specialist_attention.forward(&stacked_var); // (batch, 7, 256)
 
         // Mean pool over 7 models → (batch, 256)
-        let attn_data = attn_out.data().to_vec();
-        let mut pooled = vec![0.0f32; batch * 256];
-        for b in 0..batch {
-            for f in 0..256 {
-                let mut sum = 0.0;
-                for m in 0..7 {
-                    sum += attn_data[(b * 7 + m) * 256 + f];
-                }
-                pooled[b * 256 + f] = sum / 7.0;
-            }
-        }
-        let model_features = Variable::new(
-            Tensor::from_vec(pooled, &[batch, 256]).unwrap(), false);
+        let model_features = attn_out.mean_dim(1, false);
 
         // Sensor encoder
         let sensor_features = self.sensor_encoder.forward(raw_sensors); // (batch, 128)
@@ -174,31 +154,15 @@ impl Apollo {
 
     /// Forward from concatenated model embeddings + sensor features.
     pub fn forward_concat(&self, input: &Variable) -> (Variable, Variable, Variable, Variable, Variable) {
-        let batch = input.shape()[0];
-        let data = input.data().to_vec();
-        let total_in = TOTAL_MODEL_DIM + RAW_SENSOR_DIM;
-
         // Split into model embeddings and raw sensor
         let mut model_parts: Vec<Variable> = Vec::new();
         let mut offset = 0;
         for &dim in &MODEL_DIMS {
-            let mut part_data = Vec::with_capacity(batch * dim);
-            for b in 0..batch {
-                let start = b * total_in + offset;
-                part_data.extend_from_slice(&data[start..start + dim]);
-            }
-            model_parts.push(Variable::new(
-                Tensor::from_vec(part_data, &[batch, dim]).unwrap(), false));
+            model_parts.push(input.narrow(1, offset, dim));
             offset += dim;
         }
 
-        let mut sensor_data = Vec::with_capacity(batch * RAW_SENSOR_DIM);
-        for b in 0..batch {
-            let start = b * total_in + offset;
-            sensor_data.extend_from_slice(&data[start..start + RAW_SENSOR_DIM]);
-        }
-        let raw_sensors = Variable::new(
-            Tensor::from_vec(sensor_data, &[batch, RAW_SENSOR_DIM]).unwrap(), false);
+        let raw_sensors = input.narrow(1, offset, RAW_SENSOR_DIM);
 
         let model_refs: Vec<&Variable> = model_parts.iter().collect();
         self.forward_parts(&model_refs, &raw_sensors)
@@ -275,6 +239,7 @@ impl Module for Apollo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axonml_tensor::Tensor;
 
     #[test]
     fn test_apollo_output_shapes() {

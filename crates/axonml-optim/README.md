@@ -147,9 +147,43 @@ let mut scheduler = ReduceLROnPlateau::with_options(
 scheduler.step_with_metric(&mut optimizer, val_loss);
 ```
 
+### Training Health Monitor *(novel)*
+
+The optimizer monitors its own training health — detects problems before they ruin your run.
+
+```rust
+use axonml_optim::health::{TrainingMonitor, MonitorConfig};
+
+let mut monitor = TrainingMonitor::new(MonitorConfig::default());
+
+// Record metrics each training step
+for step in 0..1000 {
+    let loss = train_step(&model, &batch);
+    let grad_norm = compute_grad_norm(&model);
+
+    monitor.record_step(loss, grad_norm, optimizer.get_lr());
+
+    // Check for alerts
+    for alert in monitor.alerts_since_last_check() {
+        match alert.severity {
+            AlertSeverity::Critical => eprintln!("CRITICAL: {}", alert.message),
+            AlertSeverity::Warning => eprintln!("WARNING: {}", alert.message),
+            _ => {}
+        }
+    }
+}
+
+// Analyze training health
+let report = monitor.health_report();
+println!("Loss trend: {:?}", report.loss_trend);        // Decreasing/Stable/Oscillating/etc.
+println!("Convergence: {:.2}", monitor.convergence_score());
+println!("Suggested LR: {:?}", monitor.suggest_lr());
+println!("{}", monitor.summary());
+```
+
 ## Tests
 
-Run the test suite:
+Run the test suite (79 tests):
 
 ```bash
 cargo test -p axonml-optim

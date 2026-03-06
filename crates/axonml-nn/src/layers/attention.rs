@@ -137,9 +137,11 @@ impl MultiHeadAttention {
         let scores = if let Some(mask) = attn_mask {
             let mask_shape = mask.shape();
             let mask_data = mask.data();
-            let mask_vec = mask_data.to_vec();
 
             // Convert to additive mask: 0 → -1e9, nonzero → 0
+            // We need the mask on CPU to build the expanded version, but the mask is small
+            // (typically [tgt_len, src_len]) so the copy is negligible
+            let mask_vec = mask_data.to_vec();
             let additive: Vec<f32> = mask_vec
                 .iter()
                 .map(|&v| if v == 0.0 { -1e9 } else { 0.0 })
@@ -165,6 +167,22 @@ impl MultiHeadAttention {
                         }
                     }
                 }
+            } else if mask_shape.len() == 2 && mask_shape[0] == batch_size && mask_shape[1] == src_len {
+                // Padding mask [batch, src_len] → broadcast over heads & tgt positions
+                // Each batch element's mask is replicated across all heads and query positions
+                for b in 0..batch_size {
+                    for h in 0..self.num_heads {
+                        for i in 0..tgt_len {
+                            for j in 0..src_len {
+                                let idx = b * self.num_heads * tgt_len * src_len
+                                    + h * tgt_len * src_len
+                                    + i * src_len
+                                    + j;
+                                expanded[idx] = additive[b * src_len + j];
+                            }
+                        }
+                    }
+                }
             } else {
                 // General: tile mask across scores using modular indexing
                 for (i, val) in expanded.iter_mut().enumerate() {
@@ -172,10 +190,13 @@ impl MultiHeadAttention {
                 }
             }
 
-            let additive_mask = Variable::new(
-                Tensor::from_vec(expanded, &scores_shape).unwrap(),
-                false,
-            );
+            let mut additive_tensor = Tensor::from_vec(expanded, &scores_shape).unwrap();
+            // Move mask to same device as scores
+            let scores_device = scores.data().device();
+            if scores_device.is_gpu() {
+                additive_tensor = additive_tensor.to_device(scores_device).unwrap();
+            }
+            let additive_mask = Variable::new(additive_tensor, false);
             scores.add_var(&additive_mask)
         } else {
             scores

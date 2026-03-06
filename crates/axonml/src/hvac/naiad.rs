@@ -107,41 +107,15 @@ impl Naiad {
 
         // Global average pooling over the time dimension
         // x shape: (batch, 256, time_len)
-        let x_shape = x.shape();
-        let channels = x_shape[1];
-        let time_len = x_shape[2];
-        let x_data = x.data().to_vec();
-
-        let mut pooled = Vec::with_capacity(batch * channels);
-        for b in 0..batch {
-            for c in 0..channels {
-                let mut sum = 0.0f32;
-                for t in 0..time_len {
-                    sum += x_data[b * channels * time_len + c * time_len + t];
-                }
-                pooled.push(sum / time_len as f32);
-            }
-        }
-
-        let embedding = Variable::new(
-            axonml_tensor::Tensor::from_vec(pooled, &[batch, channels]).unwrap(),
-            false,
-        ); // (batch, 256)
+        let channels = x.shape()[1];
+        let embedding = x.mean_dim(2, false); // (batch, 256)
 
         // Self-attention: reshape (batch, 256) -> (batch, 1, 256) for MHA
-        let emb_data = embedding.data().to_vec();
-        let attn_input = Variable::new(
-            axonml_tensor::Tensor::from_vec(emb_data, &[batch, 1, channels]).unwrap(),
-            false,
-        );
+        let attn_input = embedding.reshape(&[batch, 1, channels]);
         let attn_out = self.attention.forward(&attn_input); // (batch, 1, 256)
 
         // Squeeze back to (batch, 256)
-        let attn_data = attn_out.data().to_vec();
-        let embedding = Variable::new(
-            axonml_tensor::Tensor::from_vec(attn_data, &[batch, channels]).unwrap(),
-            false,
-        );
+        let embedding = attn_out.reshape(&[batch, channels]);
 
         // Output heads
         let fault = self.fault_head.forward(&embedding);

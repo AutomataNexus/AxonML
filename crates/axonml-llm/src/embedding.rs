@@ -24,32 +24,14 @@ impl TokenEmbedding {
 
     /// Gets embeddings for token IDs.
     pub fn forward_ids(&self, input_ids: &Tensor<u32>) -> Variable {
-        // Convert u32 to indices and lookup
-        let batch_size = input_ids.shape()[0];
-        let seq_len = input_ids.shape()[1];
-        let embed_dim = self.embedding.embedding_dim();
-
-        let ids_vec = input_ids.to_vec();
-        let mut output_data = vec![0.0f32; batch_size * seq_len * embed_dim];
-
-        let weight = &self.embedding.weight;
-        let weight_data = weight.data().to_vec();
-
-        for b in 0..batch_size {
-            for s in 0..seq_len {
-                let idx = ids_vec[b * seq_len + s] as usize;
-                let src_offset = idx * embed_dim;
-                let dst_offset = (b * seq_len + s) * embed_dim;
-
-                for e in 0..embed_dim {
-                    output_data[dst_offset + e] = weight_data[src_offset + e];
-                }
-            }
-        }
-
-        let output_tensor =
-            Tensor::from_vec(output_data, &[batch_size, seq_len, embed_dim]).unwrap();
-        Variable::new(output_tensor, weight.requires_grad())
+        // Convert u32 indices to f32 and delegate to Embedding::lookup
+        // which has proper EmbeddingBackward for gradient tracking
+        let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
+        let ids_var = Variable::new(
+            Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(),
+            false,
+        );
+        self.embedding.forward(&ids_var)
     }
 }
 
@@ -147,8 +129,14 @@ impl SinusoidalPositionalEncoding {
 
     /// Gets positional encodings for a sequence.
     pub fn forward_seq(&self, seq_len: usize) -> Variable {
-        let sliced = self.encodings.slice(&[0..seq_len, 0..self.embed_dim]);
-        Variable::new(sliced, false)
+        if seq_len >= self.max_len {
+            // Full tensor, no slicing needed
+            Variable::new(self.encodings.clone(), false)
+        } else {
+            // Use narrow to slice first seq_len rows — stays on GPU if encodings are on GPU
+            let sliced = self.encodings.narrow(0, 0, seq_len).unwrap();
+            Variable::new(sliced, false)
+        }
     }
 }
 

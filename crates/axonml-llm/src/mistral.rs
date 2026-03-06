@@ -13,9 +13,12 @@
 //! let model = Mistral::new(&config);
 //! ```
 
-use axonml_autograd::Variable;
+use axonml_autograd::no_grad::is_grad_enabled;
+use axonml_autograd::{GradFn, Variable};
 use axonml_nn::{Dropout, Embedding, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
+
+use crate::llama::RepeatKVBackward;
 
 use crate::attention::{KVCache, LayerKVCache};
 use crate::llama::{RMSNorm, RotaryEmbedding};
@@ -293,10 +296,19 @@ impl MistralAttention {
             }
         }
 
-        Variable::new(
-            Tensor::from_vec(output, &[batch, num_kv_heads * n_rep, seq_len, head_dim]).unwrap(),
-            x.requires_grad(),
-        )
+        let output_tensor =
+            Tensor::from_vec(output, &[batch, num_kv_heads * n_rep, seq_len, head_dim]).unwrap();
+
+        if x.requires_grad() && is_grad_enabled() {
+            let grad_fn = GradFn::new(RepeatKVBackward {
+                next_fns: vec![x.grad_fn().cloned()],
+                num_kv_heads,
+                n_rep,
+            });
+            Variable::from_operation(output_tensor, grad_fn, true)
+        } else {
+            Variable::new(output_tensor, false)
+        }
     }
 
     /// Create sliding window causal mask.

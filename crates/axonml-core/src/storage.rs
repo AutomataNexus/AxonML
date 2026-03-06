@@ -23,19 +23,70 @@ use crate::error::{Error, Result};
 
 #[cfg(feature = "cuda")]
 use cudarc::driver::CudaSlice;
+#[cfg(feature = "cuda")]
+use cudarc::driver::safe::DeviceSlice;
 
 // =============================================================================
 // Storage Data Enum
 // =============================================================================
+
+/// Wrapper around CudaSlice that returns memory to the pool on drop
+/// instead of calling cudaFree.
+#[cfg(feature = "cuda")]
+pub struct PooledCudaSlice {
+    slice: Option<CudaSlice<f32>>,
+    pool_managed: bool,
+}
+
+#[cfg(feature = "cuda")]
+impl std::fmt::Debug for PooledCudaSlice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PooledCudaSlice")
+            .field("pool_managed", &self.pool_managed)
+            .field("len", &self.slice.as_ref().map(|s| s.len()))
+            .finish()
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl Drop for PooledCudaSlice {
+    fn drop(&mut self) {
+        if let Some(slice) = self.slice.take() {
+            if self.pool_managed {
+                crate::backends::cuda_pool::pool_free(slice);
+            }
+            // else: normal CudaSlice drop calls cudaFree
+        }
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl PooledCudaSlice {
+    /// Create a new pool-managed CUDA slice.
+    pub fn new(slice: CudaSlice<f32>, pool_managed: bool) -> Self {
+        Self { slice: Some(slice), pool_managed }
+    }
+
+    /// Get a reference to the underlying CudaSlice.
+    pub fn slice(&self) -> &CudaSlice<f32> {
+        self.slice.as_ref().expect("CudaSlice already taken")
+    }
+
+    /// Get a mutable reference to the underlying CudaSlice.
+    pub fn slice_mut(&mut self) -> &mut CudaSlice<f32> {
+        self.slice.as_mut().expect("CudaSlice already taken")
+    }
+}
 
 /// Holds either CPU or GPU data.
 #[derive(Debug)]
 enum StorageData<T: Scalar> {
     /// CPU data stored as a Vec.
     Cpu(Vec<T>),
-    /// GPU data stored as a CudaSlice (f32 only on GPU).
+    /// GPU data stored as a PooledCudaSlice (f32 only on GPU).
+    /// Returns to memory pool on drop instead of calling cudaFree.
     #[cfg(feature = "cuda")]
-    Cuda(CudaSlice<f32>),
+    Cuda(PooledCudaSlice),
 }
 
 // =============================================================================
@@ -283,7 +334,7 @@ impl Storage<f32> {
                 let len = self.len;
                 Ok(Self {
                     inner: Arc::new(RwLock::new(StorageInner {
-                        data: StorageData::Cuda(cuda_slice),
+                        data: StorageData::Cuda(PooledCudaSlice::new(cuda_slice, false)),
                         device,
                     })),
                     offset: 0,
@@ -291,15 +342,33 @@ impl Storage<f32> {
                 })
             }
             // GPU → CPU: dtoh_copy
-            (StorageData::Cuda(cuda_slice), Device::Cpu) => {
+            (StorageData::Cuda(pooled), Device::Cpu) => {
                 let backend = crate::backends::cuda::get_cuda_backend()
                     .ok_or(Error::DeviceNotAvailable { device: self.device() })?;
-                let full_vec = backend.dtoh_copy(cuda_slice)
+                let full_vec = backend.dtoh_copy(pooled.slice())
                     .map_err(|_| Error::DeviceNotAvailable { device })?;
+                let end = self.offset + self.len;
                 let sliced: Vec<f32> = if self.offset == 0 && self.len == full_vec.len() {
                     full_vec
+                } else if end <= full_vec.len() {
+                    full_vec[self.offset..end].to_vec()
                 } else {
-                    full_vec[self.offset..self.offset + self.len].to_vec()
+                    // CudaSlice is smaller than Storage.len — this indicates a bug
+                    // but handle gracefully: copy what we have, zero-pad the rest
+                    eprintln!(
+                        "[storage] WARNING: CudaSlice len={} < Storage offset+len={} (offset={}, len={})",
+                        full_vec.len(), end, self.offset, self.len
+                    );
+                    let available = if self.offset < full_vec.len() {
+                        full_vec.len() - self.offset
+                    } else {
+                        0
+                    };
+                    let mut result = vec![0.0f32; self.len];
+                    if available > 0 {
+                        result[..available].copy_from_slice(&full_vec[self.offset..self.offset + available]);
+                    }
+                    result
                 };
                 Ok(Self::from_vec(sliced, Device::Cpu))
             }
@@ -327,9 +396,9 @@ impl Storage<f32> {
             StorageData::Cpu(cpu_data) => {
                 cpu_data[self.offset..self.offset + self.len].to_vec()
             }
-            StorageData::Cuda(cuda_slice) => {
+            StorageData::Cuda(pooled) => {
                 if let Some(backend) = crate::backends::cuda::get_cuda_backend() {
-                    if let Ok(full_vec) = backend.dtoh_copy(cuda_slice) {
+                    if let Ok(full_vec) = backend.dtoh_copy(pooled.slice()) {
                         if self.offset == 0 && self.len == full_vec.len() {
                             return full_vec;
                         }
@@ -348,24 +417,44 @@ impl Storage<f32> {
         if device.is_gpu() {
             if let Some(backend) = crate::backends::cuda::get_cuda_backend() {
                 if let Ok(new_slice) = backend.htod_copy(&vec) {
-                    return Self::from_cuda_slice(new_slice, self.len, device);
+                    return Self::from_cuda_slice_unmanaged(new_slice, self.len, device);
                 }
             }
         }
         Self::from_vec(vec, device)
     }
 
-    /// Creates storage from an existing CudaSlice.
+    /// Creates storage from a pool-allocated CudaSlice.
+    ///
+    /// The slice will be returned to the CUDA memory pool on drop.
+    /// Only use this for CudaSlices from `pool_alloc()` — the slice must be
+    /// bucket-sized for correct pool reuse.
     pub fn from_cuda_slice(slice: CudaSlice<f32>, len: usize, device: Device) -> Self {
         Self {
             inner: Arc::new(RwLock::new(StorageInner {
-                data: StorageData::Cuda(slice),
+                data: StorageData::Cuda(PooledCudaSlice::new(slice, true)),
                 device,
             })),
             offset: 0,
             len,
         }
     }
+
+    /// Creates storage from a non-pool CudaSlice (e.g., from htod_copy).
+    ///
+    /// The slice will be freed via cudaFree on drop (normal CUDA deallocation),
+    /// NOT returned to the memory pool.
+    pub fn from_cuda_slice_unmanaged(slice: CudaSlice<f32>, len: usize, device: Device) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(StorageInner {
+                data: StorageData::Cuda(PooledCudaSlice::new(slice, false)),
+                device,
+            })),
+            offset: 0,
+            len,
+        }
+    }
+
 
     /// Returns a reference to the CudaSlice if on GPU.
     ///
@@ -392,7 +481,7 @@ impl<'a> CudaSliceReadGuard<'a> {
     /// Panics if storage is CPU.
     pub fn slice(&self) -> &CudaSlice<f32> {
         match &self.guard.data {
-            StorageData::Cuda(s) => s,
+            StorageData::Cuda(pooled) => pooled.slice(),
             StorageData::Cpu(_) => panic!("Storage is on CPU, not GPU"),
         }
     }

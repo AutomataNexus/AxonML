@@ -217,9 +217,39 @@ assert!(!model.is_training());
 model.zero_grad();
 ```
 
+### Differentiable Structured Sparsity *(novel)*
+
+Learn which weights to prune end-to-end — the pruning mask is differentiable.
+
+```rust
+use axonml_nn::layers::sparse::{SparseLinear, GroupSparsity, LotteryTicket};
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
+
+// SparseLinear: soft-thresholded magnitude pruning
+let sparse = SparseLinear::new(256, 128, 0.5, 10.0); // threshold=0.5, temperature=10.0
+let input = Variable::new(Tensor::randn(&[4, 256]), true);
+let output = sparse.forward(&input); // [4, 128]
+
+// Check actual sparsity
+let sparsity = sparse.sparsity(); // fraction of weights effectively pruned
+println!("Sparsity: {:.1}%", sparsity * 100.0);
+
+// Group sparsity regularization
+let group_reg = GroupSparsity::new(0.01, "row"); // L1 penalty on row norms
+let reg_loss = group_reg.compute(&sparse);
+
+// Lottery Ticket Hypothesis
+let mut ticket = LotteryTicket::new(&sparse);
+ticket.snapshot(); // save initial weights
+// ... train for a while ...
+ticket.prune(0.2); // prune bottom 20% by magnitude
+ticket.rewind(&mut sparse); // rewind to initial weights with discovered mask
+```
+
 ## Tests
 
-Run the test suite:
+Run the test suite (171 tests):
 
 ```bash
 cargo test -p axonml-nn

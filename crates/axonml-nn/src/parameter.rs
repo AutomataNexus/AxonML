@@ -106,6 +106,11 @@ impl Parameter {
         self.data.read().zero_grad();
     }
 
+    /// Sets the gradient directly.
+    pub fn set_grad(&self, grad: Tensor<f32>) {
+        self.data.read().set_grad(grad);
+    }
+
     /// Updates the parameter data in-place.
     ///
     /// Used by optimizers to update weights.

@@ -2,11 +2,14 @@
 //!
 //! Applies convolution operations over input signals.
 //!
-//! @version 0.1.0
+//! @version 0.2.0
 //! @author AutomataNexus Development Team
 
 use std::collections::HashMap;
 
+use axonml_autograd::functions::{Conv1dBackward, Conv2dBackward, ConvTranspose2dBackward, GroupedConv2dBackward};
+use axonml_autograd::grad_fn::GradFn;
+use axonml_autograd::no_grad::is_grad_enabled;
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
 
@@ -89,20 +92,18 @@ impl Conv1d {
 
 impl Module for Conv1d {
     fn forward(&self, input: &Variable) -> Variable {
-        // Basic implementation using im2col approach
-        // For a full implementation, we'd use optimized convolution kernels
         let input_shape = input.shape();
         let batch_size = input_shape[0];
         let _in_channels = input_shape[1];
         let in_length = input_shape[2];
 
-        // Calculate output length
         let out_length = (in_length + 2 * self.padding - self.kernel_size) / self.stride + 1;
 
-        // For now, implement a simple direct convolution
-        // A full implementation would use im2col or FFT
         let input_data = input.data();
         let weight_data = self.weight.data();
+        let input_vec = input_data.to_vec();
+        let weight_vec = weight_data.to_vec();
+
         let mut output_data = vec![0.0f32; batch_size * self.out_channels * out_length];
 
         for b in 0..batch_size {
@@ -125,12 +126,10 @@ impl Module for Conv1d {
                                 + ic * self.kernel_size
                                 + k;
 
-                            sum +=
-                                input_data.to_vec()[input_idx] * weight_data.to_vec()[weight_idx];
+                            sum += input_vec[input_idx] * weight_vec[weight_idx];
                         }
                     }
 
-                    // Add bias
                     if let Some(ref bias) = self.bias {
                         sum += bias.data().to_vec()[oc];
                     }
@@ -144,7 +143,30 @@ impl Module for Conv1d {
         let output_tensor =
             Tensor::from_vec(output_data, &[batch_size, self.out_channels, out_length]).unwrap();
 
-        Variable::new(output_tensor, input.requires_grad())
+        let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+
+        if requires_grad {
+            let weight_var = self.weight.variable();
+            let bias_grad_fn = self.bias.as_ref().map(|b| b.variable().grad_fn().cloned());
+
+            let grad_fn = GradFn::new(Conv1dBackward::new(
+                input.grad_fn().cloned(),
+                weight_var.grad_fn().cloned(),
+                bias_grad_fn,
+                input_data,
+                weight_data,
+                input_shape,
+                self.in_channels,
+                self.out_channels,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.bias.is_some(),
+            ));
+            Variable::from_operation(output_tensor, grad_fn, true)
+        } else {
+            Variable::new(output_tensor, false)
+        }
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -195,6 +217,8 @@ pub struct Conv2d {
     stride: (usize, usize),
     /// Zero-padding added to both sides (height, width).
     padding: (usize, usize),
+    /// Number of groups for grouped convolution.
+    groups: usize,
 }
 
 impl Conv2d {
@@ -219,15 +243,34 @@ impl Conv2d {
         padding: (usize, usize),
         bias: bool,
     ) -> Self {
-        let (kh, kw) = kernel_size;
-        let fan_in = in_channels * kh * kw;
+        Self::with_groups(in_channels, out_channels, kernel_size, stride, padding, bias, 1)
+    }
 
-        // Initialize weights
+    /// Creates a Conv2d layer with grouped convolution support.
+    ///
+    /// When `groups == in_channels` and `out_channels == in_channels`, this is
+    /// a depthwise convolution.
+    pub fn with_groups(
+        in_channels: usize,
+        out_channels: usize,
+        kernel_size: (usize, usize),
+        stride: (usize, usize),
+        padding: (usize, usize),
+        bias: bool,
+        groups: usize,
+    ) -> Self {
+        assert!(in_channels % groups == 0, "in_channels must be divisible by groups");
+        assert!(out_channels % groups == 0, "out_channels must be divisible by groups");
+
+        let (kh, kw) = kernel_size;
+        let in_channels_per_group = in_channels / groups;
+        let fan_in = in_channels_per_group * kh * kw;
+
         let weight_data = kaiming_uniform(out_channels, fan_in);
         let weight_reshaped = weight_data
             .reshape(&[
                 out_channels as isize,
-                in_channels as isize,
+                in_channels_per_group as isize,
                 kh as isize,
                 kw as isize,
             ])
@@ -248,7 +291,21 @@ impl Conv2d {
             kernel_size,
             stride,
             padding,
+            groups,
         }
+    }
+
+    /// Creates a depthwise convolution (groups = in_channels).
+    pub fn depthwise(channels: usize, kernel_size: usize) -> Self {
+        Self::with_groups(
+            channels,
+            channels,
+            (kernel_size, kernel_size),
+            (1, 1),
+            (kernel_size / 2, kernel_size / 2),
+            true,
+            channels,
+        )
     }
 }
 
@@ -273,55 +330,64 @@ impl Module for Conv2d {
 
         let mut output_data = vec![0.0f32; batch_size * self.out_channels * out_height * out_width];
 
+        let in_channels_per_group = self.in_channels / self.groups;
+        let out_channels_per_group = self.out_channels / self.groups;
+
         for b in 0..batch_size {
-            for oc in 0..self.out_channels {
-                for oh in 0..out_height {
-                    for ow in 0..out_width {
-                        let mut sum = 0.0f32;
+            for g in 0..self.groups {
+                let ic_start = g * in_channels_per_group;
+                let oc_start = g * out_channels_per_group;
 
-                        for ic in 0..self.in_channels {
-                            for ki in 0..kh {
-                                for kj in 0..kw {
-                                    let ih = oh * sh + ki;
-                                    let iw = ow * sw + kj;
+                for oc_local in 0..out_channels_per_group {
+                    let oc = oc_start + oc_local;
+                    for oh in 0..out_height {
+                        for ow in 0..out_width {
+                            let mut sum = 0.0f32;
 
-                                    // Handle padding
-                                    if ih < ph
-                                        || ih >= in_height + ph
-                                        || iw < pw
-                                        || iw >= in_width + pw
-                                    {
-                                        continue;
+                            for ic_local in 0..in_channels_per_group {
+                                let ic = ic_start + ic_local;
+                                for ki in 0..kh {
+                                    for kj in 0..kw {
+                                        let ih = oh * sh + ki;
+                                        let iw = ow * sw + kj;
+
+                                        if ih < ph
+                                            || ih >= in_height + ph
+                                            || iw < pw
+                                            || iw >= in_width + pw
+                                        {
+                                            continue;
+                                        }
+
+                                        let actual_ih = ih - ph;
+                                        let actual_iw = iw - pw;
+
+                                        let input_idx = b * self.in_channels * in_height * in_width
+                                            + ic * in_height * in_width
+                                            + actual_ih * in_width
+                                            + actual_iw;
+
+                                        // weight: (out_channels, in_channels_per_group, kh, kw)
+                                        let weight_idx = oc * in_channels_per_group * kh * kw
+                                            + ic_local * kh * kw
+                                            + ki * kw
+                                            + kj;
+
+                                        sum += input_vec[input_idx] * weight_vec[weight_idx];
                                     }
-
-                                    let actual_ih = ih - ph;
-                                    let actual_iw = iw - pw;
-
-                                    let input_idx = b * self.in_channels * in_height * in_width
-                                        + ic * in_height * in_width
-                                        + actual_ih * in_width
-                                        + actual_iw;
-
-                                    let weight_idx = oc * self.in_channels * kh * kw
-                                        + ic * kh * kw
-                                        + ki * kw
-                                        + kj;
-
-                                    sum += input_vec[input_idx] * weight_vec[weight_idx];
                                 }
                             }
-                        }
 
-                        // Add bias
-                        if let Some(ref bias) = self.bias {
-                            sum += bias.data().to_vec()[oc];
-                        }
+                            if let Some(ref bias) = self.bias {
+                                sum += bias.data().to_vec()[oc];
+                            }
 
-                        let output_idx = b * self.out_channels * out_height * out_width
-                            + oc * out_height * out_width
-                            + oh * out_width
-                            + ow;
-                        output_data[output_idx] = sum;
+                            let output_idx = b * self.out_channels * out_height * out_width
+                                + oc * out_height * out_width
+                                + oh * out_width
+                                + ow;
+                            output_data[output_idx] = sum;
+                        }
                     }
                 }
             }
@@ -333,7 +399,52 @@ impl Module for Conv2d {
         )
         .unwrap();
 
-        Variable::new(output_tensor, input.requires_grad())
+        let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+
+        if requires_grad && self.groups == 1 {
+            // Full backward pass for standard convolution
+            let weight_var = self.weight.variable();
+            let bias_grad_fn = self.bias.as_ref().map(|b| b.variable().grad_fn().cloned());
+
+            let grad_fn = GradFn::new(Conv2dBackward::new(
+                input.grad_fn().cloned(),
+                weight_var.grad_fn().cloned(),
+                bias_grad_fn,
+                input_data,
+                weight_data,
+                input_shape,
+                self.in_channels,
+                self.out_channels,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.bias.is_some(),
+            ));
+            Variable::from_operation(output_tensor, grad_fn, true)
+        } else if requires_grad {
+            // Grouped convolution backward (depthwise separable, etc.)
+            let weight_var = self.weight.variable();
+            let bias_grad_fn = self.bias.as_ref().map(|b| b.variable().grad_fn().cloned());
+
+            let grad_fn = GradFn::new(GroupedConv2dBackward::new(
+                input.grad_fn().cloned(),
+                weight_var.grad_fn().cloned(),
+                bias_grad_fn,
+                input_data,
+                weight_data,
+                input_shape,
+                self.in_channels,
+                self.out_channels,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.groups,
+                self.bias.is_some(),
+            ));
+            Variable::from_operation(output_tensor, grad_fn, true)
+        } else {
+            Variable::new(output_tensor, false)
+        }
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -355,6 +466,225 @@ impl Module for Conv2d {
 
     fn name(&self) -> &'static str {
         "Conv2d"
+    }
+}
+
+// =============================================================================
+// ConvTranspose2d
+// =============================================================================
+
+/// Applies a 2D transposed convolution (deconvolution) for upsampling.
+///
+/// # Shape
+/// - Input: (N, C_in, H, W)
+/// - Output: (N, C_out, H_out, W_out)
+///
+/// where H_out = (H - 1) * stride - 2*padding + kernel_size + output_padding
+pub struct ConvTranspose2d {
+    /// Weight tensor of shape (in_channels, out_channels, kernel_h, kernel_w).
+    pub weight: Parameter,
+    /// Bias tensor of shape (out_channels).
+    pub bias: Option<Parameter>,
+    in_channels: usize,
+    out_channels: usize,
+    kernel_size: (usize, usize),
+    stride: (usize, usize),
+    padding: (usize, usize),
+    output_padding: (usize, usize),
+}
+
+impl ConvTranspose2d {
+    /// Creates a new ConvTranspose2d layer with square kernel.
+    pub fn new(in_channels: usize, out_channels: usize, kernel_size: usize) -> Self {
+        Self::with_options(
+            in_channels,
+            out_channels,
+            (kernel_size, kernel_size),
+            (1, 1),
+            (0, 0),
+            (0, 0),
+            true,
+        )
+    }
+
+    /// Creates a ConvTranspose2d layer with all options.
+    pub fn with_options(
+        in_channels: usize,
+        out_channels: usize,
+        kernel_size: (usize, usize),
+        stride: (usize, usize),
+        padding: (usize, usize),
+        output_padding: (usize, usize),
+        bias: bool,
+    ) -> Self {
+        let (kh, kw) = kernel_size;
+        let fan_in = in_channels * kh * kw;
+
+        let weight_data = kaiming_uniform(out_channels, fan_in);
+        let weight_reshaped = weight_data
+            .reshape(&[
+                in_channels as isize,
+                out_channels as isize,
+                kh as isize,
+                kw as isize,
+            ])
+            .unwrap();
+        let weight = Parameter::named("weight", weight_reshaped, true);
+
+        let bias_param = if bias {
+            Some(Parameter::named("bias", zeros(&[out_channels]), true))
+        } else {
+            None
+        };
+
+        Self {
+            weight,
+            bias: bias_param,
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            output_padding,
+        }
+    }
+}
+
+impl Module for ConvTranspose2d {
+    fn forward(&self, input: &Variable) -> Variable {
+        let input_shape = input.shape();
+        let batch_size = input_shape[0];
+        let in_h = input_shape[2];
+        let in_w = input_shape[3];
+
+        let (kh, kw) = self.kernel_size;
+        let (sh, sw) = self.stride;
+        let (ph, pw) = self.padding;
+        let (oph, opw) = self.output_padding;
+
+        let out_h = (in_h - 1) * sh - 2 * ph + kh + oph;
+        let out_w = (in_w - 1) * sw - 2 * pw + kw + opw;
+
+        let input_data = input.data();
+        let weight_data = self.weight.data();
+        let input_vec = input_data.to_vec();
+        let weight_vec = weight_data.to_vec();
+
+        let mut output_data = vec![0.0f32; batch_size * self.out_channels * out_h * out_w];
+
+        // Transposed convolution: scatter input values through the kernel
+        for b in 0..batch_size {
+            for ic in 0..self.in_channels {
+                for ih in 0..in_h {
+                    for iw in 0..in_w {
+                        let in_idx = b * self.in_channels * in_h * in_w
+                            + ic * in_h * in_w
+                            + ih * in_w
+                            + iw;
+                        let in_val = input_vec[in_idx];
+
+                        for oc in 0..self.out_channels {
+                            for ki in 0..kh {
+                                for kj in 0..kw {
+                                    let oh_signed = (ih * sh + ki) as isize - ph as isize;
+                                    let ow_signed = (iw * sw + kj) as isize - pw as isize;
+
+                                    if oh_signed >= 0
+                                        && (oh_signed as usize) < out_h
+                                        && ow_signed >= 0
+                                        && (ow_signed as usize) < out_w
+                                    {
+                                        let oh = oh_signed as usize;
+                                        let ow = ow_signed as usize;
+                                        let out_idx = b * self.out_channels * out_h * out_w
+                                            + oc * out_h * out_w
+                                            + oh * out_w
+                                            + ow;
+                                        // weight: (in_channels, out_channels, kh, kw)
+                                        let w_idx = ic * self.out_channels * kh * kw
+                                            + oc * kh * kw
+                                            + ki * kw
+                                            + kj;
+                                        output_data[out_idx] += in_val * weight_vec[w_idx];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add bias
+        if let Some(ref bias) = self.bias {
+            let bias_vec = bias.data().to_vec();
+            for b in 0..batch_size {
+                for oc in 0..self.out_channels {
+                    for oh in 0..out_h {
+                        for ow in 0..out_w {
+                            let out_idx = b * self.out_channels * out_h * out_w
+                                + oc * out_h * out_w
+                                + oh * out_w
+                                + ow;
+                            output_data[out_idx] += bias_vec[oc];
+                        }
+                    }
+                }
+            }
+        }
+
+        let output_tensor = Tensor::from_vec(
+            output_data,
+            &[batch_size, self.out_channels, out_h, out_w],
+        )
+        .unwrap();
+
+        let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+
+        if requires_grad {
+            let weight_var = self.weight.variable();
+            let bias_grad_fn = self.bias.as_ref().map(|b| b.variable().grad_fn().cloned());
+
+            let grad_fn = GradFn::new(ConvTranspose2dBackward::new(
+                input.grad_fn().cloned(),
+                weight_var.grad_fn().cloned(),
+                bias_grad_fn,
+                input_data,
+                weight_data,
+                input_shape,
+                self.in_channels,
+                self.out_channels,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.output_padding,
+                self.bias.is_some(),
+            ));
+            Variable::from_operation(output_tensor, grad_fn, true)
+        } else {
+            Variable::new(output_tensor, false)
+        }
+    }
+
+    fn parameters(&self) -> Vec<Parameter> {
+        let mut params = vec![self.weight.clone()];
+        if let Some(ref bias) = self.bias {
+            params.push(bias.clone());
+        }
+        params
+    }
+
+    fn named_parameters(&self) -> HashMap<String, Parameter> {
+        let mut params = HashMap::new();
+        params.insert("weight".to_string(), self.weight.clone());
+        if let Some(ref bias) = self.bias {
+            params.insert("bias".to_string(), bias.clone());
+        }
+        params
+    }
+
+    fn name(&self) -> &'static str {
+        "ConvTranspose2d"
     }
 }
 
@@ -386,6 +716,23 @@ mod tests {
     }
 
     #[test]
+    fn test_conv1d_backward() {
+        let conv = Conv1d::with_options(1, 1, 3, 1, 1, false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0], &[1, 1, 5]).unwrap(),
+            true,
+        );
+        let output = conv.forward(&input);
+        let loss = output.sum();
+        loss.backward();
+
+        // Input should have gradient (not None)
+        assert!(input.grad().is_some(), "Conv1d: input gradient should flow through backward pass");
+        let grad = input.grad().unwrap();
+        assert_eq!(grad.shape(), &[1, 1, 5]);
+    }
+
+    #[test]
     fn test_conv2d_creation() {
         let conv = Conv2d::new(3, 64, 3);
         assert_eq!(conv.in_channels, 3);
@@ -405,9 +752,71 @@ mod tests {
     }
 
     #[test]
+    fn test_conv2d_backward() {
+        let conv = Conv2d::with_options(1, 1, (3, 3), (1, 1), (1, 1), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 25], &[1, 1, 5, 5]).unwrap(),
+            true,
+        );
+        let output = conv.forward(&input);
+        let loss = output.sum();
+        loss.backward();
+
+        assert!(input.grad().is_some(), "Conv2d: input gradient should flow through backward pass");
+        let grad = input.grad().unwrap();
+        assert_eq!(grad.shape(), &[1, 1, 5, 5]);
+
+        // Weight should also have gradient
+        let w_grad = conv.weight.grad();
+        assert!(w_grad.is_some(), "Conv2d: weight gradient should be computed");
+    }
+
+    #[test]
     fn test_conv2d_parameters() {
         let conv = Conv2d::new(3, 64, 3);
         let params = conv.parameters();
         assert_eq!(params.len(), 2); // weight + bias
+    }
+
+    #[test]
+    fn test_conv2d_grouped() {
+        // Depthwise: groups = in_channels = out_channels
+        let conv = Conv2d::depthwise(4, 3);
+        assert_eq!(conv.groups, 4);
+        assert_eq!(conv.in_channels, 4);
+        assert_eq!(conv.out_channels, 4);
+
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 4 * 5 * 5], &[1, 4, 5, 5]).unwrap(),
+            false,
+        );
+        let output = conv.forward(&input);
+        assert_eq!(output.shape(), vec![1, 4, 5, 5]);
+    }
+
+    #[test]
+    fn test_conv_transpose2d_forward() {
+        let conv_t = ConvTranspose2d::with_options(1, 1, (3, 3), (2, 2), (1, 1), (1, 1), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 4], &[1, 1, 2, 2]).unwrap(),
+            false,
+        );
+        let output = conv_t.forward(&input);
+        // H_out = (2-1)*2 - 2*1 + 3 + 1 = 4
+        assert_eq!(output.shape(), vec![1, 1, 4, 4]);
+    }
+
+    #[test]
+    fn test_conv_transpose2d_backward() {
+        let conv_t = ConvTranspose2d::new(1, 1, 3);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3]).unwrap(),
+            true,
+        );
+        let output = conv_t.forward(&input);
+        let loss = output.sum();
+        loss.backward();
+
+        assert!(input.grad().is_some(), "ConvTranspose2d: input gradient should flow through backward");
     }
 }

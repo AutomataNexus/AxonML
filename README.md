@@ -17,9 +17,9 @@
 
 Axonml (named after axons - the nerve fibers that transmit signals between neurons) is an ambitious open-source project to create a complete machine learning framework in Rust. Our goal is to provide the same comprehensive functionality as PyTorch while leveraging Rust's performance, safety, and concurrency guarantees.
 
-## PyTorch Parity: ~92-95%
+## PyTorch Parity: ~92-95% (and beyond)
 
-AxonML provides comprehensive PyTorch-equivalent functionality with 1076+ passing tests.
+AxonML provides comprehensive PyTorch-equivalent functionality with 1575+ passing tests. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
 
 ## Features
 
@@ -36,6 +36,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with 1076+ passin
   - Shape operations (flip, roll, squeeze, unsqueeze, permute)
   - Activation functions (ReLU, Sigmoid, Tanh, Softmax, GELU, SiLU, ELU, LeakyReLU)
   - Sparse tensor support (COO format)
+  - **Lazy Tensor Computation** *(novel)* - Deferred execution with algebraic optimization (constant folding, identity elimination, inverse cancellation, scalar folding) — built into the tensor type, no external JIT needed
 
 - **Automatic Differentiation** (`axonml-autograd`)
   - Dynamic computational graph
@@ -44,6 +45,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with 1076+ passin
   - `no_grad` context manager
   - **Automatic Mixed Precision (AMP)** - autocast context for F16 training
   - **Gradient Checkpointing** - trade compute for memory
+  - **Graph Inspection API** *(novel)* - Native computation graph visualization and analysis (trace_backward, DOT export, node/depth/leaf counting, gradient flow summary) — no external tools needed (unlike PyTorch's torchviz)
 
 - **Neural Networks** (`axonml-nn`)
   - Module trait with train/eval modes
@@ -54,6 +56,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with 1076+ passin
   - MultiHeadAttention, Embedding
   - Loss functions (MSE, CrossEntropy, BCE, BCEWithLogits, L1, SmoothL1, NLL)
   - Parameter initialization (Xavier, Kaiming, Orthogonal, etc.)
+  - **Differentiable Structured Sparsity** *(novel)* - `SparseLinear` with learnable pruning masks via soft thresholding, `GroupSparsity` regularization, and `LotteryTicket` hypothesis implementation — the pruning mask is differentiable, enabling end-to-end learning of which weights to prune
 
 - **Optimizers** (`axonml-optim`)
   - SGD with momentum and Nesterov
@@ -61,6 +64,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with 1076+ passin
   - **LAMB** - Layer-wise Adaptive Moments for large batch training
   - **GradScaler** - Gradient scaling for mixed precision
   - LR Schedulers (Step, Cosine, OneCycle, Warmup, ReduceLROnPlateau, MultiStep, Exponential)
+  - **Training Health Monitor** *(novel)* - Real-time training diagnostics: NaN/gradient explosion/vanishing detection, loss trend analysis (decreasing/stable/increasing/oscillating), dead neuron tracking, convergence detection, automatic learning rate suggestions — the optimizer monitors its own health
 
 - **Data Loading** (`axonml-data`)
   - Dataset trait and DataLoader
@@ -71,6 +75,23 @@ AxonML provides comprehensive PyTorch-equivalent functionality with 1076+ passin
   - Image transforms (Resize, Crop, Flip, Normalize)
   - SyntheticMNIST, SyntheticCIFAR datasets
   - LeNet, SimpleCNN, ResNet, VGG, ViT architectures
+  - **Aegis Identity** *(novel)* — Unified biometric framework (~362K params, <2MB) with 5 novel architectures:
+    - **Mnemosyne** - Face identity via temporal crystallization (GRU attractor convergence, liveness detection)
+    - **Ariadne** - Fingerprint via ridge event fields (Gabor wavelet banks, singularity detection)
+    - **Echo** - Voice via predictive speaker residuals (identity = what can't be predicted)
+    - **Argus** - Iris via polar-native radial phase encoding (rotation-invariant matching)
+    - **Themis** - Multimodal belief propagation fusion (uncertainty-aware, not score averaging)
+    - Forensic verification, batch ops, drift detection, quality gating, operating curves
+    - Each modality deployable independently on Raspberry Pi
+  - **Object Detection Training Infrastructure** *(novel)*
+    - Image I/O: `load_image`, `load_image_resized`, `rgb_bytes_to_tensor` (CHW, [0,1] normalized)
+    - Dataset loaders: `CocoDataset` (COCO JSON, category remapping), `WiderFaceDataset` (WIDER FACE annotations)
+    - Detection losses: `FocalLoss`, `GIoULoss`, `UncertaintyLoss`, `compute_centerness`
+    - FCOS target assignment (multi-scale) and Phantom target assignment (single-scale)
+    - Training loops: `nexus_training_step()`, `phantom_training_step()` (full forward→loss→backward→step)
+    - Evaluation: `compute_ap`, `compute_map`, `compute_coco_map` (AP/mAP at IoU thresholds)
+  - **Nexus** *(novel)* — Dual-pathway object detector (~430K params) with predictive coding, persistent GRU object memory, uncertainty quantification, and 3-scale anchor-free heads
+  - **Phantom** *(novel)* — Event-driven face detector (~126K params) with sparse processing, GRU face tracking, and confidence accumulation. Compute drops to ~5% in steady state
 
 - **Audio Processing** (`axonml-audio`)
   - MelSpectrogram, MFCC transforms
@@ -727,6 +748,7 @@ Axonml/
 
 - [Architecture Guide](Axonml_Architecture.md)
 - [API Documentation](docs/) - Per-module documentation
+- [Object Detection Training](docs/detection.md) - Detection training guide (Nexus, Phantom, COCO, WIDER FACE)
 - [Examples](examples/) - Working code examples
 - [Changelog](CHANGELOG.md) - Version history
 
@@ -736,7 +758,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ### Test Suite
 
-The framework includes **1076+ tests** across all crates:
+The framework includes **1575+ tests** across all crates:
 
 ```bash
 cargo test --workspace
@@ -745,12 +767,12 @@ cargo test --workspace
 | Crate | Tests |
 |-------|-------|
 | axonml-core | 31 |
-| axonml-tensor | 64 |
-| axonml-autograd | 52 |
-| axonml-nn | 76 |
-| axonml-optim | 40 |
+| axonml-tensor | 98 |
+| axonml-autograd | 105 |
+| axonml-nn | 171 |
+| axonml-optim | 79 |
 | axonml-data | 55 |
-| axonml-vision | 75 |
+| axonml-vision | 607 |
 | axonml-audio | 37 |
 | axonml-text | 43 |
 | axonml-distributed | 83 |

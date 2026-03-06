@@ -185,6 +185,39 @@ let sub = a.narrow(0, 1, 2)?;     // Rows 1-2
 let chunks = a.chunk(2, 0)?;      // Split into 2
 ```
 
+### lazy.rs *(novel)*
+
+Lazy tensor computation with algebraic optimization.
+
+**Core Types:**
+- `LazyTensor` — A tensor wrapped in a deferred expression tree
+- `LazyOp` — Operation nodes: Unary, Binary, Reduction, Shape, Scalar
+
+**Usage:**
+```rust
+use axonml_tensor::lazy::LazyTensor;
+
+// Build expression tree without executing anything
+let a = LazyTensor::from_tensor(tensor_a);
+let b = LazyTensor::from_tensor(tensor_b);
+let result = a.add(&b).mul_scalar(2.0).neg().neg();
+
+// Optimize: eliminates double negation, folds constants
+let optimized = result.optimize();
+
+// Execute the optimized tree
+let concrete = optimized.materialize();
+```
+
+**Optimizations applied:**
+- **Identity elimination** — `x + 0`, `x * 1`, `x - 0` → `x`
+- **Double negation** — `neg(neg(x))` → `x`
+- **Inverse cancellation** — `exp(log(x))`, `log(exp(x))` → `x`
+- **Constant folding** — `2.0 * 3.0` → `6.0` at compile time
+- **Scalar folding** — `(x * 2) * 3` → `x * 6`
+
+**Why novel:** PyTorch requires TorchScript JIT for lazy evaluation. AxonML's lazy tensors are built into the tensor type itself with algebraic simplification.
+
 ## Feature Flags
 
 - `std` (default) - Enable standard library

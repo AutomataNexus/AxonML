@@ -170,7 +170,8 @@ pub async fn analyze_dataset(
         .data_type
         .map(|t| parse_data_type(&t))
         .unwrap_or_else(|| detect_data_type(&path));
-    let max_samples = query.max_samples.unwrap_or(1000).min(100_000);
+    // SECURITY: Cap max_samples to prevent uncontrolled allocation
+    let max_samples = query.max_samples.unwrap_or(1000).min(10_000);
 
     let analysis = analyze_dataset_path(&path, &dataset.name, data_type, max_samples)?;
 
@@ -199,7 +200,8 @@ pub async fn preview_dataset(
     }
 
     let path = PathBuf::from(&dataset.file_path);
-    let num_samples = query.num_samples.unwrap_or(5).min(10_000);
+    // SECURITY: Cap num_samples to prevent uncontrolled allocation
+    let num_samples = query.num_samples.unwrap_or(5).min(100);
     let data_type = detect_data_type(&path);
 
     let samples = preview_samples(&path, &data_type, num_samples)?;

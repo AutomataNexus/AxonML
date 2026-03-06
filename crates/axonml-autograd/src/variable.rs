@@ -15,10 +15,13 @@ use parking_lot::RwLock;
 use axonml_tensor::Tensor;
 
 use crate::functions::{
-    AddBackward, CatBackward, DivBackward, ExpandBackward, MatMulBackward, MeanBackward,
-    MulBackward, NarrowBackward, NegBackward, PowBackward, ReluBackward, ReshapeBackward,
-    SelectBackward, SigmoidBackward, SubBackward, SumBackward, SumDimBackward, TanhBackward,
-    TransposeBackward, UnsqueezeBackward,
+    AddBackward, AddScalarBackward, CatBackward, ClampBackward, DivBackward, EluBackward,
+    ExpBackward, ExpandBackward, GeluBackward, LeakyReluBackward, LogBackward,
+    LogSoftmaxBackward, MatMulBackward, MeanBackward, MeanDimBackward, MulBackward,
+    MulScalarBackward, NarrowBackward, NegBackward, PowBackward, ReluBackward, ReshapeBackward,
+    SelectBackward, SigmoidBackward, SiluBackward, SoftmaxBackward, SqrtBackward, SubBackward,
+    SumBackward, SumDimBackward, TanhBackward, TransposeBackward, UnsqueezeBackward,
+    VarDimBackward,
 };
 use crate::grad_fn::{AccumulateGrad, GradAccumulator, GradFn};
 use crate::graph::{with_graph, GraphNode};
@@ -231,6 +234,23 @@ impl Variable {
         crate::backward::backward(self, &grad_output);
     }
 
+    /// Runs the backward pass with a provided gradient tensor.
+    ///
+    /// Unlike `backward()`, this does not require the variable to be scalar.
+    /// The gradient tensor must match the shape of this variable.
+    pub fn backward_with_grad(&self, grad_output: &Tensor<f32>) {
+        if !self.requires_grad {
+            return;
+        }
+        let device = self.data.read().device();
+        let grad = if grad_output.device() != device && device.is_gpu() {
+            grad_output.to_device(device).unwrap()
+        } else {
+            grad_output.clone()
+        };
+        crate::backward::backward(self, &grad);
+    }
+
     // =========================================================================
     // Arithmetic Operations
     // =========================================================================
@@ -384,6 +404,62 @@ impl Variable {
         }
     }
 
+    /// Leaky ReLU activation.
+    #[must_use]
+    pub fn leaky_relu(&self, negative_slope: f32) -> Variable {
+        let self_data = self.data.read().clone();
+        let device = self_data.device();
+        let result_vec: Vec<f32> = self_data
+            .to_vec()
+            .iter()
+            .map(|&x| if x > 0.0 { x } else { x * negative_slope })
+            .collect();
+        let mut result = Tensor::from_vec(result_vec, self_data.shape()).unwrap();
+        if device.is_gpu() {
+            result = result.to_device(device).unwrap();
+        }
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(LeakyReluBackward::new(
+                self.grad_fn.clone(),
+                self_data,
+                negative_slope,
+            ));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
+    }
+
+    /// ELU activation.
+    #[must_use]
+    pub fn elu(&self, alpha: f32) -> Variable {
+        let self_data = self.data.read().clone();
+        let device = self_data.device();
+        let result_vec: Vec<f32> = self_data
+            .to_vec()
+            .iter()
+            .map(|&x| if x > 0.0 { x } else { alpha * (x.exp() - 1.0) })
+            .collect();
+        let mut result = Tensor::from_vec(result_vec, self_data.shape()).unwrap();
+        if device.is_gpu() {
+            result = result.to_device(device).unwrap();
+        }
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(EluBackward::new(
+                self.grad_fn.clone(),
+                self_data,
+                alpha,
+            ));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
+    }
+
     /// Sigmoid activation.
     #[must_use]
     pub fn sigmoid(&self) -> Variable {
@@ -406,6 +482,65 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(TanhBackward::new(self.grad_fn.clone(), result.clone()));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
+    }
+
+    /// Element-wise exponential.
+    #[must_use]
+    pub fn exp(&self) -> Variable {
+        let self_data = self.data.read().clone();
+        let result = self_data.exp();
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(ExpBackward::new(self.grad_fn.clone(), result.clone()));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
+    }
+
+    /// Element-wise natural logarithm.
+    #[must_use]
+    pub fn log(&self) -> Variable {
+        let self_data = self.data.read().clone();
+        let result = self_data.ln();
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(LogBackward::new(self.grad_fn.clone(), self_data));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
+    }
+
+    /// Element-wise clamp to [min_val, max_val].
+    #[must_use]
+    pub fn clamp(&self, min_val: f32, max_val: f32) -> Variable {
+        let self_data = self.data.read().clone();
+        let device = self_data.device();
+        let result_data: Vec<f32> = self_data
+            .to_vec()
+            .iter()
+            .map(|&x| x.clamp(min_val, max_val))
+            .collect();
+        let mut result = Tensor::from_vec(result_data, self_data.shape()).unwrap();
+        if device.is_gpu() {
+            result = result.to_device(device).unwrap();
+        }
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(ClampBackward::new(
+                self.grad_fn.clone(),
+                self_data,
+                min_val,
+                max_val,
+            ));
             Variable::from_operation(result, grad_fn, true)
         } else {
             Variable::from_tensor(result)
@@ -657,22 +792,30 @@ impl Variable {
     #[must_use]
     pub fn mul_scalar(&self, scalar: f32) -> Variable {
         let data = self.data();
-        let shape = data.shape();
-        let numel: usize = shape.iter().product();
-        let scalar_tensor = Tensor::from_vec(vec![scalar; numel], shape).unwrap();
-        let scalar_var = Variable::new(scalar_tensor, false);
-        self.mul_var(&scalar_var)
+        let result = data.mul_scalar(scalar);
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(MulScalarBackward::new(self.grad_fn.clone(), scalar));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
     }
 
     /// Adds a scalar.
     #[must_use]
     pub fn add_scalar(&self, scalar: f32) -> Variable {
         let data = self.data();
-        let shape = data.shape();
-        let numel: usize = shape.iter().product();
-        let scalar_tensor = Tensor::from_vec(vec![scalar; numel], shape).unwrap();
-        let scalar_var = Variable::new(scalar_tensor, false);
-        self.add_var(&scalar_var)
+        let result = data.add_scalar(scalar);
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(AddScalarBackward::new(self.grad_fn.clone()));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
     }
 
     /// Subtracts a scalar.
@@ -694,18 +837,31 @@ impl Variable {
     /// GELU activation function (Gaussian Error Linear Unit).
     #[must_use]
     pub fn gelu(&self) -> Variable {
-        // Approximate GELU: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-        let data = self.data();
-        let result = data.gelu();
-        Variable::new(result, self.requires_grad())
+        let self_data = self.data();
+        let result = self_data.gelu();
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(GeluBackward::new(self.grad_fn.clone(), self_data));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
     }
 
     /// SiLU/Swish activation function (x * sigmoid(x)).
     #[must_use]
     pub fn silu(&self) -> Variable {
-        let data = self.data();
-        let result = data.silu();
-        Variable::new(result, self.requires_grad())
+        let self_data = self.data();
+        let result = self_data.silu();
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(SiluBackward::new(self.grad_fn.clone(), self_data));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
     }
 
     /// Square root.
@@ -713,7 +869,14 @@ impl Variable {
     pub fn sqrt(&self) -> Variable {
         let data = self.data();
         let result = data.sqrt();
-        Variable::new(result, self.requires_grad())
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(SqrtBackward::new(self.grad_fn.clone(), result.clone()));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
     }
 
     // =========================================================================
@@ -725,7 +888,18 @@ impl Variable {
     pub fn softmax(&self, dim: i32) -> Variable {
         let data = self.data();
         let result = data.softmax(dim);
-        Variable::new(result, self.requires_grad())
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(SoftmaxBackward::new(
+                self.grad_fn.clone(),
+                result.clone(),
+                dim as i64,
+            ));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
     }
 
     /// Log softmax along specified dimension.
@@ -733,7 +907,18 @@ impl Variable {
     pub fn log_softmax(&self, dim: i32) -> Variable {
         let data = self.data();
         let result = data.log_softmax(dim);
-        Variable::new(result, self.requires_grad())
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(LogSoftmaxBackward::new(
+                self.grad_fn.clone(),
+                result.clone(),
+                dim as i64,
+            ));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
     }
 
     // =========================================================================
@@ -744,16 +929,46 @@ impl Variable {
     #[must_use]
     pub fn mean_dim(&self, dim: i32, keepdim: bool) -> Variable {
         let data = self.data();
+        let input_shape = data.shape().to_vec();
+        let ndim = input_shape.len();
+        let dim_usize = if dim < 0 { (ndim as i32 + dim) as usize } else { dim as usize };
         let result = data.mean_dim(dim, keepdim);
-        Variable::new(result, self.requires_grad())
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(MeanDimBackward::new(
+                self.grad_fn.clone(),
+                input_shape,
+                dim_usize,
+                keepdim,
+            ));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
     }
 
     /// Variance along a dimension, optionally keeping the dimension.
     #[must_use]
     pub fn var_dim(&self, dim: i32, keepdim: bool) -> Variable {
-        let data = self.data();
-        let result = data.var_dim(dim, keepdim);
-        Variable::new(result, self.requires_grad())
+        let self_data = self.data();
+        let input_shape = self_data.shape().to_vec();
+        let ndim = input_shape.len();
+        let dim_usize = if dim < 0 { (ndim as i32 + dim) as usize } else { dim as usize };
+        let result = self_data.var_dim(dim, keepdim);
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(VarDimBackward::new(
+                self.grad_fn.clone(),
+                self_data,
+                dim_usize,
+                keepdim,
+            ));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
     }
 
     // =========================================================================
@@ -906,5 +1121,50 @@ mod tests {
         let loss = pred.mse_loss(&target);
         assert_eq!(loss.numel(), 1);
         assert!((loss.data().to_vec()[0] - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_exp() {
+        let a = Variable::new(Tensor::from_vec(vec![0.0, 1.0, 2.0], &[3]).unwrap(), true);
+        let b = a.exp();
+        assert!((b.data().to_vec()[0] - 1.0).abs() < 1e-5);
+        assert!((b.data().to_vec()[1] - std::f32::consts::E).abs() < 1e-4);
+
+        b.sum().backward();
+        let grad = a.grad().unwrap().to_vec();
+        // d/dx(exp(x)) = exp(x)
+        assert!((grad[0] - 1.0).abs() < 1e-5);
+        assert!((grad[1] - std::f32::consts::E).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_log() {
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0, std::f32::consts::E, 10.0], &[3]).unwrap(),
+            true,
+        );
+        let b = a.log();
+        assert!((b.data().to_vec()[0] - 0.0).abs() < 1e-5);
+        assert!((b.data().to_vec()[1] - 1.0).abs() < 1e-5);
+
+        b.sum().backward();
+        let grad = a.grad().unwrap().to_vec();
+        // d/dx(log(x)) = 1/x
+        assert!((grad[0] - 1.0).abs() < 1e-5);
+        assert!((grad[1] - 1.0 / std::f32::consts::E).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_clamp() {
+        let a = Variable::new(Tensor::from_vec(vec![-1.0, 0.5, 2.0], &[3]).unwrap(), true);
+        let b = a.clamp(0.0, 1.0);
+        assert_eq!(b.data().to_vec(), vec![0.0, 0.5, 1.0]);
+
+        b.sum().backward();
+        let grad = a.grad().unwrap().to_vec();
+        // Gradient passes through only where not clamped
+        assert_eq!(grad[0], 0.0); // clamped at min
+        assert_eq!(grad[1], 1.0); // not clamped
+        assert_eq!(grad[2], 0.0); // clamped at max
     }
 }

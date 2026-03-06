@@ -197,41 +197,16 @@ impl Module for RNN {
             .collect();
 
         // Process each time step
-        let input_data = input.data();
         let mut outputs = Vec::with_capacity(seq_len);
 
         for t in 0..seq_len {
-            // Extract input at time t
+            // Extract input at time t using graph-tracked select
             let t_input = if self.batch_first {
-                // [batch, seq, features] -> extract [batch, features] at t
-                let mut slice_data = vec![0.0f32; batch_size * self.input_size];
-                let input_vec = input_data.to_vec();
-                for b in 0..batch_size {
-                    for f in 0..self.input_size {
-                        let src_idx = b * seq_len * self.input_size + t * self.input_size + f;
-                        let dst_idx = b * self.input_size + f;
-                        slice_data[dst_idx] = input_vec[src_idx];
-                    }
-                }
-                Variable::new(
-                    Tensor::from_vec(slice_data, &[batch_size, self.input_size]).unwrap(),
-                    input.requires_grad(),
-                )
+                // [batch, seq, features] -> select dim=1 at t -> [batch, features]
+                input.select(1, t)
             } else {
-                // [seq, batch, features] -> extract [batch, features] at t
-                let mut slice_data = vec![0.0f32; batch_size * self.input_size];
-                let input_vec = input_data.to_vec();
-                for b in 0..batch_size {
-                    for f in 0..self.input_size {
-                        let src_idx = t * batch_size * self.input_size + b * self.input_size + f;
-                        let dst_idx = b * self.input_size + f;
-                        slice_data[dst_idx] = input_vec[src_idx];
-                    }
-                }
-                Variable::new(
-                    Tensor::from_vec(slice_data, &[batch_size, self.input_size]).unwrap(),
-                    input.requires_grad(),
-                )
+                // [seq, batch, features] -> select dim=0 at t -> [batch, features]
+                input.select(0, t)
             };
 
             // Process through layers
@@ -343,45 +318,13 @@ impl LSTMCell {
         let hh = hh.add_var(&bias_hh);
 
         let gates = ih.add_var(&hh);
-        let gates_vec = gates.data().to_vec();
-        let batch_size = input.shape()[0];
+        let hs = self.hidden_size;
 
-        // Split into 4 gates: i, f, g, o
-        let mut i_data = vec![0.0f32; batch_size * self.hidden_size];
-        let mut f_data = vec![0.0f32; batch_size * self.hidden_size];
-        let mut g_data = vec![0.0f32; batch_size * self.hidden_size];
-        let mut o_data = vec![0.0f32; batch_size * self.hidden_size];
-
-        for b in 0..batch_size {
-            for j in 0..self.hidden_size {
-                let base = b * 4 * self.hidden_size;
-                i_data[b * self.hidden_size + j] = gates_vec[base + j];
-                f_data[b * self.hidden_size + j] = gates_vec[base + self.hidden_size + j];
-                g_data[b * self.hidden_size + j] = gates_vec[base + 2 * self.hidden_size + j];
-                o_data[b * self.hidden_size + j] = gates_vec[base + 3 * self.hidden_size + j];
-            }
-        }
-
-        let i = Variable::new(
-            Tensor::from_vec(i_data, &[batch_size, self.hidden_size]).unwrap(),
-            input.requires_grad(),
-        )
-        .sigmoid();
-        let f = Variable::new(
-            Tensor::from_vec(f_data, &[batch_size, self.hidden_size]).unwrap(),
-            input.requires_grad(),
-        )
-        .sigmoid();
-        let g = Variable::new(
-            Tensor::from_vec(g_data, &[batch_size, self.hidden_size]).unwrap(),
-            input.requires_grad(),
-        )
-        .tanh();
-        let o = Variable::new(
-            Tensor::from_vec(o_data, &[batch_size, self.hidden_size]).unwrap(),
-            input.requires_grad(),
-        )
-        .sigmoid();
+        // Split into 4 gates using narrow (preserves gradient flow)
+        let i = gates.narrow(1, 0, hs).sigmoid();
+        let f = gates.narrow(1, hs, hs).sigmoid();
+        let g = gates.narrow(1, 2 * hs, hs).tanh();
+        let o = gates.narrow(1, 3 * hs, hs).sigmoid();
 
         // c' = f * c + i * g
         let c_new = f.mul_var(c).add_var(&i.mul_var(&g));
@@ -519,28 +462,15 @@ impl Module for LSTM {
             })
             .collect();
 
-        let input_data = input.data();
-        let input_vec = input_data.to_vec();
         let mut outputs = Vec::with_capacity(seq_len);
 
         for t in 0..seq_len {
-            let mut slice_data = vec![0.0f32; batch_size * input_features];
-            for b in 0..batch_size {
-                for f in 0..input_features {
-                    let src_idx = if self.batch_first {
-                        b * seq_len * input_features + t * input_features + f
-                    } else {
-                        t * batch_size * input_features + b * input_features + f
-                    };
-                    slice_data[b * input_features + f] = input_vec[src_idx];
-                }
-            }
-
-            // Input slice always has input_features dimensions
-            let mut layer_input = Variable::new(
-                Tensor::from_vec(slice_data.clone(), &[batch_size, input_features]).unwrap(),
-                input.requires_grad(),
-            );
+            // Extract input at time t using graph-tracked select
+            let mut layer_input = if self.batch_first {
+                input.select(1, t) // [batch, seq, features] -> [batch, features]
+            } else {
+                input.select(0, t) // [seq, batch, features] -> [batch, features]
+            };
 
             for (l, cell) in self.cells.iter().enumerate() {
                 // Resize input if needed for subsequent layers
