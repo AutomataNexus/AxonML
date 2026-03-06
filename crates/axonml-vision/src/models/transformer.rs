@@ -17,7 +17,10 @@
 //! "An Image is Worth 16x16 Words" (Dosovitskiy et al., 2020)
 //! <https://arxiv.org/abs/2010.11929>
 
-use axonml_autograd::Variable;
+use std::any::Any;
+
+use axonml_autograd::no_grad::is_grad_enabled;
+use axonml_autograd::{GradFn, GradientFunction, Variable};
 use axonml_nn::{Dropout, LayerNorm, Linear, Module, MultiHeadAttention, Parameter};
 use axonml_tensor::Tensor;
 
@@ -653,10 +656,21 @@ impl VisionTransformer {
             }
         }
 
-        Variable::new(
-            Tensor::from_vec(patches, &[batch_size, self.num_patches, patch_dim]).unwrap(),
-            x.requires_grad(),
-        )
+        let output_tensor =
+            Tensor::from_vec(patches, &[batch_size, self.num_patches, patch_dim]).unwrap();
+
+        if x.requires_grad() && is_grad_enabled() {
+            let grad_fn = GradFn::new(PatchExtractBackward {
+                next_fns: vec![x.grad_fn().cloned()],
+                input_shape: shape.to_vec(),
+                patch_size: self.patch_size,
+                num_patches_h,
+                num_patches_w,
+            });
+            Variable::from_operation(output_tensor, grad_fn, true)
+        } else {
+            Variable::new(output_tensor, false)
+        }
     }
 }
 
@@ -671,32 +685,10 @@ impl Module for VisionTransformer {
         // Embed patches: [B, num_patches, patch_dim] -> [B, num_patches, d_model]
         let patch_emb = self.patch_embedding.forward(&patches);
 
-        // Prepend CLS token
-        let cls_data = self.cls_token.data().to_vec();
-        let patch_emb_data = patch_emb.data().to_vec();
-
-        let mut tokens = vec![0.0f32; batch_size * (self.num_patches + 1) * self.d_model];
-
-        for b in 0..batch_size {
-            // CLS token
-            for d in 0..self.d_model {
-                tokens[b * (self.num_patches + 1) * self.d_model + d] = cls_data[d];
-            }
-            // Patch embeddings
-            for p in 0..self.num_patches {
-                for d in 0..self.d_model {
-                    let src_idx = b * self.num_patches * self.d_model + p * self.d_model + d;
-                    let dst_idx =
-                        b * (self.num_patches + 1) * self.d_model + (p + 1) * self.d_model + d;
-                    tokens[dst_idx] = patch_emb_data[src_idx];
-                }
-            }
-        }
-
-        let tokens = Variable::new(
-            Tensor::from_vec(tokens, &[batch_size, self.num_patches + 1, self.d_model]).unwrap(),
-            x.requires_grad(),
-        );
+        // Prepend CLS token: expand to [B, 1, d_model] then cat with patches
+        let cls_var = self.cls_token.variable();
+        let cls_expanded = cls_var.expand(&[batch_size, 1, self.d_model]);
+        let tokens = Variable::cat(&[&cls_expanded, &patch_emb], 1);
 
         // Add positional encoding
         let tokens = self.pos_encoding.forward(&tokens);
@@ -704,20 +696,8 @@ impl Module for VisionTransformer {
         // Pass through encoder
         let encoded = self.encoder.forward(&tokens);
 
-        // Extract CLS token output: [B, num_patches+1, d_model] -> [B, d_model]
-        let encoded_data = encoded.data().to_vec();
-        let mut cls_output = vec![0.0f32; batch_size * self.d_model];
-        for b in 0..batch_size {
-            for d in 0..self.d_model {
-                cls_output[b * self.d_model + d] =
-                    encoded_data[b * (self.num_patches + 1) * self.d_model + d];
-            }
-        }
-
-        let cls_output = Variable::new(
-            Tensor::from_vec(cls_output, &[batch_size, self.d_model]).unwrap(),
-            x.requires_grad(),
-        );
+        // Extract CLS token output: [B, num_patches+1, d_model] -> [B, 1, d_model] -> [B, d_model]
+        let cls_output = encoded.narrow(1, 0, 1).reshape(&[batch_size, self.d_model]);
 
         // Classification head
         self.mlp_head.forward(&cls_output)
@@ -759,6 +739,79 @@ pub fn vit_base() -> VisionTransformer {
 #[must_use]
 pub fn vit_large() -> VisionTransformer {
     VisionTransformer::vit_large(224, 1000)
+}
+
+// =============================================================================
+// PatchExtractBackward
+// =============================================================================
+
+/// Gradient function for ViT patch extraction.
+///
+/// Scatters gradients from [B, num_patches, patch_dim] back to [B, C, H, W].
+#[derive(Debug)]
+struct PatchExtractBackward {
+    next_fns: Vec<Option<GradFn>>,
+    input_shape: Vec<usize>,
+    patch_size: usize,
+    num_patches_h: usize,
+    num_patches_w: usize,
+}
+
+impl GradientFunction for PatchExtractBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let (batch_size, channels, height, width) = (
+            self.input_shape[0],
+            self.input_shape[1],
+            self.input_shape[2],
+            self.input_shape[3],
+        );
+        let patch_dim = channels * self.patch_size * self.patch_size;
+        let num_patches = self.num_patches_h * self.num_patches_w;
+
+        let g_vec = grad_output.to_vec();
+        let mut grad_input = vec![0.0f32; batch_size * channels * height * width];
+
+        for b in 0..batch_size {
+            for ph in 0..self.num_patches_h {
+                for pw in 0..self.num_patches_w {
+                    let patch_idx = ph * self.num_patches_w + pw;
+                    for c in 0..channels {
+                        for i in 0..self.patch_size {
+                            for j in 0..self.patch_size {
+                                let img_h = ph * self.patch_size + i;
+                                let img_w = pw * self.patch_size + j;
+                                let img_idx = b * channels * height * width
+                                    + c * height * width
+                                    + img_h * width
+                                    + img_w;
+                                let patch_offset =
+                                    c * self.patch_size * self.patch_size + i * self.patch_size + j;
+                                let out_idx = b * num_patches * patch_dim
+                                    + patch_idx * patch_dim
+                                    + patch_offset;
+                                grad_input[img_idx] += g_vec[out_idx];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let gi = Tensor::from_vec(grad_input, &self.input_shape).unwrap();
+        vec![Some(gi)]
+    }
+
+    fn name(&self) -> &'static str {
+        "PatchExtractBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 // =============================================================================

@@ -19,16 +19,15 @@ use axonml_autograd::Variable;
 use axonml_nn::{
     AdaptiveAvgPool2d, BatchNorm2d, Conv2d, Linear, MaxPool2d, Module, Parameter, ReLU,
 };
-use axonml_tensor::Tensor;
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
 /// Flatten a tensor from [N, C, H, W] to [N, C*H*W].
+/// Uses Variable::reshape() to preserve the autograd graph.
 fn flatten(input: &Variable) -> Variable {
-    let data = input.data();
-    let shape = data.shape();
+    let shape = input.shape();
 
     if shape.len() <= 2 {
         return input.clone();
@@ -37,10 +36,7 @@ fn flatten(input: &Variable) -> Variable {
     let batch_size = shape[0];
     let features: usize = shape[1..].iter().product();
 
-    Variable::new(
-        Tensor::from_vec(data.to_vec(), &[batch_size, features]).unwrap(),
-        input.requires_grad(),
-    )
+    input.reshape(&[batch_size, features])
 }
 
 // =============================================================================
@@ -463,6 +459,7 @@ pub fn resnet34() -> ResNet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axonml_tensor::Tensor;
 
     #[test]
     fn test_basic_block() {
