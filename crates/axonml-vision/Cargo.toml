@@ -17,7 +17,12 @@ axonml-tensor.workspace = true
 axonml-data.workspace = true
 axonml-nn.workspace = true
 axonml-autograd.workspace = true
+axonml-optim.workspace = true
+image = "0.25"
+libc = "0.2"
 rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 byteorder = "1.5"
 flate2 = "1.0"
 dirs.workspace = true

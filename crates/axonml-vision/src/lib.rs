@@ -87,9 +87,15 @@
 #![allow(clippy::manual_assert)]
 #![allow(clippy::unnecessary_debug_formatting)]
 
+pub mod camera;
 pub mod datasets;
+pub mod edge;
 pub mod hub;
+pub mod image_io;
+pub mod losses;
 pub mod models;
+pub mod ops;
+pub mod training;
 pub mod transforms;
 
 // =============================================================================
@@ -104,6 +110,15 @@ pub use transforms::{
 pub use datasets::{FashionMNIST, SyntheticCIFAR, SyntheticMNIST, CIFAR10, CIFAR100, MNIST};
 
 pub use models::{LeNet, SimpleCNN, MLP};
+
+// Biometric Identity (Aegis Identity)
+pub use models::biometric::{
+    AegisIdentity, AriadneFingerprint, ArgusIris, BiometricConfig, BiometricEvidence,
+    BiometricModality, EchoSpeaker, IdentityBank, MnemosyneIdentity, ThemisFusion,
+    VerificationResult, IdentificationResult, EnrollmentResult,
+    AngularMarginLoss, ArgusLoss, CenterLoss, ContrastiveLoss, CrystallizationLoss,
+    DiversityRegularization, EchoLoss, LivenessLoss, ThemisLoss,
+};
 
 pub use hub::{
     cache_dir, download_weights, is_cached, list_models, load_state_dict, model_info,

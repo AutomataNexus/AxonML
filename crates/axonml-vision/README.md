@@ -31,6 +31,7 @@
 | `transforms` | Image-specific data augmentation and preprocessing transforms |
 | `datasets` | Loaders for MNIST, CIFAR, and synthetic vision datasets |
 | `models` | Pre-defined neural network architectures (LeNet, ResNet, VGG, ViT) |
+| `models::biometric` | **Aegis Identity** *(novel)* — Unified biometric framework with 5 modality-specific architectures |
 | `hub` | Pretrained model weights management (download, cache, load) |
 
 ## Usage
@@ -174,9 +175,58 @@ let state_dict = load_state_dict(&path)?;
 // model.load_state_dict(state_dict);
 ```
 
+### Aegis Identity — Biometric Framework *(novel)*
+
+A unified biometric identity system with 5 novel architectures, each exploiting AxonML's unique
+temporal, event-driven, and uncertainty-aware primitives. Total ~362K params, <2MB, deployable on Raspberry Pi.
+
+```rust
+use axonml_vision::models::biometric::{
+    AegisIdentity, BiometricEvidence, BiometricModality,
+};
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
+
+// Create full multimodal system (or use face_only() / edge_minimal())
+let mut aegis = AegisIdentity::full();
+
+// Enroll with available evidence
+let face = Variable::new(Tensor::randn(&[1, 3, 64, 64]), false);
+let evidence = BiometricEvidence::new()
+    .with_face(face);
+let result = aegis.enroll(1001, &evidence);
+
+// Verify identity claim
+let probe = BiometricEvidence::new()
+    .with_face(Variable::new(Tensor::randn(&[1, 3, 64, 64]), false));
+let verification = aegis.verify(1001, &probe);
+println!("Match: {}, Score: {:.3}, Confidence: {:.3}",
+    verification.is_match, verification.match_score, verification.confidence);
+
+// Forensic verification with full audit trail
+let (result, forensic) = aegis.verify_forensic(1001, &probe);
+println!("Per-modality: {:?}", forensic.modality_scores);
+println!("Cross-modal consistency: {:.3}", forensic.consistency);
+
+// Liveness detection (anti-spoofing)
+let liveness = aegis.assess_liveness(&evidence);
+
+// Secure pipeline: quality → liveness → verification
+let secure_result = aegis.secure_verify(1001, &evidence);
+```
+
+**Architectures:**
+| Model | Modality | Novel Idea | Params |
+|-------|----------|------------|--------|
+| Mnemosyne | Face | Identity crystallizes via GRU attractor convergence | ~115K |
+| Ariadne | Fingerprint | Ridge event fields with Gabor wavelets | ~65K |
+| Echo | Voice | Identity = unpredictable speech residuals | ~68K |
+| Argus | Iris | Polar-native radial/angular Conv1d encoding | ~65K |
+| Themis | Fusion | Belief propagation with uncertainty gating | ~49K |
+
 ## Tests
 
-Run the test suite:
+Run the test suite (607 tests):
 
 ```bash
 cargo test -p axonml-vision
