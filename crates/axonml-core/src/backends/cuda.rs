@@ -24,6 +24,8 @@ use super::cuda_kernels::{self, CudaKernels, BLOCK_SIZE};
 use super::Backend;
 use crate::device::DeviceCapabilities;
 #[cfg(feature = "cuda")]
+use std::sync::Arc;
+#[cfg(feature = "cuda")]
 use std::sync::OnceLock;
 
 // =============================================================================
