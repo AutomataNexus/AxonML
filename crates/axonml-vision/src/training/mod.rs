@@ -15,8 +15,6 @@ pub mod gpu_bench;
 pub mod helios_trainer;
 pub mod integration;
 pub mod metrics;
-pub mod train_models;
-
 pub use assign::{assign_fcos_targets, assign_phantom_targets, fcos_targets_to_tensors, FcosTarget};
 pub use augment::{
     DetAugPipeline, DetRandomAffine, DetRandomHFlip, DetSample, HSVJitter, LetterBox, MixUp,
