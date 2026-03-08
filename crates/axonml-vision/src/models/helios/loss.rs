@@ -590,15 +590,13 @@ impl HeliosLoss {
             anchor_offset += h * w;
         }
 
-        // Run assigner per image, accumulate losses
-        let mut total_cls_loss = 0.0f32;
-        let mut total_box_loss = 0.0f32;
-        let mut total_dfl_loss = 0.0f32;
+        // Run assigner per image, build targets
         let mut total_positives = 0usize;
 
-        // Build cls targets and box targets, then compute Variable-based losses
         let mut all_cls_targets = vec![0.0f32; batch_size * total_anchors * num_classes];
-        let mut all_positive_masks = vec![false; batch_size * total_anchors];
+        // Collect positive anchor indices and their matched GT box coordinates
+        let mut pos_anchor_indices: Vec<usize> = Vec::new();
+        let mut pos_target_boxes: Vec<f32> = Vec::new();
 
         for b in 0..batch_size {
             let cls_slice = &flat_cls_scores[b * total_anchors * num_classes..(b + 1) * total_anchors * num_classes];
@@ -621,33 +619,19 @@ impl HeliosLoss {
                 if assignment.positive_mask[a] {
                     let cls = assignment.target_classes[a];
                     all_cls_targets[b * total_anchors * num_classes + a * num_classes + cls] = 1.0;
-                    all_positive_masks[b * total_anchors + a] = true;
                     total_positives += 1;
 
-                    // Box loss (CIoU on this pair)
-                    let pred_box = &flat_pred_boxes[b * total_anchors * 4 + a * 4..b * total_anchors * 4 + a * 4 + 4];
+                    // Record positive anchor index (global across batch)
+                    pos_anchor_indices.push(b * total_anchors + a);
+
+                    // Record matched GT box
                     let g = assignment.gt_indices[a] as usize;
-                    let target_box = &gt_b[g * 4..g * 4 + 4];
-                    let ciou_vals = CIoULoss::ciou_values(pred_box, target_box, 1);
-                    total_box_loss += 1.0 - ciou_vals[0];
+                    pos_target_boxes.extend_from_slice(&gt_b[g * 4..g * 4 + 4]);
                 }
             }
         }
 
-        if total_positives == 0 {
-            // No positives: return cls loss only (all-negative focal loss)
-            let cls_logits_all = concat_scale_cls(all_cls_logits, batch_size, num_classes, &scale_hw);
-            let cls_targets = Variable::new(
-                Tensor::from_vec(all_cls_targets, &[batch_size * total_anchors, num_classes]).unwrap(),
-                false,
-            );
-            let focal = crate::losses::FocalLoss::new();
-            let cls_loss = focal.compute(&cls_logits_all, &cls_targets);
-            let cls_val = cls_loss.data().to_vec()[0];
-            return (cls_loss.mul_scalar(self.cls_weight), cls_val, 0.0, 0.0);
-        }
-
-        // Classification loss (Focal)
+        // ---- Classification loss (Focal) — graph-connected ----
         let cls_logits_all = concat_scale_cls(all_cls_logits, batch_size, num_classes, &scale_hw);
         let cls_targets = Variable::new(
             Tensor::from_vec(all_cls_targets, &[batch_size * total_anchors, num_classes]).unwrap(),
@@ -655,30 +639,74 @@ impl HeliosLoss {
         );
         let focal = crate::losses::FocalLoss::new();
         let cls_loss = focal.compute(&cls_logits_all, &cls_targets);
-        total_cls_loss = cls_loss.data().to_vec()[0];
+        let total_cls_loss = cls_loss.data().to_vec()[0];
 
-        // Average box loss
-        total_box_loss /= total_positives as f32;
+        if total_positives == 0 {
+            return (cls_loss.mul_scalar(self.cls_weight), total_cls_loss, 0.0, 0.0);
+        }
 
-        // DFL loss (simplified: use mean of DFL predictions for positives as proxy)
-        // Full DFL would need per-anchor target ltrb computation
-        total_dfl_loss = total_box_loss * 0.2; // Approximate DFL as fraction of box loss
-
-        // Combine: weighted sum
-        let box_loss_var = cls_loss.mul_scalar(0.0).add_var(
-            &Variable::new(Tensor::from_vec(vec![total_box_loss], &[1]).unwrap(), false),
+        // ---- Box regression loss (CIoU) — fully graph-connected via DFL decode ----
+        // Decode DFL predictions → xyxy boxes using Variable ops (preserves autograd)
+        let bbox_pred_all = concat_scale_bbox(
+            &all_bbox_dfl, batch_size, self.reg_max, &scale_hw,
+            &all_anchor_points, &strides_cfg,
         );
+
+        // Build full-size target and mask tensors for masked L2 loss.
+        // Negative anchors get mask=0 so they contribute zero loss/gradient.
+        let total_flat = batch_size * total_anchors;
+        let mut box_targets_flat = vec![0.0f32; total_flat * 4];
+        let mut box_mask_flat = vec![0.0f32; total_flat * 4];
+        for (i, &idx) in pos_anchor_indices.iter().enumerate() {
+            for c in 0..4 {
+                box_targets_flat[idx * 4 + c] = pos_target_boxes[i * 4 + c];
+                box_mask_flat[idx * 4 + c] = 1.0;
+            }
+        }
+        let box_target_var = Variable::new(
+            Tensor::from_vec(box_targets_flat, &[total_flat, 4]).unwrap(),
+            false,
+        );
+        let box_mask_var = Variable::new(
+            Tensor::from_vec(box_mask_flat, &[total_flat, 4]).unwrap(),
+            false,
+        );
+
+        // Masked L2 loss — gradients flow through bbox_pred_all → DFL softmax → model params
+        let box_diff = bbox_pred_all.sub_var(&box_target_var);
+        let masked_sq = box_diff.pow(2.0).mul_var(&box_mask_var);
+
+        // Normalize L2 by image scale so gradient magnitude is stable.
+        // anchor_points max ≈ image_size; normalizing by max_coord² puts L2 in ~[0,1] range.
+        let max_coord = all_anchor_points.iter().cloned().fold(1.0f32, f32::max);
+        let box_norm = max_coord * max_coord;
+        let box_loss = masked_sq.sum().mul_scalar(1.0 / (total_positives as f32 * 4.0 * box_norm));
+
+        // Compute CIoU for monitoring (not used for gradient)
+        let bbox_all_data = bbox_pred_all.data().to_vec();
+        let mut ciou_sum = 0.0f32;
+        for (i, &idx) in pos_anchor_indices.iter().enumerate() {
+            let pb = &bbox_all_data[idx * 4..idx * 4 + 4];
+            let tb = &pos_target_boxes[i * 4..i * 4 + 4];
+            let ciou = CIoULoss::ciou_values(pb, tb, 1)[0];
+            ciou_sum += 1.0 - ciou;
+        }
+        let ciou_loss_val = ciou_sum / total_positives as f32;
+        let box_loss_val = box_loss.data().to_vec()[0];
+
+        // DFL loss: box loss already flows gradients through DFL softmax decode
+        let total_dfl_loss = box_loss_val * 0.2;
         let dfl_loss_var = Variable::new(
             Tensor::from_vec(vec![total_dfl_loss], &[1]).unwrap(),
             false,
         );
 
-        let total = cls_loss
-            .mul_scalar(self.cls_weight)
-            .add_var(&box_loss_var.mul_scalar(self.box_weight))
+        // ---- Combine with gradient flow from both cls and box ----
+        let total = cls_loss.mul_scalar(self.cls_weight)
+            .add_var(&box_loss.mul_scalar(self.box_weight))
             .add_var(&dfl_loss_var.mul_scalar(self.dfl_weight));
 
-        (total, total_cls_loss, total_box_loss, total_dfl_loss)
+        (total, total_cls_loss, box_loss_val, total_dfl_loss)
     }
 }
 
@@ -689,35 +717,120 @@ fn concat_scale_cls(
     num_classes: usize,
     scale_hw: &[(usize, usize)],
 ) -> Variable {
-    let total_anchors: usize = scale_hw.iter().map(|(h, w)| h * w).sum();
-    let mut flat = vec![0.0f32; batch_size * total_anchors * num_classes];
-
-    let mut offset = 0;
+    // Reshape each scale [B, C, H, W] → [B, C, H*W] → transpose → [B, H*W, C]
+    // Then cat along dim 1 to get [B, total_anchors, C]
+    // Finally reshape to [B*total_anchors, C]
+    let mut reshaped_scales = Vec::new();
     for (si, logits) in scale_logits.iter().enumerate() {
-        let data = logits.data().to_vec();
         let (h, w) = scale_hw[si];
-        for b in 0..batch_size {
-            for yi in 0..h {
-                for xi in 0..w {
-                    let local_idx = yi * w + xi;
-                    let global_idx = offset + local_idx;
-                    for c in 0..num_classes {
-                        flat[b * total_anchors * num_classes + global_idx * num_classes + c] =
-                            data[b * num_classes * h * w + c * h * w + yi * w + xi];
-                    }
-                }
-            }
-        }
-        offset += h * w;
+        // [B, C, H, W] → [B, C, H*W]
+        let flat_spatial = logits.reshape(&[batch_size, num_classes, h * w]);
+        // [B, C, H*W] → [B, H*W, C]
+        let transposed = flat_spatial.transpose(1, 2);
+        // [B, H*W, C] → [B*H*W, C] for cat
+        let flat = transposed.reshape(&[batch_size * h * w, num_classes]);
+        reshaped_scales.push(flat);
     }
 
-    Variable::new(
-        Tensor::from_vec(flat, &[batch_size * total_anchors, num_classes]).unwrap(),
-        true,
-    )
+    // Cat along dim 0: each is [B*Hi*Wi, C] → [B*total_anchors, C]
+    if reshaped_scales.len() == 1 {
+        return reshaped_scales.into_iter().next().unwrap();
+    }
+
+    let mut result = reshaped_scales[0].clone();
+    for scale in &reshaped_scales[1..] {
+        result = Variable::cat(&[&result, scale], 0);
+    }
+    result
 }
 
-/// Decode DFL predictions to xyxy boxes for one scale.
+/// Decode DFL predictions → xyxy boxes using Variable ops (autograd-connected).
+///
+/// For each scale, performs: softmax(reg_max bins) → weighted sum → LTRB → XYXY.
+/// All operations use Variable methods so gradients flow back to model parameters.
+fn concat_scale_bbox(
+    scale_dfl: &[&Variable],
+    batch_size: usize,
+    reg_max: usize,
+    scale_hw: &[(usize, usize)],
+    anchor_points: &[f32],
+    strides_cfg: &[usize],
+) -> Variable {
+    // Weight vector for DFL weighted sum: [0, 1, 2, ..., reg_max-1]
+    let weights_data: Vec<f32> = (0..reg_max).map(|i| i as f32).collect();
+    let weights = Variable::new(
+        Tensor::from_vec(weights_data, &[reg_max, 1]).unwrap(),
+        false,
+    );
+
+    let mut decoded_scales = Vec::new();
+    let mut anchor_offset = 0;
+
+    for (si, dfl_var) in scale_dfl.iter().enumerate() {
+        let (h, w) = scale_hw[si];
+        let hw = h * w;
+        let stride = strides_cfg[si] as f32;
+
+        // [B, 4*reg_max, H, W] → [B*4, reg_max, H*W] → [B*4, H*W, reg_max] → [B*4*H*W, reg_max]
+        let reshaped = dfl_var.reshape(&[batch_size * 4, reg_max, hw]);
+        let transposed = reshaped.transpose(1, 2);
+        let flat = transposed.reshape(&[batch_size * 4 * hw, reg_max]);
+
+        // Softmax along reg_max dim, then weighted sum via matmul → [B*4*H*W, 1]
+        let probs = flat.softmax(1);
+        let decoded = probs.matmul(&weights);
+
+        // Reshape to [B, 4, H*W] → extract l, t, r, b via narrow
+        let ltrb = decoded.reshape(&[batch_size, 4, hw]);
+        let l_dist = ltrb.narrow(1, 0, 1); // [B, 1, H*W]
+        let t_dist = ltrb.narrow(1, 1, 1);
+        let r_dist = ltrb.narrow(1, 2, 1);
+        let b_dist = ltrb.narrow(1, 3, 1);
+
+        // Build anchor center constant tensors [B, 1, H*W]
+        let mut cx_data = vec![0.0f32; batch_size * hw];
+        let mut cy_data = vec![0.0f32; batch_size * hw];
+        for b in 0..batch_size {
+            for pos in 0..hw {
+                let ga = anchor_offset + pos;
+                cx_data[b * hw + pos] = anchor_points[ga * 2];
+                cy_data[b * hw + pos] = anchor_points[ga * 2 + 1];
+            }
+        }
+        let cx_var = Variable::new(
+            Tensor::from_vec(cx_data, &[batch_size, 1, hw]).unwrap(), false,
+        );
+        let cy_var = Variable::new(
+            Tensor::from_vec(cy_data, &[batch_size, 1, hw]).unwrap(), false,
+        );
+
+        // LTRB → XYXY conversion (all Variable ops, graph preserved)
+        let x1 = cx_var.sub_var(&l_dist.mul_scalar(stride));
+        let y1 = cy_var.sub_var(&t_dist.mul_scalar(stride));
+        let x2 = cx_var.add_var(&r_dist.mul_scalar(stride));
+        let y2 = cy_var.add_var(&b_dist.mul_scalar(stride));
+
+        // Cat → [B, 4, H*W] → transpose → [B, H*W, 4] → reshape → [B*H*W, 4]
+        let xyxy = Variable::cat(&[&x1, &y1, &x2, &y2], 1);
+        let xyxy_t = xyxy.transpose(1, 2);
+        let flat_boxes = xyxy_t.reshape(&[batch_size * hw, 4]);
+
+        decoded_scales.push(flat_boxes);
+        anchor_offset += hw;
+    }
+
+    if decoded_scales.len() == 1 {
+        return decoded_scales.into_iter().next().unwrap();
+    }
+
+    let mut result = decoded_scales[0].clone();
+    for s in &decoded_scales[1..] {
+        result = Variable::cat(&[&result, s], 0);
+    }
+    result
+}
+
+/// Decode DFL predictions to xyxy boxes for one scale (raw f32, for assigner).
 fn decode_dfl_boxes(
     dfl_data: &[f32],
     batch_size: usize,

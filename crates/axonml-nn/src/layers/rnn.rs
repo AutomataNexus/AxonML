@@ -180,7 +180,7 @@ impl RNN {
 impl Module for RNN {
     fn forward(&self, input: &Variable) -> Variable {
         let shape = input.shape();
-        let (batch_size, seq_len, _) = if self.batch_first {
+        let (batch_size, seq_len, input_features) = if self.batch_first {
             (shape[0], shape[1], shape[2])
         } else {
             (shape[1], shape[0], shape[2])
@@ -196,24 +196,26 @@ impl Module for RNN {
             })
             .collect();
 
-        // Process each time step
+        // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
+        let cell0 = &self.cells[0];
+        let input_2d = input.reshape(&[batch_size * seq_len, input_features]);
+        let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
+        let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
+        let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, self.hidden_size]);
+
         let mut outputs = Vec::with_capacity(seq_len);
 
         for t in 0..seq_len {
-            // Extract input at time t using graph-tracked select
-            let t_input = if self.batch_first {
-                // [batch, seq, features] -> select dim=1 at t -> [batch, features]
-                input.select(1, t)
-            } else {
-                // [seq, batch, features] -> select dim=0 at t -> [batch, features]
-                input.select(0, t)
-            };
+            // Layer 0: use pre-computed ih projection
+            let ih_t = ih_all_3d.select(1, t); // [batch, hidden]
+            let w_hh_t = cell0.weight_hh.variable().transpose(0, 1);
+            let hh = hiddens[0].matmul(&w_hh_t).add_var(&cell0.bias_hh.variable());
+            hiddens[0] = ih_t.add_var(&hh).tanh();
 
-            // Process through layers
-            let mut layer_input = t_input;
-            for (l, cell) in self.cells.iter().enumerate() {
-                hiddens[l] = cell.forward_step(&layer_input, &hiddens[l]);
-                layer_input = hiddens[l].clone();
+            // Subsequent layers
+            for l in 1..self.num_layers {
+                let layer_input = hiddens[l - 1].clone();
+                hiddens[l] = self.cells[l].forward_step(&layer_input, &hiddens[l]);
             }
 
             outputs.push(hiddens[self.num_layers - 1].clone());
@@ -438,10 +440,8 @@ impl LSTM {
 
 impl Module for LSTM {
     fn forward(&self, input: &Variable) -> Variable {
-        // Similar to RNN forward but using LSTM cells
-        // For brevity, implementing a simplified version
         let shape = input.shape();
-        let (batch_size, seq_len, input_features) = if self.batch_first {
+        let (batch_size, seq_len, _input_features) = if self.batch_first {
             (shape[0], shape[1], shape[2])
         } else {
             (shape[1], shape[0], shape[2])
@@ -462,28 +462,47 @@ impl Module for LSTM {
             })
             .collect();
 
+        // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
+        // input: [batch, seq, features] -> reshaped to [batch*seq, features]
+        // ih_all: [batch*seq, 4*hidden] = input_2d @ W_ih^T + bias_ih
+        let cell0 = &self.cells[0];
+        let input_2d = input.reshape(&[batch_size * seq_len, _input_features]);
+        let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
+        let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
+        // ih_all_3d: [batch, seq, 4*hidden]
+        let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, 4 * self.hidden_size]);
+
         let mut outputs = Vec::with_capacity(seq_len);
 
         for t in 0..seq_len {
-            // Extract input at time t using graph-tracked select
-            let mut layer_input = if self.batch_first {
-                input.select(1, t) // [batch, seq, features] -> [batch, features]
-            } else {
-                input.select(0, t) // [seq, batch, features] -> [batch, features]
-            };
+            // Layer 0: use pre-computed ih projection
+            let ih_t = ih_all_3d.select(1, t); // [batch, 4*hidden]
+            let (h, c) = &states[0];
 
-            for (l, cell) in self.cells.iter().enumerate() {
-                // Resize input if needed for subsequent layers
-                if l > 0 {
-                    layer_input = states[l - 1].0.clone();
-                }
-                states[l] = cell.forward_step(&layer_input, &states[l]);
+            // Only compute hidden-to-hidden per timestep (depends on previous h)
+            let w_hh_t = cell0.weight_hh.variable().transpose(0, 1);
+            let hh = h.matmul(&w_hh_t).add_var(&cell0.bias_hh.variable());
+
+            let gates = ih_t.add_var(&hh);
+            let hs = self.hidden_size;
+            let i_gate = gates.narrow(1, 0, hs).sigmoid();
+            let f_gate = gates.narrow(1, hs, hs).sigmoid();
+            let g_gate = gates.narrow(1, 2 * hs, hs).tanh();
+            let o_gate = gates.narrow(1, 3 * hs, hs).sigmoid();
+            let c_new = f_gate.mul_var(c).add_var(&i_gate.mul_var(&g_gate));
+            let h_new = o_gate.mul_var(&c_new.tanh());
+            states[0] = (h_new, c_new);
+
+            // Subsequent layers use the regular cell forward_step
+            for l in 1..self.num_layers {
+                let layer_input = states[l - 1].0.clone();
+                states[l] = self.cells[l].forward_step(&layer_input, &states[l]);
             }
 
             outputs.push(states[self.num_layers - 1].0.clone());
         }
 
-        // Stack outputs using graph-tracked cat (unsqueeze + cat along time dim)
+        // Stack outputs along the time dimension
         let time_dim = if self.batch_first { 1 } else { 0 };
         let unsqueezed: Vec<Variable> = outputs.iter()
             .map(|o| o.unsqueeze(time_dim))
@@ -627,16 +646,9 @@ impl GRUCell {
         let n = ih_n.add_var(&r.mul_var(&hh_n)).tanh();
 
         // h_new = (1 - z) * n + z * h_prev
-        // Create ones for (1 - z)
-        let shape = [batch_size, hidden_size];
-        let ones = Variable::new(
-            Tensor::from_vec(vec![1.0f32; batch_size * hidden_size], &shape).unwrap(),
-            false,
-        );
-        let one_minus_z = ones.sub_var(&z);
-
-        // h_new = one_minus_z * n + z * h_prev
-        one_minus_z.mul_var(&n).add_var(&z.mul_var(hidden))
+        // Rewritten as: n + z * (h_prev - n)  to avoid allocating a ones tensor
+        let h_minus_n = hidden.sub_var(&n);
+        n.add_var(&z.mul_var(&h_minus_n))
     }
 }
 
@@ -718,7 +730,7 @@ impl GRU {
 impl Module for GRU {
     fn forward(&self, input: &Variable) -> Variable {
         let shape = input.shape();
-        let (batch_size, seq_len, _input_size) = if self.batch_first {
+        let (batch_size, seq_len, input_features) = if self.batch_first {
             (shape[0], shape[1], shape[2])
         } else {
             (shape[1], shape[0], shape[2])
@@ -734,38 +746,52 @@ impl Module for GRU {
             })
             .collect();
 
-        // Collect output Variables for each time step
+        // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
+        // One big matmul instead of seq_len small ones
+        let cell0 = &self.cells[0];
+        let input_2d = input.reshape(&[batch_size * seq_len, input_features]);
+        let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
+        let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
+        let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, 3 * self.hidden_size]);
+
         let mut output_vars: Vec<Variable> = Vec::with_capacity(seq_len);
 
-        // Process each time step
         for t in 0..seq_len {
-            // Extract input for this time step using narrow (preserves gradients)
-            // input shape: [batch, seq, features]
-            // narrow to [batch, 1, features], then reshape to [batch, features]
-            // narrow gives [batch, 1, features], reshape to [batch, features]
-            let narrowed = input.narrow(1, t, 1);
-            let step_input = narrowed.reshape(&[batch_size, narrowed.data().numel() / batch_size]);
+            // Layer 0: use pre-computed ih projection
+            let ih_t = ih_all_3d.select(1, t); // [batch, 3*hidden]
+            let hidden = &hidden_states[0];
+            let hs = self.hidden_size;
 
-            // Process through each layer
-            let mut layer_input = step_input;
+            // Only compute hidden-to-hidden per timestep
+            let w_hh_t = cell0.weight_hh.variable().transpose(0, 1);
+            let hh = hidden.matmul(&w_hh_t).add_var(&cell0.bias_hh.variable());
 
-            for (layer_idx, cell) in self.cells.iter().enumerate() {
-                let new_hidden = cell.forward_step(&layer_input, &hidden_states[layer_idx]);
+            let ih_r = ih_t.narrow(1, 0, hs);
+            let ih_z = ih_t.narrow(1, hs, hs);
+            let ih_n = ih_t.narrow(1, 2 * hs, hs);
+            let hh_r = hh.narrow(1, 0, hs);
+            let hh_z = hh.narrow(1, hs, hs);
+            let hh_n = hh.narrow(1, 2 * hs, hs);
 
-                // Update hidden state for this layer (keeps gradient chain)
-                hidden_states[layer_idx] = new_hidden.clone();
+            let r = ih_r.add_var(&hh_r).sigmoid();
+            let z = ih_z.add_var(&hh_z).sigmoid();
+            let n = ih_n.add_var(&r.mul_var(&hh_n)).tanh();
+            let h_minus_n = hidden.sub_var(&n);
+            let h_new = n.add_var(&z.mul_var(&h_minus_n));
+            hidden_states[0] = h_new.clone();
 
-                // Output of this layer becomes input to next layer
-                layer_input = new_hidden;
+            // Subsequent layers use the regular cell forward_step
+            let mut layer_output = h_new;
+            for l in 1..self.num_layers {
+                let new_hidden = self.cells[l].forward_step(&layer_output, &hidden_states[l]);
+                hidden_states[l] = new_hidden.clone();
+                layer_output = new_hidden;
             }
 
-            // Store output from last layer for this time step
-            output_vars.push(layer_input);
+            output_vars.push(layer_output);
         }
 
         // Stack outputs along the time dimension
-        // Each output_var has shape [batch, hidden_size]
-        // We need to combine them into [batch, seq, hidden_size]
         self.stack_outputs(&output_vars, batch_size, seq_len)
     }
 

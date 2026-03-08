@@ -137,6 +137,25 @@ impl Variable {
         self.data.read().numel()
     }
 
+    /// Returns the device this variable's data is on.
+    #[must_use]
+    pub fn device(&self) -> axonml_tensor::Device {
+        self.data.read().device()
+    }
+
+    /// Moves this variable's data to the specified device.
+    ///
+    /// Creates a new leaf Variable on the target device.
+    /// Used for moving inputs to GPU before forward pass.
+    pub fn to_device(&self, device: axonml_tensor::Device) -> Self {
+        let current = self.data.read().clone();
+        if current.device() == device {
+            return self.clone();
+        }
+        let moved = current.to_device(device).expect("Failed to move variable to device");
+        Variable::new(moved, self.requires_grad)
+    }
+
     /// Returns whether this variable requires gradients.
     #[must_use]
     pub fn requires_grad(&self) -> bool {

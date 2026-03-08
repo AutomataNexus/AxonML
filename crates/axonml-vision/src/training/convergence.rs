@@ -360,7 +360,7 @@ mod tests {
         let loss_fn = CrossEntropyLoss::new();
 
         let batch_size = 8;
-        let steps = 5;
+        let steps = 8;
 
         let mut losses = Vec::new();
         for step in 0..steps {

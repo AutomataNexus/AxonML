@@ -263,7 +263,7 @@ impl RetinaFace {
     }
 
     /// Raw forward pass returning per-level predictions.
-    fn forward_raw(&self, x: &Variable) -> (Vec<Variable>, Vec<Variable>, Vec<Variable>) {
+    pub(crate) fn forward_raw(&self, x: &Variable) -> (Vec<Variable>, Vec<Variable>, Vec<Variable>) {
         // Extract backbone features at each layer
         let features = self.extract_backbone_features(x);
 

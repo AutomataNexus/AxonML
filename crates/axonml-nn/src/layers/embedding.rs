@@ -34,6 +34,19 @@ struct EmbeddingBackward {
 
 impl GradientFunction for EmbeddingBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        // GPU path: use CUDA scatter-add kernel
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            let indices_u32: Vec<u32> = self.indices.iter().map(|&i| i as u32).collect();
+            let grad_tensor = grad_output.embedding_scatter_add_cuda(
+                &indices_u32,
+                self.num_embeddings,
+                self.embedding_dim,
+            );
+            return vec![Some(grad_tensor)];
+        }
+
+        // CPU fallback
         let grad_data = grad_output.to_vec();
         let mut weight_grad = vec![0.0f32; self.num_embeddings * self.embedding_dim];
 

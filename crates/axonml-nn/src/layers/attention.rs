@@ -88,6 +88,24 @@ impl MultiHeadAttention {
         }
     }
 
+    /// Try to expand attention mask on GPU via CUDA kernels.
+    /// Returns None to fall through to CPU expansion.
+    #[allow(unused_variables)]
+    fn try_gpu_mask_expand(
+        mask_data: &Tensor<f32>,
+        mask_shape: &[usize],
+        scores_shape: &[usize],
+        device: axonml_core::Device,
+        total: usize,
+        batch_size: usize,
+        num_heads: usize,
+        tgt_len: usize,
+        src_len: usize,
+    ) -> Option<Variable> {
+        // TODO: CUDA kernel for mask broadcast expansion
+        None
+    }
+
     /// Computes attention using batched matmul (BLAS-accelerated).
     pub fn attention(
         &self,
@@ -137,19 +155,38 @@ impl MultiHeadAttention {
         let scores = if let Some(mask) = attn_mask {
             let mask_shape = mask.shape();
             let mask_data = mask.data();
+            let scores_shape = scores.shape();
+            let total = scores_shape.iter().product::<usize>();
 
-            // Convert to additive mask: 0 → -1e9, nonzero → 0
-            // We need the mask on CPU to build the expanded version, but the mask is small
-            // (typically [tgt_len, src_len]) so the copy is negligible
+            // GPU fast path: expand mask entirely on GPU via CUDA kernel
+            // Avoids GPU→CPU→GPU round-trip (9 mask expansions per forward pass)
+            #[cfg(feature = "cuda")]
+            if scores.data().device().is_gpu() {
+                // Ensure mask is on GPU (it's small, so upload is cheap if needed)
+                let mask_gpu = if mask_data.device().is_gpu() {
+                    mask_data.clone()
+                } else {
+                    mask_data.to_device(scores.data().device()).unwrap()
+                };
+
+                if let Some(expanded_tensor) = mask_gpu.mask_expand_cuda(
+                    &scores_shape, batch_size, self.num_heads, tgt_len, src_len,
+                ) {
+                    let additive_mask = Variable::new(expanded_tensor, false);
+                    return self.finish_attention(
+                        scores.add_var(&additive_mask), &v, batch_size, tgt_len,
+                    );
+                }
+                // Fall through to CPU path on unsupported shape
+            }
+
+            // CPU fallback: expand mask with nested loops
             let mask_vec = mask_data.to_vec();
             let additive: Vec<f32> = mask_vec
                 .iter()
                 .map(|&v| if v == 0.0 { -1e9 } else { 0.0 })
                 .collect();
 
-            // Expand mask to [batch, heads, tgt_len, src_len]
-            let scores_shape = scores.shape();
-            let total = scores_shape.iter().product::<usize>();
             let mut expanded = vec![0.0f32; total];
 
             if mask_shape.len() == 2 && mask_shape[0] == tgt_len && mask_shape[1] == src_len {
@@ -169,7 +206,6 @@ impl MultiHeadAttention {
                 }
             } else if mask_shape.len() == 2 && mask_shape[0] == batch_size && mask_shape[1] == src_len {
                 // Padding mask [batch, src_len] → broadcast over heads & tgt positions
-                // Each batch element's mask is replicated across all heads and query positions
                 for b in 0..batch_size {
                     for h in 0..self.num_heads {
                         for i in 0..tgt_len {
@@ -191,7 +227,6 @@ impl MultiHeadAttention {
             }
 
             let mut additive_tensor = Tensor::from_vec(expanded, &scores_shape).unwrap();
-            // Move mask to same device as scores
             let scores_device = scores.data().device();
             if scores_device.is_gpu() {
                 additive_tensor = additive_tensor.to_device(scores_device).unwrap();
@@ -202,20 +237,23 @@ impl MultiHeadAttention {
             scores
         };
 
-        // Softmax over last dim (src_len)
+        self.finish_attention(scores, &v, batch_size, tgt_len)
+    }
+
+    /// Softmax → weighted sum → reshape → output projection.
+    /// Shared by both GPU and CPU mask expansion paths.
+    fn finish_attention(
+        &self,
+        scores: Variable,
+        v: &Variable,
+        batch_size: usize,
+        tgt_len: usize,
+    ) -> Variable {
         let attn_weights = scores.softmax(-1);
-
-        // Weighted sum: output = attn_weights @ V
-        // [batch, heads, tgt_len, src_len] @ [batch, heads, src_len, head_dim]
-        // → [batch, heads, tgt_len, head_dim]
-        let attn_output = attn_weights.matmul(&v);
-
-        // Reshape back: [batch, heads, tgt_len, head_dim] → [batch, tgt_len, embed]
+        let attn_output = attn_weights.matmul(v);
         let attn_output = attn_output
             .transpose(1, 2)
             .reshape(&[batch_size, tgt_len, self.embed_dim]);
-
-        // Output projection
         self.out_proj.forward(&attn_output)
     }
 }

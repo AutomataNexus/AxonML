@@ -169,6 +169,7 @@ impl RMSNorm {
 
         let mut output = vec![0.0f32; x_vec.len()];
         let mut rms_vals = vec![0.0f32; batch_elements];
+        let weight_vec = self.weight.to_vec();
 
         for b in 0..batch_elements {
             let offset = b * last_dim;
@@ -182,7 +183,6 @@ impl RMSNorm {
             rms_vals[b] = rms;
 
             // Normalize and scale
-            let weight_vec = self.weight.to_vec();
             for i in 0..last_dim {
                 output[offset + i] = (x_vec[offset + i] / rms) * weight_vec[i];
             }
@@ -393,8 +393,11 @@ impl RotaryEmbedding {
         let batch_size = shape[0];
         let num_heads = shape[1];
         let x_vec = x.to_vec();
-        let cos_vec = self.cos_cached.to_vec();
-        let sin_vec = self.sin_cached.to_vec();
+        // Only copy the needed slice of cached cos/sin tables for positions [offset..offset+seq_len]
+        let cos_slice = self.cos_cached.narrow(0, offset, seq_len).unwrap();
+        let sin_slice = self.sin_cached.narrow(0, offset, seq_len).unwrap();
+        let cos_vec = cos_slice.to_vec();
+        let sin_vec = sin_slice.to_vec();
 
         let mut output = vec![0.0f32; x_vec.len()];
         let half_dim = head_dim / 2;
@@ -402,9 +405,8 @@ impl RotaryEmbedding {
         for b in 0..batch_size {
             for h in 0..num_heads {
                 for s in 0..seq_len {
-                    let pos = offset + s;
                     let x_offset = ((b * num_heads + h) * seq_len + s) * head_dim;
-                    let rope_offset = pos * self.dim;
+                    let rope_offset = s * self.dim;
 
                     for i in 0..half_dim {
                         let cos_val = cos_vec[rope_offset + i];
@@ -452,17 +454,19 @@ impl GradientFunction for RoPEBackward {
         let half_dim = head_dim / 2;
 
         let g_vec = grad_output.to_vec();
-        let cos_vec = self.cos_cached.to_vec();
-        let sin_vec = self.sin_cached.to_vec();
+        // Only copy the needed slice of cached cos/sin tables
+        let cos_slice = self.cos_cached.narrow(0, self.position_offset, seq_len).unwrap();
+        let sin_slice = self.sin_cached.narrow(0, self.position_offset, seq_len).unwrap();
+        let cos_vec = cos_slice.to_vec();
+        let sin_vec = sin_slice.to_vec();
 
         let mut grad_input = vec![0.0f32; g_vec.len()];
 
         for b in 0..batch_size {
             for h in 0..num_heads {
                 for s in 0..seq_len {
-                    let pos = self.position_offset + s;
                     let off = ((b * num_heads + h) * seq_len + s) * head_dim;
-                    let rope_off = pos * self.rope_dim;
+                    let rope_off = s * self.rope_dim;
 
                     for i in 0..half_dim {
                         let cos_val = cos_vec[rope_off + i];

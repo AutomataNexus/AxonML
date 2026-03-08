@@ -21,7 +21,7 @@
 
 - **Module Trait** - Core interface for all neural network components with parameter management and train/eval modes.
 
-- **Comprehensive Layers** - Linear, Conv1d/Conv2d, RNN/LSTM/GRU, Embedding, BatchNorm, LayerNorm, Dropout, and MultiHeadAttention.
+- **Comprehensive Layers** - Linear, Conv1d/Conv2d, RNN/LSTM/GRU, Embedding, BatchNorm, LayerNorm, Dropout, and MultiHeadAttention. RNN/LSTM/GRU layers use batched matmul to process all timesteps efficiently, avoiding per-step allocation overhead.
 
 - **Activation Functions** - ReLU, Sigmoid, Tanh, GELU, SiLU, ELU, LeakyReLU, Softmax, and LogSoftmax.
 

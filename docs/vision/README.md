@@ -448,5 +448,5 @@ See the [Object Detection Training Guide](../detection.md) for Nexus + COCO exam
 - [Neural Networks](../nn/README.md) - Conv2d, pooling layers
 - [Autograd](../autograd/README.md) - Training with gradients
 
-@version 0.5.0
+@version 0.4.1
 @author AutomataNexus Development Team

@@ -221,7 +221,7 @@ fn concat_channels(a: &Variable, b: &Variable) -> Variable {
 }
 
 /// ShuffleNet V2 backbone stages.
-struct ShuffleNetBackbone {
+pub(crate) struct ShuffleNetBackbone {
     stem: Conv2d,
     stem_bn: BatchNorm2d,
     relu: ReLU,
@@ -261,7 +261,7 @@ impl ShuffleNetBackbone {
     }
 
     /// Forward pass returning multi-scale features [P3, P4, P5].
-    fn forward(&self, x: &Variable) -> Vec<Variable> {
+    pub(crate) fn forward(&self, x: &Variable) -> Vec<Variable> {
         let mut out = self.relu.forward(&self.stem_bn.forward(&self.stem.forward(x)));
         let mut features = Vec::new();
 
@@ -330,7 +330,7 @@ impl DepthwiseSeparable {
 /// Ghost PAN (Path Aggregation Network) neck.
 ///
 /// Lightweight feature fusion with depthwise separable convolutions.
-struct GhostPAN {
+pub(crate) struct GhostPAN {
     /// Reduce channels from backbone to neck dimension
     reduce: Vec<(Conv2d, BatchNorm2d)>,
     /// Top-down fusion (depthwise separable)
@@ -384,7 +384,7 @@ impl GhostPAN {
         }
     }
 
-    fn forward(&self, features: &[Variable]) -> Vec<Variable> {
+    pub(crate) fn forward(&self, features: &[Variable]) -> Vec<Variable> {
         let num = features.len();
 
         // 1. Reduce all feature maps to neck_channels
@@ -450,7 +450,7 @@ impl GhostPAN {
 /// Anchor-free detection head for NanoDet.
 ///
 /// Predicts class scores and bounding boxes at each spatial location.
-struct NanoDetHead {
+pub(crate) struct NanoDetHead {
     /// Shared convolution layers
     shared: Vec<(Conv2d, BatchNorm2d)>,
     /// Classification output (per level)
@@ -485,7 +485,7 @@ impl NanoDetHead {
     }
 
     /// Forward on a single feature level.
-    fn forward_single(&self, x: &Variable) -> (Variable, Variable) {
+    pub(crate) fn forward_single(&self, x: &Variable) -> (Variable, Variable) {
         let mut out = x.clone();
         for (conv, bn) in &self.shared {
             out = self.relu.forward(&bn.forward(&conv.forward(&out)));
@@ -517,9 +517,9 @@ impl NanoDetHead {
 /// Architecture: ShuffleNet V2 backbone + Ghost PAN neck + anchor-free head.
 /// Designed for <1M parameters and real-time inference on ARM/mobile devices.
 pub struct NanoDet {
-    backbone: ShuffleNetBackbone,
-    neck: GhostPAN,
-    head: NanoDetHead,
+    pub(crate) backbone: ShuffleNetBackbone,
+    pub(crate) neck: GhostPAN,
+    pub(crate) head: NanoDetHead,
     num_classes: usize,
     strides: Vec<usize>,
 }

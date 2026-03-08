@@ -309,6 +309,141 @@ impl Conv2d {
     }
 }
 
+// =============================================================================
+// im2col + GEMM Conv2d Implementation
+// =============================================================================
+
+/// Unfold input patches into a column matrix (im2col).
+///
+/// Input: `[C_in, H, W]` (one batch element, one group's channels)
+/// Output: `[C_in * kH * kW, out_H * out_W]`
+fn im2col(
+    input: &[f32],
+    channels: usize,
+    height: usize,
+    width: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    pad_h: usize,
+    pad_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    out_h: usize,
+    out_w: usize,
+) -> Vec<f32> {
+    let col_h = channels * kernel_h * kernel_w;
+    let col_w = out_h * out_w;
+    let mut col = vec![0.0f32; col_h * col_w];
+    let hw = height * width;
+
+    for c in 0..channels {
+        let input_c = c * hw;
+        for kh_off in 0..kernel_h {
+            for kw_off in 0..kernel_w {
+                let col_row = (c * kernel_h + kh_off) * kernel_w + kw_off;
+                let col_base = col_row * col_w;
+                for oh in 0..out_h {
+                    let h_in = (oh * stride_h + kh_off) as isize - pad_h as isize;
+                    if h_in < 0 || h_in >= height as isize {
+                        continue; // entire row is zero-padded
+                    }
+                    let h_in = h_in as usize;
+                    let input_row = input_c + h_in * width;
+                    let col_row_base = col_base + oh * out_w;
+                    for ow in 0..out_w {
+                        let w_in = (ow * stride_w + kw_off) as isize - pad_w as isize;
+                        if w_in >= 0 && w_in < width as isize {
+                            col[col_row_base + ow] = input[input_row + w_in as usize];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    col
+}
+
+/// Conv2d forward using im2col + matmul. Supports groups.
+fn conv2d_im2col(
+    input: &[f32],
+    weight: &[f32],
+    bias: Option<&[f32]>,
+    batch_size: usize,
+    in_channels: usize,
+    in_height: usize,
+    in_width: usize,
+    out_channels: usize,
+    kh: usize,
+    kw: usize,
+    sh: usize,
+    sw: usize,
+    ph: usize,
+    pw: usize,
+    groups: usize,
+) -> Vec<f32> {
+    let out_h = (in_height + 2 * ph - kh) / sh + 1;
+    let out_w = (in_width + 2 * pw - kw) / sw + 1;
+    let in_channels_per_group = in_channels / groups;
+    let out_channels_per_group = out_channels / groups;
+    let col_h = in_channels_per_group * kh * kw;
+    let col_w = out_h * out_w;
+    let spatial = out_h * out_w;
+    let in_spatial = in_height * in_width;
+
+    let mut output = vec![0.0f32; batch_size * out_channels * spatial];
+
+    for b in 0..batch_size {
+        for g in 0..groups {
+            let ic_start = g * in_channels_per_group;
+            let oc_start = g * out_channels_per_group;
+
+            // Extract input for this batch+group
+            let in_offset = b * in_channels * in_spatial + ic_start * in_spatial;
+            let input_slice = &input[in_offset..in_offset + in_channels_per_group * in_spatial];
+
+            // im2col
+            let col = im2col(
+                input_slice,
+                in_channels_per_group,
+                in_height, in_width,
+                kh, kw, ph, pw, sh, sw,
+                out_h, out_w,
+            );
+
+            // Weight for this group: [oc_per_group, ic_per_group * kH * kW]
+            let w_offset = oc_start * in_channels_per_group * kh * kw;
+            let w_size = out_channels_per_group * col_h;
+            let weight_slice = &weight[w_offset..w_offset + w_size];
+
+            // GEMM via Tensor::matmul (auto-dispatches to GPU for large matrices)
+            let w_tensor = Tensor::from_vec(weight_slice.to_vec(), &[out_channels_per_group, col_h]).unwrap();
+            let col_tensor = Tensor::from_vec(col, &[col_h, col_w]).unwrap();
+            let result = w_tensor.matmul(&col_tensor).unwrap();
+            let result_vec = result.to_vec();
+
+            // Copy to output with bias
+            let out_offset = b * out_channels * spatial + oc_start * spatial;
+            for oc_local in 0..out_channels_per_group {
+                let oc = oc_start + oc_local;
+                let bias_val = bias.map_or(0.0, |bv| bv[oc]);
+                let src_start = oc_local * col_w;
+                let dst_start = out_offset + oc_local * spatial;
+                if bias_val != 0.0 {
+                    for i in 0..spatial {
+                        output[dst_start + i] = result_vec[src_start + i] + bias_val;
+                    }
+                } else {
+                    output[dst_start..dst_start + spatial]
+                        .copy_from_slice(&result_vec[src_start..src_start + spatial]);
+                }
+            }
+        }
+    }
+
+    output
+}
+
 impl Module for Conv2d {
     fn forward(&self, input: &Variable) -> Variable {
         let input_shape = input.shape();
@@ -325,73 +460,142 @@ impl Module for Conv2d {
 
         let input_data = input.data();
         let weight_data = self.weight.data();
+
+        // GPU-resident fast path: when input is already on GPU, do everything on GPU
+        // without any CPU↔GPU copies.
+        #[cfg(feature = "cuda")]
+        if input_data.device().is_gpu() {
+            // Auto-migrate weights to GPU if needed (one-time cost, cached via Arc)
+            let input_dev = input_data.device();
+            if !weight_data.device().is_gpu() {
+                self.weight.to_device(input_dev);
+                if let Some(ref b) = self.bias {
+                    b.to_device(input_dev);
+                }
+            }
+            let weight_data = self.weight.data();
+
+            let gpu_output = if self.groups == 1 {
+                // Standard convolution: single im2col + GEMM
+                let bias_tensor = self.bias.as_ref().map(|b| b.data());
+                input_data.conv2d_cuda(
+                    &weight_data,
+                    bias_tensor.as_ref(),
+                    self.stride,
+                    self.padding,
+                )
+            } else {
+                // Grouped convolution: run per-group im2col + GEMM on GPU
+                input_data.conv2d_grouped_cuda(
+                    &weight_data,
+                    self.bias.as_ref().map(|b| b.data()).as_ref(),
+                    self.stride,
+                    self.padding,
+                    self.groups,
+                )
+            };
+
+            if let Some(output_tensor) = gpu_output {
+                let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+                if requires_grad {
+                    let weight_var = self.weight.variable();
+                    let bias_grad_fn = self.bias.as_ref().map(|b| b.variable().grad_fn().cloned());
+                    if self.groups == 1 {
+                        let grad_fn = GradFn::new(Conv2dBackward::new(
+                            input.grad_fn().cloned(),
+                            weight_var.grad_fn().cloned(),
+                            bias_grad_fn,
+                            input_data,
+                            weight_data,
+                            input_shape,
+                            self.in_channels,
+                            self.out_channels,
+                            self.kernel_size,
+                            self.stride,
+                            self.padding,
+                            self.bias.is_some(),
+                        ));
+                        return Variable::from_operation(output_tensor, grad_fn, true);
+                    } else {
+                        let grad_fn = GradFn::new(GroupedConv2dBackward::new(
+                            input.grad_fn().cloned(),
+                            weight_var.grad_fn().cloned(),
+                            bias_grad_fn,
+                            input_data,
+                            weight_data,
+                            input_shape,
+                            self.in_channels,
+                            self.out_channels,
+                            self.kernel_size,
+                            self.stride,
+                            self.padding,
+                            self.groups,
+                            self.bias.is_some(),
+                        ));
+                        return Variable::from_operation(output_tensor, grad_fn, true);
+                    }
+                } else {
+                    return Variable::new(output_tensor, false);
+                }
+            }
+            // Fall through to CPU path if GPU conv failed
+        }
+
         let input_vec = input_data.to_vec();
         let weight_vec = weight_data.to_vec();
 
-        let mut output_data = vec![0.0f32; batch_size * self.out_channels * out_height * out_width];
+        // Try GPU im2col+GEMM for groups=1 when data is on CPU but GPU is available
+        let conv_flops = self.out_channels * self.in_channels * kh * kw * out_height * out_width;
+        let output_data = if self.groups == 1 && conv_flops >= 500_000 {
+            let bias_vec = self.bias.as_ref().map(|b| b.data().to_vec());
+            let gpu_result = axonml_core::backends::cuda::cuda_conv2d_forward(
+                &input_vec,
+                &weight_vec,
+                bias_vec.as_deref(),
+                batch_size,
+                self.in_channels,
+                in_height,
+                in_width,
+                self.out_channels,
+                kh, kw,
+                sh, sw,
+                ph, pw,
+            );
 
-        let in_channels_per_group = self.in_channels / self.groups;
-        let out_channels_per_group = self.out_channels / self.groups;
-
-        for b in 0..batch_size {
-            for g in 0..self.groups {
-                let ic_start = g * in_channels_per_group;
-                let oc_start = g * out_channels_per_group;
-
-                for oc_local in 0..out_channels_per_group {
-                    let oc = oc_start + oc_local;
-                    for oh in 0..out_height {
-                        for ow in 0..out_width {
-                            let mut sum = 0.0f32;
-
-                            for ic_local in 0..in_channels_per_group {
-                                let ic = ic_start + ic_local;
-                                for ki in 0..kh {
-                                    for kj in 0..kw {
-                                        let ih = oh * sh + ki;
-                                        let iw = ow * sw + kj;
-
-                                        if ih < ph
-                                            || ih >= in_height + ph
-                                            || iw < pw
-                                            || iw >= in_width + pw
-                                        {
-                                            continue;
-                                        }
-
-                                        let actual_ih = ih - ph;
-                                        let actual_iw = iw - pw;
-
-                                        let input_idx = b * self.in_channels * in_height * in_width
-                                            + ic * in_height * in_width
-                                            + actual_ih * in_width
-                                            + actual_iw;
-
-                                        // weight: (out_channels, in_channels_per_group, kh, kw)
-                                        let weight_idx = oc * in_channels_per_group * kh * kw
-                                            + ic_local * kh * kw
-                                            + ki * kw
-                                            + kj;
-
-                                        sum += input_vec[input_idx] * weight_vec[weight_idx];
-                                    }
-                                }
-                            }
-
-                            if let Some(ref bias) = self.bias {
-                                sum += bias.data().to_vec()[oc];
-                            }
-
-                            let output_idx = b * self.out_channels * out_height * out_width
-                                + oc * out_height * out_width
-                                + oh * out_width
-                                + ow;
-                            output_data[output_idx] = sum;
-                        }
-                    }
-                }
+            if let Some(result) = gpu_result {
+                result
+            } else {
+                conv2d_im2col(
+                    &input_vec,
+                    &weight_vec,
+                    self.bias.as_ref().map(|b| b.data().to_vec()).as_deref(),
+                    batch_size,
+                    self.in_channels,
+                    in_height,
+                    in_width,
+                    self.out_channels,
+                    kh, kw,
+                    sh, sw,
+                    ph, pw,
+                    self.groups,
+                )
             }
-        }
+        } else {
+            conv2d_im2col(
+                &input_vec,
+                &weight_vec,
+                self.bias.as_ref().map(|b| b.data().to_vec()).as_deref(),
+                batch_size,
+                self.in_channels,
+                in_height,
+                in_width,
+                self.out_channels,
+                kh, kw,
+                sh, sw,
+                ph, pw,
+                self.groups,
+            )
+        };
 
         let output_tensor = Tensor::from_vec(
             output_data,

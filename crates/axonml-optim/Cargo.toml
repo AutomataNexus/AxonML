@@ -11,6 +11,10 @@ documentation.workspace = true
 description = "Optimizers and learning rate schedulers for the Axonml ML framework"
 readme = "README.md"
 
+[features]
+default = []
+cuda = ["axonml-core/cuda", "axonml-tensor/cuda"]
+
 [dependencies]
 axonml-core.workspace = true
 axonml-tensor.workspace = true
