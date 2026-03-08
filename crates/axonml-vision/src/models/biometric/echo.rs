@@ -1,51 +1,18 @@
 //! Echo — Voice Identity via Predictive Speaker Residuals (~68K params)
 //!
-//! A "generic speech predictor" learns to predict the next mel frame.
-//! For a known speaker, prediction errors are LOW. The prediction residuals
-//! — what's unpredictable about your voice — ARE the speaker identity.
-//! Identity = what cannot be predicted.
+//! # File
+//! `crates/axonml-vision/src/models/biometric/echo.rs`
 //!
-//! # Novel Mechanisms
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **Predictive Coding**: GRU-based autoregressive predictor learns the temporal
-//!   structure of speech. Adapts from Nexus's surprise-gated prediction paradigm.
-//! - **Residual Identity**: The prediction *errors* (what's unique about your voice)
-//!   become the identity signal. A second encoder processes only these residuals.
-//! - **Statistics Pooling**: Mean + standard deviation across time captures both
-//!   the average and variability of the speaker's residual signature.
-//! - **Prediction Error Magnitude**: The overall prediction error serves as a
-//!   novelty detector — enrolled speakers have low error, impostors have high error.
-//! - **Replay/Spoofing Detection**: Spectral flatness analysis detects compressed
-//!   frequency distributions characteristic of replayed/synthesized audio.
-//! - **Voice Activity Detection**: Energy-based adaptive VAD for skipping silence
-//!   during enrollment and verification.
-//! - **Temporal Consistency Scoring**: Measures speaker embedding stability across
-//!   utterance segments to assess identity reliability.
-//! - **Speaking Rate Estimation**: Syllable-rate estimation from mel energy envelope
-//!   modulation for normalizing voice features across speaking styles.
+//! # Updated
+//! March 8, 2026
 //!
-//! # Architecture
-//!
-//! ```text
-//! Mel Spectrogram [B, 40, T]
-//!   ├── Speech Predictor:
-//!   │   ├── Conv1d(40→64, k=5, p=2) + ReLU → encoded [B, 64, T]
-//!   │   ├── GRUCell(64→64) per frame → predictions [B, 64, T]
-//!   │   └── Conv1d(64→40, k=3, p=1) → predicted_mel [B, 40, T]
-//!   │
-//!   ├── Residuals: actual_mel - predicted_mel → [B, 40, T]  (sub_var)
-//!   │
-//!   ├── Residual Encoder:
-//!   │   ├── Conv1d(40→48, k=3, p=1) + ReLU → [B, 48, T]
-//!   │   └── Conv1d(48→64, k=3, s=2, p=1) + ReLU → [B, 64, T/2]
-//!   │
-//!   ├── Statistics Pool: mean + std across time → [B, 128]
-//!   │
-//!   ├── Speaker Head: Linear(128→64) → L2-normalize → speaker embedding [B, 64]
-//!   └── Uncertainty Head: Linear(128→1) → log_variance [B, 1]
-//! ```
-//!
-//! @version 0.3.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{Conv1d, GRUCell, Linear, Module, Parameter};

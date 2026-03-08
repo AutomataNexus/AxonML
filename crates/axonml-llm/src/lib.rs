@@ -1,35 +1,18 @@
 //! axonml-llm - Large Language Model Architectures
 //!
-//! This crate provides implementations of popular transformer-based language models
-//! including BERT, GPT-2, LLaMA, Mistral, and Phi, along with building blocks for
-//! custom LLM architectures.
+//! # File
+//! `crates/axonml-llm/src/lib.rs`
 //!
-//! # Key Features
-//! - BERT (Bidirectional Encoder Representations from Transformers)
-//! - GPT-2 (Generative Pre-trained Transformer 2)
-//! - LLaMA (Large Language Model Meta AI) with RoPE and SwiGLU
-//! - Mistral with sliding window attention
-//! - Phi with partial rotary embeddings
-//! - KV-cache for efficient autoregressive generation
-//! - Transformer building blocks (attention, feed-forward, positional encoding)
-//! - Text generation utilities
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```ignore
-//! use axonml_llm::{GPT2, GPT2Config};
-//! use axonml_tensor::Tensor;
+//! # Updated
+//! March 8, 2026
 //!
-//! // Create a GPT-2 model
-//! let config = GPT2Config::small();
-//! let model = GPT2::new(&config);
-//!
-//! // Generate text
-//! let input_ids = Tensor::from_vec(vec![50256u32], &[1, 1]).unwrap();
-//! let output = model.forward(&input_ids);
-//! ```
-//!
-//! @version 0.2.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

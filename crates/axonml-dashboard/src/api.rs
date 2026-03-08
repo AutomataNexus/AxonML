@@ -1,6 +1,18 @@
 //! HTTP API Client for AxonML Backend
 //!
-//! Provides async functions for all backend API endpoints.
+//! # File
+//! `crates/axonml-dashboard/src/api.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use gloo_net::http::{Request, RequestBuilder};
 use gloo_storage::Storage;

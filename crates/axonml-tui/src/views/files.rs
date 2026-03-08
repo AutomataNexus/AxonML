@@ -1,10 +1,18 @@
 //! Files View - File Browser for Model and Data Files
 //!
-//! Provides a tree-like file browser to navigate directories and
-//! open model/data files for viewing and training.
+//! # File
+//! `crates/axonml-tui/src/views/files.rs`
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::path::PathBuf;
 

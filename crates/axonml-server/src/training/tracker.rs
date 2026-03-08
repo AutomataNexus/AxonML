@@ -1,6 +1,18 @@
 //! Training metrics tracker for AxonML
 //!
-//! Collects and stores training metrics in real-time.
+//! # File
+//! `crates/axonml-server/src/training/tracker.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::db::runs::{RunRepository, RunStatus, TrainingMetrics};
 use crate::db::Database;

@@ -1,24 +1,18 @@
 //! Model Benchmarking Utilities
 //!
-//! Provides utilities for benchmarking model inference and comparing performance.
+//! # File
+//! `crates/axonml/src/benchmark.rs`
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml::benchmark::{benchmark_model, warmup_model};
-//! use axonml::nn::Linear;
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! let model = Linear::new(784, 10);
-//! let input = Tensor::randn(&[32, 784]);
+//! # Updated
+//! March 8, 2026
 //!
-//! // Warmup
-//! warmup_model(&model, &input, 5);
-//!
-//! // Benchmark
-//! let result = benchmark_model(&model, &input, 100);
-//! result.print_summary();
-//! ```
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::time::Instant;
 

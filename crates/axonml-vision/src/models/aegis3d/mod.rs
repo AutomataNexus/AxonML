@@ -1,40 +1,18 @@
 //! Aegis3D — Octree-Adaptive Neural Implicit Surface Reconstruction
 //!
-//! A novel pure-Rust, edge-deployable, end-to-end differentiable 3D
-//! reconstruction pipeline. No existing framework offers this combination:
+//! # File
+//! `crates/axonml-vision/src/models/aegis3d/mod.rs`
 //!
-//! 1. **Octree-Adaptive SDF**: Each octree leaf stores a small SDF network.
-//!    Adaptively subdivides near surfaces. O(log N) query vs O(N) dense grids.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! 2. **Depth-Guided Initialization**: Uses monocular depth to initialize
-//!    the octree from even a single image, dramatically reducing convergence.
+//! # Updated
+//! March 8, 2026
 //!
-//! 3. **Progressive LOD**: Same model, different resolution. Edge queries
-//!    coarse levels (0-4), server queries all (0-8). No separate model needed.
-//!
-//! 4. **Incremental Updates**: New views update only affected octree nodes.
-//!
-//! 5. **Zero-dependency mesh export**: Pure Rust marching cubes → OBJ/STL.
-//!    Cross-compiles to ARM, x86, WASM.
-//!
-//! # Example
-//!
-//! ```ignore
-//! use axonml_vision::models::aegis3d::Aegis3D;
-//!
-//! let mut aegis = Aegis3D::new();
-//!
-//! // Single-image reconstruction
-//! let mesh = aegis.reconstruct_single(&image);
-//! mesh.save_obj("output.obj").unwrap();
-//!
-//! // Multi-view incremental reconstruction
-//! aegis.add_view(&image1, &camera1);
-//! aegis.add_view(&image2, &camera2);
-//! aegis.optimize(100);
-//! let mesh = aegis.extract_mesh(64);
-//! mesh.save_stl("output.stl").unwrap();
-//! ```
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod implicit;
 pub mod mesh;

@@ -1,15 +1,18 @@
 //! WIDER FACE Dataset — Face Detection Benchmark
 //!
-//! Loader for the WIDER FACE dataset (http://shuoyang1213.me/WIDERFACE/).
+//! # File
+//! `crates/axonml-vision/src/datasets/wider_face.rs`
 //!
-//! Expected directory structure:
-//! ```text
-//! root/
-//!   WIDER_train/images/0--Parade/0_Parade_marchingband_1_849.jpg
-//!   wider_face_split/wider_face_train_bbx_gt.txt
-//! ```
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_tensor::Tensor;
 use std::path::{Path, PathBuf};

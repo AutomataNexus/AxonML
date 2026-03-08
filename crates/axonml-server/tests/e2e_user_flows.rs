@@ -1,7 +1,18 @@
 //! End-to-end user flow tests
 //!
-//! These tests simulate complete user workflows to ensure
-//! all features work together correctly.
+//! # File
+//! `crates/axonml-server/tests/e2e_user_flows.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 mod common;
 

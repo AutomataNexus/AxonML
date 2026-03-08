@@ -1,6 +1,18 @@
 //! Model Tools API endpoints for AxonML
 //!
-//! Provides model inspection, conversion, quantization, and export functionality.
+//! # File
+//! `crates/axonml-server/src/api/tools.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_serialize::{load_state_dict, save_state_dict, Format, StateDict, TensorData};
 use axum::{

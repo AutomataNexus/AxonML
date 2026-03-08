@@ -1,19 +1,18 @@
 //! Helios — High-Efficiency Lightweight Inference Object Sentinel
 //!
-//! YOLO-competitive anchor-free object detector with CSPDarknet backbone,
-//! PANet neck, and decoupled detection head with Distribution Focal Loss.
+//! # File
+//! `crates/axonml-vision/src/models/helios/mod.rs`
 //!
-//! # Model Sizes
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! | Size   | Width | Depth | Approx Params |
-//! |--------|-------|-------|---------------|
-//! | Nano   | 0.25  | 0.33  | ~3M           |
-//! | Small  | 0.50  | 0.33  | ~9M           |
-//! | Medium | 0.75  | 0.67  | ~23M          |
-//! | Large  | 1.00  | 1.00  | ~44M          |
-//! | XLarge | 1.25  | 1.00  | ~68M          |
+//! # Updated
+//! March 8, 2026
 //!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod backbone;
 pub mod detector;

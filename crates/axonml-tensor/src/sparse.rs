@@ -1,26 +1,18 @@
 //! Sparse Tensor Support
 //!
-//! Provides sparse tensor representations for memory-efficient storage and
-//! computation when tensors have many zero elements.
+//! # File
+//! `crates/axonml-tensor/src/sparse.rs`
 //!
-//! # Formats
-//! - COO (Coordinate): Best for construction and random access
-//! - CSR (Compressed Sparse Row): Best for row-wise operations and matrix-vector products
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_tensor::sparse::{SparseTensor, SparseFormat};
+//! # Updated
+//! March 8, 2026
 //!
-//! // Create from COO format
-//! let indices = vec![(0, 1), (1, 0), (2, 2)];
-//! let values = vec![1.0, 2.0, 3.0];
-//! let sparse = SparseTensor::from_coo(&indices, &values, &[3, 3]);
-//!
-//! // Convert to dense
-//! let dense = sparse.to_dense();
-//! ```
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::Tensor;
 

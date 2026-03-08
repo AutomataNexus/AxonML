@@ -1,16 +1,18 @@
 //! AxonML Server - REST API for Machine Learning
 //!
-//! Provides HTTP API for training management, model registry, and inference.
+//! # File
+//! `crates/axonml-server/src/main.rs`
 //!
-//! # Usage
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ```bash
-//! # Start the server
-//! axonml-server
+//! # Updated
+//! March 8, 2026
 //!
-//! # With custom host and port
-//! axonml-server --host 0.0.0.0 --port 3000
-//! ```
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 mod api;
 mod auth;

@@ -1,9 +1,18 @@
 //! Mesh Generation and Export
 //!
-//! Pure-Rust marching cubes implementation for extracting triangle meshes
-//! from signed distance fields. Exports to OBJ and STL formats.
+//! # File
+//! `crates/axonml-vision/src/models/aegis3d/mesh.rs`
 //!
-//! Zero external dependencies — cross-compiles to ARM, x86, WASM.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![allow(missing_docs)]
 

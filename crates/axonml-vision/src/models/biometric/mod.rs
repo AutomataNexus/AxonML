@@ -1,34 +1,18 @@
 //! Aegis Identity — Novel Unified Biometric Framework
 //!
-//! A genuinely novel biometric framework exploiting AxonML's unique temporal,
-//! predictive, and event-driven primitives. Identity crystallizes over time
-//! through GRU hidden state convergence. Every modality carries uncertainty.
-//! Fusion is belief propagation, not score averaging.
+//! # File
+//! `crates/axonml-vision/src/models/biometric/mod.rs`
 //!
-//! # Novel Paradigms (unique to AxonML)
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **Temporal Crystallization**: Identity emerges from GRU attractor convergence
-//! - **Evidential Uncertainty**: Dirichlet-based second-order uncertainty
-//! - **Predictive Residual Identity**: You ARE what can't be predicted
-//! - **Event-Driven Ridge Fields**: Fingerprints as directional event streams
-//! - **Polar-Native Convolutions**: Iris processing in natural coordinates
-//! - **Belief Propagation Fusion**: Dynamic uncertainty-aware multimodal fusion
-//! - **Temporal Liveness Detection**: Anti-spoofing via hidden state dynamics
-//! - **Identity Drift Monitoring**: Detect gradual biometric template aging
-//! - **Forensic Analysis**: Per-dimension contribution and conflict reporting
+//! # Updated
+//! March 8, 2026
 //!
-//! # Architectures
-//!
-//! - **Mnemosyne**: Face identity via temporal crystallization (~115K params)
-//! - **Ariadne**: Fingerprint via ridge event fields (~65K params)
-//! - **Echo**: Voice via predictive speaker residuals (~68K params)
-//! - **Argus**: Iris via radial phase encoding (~65K params)
-//! - **Themis**: Multimodal belief propagation fusion (~49K params)
-//!
-//! Total: ~362K params, <2MB f32, <400KB INT8. Each deployable on Pi.
-//!
-//! @version 0.3.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod ariadne;
 pub mod argus;

@@ -1,17 +1,18 @@
 //! Data Types - Axonml Type System
 //!
-//! Defines the data types supported by Axonml tensors and provides traits
-//! for type-safe operations. Supports floating point (f16, f32, f64),
-//! integer (i8, i16, i32, i64, u8), and boolean types.
+//! # File
+//! `crates/axonml-core/src/dtype.rs`
 //!
-//! # Key Features
-//! - Type-safe numeric operations via traits
-//! - Runtime dtype information via `DType` enum
-//! - Half-precision (f16) support
-//! - Automatic type promotion rules
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use bytemuck::{Pod, Zeroable};
 use half::f16;

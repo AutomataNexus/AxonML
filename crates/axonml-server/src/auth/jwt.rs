@@ -1,6 +1,18 @@
 //! JWT authentication for AxonML
 //!
-//! Provides JWT token creation and validation.
+//! # File
+//! `crates/axonml-server/src/auth/jwt.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::AuthError;
 use chrono::{Duration, Utc};

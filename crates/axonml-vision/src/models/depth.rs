@@ -1,19 +1,18 @@
 //! Depth Estimation Models
 //!
-//! # Models
+//! # File
+//! `crates/axonml-vision/src/models/depth.rs`
 //!
-//! - **DPT**: Dense Prediction Transformer — ViT backbone with multi-scale
-//!   reassembly for monocular depth estimation (server-grade).
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **FastDepth**: Lightweight encoder-decoder with depthwise separable
-//!   convolutions for real-time depth on edge devices.
+//! # Updated
+//! March 8, 2026
 //!
-//! # References
-//!
-//! - DPT: "Vision Transformers for Dense Prediction" (Ranftl et al., 2021)
-//!   <https://arxiv.org/abs/2103.13413>
-//! - FastDepth: "FastDepth: Fast Monocular Depth Estimation on Embedded Systems"
-//!   (Wofk et al., 2019) <https://arxiv.org/abs/1903.03273>
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{

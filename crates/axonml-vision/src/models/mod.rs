@@ -1,51 +1,18 @@
 //! Vision Models
 //!
-//! Provides pre-defined neural network architectures for computer vision.
+//! # File
+//! `crates/axonml-vision/src/models/mod.rs`
 //!
-//! # Available Models
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ## Classification
-//! - **`LeNet`**: Classic architecture for MNIST
-//! - **`SimpleCNN`**: Flexible CNN for quick experiments
-//! - **`ResNet`**: Deep residual networks (`ResNet18`, `ResNet34`)
-//! - **VGG**: Very deep networks (VGG11, VGG13, VGG16, VGG19)
-//! - **`VisionTransformer`**: Attention-based image classification (`ViT`)
+//! # Updated
+//! March 8, 2026
 //!
-//! ## Detection
-//! - **`Helios`**: YOLO-competitive anchor-free detector (Nano 3M → XLarge 68M)
-//! - **`RetinaFace`**: Server-grade face detection with landmarks
-//! - **`BlazeFace`**: Edge face detection (~100K params)
-//! - **DETR**: End-to-end object detection with Transformers
-//! - **`NanoDet`**: Edge anchor-free object detection (<1M params)
-//!
-//! ## Anomaly Detection
-//! - **`PatchCore`**: Feature-based anomaly detection (no anomaly training data needed)
-//! - **`StudentTeacher`**: Lightweight edge anomaly detection
-//!
-//! ## Depth Estimation
-//! - **DPT**: Dense Prediction Transformer for monocular depth
-//! - **`FastDepth`**: Lightweight edge depth estimation
-//!
-//! ## Visual Question Answering
-//! - **`VQAModel`**: Image + text -> answer classification
-//!
-//! ## 3D Reconstruction
-//! - **`Aegis3D`**: Octree-adaptive neural implicit surface reconstruction
-//!   - Progressive LOD, depth-guided init, OBJ/STL mesh export
-//!
-//! ## Biometric Identity (Aegis Identity)
-//! - **Mnemosyne**: Face identity via temporal crystallization (~115K params)
-//! - **Ariadne**: Fingerprint via ridge event fields (~65K params)
-//! - **Echo**: Voice via predictive speaker residuals (~68K params)
-//! - **Argus**: Iris via radial phase encoding (~65K params)
-//! - **Themis**: Multimodal belief propagation fusion (~49K params)
-//! - **AegisIdentity**: Unified biometric API (enroll/verify/identify)
-//!
-//! ## Infrastructure
-//! - **FPN**: Feature Pyramid Network (shared by detection models)
-//!
-//! @version 0.2.0
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod aegis3d;
 pub mod anomaly;

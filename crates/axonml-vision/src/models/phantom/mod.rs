@@ -1,27 +1,18 @@
 //! Phantom — Temporal Event-Driven Face Detection
 //!
-//! A novel face detection architecture that generates pseudo-events from
-//! standard camera frames (no neuromorphic hardware needed), processes only
-//! changed regions, and maintains persistent face identity via GRU state.
+//! # File
+//! `crates/axonml-vision/src/models/phantom/mod.rs`
 //!
-//! # Key Innovations
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! 1. **Pseudo-event generation** on standard cameras via frame differencing
-//! 2. **Sparse processing** — only event-active regions get heavy compute
-//! 3. **Predictive tracking** — GRU state per face predicts next location
-//! 4. **Implicit identity** — tracking ID from temporal continuity
-//! 5. **Confidence accumulation** — faces tracked over time gain higher confidence
+//! # Updated
+//! March 8, 2026
 //!
-//! # Efficiency Profile
-//!
-//! - Frame 1: 100% compute (full backbone, cold start)
-//! - Frame 5: ~30% compute (only event regions processed)
-//! - Frame 30: ~5% compute (predictions accurate, minimal events)
-//! - Static scene: ~0% compute (cached backbone, no events)
-//!
-//! ~126K params. <500KB float32. <130KB INT8. Trivially runs on Pi.
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod backbone;
 pub mod detector;

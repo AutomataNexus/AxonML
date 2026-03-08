@@ -1,25 +1,18 @@
 //! Axonml Core - Foundation Layer for the Axonml ML Framework
 //!
-//! This crate provides the core abstractions that underpin the entire Axonml
-//! machine learning framework. It handles device management, memory storage,
-//! data types, and backend implementations.
+//! # File
+//! `crates/axonml-core/src/lib.rs`
 //!
-//! # Key Features
-//! - Device abstraction (CPU, CUDA, Vulkan, Metal, WebGPU)
-//! - Type-safe data type system (f32, f64, f16, i32, i64, bool)
-//! - Efficient memory storage with reference counting
-//! - Pluggable backend architecture
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust
-//! use axonml_core::{Device, DType, Storage};
+//! # Updated
+//! March 8, 2026
 //!
-//! let device = Device::Cpu;
-//! let storage = Storage::<f32>::zeros(1024, device);
-//! ```
-//!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]

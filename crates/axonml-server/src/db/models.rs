@@ -1,7 +1,18 @@
 //! Model registry database operations for AxonML
 //!
-//! Uses Aegis-DB Document Store for models, versions, and endpoints.
-//! Uses Aegis-DB Time Series for inference metrics.
+//! # File
+//! `crates/axonml-server/src/db/models.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::{Database, DbError, DocumentQuery, TimeSeriesQuery};
 use chrono::{DateTime, Utc};

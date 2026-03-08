@@ -1,9 +1,18 @@
 //! PANet Neck for Helios
 //!
-//! Path Aggregation Network with top-down and bottom-up feature fusion.
-//! Outputs 3 multi-scale feature maps at strides 8, 16, 32.
+//! # File
+//! `crates/axonml-vision/src/models/helios/neck.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![allow(missing_docs)]
 

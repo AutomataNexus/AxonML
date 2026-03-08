@@ -1,21 +1,18 @@
 //! Pipeline Parallelism
 //!
-//! Implements pipeline parallelism for training large models across multiple devices.
-//! Splits the model into stages, with each stage running on a different device.
+//! # File
+//! `crates/axonml-distributed/src/pipeline.rs`
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_distributed::pipeline::{Pipeline, PipelineSchedule};
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! // Split model into 4 stages across 4 GPUs
-//! let pipeline = Pipeline::new(stages, process_group)
-//!     .schedule(PipelineSchedule::GPipe)
-//!     .num_microbatches(4);
+//! # Updated
+//! March 8, 2026
 //!
-//! let output = pipeline.forward(&input);
-//! ```
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::process_group::ProcessGroup;
 use axonml_autograd::Variable;

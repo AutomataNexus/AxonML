@@ -1,9 +1,18 @@
 //! Helios Training Loop — Complete Detection Training Pipeline
 //!
-//! Integrates model, loss, augmentation, EMA, and LR scheduling into
-//! a production-ready training loop for the Helios detector.
+//! # File
+//! `crates/axonml-vision/src/training/helios_trainer.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{Module, Parameter};

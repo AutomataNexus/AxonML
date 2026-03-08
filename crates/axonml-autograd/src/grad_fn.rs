@@ -1,11 +1,18 @@
 //! Gradient Function Traits - Differentiable Operation Interface
 //!
-//! Defines the interface for gradient functions that compute derivatives
-//! during the backward pass. Each differentiable operation implements
-//! `GradientFunction` to specify how gradients flow backward.
+//! # File
+//! `crates/axonml-autograd/src/grad_fn.rs`
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::any::Any;
 use std::fmt::Debug;

@@ -1,10 +1,18 @@
 //! Face State Tracker — GRU-based Persistent Face Identity
 //!
-//! Maintains per-face hidden state across frames using GRU cells.
-//! Implicit identity persistence: tracking ID emerges from temporal
-//! continuity without explicit re-identification networks.
+//! # File
+//! `crates/axonml-vision/src/models/phantom/tracker.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{GRUCell, Linear, Module, Parameter};

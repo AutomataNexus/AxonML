@@ -1,12 +1,18 @@
 //! Differentiable Renderer
 //!
-//! Sphere-tracing based renderer for neural implicit surfaces.
-//! Renders depth maps and normal maps from SDF fields by marching rays
-//! through the octree structure.
+//! # File
+//! `crates/axonml-vision/src/models/aegis3d/renderer.rs`
 //!
-//! The renderer is differentiable — gradients flow back through the
-//! rendering process to the SDF network parameters, enabling end-to-end
-//! training from 2D image supervision.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![allow(missing_docs)]
 

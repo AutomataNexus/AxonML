@@ -1,10 +1,18 @@
 //! Neural Implicit Surfaces
 //!
-//! Small MLP networks that map 3D coordinates to signed distance values (SDF).
-//! Uses Fourier feature positional encoding for high-frequency detail.
+//! # File
+//! `crates/axonml-vision/src/models/aegis3d/implicit.rs`
 //!
-//! Each octree leaf stores a `LocalSDF` network that only needs to represent
-//! geometry within its local cell, keeping networks tiny (3→64→64→1).
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![allow(missing_docs)]
 

@@ -1,7 +1,18 @@
 //! CUDA Kernel Registry
 //!
-//! Manages loading and caching of CUDA kernels for element-wise operations.
-//! Kernels are compiled from PTX at runtime using cudarc.
+//! # File
+//! `crates/axonml-core/src/backends/cuda_kernels/mod.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #[cfg(feature = "cuda")]
 use cudarc::driver::{CudaDevice, CudaFunction, LaunchConfig};

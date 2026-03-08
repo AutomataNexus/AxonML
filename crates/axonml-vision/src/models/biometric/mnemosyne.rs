@@ -1,62 +1,18 @@
 //! Mnemosyne — Face Identity via Temporal Crystallization (~115K params)
 //!
-//! Identity isn't computed from a single frame. A GRU hidden state evolves
-//! over multiple face observations, converging toward an "identity attractor."
-//! Quality-gated updates mean blurry frames barely shift the state. Matching
-//! compares converged attractors, not static embeddings.
+//! # File
+//! `crates/axonml-vision/src/models/biometric/mnemosyne.rs`
 //!
-//! # Novel Mechanisms
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **Quality-Gated GRU**: Frame quality (blur, occlusion) modulates GRU input
-//!   via learned sigmoid gate. Blurry frames contribute near-zero updates.
-//! - **Temporal Crystallization**: Identity emerges through GRU convergence.
-//!   Convergence velocity measures how rapidly the state is still changing —
-//!   low velocity = crystallized identity.
-//! - **Uncertainty-Weighted Matching**: Each identity carries per-embedding
-//!   uncertainty. Matching uses precision weighting, not raw cosine similarity.
-//! - **Adaptive Crystallization Rate**: The network learns when it has enough
-//!   evidence by predicting convergence velocity and log-variance.
-//! - **Temporal Liveness Detection**: Anti-spoofing via hidden state dynamics.
-//!   Real faces produce micro-variations in GRU trajectory; photos/screens
-//!   produce abnormally smooth or repetitive trajectories.
-//! - **Identity Drift Detection**: Compares current crystallized state to
-//!   original enrollment via cosine distance, detecting template aging.
-//! - **Attention-Weighted Multi-Frame Aggregation**: Processes face sequences
-//!   through the full crystallization pipeline tracking per-frame quality and
-//!   convergence velocity.
+//! # Updated
+//! March 8, 2026
 //!
-//! # Architecture
-//!
-//! ```text
-//! Input [B, 3, 64, 64]
-//!   ├── Stem: Conv2d(3→16, 3×3, s=2) + BN + ReLU → [B, 16, 32, 32]
-//!   ├── BlazeBlock1: DWSep(16→24, s=2) → [B, 24, 16, 16]
-//!   ├── BlazeBlock2: DWSep(24→32, s=2) → [B, 32, 8, 8]
-//!   ├── BlazeBlock3: DWSep(32→48, s=2) → [B, 48, 4, 4]
-//!   ├── AdaptiveAvgPool2d(1,1) → [B, 48, 1, 1]
-//!   ├── Flatten → [B, 48]
-//!   ├── Linear(48→96) + ReLU → face encoding [B, 96]
-//!   ├── Quality Gate: Linear(96→1) + σ → quality [B, 1]
-//!   ├── Gated Input: encoding ⊙ quality.expand → [B, 96]
-//!   ├── GRUCell(96→64): hidden = GRU(gated_input, hidden) → [B, 64]
-//!   └── Convergence Head: Linear(64→2) → (velocity_logit, log_variance)
-//! ```
-//!
-//! # Parameter Budget
-//!
-//! | Component       | Params |
-//! |-----------------|--------|
-//! | Stem conv+BN    | ~480   |
-//! | BlazeBlock1     | ~1.2K  |
-//! | BlazeBlock2     | ~1.8K  |
-//! | BlazeBlock3     | ~3.6K  |
-//! | face_proj       | ~4.7K  |
-//! | quality_gate    | ~97    |
-//! | GRUCell(96→64)  | ~31K   |
-//! | convergence     | ~130   |
-//! | **Total**       | **~43K** |
-//!
-//! @version 0.3.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{AdaptiveAvgPool2d, BatchNorm2d, Conv2d, GRUCell, Linear, Module, Parameter};

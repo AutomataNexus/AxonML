@@ -1,10 +1,18 @@
 //! Object Memory Bank — GRU-based Persistent Object Tracking
 //!
-//! Maintains a GRU hidden state per detected object across frames.
-//! Objects are matched via IoU to previous detections, and their
-//! state is refined rather than re-detected from scratch.
+//! # File
+//! `crates/axonml-vision/src/models/nexus/memory.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![allow(missing_docs)]
 

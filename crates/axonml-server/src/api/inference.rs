@@ -1,6 +1,18 @@
 //! Inference API endpoints for AxonML
 //!
-//! Handles inference endpoint management and predictions.
+//! # File
+//! `crates/axonml-server/src/api/inference.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};

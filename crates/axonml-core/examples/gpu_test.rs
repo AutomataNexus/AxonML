@@ -1,15 +1,18 @@
 //! GPU Backend Test Runner
 //!
-//! This example tests all available GPU backends and reports results.
+//! # File
+//! `crates/axonml-core/examples/gpu_test.rs`
 //!
-//! Run with:
-//! ```bash
-//! # Test CUDA backend
-//! cargo run --example gpu_test --features cuda
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Test all available backends
-//! cargo run --example gpu_test --features "cuda vulkan wgpu"
-//! ```
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_core::backends::gpu_tests::{
     detect_gpu_backends, print_gpu_info, GpuTestConfig, GpuTestReport,

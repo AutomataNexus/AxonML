@@ -1,17 +1,18 @@
 //! Views and Slicing - Tensor Indexing Operations
 //!
-//! Provides functionality for creating views into tensors through slicing,
-//! indexing, and masking operations. Views share storage with the original
-//! tensor when possible, avoiding unnecessary copies.
+//! # File
+//! `crates/axonml-tensor/src/view.rs`
 //!
-//! # Key Features
-//! - Zero-copy slicing for contiguous ranges
-//! - Advanced indexing with integer arrays
-//! - Boolean masking
-//! - Gather and scatter operations
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_core::dtype::{Numeric, Scalar};
 use axonml_core::error::{Error, Result};

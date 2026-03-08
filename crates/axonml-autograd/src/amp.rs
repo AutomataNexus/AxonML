@@ -1,20 +1,18 @@
 //! Automatic Mixed Precision (AMP) Support
 //!
-//! Provides autocast contexts and utilities for mixed precision training.
-//! Autocast enables automatic dtype casting for better performance on modern GPUs.
+//! # File
+//! `crates/axonml-autograd/src/amp.rs`
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_autograd::amp::{autocast, is_autocast_enabled};
-//! use axonml_core::DType;
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! // Run forward pass with autocast
-//! let output = autocast(DType::F16, || {
-//!     model.forward(&input)
-//! });
-//! ```
+//! # Updated
+//! March 8, 2026
 //!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::cell::Cell;
 

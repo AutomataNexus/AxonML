@@ -1,13 +1,18 @@
 //! Sparse Layers - Differentiable Structured Sparsity
 //!
-//! Implements differentiable pruning for neural networks. Unlike PyTorch's static
-//! pruning (torch.nn.utils.prune), AxonML's sparsity is learned end-to-end during
-//! training via soft thresholding. The pruning mask is a differentiable function
-//! of learnable threshold parameters, so gradients flow through the mask and the
-//! network learns which weights to prune.
+//! # File
+//! `crates/axonml-nn/src/layers/sparse.rs`
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

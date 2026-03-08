@@ -1,13 +1,18 @@
 //! Predictive Coding Module — Surprise-Gated Adaptive Compute
 //!
-//! Implements the free-energy principle at the detection level:
-//! - Maintains a prediction of current frame's features
-//! - Computes surprise = |actual - predicted|²
-//! - High-surprise regions get full compute; well-predicted regions get reuse
+//! # File
+//! `crates/axonml-vision/src/models/nexus/predictive.rs`
 //!
-//! This dramatically reduces computation on temporally consistent scenes.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![allow(missing_docs)]
 

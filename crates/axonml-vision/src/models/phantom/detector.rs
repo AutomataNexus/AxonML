@@ -1,14 +1,18 @@
 //! Phantom Detector — Temporal Event-Driven Face Detection
 //!
-//! The complete Phantom detection pipeline that combines:
-//! - Pseudo-event generation from standard camera frames
-//! - Sparse processing (only changed regions get heavy compute)
-//! - BlazeBlock backbone with feature caching
-//! - GRU-based persistent face tracking
+//! # File
+//! `crates/axonml-vision/src/models/phantom/detector.rs`
 //!
-//! Gets FASTER over time: static scenes use ~0% compute.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{Conv2d, Linear, Module, Parameter};

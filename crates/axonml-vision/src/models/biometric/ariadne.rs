@@ -1,53 +1,18 @@
 //! Ariadne — Fingerprint via Ridge Event Fields (~65K params)
 //!
-//! Treats fingerprint ridges as directional event fields. A learned Gabor bank
-//! extracts 8-orientation ridge responses. Ridge flow creates a continuous
-//! vector field. Matching compares field correlation, not minutiae points.
+//! # File
+//! `crates/axonml-vision/src/models/biometric/ariadne.rs`
 //!
-//! # Novel Mechanisms
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **Learned Gabor Bank**: 8 Conv2d filters initialized as Gabor wavelets
-//!   at distinct orientations, then fine-tuned during training. Captures
-//!   directional ridge structure without hand-crafted minutiae extraction.
-//! - **Ridge Event Fields**: Converts orientation + magnitude into a 2-channel
-//!   event field [orientation_encoding, magnitude], analogous to Phantom's
-//!   motion event representation.
-//! - **Depthwise Separable Field Encoding**: Lightweight BlazeBlock-style
-//!   convolutions process the ridge field, capturing spatial relationships
-//!   between ridge orientations.
-//! - **Spatial Hashing**: 1x1 convolution + adaptive pooling compresses the
-//!   spatial layout into a compact hash for efficient matching.
-//! - **Ridge Density Quality Map**: Gabor response magnitudes aggregated over
-//!   8x8 cells to estimate local ridge density — high-quality regions have
-//!   consistent, moderate density values.
-//! - **Core/Delta Singularity Detection**: Poincare index method on the
-//!   orientation field to locate core (convergence) and delta (tri-radii)
-//!   singular points for fingerprint classification.
-//! - **Partial Fingerprint Matching**: Spatial-hash sub-region comparison
-//!   allows matching partial latent prints against full enrollments.
-//! - **Orientation Consistency Score**: Measures smoothness of the ridge
-//!   flow field — inconsistent flow indicates poor quality or damage.
+//! # Updated
+//! March 8, 2026
 //!
-//! # Architecture
-//!
-//! ```text
-//! Input [B, 1, 128, 128]
-//!   +-- 8x Gabor Conv2d(1->1, 7x7, p=3) -> 8 orientation responses
-//!   +-- Soft-argmax -> ridge_events [B, 2, 128, 128]
-//!   |     ch0 = dominant orientation (atan2/pi)
-//!   |     ch1 = response magnitude
-//!   +-- DWSep Block1 (2->16, s=2) -> [B, 16, 64, 64]
-//!   +-- DWSep Block2 (16->32, s=2) -> [B, 32, 32, 32]
-//!   +-- DWSep Block3 (32->64, s=1) -> [B, 64, 32, 32]
-//!   +-- Spatial Hash: Conv2d(64->16, 1x1) + BN + ReLU
-//!   +-- AdaptiveAvgPool2d(4, 4) -> [B, 16, 4, 4] = 256
-//!   +-- Flatten -> [B, 256]
-//!   +-- Linear(256->64) + ReLU
-//!   +-- Linear(64->128) -> L2-normalize -> embedding [B, 128]
-//!   +-- Uncertainty: Linear(256->1) -> log_variance [B, 1]
-//! ```
-//!
-//! @version 0.3.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{AdaptiveAvgPool2d, BatchNorm2d, Conv2d, Linear, Module, Parameter};

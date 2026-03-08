@@ -1,34 +1,18 @@
 //! Gradient Checkpointing - Memory-Efficient Training
 //!
-//! Implements gradient checkpointing (also called activation checkpointing) to
-//! trade compute for memory during backpropagation. Instead of storing all
-//! intermediate activations, checkpointed segments recompute them during backward.
+//! # File
+//! `crates/axonml-autograd/src/checkpoint.rs`
 //!
-//! This is essential for training large models that don't fit in GPU memory.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_autograd::checkpoint::checkpoint;
+//! # Updated
+//! March 8, 2026
 //!
-//! // Checkpoint a transformer block to save memory
-//! let output = checkpoint(|x| {
-//!     let attn_out = self_attention.forward(x);
-//!     let ff_out = feed_forward.forward(&attn_out);
-//!     ff_out
-//! }, &input);
-//! ```
-//!
-//! # Memory vs Compute Tradeoff
-//!
-//! Without checkpointing:
-//! - Memory: O(n) where n is number of layers
-//! - Compute: O(n) forward + O(n) backward = O(n)
-//!
-//! With checkpointing every k layers:
-//! - Memory: O(n/k)
-//! - Compute: O(n) forward + O(n/k * k) recompute + O(n) backward = O(2n)
-//!
-//! @version 0.2.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::grad_fn::{GradFn, GradientFunction};
 use crate::no_grad::{enable_grad, no_grad};

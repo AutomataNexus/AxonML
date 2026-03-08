@@ -1,17 +1,18 @@
 //! Camera Capture and Inference Pipeline
 //!
-//! Provides hardware-agnostic camera capture and real-time inference for
-//! deploying detection models on Pi cameras, laptop webcams, and test replays.
+//! # File
+//! `crates/axonml-vision/src/camera/mod.rs`
 //!
-//! # Components
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **`CaptureBackend`**: Trait for camera capture backends
-//! - **`FileBackend`**: Reads frames from disk for testing/replay
-//! - **`V4L2Backend`**: Linux V4L2 camera capture (Linux only)
-//! - **`InferencePipeline`**: Generic capture → preprocess → detect loop
-//! - **`preprocess`**: Color conversion, resize, normalize (pure Rust)
+//! # Updated
+//! March 8, 2026
 //!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod file;
 pub mod pipeline;

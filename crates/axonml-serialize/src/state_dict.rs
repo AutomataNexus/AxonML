@@ -1,6 +1,18 @@
 //! State Dictionary - Model parameter storage
 //!
-//! Provides `StateDict` for storing and retrieving model parameters by name.
+//! # File
+//! `crates/axonml-serialize/src/state_dict.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_core::Result;
 use axonml_nn::Module;

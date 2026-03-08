@@ -1,19 +1,18 @@
 //! Anomaly Detection Models
 //!
-//! # Models
+//! # File
+//! `crates/axonml-vision/src/models/anomaly.rs`
 //!
-//! - **PatchCore**: Feature-based anomaly detection using a pretrained backbone
-//!   and k-NN memory bank. No training on anomalies needed — fit on normal data only.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **StudentTeacher**: Lightweight anomaly detector for edge deployment.
-//!   A student network is trained to match a frozen teacher on normal data.
-//!   Anomalies cause disagreement between student and teacher features.
+//! # Updated
+//! March 8, 2026
 //!
-//! # Reference
-//!
-//! - PatchCore: "Towards Total Recall in Industrial Anomaly Detection"
-//!   (Roth et al., 2022) <https://arxiv.org/abs/2106.08265>
-//! - Student-Teacher: "Uninformed Students" (Bergmann et al., 2020)
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter, ReLU};

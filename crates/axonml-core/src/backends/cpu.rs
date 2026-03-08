@@ -1,15 +1,18 @@
 //! CPU Backend - Host Memory Operations
 //!
-//! Provides the CPU implementation for tensor operations using host memory.
-//! This is the default backend that is always available.
+//! # File
+//! `crates/axonml-core/src/backends/cpu.rs`
 //!
-//! # Key Features
-//! - SIMD-optimized operations where possible
-//! - Multi-threaded execution via rayon
-//! - matrixmultiply crate for optimized GEMM operations
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::Backend;
 use crate::device::DeviceCapabilities;

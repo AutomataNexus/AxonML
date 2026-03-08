@@ -1,6 +1,18 @@
 //! Recovery codes for AxonML
 //!
-//! Provides generation and verification of backup recovery codes.
+//! # File
+//! `crates/axonml-server/src/auth/recovery.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::AuthError;
 use argon2::{

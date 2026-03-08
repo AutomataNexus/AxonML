@@ -1,11 +1,18 @@
 //! No-Grad Context - Disable Gradient Computation
 //!
-//! Provides context managers for temporarily disabling gradient computation.
-//! This is essential for inference, evaluation, and parts of training that
-//! don't need gradients (like updating running statistics in `BatchNorm`).
+//! # File
+//! `crates/axonml-autograd/src/no_grad.rs`
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::cell::Cell;
 

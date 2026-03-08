@@ -1,39 +1,18 @@
 //! JIT Compilation for Axonml
 //!
-//! This crate provides Just-In-Time compilation for tensor operations,
-//! enabling significant performance improvements through:
+//! # File
+//! `crates/axonml-jit/src/lib.rs`
 //!
-//! - Operation tracing and graph construction
-//! - Graph optimization (fusion, constant folding, dead code elimination)
-//! - Native code generation via Cranelift
-//! - Compiled function caching
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
+//! # Updated
+//! March 8, 2026
 //!
-//! ```ignore
-//! use axonml_jit::{JitCompiler, trace};
-//!
-//! // Trace operations to build a computation graph
-//! let graph = trace(|tracer| {
-//!     let a = tracer.input("a", &[2, 3]);
-//!     let b = tracer.input("b", &[2, 3]);
-//!     let c = a.add(&b);
-//!     let d = c.mul_scalar(2.0);
-//!     tracer.output("result", d)
-//! });
-//!
-//! // Compile the graph
-//! let compiler = JitCompiler::new();
-//! let compiled = compiler.compile(&graph)?;
-//!
-//! // Execute with real tensors
-//! let a = Tensor::randn(&[2, 3]);
-//! let b = Tensor::randn(&[2, 3]);
-//! let result = compiled.run(&[("a", &a), ("b", &b)])?;
-//! ```
-//!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![allow(clippy::module_name_repetitions)]

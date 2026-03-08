@@ -1,16 +1,18 @@
 //! Adaptive Octree for Spatial Acceleration
 //!
-//! An octree data structure where each leaf node stores a local SDF network.
-//! The tree adaptively subdivides near surfaces, allocating compute where
-//! geometry is complex while keeping empty/distant regions coarse.
+//! # File
+//! `crates/axonml-vision/src/models/aegis3d/octree.rs`
 //!
-//! # Key Properties
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **Depth-guided initialization**: Uses monocular depth to place initial
-//!   subdivisions near predicted surfaces
-//! - **Progressive LOD**: Edge devices query coarse levels (0-4), servers
-//!   query all levels (0-8) — same model, different resolution
-//! - **Incremental updates**: New views only update affected octree nodes
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![allow(missing_docs)]
 

@@ -1,14 +1,18 @@
 //! CUDA Memory Pool - Reuses freed GPU allocations
 //!
-//! Instead of calling cudaMalloc/cudaFree for every tensor, this pool
-//! maintains free-lists bucketed by allocation size. When a tensor is freed,
-//! its GPU memory is returned to the pool for reuse.
+//! # File
+//! `crates/axonml-core/src/backends/cuda_pool.rs`
 //!
-//! This dramatically reduces allocation overhead and GPU memory fragmentation
-//! during training, where thousands of same-sized intermediate tensors are
-//! created and destroyed every forward/backward pass.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.2.0
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #[cfg(feature = "cuda")]
 use cudarc::driver::safe::DeviceSlice;

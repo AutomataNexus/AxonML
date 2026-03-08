@@ -1,26 +1,18 @@
 //! Axonml TUI - Terminal User Interface for ML Framework
 //!
-//! A comprehensive terminal-based user interface for the Axonml ML framework,
-//! providing visualization of models, datasets, training progress, and more.
+//! # File
+//! `crates/axonml-tui/src/lib.rs`
 //!
-//! # Features
-//! - Model architecture visualization
-//! - Dataset structure and statistics
-//! - Real-time training progress monitoring
-//! - Loss and accuracy graphs
-//! - File browser for models and datasets
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```no_run
-//! use axonml_tui::run;
+//! # Updated
+//! March 8, 2026
 //!
-//! fn main() -> std::io::Result<()> {
-//!     run(None, None)
-//! }
-//! ```
-//!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

@@ -1,12 +1,18 @@
 //! Nexus Backbone — Dual-Pathway Feature Extraction
 //!
-//! Implements the neuroscience-inspired dual-pathway architecture:
-//! - **Ventral ("what")**: Fine-grained identity features via InvertedResidual blocks
-//! - **Dorsal ("where")**: Wide-receptive-field spatial features via 5×5 convolutions
+//! # File
+//! `crates/axonml-vision/src/models/nexus/backbone.rs`
 //!
-//! Both pathways share a common stem and produce multi-scale features.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![allow(missing_docs)]
 

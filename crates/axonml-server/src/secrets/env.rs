@@ -1,16 +1,18 @@
 //! Environment variable backend for secrets management.
 //!
-//! This backend reads secrets from environment variables, making it suitable
-//! for development and simple deployments.
+//! # File
+//! `crates/axonml-server/src/secrets/env.rs`
 //!
-//! # Environment Variables
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! | Secret Key | Environment Variable |
-//! |------------|---------------------|
-//! | `jwt_secret` | `AXONML_JWT_SECRET` |
-//! | `db_username` | `AXONML_AEGIS_USERNAME` |
-//! | `db_password` | `AXONML_AEGIS_PASSWORD` |
-//! | `resend_api_key` | `AXONML_RESEND_API_KEY` |
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::{SecretKey, SecretsBackend, SecretsError};
 

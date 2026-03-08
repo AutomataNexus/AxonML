@@ -1,22 +1,18 @@
 //! FSDP - Fully Sharded Data Parallel
 //!
-//! Implements Fully Sharded Data Parallel training for scaling to multiple GPUs/nodes.
-//! FSDP shards model parameters, gradients, and optimizer states across devices.
+//! # File
+//! `crates/axonml-distributed/src/fsdp.rs`
 //!
-//! Reference: "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models"
-//! https://arxiv.org/abs/1910.02054
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_distributed::fsdp::{FullyShardedDataParallel, ShardingStrategy};
+//! # Updated
+//! March 8, 2026
 //!
-//! let model = MyModel::new();
-//! let fsdp_model = FullyShardedDataParallel::new(model, process_group)
-//!     .sharding_strategy(ShardingStrategy::FullShard)
-//!     .cpu_offload(false);
-//! ```
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::backend::ReduceOp;
 use crate::process_group::ProcessGroup;

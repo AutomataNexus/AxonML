@@ -1,12 +1,18 @@
 //! Exponential Moving Average (EMA) for Model Weights
 //!
-//! Maintains a shadow copy of model parameters updated as:
-//!   ema_param = decay * ema_param + (1 - decay) * model_param
+//! # File
+//! `crates/axonml-vision/src/training/ema.rs`
 //!
-//! Standard practice for YOLO/detection training — EMA weights typically
-//! produce 1-2% mAP improvement at zero inference cost.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_nn::Parameter;
 use axonml_tensor::Tensor;

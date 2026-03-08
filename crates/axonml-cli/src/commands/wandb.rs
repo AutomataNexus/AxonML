@@ -1,10 +1,18 @@
 //! Weights & Biases Integration - W&B Credential Management
 //!
-//! Provides commands for configuring W&B integration, allowing users to
-//! link their training runs to their W&B account for experiment tracking.
+//! # File
+//! `crates/axonml-cli/src/commands/wandb.rs`
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::io::{self, Write};
 use std::path::PathBuf;

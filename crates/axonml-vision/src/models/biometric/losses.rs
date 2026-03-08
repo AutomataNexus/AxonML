@@ -1,53 +1,18 @@
 //! Biometric Loss Functions
 //!
-//! Specialized loss functions for training the Aegis Identity biometric models.
-//! Each loss is designed to exploit the novel characteristics of its modality.
+//! # File
+//! `crates/axonml-vision/src/models/biometric/losses.rs`
 //!
-//! ## Loss Functions
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **CrystallizationLoss**: Triplet + convergence regularization (Mnemosyne)
-//!   Penalizes identity states that fail to stabilize after multiple observations.
+//! # Updated
+//! March 8, 2026
 //!
-//! - **ContrastiveLoss**: Margin-based contrastive loss (Ariadne)
-//!   Same-identity fingerprint pairs minimize distance; different-identity pairs
-//!   are pushed apart up to a margin.
-//!
-//! - **EchoLoss**: Prediction + speaker discrimination (Echo)
-//!   Combines speech prediction MSE (generic model) with speaker-specific
-//!   residual discrimination (identity = what can't be predicted).
-//!
-//! - **ArgusLoss**: Triplet + phase consistency (Argus)
-//!   Rotated iris images should produce circularly-shifted codes with the
-//!   same identity embedding. Phase consistency enforces rotation invariance.
-//!
-//! - **ThemisLoss**: BCE + triplet + calibration (Themis)
-//!   The fusion model must output calibrated match probabilities, not just
-//!   relative scores. Calibration loss penalizes overconfident wrong decisions.
-//!
-//! - **CenterLoss**: Pulls embeddings toward learned class centers with
-//!   uncertainty-weighted updates. High-uncertainty samples contribute less
-//!   to center drift, preventing noisy observations from corrupting centroids.
-//!
-//! - **AngularMarginLoss**: Additive angular margin in cosine space with
-//!   uncertainty weighting. Confident samples receive a larger margin penalty,
-//!   forcing cleaner decision boundaries where the model is most sure.
-//!
-//! - **DiversityRegularization**: Prevents embedding collapse by penalizing
-//!   batches where all embeddings are too similar. Measures average pairwise
-//!   cosine similarity and penalizes when it exceeds a target threshold.
-//!
-//! - **LivenessLoss**: Trains the temporal liveness detector by combining
-//!   trajectory smoothness loss (real biometrics have irregular trajectories)
-//!   with temporal variance loss (spoofed inputs have abnormally low variance).
-//!
-//! ## Graph Tracking
-//!
-//! The `compute_var` methods use Variable operations where possible to maintain
-//! autograd graph connectivity. The raw `compute` methods operate on f32 slices
-//! for efficient inference-only evaluation.
-//!
-//! @version 0.3.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;

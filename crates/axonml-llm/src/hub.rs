@@ -1,29 +1,18 @@
 //! LLM Model Hub - Pretrained Language Model Weights
 //!
-//! Download, cache, and load pretrained weights for language models.
+//! # File
+//! `crates/axonml-llm/src/hub.rs`
 //!
-//! # Supported Models
-//! - BERT (base, large, tiny)
-//! - GPT-2 (small, medium, large, xl)
-//! - RoBERTa
-//! - DistilBERT
-//! - ALBERT
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_llm::hub::{llm_registry, download_weights, PretrainedLLM};
+//! # Updated
+//! March 8, 2026
 //!
-//! // List available models
-//! let registry = llm_registry();
-//! for (name, model) in &registry {
-//!     println!("{}: {} params", name, model.num_parameters);
-//! }
-//!
-//! // Download a model
-//! let path = download_weights("bert-base-uncased", false).unwrap();
-//! ```
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 use std::fs::{self, File};

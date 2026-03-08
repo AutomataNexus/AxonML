@@ -1,21 +1,18 @@
 //! Transformer - Attention-based Neural Networks
 //!
-//! Implementation of Transformer architectures for various tasks.
+//! # File
+//! `crates/axonml-vision/src/models/transformer.rs`
 //!
-//! # Models
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **`TransformerEncoder`**: Stack of encoder layers
-//! - **`TransformerDecoder`**: Stack of decoder layers
-//! - **Transformer**: Full encoder-decoder Transformer
-//! - **`VisionTransformer` (`ViT`)**: Transformer for image classification
+//! # Updated
+//! March 8, 2026
 //!
-//! # Reference
-//!
-//! "Attention Is All You Need" (Vaswani et al., 2017)
-//! <https://arxiv.org/abs/1706.03762>
-//!
-//! "An Image is Worth 16x16 Words" (Dosovitskiy et al., 2020)
-//! <https://arxiv.org/abs/2010.11929>
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::any::Any;
 

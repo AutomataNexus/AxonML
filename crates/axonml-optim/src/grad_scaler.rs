@@ -1,36 +1,18 @@
 //! Gradient Scaler for Mixed Precision Training
 //!
-//! Provides gradient scaling to prevent underflow when using F16 gradients.
-//! Essential for stable mixed precision training.
+//! # File
+//! `crates/axonml-optim/src/grad_scaler.rs`
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_optim::{Adam, GradScaler};
-//! use axonml_autograd::amp::autocast;
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! let mut optimizer = Adam::new(model.parameters(), 0.001);
-//! let mut scaler = GradScaler::new();
+//! # Updated
+//! March 8, 2026
 //!
-//! for (input, target) in dataloader {
-//!     optimizer.zero_grad();
-//!
-//!     // Forward pass with autocast
-//!     let output = autocast(DType::F16, || model.forward(&input));
-//!     let loss = loss_fn.compute(&output, &target);
-//!
-//!     // Scale loss and backward
-//!     let scaled_loss = loss * scaler.get_scale();
-//!     scaled_loss.backward();
-//!
-//!     // Unscale gradients and step
-//!     if scaler.step(&mut optimizer) {
-//!         // Optimizer step was taken
-//!     }
-//!     scaler.update();
-//! }
-//! ```
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 // =============================================================================
 // GradScaler

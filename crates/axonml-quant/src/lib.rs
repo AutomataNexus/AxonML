@@ -1,24 +1,18 @@
 //! Axonml Quant - Model Quantization Library
 //!
-//! Provides quantization support for reducing model size and improving
-//! inference performance. Supports multiple quantization formats:
+//! # File
+//! `crates/axonml-quant/src/lib.rs`
 //!
-//! - **Q8_0**: 8-bit quantization (block size 32)
-//! - **Q4_0**: 4-bit quantization (block size 32)
-//! - **Q4_1**: 4-bit quantization with min/max (block size 32)
-//! - **F16**: Half-precision floating point
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```ignore
-//! use axonml_quant::{quantize_tensor, QuantType};
+//! # Updated
+//! March 8, 2026
 //!
-//! let tensor = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[4])?;
-//! let quantized = quantize_tensor(&tensor, QuantType::Q8_0)?;
-//! let dequantized = dequantize_tensor(&quantized)?;
-//! ```
-//!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

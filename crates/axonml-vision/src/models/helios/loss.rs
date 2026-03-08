@@ -1,12 +1,18 @@
 //! Helios Training Losses — CIoU, DFL Loss, Task-Aligned Assigner
 //!
-//! Complete loss pipeline for training Helios detectors:
-//! - **CIoU Loss**: Complete IoU with distance + aspect ratio penalties
-//! - **DFL Loss**: Distribution Focal Loss for fine-grained box regression
-//! - **Task-Aligned Assigner**: Dynamic label assignment based on prediction quality
-//! - **HeliosLoss**: Unified loss combining classification + regression + DFL
+//! # File
+//! `crates/axonml-vision/src/models/helios/loss.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![allow(missing_docs)]
 

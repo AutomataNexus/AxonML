@@ -1,61 +1,18 @@
 //! Tensor Operations - Mathematical and Structural Operations
 //!
-//! This module provides standalone tensor operations for convenient access.
-//! Operations are organized by category.
+//! # File
+//! `crates/axonml-tensor/src/ops/mod.rs`
 //!
-//! # Categories
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ## Comparison Operations
-//! - `eq`, `lt`, `gt` - Element-wise comparison returning boolean vectors
+//! # Updated
+//! March 8, 2026
 //!
-//! ## Activation Functions
-//! - `softmax`, `log_softmax` - Probability distributions
-//! - `gelu`, `silu`, `elu`, `leaky_relu` - Advanced activations
-//!
-//! ## Clipping Operations
-//! - `clamp`, `clamp_min`, `clamp_max` - Value range limiting
-//!
-//! ## Conditional Operations
-//! - `where_cond` - Select elements based on condition
-//!
-//! ## Sorting and Top-K
-//! - `topk` - Returns k largest/smallest elements with indices
-//! - `sort` - Sorts tensor along dimension with indices
-//! - `argsort` - Returns indices that would sort tensor
-//!
-//! ## Indexing Operations
-//! - `scatter` - Scatter values to specified indices (inverse of gather)
-//! - `nonzero` - Returns indices of non-zero elements
-//! - `unique` - Returns unique elements with optional counts/inverse
-//!
-//! ## Shape Manipulation
-//! - `flip` - Reverses tensor along specified dimensions
-//! - `roll` - Rolls tensor elements along dimensions (circular shift)
-//!
-//! # Example
-//!
-//! ```ignore
-//! use axonml_tensor::ops::{topk, sort, unique};
-//!
-//! let t = Tensor::from_vec(vec![3.0, 1.0, 4.0, 1.0, 5.0], &[5]).unwrap();
-//!
-//! // Get top 3 largest values
-//! let result = topk(&t, 3, -1, true, true).unwrap();
-//! // result.values = [5.0, 4.0, 3.0]
-//! // result.indices = [4, 2, 0]
-//!
-//! // Sort ascending
-//! let sorted = sort(&t, -1, false).unwrap();
-//! // sorted.values = [1.0, 1.0, 3.0, 4.0, 5.0]
-//!
-//! // Get unique values
-//! let uniq = unique(&t, true, true, true);
-//! // uniq.values = [1.0, 3.0, 4.0, 5.0]
-//! // uniq.counts = [2, 1, 1, 1]
-//! ```
-//!
-//! @version 0.2.6
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 // Operations are implemented directly on Tensor in tensor.rs
 // This module provides additional standalone functions

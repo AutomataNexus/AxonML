@@ -1,18 +1,18 @@
 //! LLaMA - Large Language Model Meta AI
 //!
-//! Implementation of the LLaMA architecture with RoPE (Rotary Position Embedding),
-//! RMSNorm, and SwiGLU activation.
+//! # File
+//! `crates/axonml-llm/src/llama.rs`
 //!
-//! Reference: "LLaMA: Open and Efficient Foundation Language Models"
-//! https://arxiv.org/abs/2302.13971
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_llm::{LLaMA, LLaMAConfig};
+//! # Updated
+//! March 8, 2026
 //!
-//! let config = LLaMAConfig::llama2_7b();
-//! let model = LLaMA::new(&config);
-//! ```
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::any::Any;
 

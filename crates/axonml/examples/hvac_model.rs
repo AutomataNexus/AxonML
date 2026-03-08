@@ -1,16 +1,18 @@
 //! HVAC Multi-Horizon Predictor - Native AxonML Implementation
 //!
-//! This example demonstrates building and training an HVAC failure prediction
-//! model entirely within AxonML, without external dependencies.
+//! # File
+//! `crates/axonml/examples/hvac_model.rs`
 //!
-//! Model Architecture:
-//! - Input projection: Linear(28 -> 128) + LayerNorm + ReLU
-//! - Temporal encoder: 2-layer GRU with hidden_size=128
-//! - Mean pooling for sequence aggregation
-//! - 3 prediction heads (5min, 15min, 30min horizons)
-//! - Each head: Linear(128->128) -> ReLU -> Linear(128->64) -> ReLU -> Linear(64->20)
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! Usage: cargo run --example hvac_model
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml::autograd::Variable;
 use axonml::nn::{Dropout, LayerNorm, Linear, Module, Parameter, ReLU, Softmax, GRU};

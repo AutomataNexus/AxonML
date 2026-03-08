@@ -1,48 +1,18 @@
 //! AegisIdentity — Unified Biometric API + Identity Bank
 //!
-//! Wraps all five biometric modalities (Mnemosyne, Ariadne, Echo, Argus, Themis)
-//! into a single API for enrollment, verification (1:1), and identification (1:N).
+//! # File
+//! `crates/axonml-vision/src/models/biometric/identity.rs`
 //!
-//! # Architecture
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ```text
-//! BiometricEvidence ──→ [ Modality Processors ]
-//!                           │  │  │  │
-//!                      Face Finger Voice Iris
-//!                           │  │  │  │
-//!                           ↓  ↓  ↓  ↓
-//!                     [ ModalityOutput × N ]
-//!                           │
-//!                           ↓
-//!                    [ ThemisFusion ]
-//!                    ┌───────┴──────┐
-//!                    ↓              ↓
-//!              match_prob    fused_identity
-//!                    │              │
-//!                    ↓              ↓
-//!              VerificationResult   IdentityBank
-//! ```
+//! # Updated
+//! March 8, 2026
 //!
-//! ## Deployment Configurations
-//!
-//! | Config       | Modalities       | Params  | Use Case                    |
-//! |--------------|------------------|---------|-----------------------------|
-//! | `full()`     | All 4            | ~362K   | Server / high-security      |
-//! | `face_only()`| Face             | ~115K   | Kiosk / access control      |
-//! | `edge_minimal()`| Face + Voice  | ~183K   | IoT / Raspberry Pi          |
-//!
-//! ## Novel Features (unique to AxonML)
-//!
-//! - **Forensic Verification**: Full audit trail with per-modality breakdown,
-//!   cross-modal consistency, and per-dimension contribution analysis.
-//! - **Batch Operations**: Process multiple enrollments/verifications efficiently.
-//! - **Identity Drift Detection**: Monitor template aging and trigger re-enrollment.
-//! - **Quality-Gated Processing**: Reject poor quality before recognition.
-//! - **Temporal Liveness**: Anti-spoofing via hidden state trajectory analysis.
-//! - **Operating Point Analysis**: FAR/FRR curve computation for threshold tuning.
-//!
-//! @version 0.3.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

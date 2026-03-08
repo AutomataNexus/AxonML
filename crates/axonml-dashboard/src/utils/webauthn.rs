@@ -1,6 +1,18 @@
 //! WebAuthn utility functions for WASM
 //!
-//! Implements WebAuthn registration and authentication using web-sys bindings.
+//! # File
+//! `crates/axonml-dashboard/src/utils/webauthn.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;

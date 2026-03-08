@@ -1,21 +1,18 @@
 //! Vulkan Backend - Cross-Platform GPU Operations
 //!
-//! Provides the Vulkan implementation for tensor operations on GPUs.
-//! This backend requires the `vulkan` feature and Vulkan SDK.
+//! # File
+//! `crates/axonml-core/src/backends/vulkan.rs`
 //!
-//! # Key Features
-//! - Cross-platform GPU support (Windows, Linux, macOS via MoltenVK)
-//! - Compute shader based operations
-//! - Async execution with command queues
-//! - Multi-GPU support
-//! - Memory management via gpu-allocator
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Requirements
-//! - Vulkan 1.1+ capable GPU
-//! - Vulkan SDK/runtime
+//! # Updated
+//! March 8, 2026
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::Backend;
 use crate::device::DeviceCapabilities;

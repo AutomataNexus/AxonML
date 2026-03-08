@@ -1,39 +1,18 @@
 //! Normalization Layers
 //!
-//! Provides normalization layers to improve training stability and convergence speed.
+//! # File
+//! `crates/axonml-nn/src/layers/norm.rs`
 //!
-//! # Available Layers
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **BatchNorm1d/2d** - Normalizes over batch dimension (good for large batches)
-//! - **LayerNorm** - Normalizes over feature dimension (stable for any batch size)
-//! - **GroupNorm** - Normalizes within channel groups (good for small batches, used in diffusion models)
-//! - **InstanceNorm2d** - Normalizes each (batch, channel) independently (good for style transfer)
+//! # Updated
+//! March 8, 2026
 //!
-//! # When to Use Which
-//!
-//! | Layer | Best For | Batch Size Dependency |
-//! |-------|----------|----------------------|
-//! | BatchNorm | CNNs, large batch training | Requires large batches |
-//! | LayerNorm | Transformers, RNNs | Batch-independent |
-//! | GroupNorm | ResNeXt, diffusion models | Batch-independent |
-//! | InstanceNorm | Style transfer, GANs | Batch-independent |
-//!
-//! # Example
-//!
-//! ```ignore
-//! use axonml_nn::{GroupNorm, InstanceNorm2d, Module};
-//!
-//! // GroupNorm: 8 groups, 32 channels
-//! let gn = GroupNorm::new(8, 32);
-//! let output = gn.forward(&input); // [N, 32, H, W]
-//!
-//! // InstanceNorm: normalize each channel independently
-//! let inn = InstanceNorm2d::with_affine(64);
-//! let output = inn.forward(&input); // [N, 64, H, W]
-//! ```
-//!
-//! @version 0.2.6
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};

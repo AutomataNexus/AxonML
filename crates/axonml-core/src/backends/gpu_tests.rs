@@ -1,21 +1,18 @@
 //! GPU Backend Testing Infrastructure
 //!
-//! Comprehensive tests for all GPU backends (CUDA, Vulkan, Metal, WebGPU).
-//! These tests verify correctness by comparing GPU results against CPU reference.
+//! # File
+//! `crates/axonml-core/src/backends/gpu_tests.rs`
 //!
-//! # Running Tests
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ```bash
-//! # Run all GPU tests (requires hardware)
-//! cargo test -p axonml-core --features cuda gpu_tests
+//! # Updated
+//! March 8, 2026
 //!
-//! # Run specific backend tests
-//! cargo test -p axonml-core --features cuda test_cuda
-//! cargo test -p axonml-core --features vulkan test_vulkan
-//! cargo test -p axonml-core --features wgpu test_wgpu
-//! ```
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::device::DeviceCapabilities;
 

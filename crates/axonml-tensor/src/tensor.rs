@@ -1,18 +1,18 @@
 //! Tensor - Core N-Dimensional Array Type
 //!
-//! The `Tensor` struct is the fundamental data structure in Axonml. It represents
-//! an N-dimensional array of numeric values with support for automatic broadcasting,
-//! device placement, and efficient memory sharing through views.
+//! # File
+//! `crates/axonml-tensor/src/tensor.rs`
 //!
-//! # Key Features
-//! - Generic over element type (f32, f64, i32, etc.)
-//! - Efficient views with shared storage
-//! - Device-agnostic operations
-//! - Broadcasting support
-//! - Lazy operations where possible
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use core::fmt;
 use core::ops::{Add, Div, Mul, Neg, Sub};

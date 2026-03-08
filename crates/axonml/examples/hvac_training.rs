@@ -1,12 +1,18 @@
 //! HVAC Multi-Horizon Predictor - Training with Synthetic Data
 //!
-//! Complete training pipeline for HVAC failure prediction model:
-//! - Synthetic data generation (normal operation + failure scenarios)
-//! - Multi-horizon training (5/15/30 minute predictions)
-//! - Adam optimizer with learning rate scheduling
-//! - Validation and metrics reporting
+//! # File
+//! `crates/axonml/examples/hvac_training.rs`
 //!
-//! Usage: cargo run --example hvac_training --release
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml::autograd::Variable;
 use axonml::nn::{CrossEntropyLoss, Dropout, LayerNorm, Linear, Module, Parameter, ReLU, GRU};

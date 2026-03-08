@@ -1,10 +1,18 @@
 //! Phantom Backbone — BlazeBlock-based Lightweight Feature Extractor
 //!
-//! Provides cached multi-scale features for the Phantom face detector.
-//! Runs full backbone every N frames (cold path) or reuses cached features
-//! (warm path) for event-driven sparse processing.
+//! # File
+//! `crates/axonml-vision/src/models/phantom/backbone.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter, ReLU};

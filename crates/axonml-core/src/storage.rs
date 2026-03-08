@@ -1,16 +1,18 @@
 //! Storage - Raw Memory Management for Tensors
 //!
-//! Provides efficient memory storage that underlies all tensor operations.
-//! Storage is reference-counted for efficient sharing between tensor views.
+//! # File
+//! `crates/axonml-core/src/storage.rs`
 //!
-//! # Key Features
-//! - Reference-counted memory for efficient views
-//! - Device-agnostic storage interface (CPU and GPU)
-//! - Zero-copy slicing through offset/length
-//! - Automatic memory cleanup
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.2.0
-//! @author `AutomataNexus` Development Team
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use core::ops::{Deref, DerefMut};
 use std::sync::Arc;

@@ -1,24 +1,18 @@
 //! Nexus — Predictive Dual-Pathway Object Detection
 //!
-//! A novel detection architecture that unifies five innovations never
-//! combined before:
+//! # File
+//! `crates/axonml-vision/src/models/nexus/mod.rs`
 //!
-//! # Key Innovations
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! 1. **Dual-pathway processing** — Separate ventral ("what", identity) and
-//!    dorsal ("where", spatial) streams inspired by primate visual cortex
-//! 2. **Predictive coding** — Maintains prediction of current features;
-//!    only prediction errors get full compute (free-energy principle)
-//! 3. **Persistent object memory** — GRU hidden state per detected object
-//!    across frames (refine, don't re-detect)
-//! 4. **Uncertainty quantification** — Every bbox outputs mean + log-variance
-//!    (aleatoric uncertainty for localization)
-//! 5. **Surprise-gated adaptive compute** — High prediction-error regions get
-//!    deep processing; well-predicted regions get cheap reuse
+//! # Updated
+//! March 8, 2026
 //!
-//! ~430K params. <2MB float32. <500KB INT8. Edge-deployable.
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod backbone;
 pub mod detector;

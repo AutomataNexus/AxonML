@@ -1,10 +1,18 @@
 //! Weights & Biases Client - HTTP API Client for W&B
 //!
-//! Provides a client for logging training metrics to Weights & Biases.
-//! This client uses the W&B HTTP API to create runs and log metrics.
+//! # File
+//! `crates/axonml-cli/src/commands/wandb_client.rs`
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

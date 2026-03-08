@@ -1,60 +1,18 @@
 //! Argus — Iris Identity via Radial Phase Encoding (~65K params)
 //!
-//! Polar-coordinate-native convolutions. Unwrap iris to polar strip [1,32,256],
-//! apply separate 1D convolutions along radial and angular axes. Phase
-//! transitions (light↔dark) detected as events. No Cartesian CNN waste.
+//! # File
+//! `crates/axonml-vision/src/models/biometric/argus.rs`
 //!
-//! # Novel Mechanisms
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **Polar-Native Processing**: Iris is unwrapped to a polar strip BEFORE
-//!   any convolution. This means Conv1d operates naturally along radial and
-//!   angular axes — no wasted computation on circular geometry in Cartesian space.
-//! - **Separate Axis Encoding**: Radial convolutions capture collarette-to-pupil
-//!   structure. Angular convolutions capture the iris's unique crypts and furrows.
-//!   Processing each axis independently is both efficient and rotation-aware.
-//! - **Circular Padding**: Angular convolutions use wrap-around padding via
-//!   `Tensor::cat`, ensuring continuity at the 0°/360° boundary.
-//! - **Phase Transition Detection**: Angular gradients (finite differences)
-//!   detect light↔dark transitions in the iris texture — these phase events
-//!   are analogous to Phantom's motion events but in the spatial frequency domain.
-//! - **Rotation-Invariant Matching**: Since rotation of the eye maps to circular
-//!   shift of the polar strip, matching finds the best circular alignment.
-//! - **Multi-Resolution Phase Encoding**: Encode iris at 3 resolutions (coarse,
-//!   medium, fine) for hierarchical feature extraction.
-//! - **Iris Quality Scoring**: Assess iris image quality via radial contrast,
-//!   angular coverage, and non-zero pixel analysis.
-//! - **Hamming Distance Matching**: Binary iris code matching for noise-robust
-//!   comparison using binarized embeddings.
-//! - **Fragile Bit Masking**: Identify unreliable bits near the binarization
-//!   threshold for masked matching.
+//! # Updated
+//! March 8, 2026
 //!
-//! # Architecture
-//!
-//! ```text
-//! Raw Iris [B, 1, H, W]
-//!   ├── Polar Unwrap (geometric, not learned) → [B, 1, 32, 256]
-//!   │
-//!   ├── Radial Encoder (per angular column):
-//!   │   ├── Conv1d(1→16, k=5, p=2) + ReLU → [B*256, 16, 32]
-//!   │   └── Conv1d(16→32, k=3, p=1) + ReLU → [B*256, 32, 32]
-//!   │
-//!   ├── Angular Encoder (per radial row, circular padding):
-//!   │   ├── CircularPad(3) + Conv1d(32→48, k=7) + ReLU → [B*32, 48, 256]
-//!   │   └── CircularPad(2) + Conv1d(48→48, k=5) + ReLU → [B*32, 48, 256]
-//!   │
-//!   ├── Phase Detector:
-//!   │   ├── Angular gradient (finite difference along angular axis)
-//!   │   ├── Threshold: |gradient| > learned_threshold → phase event
-//!   │   └── Conv1d(48→32, k=3, p=1) + ReLU → [B*32, 32, 256]
-//!   │
-//!   ├── Reshape → [B, 32, 32, 256]
-//!   ├── Conv2d(32→8, 1×1) + ReLU
-//!   ├── AdaptiveAvgPool2d(4, 8) → [B, 8, 4, 8] = 256
-//!   ├── Flatten → Linear(256→128) → L2-normalize → embedding [B, 128]
-//!   └── Uncertainty: Linear(256→1) → log_variance [B, 1]
-//! ```
-//!
-//! @version 0.3.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{AdaptiveAvgPool2d, Conv1d, Conv2d, Linear, Module, Parameter};

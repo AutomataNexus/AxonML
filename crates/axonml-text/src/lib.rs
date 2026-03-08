@@ -1,29 +1,18 @@
 //! Axonml Text - Natural Language Processing Utilities
 //!
-//! This crate provides text processing functionality for the Axonml ML framework:
+//! # File
+//! `crates/axonml-text/src/lib.rs`
 //!
-//! - **Vocabulary**: Token-to-index mapping with special tokens
-//! - **Tokenizers**: Various tokenization strategies (whitespace, char, BPE)
-//! - **Datasets**: Text classification, language modeling, seq2seq
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
+//! # Updated
+//! March 8, 2026
 //!
-//! ```ignore
-//! use axonml_text::prelude::*;
-//!
-//! // Build vocabulary from text
-//! let vocab = Vocab::from_text("the quick brown fox", 1);
-//!
-//! // Tokenize text
-//! let tokenizer = WhitespaceTokenizer::new();
-//! let tokens = tokenizer.tokenize("hello world");
-//!
-//! // Create a sentiment dataset
-//! let dataset = SyntheticSentimentDataset::small();
-//! ```
-//!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

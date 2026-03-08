@@ -1,10 +1,18 @@
 //! COLOSSUS — Master Aggregator Model (~1.5M params)
 //!
-//! Aggregates outputs from all 5 specialist models using cross-specialist
-//! multi-head attention to detect system-level faults and cascading failures.
+//! # File
+//! `crates/axonml/src/hvac/colossus.rs`
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

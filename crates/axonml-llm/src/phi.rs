@@ -1,17 +1,18 @@
 //! Phi - Microsoft's Small Language Models
 //!
-//! Implementation of the Phi architecture (Phi-1, Phi-2, Phi-3).
-//! Phi models are efficient small language models optimized for coding and reasoning.
+//! # File
+//! `crates/axonml-llm/src/phi.rs`
 //!
-//! Reference: "Textbooks Are All You Need" https://arxiv.org/abs/2306.11644
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_llm::{Phi, PhiConfig};
+//! # Updated
+//! March 8, 2026
 //!
-//! let config = PhiConfig::phi2();
-//! let model = Phi::new(&config);
-//! ```
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::no_grad::is_grad_enabled;
 use axonml_autograd::{GradFn, Variable};

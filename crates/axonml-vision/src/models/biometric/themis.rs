@@ -1,74 +1,18 @@
 //! Themis — Multimodal Belief Propagation Fusion (~49K params)
 //!
-//! # Novel Architecture
+//! # File
+//! `crates/axonml-vision/src/models/biometric/themis.rs`
 //!
-//! Each biometric modality contributes with dynamic uncertainty-aware weighting.
-//! Cross-modal consistency checking down-weights contradictory modalities.
-//! A GRU accumulates belief over time — the fusion state itself crystallizes.
-//! Any subset of modalities works (graceful degradation).
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ## Unique Design Principles
+//! # Updated
+//! March 8, 2026
 //!
-//! Unlike standard score-level fusion (weighted averaging) or feature-level
-//! concatenation, Themis implements **belief propagation**:
-//!
-//! 1. **Uncertainty gating**: Each modality's contribution is scaled by
-//!    `sigmoid(-log_variance * temperature)`. Low-uncertainty modalities
-//!    dominate; noisy readings are automatically suppressed.
-//!
-//! 2. **Cross-modal consistency**: A learned checker detects contradictions
-//!    between modalities (e.g., face says "match" but fingerprint says "impostor").
-//!    Inconsistent modalities are down-weighted even if individually confident.
-//!
-//! 3. **Temporal belief accumulation**: A GRU hidden state integrates evidence
-//!    across multiple observations. Initial readings have high uncertainty;
-//!    as consistent evidence accumulates, belief crystallizes (converges).
-//!
-//! 4. **Graceful degradation**: Missing modalities contribute zero-vectors
-//!    with zero uncertainty weight. Themis naturally adapts to any modality
-//!    subset without architectural changes.
-//!
-//! 5. **Evidential uncertainty**: Dirichlet-based second-order uncertainty
-//!    distinguishes aleatoric (data noise) from epistemic (model ignorance).
-//!    More observations lower epistemic uncertainty — "uncertainty about
-//!    the uncertainty".
-//!
-//! 6. **Temporal evidence decay**: Exponential decay on belief state prevents
-//!    stale evidence from dominating current decisions.
-//!
-//! 7. **Conflict detection**: Explicit pairwise comparison of modality scores
-//!    for forensic audit trails.
-//!
-//! 8. **Modality reliability tracking**: Historical accuracy weighting per
-//!    modality, updated after each verification.
-//!
-//! ## Architecture
-//!
-//! ```text
-//!  Face [64] ──→ Proj(64→48) ──→ ┐
-//!  Finger [128] → Proj(128→48) ──→ ├──→ Cat[192] → ConsistencyCheck → weights[4]
-//!  Voice [64] ──→ Proj(64→48) ──→ ┤                                      │
-//!  Iris [128] ──→ Proj(128→48) ──→ ┘                                      ↓
-//!                                          uncertainty_gates × consistency_weights
-//!                                                        │
-//!                                                        ↓
-//!                                              Weighted Sum → [48]
-//!                                                        │
-//!                                                        ↓
-//!                                               GRUCell(48→48) ← belief_state
-//!                                                        │
-//!                                              ┌─────────┴──────────┐
-//!                                              ↓                    ↓
-//!                                    Decision(48→1)      Identity(48→48)
-//!                                         │                    │
-//!                                         ↓                    ↓
-//!                                      sigmoid            L2-normalize
-//!                                         │                    │
-//!                                    match_prob          fused_identity
-//! ```
-//!
-//! @version 0.3.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

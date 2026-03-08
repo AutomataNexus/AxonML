@@ -1,6 +1,18 @@
 //! API Client for AxonML Server Sync
 //!
-//! Enables CLI to sync with the webapp through the axonml-server API.
+//! # File
+//! `crates/axonml-cli/src/api_client.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

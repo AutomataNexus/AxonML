@@ -1,32 +1,18 @@
 //! axonml-profile - Profiling Tools for Axonml ML Framework
 //!
-//! Provides comprehensive profiling capabilities for neural network training
-//! and inference, including memory tracking, compute profiling, and bottleneck detection.
+//! # File
+//! `crates/axonml-profile/src/lib.rs`
 //!
-//! # Key Features
-//! - Memory profiler: Track allocations, peak usage, and memory leaks
-//! - Compute profiler: Measure operation times, FLOPS, and throughput
-//! - Timeline profiler: Record events with timestamps for visualization
-//! - Bottleneck detection: Identify performance bottlenecks automatically
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```ignore
-//! use axonml_profile::{Profiler, MemoryProfiler, ComputeProfiler};
+//! # Updated
+//! March 8, 2026
 //!
-//! // Create a profiler
-//! let profiler = Profiler::new();
-//!
-//! // Profile a forward pass
-//! profiler.start("forward_pass");
-//! let output = model.forward(&input);
-//! profiler.stop("forward_pass");
-//!
-//! // Print summary
-//! profiler.summary();
-//! ```
-//!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
