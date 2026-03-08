@@ -210,42 +210,41 @@ impl Optimizer for RMSprop {
                 *sq = self.alpha * *sq + (1.0 - self.alpha) * g * g;
             }
 
-            // Compute denominator
-            let avg: Vec<f32> = if self.centered {
+            // Fused parameter update — no intermediate Vec allocation for denominator
+            let lr = self.lr;
+            let eps = self.eps;
+
+            if self.centered {
                 // Update gradient average for centered RMSprop
                 let grad_avg = state.grad_avg.as_mut().unwrap();
-                for (ga, g) in grad_avg.iter_mut().zip(grad_vec.iter()) {
-                    *ga = self.alpha * *ga + (1.0 - self.alpha) * g;
+                if self.momentum == 0.0 {
+                    for i in 0..param_vec.len() {
+                        grad_avg[i] = self.alpha * grad_avg[i] + (1.0 - self.alpha) * grad_vec[i];
+                        let avg = (state.square_avg[i] - grad_avg[i] * grad_avg[i]).sqrt() + eps;
+                        param_vec[i] -= lr * grad_vec[i] / avg;
+                    }
+                } else {
+                    let buf = state.momentum_buffer.as_mut().unwrap();
+                    for i in 0..param_vec.len() {
+                        grad_avg[i] = self.alpha * grad_avg[i] + (1.0 - self.alpha) * grad_vec[i];
+                        let avg = (state.square_avg[i] - grad_avg[i] * grad_avg[i]).sqrt() + eps;
+                        buf[i] = self.momentum * buf[i] + grad_vec[i] / avg;
+                        param_vec[i] -= lr * buf[i];
+                    }
                 }
-                // avg = sqrt(square_avg - grad_avg^2)
-                state
-                    .square_avg
-                    .iter()
-                    .zip(grad_avg.iter())
-                    .map(|(sq, ga)| (sq - ga * ga).sqrt() + self.eps)
-                    .collect()
-            } else {
-                state
-                    .square_avg
-                    .iter()
-                    .map(|sq| sq.sqrt() + self.eps)
-                    .collect()
-            };
-
-            // Update parameters
-            if self.momentum == 0.0 {
-                // Without momentum
-                for ((p, g), a) in param_vec.iter_mut().zip(grad_vec.iter()).zip(avg.iter()) {
-                    *p -= self.lr * g / a;
+            } else if self.momentum == 0.0 {
+                // Without momentum, without centering
+                for i in 0..param_vec.len() {
+                    let avg = state.square_avg[i].sqrt() + eps;
+                    param_vec[i] -= lr * grad_vec[i] / avg;
                 }
             } else {
-                // With momentum
+                // With momentum, without centering
                 let buf = state.momentum_buffer.as_mut().unwrap();
-                for ((b, g), a) in buf.iter_mut().zip(grad_vec.iter()).zip(avg.iter()) {
-                    *b = self.momentum * *b + g / a;
-                }
-                for (p, b) in param_vec.iter_mut().zip(buf.iter()) {
-                    *p -= self.lr * b;
+                for i in 0..param_vec.len() {
+                    let avg = state.square_avg[i].sqrt() + eps;
+                    buf[i] = self.momentum * buf[i] + grad_vec[i] / avg;
+                    param_vec[i] -= lr * buf[i];
                 }
             }
 

@@ -13,6 +13,29 @@ use axonml_tensor::Tensor;
 use crate::grad_fn::{GradFn, GradientFunction};
 
 // =============================================================================
+// GEMM helper for Conv2d backward (im2col approach, BLAS-accelerated)
+// =============================================================================
+
+/// C += A × B  using matrixmultiply (BLAS-level GEMM).
+/// A: [m, k] (or [k, m] if trans_a), B: [k, n] (or [n, k] if trans_b), C: [m, n]
+fn gemm_acc(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize,
+    trans_a: bool, trans_b: bool)
+{
+    let (rsa, csa) = if trans_a { (1isize, m as isize) } else { (k as isize, 1isize) };
+    let (rsb, csb) = if trans_b { (1isize, k as isize) } else { (n as isize, 1isize) };
+    unsafe {
+        matrixmultiply::sgemm(
+            m, k, n,
+            1.0,               // alpha
+            a.as_ptr(), rsa, csa,
+            b.as_ptr(), rsb, csb,
+            1.0,               // beta (accumulate into C)
+            c.as_mut_ptr(), n as isize, 1,
+        );
+    }
+}
+
+// =============================================================================
 // Conv2d Backward
 // =============================================================================
 
@@ -73,7 +96,29 @@ impl Conv2dBackward {
 
 impl GradientFunction for Conv2dBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let grad_out_vec = grad_output.to_vec();
+        // GPU-resident fast path: do entire backward on GPU without CPU copies
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() && self.saved_input.device().is_gpu() {
+            if let Some((grad_input, grad_weight, grad_bias)) = grad_output.conv2d_backward_cuda(
+                &self.saved_input,
+                &self.saved_weight,
+                &self.input_shape,
+                self.in_channels,
+                self.out_channels,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.has_bias,
+            ) {
+                let mut result = vec![Some(grad_input), Some(grad_weight)];
+                if self.has_bias {
+                    result.push(grad_bias);
+                }
+                return result;
+            }
+            // Fall through to CPU path if GPU backward failed
+        }
+
         let grad_out_shape = grad_output.shape();
         let batch_size = grad_out_shape[0];
         let out_h = grad_out_shape[2];
@@ -84,50 +129,74 @@ impl GradientFunction for Conv2dBackward {
         let (kh, kw) = self.kernel_size;
         let (sh, sw) = self.stride;
         let (ph, pw) = self.padding;
+        let out_hw = out_h * out_w;
+        let col_rows = self.in_channels * kh * kw;
 
         let input_vec = self.saved_input.to_vec();
         let weight_vec = self.saved_weight.to_vec();
+        let grad_out_vec = grad_output.to_vec();
 
-        // === d_input: "full" convolution with flipped weights ===
-        // d_input[n,ic,ih,iw] += grad_out[n,oc,oh,ow] * weight[oc,ic,kh_i,kw_j]
-        // where ih = oh*sh + ki - ph, iw = ow*sw + kj - pw
+        // Use im2col + GEMM for efficient Conv2d backward
+        // grad_weight = sum_over_batch( grad_out_reshaped × im2col(input)^T )
+        // grad_input = col2im( weight^T × grad_out_reshaped )
+
+        let mut grad_weight = vec![0.0f32; self.out_channels * col_rows];
         let mut grad_input = vec![0.0f32; batch_size * self.in_channels * in_h * in_w];
 
         for b in 0..batch_size {
-            for oc in 0..self.out_channels {
-                for oh in 0..out_h {
-                    for ow in 0..out_w {
-                        let go_idx = b * self.out_channels * out_h * out_w
-                            + oc * out_h * out_w
-                            + oh * out_w
-                            + ow;
-                        let go_val = grad_out_vec[go_idx];
+            // im2col for this batch element
+            let input_offset = b * self.in_channels * in_h * in_w;
+            let mut col = vec![0.0f32; col_rows * out_hw];
+            for c in 0..self.in_channels {
+                for ki in 0..kh {
+                    for kj in 0..kw {
+                        let col_row = c * kh * kw + ki * kw + kj;
+                        for oh in 0..out_h {
+                            for ow in 0..out_w {
+                                let ih = (oh * sh + ki) as isize - ph as isize;
+                                let iw = (ow * sw + kj) as isize - pw as isize;
+                                let val = if ih >= 0 && (ih as usize) < in_h
+                                    && iw >= 0 && (iw as usize) < in_w
+                                {
+                                    input_vec[input_offset + c * in_h * in_w
+                                        + ih as usize * in_w + iw as usize]
+                                } else { 0.0 };
+                                col[col_row * out_hw + oh * out_w + ow] = val;
+                            }
+                        }
+                    }
+                }
+            }
 
-                        for ic in 0..self.in_channels {
-                            for ki in 0..kh {
-                                for kj in 0..kw {
-                                    let ih_signed =
-                                        (oh * sh + ki) as isize - ph as isize;
-                                    let iw_signed =
-                                        (ow * sw + kj) as isize - pw as isize;
+            // grad_out for this batch: [out_channels, out_hw]
+            let go_offset = b * self.out_channels * out_hw;
 
-                                    if ih_signed >= 0
-                                        && (ih_signed as usize) < in_h
-                                        && iw_signed >= 0
-                                        && (iw_signed as usize) < in_w
-                                    {
-                                        let ih = ih_signed as usize;
-                                        let iw = iw_signed as usize;
-                                        let in_idx = b * self.in_channels * in_h * in_w
-                                            + ic * in_h * in_w
-                                            + ih * in_w
-                                            + iw;
-                                        let w_idx = oc * self.in_channels * kh * kw
-                                            + ic * kh * kw
-                                            + ki * kw
-                                            + kj;
-                                        grad_input[in_idx] += go_val * weight_vec[w_idx];
-                                    }
+            // grad_weight += grad_out × col^T  (GEMM: [OC, out_hw] × [out_hw, col_rows])
+            let go_slice = &grad_out_vec[go_offset..go_offset + self.out_channels * out_hw];
+            gemm_acc(go_slice, &col, &mut grad_weight,
+                self.out_channels, out_hw, col_rows, false, true);
+
+            // grad_col = weight^T × grad_out  (GEMM: [col_rows, OC] × [OC, out_hw] = [col_rows, out_hw])
+            let mut grad_col = vec![0.0f32; col_rows * out_hw];
+            gemm_acc(&weight_vec, go_slice, &mut grad_col,
+                col_rows, self.out_channels, out_hw, true, false);
+
+            // col2im: scatter grad_col back to grad_input
+            let gi_offset = b * self.in_channels * in_h * in_w;
+            for c in 0..self.in_channels {
+                for ki in 0..kh {
+                    for kj in 0..kw {
+                        let col_row = c * kh * kw + ki * kw + kj;
+                        for oh in 0..out_h {
+                            for ow in 0..out_w {
+                                let ih = (oh * sh + ki) as isize - ph as isize;
+                                let iw = (ow * sw + kj) as isize - pw as isize;
+                                if ih >= 0 && (ih as usize) < in_h
+                                    && iw >= 0 && (iw as usize) < in_w
+                                {
+                                    grad_input[gi_offset + c * in_h * in_w
+                                        + ih as usize * in_w + iw as usize]
+                                        += grad_col[col_row * out_hw + oh * out_w + ow];
                                 }
                             }
                         }
@@ -136,61 +205,10 @@ impl GradientFunction for Conv2dBackward {
             }
         }
 
-        // === d_weight: correlation of input with grad_output ===
-        // d_weight[oc,ic,ki,kj] += input[n,ic,oh*sh+ki-ph,ow*sw+kj-pw] * grad_out[n,oc,oh,ow]
-        let mut grad_weight =
-            vec![0.0f32; self.out_channels * self.in_channels * kh * kw];
-
-        for b in 0..batch_size {
-            for oc in 0..self.out_channels {
-                for oh in 0..out_h {
-                    for ow in 0..out_w {
-                        let go_idx = b * self.out_channels * out_h * out_w
-                            + oc * out_h * out_w
-                            + oh * out_w
-                            + ow;
-                        let go_val = grad_out_vec[go_idx];
-
-                        for ic in 0..self.in_channels {
-                            for ki in 0..kh {
-                                for kj in 0..kw {
-                                    let ih_signed =
-                                        (oh * sh + ki) as isize - ph as isize;
-                                    let iw_signed =
-                                        (ow * sw + kj) as isize - pw as isize;
-
-                                    if ih_signed >= 0
-                                        && (ih_signed as usize) < in_h
-                                        && iw_signed >= 0
-                                        && (iw_signed as usize) < in_w
-                                    {
-                                        let ih = ih_signed as usize;
-                                        let iw = iw_signed as usize;
-                                        let in_idx = b * self.in_channels * in_h * in_w
-                                            + ic * in_h * in_w
-                                            + ih * in_w
-                                            + iw;
-                                        let w_idx = oc * self.in_channels * kh * kw
-                                            + ic * kh * kw
-                                            + ki * kw
-                                            + kj;
-                                        grad_weight[w_idx] += input_vec[in_idx] * go_val;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let grad_input_tensor =
-            Tensor::from_vec(grad_input, &self.input_shape).unwrap();
+        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape).unwrap();
         let grad_weight_tensor = Tensor::from_vec(
-            grad_weight,
-            &[self.out_channels, self.in_channels, kh, kw],
-        )
-        .unwrap();
+            grad_weight, &[self.out_channels, self.in_channels, kh, kw],
+        ).unwrap();
 
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
@@ -198,16 +216,10 @@ impl GradientFunction for Conv2dBackward {
         if self.has_bias {
             let mut grad_bias = vec![0.0f32; self.out_channels];
             for b in 0..batch_size {
+                let go_offset = b * self.out_channels * out_hw;
                 for oc in 0..self.out_channels {
-                    for oh in 0..out_h {
-                        for ow in 0..out_w {
-                            let go_idx = b * self.out_channels * out_h * out_w
-                                + oc * out_h * out_w
-                                + oh * out_w
-                                + ow;
-                            grad_bias[oc] += grad_out_vec[go_idx];
-                        }
-                    }
+                    let start = go_offset + oc * out_hw;
+                    grad_bias[oc] += grad_out_vec[start..start + out_hw].iter().sum::<f32>();
                 }
             }
             result.push(Some(
@@ -304,51 +316,11 @@ impl GradientFunction for GroupedConv2dBackward {
 
         let ic_per_group = self.in_channels / self.groups;
         let oc_per_group = self.out_channels / self.groups;
+        let out_hw = out_h * out_w;
+        let col_rows_g = ic_per_group * kh * kw; // columns per group
 
-        // === d_input ===
+        // Use im2col + GEMM per group for efficient backward
         let mut grad_input = vec![0.0f32; batch_size * self.in_channels * in_h * in_w];
-
-        for b in 0..batch_size {
-            for g in 0..self.groups {
-                let ic_start = g * ic_per_group;
-                let oc_start = g * oc_per_group;
-
-                for oc_local in 0..oc_per_group {
-                    let oc = oc_start + oc_local;
-                    for oh in 0..out_h {
-                        for ow in 0..out_w {
-                            let go_idx = b * self.out_channels * out_h * out_w
-                                + oc * out_h * out_w + oh * out_w + ow;
-                            let go_val = grad_out_vec[go_idx];
-
-                            for ic_local in 0..ic_per_group {
-                                let ic = ic_start + ic_local;
-                                for ki in 0..kh {
-                                    for kj in 0..kw {
-                                        let ih_s = (oh * sh + ki) as isize - ph as isize;
-                                        let iw_s = (ow * sw + kj) as isize - pw as isize;
-                                        if ih_s >= 0 && (ih_s as usize) < in_h
-                                            && iw_s >= 0 && (iw_s as usize) < in_w
-                                        {
-                                            let ih = ih_s as usize;
-                                            let iw = iw_s as usize;
-                                            let in_idx = b * self.in_channels * in_h * in_w
-                                                + ic * in_h * in_w + ih * in_w + iw;
-                                            // weight: (out_channels, ic_per_group, kh, kw)
-                                            let w_idx = oc * ic_per_group * kh * kw
-                                                + ic_local * kh * kw + ki * kw + kj;
-                                            grad_input[in_idx] += go_val * weight_vec[w_idx];
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // === d_weight ===
         let mut grad_weight = vec![0.0f32; self.out_channels * ic_per_group * kh * kw];
 
         for b in 0..batch_size {
@@ -356,31 +328,67 @@ impl GradientFunction for GroupedConv2dBackward {
                 let ic_start = g * ic_per_group;
                 let oc_start = g * oc_per_group;
 
+                // im2col for this group's input channels
+                let mut col = vec![0.0f32; col_rows_g * out_hw];
+                for c_local in 0..ic_per_group {
+                    let c = ic_start + c_local;
+                    for ki in 0..kh {
+                        for kj in 0..kw {
+                            let col_row = c_local * kh * kw + ki * kw + kj;
+                            for oh in 0..out_h {
+                                for ow in 0..out_w {
+                                    let ih = (oh * sh + ki) as isize - ph as isize;
+                                    let iw = (ow * sw + kj) as isize - pw as isize;
+                                    let val = if ih >= 0 && (ih as usize) < in_h
+                                        && iw >= 0 && (iw as usize) < in_w
+                                    {
+                                        input_vec[b * self.in_channels * in_h * in_w
+                                            + c * in_h * in_w + ih as usize * in_w + iw as usize]
+                                    } else { 0.0 };
+                                    col[col_row * out_hw + oh * out_w + ow] = val;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // grad_out slice for this group: [oc_per_group, out_hw]
+                let mut go_group = vec![0.0f32; oc_per_group * out_hw];
                 for oc_local in 0..oc_per_group {
                     let oc = oc_start + oc_local;
-                    for oh in 0..out_h {
-                        for ow in 0..out_w {
-                            let go_idx = b * self.out_channels * out_h * out_w
-                                + oc * out_h * out_w + oh * out_w + ow;
-                            let go_val = grad_out_vec[go_idx];
+                    let src_off = b * self.out_channels * out_hw + oc * out_hw;
+                    go_group[oc_local * out_hw..(oc_local + 1) * out_hw]
+                        .copy_from_slice(&grad_out_vec[src_off..src_off + out_hw]);
+                }
 
-                            for ic_local in 0..ic_per_group {
-                                let ic = ic_start + ic_local;
-                                for ki in 0..kh {
-                                    for kj in 0..kw {
-                                        let ih_s = (oh * sh + ki) as isize - ph as isize;
-                                        let iw_s = (ow * sw + kj) as isize - pw as isize;
-                                        if ih_s >= 0 && (ih_s as usize) < in_h
-                                            && iw_s >= 0 && (iw_s as usize) < in_w
-                                        {
-                                            let ih = ih_s as usize;
-                                            let iw = iw_s as usize;
-                                            let in_idx = b * self.in_channels * in_h * in_w
-                                                + ic * in_h * in_w + ih * in_w + iw;
-                                            let w_idx = oc * ic_per_group * kh * kw
-                                                + ic_local * kh * kw + ki * kw + kj;
-                                            grad_weight[w_idx] += input_vec[in_idx] * go_val;
-                                        }
+                // grad_weight[group] += go_group × col^T
+                let w_offset = oc_start * ic_per_group * kh * kw;
+                gemm_acc(&go_group, &col,
+                    &mut grad_weight[w_offset..w_offset + oc_per_group * col_rows_g],
+                    oc_per_group, out_hw, col_rows_g, false, true);
+
+                // grad_col = weight[group]^T × go_group
+                let w_group = &weight_vec[w_offset..w_offset + oc_per_group * col_rows_g];
+                let mut grad_col = vec![0.0f32; col_rows_g * out_hw];
+                gemm_acc(w_group, &go_group, &mut grad_col,
+                    col_rows_g, oc_per_group, out_hw, true, false);
+
+                // col2im: scatter grad_col back
+                for c_local in 0..ic_per_group {
+                    let c = ic_start + c_local;
+                    for ki in 0..kh {
+                        for kj in 0..kw {
+                            let col_row = c_local * kh * kw + ki * kw + kj;
+                            for oh in 0..out_h {
+                                for ow in 0..out_w {
+                                    let ih = (oh * sh + ki) as isize - ph as isize;
+                                    let iw = (ow * sw + kj) as isize - pw as isize;
+                                    if ih >= 0 && (ih as usize) < in_h
+                                        && iw >= 0 && (iw as usize) < in_w
+                                    {
+                                        grad_input[b * self.in_channels * in_h * in_w
+                                            + c * in_h * in_w + ih as usize * in_w + iw as usize]
+                                            += grad_col[col_row * out_hw + oh * out_w + ow];
                                     }
                                 }
                             }
@@ -401,14 +409,10 @@ impl GradientFunction for GroupedConv2dBackward {
         if self.has_bias {
             let mut grad_bias = vec![0.0f32; self.out_channels];
             for b in 0..batch_size {
+                let go_offset = b * self.out_channels * out_hw;
                 for oc in 0..self.out_channels {
-                    for oh in 0..out_h {
-                        for ow in 0..out_w {
-                            let go_idx = b * self.out_channels * out_h * out_w
-                                + oc * out_h * out_w + oh * out_w + ow;
-                            grad_bias[oc] += grad_out_vec[go_idx];
-                        }
-                    }
+                    let start = go_offset + oc * out_hw;
+                    grad_bias[oc] += grad_out_vec[start..start + out_hw].iter().sum::<f32>();
                 }
             }
             result.push(Some(Tensor::from_vec(grad_bias, &[self.out_channels]).unwrap()));
@@ -496,13 +500,16 @@ impl GradientFunction for BatchNorm2dBackward {
 
             // Accumulate grad_bias = sum(grad), grad_weight = sum(grad * x_hat)
             // Also compute sum_grad and sum_grad_xhat for d_input
+            // Cache x_hat to avoid recomputing in second pass
             let mut sum_grad = 0.0f32;
             let mut sum_grad_xhat = 0.0f32;
+            let mut x_hat_cache = vec![0.0f32; batch * spatial];
 
             for b_idx in 0..batch {
                 for s in 0..spatial {
                     let idx = b_idx * channels * spatial + c * spatial + s;
                     let x_hat = (input_vec[idx] - mean_c) * std_inv;
+                    x_hat_cache[b_idx * spatial + s] = x_hat;
                     let g = grad_vec[idx];
 
                     grad_bias[c] += g;
@@ -514,13 +521,14 @@ impl GradientFunction for BatchNorm2dBackward {
             }
 
             // d_input = weight * std_inv / N * (N * grad - sum_grad - x_hat * sum_grad_xhat)
+            let scale = weight_c * std_inv / n;
             for b_idx in 0..batch {
                 for s in 0..spatial {
                     let idx = b_idx * channels * spatial + c * spatial + s;
-                    let x_hat = (input_vec[idx] - mean_c) * std_inv;
+                    let x_hat = x_hat_cache[b_idx * spatial + s];
                     let g = grad_vec[idx];
 
-                    grad_input[idx] = weight_c * std_inv / n
+                    grad_input[idx] = scale
                         * (n * g - sum_grad - x_hat * sum_grad_xhat);
                 }
             }
@@ -615,11 +623,13 @@ impl GradientFunction for BatchNorm1dBackward {
 
             let mut sum_grad = 0.0f32;
             let mut sum_grad_xhat = 0.0f32;
+            let mut x_hat_cache = vec![0.0f32; batch * spatial];
 
             for b_idx in 0..batch {
                 for s in 0..spatial {
                     let idx = b_idx * channels * spatial + c * spatial + s;
                     let x_hat = (input_vec[idx] - mean_c) * std_inv;
+                    x_hat_cache[b_idx * spatial + s] = x_hat;
                     let g = grad_vec[idx];
 
                     grad_bias[c] += g;
@@ -630,13 +640,14 @@ impl GradientFunction for BatchNorm1dBackward {
                 }
             }
 
+            let scale = weight_c * std_inv / n;
             for b_idx in 0..batch {
                 for s in 0..spatial {
                     let idx = b_idx * channels * spatial + c * spatial + s;
-                    let x_hat = (input_vec[idx] - mean_c) * std_inv;
+                    let x_hat = x_hat_cache[b_idx * spatial + s];
                     let g = grad_vec[idx];
 
-                    grad_input[idx] = weight_c * std_inv / n
+                    grad_input[idx] = scale
                         * (n * g - sum_grad - x_hat * sum_grad_xhat);
                 }
             }
@@ -729,58 +740,62 @@ impl GradientFunction for Conv1dBackward {
 
         let in_length = self.input_shape[2];
         let ks = self.kernel_size;
+        let col_rows = self.in_channels * ks; // im2col column height
 
         let input_vec = self.saved_input.to_vec();
         let weight_vec = self.saved_weight.to_vec();
 
-        // d_input
-        let mut grad_input = vec![0.0f32; batch_size * self.in_channels * in_length];
-        for b in 0..batch_size {
-            for oc in 0..self.out_channels {
-                for ol in 0..out_length {
-                    let go_idx =
-                        b * self.out_channels * out_length + oc * out_length + ol;
-                    let go_val = grad_out_vec[go_idx];
+        // Use im2col + GEMM approach (same pattern as Conv2d backward)
+        // im2col unfolds 1D patches: col[c*ks+k, ol] = input[c, ol*stride+k-padding]
+        // grad_weight = grad_out × col^T  (GEMM)
+        // grad_col = weight^T × grad_out  (GEMM)
+        // grad_input = col2im(grad_col)
 
-                    for ic in 0..self.in_channels {
-                        for k in 0..ks {
-                            let il_signed =
-                                (ol * self.stride + k) as isize - self.padding as isize;
-                            if il_signed >= 0 && (il_signed as usize) < in_length {
-                                let il = il_signed as usize;
-                                let in_idx =
-                                    b * self.in_channels * in_length + ic * in_length + il;
-                                let w_idx =
-                                    oc * self.in_channels * ks + ic * ks + k;
-                                grad_input[in_idx] += go_val * weight_vec[w_idx];
-                            }
-                        }
+        let mut grad_weight = vec![0.0f32; self.out_channels * col_rows];
+        let mut grad_input = vec![0.0f32; batch_size * self.in_channels * in_length];
+
+        for b in 0..batch_size {
+            // im2col for this batch element
+            let input_offset = b * self.in_channels * in_length;
+            let mut col = vec![0.0f32; col_rows * out_length];
+            for c in 0..self.in_channels {
+                for k in 0..ks {
+                    let col_row = c * ks + k;
+                    for ol in 0..out_length {
+                        let il_signed = (ol * self.stride + k) as isize - self.padding as isize;
+                        let val = if il_signed >= 0 && (il_signed as usize) < in_length {
+                            input_vec[input_offset + c * in_length + il_signed as usize]
+                        } else {
+                            0.0
+                        };
+                        col[col_row * out_length + ol] = val;
                     }
                 }
             }
-        }
 
-        // d_weight
-        let mut grad_weight = vec![0.0f32; self.out_channels * self.in_channels * ks];
-        for b in 0..batch_size {
-            for oc in 0..self.out_channels {
-                for ol in 0..out_length {
-                    let go_idx =
-                        b * self.out_channels * out_length + oc * out_length + ol;
-                    let go_val = grad_out_vec[go_idx];
+            // grad_out for this batch: [out_channels, out_length]
+            let go_offset = b * self.out_channels * out_length;
+            let go_slice = &grad_out_vec[go_offset..go_offset + self.out_channels * out_length];
 
-                    for ic in 0..self.in_channels {
-                        for k in 0..ks {
-                            let il_signed =
-                                (ol * self.stride + k) as isize - self.padding as isize;
-                            if il_signed >= 0 && (il_signed as usize) < in_length {
-                                let il = il_signed as usize;
-                                let in_idx =
-                                    b * self.in_channels * in_length + ic * in_length + il;
-                                let w_idx =
-                                    oc * self.in_channels * ks + ic * ks + k;
-                                grad_weight[w_idx] += input_vec[in_idx] * go_val;
-                            }
+            // grad_weight += grad_out × col^T  (GEMM: [OC, out_length] × [out_length, col_rows])
+            gemm_acc(go_slice, &col, &mut grad_weight,
+                self.out_channels, out_length, col_rows, false, true);
+
+            // grad_col = weight^T × grad_out  (GEMM: [col_rows, OC] × [OC, out_length] = [col_rows, out_length])
+            let mut grad_col = vec![0.0f32; col_rows * out_length];
+            gemm_acc(&weight_vec, go_slice, &mut grad_col,
+                col_rows, self.out_channels, out_length, true, false);
+
+            // col2im: scatter grad_col back to grad_input
+            let gi_offset = b * self.in_channels * in_length;
+            for c in 0..self.in_channels {
+                for k in 0..ks {
+                    let col_row = c * ks + k;
+                    for ol in 0..out_length {
+                        let il_signed = (ol * self.stride + k) as isize - self.padding as isize;
+                        if il_signed >= 0 && (il_signed as usize) < in_length {
+                            grad_input[gi_offset + c * in_length + il_signed as usize]
+                                += grad_col[col_row * out_length + ol];
                         }
                     }
                 }
@@ -798,14 +813,13 @@ impl GradientFunction for Conv1dBackward {
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
         if self.has_bias {
+            let out_hw = out_length;
             let mut grad_bias = vec![0.0f32; self.out_channels];
             for b in 0..batch_size {
+                let go_offset = b * self.out_channels * out_hw;
                 for oc in 0..self.out_channels {
-                    for ol in 0..out_length {
-                        let go_idx =
-                            b * self.out_channels * out_length + oc * out_length + ol;
-                        grad_bias[oc] += grad_out_vec[go_idx];
-                    }
+                    let start = go_offset + oc * out_hw;
+                    grad_bias[oc] += grad_out_vec[start..start + out_hw].iter().sum::<f32>();
                 }
             }
             result.push(Some(
@@ -1010,35 +1024,37 @@ impl GradientFunction for AvgPool2dBackward {
             for c in 0..channels {
                 for oh in 0..out_h {
                     for ow in 0..out_w {
-                        // Count valid elements in this pooling window
-                        let mut count = 0;
-                        for ki in 0..kh {
-                            for kj in 0..kw {
-                                let ih = oh * sh + ki;
-                                let iw = ow * sw + kj;
-                                if ih >= ph && ih < in_h + ph && iw >= pw && iw < in_w + pw {
-                                    count += 1;
-                                }
-                            }
-                        }
+                        // Compute count analytically instead of iterating kernel twice
+                        let ih_start = (oh * sh).max(ph) - ph;
+                        let ih_end = ((oh * sh + kh).min(in_h + ph)) - ph;
+                        let iw_start = (ow * sw).max(pw) - pw;
+                        let iw_end = ((ow * sw + kw).min(in_w + pw)) - pw;
+                        let count = if ih_end > ih_start && iw_end > iw_start {
+                            (ih_end - ih_start) * (iw_end - iw_start)
+                        } else {
+                            0
+                        };
 
                         let go_idx =
                             b * channels * out_h * out_w + c * out_h * out_w + oh * out_w + ow;
                         let go_val = grad_out_vec[go_idx];
                         let grad_per_elem = if count > 0 { go_val / count as f32 } else { 0.0 };
 
+                        // Single pass to scatter gradients
                         for ki in 0..kh {
-                            for kj in 0..kw {
-                                let ih = oh * sh + ki;
-                                let iw = ow * sw + kj;
-                                if ih >= ph && ih < in_h + ph && iw >= pw && iw < in_w + pw {
-                                    let actual_ih = ih - ph;
-                                    let actual_iw = iw - pw;
-                                    let in_idx = b * channels * in_h * in_w
-                                        + c * in_h * in_w
-                                        + actual_ih * in_w
-                                        + actual_iw;
-                                    grad_input[in_idx] += grad_per_elem;
+                            let ih = oh * sh + ki;
+                            if ih >= ph && ih < in_h + ph {
+                                let actual_ih = ih - ph;
+                                for kj in 0..kw {
+                                    let iw = ow * sw + kj;
+                                    if iw >= pw && iw < in_w + pw {
+                                        let actual_iw = iw - pw;
+                                        let in_idx = b * channels * in_h * in_w
+                                            + c * in_h * in_w
+                                            + actual_ih * in_w
+                                            + actual_iw;
+                                        grad_input[in_idx] += grad_per_elem;
+                                    }
                                 }
                             }
                         }
@@ -1113,19 +1129,17 @@ impl GradientFunction for AvgPool1dBackward {
             for c in 0..channels {
                 for ol in 0..out_length {
                     let in_start = ol * self.stride;
-                    let mut count = 0;
-                    for k in 0..self.kernel_size {
-                        let il = in_start + k;
-                        if il >= self.padding && il < in_length + self.padding {
-                            count += 1;
-                        }
-                    }
+                    // Compute count analytically instead of iterating kernel twice
+                    let il_begin = in_start.max(self.padding) - self.padding;
+                    let il_end = ((in_start + self.kernel_size).min(in_length + self.padding)) - self.padding;
+                    let count = if il_end > il_begin { il_end - il_begin } else { 0 };
 
                     let go_idx =
                         b * channels * out_length + c * out_length + ol;
                     let go_val = grad_out_vec[go_idx];
                     let grad_per_elem = if count > 0 { go_val / count as f32 } else { 0.0 };
 
+                    // Single pass to scatter gradients
                     for k in 0..self.kernel_size {
                         let il = in_start + k;
                         if il >= self.padding && il < in_length + self.padding {
@@ -1308,9 +1322,11 @@ impl GradientFunction for ConvTranspose2dBackward {
         let batch_size = grad_out_shape[0];
         let out_h = grad_out_shape[2];
         let out_w = grad_out_shape[3];
+        let out_hw = out_h * out_w;
 
         let in_h = self.input_shape[2];
         let in_w = self.input_shape[3];
+        let in_hw = in_h * in_w;
         let (kh, kw) = self.kernel_size;
         let (sh, sw) = self.stride;
         let (ph, pw) = self.padding;
@@ -1320,80 +1336,103 @@ impl GradientFunction for ConvTranspose2dBackward {
 
         // d_input: standard conv2d of grad_output with weight
         // weight shape: (in_channels, out_channels, kh, kw)
-        let mut grad_input = vec![0.0f32; batch_size * self.in_channels * in_h * in_w];
+        // grad_input[b, ic, ih, iw] = sum_{oc,ki,kj} weight[ic,oc,ki,kj] * grad_out[b,oc,oh,ow]
+        // where oh = ih*sh + ki - ph,  ow = iw*sw + kj - pw
+        //
+        // Cache-friendly: pre-compute base offsets, skip out-of-bounds early
+        let mut grad_input = vec![0.0f32; batch_size * self.in_channels * in_hw];
 
         for b in 0..batch_size {
+            let go_b = b * self.out_channels * out_hw;
+            let gi_b = b * self.in_channels * in_hw;
+
             for ic in 0..self.in_channels {
+                let w_ic = ic * self.out_channels * kh * kw;
+                let gi_ic = gi_b + ic * in_hw;
+
                 for ih in 0..in_h {
+                    let oh_base = (ih * sh) as isize - ph as isize;
+
                     for iw in 0..in_w {
+                        let ow_base = (iw * sw) as isize - pw as isize;
                         let mut sum = 0.0f32;
-                        for oc in 0..self.out_channels {
-                            for ki in 0..kh {
-                                for kj in 0..kw {
-                                    let oh_signed = (ih as isize) * (sh as isize) + (ki as isize) - (ph as isize);
-                                    let ow_signed = (iw as isize) * (sw as isize) + (kj as isize) - (pw as isize);
-                                    if oh_signed >= 0 && (oh_signed as usize) < out_h
-                                        && ow_signed >= 0 && (ow_signed as usize) < out_w
-                                    {
-                                        let oh = oh_signed as usize;
-                                        let ow = ow_signed as usize;
-                                        let go_idx = b * self.out_channels * out_h * out_w
-                                            + oc * out_h * out_w
-                                            + oh * out_w
-                                            + ow;
-                                        let w_idx = ic * self.out_channels * kh * kw
-                                            + oc * kh * kw
-                                            + ki * kw
-                                            + kj;
-                                        sum += grad_out_vec[go_idx] * weight_vec[w_idx];
-                                    }
+
+                        for ki in 0..kh {
+                            let oh_signed = oh_base + ki as isize;
+                            if oh_signed < 0 || oh_signed as usize >= out_h {
+                                continue;
+                            }
+                            let oh = oh_signed as usize;
+
+                            for kj in 0..kw {
+                                let ow_signed = ow_base + kj as isize;
+                                if ow_signed < 0 || ow_signed as usize >= out_w {
+                                    continue;
+                                }
+                                let ow = ow_signed as usize;
+                                let go_spatial = oh * out_w + ow;
+                                let w_kij = w_ic + ki * kw + kj;
+
+                                for oc in 0..self.out_channels {
+                                    sum += grad_out_vec[go_b + oc * out_hw + go_spatial]
+                                        * weight_vec[w_kij + oc * kh * kw];
                                 }
                             }
                         }
-                        let in_idx = b * self.in_channels * in_h * in_w
-                            + ic * in_h * in_w
-                            + ih * in_w
-                            + iw;
-                        grad_input[in_idx] = sum;
+                        grad_input[gi_ic + ih * in_w + iw] = sum;
                     }
                 }
             }
         }
 
-        // d_weight
+        // d_weight: accumulate over batch and spatial positions
+        // grad_weight[ic, oc, ki, kj] += input[b, ic, ih, iw] * grad_out[b, oc, oh, ow]
+        // where oh = ih*sh + ki - ph,  ow = iw*sw + kj - pw
+        //
+        // Loop order: batch -> ic -> spatial(ih,iw) -> kernel(ki,kj) -> oc
+        // This keeps input access sequential and skips zero inputs
         let mut grad_weight = vec![0.0f32; self.in_channels * self.out_channels * kh * kw];
+
         for b in 0..batch_size {
+            let in_b = b * self.in_channels * in_hw;
+            let go_b = b * self.out_channels * out_hw;
+
             for ic in 0..self.in_channels {
-                for oc in 0..self.out_channels {
-                    for ki in 0..kh {
-                        for kj in 0..kw {
-                            let mut sum = 0.0f32;
-                            for ih in 0..in_h {
-                                for iw in 0..in_w {
-                                    let oh_signed = (ih as isize) * (sh as isize) + (ki as isize) - (ph as isize);
-                                    let ow_signed = (iw as isize) * (sw as isize) + (kj as isize) - (pw as isize);
-                                    if oh_signed >= 0 && (oh_signed as usize) < out_h
-                                        && ow_signed >= 0 && (ow_signed as usize) < out_w
-                                    {
-                                        let oh = oh_signed as usize;
-                                        let ow = ow_signed as usize;
-                                        let in_idx = b * self.in_channels * in_h * in_w
-                                            + ic * in_h * in_w
-                                            + ih * in_w
-                                            + iw;
-                                        let go_idx = b * self.out_channels * out_h * out_w
-                                            + oc * out_h * out_w
-                                            + oh * out_w
-                                            + ow;
-                                        sum += input_vec[in_idx] * grad_out_vec[go_idx];
-                                    }
+                let in_ic = in_b + ic * in_hw;
+                let gw_ic = ic * self.out_channels * kh * kw;
+
+                for ih in 0..in_h {
+                    let oh_base = (ih * sh) as isize - ph as isize;
+
+                    for iw in 0..in_w {
+                        let in_val = input_vec[in_ic + ih * in_w + iw];
+                        if in_val == 0.0 {
+                            continue; // skip zero inputs (common with ReLU)
+                        }
+
+                        let ow_base = (iw * sw) as isize - pw as isize;
+
+                        for ki in 0..kh {
+                            let oh_signed = oh_base + ki as isize;
+                            if oh_signed < 0 || oh_signed as usize >= out_h {
+                                continue;
+                            }
+                            let oh = oh_signed as usize;
+
+                            for kj in 0..kw {
+                                let ow_signed = ow_base + kj as isize;
+                                if ow_signed < 0 || ow_signed as usize >= out_w {
+                                    continue;
+                                }
+                                let ow = ow_signed as usize;
+                                let go_spatial = oh * out_w + ow;
+                                let gw_kij = gw_ic + ki * kw + kj;
+
+                                for oc in 0..self.out_channels {
+                                    grad_weight[gw_kij + oc * kh * kw]
+                                        += in_val * grad_out_vec[go_b + oc * out_hw + go_spatial];
                                 }
                             }
-                            let w_idx = ic * self.out_channels * kh * kw
-                                + oc * kh * kw
-                                + ki * kw
-                                + kj;
-                            grad_weight[w_idx] += sum;
                         }
                     }
                 }
@@ -1411,16 +1450,10 @@ impl GradientFunction for ConvTranspose2dBackward {
         if self.has_bias {
             let mut grad_bias = vec![0.0f32; self.out_channels];
             for b in 0..batch_size {
+                let go_offset = b * self.out_channels * out_hw;
                 for oc in 0..self.out_channels {
-                    for oh in 0..out_h {
-                        for ow in 0..out_w {
-                            let go_idx = b * self.out_channels * out_h * out_w
-                                + oc * out_h * out_w
-                                + oh * out_w
-                                + ow;
-                            grad_bias[oc] += grad_out_vec[go_idx];
-                        }
-                    }
+                    let start = go_offset + oc * out_hw;
+                    grad_bias[oc] += grad_out_vec[start..start + out_hw].iter().sum::<f32>();
                 }
             }
             result.push(Some(

@@ -1395,6 +1395,105 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Embedding scatter-add: atomically accumulates gradients into weight_grad.
+    /// Each thread handles one element of grad_src (total = num_indices * emb_dim).
+    pub fn embedding_scatter_add_f32(
+        &self,
+        grad_src: &CudaSlice<f32>,
+        indices: &CudaSlice<u32>,
+        weight_grad: &mut CudaSlice<f32>,
+        total_n: usize,
+        emb_dim: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("embedding_scatter_add_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("embedding_scatter_add_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(total_n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (grad_src, indices, weight_grad, total_n as u32, emb_dim as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Fused Adam optimizer step: updates param, exp_avg, exp_avg_sq in-place on GPU.
+    /// Eliminates the GPU->CPU->GPU copy in standard Adam.
+    #[allow(clippy::too_many_arguments)]
+    pub fn adam_step_f32(
+        &self,
+        param: &mut CudaSlice<f32>,
+        grad: &CudaSlice<f32>,
+        exp_avg: &mut CudaSlice<f32>,
+        exp_avg_sq: &mut CudaSlice<f32>,
+        n: usize,
+        lr: f32,
+        beta1: f32,
+        beta2: f32,
+        eps: f32,
+        weight_decay: f32,
+        bias_correction1: f32,
+        bias_correction2: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("adam_step_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("adam_step_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (
+                    param, grad, exp_avg, exp_avg_sq,
+                    n as u32, lr, beta1, beta2, eps, weight_decay,
+                    bias_correction1, bias_correction2,
+                ))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Compute sum of squares of all elements (for gradient norm).
+    /// Result is atomically accumulated into output[0].
+    pub fn grad_norm_sq_f32(
+        &self,
+        data: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("grad_norm_sq_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("grad_norm_sq_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (data, output, n as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Scale all elements in-place: data[i] *= scale
+    pub fn grad_scale_f32(
+        &self,
+        data: &mut CudaSlice<f32>,
+        n: usize,
+        scale: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("grad_scale_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("grad_scale_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (data, n as u32, scale))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// CrossEntropy forward: fused softmax + NLL loss.
     /// One block per batch item, 256 threads per block.
     /// Returns per-sample losses and softmax probabilities (for backward).
@@ -1482,6 +1581,324 @@ impl CudaBackend {
         }
         Ok(())
     }
+}
+
+// =============================================================================
+// Attention Mask Expansion GPU Operations
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+impl CudaBackend {
+    /// Expand causal mask [T, S] → [B, H, T, S] with 0→-1e9 conversion, entirely on GPU.
+    pub fn mask_expand_causal_f32(
+        &self,
+        mask: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        total_n: usize,
+        tgt_len: usize,
+        src_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("mask_expand_causal_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("mask_expand_causal_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(total_n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (mask, output, total_n as u32, tgt_len as u32, src_len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Expand padding mask [B, S] → [B, H, T, S] with 0→-1e9 conversion, entirely on GPU.
+    pub fn mask_expand_padding_f32(
+        &self,
+        mask: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        total_n: usize,
+        num_heads: usize,
+        tgt_len: usize,
+        src_len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("mask_expand_padding_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("mask_expand_padding_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(total_n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (mask, output, total_n as u32, num_heads as u32, tgt_len as u32, src_len as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Strided Gather (GPU-native contiguous)
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+impl CudaBackend {
+    /// Gather elements from a strided tensor layout into contiguous output on GPU.
+    /// Replaces the CPU index computation in contiguous_gpu().
+    pub fn strided_gather_f32(
+        &self,
+        src: &CudaSlice<f32>,
+        dst: &mut CudaSlice<f32>,
+        strides: &CudaSlice<i64>,
+        shape: &CudaSlice<u32>,
+        ndim: usize,
+        offset: usize,
+        total_n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("strided_gather_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("strided_gather_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(total_n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (src, dst, strides, shape, ndim as u32, offset as u32, total_n as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Conv2d GPU Operations (im2col + GEMM)
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+impl CudaBackend {
+    /// Launch the GPU im2col kernel.
+    ///
+    /// Unfolds one batch element's input patches into a column matrix.
+    /// - `input`: device buffer for one batch element [C_in, H, W]
+    /// - `col`: output device buffer [C_in*kH*kW, out_H*out_W]
+    /// - `params`: device buffer with u32[10] = {H, W, kH, kW, pH, pW, sH, sW, oH, oW}
+    pub fn im2col_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        col: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("im2col_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("im2col_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (input, col, params, n as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Launch the GPU col2im kernel (reverse of im2col).
+    ///
+    /// Scatters column matrix back to input spatial positions using atomicAdd.
+    /// The output buffer MUST be zero-initialized before calling this.
+    pub fn col2im_f32(
+        &self,
+        col: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("col2im_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("col2im_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (col, output, params, n as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Launch the GPU bias_add_channels kernel (in-place).
+    ///
+    /// Adds bias per output channel: data[i] += bias[i / spatial_size]
+    pub fn bias_add_channels_f32(
+        &self,
+        data: &mut CudaSlice<f32>,
+        bias: &CudaSlice<f32>,
+        spatial: usize,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("bias_add_channels_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("bias_add_channels_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            func.clone()
+                .launch(cfg, (data, bias, spatial as u32, n as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Full GPU conv2d forward: im2col on GPU → cuBLAS GEMM → bias add on GPU.
+    ///
+    /// Handles groups=1 only. Returns output as flat Vec<f32> in NCHW layout.
+    /// Returns None if any GPU operation fails (caller falls back to CPU).
+    pub fn conv2d_forward(
+        &self,
+        input: &[f32],
+        weight: &[f32],
+        bias: Option<&[f32]>,
+        batch_size: usize,
+        in_channels: usize,
+        in_height: usize,
+        in_width: usize,
+        out_channels: usize,
+        kernel_h: usize,
+        kernel_w: usize,
+        stride_h: usize,
+        stride_w: usize,
+        pad_h: usize,
+        pad_w: usize,
+    ) -> Option<Vec<f32>> {
+        let out_h = (in_height + 2 * pad_h - kernel_h) / stride_h + 1;
+        let out_w = (in_width + 2 * pad_w - kernel_w) / stride_w + 1;
+        let col_h = in_channels * kernel_h * kernel_w;
+        let col_w = out_h * out_w;
+        let col_n = col_h * col_w;
+        let spatial = out_h * out_w;
+        let out_per_batch = out_channels * spatial;
+        let in_per_batch = in_channels * in_height * in_width;
+
+        use super::cuda_pool::pool_alloc;
+
+        // Upload weight [out_channels, col_h] to GPU (once for all batches)
+        let weight_gpu = self.htod_copy(weight).ok()?;
+
+        // Upload bias if present
+        let bias_gpu = bias.and_then(|b| self.htod_copy(b).ok());
+
+        // Upload im2col parameters as u32 buffer (reused across batches)
+        let im2col_params: [u32; 10] = [
+            in_height as u32, in_width as u32,
+            kernel_h as u32, kernel_w as u32,
+            pad_h as u32, pad_w as u32,
+            stride_h as u32, stride_w as u32,
+            out_h as u32, out_w as u32,
+        ];
+        let params_gpu = self.htod_copy(&im2col_params[..]).ok()?;
+
+        // Pool-allocate col buffer on GPU (reused across batches)
+        let mut col_gpu = pool_alloc(col_n).ok()?;
+
+        // Pool-allocate output buffer on GPU
+        let mut batch_out_gpu = pool_alloc(out_per_batch).ok()?;
+
+        let mut output = vec![0.0f32; batch_size * out_per_batch];
+
+        for b in 0..batch_size {
+            // Upload input for this batch element
+            let input_slice = &input[b * in_per_batch..(b + 1) * in_per_batch];
+            let input_gpu = self.htod_copy(input_slice).ok()?;
+
+            // GPU im2col: input [C_in, H, W] → col [col_h, col_w]
+            self.im2col_f32(
+                &input_gpu, &mut col_gpu, &params_gpu, col_n,
+            ).ok()?;
+
+            // GPU GEMM: out = weight @ col
+            // weight: [out_channels, col_h] (row-major)
+            // col: [col_h, col_w] (row-major)
+            // result: [out_channels, col_w] (row-major)
+            //
+            // cuBLAS column-major: C^T = B^T @ A^T
+            // m=col_w, n=out_channels, k=col_h
+            self.gemm_f32(
+                false, false,
+                col_w, out_channels, col_h,
+                1.0,
+                &col_gpu, col_w,
+                &weight_gpu, col_h,
+                0.0,
+                &mut batch_out_gpu, col_w,
+            ).ok()?;
+
+            // GPU bias add (in-place on batch_out_gpu)
+            if let Some(ref bg) = bias_gpu {
+                self.bias_add_channels_f32(
+                    &mut batch_out_gpu, bg, spatial, out_per_batch,
+                ).ok()?;
+            }
+
+            // Download output for this batch
+            let batch_result = self.dtoh_copy(&batch_out_gpu).ok()?;
+            output[b * out_per_batch..(b + 1) * out_per_batch]
+                .copy_from_slice(&batch_result[..out_per_batch]);
+        }
+
+        Some(output)
+    }
+}
+
+/// Public GPU conv2d forward — callable from other crates.
+///
+/// Returns Some(output_vec) on success, None if CUDA unavailable or operation fails.
+/// Only handles groups=1. Caller should fall back to CPU for grouped convolution.
+#[cfg(feature = "cuda")]
+pub fn cuda_conv2d_forward(
+    input: &[f32],
+    weight: &[f32],
+    bias: Option<&[f32]>,
+    batch_size: usize,
+    in_channels: usize,
+    in_height: usize,
+    in_width: usize,
+    out_channels: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: usize,
+    pad_w: usize,
+) -> Option<Vec<f32>> {
+    let cuda = get_cuda_backend()?;
+    cuda.conv2d_forward(
+        input, weight, bias,
+        batch_size, in_channels, in_height, in_width,
+        out_channels, kernel_h, kernel_w,
+        stride_h, stride_w, pad_h, pad_w,
+    )
+}
+
+/// Stub when CUDA feature is disabled.
+#[cfg(not(feature = "cuda"))]
+pub fn cuda_conv2d_forward(
+    _input: &[f32],
+    _weight: &[f32],
+    _bias: Option<&[f32]>,
+    _batch_size: usize,
+    _in_channels: usize,
+    _in_height: usize,
+    _in_width: usize,
+    _out_channels: usize,
+    _kernel_h: usize,
+    _kernel_w: usize,
+    _stride_h: usize,
+    _stride_w: usize,
+    _pad_h: usize,
+    _pad_w: usize,
+) -> Option<Vec<f32>> {
+    None
 }
 
 // =============================================================================
@@ -1761,5 +2178,51 @@ mod tests {
         assert!((result[0] - n as f32).abs() < 1e-3);
         assert!((result[n / 2] - n as f32).abs() < 1e-3);
         assert!((result[n - 1] - n as f32).abs() < 1e-3);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_cuda_conv2d_forward() {
+        if !is_available() {
+            return;
+        }
+
+        // 1x1 conv: 3 in_channels → 2 out_channels, input 4x4
+        let input = vec![1.0f32; 1 * 3 * 4 * 4]; // all ones
+        let mut weight = vec![0.0f32; 2 * 3 * 1 * 1];
+        // out_ch0 = in_ch0 (weight[0]=1), out_ch1 = in_ch1 (weight[4]=1)
+        weight[0] = 1.0;
+        weight[4] = 1.0;
+        let bias = vec![0.5f32; 2];
+
+        let result = cuda_conv2d_forward(
+            &input, &weight, Some(&bias),
+            1, 3, 4, 4, 2, 1, 1, 1, 1, 0, 0,
+        );
+
+        let out = result.expect("CUDA conv2d should succeed");
+        assert_eq!(out.len(), 2 * 4 * 4);
+        // out_ch0 = 1.0*1 + 0.5 = 1.5
+        assert!((out[0] - 1.5).abs() < 0.01, "1x1 conv ch0: expected 1.5, got {}", out[0]);
+        // out_ch1 = 1.0*1 + 0.5 = 1.5
+        assert!((out[16] - 1.5).abs() < 0.01, "1x1 conv ch1: expected 1.5, got {}", out[16]);
+
+        // 3x3 conv with padding=1: all-ones input, all-ones weight
+        let input2 = vec![1.0f32; 1 * 3 * 8 * 8];
+        let weight2 = vec![1.0f32; 2 * 3 * 3 * 3]; // all 1s → each output = sum of 27 inputs
+        let bias2 = vec![0.0f32; 2];
+
+        let result2 = cuda_conv2d_forward(
+            &input2, &weight2, Some(&bias2),
+            1, 3, 8, 8, 2, 3, 3, 1, 1, 1, 1,
+        );
+
+        let out2 = result2.expect("CUDA 3x3 conv should succeed");
+        assert_eq!(out2.len(), 2 * 8 * 8);
+        // Center pixel (row 4, col 4) = 3 channels * 9 kernel positions * 1.0 = 27.0
+        let center = 4 * 8 + 4;
+        assert!((out2[center] - 27.0).abs() < 0.1, "3x3 conv center: expected 27.0, got {}", out2[center]);
+        // Corner pixel (0,0) with pad=1: only 2x2x3 = 12 valid positions
+        assert!((out2[0] - 12.0).abs() < 0.1, "3x3 conv corner: expected 12.0, got {}", out2[0]);
     }
 }

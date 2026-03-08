@@ -139,7 +139,8 @@ pub fn nms(boxes: &Tensor<f32>, scores: &Tensor<f32>, iou_threshold: f32) -> Vec
     let mut keep = Vec::new();
     let mut suppressed = vec![false; n];
 
-    for &idx in &order {
+    for pos in 0..order.len() {
+        let idx = order[pos];
         if suppressed[idx] {
             continue;
         }
@@ -151,8 +152,10 @@ pub fn nms(boxes: &Tensor<f32>, scores: &Tensor<f32>, iou_threshold: f32) -> Vec
         let y2_a = boxes_vec[idx * 4 + 3];
         let area_a = (x2_a - x1_a).max(0.0) * (y2_a - y1_a).max(0.0);
 
-        for &other in &order {
-            if suppressed[other] || other == idx {
+        // Only check boxes after current position in score-sorted order;
+        // earlier boxes are either kept or already suppressed.
+        for &other in &order[pos + 1..] {
+            if suppressed[other] {
                 continue;
             }
 
@@ -727,18 +730,23 @@ pub fn positional_encoding_2d(h: usize, w: usize, d_model: usize) -> Tensor<f32>
 
     let mut encoding = vec![0.0f32; d_model * h * w];
 
+    // Precompute frequency table to avoid repeated powf in inner loops
+    let freqs: Vec<f32> = (0..quarter_d)
+        .map(|i| 1.0 / 10000.0f32.powf(2.0 * i as f32 / half_d as f32))
+        .collect();
+
     for y in 0..h {
         for x in 0..w {
             // Height encoding (first half)
             for i in 0..quarter_d {
-                let freq = 1.0 / 10000.0f32.powf(2.0 * i as f32 / half_d as f32);
+                let freq = freqs[i];
                 let pos = y as f32;
                 encoding[(2 * i) * h * w + y * w + x] = (pos * freq).sin();
                 encoding[(2 * i + 1) * h * w + y * w + x] = (pos * freq).cos();
             }
             // Width encoding (second half)
             for i in 0..quarter_d {
-                let freq = 1.0 / 10000.0f32.powf(2.0 * i as f32 / half_d as f32);
+                let freq = freqs[i];
                 let pos = x as f32;
                 encoding[(half_d + 2 * i) * h * w + y * w + x] = (pos * freq).sin();
                 encoding[(half_d + 2 * i + 1) * h * w + y * w + x] = (pos * freq).cos();

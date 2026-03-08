@@ -19,3 +19,4 @@ cuda = ["axonml-tensor/cuda", "axonml-core/cuda"]
 axonml-core.workspace = true
 axonml-tensor.workspace = true
 parking_lot.workspace = true
+matrixmultiply.workspace = true

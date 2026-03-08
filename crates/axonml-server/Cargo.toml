@@ -18,11 +18,11 @@ path = "src/main.rs"
 
 [dependencies]
 # AxonML crates for model inference
-axonml-core = { path = "../axonml-core", version = "0.3.2" }
-axonml-tensor = { path = "../axonml-tensor", version = "0.3.2" }
-axonml-autograd = { path = "../axonml-autograd", version = "0.3.2" }
-axonml-nn = { path = "../axonml-nn", version = "0.3.2" }
-axonml-serialize = { path = "../axonml-serialize", version = "0.3.2" }
+axonml-core = { path = "../axonml-core", version = "0.4.1" }
+axonml-tensor = { path = "../axonml-tensor", version = "0.4.1" }
+axonml-autograd = { path = "../axonml-autograd", version = "0.4.1" }
+axonml-nn = { path = "../axonml-nn", version = "0.4.1" }
+axonml-serialize = { path = "../axonml-serialize", version = "0.4.1" }
 
 # Web framework
 axum = { version = "0.7", features = ["ws", "multipart", "macros"] }
@@ -37,7 +37,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Authentication
-jsonwebtoken = "10"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 totp-rs = { version = "5", features = ["qr", "gen_secret"] }
 argon2 = "0.5"
 rand = "0.8"

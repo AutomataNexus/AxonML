@@ -252,5 +252,5 @@ let summary = snapshot.gradient_flow_summary();
 - [Neural Networks](../nn/README.md) - Modules using autograd
 - [Optimizers](../optim/README.md) - Gradient-based optimization
 
-@version 0.4.0
+@version 0.4.1
 @author AutomataNexus Development Team

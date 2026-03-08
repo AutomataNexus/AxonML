@@ -320,5 +320,5 @@ This makes the mask continuous and differentiable — gradients flow through the
 - [Optimizers](../optim/README.md) - Parameter updates
 - [Data](../data/README.md) - Data loading
 
-@version 0.4.0
+@version 0.4.1
 @author AutomataNexus Development Team

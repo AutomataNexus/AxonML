@@ -2695,6 +2695,835 @@ $L__cebwd_exit:
 }
 "#;
 
+/// PTX for embedding scatter-add backward (GPU-native gradient accumulation)
+/// Each thread handles one element: given (token_index, dim_offset),
+/// atomically adds grad_output[token_index * emb_dim + dim_offset] to
+/// weight_grad[indices[token_index] * emb_dim + dim_offset].
+#[cfg(feature = "cuda")]
+pub const EMBEDDING_SCATTER_PTX: &str = r#"
+.version 7.0
+.target sm_50
+.address_size 64
+
+// embedding_scatter_add_f32: Scatter-add gradients for embedding backward
+// Thread i handles one element in grad_output (total = num_indices * emb_dim)
+// Params: grad_src, indices, weight_grad, num_indices, emb_dim
+.visible .entry embedding_scatter_add_f32(
+    .param .u64 p_grad_src,
+    .param .u64 p_indices,
+    .param .u64 p_weight_grad,
+    .param .u32 p_total_n,
+    .param .u32 p_emb_dim
+) {
+    .reg .pred %p<2>;
+    .reg .f32 %f<2>;
+    .reg .b32 %r<10>;
+    .reg .b64 %rd<12>;
+
+    // Global thread index
+    mov.u32 %r1, %ctaid.x;
+    mov.u32 %r2, %ntid.x;
+    mov.u32 %r3, %tid.x;
+    mad.lo.s32 %r1, %r1, %r2, %r3;
+
+    // Bounds check: r1 = thread_idx, must be < total_n
+    ld.param.u32 %r4, [p_total_n];
+    setp.ge.u32 %p1, %r1, %r4;
+    @%p1 bra $L__scatter_exit;
+
+    // Compute token_index = thread_idx / emb_dim
+    // Compute dim_offset  = thread_idx % emb_dim
+    ld.param.u32 %r5, [p_emb_dim];
+    div.u32 %r6, %r1, %r5;    // r6 = token_index
+    rem.u32 %r7, %r1, %r5;    // r7 = dim_offset
+
+    // Load indices[token_index] -> r8 = embedding row index
+    ld.param.u64 %rd1, [p_indices];
+    cvt.u64.u32 %rd2, %r6;
+    shl.b64 %rd2, %rd2, 2;       // *4 bytes per u32
+    add.s64 %rd3, %rd1, %rd2;
+    ld.global.u32 %r8, [%rd3];   // r8 = indices[token_index]
+
+    // Load grad_src[thread_idx]
+    ld.param.u64 %rd4, [p_grad_src];
+    cvt.u64.u32 %rd5, %r1;
+    shl.b64 %rd5, %rd5, 2;       // *4 bytes per f32
+    add.s64 %rd6, %rd4, %rd5;
+    ld.global.f32 %f1, [%rd6];
+
+    // Compute dest offset: r8 * emb_dim + dim_offset
+    mad.lo.u32 %r9, %r8, %r5, %r7;
+    ld.param.u64 %rd7, [p_weight_grad];
+    cvt.u64.u32 %rd8, %r9;
+    shl.b64 %rd8, %rd8, 2;       // *4 bytes per f32
+    add.s64 %rd9, %rd7, %rd8;
+
+    // Atomic add: weight_grad[r8*emb_dim + dim_offset] += grad_src[thread_idx]
+    atom.global.add.f32 %f1, [%rd9], %f1;
+
+$L__scatter_exit:
+    ret;
+}
+"#;
+
+/// PTX for fused Adam optimizer step (GPU-native parameter update)
+/// Each thread handles one element: updates param, exp_avg, exp_avg_sq in-place.
+/// Eliminates the GPU->CPU->GPU copy that standard Adam does per step.
+#[cfg(feature = "cuda")]
+pub const ADAM_PTX: &str = r#"
+.version 7.0
+.target sm_50
+.address_size 64
+
+// adam_step_f32: Fused Adam parameter update
+// Thread i updates one element of param, exp_avg, exp_avg_sq
+// Params: param, grad, exp_avg, exp_avg_sq, n,
+//         lr, beta1, beta2, eps, weight_decay,
+//         bias_correction1, bias_correction2
+.visible .entry adam_step_f32(
+    .param .u64 p_param,
+    .param .u64 p_grad,
+    .param .u64 p_exp_avg,
+    .param .u64 p_exp_avg_sq,
+    .param .u32 p_n,
+    .param .f32 p_lr,
+    .param .f32 p_beta1,
+    .param .f32 p_beta2,
+    .param .f32 p_eps,
+    .param .f32 p_weight_decay,
+    .param .f32 p_bias_correction1,
+    .param .f32 p_bias_correction2
+) {
+    .reg .pred %p<2>;
+    .reg .f32 %f<20>;
+    .reg .b32 %r<5>;
+    .reg .b64 %rd<12>;
+
+    // Global thread index
+    mov.u32 %r1, %ctaid.x;
+    mov.u32 %r2, %ntid.x;
+    mov.u32 %r3, %tid.x;
+    mad.lo.s32 %r1, %r1, %r2, %r3;
+
+    // Bounds check
+    ld.param.u32 %r4, [p_n];
+    setp.ge.u32 %p1, %r1, %r4;
+    @%p1 bra $L__adam_exit;
+
+    // Compute byte offset for this element
+    cvt.u64.u32 %rd1, %r1;
+    shl.b64 %rd1, %rd1, 2;    // *4 bytes
+
+    // Load all pointers
+    ld.param.u64 %rd2, [p_param];
+    ld.param.u64 %rd3, [p_grad];
+    ld.param.u64 %rd4, [p_exp_avg];
+    ld.param.u64 %rd5, [p_exp_avg_sq];
+
+    // Load values: param[i], grad[i], m[i], v[i]
+    add.s64 %rd6, %rd2, %rd1;
+    ld.global.f32 %f1, [%rd6];      // f1 = param[i]
+    add.s64 %rd7, %rd3, %rd1;
+    ld.global.f32 %f2, [%rd7];      // f2 = grad[i]
+    add.s64 %rd8, %rd4, %rd1;
+    ld.global.f32 %f3, [%rd8];      // f3 = exp_avg[i]
+    add.s64 %rd9, %rd5, %rd1;
+    ld.global.f32 %f4, [%rd9];      // f4 = exp_avg_sq[i]
+
+    // Load hyperparams
+    ld.param.f32 %f5, [p_lr];
+    ld.param.f32 %f6, [p_beta1];
+    ld.param.f32 %f7, [p_beta2];
+    ld.param.f32 %f8, [p_eps];
+    ld.param.f32 %f9, [p_weight_decay];
+    ld.param.f32 %f10, [p_bias_correction1];
+    ld.param.f32 %f11, [p_bias_correction2];
+
+    // Apply weight decay to grad: grad = grad + weight_decay * param
+    // f12 = weight_decay * param[i]
+    mul.f32 %f12, %f9, %f1;
+    add.f32 %f2, %f2, %f12;         // f2 = grad + wd*param
+
+    // Update exp_avg: m = beta1 * m + (1-beta1) * grad
+    // f13 = 1.0 - beta1
+    mov.f32 %f13, 0f3F800000;       // 1.0
+    sub.f32 %f13, %f13, %f6;        // 1 - beta1
+    mul.f32 %f14, %f6, %f3;         // beta1 * m
+    mul.f32 %f15, %f13, %f2;        // (1-beta1) * grad
+    add.f32 %f3, %f14, %f15;        // new m
+
+    // Update exp_avg_sq: v = beta2 * v + (1-beta2) * grad^2
+    mov.f32 %f13, 0f3F800000;       // 1.0
+    sub.f32 %f13, %f13, %f7;        // 1 - beta2
+    mul.f32 %f14, %f7, %f4;         // beta2 * v
+    mul.f32 %f15, %f2, %f2;         // grad^2
+    mul.f32 %f15, %f13, %f15;       // (1-beta2) * grad^2
+    add.f32 %f4, %f14, %f15;        // new v
+
+    // Bias-corrected step: step_size = lr / bias_correction1
+    div.approx.f32 %f16, %f5, %f10; // step_size
+
+    // denom = sqrt(v / bias_correction2) + eps
+    div.approx.f32 %f17, %f4, %f11; // v / bc2
+    sqrt.approx.f32 %f17, %f17;     // sqrt(v/bc2)
+    add.f32 %f17, %f17, %f8;        // + eps
+
+    // param = param - step_size * m / denom
+    div.approx.f32 %f18, %f3, %f17; // m / denom
+    mul.f32 %f18, %f16, %f18;       // step_size * m / denom
+    sub.f32 %f1, %f1, %f18;         // param -= update
+
+    // Store updated values
+    st.global.f32 [%rd6], %f1;      // param[i]
+    st.global.f32 [%rd8], %f3;      // exp_avg[i]
+    st.global.f32 [%rd9], %f4;      // exp_avg_sq[i]
+
+$L__adam_exit:
+    ret;
+}
+
+// grad_norm_sq_f32: Compute sum of squares of a vector (partial reduction)
+// Each block reduces its portion, atomically adds to output[0]
+.visible .entry grad_norm_sq_f32(
+    .param .u64 p_data,
+    .param .u64 p_output,
+    .param .u32 p_n
+) {
+    .reg .pred %p<2>;
+    .reg .f32 %f<4>;
+    .reg .b32 %r<8>;
+    .reg .b64 %rd<6>;
+    .shared .f32 sdata[256];
+
+    // Global thread index
+    mov.u32 %r1, %ctaid.x;
+    mov.u32 %r2, %ntid.x;
+    mov.u32 %r3, %tid.x;
+    mad.lo.s32 %r4, %r1, %r2, %r3;   // global_idx
+
+    ld.param.u32 %r5, [p_n];
+
+    // Load and square, or zero if out of bounds
+    setp.lt.u32 %p1, %r4, %r5;
+    mov.f32 %f1, 0f00000000;          // 0.0
+    @!%p1 bra $L__norm_store;
+
+    ld.param.u64 %rd1, [p_data];
+    cvt.u64.u32 %rd2, %r4;
+    shl.b64 %rd2, %rd2, 2;
+    add.s64 %rd3, %rd1, %rd2;
+    ld.global.f32 %f2, [%rd3];
+    mul.f32 %f1, %f2, %f2;            // f1 = data[i]^2
+
+$L__norm_store:
+    // Store to shared memory
+    cvt.u64.u32 %rd4, %r3;
+    shl.b64 %rd4, %rd4, 2;
+    mov.u64 %rd5, sdata;
+    add.s64 %rd5, %rd5, %rd4;
+    st.shared.f32 [%rd5], %f1;
+    bar.sync 0;
+
+    // Tree reduction in shared memory
+    mov.u32 %r6, 128;
+$L__norm_reduce:
+    setp.lt.u32 %p1, %r3, %r6;
+    @!%p1 bra $L__norm_reduce_done;
+
+    // Load sdata[tid] and sdata[tid + stride]
+    mov.u64 %rd5, sdata;
+    cvt.u64.u32 %rd4, %r3;
+    shl.b64 %rd4, %rd4, 2;
+    add.s64 %rd3, %rd5, %rd4;
+    ld.shared.f32 %f1, [%rd3];
+
+    add.u32 %r7, %r3, %r6;
+    cvt.u64.u32 %rd4, %r7;
+    shl.b64 %rd4, %rd4, 2;
+    add.s64 %rd4, %rd5, %rd4;
+    ld.shared.f32 %f2, [%rd4];
+
+    add.f32 %f1, %f1, %f2;
+    st.shared.f32 [%rd3], %f1;
+
+$L__norm_reduce_done:
+    bar.sync 0;
+    shr.u32 %r6, %r6, 1;
+    setp.ge.u32 %p1, %r6, 1;
+    @%p1 bra $L__norm_reduce;
+
+    // Thread 0 atomically adds block result to global output
+    setp.eq.u32 %p1, %r3, 0;
+    @!%p1 bra $L__norm_exit;
+
+    mov.u64 %rd5, sdata;
+    ld.shared.f32 %f1, [%rd5];
+    ld.param.u64 %rd1, [p_output];
+    atom.global.add.f32 %f1, [%rd1], %f1;
+
+$L__norm_exit:
+    ret;
+}
+
+// grad_scale_f32: Multiply all elements by a scalar
+// data[i] *= scale
+.visible .entry grad_scale_f32(
+    .param .u64 p_data,
+    .param .u32 p_n,
+    .param .f32 p_scale
+) {
+    .reg .pred %p<2>;
+    .reg .f32 %f<3>;
+    .reg .b32 %r<5>;
+    .reg .b64 %rd<5>;
+
+    mov.u32 %r1, %ctaid.x;
+    mov.u32 %r2, %ntid.x;
+    mov.u32 %r3, %tid.x;
+    mad.lo.s32 %r1, %r1, %r2, %r3;
+
+    ld.param.u32 %r4, [p_n];
+    setp.ge.u32 %p1, %r1, %r4;
+    @%p1 bra $L__scale_exit;
+
+    ld.param.u64 %rd1, [p_data];
+    cvt.u64.u32 %rd2, %r1;
+    shl.b64 %rd2, %rd2, 2;
+    add.s64 %rd3, %rd1, %rd2;
+    ld.global.f32 %f1, [%rd3];
+
+    ld.param.f32 %f2, [p_scale];
+    mul.f32 %f1, %f1, %f2;
+    st.global.f32 [%rd3], %f1;
+
+$L__scale_exit:
+    ret;
+}
+"#;
+
+/// PTX for strided gather (making non-contiguous tensors contiguous on GPU)
+/// Replaces the CPU index computation in contiguous_gpu()
+#[cfg(feature = "cuda")]
+pub const STRIDED_COPY_PTX: &str = r#"
+.version 7.0
+.target sm_50
+.address_size 64
+
+// strided_gather_f32: Copy elements from strided layout to contiguous output
+// src:     source data pointer (device)
+// dst:     destination data pointer (device, contiguous)
+// strides: [ndim] array of strides (device, i64)
+// shape:   [ndim] array of shape dims (device, u32)
+// ndim:    number of dimensions
+// offset:  storage offset
+// total_n: total number of elements to copy
+//
+// Each thread computes its multi-dim coordinate from its linear index,
+// then computes the source offset using strides.
+.visible .entry strided_gather_f32(
+    .param .u64 p_src,
+    .param .u64 p_dst,
+    .param .u64 p_strides,
+    .param .u64 p_shape,
+    .param .u32 p_ndim,
+    .param .u32 p_offset,
+    .param .u32 p_total_n
+) {
+    .reg .pred %p<2>;
+    .reg .f32 %f<2>;
+    .reg .b32 %r<16>;
+    .reg .b64 %rd<12>;
+
+    ld.param.u64 %rd1, [p_src];
+    ld.param.u64 %rd2, [p_dst];
+    ld.param.u64 %rd3, [p_strides];
+    ld.param.u64 %rd4, [p_shape];
+    ld.param.u32 %r1, [p_ndim];
+    ld.param.u32 %r2, [p_offset];
+    ld.param.u32 %r3, [p_total_n];
+
+    // Global thread index
+    mov.u32 %r4, %ctaid.x;
+    mov.u32 %r5, %ntid.x;
+    mov.u32 %r6, %tid.x;
+    mad.lo.s32 %r4, %r4, %r5, %r6;
+
+    setp.ge.u32 %p1, %r4, %r3;
+    @%p1 bra $L__sg_exit;
+
+    // Compute multi-dim coordinate from linear index, then source offset
+    // remaining = idx
+    // src_offset = storage_offset
+    // For each dim d from 0 to ndim-1:
+    //   coord_d = remaining / product(shape[d+1..ndim])
+    //   remaining = remaining % product(shape[d+1..ndim])
+    //   src_offset += coord_d * strides[d]
+    //
+    // We precompute by iterating right-to-left (innermost dim first)
+    // using: coord_d = remaining % shape[d], remaining /= shape[d]
+
+    mov.u32 %r7, %r4;           // remaining = idx
+    mov.u32 %r8, %r2;           // src_offset = storage_offset (as i32 for now)
+
+    // Loop from dim = ndim-1 down to 0
+    mov.u32 %r9, %r1;           // d = ndim
+$L__sg_loop:
+    setp.eq.u32 %p1, %r9, 0;
+    @%p1 bra $L__sg_done;
+    sub.u32 %r9, %r9, 1;        // d--
+
+    // Load shape[d]
+    cvt.u64.u32 %rd5, %r9;
+    shl.b64 %rd5, %rd5, 2;      // * sizeof(u32)
+    add.s64 %rd6, %rd4, %rd5;
+    ld.global.u32 %r10, [%rd6]; // shape[d]
+
+    // Load strides[d] (stored as i64 / isize)
+    cvt.u64.u32 %rd5, %r9;
+    shl.b64 %rd5, %rd5, 3;      // * sizeof(i64)
+    add.s64 %rd7, %rd3, %rd5;
+    ld.global.s32 %r11, [%rd7]; // strides[d] (lower 32 bits, sufficient for most tensors)
+
+    // coord = remaining % shape[d]
+    rem.u32 %r12, %r7, %r10;
+    // remaining = remaining / shape[d]
+    div.u32 %r7, %r7, %r10;
+    // src_offset += coord * stride[d]
+    mad.lo.s32 %r8, %r12, %r11, %r8;
+
+    bra $L__sg_loop;
+
+$L__sg_done:
+    // Load src[src_offset]
+    cvt.s64.s32 %rd8, %r8;
+    shl.b64 %rd8, %rd8, 2;      // * sizeof(f32)
+    add.s64 %rd9, %rd1, %rd8;
+    ld.global.f32 %f1, [%rd9];
+
+    // Store to dst[idx]
+    cvt.u64.u32 %rd10, %r4;
+    shl.b64 %rd10, %rd10, 2;
+    add.s64 %rd11, %rd2, %rd10;
+    st.global.f32 [%rd11], %f1;
+
+$L__sg_exit:
+    ret;
+}
+"#;
+
+/// Embedded PTX for im2col (conv2d unfolding) and bias_add_channels
+#[cfg(feature = "cuda")]
+/// PTX for attention mask expansion kernels
+pub const MASK_PTX: &str = r#"
+.version 7.0
+.target sm_50
+.address_size 64
+
+// mask_expand_causal_f32: Expand [T, S] causal mask to [B, H, T, S] with 0 to -1e9
+// mask_in: [T * S] input mask (device pointer)
+// output:  [B * H * T * S] expanded mask (device pointer)
+// total_n: B * H * T * S
+// tgt_len: T
+// src_len: S
+.visible .entry mask_expand_causal_f32(
+    .param .u64 p_mask_in,
+    .param .u64 p_output,
+    .param .u32 p_total_n,
+    .param .u32 p_tgt_len,
+    .param .u32 p_src_len
+) {
+    .reg .pred %p<3>;
+    .reg .f32 %f<3>;
+    .reg .b32 %r<12>;
+    .reg .b64 %rd<6>;
+
+    ld.param.u64 %rd1, [p_mask_in];
+    ld.param.u64 %rd2, [p_output];
+    ld.param.u32 %r1, [p_total_n];
+    ld.param.u32 %r2, [p_tgt_len];
+    ld.param.u32 %r3, [p_src_len];
+
+    // Global thread index
+    mov.u32 %r4, %ctaid.x;
+    mov.u32 %r5, %ntid.x;
+    mov.u32 %r6, %tid.x;
+    mad.lo.s32 %r4, %r4, %r5, %r6;
+
+    setp.ge.u32 %p1, %r4, %r1;
+    @%p1 bra $L__mask_causal_exit;
+
+    // idx to j = idx % S, i = (idx / S) % T
+    rem.u32 %r7, %r4, %r3;          // j = idx % src_len
+    div.u32 %r8, %r4, %r3;          // tmp = idx / src_len
+    rem.u32 %r9, %r8, %r2;          // i = tmp % tgt_len
+
+    // mask_in index = i * S + j
+    mad.lo.s32 %r10, %r9, %r3, %r7;
+
+    // Load mask_in[i * S + j]
+    cvt.u64.u32 %rd3, %r10;
+    shl.b64 %rd3, %rd3, 2;
+    add.s64 %rd3, %rd1, %rd3;
+    ld.global.f32 %f1, [%rd3];
+
+    // Convert: 0.0 to -1e9, nonzero to 0.0
+    mov.f32 %f2, 0fCEE6B280;        // -1e9 in IEEE 754
+    setp.eq.f32 %p2, %f1, 0f00000000;
+    selp.f32 %f1, %f2, 0f00000000, %p2;
+
+    // Store to output[idx]
+    cvt.u64.u32 %rd4, %r4;
+    shl.b64 %rd4, %rd4, 2;
+    add.s64 %rd4, %rd2, %rd4;
+    st.global.f32 [%rd4], %f1;
+
+$L__mask_causal_exit:
+    ret;
+}
+
+// mask_expand_padding_f32: Expand [B, S] padding mask to [B, H, T, S] with 0 to -1e9
+// mask_in: [B * S] input mask (device pointer)
+// output:  [B * H * T * S] expanded mask (device pointer)
+// total_n: B * H * T * S
+// num_heads: H
+// tgt_len: T
+// src_len: S
+.visible .entry mask_expand_padding_f32(
+    .param .u64 p_mask_in,
+    .param .u64 p_output,
+    .param .u32 p_total_n,
+    .param .u32 p_num_heads,
+    .param .u32 p_tgt_len,
+    .param .u32 p_src_len
+) {
+    .reg .pred %p<3>;
+    .reg .f32 %f<3>;
+    .reg .b32 %r<14>;
+    .reg .b64 %rd<6>;
+
+    ld.param.u64 %rd1, [p_mask_in];
+    ld.param.u64 %rd2, [p_output];
+    ld.param.u32 %r1, [p_total_n];
+    ld.param.u32 %r2, [p_num_heads];
+    ld.param.u32 %r3, [p_tgt_len];
+    ld.param.u32 %r4, [p_src_len];
+
+    // Global thread index
+    mov.u32 %r5, %ctaid.x;
+    mov.u32 %r6, %ntid.x;
+    mov.u32 %r7, %tid.x;
+    mad.lo.s32 %r5, %r5, %r6, %r7;
+
+    setp.ge.u32 %p1, %r5, %r1;
+    @%p1 bra $L__mask_padding_exit;
+
+    // idx to j = idx % S, stride = H * T * S, b = idx / stride
+    rem.u32 %r8, %r5, %r4;          // j = idx % src_len
+
+    // stride = num_heads * tgt_len * src_len
+    mul.lo.s32 %r9, %r2, %r3;
+    mul.lo.s32 %r9, %r9, %r4;       // stride = H * T * S
+    div.u32 %r10, %r5, %r9;         // b = idx / stride
+
+    // mask_in index = b * S + j
+    mad.lo.s32 %r11, %r10, %r4, %r8;
+
+    // Load mask_in[b * S + j]
+    cvt.u64.u32 %rd3, %r11;
+    shl.b64 %rd3, %rd3, 2;
+    add.s64 %rd3, %rd1, %rd3;
+    ld.global.f32 %f1, [%rd3];
+
+    // Convert: 0.0 to -1e9, nonzero to 0.0
+    mov.f32 %f2, 0fCEE6B280;        // -1e9 in IEEE 754
+    setp.eq.f32 %p2, %f1, 0f00000000;
+    selp.f32 %f1, %f2, 0f00000000, %p2;
+
+    // Store to output[idx]
+    cvt.u64.u32 %rd4, %r5;
+    shl.b64 %rd4, %rd4, 2;
+    add.s64 %rd4, %rd2, %rd4;
+    st.global.f32 [%rd4], %f1;
+
+$L__mask_padding_exit:
+    ret;
+}
+"#;
+
+pub const CONV_PTX: &str = r#"
+.version 7.0
+.target sm_50
+.address_size 64
+
+// im2col_f32: Unfold input patches into column matrix on GPU
+// input:  [C_in, H, W] (one batch element, device pointer)
+// col:    [C_in*kH*kW, out_H*out_W] (output column matrix, device pointer)
+// params: u32[10] = {H, W, kH, kW, pH, pW, sH, sW, oH, oW}
+// n:      total elements = C_in * kH * kW * oH * oW
+//
+// Decomposition for thread idx:
+//   w_col  = idx % out_w
+//   h_col  = (idx / out_w) % out_h
+//   c_col  = idx / (out_w * out_h)     (0 .. C_in*kH*kW)
+//   kw_off = c_col % kW
+//   kh_off = (c_col / kW) % kH
+//   c_in   = c_col / (kW * kH)
+//   h_in   = h_col * stride_h + kh_off - pad_h   (signed)
+//   w_in   = w_col * stride_w + kw_off - pad_w   (signed)
+//
+.visible .entry im2col_f32(
+    .param .u64 p_input,
+    .param .u64 p_col,
+    .param .u64 p_params,
+    .param .u32 p_n
+) {
+    .reg .pred %p<4>;
+    .reg .f32 %f<2>;
+    .reg .b32 %r<30>;
+    .reg .b64 %rd<8>;
+
+    ld.param.u64 %rd1, [p_input];
+    ld.param.u64 %rd2, [p_col];
+    ld.param.u64 %rd7, [p_params];
+    ld.param.u32 %r20, [p_n];
+
+    // Load conv params from global memory buffer
+    ld.global.u32 %r10, [%rd7 + 0];   // height
+    ld.global.u32 %r11, [%rd7 + 4];   // width
+    ld.global.u32 %r12, [%rd7 + 8];   // kernel_h
+    ld.global.u32 %r13, [%rd7 + 12];  // kernel_w
+    ld.global.u32 %r14, [%rd7 + 16];  // pad_h
+    ld.global.u32 %r15, [%rd7 + 20];  // pad_w
+    ld.global.u32 %r16, [%rd7 + 24];  // stride_h
+    ld.global.u32 %r17, [%rd7 + 28];  // stride_w
+    ld.global.u32 %r18, [%rd7 + 32];  // out_h
+    ld.global.u32 %r19, [%rd7 + 36];  // out_w
+
+    // Global thread index
+    mov.u32 %r1, %ctaid.x;
+    mov.u32 %r2, %ntid.x;
+    mov.u32 %r3, %tid.x;
+    mad.lo.s32 %r1, %r1, %r2, %r3;
+
+    setp.ge.u32 %p1, %r1, %r20;
+    @%p1 bra $L__im2col_exit;
+
+    // w_col = idx % out_w
+    rem.u32 %r4, %r1, %r19;
+    // tmp = idx / out_w
+    div.u32 %r5, %r1, %r19;
+    // h_col = tmp % out_h
+    rem.u32 %r6, %r5, %r18;
+    // c_col = tmp / out_h
+    div.u32 %r7, %r5, %r18;
+
+    // kw_off = c_col % kW
+    rem.u32 %r8, %r7, %r13;
+    // tmp2 = c_col / kW
+    div.u32 %r9, %r7, %r13;
+    // kh_off = tmp2 % kH
+    rem.u32 %r21, %r9, %r12;
+    // c_in = tmp2 / kH
+    div.u32 %r22, %r9, %r12;
+
+    // h_in = h_col * stride_h + kh_off - pad_h  (signed)
+    mad.lo.s32 %r23, %r6, %r16, %r21;
+    sub.s32 %r23, %r23, %r14;
+    // w_in = w_col * stride_w + kw_off - pad_w  (signed)
+    mad.lo.s32 %r24, %r4, %r17, %r8;
+    sub.s32 %r24, %r24, %r15;
+
+    // Bounds: h_in in [0, height) and w_in in [0, width)
+    setp.lt.s32 %p2, %r23, 0;
+    @%p2 bra $L__im2col_zero;
+    setp.ge.s32 %p2, %r23, %r10;
+    @%p2 bra $L__im2col_zero;
+    setp.lt.s32 %p3, %r24, 0;
+    @%p3 bra $L__im2col_zero;
+    setp.ge.s32 %p3, %r24, %r11;
+    @%p3 bra $L__im2col_zero;
+
+    // In bounds: input[c_in * H * W + h_in * W + w_in]
+    mul.lo.s32 %r25, %r10, %r11;
+    mul.lo.s32 %r26, %r22, %r25;
+    mad.lo.s32 %r26, %r23, %r11, %r26;
+    add.s32 %r26, %r26, %r24;
+
+    cvt.u64.u32 %rd3, %r26;
+    shl.b64 %rd3, %rd3, 2;
+    add.s64 %rd3, %rd1, %rd3;
+    ld.global.f32 %f1, [%rd3];
+
+    cvt.u64.u32 %rd4, %r1;
+    shl.b64 %rd4, %rd4, 2;
+    add.s64 %rd4, %rd2, %rd4;
+    st.global.f32 [%rd4], %f1;
+    bra $L__im2col_exit;
+
+$L__im2col_zero:
+    mov.f32 %f1, 0f00000000;
+    cvt.u64.u32 %rd4, %r1;
+    shl.b64 %rd4, %rd4, 2;
+    add.s64 %rd4, %rd2, %rd4;
+    st.global.f32 [%rd4], %f1;
+
+$L__im2col_exit:
+    ret;
+}
+
+// bias_add_channels_f32: data[i] += bias[i / spatial_size]
+// data:    [C_out * spatial] (in-place, device pointer)
+// bias:    [C_out] (device pointer)
+// spatial: out_h * out_w
+// n:       C_out * spatial (total elements)
+.visible .entry bias_add_channels_f32(
+    .param .u64 p_data,
+    .param .u64 p_bias,
+    .param .u32 p_spatial,
+    .param .u32 p_n
+) {
+    .reg .pred %p<2>;
+    .reg .f32 %f<3>;
+    .reg .b32 %r<7>;
+    .reg .b64 %rd<6>;
+
+    ld.param.u64 %rd1, [p_data];
+    ld.param.u64 %rd2, [p_bias];
+    ld.param.u32 %r1, [p_spatial];
+    ld.param.u32 %r2, [p_n];
+
+    mov.u32 %r3, %ctaid.x;
+    mov.u32 %r4, %ntid.x;
+    mov.u32 %r5, %tid.x;
+    mad.lo.s32 %r3, %r3, %r4, %r5;
+
+    setp.ge.u32 %p1, %r3, %r2;
+    @%p1 bra $L__bias_exit;
+
+    // channel = i / spatial_size
+    div.u32 %r6, %r3, %r1;
+
+    // Load bias[channel]
+    cvt.u64.u32 %rd3, %r6;
+    shl.b64 %rd3, %rd3, 2;
+    add.s64 %rd3, %rd2, %rd3;
+    ld.global.f32 %f1, [%rd3];
+
+    // Load data[i]
+    cvt.u64.u32 %rd4, %r3;
+    shl.b64 %rd4, %rd4, 2;
+    add.s64 %rd5, %rd1, %rd4;
+    ld.global.f32 %f2, [%rd5];
+
+    // data[i] += bias[channel]
+    add.f32 %f2, %f2, %f1;
+    st.global.f32 [%rd5], %f2;
+
+$L__bias_exit:
+    ret;
+}
+
+// col2im_f32: Scatter column matrix back to input spatial positions (reverse of im2col).
+// Iterates over each output position in col and atomicAdds to the corresponding input position.
+// col:     [C_in*kH*kW, out_H*out_W] (input column matrix, device pointer)
+// output:  [C_in, H, W] (output image, device pointer - MUST be zero-initialized)
+// params:  u32[10] = {H, W, kH, kW, pH, pW, sH, sW, oH, oW}
+// n:       total col elements = C_in * kH * kW * oH * oW
+.visible .entry col2im_f32(
+    .param .u64 p_col,
+    .param .u64 p_output,
+    .param .u64 p_params,
+    .param .u32 p_n
+) {
+    .reg .pred %p<4>;
+    .reg .f32 %f<3>;
+    .reg .b32 %r<30>;
+    .reg .b64 %rd<8>;
+
+    ld.param.u64 %rd1, [p_col];
+    ld.param.u64 %rd2, [p_output];
+    ld.param.u64 %rd7, [p_params];
+    ld.param.u32 %r20, [p_n];
+
+    // Load conv params
+    ld.global.u32 %r10, [%rd7 + 0];   // height
+    ld.global.u32 %r11, [%rd7 + 4];   // width
+    ld.global.u32 %r12, [%rd7 + 8];   // kernel_h
+    ld.global.u32 %r13, [%rd7 + 12];  // kernel_w
+    ld.global.u32 %r14, [%rd7 + 16];  // pad_h
+    ld.global.u32 %r15, [%rd7 + 20];  // pad_w
+    ld.global.u32 %r16, [%rd7 + 24];  // stride_h
+    ld.global.u32 %r17, [%rd7 + 28];  // stride_w
+    ld.global.u32 %r18, [%rd7 + 32];  // out_h
+    ld.global.u32 %r19, [%rd7 + 36];  // out_w
+
+    // Global thread index
+    mov.u32 %r1, %ctaid.x;
+    mov.u32 %r2, %ntid.x;
+    mov.u32 %r3, %tid.x;
+    mad.lo.s32 %r1, %r1, %r2, %r3;
+
+    setp.ge.u32 %p1, %r1, %r20;
+    @%p1 bra $L__col2im_exit;
+
+    // Same decomposition as im2col
+    // w_col = idx % out_w
+    rem.u32 %r4, %r1, %r19;
+    // tmp = idx / out_w
+    div.u32 %r5, %r1, %r19;
+    // h_col = tmp % out_h
+    rem.u32 %r6, %r5, %r18;
+    // c_col = tmp / out_h
+    div.u32 %r7, %r5, %r18;
+
+    // kw_off = c_col % kW
+    rem.u32 %r8, %r7, %r13;
+    // tmp2 = c_col / kW
+    div.u32 %r9, %r7, %r13;
+    // kh_off = tmp2 % kH
+    rem.u32 %r21, %r9, %r12;
+    // c_in = tmp2 / kH
+    div.u32 %r22, %r9, %r12;
+
+    // h_in = h_col * stride_h + kh_off - pad_h
+    mad.lo.s32 %r23, %r6, %r16, %r21;
+    sub.s32 %r23, %r23, %r14;
+    // w_in = w_col * stride_w + kw_off - pad_w
+    mad.lo.s32 %r24, %r4, %r17, %r8;
+    sub.s32 %r24, %r24, %r15;
+
+    // Bounds check
+    setp.lt.s32 %p2, %r23, 0;
+    @%p2 bra $L__col2im_exit;
+    setp.ge.s32 %p2, %r23, %r10;
+    @%p2 bra $L__col2im_exit;
+    setp.lt.s32 %p3, %r24, 0;
+    @%p3 bra $L__col2im_exit;
+    setp.ge.s32 %p3, %r24, %r11;
+    @%p3 bra $L__col2im_exit;
+
+    // Read col[idx]
+    cvt.u64.u32 %rd3, %r1;
+    shl.b64 %rd3, %rd3, 2;
+    add.s64 %rd3, %rd1, %rd3;
+    ld.global.f32 %f1, [%rd3];
+
+    // output[c_in * H * W + h_in * W + w_in] += col[idx]
+    mul.lo.s32 %r25, %r10, %r11;
+    mul.lo.s32 %r26, %r22, %r25;
+    mad.lo.s32 %r26, %r23, %r11, %r26;
+    add.s32 %r26, %r26, %r24;
+
+    cvt.u64.u32 %rd4, %r26;
+    shl.b64 %rd4, %rd4, 2;
+    add.s64 %rd4, %rd2, %rd4;
+    atom.global.add.f32 %f2, [%rd4], %f1;
+
+$L__col2im_exit:
+    ret;
+}
+"#;
+
 /// CUDA Kernel registry for managing loaded kernels
 #[cfg(feature = "cuda")]
 pub struct CudaKernels {
@@ -2784,6 +3613,41 @@ impl CudaKernels {
             "cross_entropy",
             CROSS_ENTROPY_PTX,
             &["cross_entropy_fwd_f32", "cross_entropy_bwd_f32"],
+        )?;
+
+        // Load conv kernels (im2col + col2im + bias_add)
+        kernels.load_module(
+            "conv",
+            CONV_PTX,
+            &["im2col_f32", "col2im_f32", "bias_add_channels_f32"],
+        )?;
+
+        // Load attention mask expansion kernels
+        kernels.load_module(
+            "mask",
+            MASK_PTX,
+            &["mask_expand_causal_f32", "mask_expand_padding_f32"],
+        )?;
+
+        // Load strided gather kernel (for GPU-native contiguous())
+        kernels.load_module(
+            "strided_copy",
+            STRIDED_COPY_PTX,
+            &["strided_gather_f32"],
+        )?;
+
+        // Load embedding scatter-add kernel (for GPU-native embedding backward)
+        kernels.load_module(
+            "embedding",
+            EMBEDDING_SCATTER_PTX,
+            &["embedding_scatter_add_f32"],
+        )?;
+
+        // Load fused Adam optimizer + gradient utility kernels
+        kernels.load_module(
+            "adam",
+            ADAM_PTX,
+            &["adam_step_f32", "grad_norm_sq_f32", "grad_scale_f32"],
         )?;
 
         Ok(kernels)

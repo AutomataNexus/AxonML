@@ -215,7 +215,7 @@ impl Optimizer for LAMB {
             state.step += 1;
 
             let param_data = param.data();
-            let param_vec = param_data.to_vec();
+            let mut param_vec = param_data.to_vec();
 
             // Update biased first moment estimate
             for (m, g) in state.exp_avg.iter_mut().zip(grad_vec.iter()) {
@@ -237,28 +237,31 @@ impl Optimizer for LAMB {
                 (1.0, 1.0)
             };
 
-            // Compute Adam update direction: m_hat / (sqrt(v_hat) + eps)
-            let mut update: Vec<f32> = state
-                .exp_avg
-                .iter()
-                .zip(state.exp_avg_sq.iter())
-                .map(|(m, v)| {
-                    let m_hat = m / bias_correction1;
-                    let v_hat = v / bias_correction2;
-                    m_hat / (v_hat.sqrt() + self.eps)
-                })
-                .collect();
+            // Fused: compute update direction + weight decay + both norms in single pass
+            let eps = self.eps;
+            let wd = self.weight_decay;
+            let has_wd = wd > 0.0;
+            let n = param_vec.len();
 
-            // Add decoupled weight decay
-            if self.weight_decay > 0.0 {
-                for (u, p) in update.iter_mut().zip(param_vec.iter()) {
-                    *u += self.weight_decay * p;
+            // Reuse grad_vec allocation for update storage
+            let mut update = grad_vec; // take ownership, no new allocation
+            let mut weight_norm_sq: f32 = 0.0;
+            let mut update_norm_sq: f32 = 0.0;
+
+            for i in 0..n {
+                let m_hat = state.exp_avg[i] / bias_correction1;
+                let v_hat = state.exp_avg_sq[i] / bias_correction2;
+                let mut u = m_hat / (v_hat.sqrt() + eps);
+                if has_wd {
+                    u += wd * param_vec[i];
                 }
+                update[i] = u;
+                weight_norm_sq += param_vec[i] * param_vec[i];
+                update_norm_sq += u * u;
             }
 
-            // Compute layer-wise trust ratio
-            let weight_norm = Self::l2_norm(&param_vec);
-            let update_norm = Self::l2_norm(&update);
+            let weight_norm = weight_norm_sq.sqrt();
+            let update_norm = update_norm_sq.sqrt();
 
             let trust_ratio = if weight_norm > 0.0 && update_norm > 0.0 {
                 weight_norm / update_norm
@@ -266,15 +269,13 @@ impl Optimizer for LAMB {
                 1.0
             };
 
-            // Apply update with trust ratio
+            // Apply update in place — reuse param_vec, no new allocation
             let effective_lr = self.lr * trust_ratio;
-            let new_data: Vec<f32> = param_vec
-                .iter()
-                .zip(update.iter())
-                .map(|(p, u)| p - effective_lr * u)
-                .collect();
+            for i in 0..n {
+                param_vec[i] -= effective_lr * update[i];
+            }
 
-            let mut new_tensor = Tensor::from_vec(new_data, param_data.shape()).unwrap();
+            let mut new_tensor = Tensor::from_vec(param_vec, param_data.shape()).unwrap();
             // Preserve device: from_vec creates CPU, move back to param device
             let device = param_data.device();
             if device.is_gpu() {

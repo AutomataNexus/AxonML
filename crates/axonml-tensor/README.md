@@ -31,6 +31,8 @@
 
 - **Factory Functions** - Convenient tensor creation with `zeros`, `ones`, `rand`, `randn`, `arange`, `linspace`, and more.
 
+- **Optimized Concatenation** - `cat` uses contiguous memcpy per slice for fast tensor joining along any axis. `var_dim` computes variance along a dimension in a single pass with Welford's algorithm.
+
 ## Modules
 
 | Module | Description |

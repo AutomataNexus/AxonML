@@ -465,6 +465,16 @@ impl Storage<f32> {
             guard: self.inner.read(),
         }
     }
+
+    /// Returns a write guard providing mutable access to the underlying `CudaSlice<f32>`.
+    ///
+    /// # Panics
+    /// Panics if storage is not on GPU.
+    pub fn as_cuda_slice_mut(&self) -> CudaSliceWriteGuard<'_> {
+        CudaSliceWriteGuard {
+            guard: self.inner.write(),
+        }
+    }
 }
 
 /// Read guard that provides access to the CudaSlice.
@@ -482,6 +492,26 @@ impl<'a> CudaSliceReadGuard<'a> {
     pub fn slice(&self) -> &CudaSlice<f32> {
         match &self.guard.data {
             StorageData::Cuda(pooled) => pooled.slice(),
+            StorageData::Cpu(_) => panic!("Storage is on CPU, not GPU"),
+        }
+    }
+}
+
+/// Write guard that provides mutable access to the CudaSlice.
+#[cfg(feature = "cuda")]
+pub struct CudaSliceWriteGuard<'a> {
+    guard: parking_lot::RwLockWriteGuard<'a, StorageInner<f32>>,
+}
+
+#[cfg(feature = "cuda")]
+impl<'a> CudaSliceWriteGuard<'a> {
+    /// Returns a mutable reference to the CudaSlice.
+    ///
+    /// # Panics
+    /// Panics if storage is CPU.
+    pub fn slice_mut(&mut self) -> &mut CudaSlice<f32> {
+        match &mut self.guard.data {
+            StorageData::Cuda(pooled) => pooled.slice_mut(),
             StorageData::Cpu(_) => panic!("Storage is on CPU, not GPU"),
         }
     }

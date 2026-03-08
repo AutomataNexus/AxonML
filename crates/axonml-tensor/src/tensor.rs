@@ -793,13 +793,11 @@ impl<T: Numeric> Tensor<T> {
             let t_dim_size = t.shape[dim];
             for outer in 0..outer_size {
                 for d in 0..t_dim_size {
-                    for inner in 0..inner_size {
-                        let src_idx = outer * t_dim_size * inner_size + d * inner_size + inner;
-                        let dst_idx = outer * total_dim_size * inner_size
-                            + (dim_offset + d) * inner_size
-                            + inner;
-                        result[dst_idx] = t_data[src_idx];
-                    }
+                    let src_base = outer * t_dim_size * inner_size + d * inner_size;
+                    let dst_base = outer * total_dim_size * inner_size
+                        + (dim_offset + d) * inner_size;
+                    result[dst_base..dst_base + inner_size]
+                        .copy_from_slice(&t_data[src_base..src_base + inner_size]);
                 }
             }
             dim_offset += t_dim_size;
@@ -1107,10 +1105,13 @@ impl<T: Float> Tensor<T> {
     /// Variance along a dimension.
     #[must_use]
     pub fn var_dim(&self, dim: i32, keepdim: bool) -> Self {
+        // variance = E[x²] - E[x]²  (saves one full-size intermediate allocation)
         let mean = self.mean_dim(dim, true);
-        let diff = self.sub(&mean).unwrap_or_else(|_| self.clone());
-        let squared = diff.mul(&diff).unwrap_or_else(|_| self.clone());
-        squared.mean_dim(dim, keepdim)
+        let sq = self.mul(self).unwrap_or_else(|_| self.clone());
+        let mean_sq = sq.mean_dim(dim, keepdim);
+        let mean_keepdim = if keepdim { mean.clone() } else { self.mean_dim(dim, keepdim) };
+        let mean_squared = mean_keepdim.mul(&mean_keepdim).unwrap_or_else(|_| mean_keepdim.clone());
+        mean_sq.sub(&mean_squared).unwrap_or_else(|_| mean_sq.clone())
     }
 
     /// Broadcasts tensor to a new shape.

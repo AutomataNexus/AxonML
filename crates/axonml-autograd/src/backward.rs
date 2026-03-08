@@ -49,6 +49,10 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
     grad_map.insert(output_id, grad_output.clone());
 
     // Process nodes in reverse topological order
+    // Profile: track time per backward op type
+    let profile_enabled = std::env::var("AXONML_PROFILE_BACKWARD").is_ok();
+    let mut op_times: HashMap<&str, (u128, usize)> = HashMap::new();
+
     for node in topo_order.iter().rev() {
         let node_id = node.id();
 
@@ -59,7 +63,14 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
         };
 
         // Apply the gradient function to get input gradients.
+        let t0 = std::time::Instant::now();
         let input_grads = node.apply(&grad);
+        if profile_enabled {
+            let elapsed = t0.elapsed().as_micros();
+            let entry = op_times.entry(node.name()).or_insert((0, 0));
+            entry.0 += elapsed;
+            entry.1 += 1;
+        }
 
         // Propagate gradients to input nodes
         let next_fns = node.next_functions();
@@ -78,6 +89,17 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
                         .or_insert(input_grad);
                 }
             }
+        }
+    }
+
+    // Print backward profile if enabled
+    if profile_enabled {
+        let mut sorted: Vec<_> = op_times.into_iter().collect();
+        sorted.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+        eprintln!("[backward profile] {} nodes total", topo_order.len());
+        for (name, (us, count)) in sorted.iter().take(15) {
+            eprintln!("  {:<35} {:>8}us  x{:>4}  ({:.1}ms avg)",
+                name, us, count, *us as f64 / *count as f64 / 1000.0);
         }
     }
 
