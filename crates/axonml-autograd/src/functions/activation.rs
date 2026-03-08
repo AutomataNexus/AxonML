@@ -835,7 +835,7 @@ impl GradientFunction for LogSoftmaxBackward {
                 let mut temp = outer;
                 for d in (0..ndim).rev() {
                     if d != dim {
-                        let s = if d > dim { strides[d] } else { strides[d] / dim_size };
+                        let _s = if d > dim { strides[d] } else { strides[d] / dim_size };
                         let coord = temp % shape[d];
                         temp /= shape[d];
                         base_idx += coord * strides[d];

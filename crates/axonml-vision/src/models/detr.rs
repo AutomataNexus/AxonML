@@ -29,7 +29,7 @@ use crate::ops::{positional_encoding_2d, Detection};
 struct DETRTransformer {
     encoder_layers: Vec<DETREncoderLayer>,
     decoder_layers: Vec<DETRDecoderLayer>,
-    d_model: usize,
+    _d_model: usize,
 }
 
 struct DETREncoderLayer {
@@ -139,7 +139,7 @@ impl DETRTransformer {
         Self {
             encoder_layers,
             decoder_layers,
-            d_model,
+            _d_model: d_model,
         }
     }
 
@@ -195,7 +195,7 @@ pub struct DETR {
     /// Number of object queries
     num_queries: usize,
     /// Number of classes (including background)
-    num_classes: usize,
+    _num_classes: usize,
 }
 
 impl DETR {
@@ -245,7 +245,7 @@ impl DETR {
             query_embed_data,
             d_model,
             num_queries,
-            num_classes,
+            _num_classes: num_classes,
         }
     }
 

@@ -21,7 +21,7 @@ use axonml_nn::{
 };
 use axonml_tensor::Tensor;
 
-use crate::ops::{interpolate, interpolate_var, DepthMap, InterpolateMode};
+use crate::ops::{interpolate_var, DepthMap, InterpolateMode};
 
 // =============================================================================
 // DPT (Dense Prediction Transformer)
@@ -57,8 +57,8 @@ struct DPTEncoderLayer {
     ffn2: Linear,
     norm1: axonml_nn::LayerNorm,
     norm2: axonml_nn::LayerNorm,
-    d_model: usize,
-    num_heads: usize,
+    _d_model: usize,
+    _num_heads: usize,
 }
 
 impl DPTEncoderLayer {
@@ -70,8 +70,8 @@ impl DPTEncoderLayer {
             ffn2: Linear::new(d_model * 4, d_model),
             norm1: axonml_nn::LayerNorm::single(d_model),
             norm2: axonml_nn::LayerNorm::single(d_model),
-            d_model,
-            num_heads,
+            _d_model: d_model,
+            _num_heads: num_heads,
         }
     }
 

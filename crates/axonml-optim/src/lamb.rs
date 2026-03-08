@@ -191,7 +191,7 @@ impl LAMB {
     }
 
     /// Computes the L2 norm of a vector.
-    fn l2_norm(vec: &[f32]) -> f32 {
+    fn _l2_norm(vec: &[f32]) -> f32 {
         vec.iter().map(|x| x * x).sum::<f32>().sqrt()
     }
 }
@@ -416,7 +416,7 @@ mod tests {
     #[test]
     fn test_l2_norm() {
         let vec = vec![3.0, 4.0];
-        let norm = LAMB::l2_norm(&vec);
+        let norm = LAMB::_l2_norm(&vec);
         assert!((norm - 5.0).abs() < 1e-6);
     }
 }

@@ -21,6 +21,7 @@ axonml-tensor.workspace = true
 axonml-autograd.workspace = true
 parking_lot.workspace = true
 rand = "0.8"
+rayon.workspace = true
 rustfft = "6.2"
 
 [dev-dependencies]

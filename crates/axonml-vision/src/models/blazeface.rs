@@ -249,6 +249,7 @@ pub struct BlazeFace {
 }
 
 /// Configuration for anchor generation at each scale.
+#[allow(dead_code)]
 struct AnchorConfig {
     feature_size: usize,
     num_anchors: usize,
@@ -493,6 +494,7 @@ impl BlazeFace {
     }
 
     /// Forward bbox only (for backward compatibility).
+    #[allow(dead_code)]
     pub(crate) fn forward_bbox(&self, x: &Variable) -> Variable {
         let (_cls, bbox) = self.forward_train(x);
         bbox.reshape(&[bbox.shape()[0], bbox.shape()[1] * 4])

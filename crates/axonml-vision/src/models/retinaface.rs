@@ -12,7 +12,7 @@
 //! (Deng et al., 2020) <https://arxiv.org/abs/1905.00641>
 
 use axonml_autograd::Variable;
-use axonml_nn::{BatchNorm2d, Conv2d, Linear, Module, Parameter, ReLU};
+use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter, ReLU};
 use axonml_tensor::Tensor;
 
 use crate::models::fpn::FPN;
@@ -76,7 +76,7 @@ struct DetectionHead {
     cls_conv: Conv2d,
     bbox_conv: Conv2d,
     ldm_conv: Conv2d,
-    num_anchors: usize,
+    _num_anchors: usize,
 }
 
 impl DetectionHead {
@@ -85,7 +85,7 @@ impl DetectionHead {
             cls_conv: Conv2d::with_options(in_channels, num_anchors * 2, (1, 1), (1, 1), (0, 0), true),
             bbox_conv: Conv2d::with_options(in_channels, num_anchors * 4, (1, 1), (1, 1), (0, 0), true),
             ldm_conv: Conv2d::with_options(in_channels, num_anchors * 10, (1, 1), (1, 1), (0, 0), true),
-            num_anchors,
+            _num_anchors: num_anchors,
         }
     }
 
@@ -291,7 +291,7 @@ impl RetinaFace {
         // We run the full backbone forward and collect intermediate features.
         // For now, we do a simplified version running through the backbone layers.
         let backbone_output = self.backbone.forward(x);
-        let shape = backbone_output.shape();
+        let _shape = backbone_output.shape();
 
         // Simplified: create placeholder features at different scales.
         // In a real implementation, we'd hook into backbone layers.

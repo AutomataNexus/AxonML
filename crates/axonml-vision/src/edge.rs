@@ -10,7 +10,7 @@
 //! - `aarch64-unknown-linux-gnu` (ARM64 Linux)
 //! - `wasm32-unknown-unknown` (WebAssembly)
 
-use axonml_nn::{Module, Parameter};
+use axonml_nn::Module;
 
 // =============================================================================
 // Model Profile

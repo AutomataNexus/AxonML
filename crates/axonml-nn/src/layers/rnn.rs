@@ -8,7 +8,6 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_tensor::Tensor;
 
 use crate::init::{xavier_uniform, zeros};
 use crate::module::Module;
@@ -135,7 +134,7 @@ pub struct RNN {
     /// RNN cells for each layer.
     cells: Vec<RNNCell>,
     /// Input size.
-    input_size: usize,
+    _input_size: usize,
     /// Hidden size.
     hidden_size: usize,
     /// Number of layers.
@@ -169,7 +168,7 @@ impl RNN {
 
         Self {
             cells,
-            input_size,
+            _input_size: input_size,
             hidden_size,
             num_layers,
             batch_first,
@@ -203,13 +202,16 @@ impl Module for RNN {
         let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
         let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, self.hidden_size]);
 
+        // Hoist weight transposes out of the per-timestep loop
+        let w_hh_t_0 = cell0.weight_hh.variable().transpose(0, 1);
+        let bias_hh_0 = cell0.bias_hh.variable();
+
         let mut outputs = Vec::with_capacity(seq_len);
 
         for t in 0..seq_len {
-            // Layer 0: use pre-computed ih projection
-            let ih_t = ih_all_3d.select(1, t); // [batch, hidden]
-            let w_hh_t = cell0.weight_hh.variable().transpose(0, 1);
-            let hh = hiddens[0].matmul(&w_hh_t).add_var(&cell0.bias_hh.variable());
+            // Layer 0: use pre-computed ih projection + hoisted weight transpose
+            let ih_t = ih_all_3d.select(1, t);
+            let hh = hiddens[0].matmul(&w_hh_t_0).add_var(&bias_hh_0);
             hiddens[0] = ih_t.add_var(&hh).tanh();
 
             // Subsequent layers
@@ -472,16 +474,18 @@ impl Module for LSTM {
         // ih_all_3d: [batch, seq, 4*hidden]
         let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, 4 * self.hidden_size]);
 
+        // Hoist weight transpose + bias out of the per-timestep loop
+        let w_hh_t_0 = cell0.weight_hh.variable().transpose(0, 1);
+        let bias_hh_0 = cell0.bias_hh.variable();
+
         let mut outputs = Vec::with_capacity(seq_len);
 
         for t in 0..seq_len {
-            // Layer 0: use pre-computed ih projection
-            let ih_t = ih_all_3d.select(1, t); // [batch, 4*hidden]
+            // Layer 0: use pre-computed ih projection + hoisted weight transpose
+            let ih_t = ih_all_3d.select(1, t);
             let (h, c) = &states[0];
 
-            // Only compute hidden-to-hidden per timestep (depends on previous h)
-            let w_hh_t = cell0.weight_hh.variable().transpose(0, 1);
-            let hh = h.matmul(&w_hh_t).add_var(&cell0.bias_hh.variable());
+            let hh = h.matmul(&w_hh_t_0).add_var(&bias_hh_0);
 
             let gates = ih_t.add_var(&hh);
             let hs = self.hidden_size;
@@ -606,7 +610,7 @@ impl GRUCell {
     ///
     /// All computations use Variable operations for proper gradient flow.
     pub fn forward_step(&self, input: &Variable, hidden: &Variable) -> Variable {
-        let batch_size = input.shape()[0];
+        let _batch_size = input.shape()[0];
         let hidden_size = self.hidden_size;
 
         // Get weight matrices
@@ -754,17 +758,19 @@ impl Module for GRU {
         let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
         let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, 3 * self.hidden_size]);
 
+        // Hoist weight transpose + bias out of the per-timestep loop
+        let w_hh_t_0 = cell0.weight_hh.variable().transpose(0, 1);
+        let bias_hh_0 = cell0.bias_hh.variable();
+
         let mut output_vars: Vec<Variable> = Vec::with_capacity(seq_len);
 
         for t in 0..seq_len {
-            // Layer 0: use pre-computed ih projection
-            let ih_t = ih_all_3d.select(1, t); // [batch, 3*hidden]
+            // Layer 0: use pre-computed ih projection + hoisted weight transpose
+            let ih_t = ih_all_3d.select(1, t);
             let hidden = &hidden_states[0];
             let hs = self.hidden_size;
 
-            // Only compute hidden-to-hidden per timestep
-            let w_hh_t = cell0.weight_hh.variable().transpose(0, 1);
-            let hh = hidden.matmul(&w_hh_t).add_var(&cell0.bias_hh.variable());
+            let hh = hidden.matmul(&w_hh_t_0).add_var(&bias_hh_0);
 
             let ih_r = ih_t.narrow(1, 0, hs);
             let ih_z = ih_t.narrow(1, hs, hs);
@@ -825,13 +831,12 @@ impl GRU {
     /// This is equivalent to processing then mean pooling, but with proper gradient flow.
     pub fn forward_mean(&self, input: &Variable) -> Variable {
         let shape = input.shape();
-        let (batch_size, seq_len, _input_size) = if self.batch_first {
+        let (batch_size, seq_len, input_features) = if self.batch_first {
             (shape[0], shape[1], shape[2])
         } else {
             (shape[1], shape[0], shape[2])
         };
 
-        // Initialize hidden states for all layers as Variables (with gradients)
         let mut hidden_states: Vec<Variable> = (0..self.num_layers)
             .map(|_| {
                 Variable::new(
@@ -841,33 +846,54 @@ impl GRU {
             })
             .collect();
 
-        // Accumulator for mean of outputs
+        // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
+        let cell0 = &self.cells[0];
+        let input_2d = input.reshape(&[batch_size * seq_len, input_features]);
+        let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
+        let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
+        let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, 3 * self.hidden_size]);
+
+        // Hoist weight transpose + bias out of per-timestep loop
+        let w_hh_t_0 = cell0.weight_hh.variable().transpose(0, 1);
+        let bias_hh_0 = cell0.bias_hh.variable();
+
         let mut output_sum: Option<Variable> = None;
+        let hs = self.hidden_size;
 
-        // Process each time step
         for t in 0..seq_len {
-            // Extract input for this time step using narrow (preserves gradients)
-            // narrow gives [batch, 1, features], reshape to [batch, features]
-            let narrowed = input.narrow(1, t, 1);
-            let step_input = narrowed.reshape(&[batch_size, narrowed.data().numel() / batch_size]);
+            // Layer 0: use pre-computed ih projection + hoisted weight transpose
+            let ih_t = ih_all_3d.select(1, t);
+            let hidden = &hidden_states[0];
+            let hh = hidden.matmul(&w_hh_t_0).add_var(&bias_hh_0);
 
-            // Process through each layer
-            let mut layer_input = step_input;
+            let ih_r = ih_t.narrow(1, 0, hs);
+            let ih_z = ih_t.narrow(1, hs, hs);
+            let ih_n = ih_t.narrow(1, 2 * hs, hs);
+            let hh_r = hh.narrow(1, 0, hs);
+            let hh_z = hh.narrow(1, hs, hs);
+            let hh_n = hh.narrow(1, 2 * hs, hs);
 
-            for (layer_idx, cell) in self.cells.iter().enumerate() {
-                let new_hidden = cell.forward_step(&layer_input, &hidden_states[layer_idx]);
-                hidden_states[layer_idx] = new_hidden.clone();
-                layer_input = new_hidden;
+            let r = ih_r.add_var(&hh_r).sigmoid();
+            let z = ih_z.add_var(&hh_z).sigmoid();
+            let n = ih_n.add_var(&r.mul_var(&hh_n)).tanh();
+            let h_minus_n = hidden.sub_var(&n);
+            let h_new = n.add_var(&z.mul_var(&h_minus_n));
+            hidden_states[0] = h_new.clone();
+
+            // Subsequent layers
+            let mut layer_output = h_new;
+            for l in 1..self.num_layers {
+                let new_hidden = self.cells[l].forward_step(&layer_output, &hidden_states[l]);
+                hidden_states[l] = new_hidden.clone();
+                layer_output = new_hidden;
             }
 
-            // Accumulate output (last layer's hidden state)
             output_sum = Some(match output_sum {
-                None => layer_input,
-                Some(acc) => acc.add_var(&layer_input),
+                None => layer_output,
+                Some(acc) => acc.add_var(&layer_output),
             });
         }
 
-        // Return mean of all hidden states
         match output_sum {
             Some(sum) => sum.mul_scalar(1.0 / seq_len as f32),
             None => Variable::new(zeros(&[batch_size, self.hidden_size]), false),
@@ -878,13 +904,12 @@ impl GRU {
     /// Good for sequence classification with proper gradient flow.
     pub fn forward_last(&self, input: &Variable) -> Variable {
         let shape = input.shape();
-        let (batch_size, seq_len, _input_size) = if self.batch_first {
+        let (batch_size, seq_len, input_features) = if self.batch_first {
             (shape[0], shape[1], shape[2])
         } else {
             (shape[1], shape[0], shape[2])
         };
 
-        // Initialize hidden states for all layers
         let mut hidden_states: Vec<Variable> = (0..self.num_layers)
             .map(|_| {
                 Variable::new(
@@ -894,15 +919,42 @@ impl GRU {
             })
             .collect();
 
-        // Process each time step
+        // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
+        let cell0 = &self.cells[0];
+        let input_2d = input.reshape(&[batch_size * seq_len, input_features]);
+        let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
+        let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
+        let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, 3 * self.hidden_size]);
+
+        // Hoist weight transpose + bias out of per-timestep loop
+        let w_hh_t_0 = cell0.weight_hh.variable().transpose(0, 1);
+        let bias_hh_0 = cell0.bias_hh.variable();
+        let hs = self.hidden_size;
+
         for t in 0..seq_len {
-            // narrow gives [batch, 1, features], reshape to [batch, features]
-            let narrowed = input.narrow(1, t, 1);
-            let step_input = narrowed.reshape(&[batch_size, narrowed.data().numel() / batch_size]);
+            // Layer 0: use pre-computed ih projection + hoisted weight transpose
+            let ih_t = ih_all_3d.select(1, t);
+            let hidden = &hidden_states[0];
+            let hh = hidden.matmul(&w_hh_t_0).add_var(&bias_hh_0);
 
-            let mut layer_input = step_input;
+            let ih_r = ih_t.narrow(1, 0, hs);
+            let ih_z = ih_t.narrow(1, hs, hs);
+            let ih_n = ih_t.narrow(1, 2 * hs, hs);
+            let hh_r = hh.narrow(1, 0, hs);
+            let hh_z = hh.narrow(1, hs, hs);
+            let hh_n = hh.narrow(1, 2 * hs, hs);
 
-            for (layer_idx, cell) in self.cells.iter().enumerate() {
+            let r = ih_r.add_var(&hh_r).sigmoid();
+            let z = ih_z.add_var(&hh_z).sigmoid();
+            let n = ih_n.add_var(&r.mul_var(&hh_n)).tanh();
+            let h_minus_n = hidden.sub_var(&n);
+            let h_new = n.add_var(&z.mul_var(&h_minus_n));
+            hidden_states[0] = h_new.clone();
+
+            // Subsequent layers
+            let mut layer_input = h_new;
+
+            for (layer_idx, cell) in self.cells.iter().enumerate().skip(1) {
                 let new_hidden = cell.forward_step(&layer_input, &hidden_states[layer_idx]);
                 hidden_states[layer_idx] = new_hidden.clone();
                 layer_input = new_hidden;

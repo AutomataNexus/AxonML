@@ -20,3 +20,4 @@ axonml-core.workspace = true
 axonml-tensor.workspace = true
 parking_lot.workspace = true
 matrixmultiply.workspace = true
+rayon.workspace = true

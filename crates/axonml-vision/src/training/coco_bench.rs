@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! COCO Evaluation Benchmarks — Full Detection Model Evaluation Suite
 //!
 //! Comprehensive benchmarks for all AxonML detection models:
