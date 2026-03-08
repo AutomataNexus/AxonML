@@ -12,6 +12,7 @@ use axonml_autograd::grad_fn::GradFn;
 use axonml_autograd::no_grad::is_grad_enabled;
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
+use rayon::prelude::*;
 
 use crate::init::{kaiming_uniform, zeros};
 use crate::module::Module;
@@ -335,26 +336,35 @@ fn im2col(
     let col_w = out_h * out_w;
     let mut col = vec![0.0f32; col_h * col_w];
     let hw = height * width;
+    let kk = kernel_h * kernel_w;
+    let h_signed = height as isize;
+    let w_signed = width as isize;
+    let pad_h_s = pad_h as isize;
+    let pad_w_s = pad_w as isize;
 
-    for c in 0..channels {
+    // Fused single-pass: iterate linearly over output col matrix
+    // col_row = c * kH * kW + kh_off * kW + kw_off
+    // col_col = oh * out_w + ow
+    for col_row in 0..col_h {
+        let c = col_row / kk;
+        let k_idx = col_row % kk;
+        let kh_off = k_idx / kernel_w;
+        let kw_off = k_idx % kernel_w;
         let input_c = c * hw;
-        for kh_off in 0..kernel_h {
-            for kw_off in 0..kernel_w {
-                let col_row = (c * kernel_h + kh_off) * kernel_w + kw_off;
-                let col_base = col_row * col_w;
-                for oh in 0..out_h {
-                    let h_in = (oh * stride_h + kh_off) as isize - pad_h as isize;
-                    if h_in < 0 || h_in >= height as isize {
-                        continue; // entire row is zero-padded
-                    }
-                    let h_in = h_in as usize;
-                    let input_row = input_c + h_in * width;
-                    let col_row_base = col_base + oh * out_w;
-                    for ow in 0..out_w {
-                        let w_in = (ow * stride_w + kw_off) as isize - pad_w as isize;
-                        if w_in >= 0 && w_in < width as isize {
-                            col[col_row_base + ow] = input[input_row + w_in as usize];
-                        }
+        let col_base = col_row * col_w;
+
+        for oh in 0..out_h {
+            let h_in = (oh * stride_h + kh_off) as isize - pad_h_s;
+            if h_in < 0 || h_in >= h_signed { continue; }
+            let input_row = input_c + h_in as usize * width;
+            let col_row_base = col_base + oh * out_w;
+
+            for ow in 0..out_w {
+                let w_in = (ow * stride_w + kw_off) as isize - pad_w_s;
+                if w_in >= 0 && w_in < w_signed {
+                    unsafe {
+                        *col.get_unchecked_mut(col_row_base + ow) =
+                            *input.get_unchecked(input_row + w_in as usize);
                     }
                 }
             }
@@ -391,56 +401,68 @@ fn conv2d_im2col(
     let spatial = out_h * out_w;
     let in_spatial = in_height * in_width;
 
-    let mut output = vec![0.0f32; batch_size * out_channels * spatial];
+    // Parallel: each batch element produces its own output slice
+    let out_per_batch = out_channels * spatial;
+    let per_batch: Vec<Vec<f32>> = (0..batch_size)
+        .into_par_iter()
+        .map(|b| {
+            let mut batch_out = vec![0.0f32; out_per_batch];
 
-    for b in 0..batch_size {
-        for g in 0..groups {
-            let ic_start = g * in_channels_per_group;
-            let oc_start = g * out_channels_per_group;
+            for g in 0..groups {
+                let ic_start = g * in_channels_per_group;
+                let oc_start = g * out_channels_per_group;
 
-            // Extract input for this batch+group
-            let in_offset = b * in_channels * in_spatial + ic_start * in_spatial;
-            let input_slice = &input[in_offset..in_offset + in_channels_per_group * in_spatial];
+                // Extract input for this batch+group
+                let in_offset = b * in_channels * in_spatial + ic_start * in_spatial;
+                let input_slice = &input[in_offset..in_offset + in_channels_per_group * in_spatial];
 
-            // im2col
-            let col = im2col(
-                input_slice,
-                in_channels_per_group,
-                in_height, in_width,
-                kh, kw, ph, pw, sh, sw,
-                out_h, out_w,
-            );
+                // im2col
+                let col = im2col(
+                    input_slice,
+                    in_channels_per_group,
+                    in_height, in_width,
+                    kh, kw, ph, pw, sh, sw,
+                    out_h, out_w,
+                );
 
-            // Weight for this group: [oc_per_group, ic_per_group * kH * kW]
-            let w_offset = oc_start * in_channels_per_group * kh * kw;
-            let w_size = out_channels_per_group * col_h;
-            let weight_slice = &weight[w_offset..w_offset + w_size];
+                // Weight for this group
+                let w_offset = oc_start * in_channels_per_group * kh * kw;
+                let w_size = out_channels_per_group * col_h;
+                let weight_slice = &weight[w_offset..w_offset + w_size];
 
-            // GEMM via Tensor::matmul (auto-dispatches to GPU for large matrices)
-            let w_tensor = Tensor::from_vec(weight_slice.to_vec(), &[out_channels_per_group, col_h]).unwrap();
-            let col_tensor = Tensor::from_vec(col, &[col_h, col_w]).unwrap();
-            let result = w_tensor.matmul(&col_tensor).unwrap();
-            let result_vec = result.to_vec();
+                // GEMM via Tensor::matmul
+                let w_tensor = Tensor::from_vec(weight_slice.to_vec(), &[out_channels_per_group, col_h]).unwrap();
+                let col_tensor = Tensor::from_vec(col, &[col_h, col_w]).unwrap();
+                let result = w_tensor.matmul(&col_tensor).unwrap();
+                let result_vec = result.to_vec();
 
-            // Copy to output with bias
-            let out_offset = b * out_channels * spatial + oc_start * spatial;
-            for oc_local in 0..out_channels_per_group {
-                let oc = oc_start + oc_local;
-                let bias_val = bias.map_or(0.0, |bv| bv[oc]);
-                let src_start = oc_local * col_w;
-                let dst_start = out_offset + oc_local * spatial;
-                if bias_val != 0.0 {
-                    for i in 0..spatial {
-                        output[dst_start + i] = result_vec[src_start + i] + bias_val;
+                // Copy to output with bias
+                let out_offset = oc_start * spatial;
+                for oc_local in 0..out_channels_per_group {
+                    let oc = oc_start + oc_local;
+                    let bias_val = bias.map_or(0.0, |bv| bv[oc]);
+                    let src_start = oc_local * col_w;
+                    let dst_start = out_offset + oc_local * spatial;
+                    if bias_val != 0.0 {
+                        for i in 0..spatial {
+                            batch_out[dst_start + i] = result_vec[src_start + i] + bias_val;
+                        }
+                    } else {
+                        batch_out[dst_start..dst_start + spatial]
+                            .copy_from_slice(&result_vec[src_start..src_start + spatial]);
                     }
-                } else {
-                    output[dst_start..dst_start + spatial]
-                        .copy_from_slice(&result_vec[src_start..src_start + spatial]);
                 }
             }
-        }
-    }
 
+            batch_out
+        })
+        .collect();
+
+    // Flatten per-batch results into single output
+    let mut output = Vec::with_capacity(batch_size * out_per_batch);
+    for batch_out in per_batch {
+        output.extend_from_slice(&batch_out);
+    }
     output
 }
 

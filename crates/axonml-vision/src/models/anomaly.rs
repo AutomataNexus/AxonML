@@ -16,7 +16,7 @@
 //! - Student-Teacher: "Uninformed Students" (Bergmann et al., 2020)
 
 use axonml_autograd::Variable;
-use axonml_nn::{BatchNorm2d, Conv2d, Linear, Module, Parameter, ReLU};
+use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter, ReLU};
 use axonml_tensor::Tensor;
 
 use crate::ops::AnomalyResult;
@@ -36,7 +36,7 @@ pub struct PatchCore {
     /// Memory bank of normal patch features [M, D]
     memory_bank: Vec<Vec<f32>>,
     /// Feature dimension
-    feature_dim: usize,
+    _feature_dim: usize,
     /// Anomaly threshold (learned during fit)
     threshold: f32,
     /// Whether the model has been fit
@@ -95,7 +95,7 @@ impl PatchCore {
         Self {
             feature_extractor: PatchCoreBackbone::new(in_channels, feature_dim),
             memory_bank: Vec::new(),
-            feature_dim,
+            _feature_dim: feature_dim,
             threshold: 0.0,
             is_fitted: false,
         }
@@ -314,6 +314,7 @@ impl TeacherNet {
         self.relu.forward(&self.bn2.forward(&self.conv2.forward(&x)))
     }
 
+    #[allow(dead_code)]
     fn parameters(&self) -> Vec<Parameter> {
         let mut p = Vec::new();
         p.extend(self.conv1.parameters());
@@ -458,7 +459,7 @@ mod tests {
     #[test]
     fn test_patchcore_creation() {
         let model = PatchCore::default_rgb();
-        assert_eq!(model.feature_dim, 256);
+        assert_eq!(model._feature_dim, 256);
         assert!(!model.is_fitted);
     }
 

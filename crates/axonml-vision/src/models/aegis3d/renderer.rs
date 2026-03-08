@@ -8,6 +8,8 @@
 //! rendering process to the SDF network parameters, enabling end-to-end
 //! training from 2D image supervision.
 
+#![allow(missing_docs)]
+
 use super::octree::AdaptiveOctree;
 
 // =============================================================================

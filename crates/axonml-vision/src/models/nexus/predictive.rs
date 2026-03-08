@@ -9,6 +9,8 @@
 //!
 //! @version 0.1.0
 
+#![allow(missing_docs)]
+
 use axonml_autograd::Variable;
 use axonml_nn::{Conv2d, BatchNorm2d, Module, Parameter};
 use axonml_tensor::Tensor;
@@ -28,7 +30,7 @@ pub struct PredictiveCodingModule {
     predict_conv: Conv2d,
     predict_bn: BatchNorm2d,
     /// Channels at this scale.
-    channels: usize,
+    _channels: usize,
     /// Previous prediction [B, C, H, W].
     prediction: Option<Variable>,
     /// Surprise gating temperature (lower = sharper gating).
@@ -41,7 +43,7 @@ impl PredictiveCodingModule {
         Self {
             predict_conv: Conv2d::with_options(channels, channels, (3, 3), (1, 1), (1, 1), true),
             predict_bn: BatchNorm2d::new(channels),
-            channels,
+            _channels: channels,
             prediction: None,
             temperature: 1.0,
         }

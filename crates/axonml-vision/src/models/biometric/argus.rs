@@ -159,6 +159,7 @@ impl ArgusIris {
         }
     }
 
+    #[allow(dead_code)]
     /// Apply circular padding to a 3D tensor along the last dimension.
     ///
     /// Wraps `pad` elements from each end around to the other side,

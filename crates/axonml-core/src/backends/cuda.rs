@@ -23,7 +23,6 @@ use cudarc::driver::{CudaDevice, CudaSlice, DeviceRepr, LaunchAsync, LaunchConfi
 use super::cuda_kernels::{self, CudaKernels, BLOCK_SIZE};
 use super::Backend;
 use crate::device::DeviceCapabilities;
-use std::sync::Arc;
 #[cfg(feature = "cuda")]
 use std::sync::OnceLock;
 
@@ -70,6 +69,7 @@ pub struct CudaBackend {
     kernels: CudaKernels,
 }
 
+/// CUDA backend stub when the `cuda` feature is disabled.
 #[cfg(not(feature = "cuda"))]
 #[derive(Debug)]
 pub struct CudaBackend {
@@ -115,6 +115,7 @@ impl CudaBackend {
         })
     }
 
+    /// Creates a new CUDA backend (stub, always returns None without the `cuda` feature).
     #[cfg(not(feature = "cuda"))]
     pub fn new(device_index: usize) -> Option<Self> {
         let _ = device_index;
@@ -273,6 +274,7 @@ pub fn cuda_sync() -> bool {
     }
 }
 
+/// Synchronize the CUDA device (no-op without the `cuda` feature).
 #[cfg(not(feature = "cuda"))]
 pub fn cuda_sync() -> bool {
     false
@@ -450,6 +452,7 @@ pub fn stream_synchronize(_handle: usize) {
     // This is intentional: synchronization should be explicit via CudaBackend.
 }
 
+/// Synchronize a CUDA stream (no-op without the `cuda` feature).
 #[cfg(not(feature = "cuda"))]
 pub fn stream_synchronize(_handle: usize) {
     // No-op when CUDA is not available

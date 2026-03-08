@@ -72,7 +72,7 @@ pub struct CocoAnnotation {
 /// COCO format object detection dataset.
 pub struct CocoDataset {
     /// Image directory path.
-    image_dir: PathBuf,
+    _image_dir: PathBuf,
     /// Per-image entries: (image_path, original_size, annotations).
     entries: Vec<CocoEntry>,
     /// Target image size (height, width) for resizing.
@@ -83,8 +83,8 @@ pub struct CocoDataset {
 
 struct CocoEntry {
     image_path: PathBuf,
-    orig_w: u32,
-    orig_h: u32,
+    _orig_w: u32,
+    _orig_h: u32,
     annotations: Vec<CocoAnnotation>,
 }
 
@@ -117,7 +117,7 @@ impl CocoDataset {
         let num_classes = sorted_cats.len();
 
         // Build image info map
-        let image_map: HashMap<u64, &CocoImage> =
+        let _image_map: HashMap<u64, &CocoImage> =
             coco.images.iter().map(|img| (img.id, img)).collect();
 
         // Group annotations by image
@@ -160,15 +160,15 @@ impl CocoDataset {
             if !annotations.is_empty() {
                 entries.push(CocoEntry {
                     image_path: image_dir.join(&img.file_name),
-                    orig_w: img.width,
-                    orig_h: img.height,
+                    _orig_w: img.width,
+                    _orig_h: img.height,
                     annotations,
                 });
             }
         }
 
         Ok(Self {
-            image_dir,
+            _image_dir: image_dir,
             entries,
             target_size,
             num_classes,

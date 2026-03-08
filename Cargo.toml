@@ -82,7 +82,7 @@ smallvec = "1.13"
 bytemuck = { version = "1.14", features = ["derive"] }
 half = { version = "2.4", features = ["bytemuck", "num-traits"] }
 sysinfo = "0.32"
-matrixmultiply = "0.3"
+matrixmultiply = { version = "0.3", features = ["threading"] }
 rustc-hash = "2.1"
 
 # GPU backends

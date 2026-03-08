@@ -82,7 +82,7 @@ pub fn nexus_training_step(
     gt_classes: &[usize],
     optimizer: &mut dyn axonml_optim::Optimizer,
 ) -> f32 {
-    use crate::losses::{FocalLoss, UncertaintyLoss};
+    use crate::losses::FocalLoss;
     use axonml_nn::SmoothL1Loss;
 
     // Forward pass (training mode — returns raw head outputs)
@@ -105,7 +105,7 @@ pub fn nexus_training_step(
     let mut total_loss = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false);
 
     for (scale_idx, scale_out) in train_out.scales.iter().enumerate() {
-        let (ref cls_target, ref bbox_target, ref center_target) = target_tensors[scale_idx];
+        let (ref cls_target, ref bbox_target, ref _center_target) = target_tensors[scale_idx];
 
         let cls_shape = scale_out.cls_logits.shape();
         let fh = cls_shape[2];
@@ -113,7 +113,7 @@ pub fn nexus_training_step(
 
         // Reshape cls_logits from [1, 1, H, W] → [H*W]
         let cls_pred = scale_out.cls_logits.reshape(&[fh * fw]);
-        let cls_tgt = Variable::new(cls_target.clone(), false);
+        let _cls_tgt = Variable::new(cls_target.clone(), false);
 
         // Convert class targets: -1 (bg) → 0, >=0 → 1 (for binary focal loss)
         let binary_target_data: Vec<f32> = cls_target.to_vec().iter()

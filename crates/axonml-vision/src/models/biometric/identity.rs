@@ -87,7 +87,7 @@ struct IdentityRecord {
     /// Enrollment timestamp
     enrolled_at: Option<f64>,
     /// Last verification timestamp
-    last_verified_at: Option<f64>,
+    _last_verified_at: Option<f64>,
 }
 
 impl IdentityRecord {
@@ -104,7 +104,7 @@ impl IdentityRecord {
             original_voice: None,
             original_iris: None,
             enrolled_at: None,
-            last_verified_at: None,
+            _last_verified_at: None,
         }
     }
 

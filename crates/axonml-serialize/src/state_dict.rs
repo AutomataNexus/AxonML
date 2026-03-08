@@ -122,8 +122,13 @@ impl StateDict {
             }
         } else {
             // Fallback for modules that don't implement named_parameters
-            for param in module.parameters() {
-                let name = param.name().to_string();
+            for (i, param) in module.parameters().iter().enumerate() {
+                // Use indexed key when param has no name to avoid HashMap collisions
+                let name = if param.name().is_empty() {
+                    format!("param_{i}")
+                } else {
+                    param.name().to_string()
+                };
                 let tensor_data = TensorData::from_tensor(&param.data());
                 let entry = StateDictEntry::new(tensor_data, param.requires_grad());
                 state_dict.entries.insert(name, entry);

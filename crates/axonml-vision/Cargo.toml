@@ -36,3 +36,7 @@ cuda = ["axonml-tensor/cuda", "axonml-nn/cuda", "axonml-autograd/cuda", "axonml-
 version = "0.12"
 features = ["blocking"]
 optional = true
+
+[dev-dependencies]
+axonml-serialize = { path = "../axonml-serialize" }
+rayon.workspace = true

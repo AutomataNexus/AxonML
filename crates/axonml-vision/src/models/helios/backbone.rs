@@ -4,6 +4,8 @@
 //!
 //! @version 0.1.0
 
+#![allow(missing_docs)]
+
 use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, MaxPool2d, Module, Parameter};
 

@@ -5,6 +5,8 @@
 //!
 //! @version 0.1.0
 
+#![allow(missing_docs)]
+
 use axonml_autograd::Variable;
 use axonml_nn::{Conv2d, Module, Parameter};
 use axonml_tensor::Tensor;

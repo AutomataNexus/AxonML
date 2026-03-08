@@ -91,6 +91,7 @@ impl MultiHeadAttention {
     /// Try to expand attention mask on GPU via CUDA kernels.
     /// Returns None to fall through to CPU expansion.
     #[allow(unused_variables)]
+    #[allow(dead_code)]
     fn try_gpu_mask_expand(
         mask_data: &Tensor<f32>,
         mask_shape: &[usize],

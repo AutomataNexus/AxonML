@@ -121,7 +121,7 @@ impl GCNConv {
         assert_eq!(shape[2], self.in_features, "Input features mismatch");
 
         let batch = shape[0];
-        let nodes = shape[1];
+        let _nodes = shape[1];
         let adj_shape = adj.shape();
 
         // GCN: output = adj @ x @ weight + bias

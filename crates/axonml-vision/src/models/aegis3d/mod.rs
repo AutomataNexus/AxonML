@@ -46,9 +46,7 @@ pub use mesh::{MarchingCubes, Mesh, Triangle, Vertex};
 pub use octree::{AdaptiveOctree, AABB, OctreeNode};
 pub use renderer::{Camera, DifferentiableRenderer, RayHit, RenderOutput, SphereTracingConfig};
 
-use axonml_autograd::Variable;
-use axonml_nn::{Module, Parameter};
-use axonml_tensor::Tensor;
+use axonml_nn::Parameter;
 
 // =============================================================================
 // Aegis3D Pipeline
@@ -100,7 +98,7 @@ struct StoredView {
     /// Camera parameters
     camera: Camera,
     /// Which octree nodes are affected by this view
-    affected_nodes: Vec<usize>,
+    _affected_nodes: Vec<usize>,
 }
 
 /// Aegis3D — Complete 3D reconstruction pipeline.
@@ -155,8 +153,8 @@ impl Aegis3D {
         depth_map: &[f32],
         camera: &Camera,
     ) -> Mesh {
-        let w = camera.width;
-        let h = camera.height;
+        let _w = camera.width;
+        let _h = camera.height;
 
         // Back-project depth map to 3D points
         let points = self.backproject_depth(depth_map, camera);
@@ -180,7 +178,7 @@ impl Aegis3D {
         self.views.push(StoredView {
             depth_map: depth_map.to_vec(),
             camera,
-            affected_nodes: Vec::new(), // TODO: track affected nodes
+            _affected_nodes: Vec::new(), // TODO: track affected nodes
         });
     }
 
@@ -198,7 +196,7 @@ impl Aegis3D {
     /// - `num_steps`: Number of optimization iterations
     /// - `learning_rate`: Step size for parameter updates
     pub fn optimize(&mut self, num_steps: usize, learning_rate: f32) {
-        for step in 0..num_steps {
+        for _step in 0..num_steps {
             let mut total_loss = 0.0f32;
 
             for view in &self.views {
@@ -225,7 +223,7 @@ impl Aegis3D {
             for param in &params {
                 let var = param.variable();
                 let data = var.data().to_vec();
-                let perturbed: Vec<f32> = data
+                let _perturbed: Vec<f32> = data
                     .iter()
                     .map(|&v| v - learning_rate * total_loss.signum() * 0.001)
                     .collect();

@@ -206,7 +206,7 @@ impl Embedding {
         }
 
         let weight_data = self.weight.data();
-        let weight_device = weight_data.device();
+        let _weight_device = weight_data.device();
 
         // GPU path: use gather kernel to avoid copying entire weight matrix
         #[cfg(feature = "cuda")]

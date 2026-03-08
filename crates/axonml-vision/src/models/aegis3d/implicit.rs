@@ -6,6 +6,8 @@
 //! Each octree leaf stores a `LocalSDF` network that only needs to represent
 //! geometry within its local cell, keeping networks tiny (3→64→64→1).
 
+#![allow(missing_docs)]
+
 use axonml_autograd::Variable;
 use axonml_nn::{Linear, Module, Parameter, ReLU};
 use axonml_tensor::Tensor;

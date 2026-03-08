@@ -201,7 +201,7 @@ impl EchoSpeaker {
     /// Returns: (L2-normalized embedding [B, embed_dim], log_variance [B, 1])
     pub fn encode_residuals(&self, residuals: &Variable) -> (Variable, Variable) {
         let shape = residuals.shape();
-        let batch = shape[0];
+        let _batch = shape[0];
 
         // Conv encode residuals
         let x = self.res_conv1.forward(residuals).relu();

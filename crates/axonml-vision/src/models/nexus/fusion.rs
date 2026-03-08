@@ -10,6 +10,8 @@
 //!
 //! @version 0.1.0
 
+#![allow(missing_docs)]
+
 use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter};
 use axonml_tensor::Tensor;
@@ -30,7 +32,7 @@ pub struct PathwayFusion {
     out_conv: Conv2d,
     out_bn: BatchNorm2d,
     /// Output channels.
-    out_channels: usize,
+    _out_channels: usize,
 }
 
 impl PathwayFusion {
@@ -46,7 +48,7 @@ impl PathwayFusion {
             gate_bn: BatchNorm2d::new(1),
             out_conv: Conv2d::with_options(total_in, out_ch, (1, 1), (1, 1), (0, 0), true),
             out_bn: BatchNorm2d::new(out_ch),
-            out_channels: out_ch,
+            _out_channels: out_ch,
         }
     }
 

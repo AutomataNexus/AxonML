@@ -18,10 +18,9 @@
 
 use axonml_autograd::Variable;
 use axonml_nn::{
-    Conv2d, CrossAttention, Dropout, Embedding, LayerNorm, Linear,
+    Conv2d, CrossAttention, Embedding, LayerNorm, Linear,
     Module, MultiHeadAttention, Parameter, ReLU,
 };
-use axonml_tensor::Tensor;
 
 // =============================================================================
 // Text Encoder
@@ -32,7 +31,7 @@ struct TextEncoder {
     embedding: Embedding,
     layers: Vec<TextEncoderLayer>,
     norm: LayerNorm,
-    d_model: usize,
+    _d_model: usize,
 }
 
 struct TextEncoderLayer {
@@ -84,7 +83,7 @@ impl TextEncoder {
             embedding: Embedding::new(vocab_size, d_model),
             layers,
             norm: LayerNorm::single(d_model),
-            d_model,
+            _d_model: d_model,
         }
     }
 
@@ -229,9 +228,9 @@ pub struct VQAModel {
     /// Classification head
     classifier: Vec<Linear>,
     /// Model dimension
-    d_model: usize,
+    _d_model: usize,
     /// Number of answer classes
-    num_answers: usize,
+    _num_answers: usize,
     relu: ReLU,
 }
 
@@ -261,8 +260,8 @@ impl VQAModel {
                 Linear::new(d_model, d_model),
                 Linear::new(d_model, num_answers),
             ],
-            d_model,
-            num_answers,
+            _d_model: d_model,
+            _num_answers: num_answers,
             relu: ReLU,
         }
     }

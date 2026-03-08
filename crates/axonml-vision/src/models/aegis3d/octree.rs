@@ -12,12 +12,12 @@
 //!   query all levels (0-8) — same model, different resolution
 //! - **Incremental updates**: New views only update affected octree nodes
 
-use super::implicit::LocalSDF;
-use super::mesh::{Mesh, MarchingCubes, Vertex};
+#![allow(missing_docs)]
 
-use axonml_autograd::Variable;
+use super::implicit::LocalSDF;
+use super::mesh::{Mesh, MarchingCubes};
+
 use axonml_nn::{Module, Parameter};
-use axonml_tensor::Tensor;
 
 // =============================================================================
 // Octree Node

@@ -8,10 +8,12 @@
 //!
 //! @version 0.1.0
 
+#![allow(missing_docs)]
+
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
 
-use super::{HeliosScaleOutput, HeliosTrainOutput};
+use super::HeliosTrainOutput;
 
 // =============================================================================
 // CIoU Loss
@@ -462,7 +464,7 @@ pub struct HeliosLoss {
     pub box_weight: f32,
     pub dfl_weight: f32,
     pub reg_max: usize,
-    dfl_loss: DFLLoss,
+    _dfl_loss: DFLLoss,
     assigner: TaskAlignedAssigner,
 }
 
@@ -475,7 +477,7 @@ impl HeliosLoss {
             box_weight: 7.5,
             dfl_weight: 1.5,
             reg_max,
-            dfl_loss: DFLLoss::new(reg_max),
+            _dfl_loss: DFLLoss::new(reg_max),
             assigner: TaskAlignedAssigner::default_v8(),
         }
     }
@@ -494,7 +496,7 @@ impl HeliosLoss {
             box_weight,
             dfl_weight,
             reg_max,
-            dfl_loss: DFLLoss::new(reg_max),
+            _dfl_loss: DFLLoss::new(reg_max),
             assigner: TaskAlignedAssigner::default_v8(),
         }
     }
@@ -691,7 +693,7 @@ impl HeliosLoss {
             let ciou = CIoULoss::ciou_values(pb, tb, 1)[0];
             ciou_sum += 1.0 - ciou;
         }
-        let ciou_loss_val = ciou_sum / total_positives as f32;
+        let _ciou_loss_val = ciou_sum / total_positives as f32;
         let box_loss_val = box_loss.data().to_vec()[0];
 
         // DFL loss: box loss already flows gradients through DFL softmax decode

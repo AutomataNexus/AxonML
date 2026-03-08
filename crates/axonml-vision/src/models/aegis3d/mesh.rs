@@ -5,6 +5,8 @@
 //!
 //! Zero external dependencies — cross-compiles to ARM, x86, WASM.
 
+#![allow(missing_docs)]
+
 use std::collections::HashMap;
 use std::io::Write;
 

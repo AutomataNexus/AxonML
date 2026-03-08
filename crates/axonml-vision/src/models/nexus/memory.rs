@@ -6,6 +6,8 @@
 //!
 //! @version 0.1.0
 
+#![allow(missing_docs)]
+
 use axonml_autograd::Variable;
 use axonml_nn::{GRUCell, Linear, Module, Parameter};
 use axonml_tensor::Tensor;

@@ -19,7 +19,6 @@
 
 use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, Dropout, Linear, MaxPool2d, Module, Parameter, ReLU};
-use axonml_tensor::Tensor;
 
 // =============================================================================
 // Helper Functions

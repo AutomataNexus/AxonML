@@ -8,7 +8,6 @@
 
 use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter, ReLU};
-use axonml_tensor::Tensor;
 
 // =============================================================================
 // BlazeBlock (Depthwise Separable with Residual)
@@ -23,7 +22,7 @@ struct PhantomBlazeBlock {
     pw_bn: BatchNorm2d,
     project: Option<(Conv2d, BatchNorm2d)>,
     relu: ReLU,
-    stride: usize,
+    _stride: usize,
 }
 
 impl PhantomBlazeBlock {
@@ -50,7 +49,7 @@ impl PhantomBlazeBlock {
             pw_bn,
             project,
             relu: ReLU,
-            stride,
+            _stride: stride,
         }
     }
 

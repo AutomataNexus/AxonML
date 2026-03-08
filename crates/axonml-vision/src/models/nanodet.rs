@@ -131,8 +131,8 @@ struct ShuffleBlock {
     shortcut: Option<(Conv2d, BatchNorm2d, Conv2d, BatchNorm2d)>,
     relu: ReLU,
     stride: usize,
-    in_channels: usize,
-    out_channels: usize,
+    _in_channels: usize,
+    _out_channels: usize,
 }
 
 impl ShuffleBlock {
@@ -161,8 +161,8 @@ impl ShuffleBlock {
             shortcut,
             relu: ReLU,
             stride,
-            in_channels,
-            out_channels,
+            _in_channels: in_channels,
+            _out_channels: out_channels,
         }
     }
 
@@ -239,7 +239,7 @@ impl ShuffleNetBackbone {
         let mut stages = Vec::new();
         let mut in_ch = 24;
 
-        for (i, (&out_ch, &repeats)) in stage_channels.iter().zip(stage_repeats.iter()).enumerate() {
+        for (_i, (&out_ch, &repeats)) in stage_channels.iter().zip(stage_repeats.iter()).enumerate() {
             let mut blocks = Vec::new();
             // First block with stride 2
             blocks.push(ShuffleBlock::new(in_ch, out_ch, 2));
@@ -340,7 +340,7 @@ pub(crate) struct GhostPAN {
     /// Downsampling convs for bottom-up path
     downsample: Vec<(Conv2d, BatchNorm2d)>,
     relu: ReLU,
-    neck_channels: usize,
+    _neck_channels: usize,
 }
 
 impl GhostPAN {
@@ -380,7 +380,7 @@ impl GhostPAN {
             bottom_up,
             downsample,
             relu: ReLU,
-            neck_channels,
+            _neck_channels: neck_channels,
         }
     }
 
@@ -458,7 +458,7 @@ pub(crate) struct NanoDetHead {
     /// Bounding box regression output (per level)
     bbox_out: Conv2d,
     relu: ReLU,
-    num_classes: usize,
+    _num_classes: usize,
 }
 
 impl NanoDetHead {
@@ -480,7 +480,7 @@ impl NanoDetHead {
             cls_out: Conv2d::with_options(in_channels, num_classes, (1, 1), (1, 1), (0, 0), true),
             bbox_out: Conv2d::with_options(in_channels, 4, (1, 1), (1, 1), (0, 0), true),
             relu: ReLU,
-            num_classes,
+            _num_classes: num_classes,
         }
     }
 
@@ -573,7 +573,7 @@ impl NanoDet {
             let cls_data = cls.data().to_vec();
             let bbox_data = bbox.data().to_vec();
             let shape = cls.shape();
-            let (n, _c, h, w) = (shape[0], shape[1], shape[2], shape[3]);
+            let (_n, _c, h, w) = (shape[0], shape[1], shape[2], shape[3]);
             let stride = self.strides[level] as f32;
 
             for y in 0..h {
