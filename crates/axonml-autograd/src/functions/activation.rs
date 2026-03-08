@@ -324,15 +324,19 @@ impl GradientFunction for SoftmaxBackward {
                 }
             }
 
+            // Precompute strides for outer_dims coordinate decomposition
+            let mut outer_dim_strides = vec![1usize; outer_dims.len()];
+            for i in (0..outer_dims.len().saturating_sub(1)).rev() {
+                outer_dim_strides[i] = outer_dim_strides[i + 1] * outer_dims[i + 1];
+            }
+
             for outer in 0..outer_size {
                 // Decompose `outer` into coordinates for the non-dim dimensions
                 let mut base_idx = 0;
                 let mut temp = outer;
                 for i in 0..outer_dims.len() {
-                    let size_after: usize = outer_dims[i + 1..].iter().product();
-                    let size_after = if size_after == 0 { 1 } else { size_after };
-                    let coord = temp / size_after;
-                    temp %= size_after;
+                    let coord = temp / outer_dim_strides[i];
+                    temp %= outer_dim_strides[i];
                     base_idx += coord * outer_strides[i];
                 }
 

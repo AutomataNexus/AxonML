@@ -679,28 +679,79 @@ impl Tensor<f32> {
 
     /// GPU matrix multiplication using cuBLAS GEMM — no CPU copies.
     pub(crate) fn matmul_cuda(&self, other: &Self) -> Result<Self> {
-        let a = self.contiguous_gpu();
-        let b = other.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
 
+        // Detect if a tensor is a simple transpose of the last two dims.
+        // If so, we can pass the transpose flag to cuBLAS and avoid
+        // the expensive CPU gather-index computation in contiguous_gpu().
+        fn is_last2_transposed(t: &Tensor<f32>) -> bool {
+            let nd = t.ndim();
+            if nd < 2 { return false; }
+            let strides = t.strides.as_slice();
+            // A row-major [.., M, K] has strides [.., K, 1].
+            // Transposed [.., K, M] (view) has strides [.., 1, K] with shape [.., M, K].
+            // Detect: stride[-1] > stride[-2], meaning columns are strided, rows are packed.
+            strides[nd - 1] > strides[nd - 2]
+        }
+
+        // Check if batch dims (all except last 2) are contiguous.
+        // Returns true if only the last 2 dims are transposed.
+        fn batch_contiguous(t: &Tensor<f32>) -> bool {
+            let nd = t.ndim();
+            if nd <= 2 { return true; }
+            let strides = t.strides.as_slice();
+            let shape = t.shape.as_slice();
+            // Check batch strides are standard row-major
+            // For [B1, B2, .., M, K] with potential last-2 transpose:
+            // batch stride[i] should = product of shape[i+1..] considering the last-2 block
+            let mat_size = shape[nd - 2] * shape[nd - 1];
+            let mut expected = mat_size as isize;
+            for i in (0..nd - 2).rev() {
+                if strides[i] != expected {
+                    return false;
+                }
+                expected *= shape[i] as isize;
+            }
+            true
+        }
+
+        let a_transposed = is_last2_transposed(self) && batch_contiguous(self) && self.offset == 0;
+        let b_transposed = is_last2_transposed(other) && batch_contiguous(other) && other.offset == 0;
+
+        // For transposed tensors, the "logical" shape has the last two dims swapped
+        // relative to the memory layout. We pass the original (pre-transpose) dims
+        // to cuBLAS with the transpose flag.
+        let a = if a_transposed { self.clone() } else { self.contiguous_gpu() };
+        let b = if b_transposed { other.clone() } else { other.contiguous_gpu() };
+
+        // Logical matmul dimensions from the SHAPES (not memory layout)
         let m = a.shape[a.shape.len() - 2];
         let k = a.shape[a.shape.len() - 1];
         let n = b.shape[b.shape.len() - 1];
 
-        let cuda = get_cuda_backend().expect("CUDA backend not available");
-
         if a.shape.len() == 2 && b.shape.len() == 2 {
             // 2D matmul: C(m,n) = A(m,k) @ B(k,n)
-            // cuBLAS is column-major, so: C^T(n,m) = B^T(n,k) @ A^T(k,m)
+            // cuBLAS column-major: C^T(n,m) = B_cm @ A_cm
+            // Row-major A(m,k) is column-major A^T(k,m).
+            // If A is transposed in row-major, its memory is A_orig(k,m) which in
+            // column-major is A_orig^T(m,k) — so we pass trans=true to undo it.
             let a_guard = a.storage.as_cuda_slice();
             let b_guard = b.storage.as_cuda_slice();
             let mut c_gpu = pool_alloc(m * n).expect("GPU pool alloc failed");
 
+            // cuBLAS sees column-major data:
+            // Row-major A(m,k) → col-major view as (k,m) = A^T
+            // If a_transposed: memory is (k,m) row-major → col-major (m,k) → needs op_T to get (k,m)
+            let (lda, op_a) = if a_transposed { (m, true) } else { (k, false) };
+            let (ldb, op_b) = if b_transposed { (k, true) } else { (n, false) };
+
+            // cuBLAS: C^T(n,m) = B_col(op_b) @ A_col(op_a)
             cuda.gemm_f32(
-                false, false,
+                op_b, op_a,
                 n, m, k,
                 1.0,
-                b_guard.slice(), n,
-                a_guard.slice(), k,
+                b_guard.slice(), ldb,
+                a_guard.slice(), lda,
                 0.0,
                 &mut c_gpu, n,
             ).expect("cuBLAS gemm failed");
@@ -714,26 +765,34 @@ impl Tensor<f32> {
             });
         }
 
-        // Batched matmul: fully on-device using cublasSgemmStridedBatched
+        // Batched matmul: cublasSgemmStridedBatched
         let batch_dims: Vec<usize> = a.shape[..a.shape.len() - 2].to_vec();
         let batch_size: usize = batch_dims.iter().product();
-        let a_stride = (m * k) as i64;
-        let b_stride = (k * n) as i64;
-        let c_stride = (m * n) as i64;
         let total = batch_size * m * n;
 
         let a_guard = a.storage.as_cuda_slice();
         let b_guard = b.storage.as_cuda_slice();
         let mut c_gpu = pool_alloc(total).expect("GPU pool alloc failed");
 
-        // cuBLAS is column-major, so we compute B^T @ A^T = (A @ B)^T
-        // with the row-major data already laid out as transposed column-major
+        // Leading dims and strides for cuBLAS (column-major perspective)
+        let (lda, a_batch_stride, op_a) = if a_transposed {
+            (m, (m * k) as i64, true)
+        } else {
+            (k, (m * k) as i64, false)
+        };
+        let (ldb, b_batch_stride, op_b) = if b_transposed {
+            (k, (k * n) as i64, true)
+        } else {
+            (n, (k * n) as i64, false)
+        };
+        let c_stride = (m * n) as i64;
+
         cuda.gemm_strided_batched_f32(
-            false, false,
+            op_b, op_a,
             n, m, k,
             1.0,
-            b_guard.slice(), n, b_stride,
-            a_guard.slice(), k, a_stride,
+            b_guard.slice(), ldb, b_batch_stride,
+            a_guard.slice(), lda, a_batch_stride,
             0.0,
             &mut c_gpu, n, c_stride,
             batch_size,
@@ -761,7 +820,8 @@ impl Tensor<f32> {
         self.storage.to_vec_f32()
     }
 
-    /// Returns a contiguous GPU tensor — fully on-device using gather kernel.
+    /// Returns a contiguous GPU tensor — fully on-device using strided gather kernel.
+    /// Computes gather indices directly on GPU, avoiding CPU index computation.
     pub(crate) fn contiguous_gpu(&self) -> Self {
         if self.is_contiguous() && self.offset == 0 {
             return self.clone();
@@ -770,46 +830,23 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let ndim = self.shape.len();
         let offset = self.offset;
-
-        // Compute gather indices on CPU using direct stride arithmetic
-        // (no per-element Vec allocation — fixed-size stack array instead)
         let shape = self.shape.as_slice();
         let strides = self.strides.as_slice();
 
-        // Precompute contiguous strides for output indexing
-        let mut out_strides = vec![1usize; ndim];
-        for i in (0..ndim.saturating_sub(1)).rev() {
-            out_strides[i] = out_strides[i + 1] * shape[i + 1];
-        }
+        // Upload shape and strides to GPU (small arrays, cheap transfer)
+        let shape_u32: Vec<u32> = shape.iter().map(|&s| s as u32).collect();
+        let strides_i64: Vec<i64> = strides.iter().map(|&s| s as i64).collect();
+        let shape_gpu = cuda.htod_copy(&shape_u32).expect("htod shape failed");
+        let strides_gpu = cuda.htod_copy(&strides_i64).expect("htod strides failed");
 
-        let mut indices = vec![0u32; total];
-
-        // Use iterative coordinate tracking instead of unravel_index per element
-        let mut coords = vec![0usize; ndim];
-        for i in 0..total {
-            // Compute source linear index from coords and strides
-            let mut src_idx = offset as isize;
-            for d in 0..ndim {
-                src_idx += coords[d] as isize * strides[d];
-            }
-            indices[i] = src_idx as u32;
-
-            // Increment coordinates (like an odometer, rightmost digit first)
-            for d in (0..ndim).rev() {
-                coords[d] += 1;
-                if coords[d] < shape[d] {
-                    break;
-                }
-                coords[d] = 0;
-            }
-        }
-
-        let idx_gpu = cuda.htod_copy(&indices).expect("htod indices failed");
         let src_guard = self.storage.as_cuda_slice();
         let mut out = pool_alloc(total).expect("GPU pool alloc failed");
 
-        cuda.gather_contiguous_f32(&mut out, src_guard.slice(), &idx_gpu, total)
-            .expect("CUDA gather_contiguous_f32 failed");
+        cuda.strided_gather_f32(
+            src_guard.slice(), &mut out,
+            &strides_gpu, &shape_gpu,
+            ndim, offset, total,
+        ).expect("CUDA strided_gather_f32 failed");
 
         let storage = Storage::from_cuda_slice(out, total, self.device());
         Self {
@@ -910,6 +947,141 @@ impl Tensor<f32> {
             strides: contiguous_strides(&crate::shape::Shape::from_slice(output_shape)),
             offset: 0,
         }
+    }
+
+    /// Embedding backward: scatter-add grad_output into weight gradient on GPU.
+    /// grad_output shape: [num_indices, emb_dim] (contiguous on GPU)
+    /// indices: token indices as u32 (small, uploaded from CPU)
+    /// Returns: Tensor of shape [num_embeddings, emb_dim] with accumulated gradients.
+    pub fn embedding_scatter_add_cuda(
+        &self,
+        indices: &[u32],
+        num_embeddings: usize,
+        emb_dim: usize,
+    ) -> Self {
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let num_indices = indices.len();
+        let total_n = num_indices * emb_dim;
+
+        // Upload indices to GPU (small: batch_size * seq_len u32 values)
+        let idx_gpu = cuda.htod_copy(indices).expect("htod indices failed");
+
+        // Allocate zeroed output on GPU: [num_embeddings, emb_dim]
+        let out_size = num_embeddings * emb_dim;
+        let mut out = pool_alloc(out_size).expect("GPU pool alloc failed");
+        cuda.memset_zeros_f32(&mut out).expect("memset zeros failed");
+
+        // Ensure grad_output is contiguous on GPU
+        let grad = self.contiguous_gpu();
+        let grad_guard = grad.storage.as_cuda_slice();
+
+        cuda.embedding_scatter_add_f32(
+            grad_guard.slice(),
+            &idx_gpu,
+            &mut out,
+            total_n,
+            emb_dim,
+        )
+        .expect("CUDA embedding_scatter_add_f32 failed");
+
+        let shape = crate::shape::Shape::from_slice(&[num_embeddings, emb_dim]);
+        let storage = Storage::from_cuda_slice(out, out_size, self.device());
+        Self {
+            storage,
+            shape: shape.clone(),
+            strides: contiguous_strides(&shape),
+            offset: 0,
+        }
+    }
+
+    /// Fused Adam optimizer step: updates param, exp_avg, exp_avg_sq in-place on GPU.
+    /// Single kernel launch per parameter — eliminates 8+ separate tensor ops.
+    ///
+    /// `self` is the parameter tensor (modified in-place).
+    /// `grad` is the gradient tensor.
+    /// `exp_avg` and `exp_avg_sq` are the optimizer state tensors (modified in-place).
+    #[allow(clippy::too_many_arguments)]
+    pub fn adam_step_inplace(
+        &self,
+        grad: &Self,
+        exp_avg: &Self,
+        exp_avg_sq: &Self,
+        lr: f32,
+        beta1: f32,
+        beta2: f32,
+        eps: f32,
+        weight_decay: f32,
+        bias_correction1: f32,
+        bias_correction2: f32,
+    ) {
+        let n = self.numel();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        // Get mutable access to param, exp_avg, exp_avg_sq
+        let mut param_guard = self.storage.as_cuda_slice_mut();
+        let grad_guard = grad.storage.as_cuda_slice();
+        let mut avg_guard = exp_avg.storage.as_cuda_slice_mut();
+        let mut sq_guard = exp_avg_sq.storage.as_cuda_slice_mut();
+
+        cuda.adam_step_f32(
+            param_guard.slice_mut(),
+            grad_guard.slice(),
+            avg_guard.slice_mut(),
+            sq_guard.slice_mut(),
+            n,
+            lr, beta1, beta2, eps, weight_decay,
+            bias_correction1, bias_correction2,
+        )
+        .expect("CUDA adam_step_f32 failed");
+    }
+
+    /// Compute total gradient norm and clip in-place on GPU.
+    /// Single GPU→CPU copy of 1 float for the norm, then scale kernels if needed.
+    /// Returns the total L2 norm before clipping.
+    pub fn clip_grad_norm_cuda(grads: &[Self], max_norm: f32) -> f32 {
+        if grads.is_empty() {
+            return 0.0;
+        }
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        // Single accumulator for ALL params
+        let mut acc = pool_alloc(1).expect("GPU pool alloc failed");
+        cuda.memset_zeros_f32(&mut acc).expect("memset failed");
+
+        // Launch norm kernel for each grad — all atomically add to same accumulator
+        // No GPU→CPU copies in this loop
+        for grad in grads {
+            let data = grad.contiguous_gpu();
+            let n = data.numel();
+            let guard = data.storage.as_cuda_slice();
+            cuda.grad_norm_sq_f32(guard.slice(), &mut acc, n)
+                .expect("CUDA grad_norm_sq_f32 failed");
+        }
+
+        // ONE GPU→CPU copy: 1 float
+        let result = cuda.dtoh_copy(&acc).expect("dtoh failed");
+        let total_norm = result[0].sqrt();
+
+        if total_norm > max_norm {
+            let scale = max_norm / (total_norm + 1e-6);
+            for grad in grads {
+                let n = grad.numel();
+                let mut guard = grad.storage.as_cuda_slice_mut();
+                cuda.grad_scale_f32(guard.slice_mut(), n, scale)
+                    .expect("CUDA grad_scale_f32 failed");
+            }
+        }
+
+        total_norm
+    }
+
+    /// Scale all elements in-place: self[i] *= scale. No CPU copies.
+    pub fn grad_scale_inplace(&self, scale: f32) {
+        let n = self.numel();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let mut guard = self.storage.as_cuda_slice_mut();
+        cuda.grad_scale_f32(guard.slice_mut(), n, scale)
+            .expect("CUDA grad_scale_f32 failed");
     }
 
     // =========================================================================
@@ -1310,5 +1482,575 @@ impl Tensor<f32> {
             strides: contiguous_strides(&out_shape),
             offset: 0,
         }
+    }
+
+    // =========================================================================
+    // Attention Mask Expansion (GPU)
+    // =========================================================================
+
+    /// Expand attention mask on GPU: converts 0→-1e9 (masked) and broadcasts to
+    /// [batch, heads, tgt_len, src_len]. Supports causal [T,S] and padding [B,S] masks.
+    ///
+    /// Returns `None` if GPU expansion fails or mask shape is unsupported.
+    pub fn mask_expand_cuda(
+        &self,
+        output_shape: &[usize],
+        batch_size: usize,
+        num_heads: usize,
+        tgt_len: usize,
+        src_len: usize,
+    ) -> Option<Self> {
+        let cuda = get_cuda_backend()?;
+        let data = self.contiguous_gpu();
+        let mask_shape = &data.shape;
+        let total: usize = output_shape.iter().product();
+
+        let mask_guard = data.storage.as_cuda_slice();
+        let mut out = pool_alloc(total).ok()?;
+
+        let result = if mask_shape.len() == 2
+            && mask_shape[0] == tgt_len
+            && mask_shape[1] == src_len
+        {
+            cuda.mask_expand_causal_f32(
+                mask_guard.slice(), &mut out, total, tgt_len, src_len,
+            )
+        } else if mask_shape.len() == 2
+            && mask_shape[0] == batch_size
+            && mask_shape[1] == src_len
+        {
+            cuda.mask_expand_padding_f32(
+                mask_guard.slice(), &mut out, total, num_heads, tgt_len, src_len,
+            )
+        } else {
+            return None;
+        };
+
+        result.ok()?;
+
+        let out_shape = Shape::from_slice(output_shape);
+        Some(Self {
+            storage: Storage::from_cuda_slice(out, total, self.device()),
+            shape: out_shape.clone(),
+            strides: contiguous_strides(&out_shape),
+            offset: 0,
+        })
+    }
+
+    // =========================================================================
+    // GPU-Resident Conv2d (im2col + cuBLAS GEMM)
+    // =========================================================================
+
+    /// GPU-resident Conv2d forward: im2col + GEMM + bias add, all on GPU.
+    ///
+    /// `self` is the input tensor `[N, C_in, H, W]` on GPU.
+    /// `weight` is `[C_out, C_in, kH, kW]` on GPU.
+    /// `bias` is optional `[C_out]` on GPU.
+    ///
+    /// Returns output `[N, C_out, H_out, W_out]` on GPU.
+    /// Groups=1 only. Returns `None` if any GPU operation fails.
+    pub fn conv2d_cuda(
+        &self,
+        weight: &Self,
+        bias: Option<&Self>,
+        stride: (usize, usize),
+        padding: (usize, usize),
+    ) -> Option<Self> {
+        // All tensors must be GPU-resident
+        if !self.device().is_gpu() || !weight.device().is_gpu() {
+            return None;
+        }
+        if let Some(b) = bias {
+            if !b.device().is_gpu() { return None; }
+        }
+        let cuda = get_cuda_backend()?;
+
+        let batch_size = self.shape[0];
+        let in_channels = self.shape[1];
+        let in_height = self.shape[2];
+        let in_width = self.shape[3];
+        let out_channels = weight.shape[0];
+        let kernel_h = weight.shape[2];
+        let kernel_w = weight.shape[3];
+        let (stride_h, stride_w) = stride;
+        let (pad_h, pad_w) = padding;
+
+        let out_h = (in_height + 2 * pad_h - kernel_h) / stride_h + 1;
+        let out_w = (in_width + 2 * pad_w - kernel_w) / stride_w + 1;
+        let col_h = in_channels * kernel_h * kernel_w;
+        let col_w = out_h * out_w;
+        let col_n = col_h * col_w;
+        let spatial = out_h * out_w;
+        let out_per_batch = out_channels * spatial;
+        let in_per_batch = in_channels * in_height * in_width;
+
+        // Ensure input and weight are contiguous on GPU
+        let input_data = self.contiguous_gpu();
+        let weight_data = weight.contiguous_gpu();
+
+        let input_guard = input_data.storage.as_cuda_slice();
+        let weight_guard = weight_data.storage.as_cuda_slice();
+
+        // Upload im2col parameters (small, cheap)
+        let im2col_params: [u32; 10] = [
+            in_height as u32, in_width as u32,
+            kernel_h as u32, kernel_w as u32,
+            pad_h as u32, pad_w as u32,
+            stride_h as u32, stride_w as u32,
+            out_h as u32, out_w as u32,
+        ];
+        let params_gpu = cuda.htod_copy(&im2col_params[..]).ok()?;
+
+        // Keep bias tensor alive, then borrow its GPU slice
+        let bias_data = bias.map(|b| b.contiguous_gpu());
+        let bias_guard = bias_data.as_ref().map(|b| b.storage.as_cuda_slice());
+
+        // Pool-allocate col buffer (reused across batches)
+        let mut col_gpu = pool_alloc(col_n).ok()?;
+
+        // Per-batch input buffer for im2col (d2d copy into here)
+        let mut input_batch_gpu = pool_alloc(in_per_batch).ok()?;
+
+        // Per-batch output buffer for GEMM
+        let mut batch_out_gpu = pool_alloc(out_per_batch).ok()?;
+
+        // Allocate output buffer for ALL batches on GPU
+        let total_out = batch_size * out_per_batch;
+        let mut out_gpu = pool_alloc(total_out).ok()?;
+
+        for b in 0..batch_size {
+            // d2d copy: input[b] from full buffer → per-batch buffer (GPU→GPU, fast)
+            cuda.memcpy_dtod_f32(
+                &mut input_batch_gpu, 0,
+                input_guard.slice(), b * in_per_batch,
+                in_per_batch,
+            ).ok()?;
+
+            // GPU im2col: input_batch [C_in, H, W] → col [col_h, col_w]
+            cuda.im2col_f32(
+                &input_batch_gpu, &mut col_gpu, &params_gpu, col_n,
+            ).ok()?;
+
+            // GPU GEMM: batch_out = weight @ col
+            // weight: [out_channels, col_h] row-major
+            // col: [col_h, col_w] row-major
+            // result: [out_channels, col_w] row-major
+            //
+            // cuBLAS column-major: C^T = B^T @ A^T
+            // m=col_w, n=out_channels, k=col_h
+            cuda.gemm_f32(
+                false, false,
+                col_w, out_channels, col_h,
+                1.0,
+                &col_gpu, col_w,
+                weight_guard.slice(), col_h,
+                0.0,
+                &mut batch_out_gpu, col_w,
+            ).ok()?;
+
+            // GPU bias add (in-place on batch_out_gpu)
+            if let Some(ref bg) = bias_guard {
+                cuda.bias_add_channels_f32(
+                    &mut batch_out_gpu, bg.slice(), spatial, out_per_batch,
+                ).ok()?;
+            }
+
+            // d2d copy: batch output → final output buffer at right offset
+            cuda.memcpy_dtod_f32(
+                &mut out_gpu, b * out_per_batch,
+                &batch_out_gpu, 0,
+                out_per_batch,
+            ).ok()?;
+        }
+
+        let out_shape = Shape::from_slice(&[batch_size, out_channels, out_h, out_w]);
+        Some(Self {
+            storage: Storage::from_cuda_slice(out_gpu, total_out, self.device()),
+            shape: out_shape.clone(),
+            strides: contiguous_strides(&out_shape),
+            offset: 0,
+        })
+    }
+
+    /// GPU-resident grouped Conv2d forward (depthwise separable, etc.).
+    ///
+    /// Runs each group as a separate im2col + GEMM on GPU.
+    /// `self` is `[N, C_in, H, W]` on GPU.
+    /// `weight` is `[C_out, C_in/groups, kH, kW]` on GPU.
+    /// `bias` is optional `[C_out]` on GPU.
+    pub fn conv2d_grouped_cuda(
+        &self,
+        weight: &Self,
+        bias: Option<&Self>,
+        stride: (usize, usize),
+        padding: (usize, usize),
+        groups: usize,
+    ) -> Option<Self> {
+        // All tensors must be GPU-resident
+        if !self.device().is_gpu() || !weight.device().is_gpu() {
+            return None;
+        }
+        if let Some(b) = bias {
+            if !b.device().is_gpu() { return None; }
+        }
+        let cuda = get_cuda_backend()?;
+
+        let batch_size = self.shape[0];
+        let in_channels = self.shape[1];
+        let in_height = self.shape[2];
+        let in_width = self.shape[3];
+        let out_channels = weight.shape[0];
+        let kernel_h = weight.shape[2];
+        let kernel_w = weight.shape[3];
+        let (stride_h, stride_w) = stride;
+        let (pad_h, pad_w) = padding;
+
+        let in_channels_per_group = in_channels / groups;
+        let out_channels_per_group = out_channels / groups;
+
+        let out_h = (in_height + 2 * pad_h - kernel_h) / stride_h + 1;
+        let out_w = (in_width + 2 * pad_w - kernel_w) / stride_w + 1;
+        let col_h = in_channels_per_group * kernel_h * kernel_w;
+        let col_w = out_h * out_w;
+        let col_n = col_h * col_w;
+        let spatial = out_h * out_w;
+        let in_spatial = in_height * in_width;
+        let out_per_batch = out_channels * spatial;
+
+        let input_data = self.contiguous_gpu();
+        let weight_data = weight.contiguous_gpu();
+
+        let input_guard = input_data.storage.as_cuda_slice();
+        let weight_guard = weight_data.storage.as_cuda_slice();
+
+        // im2col params for per-group input (in_channels_per_group channels)
+        let params_arr: [u32; 10] = [
+            in_height as u32, in_width as u32,
+            kernel_h as u32, kernel_w as u32,
+            pad_h as u32, pad_w as u32,
+            stride_h as u32, stride_w as u32,
+            out_h as u32, out_w as u32,
+        ];
+        let params_gpu = cuda.htod_copy(&params_arr[..]).ok()?;
+
+        let bias_data = bias.map(|b| b.contiguous_gpu());
+        let bias_guard = bias_data.as_ref().map(|b| b.storage.as_cuda_slice());
+
+        let mut col_gpu = pool_alloc(col_n).ok()?;
+        let mut input_group_gpu = pool_alloc(in_channels_per_group * in_spatial).ok()?;
+        let mut group_out_gpu = pool_alloc(out_channels_per_group * spatial).ok()?;
+
+        let total_out = batch_size * out_per_batch;
+        let mut out_gpu = pool_alloc(total_out).ok()?;
+
+        for b in 0..batch_size {
+            for g in 0..groups {
+                let ic_start = g * in_channels_per_group;
+                let oc_start = g * out_channels_per_group;
+
+                // d2d copy: input channels for this group
+                let in_group_size = in_channels_per_group * in_spatial;
+                let in_offset = b * in_channels * in_spatial + ic_start * in_spatial;
+                cuda.memcpy_dtod_f32(
+                    &mut input_group_gpu, 0,
+                    input_guard.slice(), in_offset,
+                    in_group_size,
+                ).ok()?;
+
+                // im2col on group input
+                cuda.im2col_f32(
+                    &input_group_gpu, &mut col_gpu, &params_gpu, col_n,
+                ).ok()?;
+
+                // Weight for this group: offset into weight buffer
+                let w_offset = oc_start * in_channels_per_group * kernel_h * kernel_w;
+                let w_size = out_channels_per_group * col_h;
+
+                // Copy group weight to contiguous buffer for GEMM
+                let mut weight_group_gpu = pool_alloc(w_size).ok()?;
+                cuda.memcpy_dtod_f32(
+                    &mut weight_group_gpu, 0,
+                    weight_guard.slice(), w_offset,
+                    w_size,
+                ).ok()?;
+
+                // GEMM: group_out = weight_group @ col
+                cuda.gemm_f32(
+                    false, false,
+                    col_w, out_channels_per_group, col_h,
+                    1.0,
+                    &col_gpu, col_w,
+                    &weight_group_gpu, col_h,
+                    0.0,
+                    &mut group_out_gpu, col_w,
+                ).ok()?;
+
+                // Bias add for this group's channels
+                if let Some(ref bg) = bias_guard {
+                    // Copy group bias
+                    let mut bias_group = pool_alloc(out_channels_per_group).ok()?;
+                    cuda.memcpy_dtod_f32(
+                        &mut bias_group, 0,
+                        bg.slice(), oc_start,
+                        out_channels_per_group,
+                    ).ok()?;
+                    cuda.bias_add_channels_f32(
+                        &mut group_out_gpu, &bias_group, spatial,
+                        out_channels_per_group * spatial,
+                    ).ok()?;
+                }
+
+                // Copy group output into final buffer
+                let out_offset = b * out_per_batch + oc_start * spatial;
+                cuda.memcpy_dtod_f32(
+                    &mut out_gpu, out_offset,
+                    &group_out_gpu, 0,
+                    out_channels_per_group * spatial,
+                ).ok()?;
+            }
+        }
+
+        let out_shape = Shape::from_slice(&[batch_size, out_channels, out_h, out_w]);
+        Some(Self {
+            storage: Storage::from_cuda_slice(out_gpu, total_out, self.device()),
+            shape: out_shape.clone(),
+            strides: contiguous_strides(&out_shape),
+            offset: 0,
+        })
+    }
+
+    /// GPU-resident Conv2d backward: computes grad_input, grad_weight, and optionally grad_bias.
+    ///
+    /// `self` is `grad_output` `[N, C_out, H_out, W_out]` on GPU.
+    /// `saved_input` is `[N, C_in, H_in, W_in]` on GPU.
+    /// `saved_weight` is `[C_out, C_in, kH, kW]` on GPU.
+    ///
+    /// Returns `(grad_input, grad_weight, Option<grad_bias>)`, all GPU-resident.
+    /// Groups=1 only. Returns `None` if any GPU operation fails.
+    pub fn conv2d_backward_cuda(
+        &self,
+        saved_input: &Self,
+        saved_weight: &Self,
+        input_shape: &[usize],
+        in_channels: usize,
+        out_channels: usize,
+        kernel_size: (usize, usize),
+        stride: (usize, usize),
+        padding: (usize, usize),
+        has_bias: bool,
+    ) -> Option<(Self, Self, Option<Self>)> {
+        // All tensors must be GPU-resident
+        if !self.device().is_gpu() || !saved_input.device().is_gpu() || !saved_weight.device().is_gpu() {
+            return None;
+        }
+        let cuda = get_cuda_backend()?;
+
+        let batch_size = input_shape[0];
+        let in_h = input_shape[2];
+        let in_w = input_shape[3];
+        let (kh, kw) = kernel_size;
+        let (sh, sw) = stride;
+        let (ph, pw) = padding;
+        let out_h = self.shape[2];
+        let out_w = self.shape[3];
+        let col_h = in_channels * kh * kw;
+        let col_w = out_h * out_w;
+        let col_n = col_h * col_w;
+        let spatial = out_h * out_w;
+        let in_per_batch = in_channels * in_h * in_w;
+        let out_per_batch = out_channels * spatial;
+
+        let grad_out_data = self.contiguous_gpu();
+        let input_data = saved_input.contiguous_gpu();
+        let weight_data = saved_weight.contiguous_gpu();
+
+        let grad_out_guard = grad_out_data.storage.as_cuda_slice();
+        let input_guard = input_data.storage.as_cuda_slice();
+        let weight_guard = weight_data.storage.as_cuda_slice();
+
+        // im2col/col2im params
+        let params_arr: [u32; 10] = [
+            in_h as u32, in_w as u32,
+            kh as u32, kw as u32,
+            ph as u32, pw as u32,
+            sh as u32, sw as u32,
+            out_h as u32, out_w as u32,
+        ];
+        let params_gpu = cuda.htod_copy(&params_arr[..]).ok()?;
+
+        // Buffers
+        let mut col_gpu = pool_alloc(col_n).ok()?;
+        let mut grad_out_batch = pool_alloc(out_per_batch).ok()?;
+        let mut input_batch = pool_alloc(in_per_batch).ok()?;
+
+        // Accumulate grad_weight across batches on GPU
+        let weight_n = out_channels * col_h;
+        let mut grad_weight_gpu = pool_alloc(weight_n).ok()?;
+        // Zero-init grad_weight
+        let zeros_w = vec![0.0f32; weight_n];
+        let zeros_gpu = cuda.htod_copy(&zeros_w).ok()?;
+        cuda.memcpy_dtod_f32(&mut grad_weight_gpu, 0, &zeros_gpu, 0, weight_n).ok()?;
+
+        // grad_input buffer
+        let total_input = batch_size * in_per_batch;
+        let mut grad_input_gpu = pool_alloc(total_input).ok()?;
+
+        // Zero buffer for per-batch grad_input init
+        let mut zero_batch = pool_alloc(in_per_batch).ok()?;
+        {
+            let zeros_in = vec![0.0f32; in_per_batch];
+            let z = cuda.htod_copy(&zeros_in).ok()?;
+            cuda.memcpy_dtod_f32(&mut zero_batch, 0, &z, 0, in_per_batch).ok()?;
+        }
+
+        // grad_bias accumulator (computed on GPU if needed)
+        let mut grad_bias_gpu = if has_bias {
+            let gb = pool_alloc(out_channels).ok()?;
+            Some(gb)
+        } else {
+            None
+        };
+        // Zero-init grad_bias
+        if let Some(ref mut gb) = grad_bias_gpu {
+            let zeros_b = vec![0.0f32; out_channels];
+            let zb = cuda.htod_copy(&zeros_b).ok()?;
+            cuda.memcpy_dtod_f32(gb, 0, &zb, 0, out_channels).ok()?;
+        }
+
+        for b in 0..batch_size {
+            // Copy grad_output for this batch
+            cuda.memcpy_dtod_f32(
+                &mut grad_out_batch, 0,
+                grad_out_guard.slice(), b * out_per_batch,
+                out_per_batch,
+            ).ok()?;
+
+            // Copy input for this batch
+            cuda.memcpy_dtod_f32(
+                &mut input_batch, 0,
+                input_guard.slice(), b * in_per_batch,
+                in_per_batch,
+            ).ok()?;
+
+            // === grad_input: col = weight^T @ grad_out, then col2im ===
+            // weight: [out_channels, col_h] row-major
+            // grad_out: [out_channels, spatial] row-major
+            // col = weight^T @ grad_out → [col_h, spatial]
+            //
+            // cuBLAS: C^T(spatial, col_h) = grad_out^T(spatial, oc) @ weight(oc, col_h)
+            // m=spatial, n=col_h, k=out_channels, transA=false, transB=false
+            // But we need weight^T @ grad_out in row-major.
+            // Row-major weight^T(col_h, oc) → col-major (oc, col_h)
+            // We want: col(col_h, spatial) = weight^T(col_h, oc) @ grad_out(oc, spatial)
+            // col-major: col^T(spatial, col_h) = grad_out^T(spatial, oc) @ weight(oc, col_h)
+            // m=spatial, n=col_h, k=oc
+            cuda.gemm_f32(
+                false, false,
+                spatial, col_h, out_channels,
+                1.0,
+                &grad_out_batch, spatial,
+                weight_guard.slice(), col_h,
+                0.0,
+                &mut col_gpu, spatial,
+            ).ok()?;
+
+            // Zero the per-batch grad_input region
+            let gi_offset = b * in_per_batch;
+            cuda.memcpy_dtod_f32(
+                &mut grad_input_gpu, gi_offset,
+                &zero_batch, 0,
+                in_per_batch,
+            ).ok()?;
+
+            // col2im: col [col_h, spatial] → grad_input[b] [C_in, H, W]
+            // We need to write to grad_input_gpu at offset gi_offset.
+            // col2im kernel writes to output starting at base pointer.
+            // Use a temporary buffer, then d2d copy back.
+            let mut gi_batch = pool_alloc(in_per_batch).ok()?;
+            cuda.memcpy_dtod_f32(&mut gi_batch, 0, &zero_batch, 0, in_per_batch).ok()?;
+
+            cuda.col2im_f32(
+                &col_gpu, &mut gi_batch, &params_gpu, col_n,
+            ).ok()?;
+
+            cuda.memcpy_dtod_f32(
+                &mut grad_input_gpu, gi_offset,
+                &gi_batch, 0,
+                in_per_batch,
+            ).ok()?;
+
+            // === grad_weight: grad_weight += grad_out @ col^T ===
+            // im2col input for this batch
+            cuda.im2col_f32(
+                &input_batch, &mut col_gpu, &params_gpu, col_n,
+            ).ok()?;
+
+            // grad_out: [oc, spatial] row-major
+            // col: [col_h, spatial] row-major
+            // grad_weight += grad_out @ col^T → [oc, col_h]
+            //
+            // cuBLAS: gw^T(col_h, oc) = col(col_h, spatial) @ grad_out^T(spatial, oc)
+            // But in row-major → col-major mapping:
+            // gw^T(col_h, oc) = col_cm @ grad_out_cm
+            // m=col_h, n=oc, k=spatial, beta=1.0 to accumulate
+            cuda.gemm_f32(
+                true, false,
+                col_h, out_channels, spatial,
+                1.0,
+                &col_gpu, spatial,
+                &grad_out_batch, spatial,
+                1.0,
+                &mut grad_weight_gpu, col_h,
+            ).ok()?;
+
+            // === grad_bias: bias_grad += sum over spatial of grad_out ===
+            if let Some(ref mut gb) = grad_bias_gpu {
+                // Sum each channel's spatial values using GEMM:
+                // grad_out [oc, spatial] @ ones[spatial, 1] → [oc, 1]
+                // This is oc dot products.
+                // But we don't have a ones vector... use a simple CPU fallback for bias.
+                // Bias grad is tiny (just out_channels values), not worth a custom kernel.
+                let go_cpu = cuda.dtoh_copy(&grad_out_batch).ok()?;
+                let mut bias_acc = cuda.dtoh_copy(gb).ok()?;
+                for oc in 0..out_channels {
+                    let mut sum = 0.0f32;
+                    for s in 0..spatial {
+                        sum += go_cpu[oc * spatial + s];
+                    }
+                    bias_acc[oc] += sum;
+                }
+                let ba_gpu = cuda.htod_copy(&bias_acc).ok()?;
+                cuda.memcpy_dtod_f32(gb, 0, &ba_gpu, 0, out_channels).ok()?;
+            }
+        }
+
+        // Build output tensors
+        let gi_shape = Shape::from_slice(input_shape);
+        let grad_input_t = Self {
+            storage: Storage::from_cuda_slice(grad_input_gpu, total_input, self.device()),
+            shape: gi_shape.clone(),
+            strides: contiguous_strides(&gi_shape),
+            offset: 0,
+        };
+
+        let gw_shape = Shape::from_slice(&[out_channels, in_channels, kh, kw]);
+        let grad_weight_t = Self {
+            storage: Storage::from_cuda_slice(grad_weight_gpu, weight_n, self.device()),
+            shape: gw_shape.clone(),
+            strides: contiguous_strides(&gw_shape),
+            offset: 0,
+        };
+
+        let grad_bias_t = grad_bias_gpu.map(|gb| {
+            let gb_shape = Shape::from_slice(&[out_channels]);
+            Self {
+                storage: Storage::from_cuda_slice(gb, out_channels, self.device()),
+                shape: gb_shape.clone(),
+                strides: contiguous_strides(&gb_shape),
+                offset: 0,
+            }
+        });
+
+        Some((grad_input_t, grad_weight_t, grad_bias_t))
     }
 }

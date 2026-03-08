@@ -26,21 +26,13 @@ use crate::module::Module;
 #[derive(Debug)]
 struct DropoutBackward {
     next_fns: Vec<Option<GradFn>>,
-    /// The mask applied during forward: 0.0 for dropped, scale for kept.
-    mask: Vec<f32>,
-    shape: Vec<usize>,
+    /// The mask as a tensor (stored on same device as input — GPU or CPU).
+    mask_tensor: Tensor<f32>,
 }
 
 impl GradientFunction for DropoutBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // GPU path: create mask tensor on CPU, move to GPU, multiply
-        let mask_tensor = Tensor::from_vec(self.mask.clone(), &self.shape).unwrap();
-        let result = if grad_output.device().is_gpu() {
-            let mask_gpu = mask_tensor.to_device(grad_output.device()).unwrap();
-            grad_output.mul(&mask_gpu).unwrap()
-        } else {
-            grad_output.mul(&mask_tensor).unwrap()
-        };
+        let result = grad_output.mul(&self.mask_tensor).unwrap();
         vec![Some(result)]
     }
 
@@ -133,22 +125,19 @@ impl Module for Dropout {
             })
             .collect();
 
-        // Create mask tensor and move to input device — multiply on GPU, no input copy needed
-        let mask_tensor = Tensor::from_vec(mask.clone(), &shape).unwrap();
-        let output = if input_data.device().is_gpu() {
-            let mask_gpu = mask_tensor.to_device(input_data.device()).unwrap();
-            input_data.mul(&mask_gpu).unwrap()
-        } else {
-            input_data.mul(&mask_tensor).unwrap()
-        };
+        // Create mask tensor and move to input device
+        let mut mask_tensor = Tensor::from_vec(mask, &shape).unwrap();
+        if input_data.device().is_gpu() {
+            mask_tensor = mask_tensor.to_device(input_data.device()).unwrap();
+        }
+        let output = input_data.mul(&mask_tensor).unwrap();
 
         let requires_grad = input.requires_grad() && is_grad_enabled();
 
         if requires_grad {
             let grad_fn = GradFn::new(DropoutBackward {
                 next_fns: vec![input.grad_fn().cloned()],
-                mask,
-                shape,
+                mask_tensor,
             });
             Variable::from_operation(output, grad_fn, true)
         } else {
@@ -240,20 +229,17 @@ impl Module for Dropout2d {
             }
         }
 
-        let output_vec: Vec<f32> = input_vec
-            .iter()
-            .zip(mask.iter())
-            .map(|(&x, &m)| x * m)
-            .collect();
-
-        let output = Tensor::from_vec(output_vec, &shape).unwrap();
+        let mut mask_tensor = Tensor::from_vec(mask, &shape).unwrap();
+        if input_data.device().is_gpu() {
+            mask_tensor = mask_tensor.to_device(input_data.device()).unwrap();
+        }
+        let output = input_data.mul(&mask_tensor).unwrap();
         let requires_grad = input.requires_grad() && is_grad_enabled();
 
         if requires_grad {
             let grad_fn = GradFn::new(DropoutBackward {
                 next_fns: vec![input.grad_fn().cloned()],
-                mask,
-                shape,
+                mask_tensor,
             });
             Variable::from_operation(output, grad_fn, true)
         } else {
@@ -343,13 +329,16 @@ impl Module for AlphaDropout {
             .collect();
 
         let output = Tensor::from_vec(output_vec, &shape).unwrap();
+        let mut mask_tensor = Tensor::from_vec(mask, &shape).unwrap();
+        if input_data.device().is_gpu() {
+            mask_tensor = mask_tensor.to_device(input_data.device()).unwrap();
+        }
         let requires_grad = input.requires_grad() && is_grad_enabled();
 
         if requires_grad {
             let grad_fn = GradFn::new(DropoutBackward {
                 next_fns: vec![input.grad_fn().cloned()],
-                mask,
-                shape,
+                mask_tensor,
             });
             Variable::from_operation(output, grad_fn, true)
         } else {

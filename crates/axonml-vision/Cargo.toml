@@ -30,6 +30,7 @@ dirs.workspace = true
 [features]
 default = ["download"]
 download = ["reqwest"]
+cuda = ["axonml-tensor/cuda", "axonml-nn/cuda", "axonml-autograd/cuda", "axonml-core/cuda"]
 
 [dependencies.reqwest]
 version = "0.12"

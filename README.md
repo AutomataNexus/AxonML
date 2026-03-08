@@ -19,11 +19,11 @@ Axonml (named after axons - the nerve fibers that transmit signals between neuro
 
 ## PyTorch Parity: ~92-95% (and beyond)
 
-AxonML provides comprehensive PyTorch-equivalent functionality with 1575+ passing tests. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
+AxonML provides comprehensive PyTorch-equivalent functionality with **1,988 passing tests**. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
 
 ## Features
 
-### Core (v0.3.0)
+### Core (v0.4.1)
 
 - **Tensor Operations** (`axonml-tensor`)
   - N-dimensional tensors with arbitrary shapes
@@ -444,7 +444,7 @@ Add Axonml to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = "0.3"
+axonml = "0.4"
 ```
 
 ### Basic Usage
@@ -758,7 +758,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ### Test Suite
 
-The framework includes **1575+ tests** across all crates:
+The framework includes **1,988 tests** across all crates:
 
 ```bash
 cargo test --workspace
@@ -783,6 +783,7 @@ cargo test --workspace
 | axonml-jit | 27 |
 | axonml-profile | 27 |
 | axonml-llm | 73 |
+| axonml-server | 120 |
 | axonml-cli | 74 (unit) + 37 (integration) |
 | axonml-tui | 14 |
 | axonml (umbrella) | 25 (unit + integration) |

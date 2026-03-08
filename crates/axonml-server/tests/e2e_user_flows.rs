@@ -9,11 +9,16 @@ use common::*;
 use serde_json::Value;
 use std::time::Duration;
 
-/// Skip test if server not running
+/// Skip test if server not running or DB not initialized
 macro_rules! require_server {
     () => {
         if !is_server_running().await {
-            eprintln!("Skipping: server not running at {}", TEST_API_URL);
+            eprintln!("SKIP: server not running at {}", TEST_API_URL);
+            return;
+        }
+        let _c = test_client();
+        if login_as_admin(&_c).await.is_err() {
+            eprintln!("SKIP: admin login failed (run AxonML_DB_Init.sh)");
             return;
         }
     };

@@ -24,6 +24,7 @@
 - **Learning Rate Schedulers** - Comprehensive scheduling including StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, OneCycleLR, WarmupLR, and ReduceLROnPlateau
 - **Builder Pattern** - Fluent API for configuring optimizer hyperparameters
 - **Unified Interface** - Common `Optimizer` trait for interoperability
+- **Fused Optimizer Loops** - Adam, SGD, and RMSprop use fused update loops that apply momentum, weight decay, and parameter updates in a single pass over each tensor, reducing memory traffic
 
 ## Modules
 

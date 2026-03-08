@@ -31,6 +31,8 @@
 
 - **Gradient Checking** - Built-in numerical gradient verification using finite differences for debugging.
 
+- **BLAS-Accelerated Conv Backward** - Convolution backward pass uses im2col + GEMM for weight and input gradients, replacing naive nested loops with BLAS-accelerated matrix multiplication.
+
 ## Modules
 
 | Module | Description |

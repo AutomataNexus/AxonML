@@ -156,3 +156,22 @@ pub async fn is_server_running() -> bool {
         .map(|r| r.status().is_success())
         .unwrap_or(false)
 }
+
+/// Macro to skip integration tests when the server is not running
+/// or the test admin user is not configured.
+/// Place at the top of any test that requires a live server.
+#[macro_export]
+macro_rules! require_server {
+    () => {
+        if !common::is_server_running().await {
+            eprintln!("SKIP: axonml-server not running on {}", common::TEST_API_URL);
+            return;
+        }
+        // Also verify admin login works (DB must be initialized)
+        let _check_client = common::test_client();
+        if common::login_as_admin(&_check_client).await.is_err() {
+            eprintln!("SKIP: admin login failed (run AxonML_DB_Init.sh to set up test user)");
+            return;
+        }
+    };
+}

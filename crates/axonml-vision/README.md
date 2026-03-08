@@ -19,7 +19,7 @@
 
 - **Image Transforms** - Comprehensive augmentation including `Resize`, `CenterCrop`, `RandomHorizontalFlip`, `RandomVerticalFlip`, `RandomRotation`, `ColorJitter`, `Grayscale`, `ImageNormalize`, and `Pad`
 - **Vision Datasets** - Loaders for MNIST, Fashion-MNIST, CIFAR-10, CIFAR-100, and synthetic variants for testing
-- **Neural Network Models** - Pre-defined architectures including LeNet, SimpleCNN, MLP, ResNet (18/34), VGG (11/13/16/19), and Vision Transformer (ViT)
+- **Neural Network Models** - Pre-defined architectures including LeNet, SimpleCNN, MLP, ResNet (18/34), VGG (11/13/16/19), Vision Transformer (ViT), and BlazeFace with multi-resolution anchor support (128x128, 256x256, 320x320)
 - **Model Hub** - Download, cache, and load pretrained weights with checksum verification
 - **Bilinear Interpolation** - High-quality image resizing for 2D, 3D, and 4D tensors
 - **ImageNet Normalization** - Built-in presets for ImageNet, MNIST, and CIFAR normalization

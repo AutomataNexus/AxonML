@@ -306,11 +306,9 @@ impl CausalSelfAttention {
         let mut mask_data = vec![0.0f32; seq_len * seq_len];
 
         for i in 0..seq_len {
-            for j in 0..seq_len {
-                if j > i {
-                    // Can't attend to future positions
-                    mask_data[i * seq_len + j] = f32::NEG_INFINITY;
-                }
+            for j in (i + 1)..seq_len {
+                // Only fill upper triangle (future positions)
+                mask_data[i * seq_len + j] = f32::NEG_INFINITY;
             }
         }
 

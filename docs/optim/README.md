@@ -331,5 +331,5 @@ println!("Suggested LR: {:?}", monitor.suggest_lr());
 - [Autograd](../autograd/README.md) - Gradient computation
 - [Data](../data/README.md) - Data loading for training
 
-@version 0.4.0
+@version 0.4.1
 @author AutomataNexus Development Team

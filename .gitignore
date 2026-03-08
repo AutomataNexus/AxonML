@@ -80,12 +80,21 @@ data/
 *.parquet
 *.arrow
 
-# Model checkpoints
+# Model checkpoints and trained weights
 checkpoints/
 *.pt
 *.pth
 *.onnx
 *.safetensors
+*.axonml
+/models/
+
+# Dataset archives
+*.zip
+
+# Internal training scripts and benchmarks
+train_*.rs
+release-artifacts/coa/
 
 # Jupyter notebooks checkpoints
 .ipynb_checkpoints/

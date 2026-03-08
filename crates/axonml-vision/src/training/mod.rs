@@ -6,12 +6,25 @@
 //! @version 0.1.0
 
 pub mod assign;
+pub mod augment;
 pub mod benchmarks;
+pub mod coco_bench;
 pub mod convergence;
+pub mod ema;
+pub mod gpu_bench;
+pub mod helios_trainer;
 pub mod integration;
 pub mod metrics;
+pub mod train_models;
 
 pub use assign::{assign_fcos_targets, assign_phantom_targets, fcos_targets_to_tensors, FcosTarget};
+pub use augment::{
+    DetAugPipeline, DetRandomAffine, DetRandomHFlip, DetSample, HSVJitter, LetterBox, MixUp,
+    Mosaic,
+};
+pub use coco_bench::evaluate_helios_coco;
+pub use ema::ModelEMA;
+pub use helios_trainer::{HeliosTrainConfig, HeliosTrainer};
 pub use metrics::{compute_ap, compute_coco_map, compute_map, DetectionResult, GroundTruth};
 
 use axonml_autograd::Variable;
