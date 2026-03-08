@@ -1,22 +1,18 @@
 //! Backends - Device-Specific Implementations
 //!
-//! This module contains backend implementations for different compute devices.
-//! Each backend provides device-specific memory operations and kernel execution.
+//! # File
+//! `crates/axonml-core/src/backends/mod.rs`
 //!
-//! # Available Backends
-//! - `cpu` - CPU backend (always available)
-//! - `cuda` - NVIDIA CUDA backend (requires `cuda` feature)
-//! - `vulkan` - Vulkan backend (requires `vulkan` feature)
-//! - `metal` - Apple Metal backend (requires `metal` feature)
-//! - `wgpu` - WebGPU backend (requires `wgpu` feature)
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Backend Trait
+//! # Updated
+//! March 8, 2026
 //!
-//! All backends implement the `Backend` trait which provides a common interface
-//! for tensor operations. This enables device-agnostic code.
-//!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::device::DeviceCapabilities;
 

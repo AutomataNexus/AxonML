@@ -1,9 +1,18 @@
 //! Target Assignment — FCOS-style Anchor-Free Target Generation
 //!
-//! Assigns ground truth targets to spatial locations on feature maps
-//! for both Nexus (multi-scale FCOS) and Phantom (single-scale face).
+//! # File
+//! `crates/axonml-vision/src/training/assign.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_tensor::Tensor;
 

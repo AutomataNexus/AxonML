@@ -1,30 +1,18 @@
 //! Device Abstraction - Hardware Backend Management
 //!
-//! Provides a unified interface for managing compute devices including CPU,
-//! CUDA GPUs, Vulkan, Metal, and WebGPU backends. Tensors can be moved between
-//! devices transparently.
+//! # File
+//! `crates/axonml-core/src/device.rs`
 //!
-//! # Key Features
-//! - Unified device abstraction across backends
-//! - Device availability checking
-//! - Device capability queries
-//! - Seamless tensor transfer between devices
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust
-//! use axonml_core::Device;
+//! # Updated
+//! March 8, 2026
 //!
-//! let cpu = Device::Cpu;
-//! assert!(cpu.is_available());
-//! assert!(cpu.is_cpu());
-//!
-//! // Use default device (CPU)
-//! let device = Device::default();
-//! assert_eq!(device, Device::Cpu);
-//! ```
-//!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use core::fmt;
 use sysinfo::System;

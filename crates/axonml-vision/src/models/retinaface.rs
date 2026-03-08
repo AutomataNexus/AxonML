@@ -1,15 +1,18 @@
 //! RetinaFace - Single-Stage Face Detection
 //!
-//! Server-grade face detection with bounding boxes and 5-point landmarks.
+//! # File
+//! `crates/axonml-vision/src/models/retinaface.rs`
 //!
-//! # Architecture
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ResNet backbone + FPN + 3 task-specific heads (classification, bbox, landmarks).
+//! # Updated
+//! March 8, 2026
 //!
-//! # Reference
-//!
-//! "RetinaFace: Single-Shot Multi-Level Face Localisation in the Wild"
-//! (Deng et al., 2020) <https://arxiv.org/abs/1905.00641>
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter, ReLU};

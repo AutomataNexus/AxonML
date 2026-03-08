@@ -1,17 +1,18 @@
 //! Shape and Strides - Tensor Dimension Management
 //!
-//! Provides types and functions for managing tensor shapes, strides, and
-//! broadcasting rules. Shapes define the dimensions of a tensor, while
-//! strides define how to traverse the underlying storage.
+//! # File
+//! `crates/axonml-tensor/src/shape.rs`
 //!
-//! # Key Features
-//! - Efficient shape representation with small-vector optimization
-//! - Stride computation for contiguous and transposed layouts
-//! - Broadcasting support following `NumPy` rules
-//! - Shape validation and manipulation
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use smallvec::SmallVec;
 

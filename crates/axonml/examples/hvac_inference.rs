@@ -1,8 +1,18 @@
 //! HVAC Multi-Horizon Predictor Inference Example
 //!
-//! Runs inference on the HVAC failure prediction model.
+//! # File
+//! `crates/axonml/examples/hvac_inference.rs`
 //!
-//! Usage: cargo run --example hvac_inference
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml::onnx::import_onnx;
 use axonml::tensor::Tensor;

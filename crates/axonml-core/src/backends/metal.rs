@@ -1,20 +1,18 @@
 //! Metal Backend - Apple GPU Operations
 //!
-//! Provides the Metal implementation for tensor operations on Apple GPUs.
-//! This backend requires the `metal` feature and macOS/iOS.
+//! # File
+//! `crates/axonml-core/src/backends/metal.rs`
 //!
-//! # Key Features
-//! - Native Apple Silicon support (M1, M2, M3)
-//! - MPS (Metal Performance Shaders) integration
-//! - Unified memory architecture support
-//! - Async execution with command buffers
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Requirements
-//! - macOS 10.13+ or iOS 11+
-//! - Apple GPU (Intel, AMD, or Apple Silicon)
+//! # Updated
+//! March 8, 2026
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::Backend;
 use crate::device::DeviceCapabilities;

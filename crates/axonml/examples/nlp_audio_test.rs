@@ -1,6 +1,18 @@
 //! NLP and Audio Test Example
 //!
-//! Tests text tokenization, vocabulary, and audio transforms.
+//! # File
+//! `crates/axonml/examples/nlp_audio_test.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml::prelude::*;
 

@@ -1,20 +1,18 @@
 //! NanoDet — Lightweight Anchor-Free Object Detection for Edge
 //!
-//! Ultra-efficient object detection with <1M parameters, designed for
-//! real-time inference on mobile/edge devices.
+//! # File
+//! `crates/axonml-vision/src/models/nanodet.rs`
 //!
-//! # Architecture
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ```text
-//! Image -> ShuffleNet backbone -> Ghost PAN neck -> Detection head
-//!                                                    ├── class scores
-//!                                                    └── bbox regression
-//! ```
+//! # Updated
+//! March 8, 2026
 //!
-//! # Reference
-//!
-//! "NanoDet-Plus: Super fast and high accuracy lightweight anchor-free
-//! object detection model" (RangiLyu, 2021)
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::any::Any;
 

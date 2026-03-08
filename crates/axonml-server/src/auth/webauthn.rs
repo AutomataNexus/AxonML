@@ -1,7 +1,18 @@
 //! WebAuthn authentication for AxonML
 //!
-//! Provides WebAuthn (FIDO2) registration and authentication.
-//! This is a simplified implementation without the full webauthn-rs dependency.
+//! # File
+//! `crates/axonml-server/src/auth/webauthn.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::AuthError;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as BASE64, Engine};

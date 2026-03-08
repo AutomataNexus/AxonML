@@ -1,9 +1,18 @@
 //! Training Infrastructure — Detection Training Loops
 //!
-//! Provides training loops for Nexus (COCO) and Phantom (WIDER FACE) detectors,
-//! plus target assignment and evaluation metrics.
+//! # File
+//! `crates/axonml-vision/src/training/mod.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod assign;
 pub mod augment;

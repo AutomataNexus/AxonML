@@ -1,18 +1,18 @@
 //! CUDA Backend - NVIDIA GPU Operations
 //!
-//! Provides the CUDA implementation for tensor operations on NVIDIA GPUs.
-//! This backend requires the `cuda` feature and NVIDIA CUDA toolkit.
+//! # File
+//! `crates/axonml-core/src/backends/cuda.rs`
 //!
-//! # Key Features
-//! - cuBLAS integration for linear algebra
-//! - Multi-GPU support
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Requirements
-//! - NVIDIA GPU with compute capability 3.5+
-//! - CUDA Toolkit 11.0+
+//! # Updated
+//! March 8, 2026
 //!
-//! @version 0.2.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #[cfg(feature = "cuda")]
 use cudarc::cublas::{sys::cublasOperation_t, CudaBlas, Gemm, GemmConfig};

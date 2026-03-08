@@ -1,9 +1,18 @@
 //! Detection Losses — Focal Loss, GIoU Loss, Uncertainty NLL Loss
 //!
-//! Differentiable loss functions for training object detection models.
-//! All losses produce graph-tracked Variables for gradient computation.
+//! # File
+//! `crates/axonml-vision/src/losses.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;

@@ -1,9 +1,18 @@
 //! New - Create New Axonml Project
 //!
-//! Creates a new Axonml project with the standard directory structure.
+//! # File
+//! `crates/axonml-cli/src/commands/new.rs`
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::fs;
 use std::path::PathBuf;

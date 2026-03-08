@@ -1,15 +1,18 @@
 //! Vision Operations - Detection and Spatial Primitives
 //!
-//! Provides core operations for object detection, spatial transformations,
-//! and region-of-interest processing.
+//! # File
+//! `crates/axonml-vision/src/ops.rs`
 //!
-//! # Operations
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **NMS**: Non-Maximum Suppression for filtering overlapping detections
-//! - **IoU**: Intersection over Union for box similarity
-//! - **Anchors**: Prior box generation for anchor-based detectors
-//! - **Interpolate**: Differentiable bilinear/nearest upsampling
-//! - **RoIAlign**: Region of Interest pooling with bilinear sampling
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::any::Any;
 

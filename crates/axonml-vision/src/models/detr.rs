@@ -1,17 +1,18 @@
 //! DETR - DEtection TRansformer
 //!
-//! End-to-end object detection with Transformers.
-//! No anchors, no NMS — uses set-based Hungarian matching.
+//! # File
+//! `crates/axonml-vision/src/models/detr.rs`
 //!
-//! # Architecture
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ResNet backbone -> flatten + positional encoding -> Transformer encoder-decoder
-//! -> FFN heads for class and bbox prediction on object queries.
+//! # Updated
+//! March 8, 2026
 //!
-//! # Reference
-//!
-//! "End-to-End Object Detection with Transformers" (Carion et al., 2020)
-//! <https://arxiv.org/abs/2005.12872>
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{

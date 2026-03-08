@@ -1,40 +1,18 @@
 //! Axonml CLI - Command Line Interface for Axonml ML Framework
 //!
-//! The main entry point for the Axonml command-line tool.
+//! # File
+//! `crates/axonml-cli/src/main.rs`
 //!
-//! # Commands
-//! - `axonml new` - Create a new Axonml project
-//! - `axonml init` - Initialize Axonml in an existing directory
-//! - `axonml train` - Train a model from configuration
-//! - `axonml eval` - Evaluate model performance
-//! - `axonml predict` - Make predictions with a trained model
-//! - `axonml convert` - Convert models between formats
-//! - `axonml export` - Export models for deployment
-//! - `axonml report` - Generate comprehensive evaluation reports
-//! - `axonml serve` - Start an inference server
-//! - `axonml inspect` - Inspect model architecture and parameters
-//! - `axonml wandb` - Configure Weights & Biases integration
-//! - `axonml upload` - Upload model files
-//! - `axonml data` - Analyze and manage datasets
-//! - `axonml scaffold` - Generate Rust training projects
-//! - `axonml zip` - Create model/dataset bundles
-//! - `axonml rename` - Rename models and datasets
-//! - `axonml quant` - Quantize models (Q4, Q8, F16, etc.)
-//! - `axonml load` - Load models and datasets into workspace
-//! - `axonml analyze` - Comprehensive analysis and reporting
-//! - `axonml bench` - Benchmark models and hardware
-//! - `axonml gpu` - GPU detection and management
-//! - `axonml tui` - Launch the terminal user interface
-//! - `axonml kaggle` - Kaggle dataset integration
-//! - `axonml hub` - Pretrained model hub
-//! - `axonml dataset` - Dataset management (NexusConnectBridge)
-//! - `axonml start` - Start dashboard and API server
-//! - `axonml stop` - Stop running services
-//! - `axonml status` - Check service status
-//! - `axonml logs` - View service logs
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

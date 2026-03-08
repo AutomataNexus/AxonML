@@ -1,6 +1,18 @@
 //! Graph Optimization
 //!
-//! Provides optimization passes for computation graphs.
+//! # File
+//! `crates/axonml-jit/src/optimize.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::ir::{Graph, NodeId, Op};
 use rustc_hash::{FxHashMap, FxHashSet};

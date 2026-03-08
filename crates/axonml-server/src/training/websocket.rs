@@ -1,6 +1,18 @@
 //! WebSocket metrics streaming for AxonML
 //!
-//! Provides real-time training metrics via WebSocket connections.
+//! # File
+//! `crates/axonml-server/src/training/websocket.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::db::runs::TrainingMetrics;
 use axum::extract::ws::{Message, WebSocket};

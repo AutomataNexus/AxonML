@@ -1,12 +1,18 @@
 //! Feature Pyramid Network (FPN)
 //!
-//! Top-down architecture with lateral connections for building rich
-//! multi-scale feature pyramids from single-scale backbone features.
+//! # File
+//! `crates/axonml-vision/src/models/fpn.rs`
 //!
-//! # Reference
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! "Feature Pyramid Networks for Object Detection" (Lin et al., 2017)
-//! <https://arxiv.org/abs/1612.03144>
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{Conv2d, Module, Parameter};

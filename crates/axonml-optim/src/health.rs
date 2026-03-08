@@ -1,36 +1,18 @@
 //! Training Health Monitor - Real-time Training Diagnostics
 //!
-//! Provides automated detection of pathological training behavior including
-//! gradient explosion/vanishing, loss divergence, dead neurons, and convergence
-//! analysis. Attaches to any optimizer for self-monitoring training loops.
+//! # File
+//! `crates/axonml-optim/src/health.rs`
 //!
-//! This is a genuinely novel feature -- PyTorch has no built-in training
-//! diagnostics. AxonML optimizers can self-monitor and detect problems
-//! before they waste hours of compute.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
+//! # Updated
+//! March 8, 2026
 //!
-//! ```ignore
-//! use axonml_optim::health::{TrainingMonitor, MonitorConfig};
-//!
-//! let mut monitor = TrainingMonitor::new();
-//!
-//! for step in 0..1000 {
-//!     // ... training step ...
-//!     let grad_norms = vec![("layer1.weight", 0.5), ("layer2.weight", 0.3)];
-//!     monitor.record_step(loss_val, &grad_norms, lr);
-//!
-//!     if !monitor.is_healthy() {
-//!         eprintln!("{}", monitor.summary());
-//!         if let Some(suggested) = monitor.suggest_lr() {
-//!             optimizer.set_lr(suggested);
-//!         }
-//!     }
-//! }
-//! ```
-//!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 use std::fmt;

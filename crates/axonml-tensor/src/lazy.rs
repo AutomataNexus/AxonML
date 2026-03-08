@@ -1,23 +1,18 @@
 //! Lazy Tensor - Deferred Computation with Graph Optimization
 //!
-//! This module implements lazy/deferred tensor computation. Operations are recorded
-//! without execution and can be fused/optimized before materialization. While PyTorch
-//! relies on external JIT (torch.compile), AxonML builds lazy evaluation directly
-//! into the tensor type.
+//! # File
+//! `crates/axonml-tensor/src/lazy.rs`
 //!
-//! # Example
-//! ```rust
-//! use axonml_tensor::Tensor;
-//! use axonml_tensor::lazy::LazyTensor;
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! let x = Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap();
-//! let lazy = LazyTensor::from_tensor(x);
-//! let result = lazy.relu().add_scalar(1.0).mul_scalar(2.0);
-//! let optimized = result.optimize();
-//! let concrete = optimized.materialize();
-//! ```
+//! # Updated
+//! March 8, 2026
 //!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::tensor::Tensor;
 

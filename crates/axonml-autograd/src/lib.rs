@@ -1,72 +1,18 @@
 //! Axonml Autograd - Automatic Differentiation Engine
 //!
-//! Provides reverse-mode automatic differentiation for computing gradients
-//! of tensor operations. This is the foundation for training neural networks
-//! using gradient descent optimization.
+//! # File
+//! `crates/axonml-autograd/src/lib.rs`
 //!
-//! # Key Features
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **Dynamic Computational Graph** - Build graph during forward pass
-//! - **Reverse-mode Autodiff** - Efficient backpropagation
-//! - **Gradient Accumulation** - Support for gradient accumulation across batches
-//! - **No-grad Context** - Disable gradient tracking for inference
-//! - **Automatic Mixed Precision (AMP)** - F16 autocast for faster training
-//! - **Gradient Checkpointing** - Trade compute for memory on large models
+//! # Updated
+//! March 8, 2026
 //!
-//! # Basic Example
-//!
-//! ```rust,ignore
-//! use axonml_autograd::{Variable, no_grad};
-//!
-//! // Create variables with gradient tracking
-//! let x = Variable::new(tensor, true);  // requires_grad = true
-//! let w = Variable::new(weights, true);
-//!
-//! // Forward pass builds computational graph
-//! let y = x.matmul(&w);
-//! let loss = y.mse_loss(&target);
-//!
-//! // Backward pass computes gradients
-//! loss.backward();
-//!
-//! // Access gradients
-//! println!("dL/dw = {:?}", w.grad());
-//! ```
-//!
-//! # Mixed Precision Training
-//!
-//! ```rust,ignore
-//! use axonml_autograd::amp::{autocast, AutocastGuard};
-//! use axonml_core::DType;
-//!
-//! // Enable F16 autocast for forward pass
-//! let output = autocast(DType::F16, || {
-//!     model.forward(&input)
-//! });
-//!
-//! // Or use RAII guard
-//! {
-//!     let _guard = AutocastGuard::new(DType::F16);
-//!     let output = model.forward(&input);
-//! }
-//! ```
-//!
-//! # Gradient Checkpointing
-//!
-//! ```rust,ignore
-//! use axonml_autograd::checkpoint::{checkpoint, checkpoint_sequential};
-//!
-//! // Checkpoint a single function - recomputes during backward
-//! let output = checkpoint(|x| heavy_computation(x), &input);
-//!
-//! // Checkpoint sequential layers in segments
-//! let output = checkpoint_sequential(24, 4, &input, |layer_idx, x| {
-//!     layers[layer_idx].forward(x)
-//! });
-//! ```
-//!
-//! @version 0.2.6
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

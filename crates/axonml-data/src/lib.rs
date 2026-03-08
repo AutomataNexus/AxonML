@@ -1,45 +1,18 @@
 //! axonml-data - Data Loading Utilities
 //!
-//! Provides data loading infrastructure for training neural networks:
-//! - Dataset trait for defining data sources
-//! - `DataLoader` for batched iteration with parallel loading
-//! - Samplers for controlling data access patterns
-//! - Transforms for data augmentation
+//! # File
+//! `crates/axonml-data/src/lib.rs`
 //!
-//! # Example
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ```ignore
-//! use axonml_data::prelude::*;
+//! # Updated
+//! March 8, 2026
 //!
-//! // Define a simple dataset
-//! struct MyDataset {
-//!     data: Vec<(Tensor<f32>, Tensor<f32>)>,
-//! }
-//!
-//! impl Dataset for MyDataset {
-//!     type Item = (Tensor<f32>, Tensor<f32>);
-//!
-//!     fn len(&self) -> usize {
-//!         self.data.len()
-//!     }
-//!
-//!     fn get(&self, index: usize) -> Option<Self::Item> {
-//!         self.data.get(index).cloned()
-//!     }
-//! }
-//!
-//! // Create a DataLoader
-//! let loader = DataLoader::new(dataset, 32)
-//!     .shuffle(true)
-//!     .num_workers(4);
-//!
-//! for batch in loader.iter() {
-//!     // Process batch
-//! }
-//! ```
-//!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

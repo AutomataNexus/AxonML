@@ -1,21 +1,18 @@
 //! VGG - Very Deep Convolutional Networks
 //!
-//! Implementation of VGG architectures for image classification.
+//! # File
+//! `crates/axonml-vision/src/models/vgg.rs`
 //!
-//! # Supported Variants
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - VGG11: 11 layers (~133M parameters)
-//! - VGG13: 13 layers (~133M parameters)
-//! - VGG16: 16 layers (~138M parameters)
-//! - VGG19: 19 layers (~144M parameters)
+//! # Updated
+//! March 8, 2026
 //!
-//! All variants available with or without batch normalization.
-//!
-//! # Reference
-//!
-//! "Very Deep Convolutional Networks for Large-Scale Image Recognition"
-//! (Simonyan & Zisserman, 2014)
-//! <https://arxiv.org/abs/1409.1556>
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, Dropout, Linear, MaxPool2d, Module, Parameter, ReLU};

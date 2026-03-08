@@ -1,11 +1,18 @@
 //! Computational Graph - Dynamic Graph Construction
 //!
-//! Manages the computational graph that tracks operations for automatic
-//! differentiation. The graph is built dynamically during the forward pass
-//! and traversed in reverse during backward pass.
+//! # File
+//! `crates/axonml-autograd/src/graph.rs`
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

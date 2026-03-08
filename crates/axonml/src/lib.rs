@@ -1,114 +1,18 @@
-//! # Axonml - A Complete ML/AI Framework in Pure Rust
+//! axonml library root
 //!
-//! Axonml is a comprehensive machine learning framework that provides ~92-95% PyTorch-equivalent
-//! functionality in pure Rust. It includes 1076+ passing tests and production-ready features:
+//! # File
+//! `crates/axonml/src/lib.rs`
 //!
-//! ## Core Features
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **Tensors**: N-dimensional arrays with broadcasting, views, BLAS operations, sparse tensors
-//! - **70+ Tensor Operations**: arithmetic, reduction, sorting (topk, sort, argsort), indexing (gather, scatter, nonzero, unique)
-//! - **Autograd**: Automatic differentiation with computational graph, AMP (autocast), gradient checkpointing
-//! - **Neural Networks**: Linear, Conv1d/2d, BatchNorm, LayerNorm, GroupNorm, InstanceNorm, Attention, RNN/LSTM/GRU
-//! - **Optimizers**: SGD, Adam, `AdamW`, `RMSprop`, LAMB with LR schedulers and GradScaler
-//! - **Data Loading**: Dataset trait, `DataLoader`, samplers, transforms, parallel loading
-//! - **Vision**: Image transforms, MNIST/CIFAR datasets, ResNet/VGG/ViT architectures, pretrained hub
-//! - **Text**: Tokenizers (BPE, `WordPiece`), vocabularies, text datasets
-//! - **Audio**: Spectrograms, MFCC, audio transforms, audio datasets
-//! - **Distributed**: DDP, FSDP (ZeRO-2/3), Pipeline Parallelism, Tensor Parallelism
-//! - **LLM**: BERT, GPT-2 architectures with pretrained model hub (LLaMA, Mistral, Phi, Qwen)
-//! - **GPU Backends**: CUDA, Vulkan, Metal, WebGPU with comprehensive test suite
+//! # Updated
+//! March 8, 2026
 //!
-//! ## Model Hub & Benchmarking
-//!
-//! - Unified model registry across vision and LLM domains
-//! - Model search, filtering, and recommendations
-//! - Throughput testing and memory profiling utilities
-//!
-//! # Quick Start
-//!
-//! ```ignore
-//! use axonml::prelude::*;
-//!
-//! // Create a tensor
-//! let x = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap();
-//!
-//! // Create a variable for autograd
-//! let var = Variable::new(x, true);
-//!
-//! // Build a simple neural network
-//! let model = Sequential::new()
-//!     .add(Linear::new(784, 128))
-//!     .add(ReLU)
-//!     .add(Linear::new(128, 10));
-//!
-//! // Create an optimizer
-//! let optimizer = Adam::new(model.parameters(), 0.001);
-//!
-//! // Load a dataset
-//! let dataset = SyntheticMNIST::new(1000);
-//! let loader = DataLoader::new(dataset, 32);
-//!
-//! // Training loop
-//! for batch in loader.iter() {
-//!     // Forward pass
-//!     let output = model.forward(&batch.data);
-//!
-//!     // Compute loss
-//!     let loss = cross_entropy_loss(&output, &batch.labels);
-//!
-//!     // Backward pass
-//!     loss.backward();
-//!
-//!     // Update weights
-//!     optimizer.step();
-//!     optimizer.zero_grad();
-//! }
-//! ```
-//!
-//! # Mixed Precision Training
-//!
-//! ```ignore
-//! use axonml_autograd::amp::autocast;
-//! use axonml_optim::GradScaler;
-//!
-//! let mut scaler = GradScaler::new();
-//!
-//! // Forward with autocast
-//! let loss = autocast(DType::F16, || {
-//!     model.forward(&input)
-//! });
-//!
-//! // Scale loss for backward
-//! let scaled_loss = scaler.scale_loss(loss);
-//! scaled_loss.backward();
-//!
-//! // Unscale and step
-//! scaler.unscale_grads(&mut gradients);
-//! optimizer.step();
-//! scaler.update();
-//! ```
-//!
-//! # Feature Flags
-//!
-//! - `full` (default): All features enabled
-//! - `core`: Core tensor and autograd functionality
-//! - `nn`: Neural network layers and optimizers
-//! - `data`: Data loading utilities
-//! - `vision`: Image processing and vision datasets
-//! - `text`: Text processing and NLP utilities
-//! - `audio`: Audio processing utilities
-//! - `distributed`: Distributed training utilities (DDP, FSDP, Pipeline)
-//! - `profile`: Performance profiling and bottleneck detection
-//! - `llm`: LLM architectures (BERT, GPT-2) with pretrained hub
-//! - `jit`: JIT compilation and tracing
-//! - `onnx`: ONNX model import and export
-//! - `cuda`: NVIDIA CUDA GPU backend
-//! - `vulkan`: Vulkan GPU backend
-//! - `metal`: Apple Metal GPU backend
-//! - `wgpu`: WebGPU backend
-//!
-//! @version 0.2.6
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

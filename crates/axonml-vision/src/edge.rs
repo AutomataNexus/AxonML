@@ -1,14 +1,18 @@
 //! Edge Deployment Pipeline
 //!
-//! Utilities for preparing vision models for edge deployment on resource-
-//! constrained devices (ARM, Raspberry Pi, mobile). Provides model profiling,
-//! quantization-ready export, and deployment configuration.
+//! # File
+//! `crates/axonml-vision/src/edge.rs`
 //!
-//! # Targets
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - `armv7-unknown-linux-musleabihf` (Raspberry Pi, static musl)
-//! - `aarch64-unknown-linux-gnu` (ARM64 Linux)
-//! - `wasm32-unknown-unknown` (WebAssembly)
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_nn::Module;
 

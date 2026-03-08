@@ -1,15 +1,18 @@
 //! Allocator - Memory Allocation Traits and Implementations
 //!
-//! Provides the allocator abstraction for device-specific memory management.
-//! Each backend implements the Allocator trait for its memory operations.
+//! # File
+//! `crates/axonml-core/src/allocator.rs`
 //!
-//! # Key Features
-//! - Unified allocator trait for all devices
-//! - Pluggable allocator implementations
-//! - Memory pool support for performance
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::device::Device;
 use crate::dtype::Scalar;

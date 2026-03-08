@@ -1,29 +1,18 @@
 //! LAMB Optimizer - Layer-wise Adaptive Moments
 //!
-//! Implements the LAMB (Layer-wise Adaptive Moments optimizer for Batch training)
-//! algorithm for large batch training. LAMB enables training with very large
-//! batch sizes while maintaining accuracy.
+//! # File
+//! `crates/axonml-optim/src/lamb.rs`
 //!
-//! Reference: "Large Batch Optimization for Deep Learning: Training BERT in 76 minutes"
-//! https://arxiv.org/abs/1904.00962
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_optim::LAMB;
+//! # Updated
+//! March 8, 2026
 //!
-//! let mut optimizer = LAMB::new(model.parameters(), 0.001)
-//!     .weight_decay(0.01)
-//!     .betas(0.9, 0.999);
-//!
-//! for epoch in 0..100 {
-//!     optimizer.zero_grad();
-//!     let loss = model.forward(&input).mse_loss(&target);
-//!     loss.backward();
-//!     optimizer.step();
-//! }
-//! ```
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_nn::Parameter;
 use axonml_tensor::Tensor;

@@ -1,26 +1,18 @@
 //! torch.compile Equivalent - High-Level Compilation API
 //!
-//! Provides a PyTorch 2.0 torch.compile-like API for automatic optimization
-//! of models and functions through tracing and compilation.
+//! # File
+//! `crates/axonml-jit/src/compile.rs`
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_jit::compile::{compile_fn, CompileConfig, Mode};
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! // Compile with default settings
-//! let compiled = compile_fn(|t| {
-//!     let x = t.input("x", &[2, 3]);
-//!     let y = x.relu();
-//!     t.output("y", y)
-//! }).unwrap();
+//! # Updated
+//! March 8, 2026
 //!
-//! // Or with custom configuration
-//! let compiled = compile_fn_with_config(f, CompileConfig::new()
-//!     .mode(Mode::MaxAutotune)
-//!     .fullgraph(true)).unwrap();
-//! ```
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::codegen::{CompiledFunction, JitCompiler};
 use crate::ir::{Graph, Node, Op};

@@ -1,29 +1,18 @@
 //! Axonml Serialize - Model Serialization for Axonml ML Framework
 //!
-//! This crate provides functionality for saving and loading trained models,
-//! including state dictionaries, model checkpoints, and format conversion.
+//! # File
+//! `crates/axonml-serialize/src/lib.rs`
 //!
-//! # Supported Formats
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **Axonml Native** (.axonml) - Efficient binary format
-//! - **JSON** (.json) - Human-readable format for debugging
-//! - **`SafeTensors`** (.safetensors) - Safe, fast format (optional feature)
+//! # Updated
+//! March 8, 2026
 //!
-//! # Example
-//!
-//! ```ignore
-//! use axonml_serialize::{save_model, load_model, StateDict};
-//!
-//! // Save model
-//! save_model(&model, "model.axonml")?;
-//!
-//! // Load model
-//! let state_dict = load_state_dict("model.axonml")?;
-//! model.load_state_dict(&state_dict)?;
-//! ```
-//!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

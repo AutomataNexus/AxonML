@@ -1,6 +1,18 @@
 //! Training runs database operations for AxonML
 //!
-//! Uses Aegis-DB Document Store for run metadata and Time Series for metrics.
+//! # File
+//! `crates/axonml-server/src/db/runs.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::{Database, DbError, DocumentQuery, TimeSeriesQuery};
 use chrono::{DateTime, Utc};

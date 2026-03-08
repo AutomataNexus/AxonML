@@ -1,15 +1,18 @@
 //! HuggingFace Tokenizer Support
 //!
-//! Loads and uses tokenizers from HuggingFace tokenizer.json files.
+//! # File
+//! `crates/axonml-llm/src/tokenizer.rs`
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_llm::tokenizer::HFTokenizer;
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! let tokenizer = HFTokenizer::from_pretrained("meta-llama/Llama-2-7b-hf")?;
-//! let tokens = tokenizer.encode("Hello, world!")?;
-//! let text = tokenizer.decode(&tokens)?;
-//! ```
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 use std::fs;

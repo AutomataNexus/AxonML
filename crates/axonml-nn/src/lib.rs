@@ -1,42 +1,18 @@
 //! axonml-nn - Neural Network Module Library
 //!
-//! Provides neural network layers, activation functions, loss functions,
-//! and utilities for building deep learning models in Axonml.
+//! # File
+//! `crates/axonml-nn/src/lib.rs`
 //!
-//! # Key Components
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - **Module trait**: Core interface for all neural network modules
-//! - **Parameter**: Wrapper for learnable parameters
-//! - **Sequential**: Container for chaining modules
-//! - **Layers**: Linear, Conv, RNN, LSTM, Attention, etc.
-//! - **Activations**: ReLU, Sigmoid, Tanh, GELU, etc.
-//! - **Loss Functions**: MSE, CrossEntropy, BCE, etc.
-//! - **Initialization**: Xavier, Kaiming, orthogonal, etc.
-//! - **Functional API**: Stateless operations
+//! # Updated
+//! March 8, 2026
 //!
-//! # Example
-//!
-//! ```ignore
-//! use axonml_nn::prelude::*;
-//!
-//! // Build a simple MLP
-//! let model = Sequential::new()
-//!     .add(Linear::new(784, 256))
-//!     .add(ReLU)
-//!     .add(Linear::new(256, 10));
-//!
-//! // Forward pass
-//! let output = model.forward(&input);
-//!
-//! // Compute loss
-//! let loss = CrossEntropyLoss::new().compute(&output, &target);
-//!
-//! // Backward pass
-//! loss.backward();
-//! ```
-//!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

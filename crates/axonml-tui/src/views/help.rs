@@ -1,10 +1,18 @@
 //! Help View - Keyboard Shortcuts and Commands
 //!
-//! Displays all available keyboard shortcuts and commands organized
-//! by category for easy reference.
+//! # File
+//! `crates/axonml-tui/src/views/help.rs`
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},

@@ -1,6 +1,18 @@
 //! TOTP (Time-based One-Time Password) authentication for AxonML
 //!
-//! Provides TOTP generation, verification, and QR code generation.
+//! # File
+//! `crates/axonml-server/src/auth/totp.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::AuthError;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};

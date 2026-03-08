@@ -1,31 +1,18 @@
 //! Axonml ONNX - ONNX Import/Export for ML Models
 //!
-//! This crate provides support for importing and exporting models in the
-//! ONNX (Open Neural Network Exchange) format, enabling interoperability
-//! with PyTorch, TensorFlow, and other ML frameworks.
+//! # File
+//! `crates/axonml-onnx/src/lib.rs`
 //!
-//! # Features
-//! - Import ONNX models and convert to Axonml modules
-//! - Export Axonml models to ONNX format
-//! - Support for common operators (Conv, MatMul, ReLU, etc.)
-//! - Weight loading from ONNX initializers
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```ignore
-//! use axonml_onnx::{OnnxModel, import_onnx};
+//! # Updated
+//! March 8, 2026
 //!
-//! // Import an ONNX model
-//! let model = import_onnx("model.onnx")?;
-//!
-//! // Run inference
-//! let output = model.forward(&input);
-//!
-//! // Export back to ONNX
-//! model.export_onnx("model_out.onnx")?;
-//! ```
-//!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

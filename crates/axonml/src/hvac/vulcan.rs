@@ -1,11 +1,18 @@
 //! VULCAN — Mechanical Systems Diagnostic Model (~1.1M params)
 //!
-//! Wide & Deep architecture with FFT vibration analysis for
-//! mechanical fault detection, bearing health, and remaining
-//! useful life estimation.
+//! # File
+//! `crates/axonml/src/hvac/vulcan.rs`
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

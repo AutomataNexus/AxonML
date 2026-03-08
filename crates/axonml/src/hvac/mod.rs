@@ -1,28 +1,18 @@
 //! HVAC 8-Model Diagnostic System
 //!
-//! A complete HVAC fault diagnosis pipeline with 8 neural network models
-//! organized in a 4-stage hierarchy:
+//! # File
+//! `crates/axonml/src/hvac/mod.rs`
 //!
-//! **Stage 1 — Specialists** (5 models, run in parallel):
-//! - `Aquilo` — Electrical systems (~608K params)
-//! - `Boreas` — Refrigeration systems (~1.2M params)
-//! - `Naiad` — Water systems (~533K params)
-//! - `Vulcan` — Mechanical systems (~1.1M params)
-//! - `Zephyrus` — Airflow systems (~845K params)
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! **Stage 2 — Aggregator**:
-//! - `Colossus` — Cross-specialist fusion (~1.5M params)
+//! # Updated
+//! March 8, 2026
 //!
-//! **Stage 3 — Safety**:
-//! - `Gaia` — Safety validation with adversarial robustness (~896K params)
-//!
-//! **Stage 4 — Coordinator**:
-//! - `Apollo` — Master diagnosis and action planning (~1.8M params)
-//!
-//! Total: ~8.6M parameters
-//!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod data;
 pub mod aquilo;

@@ -1,19 +1,18 @@
 //! `ResNet` - Deep Residual Networks
 //!
-//! Implementation of `ResNet` architectures for image classification.
+//! # File
+//! `crates/axonml-vision/src/models/resnet.rs`
 //!
-//! # Supported Variants
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! - `ResNet18`: 18 layers, ~11M parameters
-//! - `ResNet34`: 34 layers, ~21M parameters
-//! - `ResNet50`: 50 layers, ~23M parameters
-//! - `ResNet101`: 101 layers, ~42M parameters
-//! - `ResNet152`: 152 layers, ~58M parameters
+//! # Updated
+//! March 8, 2026
 //!
-//! # Reference
-//!
-//! "Deep Residual Learning for Image Recognition" (He et al., 2015)
-//! <https://arxiv.org/abs/1512.03385>
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{

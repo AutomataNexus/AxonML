@@ -1,11 +1,18 @@
 //! V4L2 Backend — Linux Camera Capture via Video4Linux2
 //!
-//! Pure Rust V4L2 camera capture using `libc` ioctls and memory-mapped buffers.
-//! Supports YUYV and MJPEG formats from USB cameras and CSI (Pi) cameras.
+//! # File
+//! `crates/axonml-vision/src/camera/v4l2.rs`
 //!
-//! Only compiled on Linux (`#[cfg(target_os = "linux")]`).
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::{CaptureBackend, CaptureConfig, CaptureError, FrameBuffer, PixelFormat};
 use std::fs;

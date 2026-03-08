@@ -1,15 +1,18 @@
 //! COCO Dataset — Object Detection Benchmark
 //!
-//! Loader for COCO format detection datasets.
+//! # File
+//! `crates/axonml-vision/src/datasets/coco.rs`
 //!
-//! Expected directory structure:
-//! ```text
-//! root/
-//!   train2017/000000000001.jpg
-//!   annotations/instances_train2017.json
-//! ```
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_tensor::Tensor;
 use serde::Deserialize;

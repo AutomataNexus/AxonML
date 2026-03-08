@@ -1,17 +1,20 @@
-#![allow(dead_code)]
 //! COCO Evaluation Benchmarks — Full Detection Model Evaluation Suite
 //!
-//! Comprehensive benchmarks for all AxonML detection models:
-//! - Multi-resolution inference (64 / 128 / 320 / 640)
-//! - 50+ images per evaluation
-//! - Per-IoU AP breakdown (0.50 / 0.75 / 0.50:0.95)
-//! - Detection statistics (count, confidence distribution, box area)
-//! - Warmup + timed inference separation
-//! - Diverse synthetic ground truth (varied box sizes, aspect ratios, classes)
+//! # File
+//! `crates/axonml-vision/src/training/coco_bench.rs`
 //!
-//! Real COCO evaluation: set $COCO_ROOT to COCO val2017 path.
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.3.0
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+#![allow(dead_code)]
 
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;

@@ -1,11 +1,18 @@
 //! Enhanced System Stats Admin Page with Advanced Visualizations
 //!
-//! Features:
-//! - Real-time system metrics
-//! - Radar chart for resource overview
-//! - 3D scatter plot for process correlation
-//! - Stacked waveform charts for time-series data
-//! - GPU monitoring with temperature and power
+//! # File
+//! `crates/axonml-dashboard/src/pages/admin/system.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use leptos::*;
 use wasm_bindgen::prelude::*;

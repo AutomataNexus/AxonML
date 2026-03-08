@@ -1,12 +1,18 @@
 //! Theme - NexusForge Color Theme for Axonml TUI
 //!
-//! Brand colors matching the NexusForge web UI.
-//! - Teal for primary/user elements
-//! - Cream for AI/assistant elements
-//! - Terracotta accents
+//! # File
+//! `crates/axonml-tui/src/theme.rs`
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use ratatui::style::{Color, Modifier, Style};
 

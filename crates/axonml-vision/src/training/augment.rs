@@ -1,10 +1,18 @@
 //! Detection Augmentations — Mosaic, MixUp, HSV Jitter, Random Affine
 //!
-//! YOLO-style data augmentation pipeline for object detection training.
-//! All augmentations operate on (image, boxes, classes) triples and
-//! correctly transform bounding boxes alongside images.
+//! # File
+//! `crates/axonml-vision/src/training/augment.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_tensor::Tensor;
 use rand::Rng;

@@ -1,10 +1,18 @@
 //! ZEPHYRUS — Airflow Systems Diagnostic Model (~845K params)
 //!
-//! Analyzes airflow sensor data using Graph Neural Networks to model
-//! sensor correlations and Conv1d for temporal patterns.
+//! # File
+//! `crates/axonml/src/hvac/zephyrus.rs`
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

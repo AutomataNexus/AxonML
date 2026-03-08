@@ -1,19 +1,18 @@
 //! High-Level Training Utilities
 //!
-//! Provides a `Trainer` class for simplified model training, similar to
-//! PyTorch Lightning or Hugging Face Trainer.
+//! # File
+//! `crates/axonml/src/trainer.rs`
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml::trainer::{Trainer, TrainingConfig};
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! let trainer = Trainer::new(model, optimizer)
-//!     .config(TrainingConfig::new().epochs(10).batch_size(32))
-//!     .callbacks(vec![EarlyStopping::new(5)])
-//!     .fit(&train_dataset, Some(&val_dataset));
-//! ```
+//! # Updated
+//! March 8, 2026
 //!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #[cfg(feature = "core")]
 use axonml_tensor::Tensor;

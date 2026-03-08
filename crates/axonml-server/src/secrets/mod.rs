@@ -1,12 +1,18 @@
 //! Secrets management with HashiCorp Vault integration.
 //!
-//! Supports both Vault (production) and environment variables (development).
+//! # File
+//! `crates/axonml-server/src/secrets/mod.rs`
 //!
-//! # Priority Order
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! 1. **Vault** - If `VAULT_ADDR` environment variable is set
-//! 2. **Environment variables** - `AXONML_*` prefixed variables
-//! 3. **Config file** - Fallback to `~/.axonml/config.toml` values
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod env;
 pub mod vault;

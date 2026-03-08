@@ -1,6 +1,18 @@
 //! Ollama Client for Local LLM Inference
 //!
-//! Provides async client for communicating with Ollama API.
+//! # File
+//! `crates/axonml-server/src/llm/ollama.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

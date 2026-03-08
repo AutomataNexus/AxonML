@@ -1,16 +1,18 @@
 //! Tensor Creation Functions
 //!
-//! Provides convenient functions for creating tensors with various initializations
-//! including zeros, ones, random values, ranges, and more.
+//! # File
+//! `crates/axonml-tensor/src/creation.rs`
 //!
-//! # Key Features
-//! - Factory functions for common tensor initializations
-//! - Random tensor generation with various distributions
-//! - Range and linspace functions
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;

@@ -1,10 +1,18 @@
 //! Pooling Layers - Max and Average Pooling
 //!
-//! Reduces spatial dimensions through pooling operations.
-//! All pooling layers now track the autograd graph for backpropagation.
+//! # File
+//! `crates/axonml-nn/src/layers/pooling.rs`
 //!
-//! @version 0.2.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::functions::{
     AdaptiveAvgPool2dBackward, AvgPool1dBackward, AvgPool2dBackward,

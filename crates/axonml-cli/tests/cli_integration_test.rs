@@ -1,10 +1,18 @@
 //! End-to-end integration tests for the Axonml CLI.
 //!
-//! These tests verify that CLI commands work correctly from a user's perspective.
-//! They simulate real user workflows by invoking the CLI binary.
+//! # File
+//! `crates/axonml-cli/tests/cli_integration_test.rs`
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use assert_cmd::Command;
 use predicates::prelude::*;

@@ -1,23 +1,18 @@
 //! Unified Model Hub - Central Registry for All Pretrained Models
 //!
-//! Provides a unified interface for discovering and loading pretrained models
-//! across all domains (vision, text, audio).
+//! # File
+//! `crates/axonml/src/hub.rs`
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml::hub::{list_all_models, search_models, ModelCategory};
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! // List all available models
-//! let models = list_all_models();
+//! # Updated
+//! March 8, 2026
 //!
-//! // Search for specific models
-//! let bert_models = search_models("bert");
-//!
-//! // Filter by category
-//! let vision_models = models_by_category(ModelCategory::Vision);
-//! ```
-//!
-//! @version 0.1.0
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 // HashMap is used by feature-gated functions
 #[allow(unused_imports)]

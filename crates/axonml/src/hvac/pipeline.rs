@@ -1,13 +1,18 @@
 //! HVAC 4-Stage Inference Pipeline
 //!
-//! Orchestrates the full 8-model diagnostic pipeline:
-//! Stage 1: 5 specialist models (parallel)
-//! Stage 2: Colossus aggregator
-//! Stage 3: Gaia safety validator
-//! Stage 4: Apollo master coordinator
+//! # File
+//! `crates/axonml/src/hvac/pipeline.rs`
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 

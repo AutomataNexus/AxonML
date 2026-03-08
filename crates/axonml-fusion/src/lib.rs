@@ -1,23 +1,18 @@
 //! Axonml Fusion - Kernel Fusion Library
 //!
-//! Provides kernel fusion support for combining multiple operations into
-//! single optimized kernels. Common fusion patterns include:
+//! # File
+//! `crates/axonml-fusion/src/lib.rs`
 //!
-//! - **MatMul + Bias + Activation**: Fused dense layer
-//! - **Conv + BatchNorm + ReLU**: Fused convolution block
-//! - **Elementwise chains**: Multiple elementwise ops in one pass
-//! - **Reduction + Transform**: Softmax, LayerNorm patterns
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```ignore
-//! use axonml_fusion::{FusedOp, fuse_matmul_bias_relu};
+//! # Updated
+//! March 8, 2026
 //!
-//! let fused = fuse_matmul_bias_relu(&weight, &bias);
-//! let output = fused.execute(&input);
-//! ```
-//!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

@@ -1,17 +1,18 @@
 //! HuggingFace Model Loader
 //!
-//! Downloads and loads pretrained weights from HuggingFace Hub into AxonML models.
+//! # File
+//! `crates/axonml-llm/src/hf_loader.rs`
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_llm::hf_loader::HFLoader;
-//! use axonml_llm::{LLaMA, LLaMAConfig};
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! // Load weights from HuggingFace
-//! let loader = HFLoader::new("meta-llama/Llama-2-7b-hf")?;
-//! let mut model = LLaMA::new(&LLaMAConfig::llama2_7b());
-//! loader.load_into_llama(&mut model)?;
-//! ```
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 use std::fs::{self, File};

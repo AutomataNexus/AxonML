@@ -1,78 +1,18 @@
 //! Axonml Distributed - Distributed Training Utilities
 //!
-//! Comprehensive distributed training support for scaling ML workloads across
-//! multiple GPUs and machines. Provides PyTorch-equivalent functionality.
+//! # File
+//! `crates/axonml-distributed/src/lib.rs`
 //!
-//! # Features
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ## Data Parallelism
-//! - **DDP** - `DistributedDataParallel` for gradient synchronization across replicas
-//! - **FSDP** - Fully Sharded Data Parallel with ZeRO-2 and ZeRO-3 optimizations
+//! # Updated
+//! March 8, 2026
 //!
-//! ## Model Parallelism
-//! - **Pipeline Parallelism** - Split model across devices with microbatching (GPipe-style)
-//! - **Tensor Parallelism** - Layer-wise model sharding for large models
-//!
-//! ## Communication
-//! - **Collective Operations**: all-reduce, all-gather, broadcast, reduce-scatter, barrier
-//! - **Point-to-Point**: send, recv for direct tensor communication
-//! - **Process Groups**: Flexible grouping for hierarchical parallelism
-//!
-//! ## Backends
-//! - Mock backend for testing without real hardware
-//! - Extensible Backend trait for NCCL, Gloo, MPI integration
-//!
-//! # DDP Example
-//!
-//! ```ignore
-//! use axonml_distributed::prelude::*;
-//! use axonml_nn::Linear;
-//!
-//! let world = World::mock();
-//! let model = Linear::new(10, 5);
-//! let ddp_model = DistributedDataParallel::new(model, world.default_group().clone());
-//!
-//! // Forward pass
-//! let output = ddp_model.forward(&input);
-//! loss.backward();
-//!
-//! // Gradient sync happens automatically or manually:
-//! ddp_model.sync_gradients();
-//! ```
-//!
-//! # FSDP Example (ZeRO-3)
-//!
-//! ```ignore
-//! use axonml_distributed::{FSDP, FSDPConfig, ShardingStrategy};
-//!
-//! let config = FSDPConfig {
-//!     sharding_strategy: ShardingStrategy::FullShard, // ZeRO-3
-//!     cpu_offload: true,
-//!     ..Default::default()
-//! };
-//!
-//! let fsdp_model = FSDP::new(model, process_group, config);
-//! let output = fsdp_model.forward(&input);
-//! ```
-//!
-//! # Pipeline Parallelism Example
-//!
-//! ```ignore
-//! use axonml_distributed::{PipelineParallel, PipelineConfig, PipelineSchedule};
-//!
-//! let config = PipelineConfig {
-//!     num_stages: 4,
-//!     num_microbatches: 8,
-//!     schedule: PipelineSchedule::GPipe,
-//!     ..Default::default()
-//! };
-//!
-//! let pipeline = PipelineParallel::new(stages, process_group, config);
-//! let output = pipeline.forward(&input);
-//! ```
-//!
-//! @version 0.2.6
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

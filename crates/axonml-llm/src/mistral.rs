@@ -1,17 +1,18 @@
 //! Mistral - Efficient LLM Architecture
 //!
-//! Implementation of the Mistral architecture with sliding window attention,
-//! grouped-query attention (GQA), and RoPE.
+//! # File
+//! `crates/axonml-llm/src/mistral.rs`
 //!
-//! Reference: "Mistral 7B" https://arxiv.org/abs/2310.06825
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust,ignore
-//! use axonml_llm::{Mistral, MistralConfig};
+//! # Updated
+//! March 8, 2026
 //!
-//! let config = MistralConfig::mistral_7b();
-//! let model = Mistral::new(&config);
-//! ```
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::no_grad::is_grad_enabled;
 use axonml_autograd::{GradFn, Variable};

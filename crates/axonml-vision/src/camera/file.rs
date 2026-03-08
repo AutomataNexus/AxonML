@@ -1,6 +1,18 @@
 //! File Backend — Read frames from disk for testing and replay
 //!
-//! @version 0.1.0
+//! # File
+//! `crates/axonml-vision/src/camera/file.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::{CaptureBackend, CaptureConfig, CaptureError, FrameBuffer, PixelFormat};
 

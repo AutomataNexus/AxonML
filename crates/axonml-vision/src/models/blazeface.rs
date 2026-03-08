@@ -1,17 +1,18 @@
 //! BlazeFace - Lightweight Face Detection for Edge
 //!
-//! Ultra-fast face detection designed for mobile/edge deployment.
-//! Uses depthwise separable convolutions with dual-scale SSD-style heads.
+//! # File
+//! `crates/axonml-vision/src/models/blazeface.rs`
 //!
-//! # Reference
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! "BlazeFace: Sub-millisecond Neural Face Detection on Mobile GPUs"
-//! (Bazarevsky et al., 2019) <https://arxiv.org/abs/1907.05047>
+//! # Updated
+//! March 8, 2026
 //!
-//! Architecture:
-//! - 128x128 input → stem → 5 BlazeBlocks → 16x16 feature map (head1, 2 anchors)
-//!                                         → 6 BlazeBlocks → 8x8 feature map (head2, 6 anchors)
-//! - Total anchors: 2*16*16 + 6*8*8 = 512 + 384 = 896
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter, ReLU};

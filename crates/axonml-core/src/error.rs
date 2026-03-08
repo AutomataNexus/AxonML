@@ -1,16 +1,18 @@
 //! Error Types - Axonml Core Error Handling
 //!
-//! Provides comprehensive error types for all operations within the Axonml
-//! framework, including device errors, memory allocation failures, and
-//! type mismatches.
+//! # File
+//! `crates/axonml-core/src/error.rs`
 //!
-//! # Key Features
-//! - Unified error type for all Axonml operations
-//! - Detailed error context for debugging
-//! - Integration with `std::error::Error`
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use thiserror::Error;
 

@@ -1,10 +1,18 @@
 //! Graphs View - Display Loss Curves and Accuracy Charts
 //!
-//! Renders training metrics as charts using ratatui's Chart widget.
-//! Supports multiple datasets (train/val loss, train/val accuracy).
+//! # File
+//! `crates/axonml-tui/src/views/graphs.rs`
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},

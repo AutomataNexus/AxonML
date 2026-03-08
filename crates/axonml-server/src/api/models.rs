@@ -1,6 +1,18 @@
 //! Models API endpoints for AxonML
 //!
-//! Handles model registry operations including CRUD and file upload.
+//! # File
+//! `crates/axonml-server/src/api/models.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};

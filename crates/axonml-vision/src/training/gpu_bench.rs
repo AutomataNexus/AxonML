@@ -1,9 +1,18 @@
 //! GPU Benchmarks — Measure CUDA-accelerated inference throughput
 //!
-//! Tests at realistic detection input sizes (320x320, 640x640)
-//! where CUDA matmul dispatch activates for large convolutions.
+//! # File
+//! `crates/axonml-vision/src/training/gpu_bench.rs`
 //!
-//! @version 0.1.0
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #[cfg(test)]
 mod tests {

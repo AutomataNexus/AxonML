@@ -1,6 +1,18 @@
 //! Data types for AxonML Dashboard
 //!
-//! These types mirror the backend API models for serialization/deserialization.
+//! # File
+//! `crates/axonml-dashboard/src/types.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 8, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

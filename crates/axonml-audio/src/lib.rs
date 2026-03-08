@@ -1,26 +1,18 @@
 //! Axonml Audio - Audio Processing Utilities
 //!
-//! This crate provides audio processing functionality for the Axonml ML framework:
+//! # File
+//! `crates/axonml-audio/src/lib.rs`
 //!
-//! - **Transforms**: Resampling, spectrograms, MFCC, pitch shifting, noise addition
-//! - **Datasets**: Audio classification, command recognition, music genre, speaker ID
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
+//! # Updated
+//! March 8, 2026
 //!
-//! ```ignore
-//! use axonml_audio::prelude::*;
-//!
-//! // Create a synthetic command dataset
-//! let dataset = SyntheticCommandDataset::small();
-//!
-//! // Apply mel spectrogram transform
-//! let mel = MelSpectrogram::new(16000);
-//! let (waveform, label) = dataset.get(0).unwrap();
-//! let spectrogram = mel.apply(&waveform);
-//! ```
-//!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

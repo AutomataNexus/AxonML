@@ -1,36 +1,18 @@
 //! Axonml Tensor - N-Dimensional Array for Machine Learning
 //!
-//! This crate provides the core `Tensor` type that serves as the foundation
-//! for all machine learning operations in Axonml. Tensors are multi-dimensional
-//! arrays with support for automatic broadcasting, device placement, and
-//! efficient memory sharing through views.
+//! # File
+//! `crates/axonml-tensor/src/lib.rs`
 //!
-//! # Key Features
-//! - N-dimensional tensor with arbitrary shape
-//! - Automatic broadcasting for operations
-//! - Efficient views and slicing (zero-copy where possible)
-//! - Device-agnostic (CPU, CUDA, Vulkan, etc.)
-//! - Generic over data type (f32, f64, i32, etc.)
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Example
-//! ```rust
-//! use axonml_tensor::{zeros, ones, Tensor};
+//! # Updated
+//! March 8, 2026
 //!
-//! // Create tensors using factory functions
-//! let a = zeros::<f32>(&[2, 3]);
-//! let b = ones::<f32>(&[2, 3]);
-//!
-//! // Arithmetic operations
-//! let c = a.add(&b).unwrap();
-//! let d = c.mul_scalar(2.0);
-//!
-//! // Reductions
-//! let sum = d.sum();
-//! let mean = d.mean();
-//! ```
-//!
-//! @version 0.1.0
-//! @author `AutomataNexus` Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]

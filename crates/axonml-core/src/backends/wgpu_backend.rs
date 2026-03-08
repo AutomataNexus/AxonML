@@ -1,21 +1,18 @@
 //! WebGPU Backend - Cross-Platform GPU Operations via wgpu
 //!
-//! Provides the WebGPU implementation for tensor operations using wgpu.
-//! This backend requires the `wgpu` feature and works on all platforms.
+//! # File
+//! `crates/axonml-core/src/backends/wgpu_backend.rs`
 //!
-//! # Key Features
-//! - Cross-platform support (Windows, Linux, macOS, Web)
-//! - WASM/browser support
-//! - Compute shader based operations
-//! - Automatic backend selection (Vulkan, Metal, DX12, WebGPU)
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Requirements
-//! - wgpu-compatible GPU
-//! - For native: Modern GPU with Vulkan/Metal/DX12 support
-//! - For web: WebGPU-enabled browser
+//! # Updated
+//! March 8, 2026
 //!
-//! @version 0.1.0
-//! @author AutomataNexus Development Team
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::Backend;
 use crate::device::DeviceCapabilities;

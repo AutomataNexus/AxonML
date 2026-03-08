@@ -1,20 +1,18 @@
 //! HashiCorp Vault backend for secrets management.
 //!
-//! Supports Token and AppRole authentication with automatic token renewal.
+//! # File
+//! `crates/axonml-server/src/secrets/vault.rs`
 //!
-//! # Environment Variables
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
 //!
-//! ## Required
-//! - `VAULT_ADDR` - Vault server address (e.g., `https://vault.example.com`)
+//! # Updated
+//! March 8, 2026
 //!
-//! ## Authentication (one of)
-//! - `VAULT_TOKEN` - Direct token authentication
-//! - `VAULT_ROLE_ID` + `VAULT_SECRET_ID` - AppRole authentication
-//!
-//! ## Optional
-//! - `VAULT_APPROLE_MOUNT` - AppRole auth mount path (default: `approle`)
-//! - `VAULT_MOUNT` - KV secrets engine mount (default: `secret`)
-//! - `VAULT_PATH` - Path within mount (default: `axonml`)
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use super::{SecretsBackend, SecretsError};
 use std::collections::HashMap;
