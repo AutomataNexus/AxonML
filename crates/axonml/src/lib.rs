@@ -141,6 +141,14 @@ pub use axonml_onnx as onnx;
 pub mod hvac;
 
 // =============================================================================
+// Training Monitor
+// =============================================================================
+
+/// Live browser-based training monitor — opens Chromium with real-time charts.
+pub mod monitor;
+pub use monitor::TrainingMonitor;
+
+// =============================================================================
 // Adversarial Training
 // =============================================================================
 

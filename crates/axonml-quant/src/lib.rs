@@ -23,12 +23,14 @@
 pub mod calibration;
 pub mod dequantize;
 pub mod error;
+pub mod inference;
 pub mod quantize;
 pub mod types;
 
 pub use calibration::{calibrate, CalibrationData};
 pub use dequantize::{dequantize_block, dequantize_tensor};
 pub use error::{QuantError, QuantResult};
+pub use inference::{QuantizedLinear, QuantizedModel, serialize_quantized, deserialize_quantized};
 pub use quantize::{quantize_model, quantize_tensor};
 pub use types::{QuantType, QuantizedBlock, QuantizedTensor};
 

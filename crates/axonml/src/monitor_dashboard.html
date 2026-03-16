@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AxonML Training Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#fffdf7; color:#111827; font-family:Inter,system-ui,-apple-system,sans-serif; padding:1.5rem; -webkit-font-smoothing:antialiased; }
+.header { text-align:center; margin-bottom:2rem; border-bottom:2px solid #14b8a6; padding-bottom:1rem; }
+.header h1 { color:#0d9488; font-size:1.6rem; font-weight:700; }
+.header .sub { color:#6b7280; font-size:0.9rem; margin-top:0.3rem; }
+.status { text-align:center; font-size:1.1rem; margin-bottom:1.5rem; }
+.status .badge { display:inline-block; padding:0.3rem 1rem; border-radius:20px; font-weight:600; font-size:0.85rem; }
+.status .training { background:rgba(20,184,166,0.15); color:#0d9488; border:1px solid #14b8a6; }
+.status .complete { background:rgba(59,130,246,0.15); color:#2563eb; border:1px solid #3b82f6; }
+.status .initializing { background:rgba(249,115,22,0.15); color:#ea580c; border:1px solid #f97316; }
+.metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:1rem; margin-bottom:2rem; }
+.card { background:#faf8f5; border:1px solid #e8d4c4; border-radius:12px; padding:1rem; text-align:center; transition:all 0.2s; }
+.card:hover { border-color:#d4b8a8; box-shadow:0 2px 8px rgba(0,0,0,0.04); }
+.card .label { color:#6b7280; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; font-weight:600; }
+.card .value { color:#0d9488; font-size:1.5rem; font-weight:700; margin-top:0.2rem; }
+.card .best { color:#c2714f; }
+.chart-box { background:#faf8f5; border:1px solid #e8d4c4; border-radius:12px; padding:1.25rem; margin-bottom:1.5rem; }
+.chart-box h2 { color:#374151; font-size:1rem; margin-bottom:0.8rem; font-weight:600; }
+canvas { max-height:300px; }
+.branding { text-align:center; margin-top:1.5rem; color:#c4a484; font-size:0.75rem; font-weight:500; letter-spacing:0.05em; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1 id="title">AxonML Training Monitor</h1>
+  <div class="sub" id="subtitle">Initializing...</div>
+</div>
+<div class="status"><span class="badge initializing" id="statusBadge">Initializing</span></div>
+<div class="metrics">
+  <div class="card"><div class="label">Epoch</div><div class="value" id="mEpoch">0</div></div>
+  <div class="card"><div class="label">Train Loss</div><div class="value" id="mLoss">--</div></div>
+  <div class="card"><div class="label">Best Loss</div><div class="value best" id="mBest">--</div></div>
+  <div class="card"><div class="label">Batch Size</div><div class="value" id="mBatch">--</div></div>
+  <div class="card"><div class="label">Parameters</div><div class="value" id="mParams">--</div></div>
+  <div class="card"><div class="label">Throughput</div><div class="value" id="mSpeed">--</div></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+<div class="chart-box"><h2>Training Loss</h2><canvas id="lossChart"></canvas></div>
+<div class="chart-box"><h2>Component Losses</h2><canvas id="compChart"></canvas></div>
+<div class="chart-box"><h2>Throughput (img/s)</h2><canvas id="speedChart"></canvas></div>
+<div class="chart-box"><h2>Best Loss Progression</h2><canvas id="bestChart"></canvas></div>
+</div>
+<div class="chart-box"><h2>Epoch Log</h2>
+<table style="width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:0.78rem;">
+<thead><tr style="border-bottom:2px solid #e8d4c4;color:#6b7280;text-align:left;">
+<th style="padding:0.4rem">Epoch</th><th style="padding:0.4rem">Loss</th>
+<th style="padding:0.4rem">Best</th><th style="padding:0.4rem">Extras</th>
+</tr></thead>
+<tbody id="logTable"></tbody>
+</table>
+</div>
+<div class="branding">AUTOMATANEXUS LLC &mdash; AXONML TRAINING MONITOR</div>
+<script>
+const CO = {responsive:true,maintainAspectRatio:true, plugins:{legend:{labels:{color:'#374151',font:{family:'Inter',size:11}}}}, scales:{x:{ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(232,212,196,0.3)'}},y:{ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(232,212,196,0.3)'}}}};
+const lossChart = new Chart(document.getElementById('lossChart'), {type:'line',data:{labels:[],datasets:[{label:'Train Loss',data:[],borderColor:'#14b8a6',backgroundColor:'rgba(20,184,166,0.08)',tension:0.3,fill:true,pointRadius:1,borderWidth:2},{label:'Val Loss',data:[],borderColor:'#c2714f',backgroundColor:'rgba(194,113,79,0.08)',tension:0.3,fill:true,pointRadius:1,borderWidth:2}]},options:CO});
+const compChart = new Chart(document.getElementById('compChart'), {type:'line',data:{labels:[],datasets:[]},options:CO});
+const speedChart = new Chart(document.getElementById('speedChart'), {type:'bar',data:{labels:[],datasets:[{label:'img/s',data:[],backgroundColor:'rgba(20,184,166,0.25)',borderColor:'#14b8a6',borderWidth:1}]},options:{...CO,plugins:{legend:{display:false}},scales:{...CO.scales,y:{...CO.scales.y,beginAtZero:true}}}});
+const bestChart = new Chart(document.getElementById('bestChart'), {type:'line',data:{labels:[],datasets:[{label:'Best Loss',data:[],borderColor:'#c2714f',backgroundColor:'rgba(194,113,79,0.1)',tension:0,fill:true,stepped:true,pointRadius:0,borderWidth:2}]},options:CO});
+const CC = ['#3b82f6','#f97316','#8b5cf6','#22c55e','#ec4899','#06b6d4'];
+
+function fmt(n){return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':n.toString();}
+
+async function poll() {
+  try {
+    const r = await fetch('/api/state');
+    const s = await r.json();
+    document.getElementById('title').textContent = (s.model||'AxonML') + ' Training Monitor';
+    document.getElementById('subtitle').textContent = fmt(s.params||0)+' params | batch '+s.batch_size+' | '+s.total_epochs+' epochs';
+    const badge = document.getElementById('statusBadge');
+    badge.textContent = s.status;
+    badge.className = 'badge '+(s.status||'initializing');
+    document.getElementById('mBatch').textContent = s.batch_size;
+    document.getElementById('mParams').textContent = fmt(s.params||0);
+    if (s.epochs && s.epochs.length > 0) {
+      const last = s.epochs[s.epochs.length-1];
+      document.getElementById('mEpoch').textContent = last.epoch+'/'+s.total_epochs;
+      document.getElementById('mLoss').textContent = last.train_loss.toFixed(4);
+      document.getElementById('mBest').textContent = s.best_loss < 1e6 ? s.best_loss.toFixed(6) : '--';
+      const spd = last.img_s || last.throughput || 0;
+      document.getElementById('mSpeed').textContent = spd > 0 ? spd.toFixed(1)+'/s' : '--';
+
+      // Loss chart
+      lossChart.data.labels = s.epochs.map(e=>e.epoch);
+      lossChart.data.datasets[0].data = s.epochs.map(e=>e.train_loss);
+      lossChart.data.datasets[1].data = s.epochs.map(e=>e.val_loss||null);
+      lossChart.update('none');
+
+      // Component chart — auto-discover extra numeric fields
+      const extraKeys = Object.keys(last).filter(k=>!['epoch','train_loss','val_loss','img_s','throughput'].includes(k)&&typeof last[k]==='number');
+      while(compChart.data.datasets.length < extraKeys.length) {
+        const ci = compChart.data.datasets.length;
+        compChart.data.datasets.push({label:extraKeys[ci],data:[],borderColor:CC[ci%CC.length],tension:0.3,pointRadius:1,borderWidth:2});
+      }
+      compChart.data.labels = s.epochs.map(e=>e.epoch);
+      extraKeys.forEach((k,i)=>{
+        compChart.data.datasets[i].label = k;
+        compChart.data.datasets[i].data = s.epochs.map(e=>e[k]||0);
+      });
+      compChart.update('none');
+
+      // Speed chart
+      speedChart.data.labels = s.epochs.map(e=>e.epoch);
+      speedChart.data.datasets[0].data = s.epochs.map(e=>e.img_s||e.throughput||0);
+      speedChart.update('none');
+
+      // Best loss progression
+      let rb = Infinity;
+      const bd = s.epochs.map(e=>{if(e.train_loss<rb)rb=e.train_loss;return rb;});
+      bestChart.data.labels = s.epochs.map(e=>e.epoch);
+      bestChart.data.datasets[0].data = bd;
+      bestChart.update('none');
+
+      // Log table
+      const tbody = document.getElementById('logTable');
+      tbody.innerHTML = s.epochs.slice(-20).reverse().map(e=>{
+        const ek = Object.keys(e).filter(k=>!['epoch','train_loss','val_loss'].includes(k));
+        const extras = ek.map(k=>k+': '+(typeof e[k]==='number'?e[k].toFixed(4):e[k])).join(', ');
+        const isBest = e.train_loss <= s.best_loss + 1e-7;
+        return '<tr style="border-bottom:1px solid rgba(232,212,196,0.3);">'+
+          '<td style="padding:0.3rem;color:#0d9488;font-weight:600">'+e.epoch+'</td>'+
+          '<td style="padding:0.3rem">'+e.train_loss.toFixed(6)+'</td>'+
+          '<td style="padding:0.3rem;color:#c2714f;font-weight:600">'+(isBest?'*':'')+'</td>'+
+          '<td style="padding:0.3rem;color:#6b7280;font-size:0.72rem">'+extras+'</td></tr>';
+      }).join('');
+    }
+  } catch(e) {}
+}
+setInterval(poll, 2000);
+poll();
+</script>
+</body>
+</html>

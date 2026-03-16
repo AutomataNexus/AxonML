@@ -32,6 +32,8 @@ std = []
 # Internal crates
 axonml-core.workspace = true
 axonml-tensor.workspace = true
+axonml-autograd.workspace = true
+axonml-nn.workspace = true
 
 # Error handling
 thiserror = { workspace = true }
