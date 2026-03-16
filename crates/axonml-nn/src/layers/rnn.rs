@@ -234,9 +234,7 @@ impl Module for RNN {
 
         // Stack outputs using graph-tracked cat (unsqueeze + cat along time dim)
         let time_dim = if self.batch_first { 1 } else { 0 };
-        let unsqueezed: Vec<Variable> = outputs.iter()
-            .map(|o| o.unsqueeze(time_dim))
-            .collect();
+        let unsqueezed: Vec<Variable> = outputs.iter().map(|o| o.unsqueeze(time_dim)).collect();
         let refs: Vec<&Variable> = unsqueezed.iter().collect();
         Variable::cat(&refs, time_dim)
     }
@@ -517,9 +515,7 @@ impl Module for LSTM {
 
         // Stack outputs along the time dimension
         let time_dim = if self.batch_first { 1 } else { 0 };
-        let unsqueezed: Vec<Variable> = outputs.iter()
-            .map(|o| o.unsqueeze(time_dim))
-            .collect();
+        let unsqueezed: Vec<Variable> = outputs.iter().map(|o| o.unsqueeze(time_dim)).collect();
         let refs: Vec<&Variable> = unsqueezed.iter().collect();
         Variable::cat(&refs, time_dim)
     }
@@ -985,9 +981,7 @@ impl GRU {
         }
 
         // Unsqueeze each (batch, hidden) → (batch, 1, hidden), then cat along dim=1
-        let unsqueezed: Vec<Variable> = outputs.iter()
-            .map(|o| o.unsqueeze(1))
-            .collect();
+        let unsqueezed: Vec<Variable> = outputs.iter().map(|o| o.unsqueeze(1)).collect();
         let refs: Vec<&Variable> = unsqueezed.iter().collect();
         Variable::cat(&refs, 1)
     }
@@ -1000,6 +994,7 @@ impl GRU {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axonml_tensor::Tensor;
 
     #[test]
     fn test_rnn_cell() {
@@ -1040,13 +1035,26 @@ mod tests {
             true,
         );
         let output = gru.forward(&input);
-        println!("Output shape: {:?}, requires_grad: {}", output.shape(), output.requires_grad());
+        println!(
+            "Output shape: {:?}, requires_grad: {}",
+            output.shape(),
+            output.requires_grad()
+        );
         let loss = output.sum();
-        println!("Loss: {:?}, requires_grad: {}", loss.data().to_vec(), loss.requires_grad());
+        println!(
+            "Loss: {:?}, requires_grad: {}",
+            loss.data().to_vec(),
+            loss.requires_grad()
+        );
         loss.backward();
 
         // Check input gradient
-        println!("Input grad: {:?}", input.grad().map(|g| g.to_vec().iter().map(|x| x.abs()).sum::<f32>()));
+        println!(
+            "Input grad: {:?}",
+            input
+                .grad()
+                .map(|g| g.to_vec().iter().map(|x| x.abs()).sum::<f32>())
+        );
 
         let params = gru.parameters();
         println!("Number of parameters: {}", params.len());
@@ -1057,18 +1065,30 @@ mod tests {
                 Some(g) => {
                     let gv = g.to_vec();
                     let sum_abs: f32 = gv.iter().map(|x| x.abs()).sum();
-                    println!("Param {} shape {:?} requires_grad={}: grad sum_abs={:.6}",
-                        i, p.shape(), p.requires_grad(), sum_abs);
+                    println!(
+                        "Param {} shape {:?} requires_grad={}: grad sum_abs={:.6}",
+                        i,
+                        p.shape(),
+                        p.requires_grad(),
+                        sum_abs
+                    );
                     if sum_abs > 0.0 {
                         has_grad = true;
                     }
                 }
                 None => {
-                    println!("Param {} shape {:?} requires_grad={}: NO GRADIENT",
-                        i, p.shape(), p.requires_grad());
+                    println!(
+                        "Param {} shape {:?} requires_grad={}: NO GRADIENT",
+                        i,
+                        p.shape(),
+                        p.requires_grad()
+                    );
                 }
             }
         }
-        assert!(has_grad, "At least one GRU parameter should have non-zero gradients");
+        assert!(
+            has_grad,
+            "At least one GRU parameter should have non-zero gradients"
+        );
     }
 }

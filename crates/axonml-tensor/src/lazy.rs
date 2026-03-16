@@ -259,7 +259,12 @@ impl LazyTensor {
     }
 
     /// Creates a binary operation LazyTensor, merging tensor stores from both operands.
-    fn binary_op(&self, other: &LazyTensor, make_op: impl FnOnce(Box<LazyOp>, Box<LazyOp>) -> LazyOp, shape: Vec<usize>) -> LazyTensor {
+    fn binary_op(
+        &self,
+        other: &LazyTensor,
+        make_op: impl FnOnce(Box<LazyOp>, Box<LazyOp>) -> LazyOp,
+        shape: Vec<usize>,
+    ) -> LazyTensor {
         let (merged, remapped_right) = Self::merge_stores(&self.tensors, &other.tensors, &other.op);
         LazyTensor {
             op: make_op(Box::new(self.op.clone()), Box::new(remapped_right)),
@@ -392,10 +397,9 @@ impl LazyTensor {
             | LazyOp::Reshape(a, _)
             | LazyOp::Transpose(a, _, _) => 1 + Self::count_ops(a),
 
-            LazyOp::Add(a, b)
-            | LazyOp::Sub(a, b)
-            | LazyOp::Mul(a, b)
-            | LazyOp::Div(a, b) => 1 + Self::count_ops(a) + Self::count_ops(b),
+            LazyOp::Add(a, b) | LazyOp::Sub(a, b) | LazyOp::Mul(a, b) | LazyOp::Div(a, b) => {
+                1 + Self::count_ops(a) + Self::count_ops(b)
+            }
         }
     }
 
@@ -530,19 +534,13 @@ impl LazyTensor {
             LazyOp::Sum(a) => LazyOp::Sum(Box::new(Self::optimize_op(a))),
             LazyOp::Mean(a) => LazyOp::Mean(Box::new(Self::optimize_op(a))),
 
-            LazyOp::Reshape(a, s) => {
-                LazyOp::Reshape(Box::new(Self::optimize_op(a)), s.clone())
-            }
+            LazyOp::Reshape(a, s) => LazyOp::Reshape(Box::new(Self::optimize_op(a)), s.clone()),
             LazyOp::Transpose(a, d0, d1) => {
                 LazyOp::Transpose(Box::new(Self::optimize_op(a)), *d0, *d1)
             }
 
-            LazyOp::AddScalar(a, s) => {
-                LazyOp::AddScalar(Box::new(Self::optimize_op(a)), *s)
-            }
-            LazyOp::MulScalar(a, s) => {
-                LazyOp::MulScalar(Box::new(Self::optimize_op(a)), *s)
-            }
+            LazyOp::AddScalar(a, s) => LazyOp::AddScalar(Box::new(Self::optimize_op(a)), *s),
+            LazyOp::MulScalar(a, s) => LazyOp::MulScalar(Box::new(Self::optimize_op(a)), *s),
         }
     }
 
@@ -576,7 +574,7 @@ impl LazyTensor {
             LazyOp::AddScalar(a, s) if *s == 0.0 => *a.clone(),
 
             // x * 1 -> x  (MulScalar with 1)
-            LazyOp::MulScalar(a, s) if *s == 1.0 => *a.clone(),
+            LazyOp::MulScalar(a, s) if (*s - 1.0).abs() < f32::EPSILON => *a.clone(),
 
             // x * 0 -> zeros (handled at materialize; here we keep MulScalar(x,0))
             // We keep it as-is since we don't know the shape at this level easily.
@@ -612,7 +610,13 @@ mod tests {
     use super::*;
 
     fn approx_eq(a: &[f32], b: &[f32], tol: f32) {
-        assert_eq!(a.len(), b.len(), "length mismatch: {} vs {}", a.len(), b.len());
+        assert_eq!(
+            a.len(),
+            b.len(),
+            "length mismatch: {} vs {}",
+            a.len(),
+            b.len()
+        );
         for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
             assert!(
                 (x - y).abs() < tol,
@@ -664,45 +668,38 @@ mod tests {
 
     #[test]
     fn test_sub_two_lazy_tensors() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![10.0, 20.0, 30.0], &[3]).unwrap(),
-        );
-        let b = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(),
-        );
+        let a =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![10.0, 20.0, 30.0], &[3]).unwrap());
+        let b =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
         let c = a.sub(&b);
         assert_eq!(c.materialize().to_vec(), vec![9.0, 18.0, 27.0]);
     }
 
     #[test]
     fn test_mul_two_lazy_tensors() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![2.0, 3.0, 4.0], &[3]).unwrap(),
-        );
-        let b = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![5.0, 6.0, 7.0], &[3]).unwrap(),
-        );
+        let a =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![2.0, 3.0, 4.0], &[3]).unwrap());
+        let b =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![5.0, 6.0, 7.0], &[3]).unwrap());
         let c = a.mul(&b);
         assert_eq!(c.materialize().to_vec(), vec![10.0, 18.0, 28.0]);
     }
 
     #[test]
     fn test_div_two_lazy_tensors() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![10.0, 20.0, 30.0], &[3]).unwrap(),
-        );
-        let b = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![2.0, 4.0, 5.0], &[3]).unwrap(),
-        );
+        let a =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![10.0, 20.0, 30.0], &[3]).unwrap());
+        let b =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![2.0, 4.0, 5.0], &[3]).unwrap());
         let c = a.div(&b);
         assert_eq!(c.materialize().to_vec(), vec![5.0, 5.0, 6.0]);
     }
 
     #[test]
     fn test_neg_lazy_tensor() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, -2.0, 3.0], &[3]).unwrap(),
-        );
+        let a =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, -2.0, 3.0], &[3]).unwrap());
         let result = a.neg().materialize();
         assert_eq!(result.to_vec(), vec![-1.0, 2.0, -3.0]);
     }
@@ -718,18 +715,14 @@ mod tests {
 
     #[test]
     fn test_sigmoid_correctness() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![0.0], &[1]).unwrap(),
-        );
+        let a = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![0.0], &[1]).unwrap());
         let result = a.sigmoid().materialize();
         approx_eq(&result.to_vec(), &[0.5], 1e-6);
     }
 
     #[test]
     fn test_exp_correctness() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![0.0, 1.0], &[2]).unwrap(),
-        );
+        let a = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![0.0, 1.0], &[2]).unwrap());
         let result = a.exp().materialize();
         approx_eq(&result.to_vec(), &[1.0, std::f32::consts::E], 1e-5);
     }
@@ -745,18 +738,16 @@ mod tests {
 
     #[test]
     fn test_add_scalar_correctness() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(),
-        );
+        let a =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
         let result = a.add_scalar(10.0).materialize();
         assert_eq!(result.to_vec(), vec![11.0, 12.0, 13.0]);
     }
 
     #[test]
     fn test_mul_scalar_correctness() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(),
-        );
+        let a =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
         let result = a.mul_scalar(3.0).materialize();
         assert_eq!(result.to_vec(), vec![3.0, 6.0, 9.0]);
     }
@@ -805,38 +796,29 @@ mod tests {
 
     #[test]
     fn test_op_count_leaf() {
-        let x = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap(),
-        );
+        let x = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap());
         assert_eq!(x.op_count(), 0);
     }
 
     #[test]
     fn test_op_count_unary() {
-        let x = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap(),
-        );
+        let x = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap());
         assert_eq!(x.relu().op_count(), 1);
         assert_eq!(x.relu().neg().op_count(), 2);
     }
 
     #[test]
     fn test_op_count_binary() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap(),
-        );
-        let b = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![2.0], &[1]).unwrap(),
-        );
+        let a = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap());
+        let b = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![2.0], &[1]).unwrap());
         // add(leaf, leaf) = 1 op
         assert_eq!(a.add(&b).op_count(), 1);
     }
 
     #[test]
     fn test_optimize_add_zero() {
-        let x = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(),
-        );
+        let x =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
         let y = x.add_scalar(0.0);
         assert_eq!(y.op_count(), 1); // AddScalar
         let opt = y.optimize();
@@ -846,9 +828,8 @@ mod tests {
 
     #[test]
     fn test_optimize_mul_one() {
-        let x = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![4.0, 5.0, 6.0], &[3]).unwrap(),
-        );
+        let x =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![4.0, 5.0, 6.0], &[3]).unwrap());
         let y = x.mul_scalar(1.0);
         assert_eq!(y.op_count(), 1);
         let opt = y.optimize();
@@ -858,9 +839,8 @@ mod tests {
 
     #[test]
     fn test_optimize_neg_neg() {
-        let x = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, -2.0, 3.0], &[3]).unwrap(),
-        );
+        let x =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, -2.0, 3.0], &[3]).unwrap());
         let y = x.neg().neg();
         assert_eq!(y.op_count(), 2);
         let opt = y.optimize();
@@ -870,9 +850,8 @@ mod tests {
 
     #[test]
     fn test_optimize_scalar_folding_mul() {
-        let x = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(),
-        );
+        let x =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
         // x * 2 * 3 should fold to x * 6
         let y = x.mul_scalar(2.0).mul_scalar(3.0);
         assert_eq!(y.op_count(), 2);
@@ -883,9 +862,7 @@ mod tests {
 
     #[test]
     fn test_optimize_scalar_folding_add() {
-        let x = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, 2.0], &[2]).unwrap(),
-        );
+        let x = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0], &[2]).unwrap());
         // x + 3 + 7 should fold to x + 10
         let y = x.add_scalar(3.0).add_scalar(7.0);
         assert_eq!(y.op_count(), 2);
@@ -896,9 +873,8 @@ mod tests {
 
     #[test]
     fn test_optimize_exp_log() {
-        let x = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(),
-        );
+        let x =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
         // exp(log(x)) -> x
         let y = x.log().exp();
         assert_eq!(y.op_count(), 2);
@@ -909,9 +885,8 @@ mod tests {
 
     #[test]
     fn test_optimize_log_exp() {
-        let x = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(),
-        );
+        let x =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
         // log(exp(x)) -> x
         let y = x.exp().log();
         assert_eq!(y.op_count(), 2);
@@ -929,19 +904,20 @@ mod tests {
         let eager = t.relu().add_scalar(1.0).mul_scalar(2.0).sum();
 
         // Lazy
-        let lazy = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(data, &[2, 2]).unwrap(),
-        );
-        let lazy_result = lazy.relu().add_scalar(1.0).mul_scalar(2.0).sum().materialize();
+        let lazy = LazyTensor::from_tensor(Tensor::<f32>::from_vec(data, &[2, 2]).unwrap());
+        let lazy_result = lazy
+            .relu()
+            .add_scalar(1.0)
+            .mul_scalar(2.0)
+            .sum()
+            .materialize();
 
         approx_eq(&eager.to_vec(), &lazy_result.to_vec(), 1e-6);
     }
 
     #[test]
     fn test_large_chain_optimization() {
-        let x = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![5.0], &[1]).unwrap(),
-        );
+        let x = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![5.0], &[1]).unwrap());
         // x * 2 * 3 * 4 + 1 + 2 + 3
         let y = x
             .mul_scalar(2.0)
@@ -961,12 +937,8 @@ mod tests {
     #[test]
     fn test_binary_ops_tensor_merging() {
         // Two independent LazyTensors sharing no tensor stores
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, 2.0], &[2]).unwrap(),
-        );
-        let b = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![3.0, 4.0], &[2]).unwrap(),
-        );
+        let a = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0], &[2]).unwrap());
+        let b = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![3.0, 4.0], &[2]).unwrap());
         // a has tensor[0], b has tensor[0] -> merged should have tensor[0], tensor[1]
         let c = a.add(&b);
         assert_eq!(c.tensors.len(), 2);
@@ -977,15 +949,9 @@ mod tests {
     #[test]
     fn test_binary_ops_chain_merging() {
         // (a + b) + c — should merge all three tensor stores
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap(),
-        );
-        let b = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![2.0], &[1]).unwrap(),
-        );
-        let c = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![3.0], &[1]).unwrap(),
-        );
+        let a = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap());
+        let b = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![2.0], &[1]).unwrap());
+        let c = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![3.0], &[1]).unwrap());
         let ab = a.add(&b);
         let abc = ab.add(&c);
         assert_eq!(abc.tensors.len(), 3);
@@ -994,18 +960,16 @@ mod tests {
 
     #[test]
     fn test_sqrt_correctness() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![4.0, 9.0, 16.0], &[3]).unwrap(),
-        );
+        let a =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![4.0, 9.0, 16.0], &[3]).unwrap());
         let result = a.sqrt().materialize();
         approx_eq(&result.to_vec(), &[2.0, 3.0, 4.0], 1e-6);
     }
 
     #[test]
     fn test_abs_correctness() {
-        let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![-3.0, 0.0, 5.0], &[3]).unwrap(),
-        );
+        let a =
+            LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![-3.0, 0.0, 5.0], &[3]).unwrap());
         let result = a.abs().materialize();
         assert_eq!(result.to_vec(), vec![3.0, 0.0, 5.0]);
     }

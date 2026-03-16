@@ -462,6 +462,7 @@ pub fn vgg19() -> VGG {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axonml_tensor::Tensor;
 
     #[test]
     fn test_vgg_features() {

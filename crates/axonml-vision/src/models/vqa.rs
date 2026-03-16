@@ -16,8 +16,8 @@
 
 use axonml_autograd::Variable;
 use axonml_nn::{
-    Conv2d, CrossAttention, Embedding, LayerNorm, Linear,
-    Module, MultiHeadAttention, Parameter, ReLU,
+    Conv2d, CrossAttention, Embedding, LayerNorm, Linear, Module, MultiHeadAttention, Parameter,
+    ReLU,
 };
 
 // =============================================================================
@@ -56,7 +56,9 @@ impl TextEncoderLayer {
     fn forward(&self, x: &Variable) -> Variable {
         let attn = self.self_attn.forward(x);
         let x = self.norm1.forward(&x.add_var(&attn));
-        let ffn = self.ffn2.forward(&self.relu.forward(&self.ffn1.forward(&x)));
+        let ffn = self
+            .ffn2
+            .forward(&self.relu.forward(&self.ffn1.forward(&x)));
         self.norm2.forward(&x.add_var(&ffn))
     }
 
@@ -141,7 +143,9 @@ impl VisionEncoderLayer {
     fn forward(&self, x: &Variable) -> Variable {
         let attn = self.self_attn.forward(x);
         let x = self.norm1.forward(&x.add_var(&attn));
-        let ffn = self.ffn2.forward(&self.relu.forward(&self.ffn1.forward(&x)));
+        let ffn = self
+            .ffn2
+            .forward(&self.relu.forward(&self.ffn1.forward(&x)));
         self.norm2.forward(&x.add_var(&ffn))
     }
 
@@ -164,8 +168,12 @@ impl VisionEncoder {
 
         Self {
             patch_embed: Conv2d::with_options(
-                3, d_model, (patch_size, patch_size),
-                (patch_size, patch_size), (0, 0), true,
+                3,
+                d_model,
+                (patch_size, patch_size),
+                (patch_size, patch_size),
+                (0, 0),
+                true,
             ),
             layers,
             norm: LayerNorm::single(d_model),
@@ -186,9 +194,7 @@ impl VisionEncoder {
         let patches = self.patch_embed.forward(image);
 
         // Reshape [N, D, pH, pW] -> [N, D, seq_len] -> transpose -> [N, seq_len, D]
-        let mut x = patches
-            .reshape(&[n, self.d_model, seq_len])
-            .transpose(1, 2);
+        let mut x = patches.reshape(&[n, self.d_model, seq_len]).transpose(1, 2);
 
         for layer in &self.layers {
             x = layer.forward(&x);
@@ -285,7 +291,9 @@ impl VQAModel {
         let text_features = self.text_encoder.forward(question_ids);
 
         // Cross-attention: text attends to image
-        let fused = self.cross_attn.cross_attention(&text_features, &image_features, None);
+        let fused = self
+            .cross_attn
+            .cross_attention(&text_features, &image_features, None);
 
         // Pool: mean over sequence dimension (graph-tracked)
         let pooled = fused.mean_dim(1, false);
@@ -324,6 +332,7 @@ impl Module for VQAModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axonml_tensor::Tensor;
 
     #[test]
     fn test_vqa_creation() {
