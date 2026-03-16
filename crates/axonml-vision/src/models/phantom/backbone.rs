@@ -68,7 +68,9 @@ impl PhantomBlazeBlock {
             x.clone()
         };
 
-        let out = self.relu.forward(&self.dw_bn.forward(&self.dw_conv.forward(x)));
+        let out = self
+            .relu
+            .forward(&self.dw_bn.forward(&self.dw_conv.forward(x)));
         let out = self.pw_bn.forward(&self.pw_conv.forward(&out));
         self.relu.forward(&out.add_var(&identity))
     }
@@ -140,7 +142,9 @@ impl EventFeatureExtractor {
     /// Forward: [B, 4, 48, 48] → [B, 32].
     pub fn forward(&self, x: &Variable) -> Variable {
         let out = self.relu.forward(&self.bn1.forward(&self.conv1.forward(x)));
-        let out = self.relu.forward(&self.bn2.forward(&self.conv2.forward(&out)));
+        let out = self
+            .relu
+            .forward(&self.bn2.forward(&self.conv2.forward(&out)));
 
         // Global average pooling → [B, 32]
         let shape = out.shape();
@@ -240,7 +244,9 @@ impl PhantomBackbone {
     /// Input: [B, 3, H, W]
     /// Returns: [P1=[B,24,H/2,W/2], P2=[B,32,H/4,W/4], P3=[B,48,H/8,W/8]]
     pub fn forward_full(&mut self, x: &Variable) -> Vec<Variable> {
-        let mut out = self.relu.forward(&self.stem_bn.forward(&self.stem_conv.forward(x)));
+        let mut out = self
+            .relu
+            .forward(&self.stem_bn.forward(&self.stem_conv.forward(x)));
 
         for block in &self.stage1 {
             out = block.forward(&out);
@@ -346,11 +352,15 @@ impl Default for PhantomBackbone {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axonml_tensor::Tensor;
 
     #[test]
     fn test_blaze_block_same_channels() {
         let block = PhantomBlazeBlock::new(24, 24, 1);
-        let x = Variable::new(Tensor::from_vec(vec![0.1; 24 * 16 * 16], &[1, 24, 16, 16]).unwrap(), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1; 24 * 16 * 16], &[1, 24, 16, 16]).unwrap(),
+            false,
+        );
         let out = block.forward(&x);
         assert_eq!(out.shape(), vec![1, 24, 16, 16]);
     }
@@ -358,7 +368,10 @@ mod tests {
     #[test]
     fn test_blaze_block_downsample() {
         let block = PhantomBlazeBlock::new(24, 32, 2);
-        let x = Variable::new(Tensor::from_vec(vec![0.1; 24 * 16 * 16], &[1, 24, 16, 16]).unwrap(), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1; 24 * 16 * 16], &[1, 24, 16, 16]).unwrap(),
+            false,
+        );
         let out = block.forward(&x);
         assert_eq!(out.shape(), vec![1, 32, 8, 8]);
     }
