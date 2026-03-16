@@ -25,3 +25,4 @@ rayon.workspace = true
 rustfft = "6.2"
 
 [dev-dependencies]
+axonml-optim = { path = "../axonml-optim" }

@@ -324,21 +324,32 @@ impl BlazeFace {
         let w2 = cls2.shape()[3];
 
         // Reshape and concatenate: cls
-        let cls1_flat = cls1.reshape(&[batch, 2 * h1 * w1]);
-        let cls2_flat = cls2.reshape(&[batch, 6 * h2 * w2]);
+        // Conv2d outputs [B, A, H, W] but anchors are ordered (H, W, A) — spatial first.
+        // Permute to [B, H, W, A] before flattening to match generate_anchors() order.
+        let cls1_perm = cls1.transpose(1, 2);                 // [B, H, A, W]
+        let cls1_perm = cls1_perm.transpose(2, 3);            // [B, H, W, A]
+        let cls1_flat = cls1_perm.reshape(&[batch, h1 * w1 * 2]);
+
+        let cls2_perm = cls2.transpose(1, 2);                 // [B, H, A, W]
+        let cls2_perm = cls2_perm.transpose(2, 3);            // [B, H, W, A]
+        let cls2_flat = cls2_perm.reshape(&[batch, h2 * w2 * 6]);
+
         let cls_all = Variable::cat(&[&cls1_flat, &cls2_flat], 1);
 
         // Reshape and concatenate: bbox
-        // Rearrange from [B, A*4, H, W] → [B, A*H*W, 4]
+        // [B, A*4, H, W] → permute to [B, H, W, A*4] → reshape to [B, H*W*A, 4]
         let n1 = 2 * h1 * w1;
         let n2 = 6 * h2 * w2;
-        let bbox1_flat = bbox1.reshape(&[batch, 2, 4, h1 * w1]);
-        let bbox1_flat = bbox1_flat.transpose(2, 3);
-        let bbox1_flat = bbox1_flat.reshape(&[batch, n1, 4]);
 
-        let bbox2_flat = bbox2.reshape(&[batch, 6, 4, h2 * w2]);
-        let bbox2_flat = bbox2_flat.transpose(2, 3);
-        let bbox2_flat = bbox2_flat.reshape(&[batch, n2, 4]);
+        // bbox1: [B, 8, H, W] → [B, H, W, 8] → [B, H*W*2, 4]
+        let bbox1_perm = bbox1.transpose(1, 2);               // [B, H, 8, W]
+        let bbox1_perm = bbox1_perm.transpose(2, 3);          // [B, H, W, 8]
+        let bbox1_flat = bbox1_perm.reshape(&[batch, n1, 4]);
+
+        // bbox2: [B, 24, H, W] → [B, H, W, 24] → [B, H*W*6, 4]
+        let bbox2_perm = bbox2.transpose(1, 2);               // [B, H, 24, W]
+        let bbox2_perm = bbox2_perm.transpose(2, 3);          // [B, H, W, 24]
+        let bbox2_flat = bbox2_perm.reshape(&[batch, n2, 4]);
 
         let bbox_all = Variable::cat(&[&bbox1_flat, &bbox2_flat], 1); // [B, 896, 4]
 

@@ -38,5 +38,6 @@ features = ["blocking"]
 optional = true
 
 [dev-dependencies]
+axonml = { path = "../axonml" }
 axonml-serialize = { path = "../axonml-serialize" }
 rayon.workspace = true

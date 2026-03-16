@@ -540,6 +540,7 @@ version = "0.4.1"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
+ "axonml-optim",
  "axonml-tensor",
  "parking_lot",
  "rand 0.8.5",
@@ -593,7 +594,9 @@ name = "axonml-quant"
 version = "0.4.1"
 dependencies = [
  "approx",
+ "axonml-autograd",
  "axonml-core",
+ "axonml-nn",
  "axonml-tensor",
  "bytemuck",
  "half",
@@ -715,6 +718,7 @@ dependencies = [
 name = "axonml-vision"
 version = "0.4.1"
 dependencies = [
+ "axonml",
  "axonml-autograd",
  "axonml-core",
  "axonml-data",
