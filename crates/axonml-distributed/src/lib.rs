@@ -73,11 +73,17 @@
 #![allow(clippy::comparison_chain)]
 #![allow(clippy::manual_assert)]
 #![allow(clippy::unnecessary_debug_formatting)]
+#![allow(clippy::ptr_as_ptr)]
+#![allow(clippy::ptr_cast_constness)]
+#![allow(clippy::manual_slice_size_calculation)]
+#![allow(clippy::needless_lifetimes)]
 
 pub mod backend;
 pub mod comm;
 pub mod ddp;
 pub mod fsdp;
+#[cfg(feature = "nccl")]
+pub mod nccl_backend;
 pub mod pipeline;
 pub mod process_group;
 
@@ -97,6 +103,8 @@ pub use fsdp::{
     CPUOffload, ColumnParallelLinear, FSDPMemoryStats, FullyShardedDataParallel, RowParallelLinear,
     ShardingStrategy,
 };
+#[cfg(feature = "nccl")]
+pub use nccl_backend::{NcclBackend, NcclError, NcclUniqueId};
 pub use pipeline::{Pipeline, PipelineMemoryStats, PipelineSchedule, PipelineStage};
 pub use process_group::{ProcessGroup, World};
 

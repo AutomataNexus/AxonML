@@ -485,6 +485,7 @@ dependencies = [
  "axonml-core",
  "axonml-nn",
  "axonml-tensor",
+ "libloading 0.8.9",
 ]
 
 [[package]]
