@@ -46,8 +46,8 @@ async fn test_complete_registration_login_flow() {
     let client = test_client();
     let unique_id = chrono::Utc::now().timestamp_millis();
     let email = format!("e2e_user_{}@test.local", unique_id);
-    let password = std::env::var("AXONML_TEST_PASSWORD")
-        .unwrap_or_else(|_| format!("TestPw_{}!", unique_id));
+    let password =
+        std::env::var("AXONML_TEST_PASSWORD").unwrap_or_else(|_| format!("TestPw_{}!", unique_id));
 
     // Step 1: Register new user
     let register_response = client

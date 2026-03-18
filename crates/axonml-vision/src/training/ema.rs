@@ -105,10 +105,7 @@ impl ModelEMA {
         F: FnOnce() -> R,
     {
         // Save original weights
-        let originals: Vec<Vec<f32>> = params
-            .iter()
-            .map(|p| p.data().to_vec())
-            .collect();
+        let originals: Vec<Vec<f32>> = params.iter().map(|p| p.data().to_vec()).collect();
 
         // Apply EMA
         self.apply_to(params);
@@ -158,10 +155,7 @@ mod tests {
                 Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap(),
                 true,
             ),
-            Parameter::new(
-                Tensor::from_vec(vec![0.5, 0.5], &[2]).unwrap(),
-                true,
-            ),
+            Parameter::new(Tensor::from_vec(vec![0.5, 0.5], &[2]).unwrap(), true),
         ]
     }
 
@@ -181,9 +175,7 @@ mod tests {
         let mut ema = ModelEMA::new(&params, 0.9);
 
         // Modify params
-        params[0].update_data(
-            Tensor::from_vec(vec![10.0, 20.0, 30.0, 40.0], &[2, 2]).unwrap(),
-        );
+        params[0].update_data(Tensor::from_vec(vec![10.0, 20.0, 30.0, 40.0], &[2, 2]).unwrap());
 
         ema.update(&params);
         assert_eq!(ema.num_updates(), 1);
@@ -205,9 +197,7 @@ mod tests {
 
         // Modify params and update EMA multiple times
         for i in 0..100 {
-            params[0].update_data(
-                Tensor::from_vec(vec![10.0; 4], &[2, 2]).unwrap(),
-            );
+            params[0].update_data(Tensor::from_vec(vec![10.0; 4], &[2, 2]).unwrap());
             ema.update(&params);
         }
 
@@ -237,6 +227,9 @@ mod tests {
         // After many steps, should approach target decay
         ema.num_updates = 10000;
         let d = ema.effective_decay();
-        assert!(d > 0.99, "After 10K steps, decay should be ~0.9999, got {d}");
+        assert!(
+            d > 0.99,
+            "After 10K steps, decay should be ~0.9999, got {d}"
+        );
     }
 }

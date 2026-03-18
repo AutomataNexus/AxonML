@@ -480,7 +480,8 @@ pub fn model_registry() -> HashMap<String, PretrainedModel> {
         "nanodet".to_string(),
         PretrainedModel {
             name: "nanodet".to_string(),
-            url: "https://huggingface.co/axonml-ml/nanodet-coco/resolve/main/nanodet.safetensors".to_string(),
+            url: "https://huggingface.co/axonml-ml/nanodet-coco/resolve/main/nanodet.safetensors"
+                .to_string(),
             checksum: None,
             size_bytes: 3_800_000,
             num_classes: 80,

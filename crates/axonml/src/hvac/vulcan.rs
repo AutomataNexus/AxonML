@@ -17,10 +17,7 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_nn::{
-    BatchNorm1d, Dropout, Linear, Module, Parameter, Sequential, ReLU,
-    FFT1d,
-};
+use axonml_nn::{BatchNorm1d, Dropout, FFT1d, Linear, Module, Parameter, ReLU, Sequential};
 
 use super::aquilo::concat_variables;
 
@@ -56,8 +53,7 @@ impl Vulcan {
     /// Creates a new Vulcan model.
     pub fn new() -> Self {
         // Wide branch: Linear(672, 256)
-        let wide_branch = Sequential::new()
-            .add(Linear::new(672, 256));
+        let wide_branch = Sequential::new().add(Linear::new(672, 256));
 
         // Deep branch: 5 layers with BN/ReLU/Dropout
         let deep_branch = Sequential::new()
@@ -87,9 +83,7 @@ impl Vulcan {
         let vib_linear2 = Linear::new(256, 64);
 
         // Fusion: concat wide(256) + deep(128) + vibration(64) = 448
-        let fusion = Sequential::new()
-            .add(Linear::new(448, 256))
-            .add(ReLU);
+        let fusion = Sequential::new().add(Linear::new(448, 256)).add(ReLU);
 
         // Output heads
         let mech_fault_head = Linear::new(256, 15);
@@ -115,7 +109,10 @@ impl Vulcan {
     /// Forward pass returning all output heads.
     ///
     /// Returns (mech_fault, bearing_health, vib_severity, rul, embedding)
-    pub fn forward_all(&self, input: &Variable) -> (Variable, Variable, Variable, Variable, Variable) {
+    pub fn forward_all(
+        &self,
+        input: &Variable,
+    ) -> (Variable, Variable, Variable, Variable, Variable) {
         let shape = input.shape();
         let batch = shape[0];
 
@@ -126,14 +123,14 @@ impl Vulcan {
         let deep_out = self.deep_branch.forward(input);
 
         // Vibration branch: FFT → Linear → ReLU → Linear
-        let fft_out = self.fft.forward(input);  // (batch, 337)
-        let vib_hidden = self.vib_linear1.forward(&fft_out);  // (batch, 256)
-        let vib_hidden = vib_hidden.relu();  // ReLU
-        let vib_out = self.vib_linear2.forward(&vib_hidden);  // (batch, 64)
+        let fft_out = self.fft.forward(input); // (batch, 337)
+        let vib_hidden = self.vib_linear1.forward(&fft_out); // (batch, 256)
+        let vib_hidden = vib_hidden.relu(); // ReLU
+        let vib_out = self.vib_linear2.forward(&vib_hidden); // (batch, 64)
 
         // Fusion: concat wide(256) + deep(128) + vibration(64) = 448
         let fused = concat_variables(&[&wide_out, &deep_out, &vib_out], batch);
-        let embedding = self.fusion.forward(&fused);  // (batch, 256)
+        let embedding = self.fusion.forward(&fused); // (batch, 256)
 
         // Output heads
         let mech_fault = self.mech_fault_head.forward(&embedding);
@@ -177,15 +174,33 @@ impl Module for Vulcan {
 
     fn named_parameters(&self) -> HashMap<String, Parameter> {
         let mut params = HashMap::new();
-        for (n, p) in self.wide_branch.named_parameters() { params.insert(format!("wide_branch.{n}"), p); }
-        for (n, p) in self.deep_branch.named_parameters() { params.insert(format!("deep_branch.{n}"), p); }
-        for (n, p) in self.vib_linear1.named_parameters() { params.insert(format!("vib_linear1.{n}"), p); }
-        for (n, p) in self.vib_linear2.named_parameters() { params.insert(format!("vib_linear2.{n}"), p); }
-        for (n, p) in self.fusion.named_parameters() { params.insert(format!("fusion.{n}"), p); }
-        for (n, p) in self.mech_fault_head.named_parameters() { params.insert(format!("mech_fault_head.{n}"), p); }
-        for (n, p) in self.bearing_health_head.named_parameters() { params.insert(format!("bearing_health_head.{n}"), p); }
-        for (n, p) in self.vib_severity_head.named_parameters() { params.insert(format!("vib_severity_head.{n}"), p); }
-        for (n, p) in self.rul_head.named_parameters() { params.insert(format!("rul_head.{n}"), p); }
+        for (n, p) in self.wide_branch.named_parameters() {
+            params.insert(format!("wide_branch.{n}"), p);
+        }
+        for (n, p) in self.deep_branch.named_parameters() {
+            params.insert(format!("deep_branch.{n}"), p);
+        }
+        for (n, p) in self.vib_linear1.named_parameters() {
+            params.insert(format!("vib_linear1.{n}"), p);
+        }
+        for (n, p) in self.vib_linear2.named_parameters() {
+            params.insert(format!("vib_linear2.{n}"), p);
+        }
+        for (n, p) in self.fusion.named_parameters() {
+            params.insert(format!("fusion.{n}"), p);
+        }
+        for (n, p) in self.mech_fault_head.named_parameters() {
+            params.insert(format!("mech_fault_head.{n}"), p);
+        }
+        for (n, p) in self.bearing_health_head.named_parameters() {
+            params.insert(format!("bearing_health_head.{n}"), p);
+        }
+        for (n, p) in self.vib_severity_head.named_parameters() {
+            params.insert(format!("vib_severity_head.{n}"), p);
+        }
+        for (n, p) in self.rul_head.named_parameters() {
+            params.insert(format!("rul_head.{n}"), p);
+        }
         params
     }
 
@@ -235,8 +250,11 @@ mod tests {
         let model = Vulcan::new();
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
         // Expected ~1.1M params
-        assert!(total > 900_000 && total < 1_300_000,
-            "Vulcan has {} params, expected ~1.1M", total);
+        assert!(
+            total > 900_000 && total < 1_300_000,
+            "Vulcan has {} params, expected ~1.1M",
+            total
+        );
     }
 
     #[test]

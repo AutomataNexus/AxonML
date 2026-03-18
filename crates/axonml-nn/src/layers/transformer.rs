@@ -68,7 +68,12 @@ impl TransformerEncoderLayer {
     }
 
     /// Creates a TransformerEncoderLayer with configurable norm ordering.
-    pub fn new_with_pre_norm(d_model: usize, nhead: usize, dim_feedforward: usize, pre_norm: bool) -> Self {
+    pub fn new_with_pre_norm(
+        d_model: usize,
+        nhead: usize,
+        dim_feedforward: usize,
+        pre_norm: bool,
+    ) -> Self {
         Self {
             self_attn: MultiHeadAttention::new(d_model, nhead),
             linear1: Linear::new(d_model, dim_feedforward),
@@ -88,7 +93,9 @@ impl TransformerEncoderLayer {
     pub fn forward_with_mask(&self, src: &Variable, src_mask: Option<&Variable>) -> Variable {
         if self.pre_norm {
             let normed = self.norm1.forward(src);
-            let attn_out = self.self_attn.attention(&normed, &normed, &normed, src_mask);
+            let attn_out = self
+                .self_attn
+                .attention(&normed, &normed, &normed, src_mask);
             let x = src.add_var(&attn_out);
 
             let normed = self.norm2.forward(&x);
@@ -203,7 +210,12 @@ impl TransformerDecoderLayer {
     }
 
     /// Creates a TransformerDecoderLayer with configurable norm ordering.
-    pub fn new_with_pre_norm(d_model: usize, nhead: usize, dim_feedforward: usize, pre_norm: bool) -> Self {
+    pub fn new_with_pre_norm(
+        d_model: usize,
+        nhead: usize,
+        dim_feedforward: usize,
+        pre_norm: bool,
+    ) -> Self {
         Self {
             self_attn: MultiHeadAttention::new(d_model, nhead),
             cross_attn: MultiHeadAttention::new(d_model, nhead),
@@ -234,11 +246,15 @@ impl TransformerDecoderLayer {
         if self.pre_norm {
             // Pre-norm: norm before each sublayer, inside residual branch
             let normed = self.norm1.forward(tgt);
-            let self_attn_out = self.self_attn.attention(&normed, &normed, &normed, tgt_mask);
+            let self_attn_out = self
+                .self_attn
+                .attention(&normed, &normed, &normed, tgt_mask);
             let x = tgt.add_var(&self_attn_out);
 
             let normed = self.norm2.forward(&x);
-            let cross_attn_out = self.cross_attn.attention(&normed, memory, memory, memory_mask);
+            let cross_attn_out = self
+                .cross_attn
+                .attention(&normed, memory, memory, memory_mask);
             let x = x.add_var(&cross_attn_out);
 
             let normed = self.norm3.forward(&x);
@@ -365,11 +381,21 @@ impl TransformerEncoder {
     /// With pre-norm, a final LayerNorm is always added after the last layer
     /// (required since pre-norm layers don't normalize their output).
     pub fn new_with_pre_norm(
-        d_model: usize, nhead: usize, dim_feedforward: usize,
-        num_layers: usize, pre_norm: bool,
+        d_model: usize,
+        nhead: usize,
+        dim_feedforward: usize,
+        num_layers: usize,
+        pre_norm: bool,
     ) -> Self {
         let layers = (0..num_layers)
-            .map(|_| TransformerEncoderLayer::new_with_pre_norm(d_model, nhead, dim_feedforward, pre_norm))
+            .map(|_| {
+                TransformerEncoderLayer::new_with_pre_norm(
+                    d_model,
+                    nhead,
+                    dim_feedforward,
+                    pre_norm,
+                )
+            })
             .collect();
 
         Self {
@@ -379,7 +405,12 @@ impl TransformerEncoder {
     }
 
     /// Creates a TransformerEncoder without final layer norm.
-    pub fn without_norm(d_model: usize, nhead: usize, dim_feedforward: usize, num_layers: usize) -> Self {
+    pub fn without_norm(
+        d_model: usize,
+        nhead: usize,
+        dim_feedforward: usize,
+        num_layers: usize,
+    ) -> Self {
         let layers = (0..num_layers)
             .map(|_| TransformerEncoderLayer::new(d_model, nhead, dim_feedforward))
             .collect();
@@ -411,9 +442,7 @@ impl Module for TransformerEncoder {
     }
 
     fn parameters(&self) -> Vec<Parameter> {
-        let mut params: Vec<Parameter> = self.layers.iter()
-            .flat_map(|l| l.parameters())
-            .collect();
+        let mut params: Vec<Parameter> = self.layers.iter().flat_map(|l| l.parameters()).collect();
         if let Some(ref norm) = self.norm {
             params.extend(norm.parameters());
         }
@@ -465,11 +494,21 @@ impl TransformerDecoder {
 
     /// Creates a TransformerDecoder with configurable norm ordering.
     pub fn new_with_pre_norm(
-        d_model: usize, nhead: usize, dim_feedforward: usize,
-        num_layers: usize, pre_norm: bool,
+        d_model: usize,
+        nhead: usize,
+        dim_feedforward: usize,
+        num_layers: usize,
+        pre_norm: bool,
     ) -> Self {
         let layers = (0..num_layers)
-            .map(|_| TransformerDecoderLayer::new_with_pre_norm(d_model, nhead, dim_feedforward, pre_norm))
+            .map(|_| {
+                TransformerDecoderLayer::new_with_pre_norm(
+                    d_model,
+                    nhead,
+                    dim_feedforward,
+                    pre_norm,
+                )
+            })
             .collect();
 
         Self {
@@ -479,7 +518,12 @@ impl TransformerDecoder {
     }
 
     /// Creates a TransformerDecoder without final layer norm.
-    pub fn without_norm(d_model: usize, nhead: usize, dim_feedforward: usize, num_layers: usize) -> Self {
+    pub fn without_norm(
+        d_model: usize,
+        nhead: usize,
+        dim_feedforward: usize,
+        num_layers: usize,
+    ) -> Self {
         let layers = (0..num_layers)
             .map(|_| TransformerDecoderLayer::new(d_model, nhead, dim_feedforward))
             .collect();
@@ -525,9 +569,7 @@ impl Module for TransformerDecoder {
     }
 
     fn parameters(&self) -> Vec<Parameter> {
-        let mut params: Vec<Parameter> = self.layers.iter()
-            .flat_map(|l| l.parameters())
-            .collect();
+        let mut params: Vec<Parameter> = self.layers.iter().flat_map(|l| l.parameters()).collect();
         if let Some(ref norm) = self.norm {
             params.extend(norm.parameters());
         }
@@ -621,8 +663,20 @@ impl Seq2SeqTransformer {
         dim_feedforward: usize,
     ) -> Self {
         Self {
-            encoder: TransformerEncoder::new_with_pre_norm(d_model, nhead, dim_feedforward, num_encoder_layers, true),
-            decoder: TransformerDecoder::new_with_pre_norm(d_model, nhead, dim_feedforward, num_decoder_layers, true),
+            encoder: TransformerEncoder::new_with_pre_norm(
+                d_model,
+                nhead,
+                dim_feedforward,
+                num_encoder_layers,
+                true,
+            ),
+            decoder: TransformerDecoder::new_with_pre_norm(
+                d_model,
+                nhead,
+                dim_feedforward,
+                num_decoder_layers,
+                true,
+            ),
             d_model,
             nhead,
         }
@@ -650,7 +704,8 @@ impl Seq2SeqTransformer {
         memory_mask: Option<&Variable>,
     ) -> Variable {
         let memory = self.encoder.forward_with_mask(src, src_mask);
-        self.decoder.forward_with_memory(tgt, &memory, tgt_mask, memory_mask)
+        self.decoder
+            .forward_with_memory(tgt, &memory, tgt_mask, memory_mask)
     }
 
     /// Encode source sequence only (useful for inference).
@@ -666,7 +721,8 @@ impl Seq2SeqTransformer {
         tgt_mask: Option<&Variable>,
         memory_mask: Option<&Variable>,
     ) -> Variable {
-        self.decoder.forward_with_memory(tgt, memory, tgt_mask, memory_mask)
+        self.decoder
+            .forward_with_memory(tgt, memory, tgt_mask, memory_mask)
     }
 
     /// Generates a causal (upper-triangular) mask for autoregressive decoding.

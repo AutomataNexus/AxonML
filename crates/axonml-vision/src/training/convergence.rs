@@ -336,14 +336,14 @@ mod tests {
             let pixels: Vec<f32> = (0..3 * 64 * 64)
                 .map(|i| ((i as f32 * 0.001 + seed).sin() * 0.5 + 0.5))
                 .collect();
-            let frame = Variable::new(
-                Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(),
-                false,
-            );
+            let frame = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
             let gt_faces = vec![[10.0, 10.0, 30.0, 30.0]];
 
             let loss = crate::training::phantom_training_step(
-                &mut model, &frame, &gt_faces, &mut optimizer,
+                &mut model,
+                &frame,
+                &gt_faces,
+                &mut optimizer,
             );
             losses.push(loss);
         }
@@ -468,16 +468,12 @@ mod tests {
             let pixels: Vec<f32> = (0..3 * 64 * 64)
                 .map(|i| ((i as f32 * 0.001 + seed).sin() * 0.5 + 0.5))
                 .collect();
-            let input = Variable::new(
-                Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(),
-                false,
-            );
+            let input = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
 
             optimizer.zero_grad();
             let train_out = model.forward_train(&input);
-            let (total_loss, _cls, _box, _dfl) = loss_fn.compute(
-                &train_out, &gt_boxes, &gt_classes, 2,
-            );
+            let (total_loss, _cls, _box, _dfl) =
+                loss_fn.compute(&train_out, &gt_boxes, &gt_classes, 2);
 
             let val = total_loss.data().to_vec()[0];
             losses.push(val);

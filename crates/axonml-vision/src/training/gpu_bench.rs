@@ -221,18 +221,28 @@ mod tests {
         // Realistic layer sizes from Helios backbone
         let configs: &[(usize, usize, usize, usize, usize)] = &[
             // (in_ch, out_ch, spatial, kernel, label_id)
-            (3, 16, 320, 3, 0),    // stem: 3→16, 320x320, 3x3 stride 2
-            (16, 32, 160, 3, 1),   // stage1: 16→32, 160x160
-            (32, 64, 80, 3, 2),    // stage2: 32→64, 80x80
-            (64, 128, 40, 3, 3),   // stage3: 64→128, 40x40
-            (128, 256, 20, 3, 4),  // stage4: 128→256, 20x20
+            (3, 16, 320, 3, 0),   // stem: 3→16, 320x320, 3x3 stride 2
+            (16, 32, 160, 3, 1),  // stage1: 16→32, 160x160
+            (32, 64, 80, 3, 2),   // stage2: 32→64, 80x80
+            (64, 128, 40, 3, 3),  // stage3: 64→128, 40x40
+            (128, 256, 20, 3, 4), // stage4: 128→256, 20x20
         ];
-        let labels = ["stem 3→16 320²", "s1 16→32 160²", "s2 32→64 80²", "s3 64→128 40²", "s4 128→256 20²"];
+        let labels = [
+            "stem 3→16 320²",
+            "s1 16→32 160²",
+            "s2 32→64 80²",
+            "s3 64→128 40²",
+            "s4 128→256 20²",
+        ];
 
         for &(ic, oc, spatial, ks, idx) in configs {
             let conv = Conv2d::with_options(ic, oc, (ks, ks), (1, 1), (ks / 2, ks / 2), true);
             let input = Variable::new(
-                Tensor::from_vec(vec![0.5f32; ic * spatial * spatial], &[1, ic, spatial, spatial]).unwrap(),
+                Tensor::from_vec(
+                    vec![0.5f32; ic * spatial * spatial],
+                    &[1, ic, spatial, spatial],
+                )
+                .unwrap(),
                 false,
             );
 

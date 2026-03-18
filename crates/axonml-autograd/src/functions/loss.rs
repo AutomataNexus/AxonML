@@ -146,7 +146,9 @@ impl GradientFunction for CrossEntropyLossBackward {
         // grad = softmax + one_hot (i.e., softmax - 1 at target positions)
         // If softmax is on GPU, move one_hot there and do GPU add
         let grad = if self.saved_softmax.device().is_gpu() {
-            let one_hot_gpu = one_hot_tensor.to_device(self.saved_softmax.device()).unwrap();
+            let one_hot_gpu = one_hot_tensor
+                .to_device(self.saved_softmax.device())
+                .unwrap();
             self.saved_softmax.add(&one_hot_gpu).unwrap()
         } else {
             self.saved_softmax.add(&one_hot_tensor).unwrap()

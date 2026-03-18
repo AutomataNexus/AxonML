@@ -68,8 +68,11 @@ impl PatchCoreBackbone {
 
     fn forward(&self, x: &Variable) -> Variable {
         let x = self.relu.forward(&self.bn1.forward(&self.conv1.forward(x)));
-        let x = self.relu.forward(&self.bn2.forward(&self.conv2.forward(&x)));
-        self.relu.forward(&self.bn3.forward(&self.conv3.forward(&x)))
+        let x = self
+            .relu
+            .forward(&self.bn2.forward(&self.conv2.forward(&x)));
+        self.relu
+            .forward(&self.bn3.forward(&self.conv3.forward(&x)))
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -245,7 +248,10 @@ impl PatchCore {
         }
 
         let mean = distances.iter().sum::<f32>() / distances.len() as f32;
-        let var = distances.iter().map(|&d| (d - mean) * (d - mean)).sum::<f32>()
+        let var = distances
+            .iter()
+            .map(|&d| (d - mean) * (d - mean))
+            .sum::<f32>()
             / distances.len() as f32;
         mean + 3.0 * var.sqrt()
     }
@@ -310,7 +316,8 @@ impl TeacherNet {
 
     fn forward(&self, x: &Variable) -> Variable {
         let x = self.relu.forward(&self.bn1.forward(&self.conv1.forward(x)));
-        self.relu.forward(&self.bn2.forward(&self.conv2.forward(&x)))
+        self.relu
+            .forward(&self.bn2.forward(&self.conv2.forward(&x)))
     }
 
     #[allow(dead_code)]
@@ -337,7 +344,8 @@ impl StudentNet {
 
     fn forward(&self, x: &Variable) -> Variable {
         let x = self.relu.forward(&self.bn1.forward(&self.conv1.forward(x)));
-        self.relu.forward(&self.bn2.forward(&self.conv2.forward(&x)))
+        self.relu
+            .forward(&self.bn2.forward(&self.conv2.forward(&x)))
     }
 
     fn parameters(&self) -> Vec<Parameter> {

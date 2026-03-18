@@ -15,9 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
-use axonml_nn::{
-    BatchNorm2d, Conv2d, ConvTranspose2d, Linear, Module, Parameter, ReLU,
-};
+use axonml_nn::{BatchNorm2d, Conv2d, ConvTranspose2d, Linear, Module, Parameter, ReLU};
 use axonml_tensor::Tensor;
 
 use crate::ops::{interpolate_var, DepthMap, InterpolateMode};
@@ -152,7 +150,9 @@ impl DPTFusion {
             Some(r) => x.add_var(r),
             None => x.clone(),
         };
-        let out = self.relu.forward(&self.bn.forward(&self.conv1.forward(&out)));
+        let out = self
+            .relu
+            .forward(&self.bn.forward(&self.conv1.forward(&out)));
         self.conv2.forward(&out)
     }
 
@@ -191,8 +191,12 @@ impl DPT {
 
         Self {
             patch_embed: Conv2d::with_options(
-                3, d_model, (patch_size, patch_size),
-                (patch_size, patch_size), (0, 0), true,
+                3,
+                d_model,
+                (patch_size, patch_size),
+                (patch_size, patch_size),
+                (0, 0),
+                true,
             ),
             encoder_layers,
             reassemble,
@@ -256,9 +260,7 @@ impl Module for DPT {
         // Flatten to tokens: [N, d_model, pH, pW] -> [N, pH*pW, d_model]
         let seq_len = ph * pw;
         // [N, d_model, pH, pW] -> [N, d_model, pH*pW] -> transpose -> [N, pH*pW, d_model]
-        let mut tokens = patches
-            .reshape(&[n, self.d_model, seq_len])
-            .transpose(1, 2);
+        let mut tokens = patches.reshape(&[n, self.d_model, seq_len]).transpose(1, 2);
 
         // Extract features at 4 depths
         let quarter = self.num_layers / 4;
@@ -405,21 +407,35 @@ impl FastDepth {
 impl Module for FastDepth {
     fn forward(&self, x: &Variable) -> Variable {
         // Encoder
-        let e1 = self.relu.forward(&self.enc_bn1.forward(&self.enc_conv1.forward(x)));
-        let e2 = self.relu.forward(&self.enc_bn2.forward(
-            &self.enc_pw1.forward(&self.enc_dw1.forward(&e1)),
-        ));
-        let e3 = self.relu.forward(&self.enc_bn3.forward(
-            &self.enc_pw2.forward(&self.enc_dw2.forward(&e2)),
-        ));
-        let e4 = self.relu.forward(&self.enc_bn4.forward(
-            &self.enc_pw3.forward(&self.enc_dw3.forward(&e3)),
-        ));
+        let e1 = self
+            .relu
+            .forward(&self.enc_bn1.forward(&self.enc_conv1.forward(x)));
+        let e2 = self.relu.forward(
+            &self
+                .enc_bn2
+                .forward(&self.enc_pw1.forward(&self.enc_dw1.forward(&e1))),
+        );
+        let e3 = self.relu.forward(
+            &self
+                .enc_bn3
+                .forward(&self.enc_pw2.forward(&self.enc_dw2.forward(&e2))),
+        );
+        let e4 = self.relu.forward(
+            &self
+                .enc_bn4
+                .forward(&self.enc_pw3.forward(&self.enc_dw3.forward(&e3))),
+        );
 
         // Decoder
-        let d1 = self.relu.forward(&self.dec_bn1.forward(&self.dec1.forward(&e4)));
-        let d2 = self.relu.forward(&self.dec_bn2.forward(&self.dec2.forward(&d1)));
-        let d3 = self.relu.forward(&self.dec_bn3.forward(&self.dec3.forward(&d2)));
+        let d1 = self
+            .relu
+            .forward(&self.dec_bn1.forward(&self.dec1.forward(&e4)));
+        let d2 = self
+            .relu
+            .forward(&self.dec_bn2.forward(&self.dec2.forward(&d1)));
+        let d3 = self
+            .relu
+            .forward(&self.dec_bn3.forward(&self.dec3.forward(&d2)));
 
         // Depth prediction (ReLU to ensure positive depth)
         self.relu.forward(&self.depth_conv.forward(&d3))
@@ -506,7 +522,10 @@ mod tests {
         assert!(!params.is_empty());
 
         // Should be lightweight
-        let total: usize = params.iter().map(|p| p.variable().data().to_vec().len()).sum();
+        let total: usize = params
+            .iter()
+            .map(|p| p.variable().data().to_vec().len())
+            .sum();
         assert!(total < 4_000_000);
     }
 

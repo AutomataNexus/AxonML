@@ -70,11 +70,8 @@ impl GradientFunction for EmbeddingBackward {
             }
         }
 
-        let grad_tensor = Tensor::from_vec(
-            weight_grad,
-            &[self.num_embeddings, self.embedding_dim],
-        )
-        .unwrap();
+        let grad_tensor =
+            Tensor::from_vec(weight_grad, &[self.num_embeddings, self.embedding_dim]).unwrap();
         vec![Some(grad_tensor)]
     }
 
@@ -224,14 +221,16 @@ impl Embedding {
             weight_data.embedding_gather_cuda(&gather_idx, &output_shape)
         } else {
             let weight_vec = weight_data.to_vec();
-            let output_data: Vec<f32> = gather_idx.iter().map(|&i| weight_vec[i as usize]).collect();
+            let output_data: Vec<f32> =
+                gather_idx.iter().map(|&i| weight_vec[i as usize]).collect();
             Tensor::from_vec(output_data, &output_shape).unwrap()
         };
 
         #[cfg(not(feature = "cuda"))]
         let output_tensor = {
             let weight_vec = weight_data.to_vec();
-            let output_data: Vec<f32> = gather_idx.iter().map(|&i| weight_vec[i as usize]).collect();
+            let output_data: Vec<f32> =
+                gather_idx.iter().map(|&i| weight_vec[i as usize]).collect();
             Tensor::from_vec(output_data, &output_shape).unwrap()
         };
 

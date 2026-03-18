@@ -230,18 +230,13 @@ mod tests {
             0--Parade/0_Parade_002.jpg\n1\n\
             100 100 50 60 0 0 0 0 0 0\n";
 
-        std::fs::write(
-            split_dir.join("wider_face_train_bbx_gt.txt"),
-            anno_content,
+        std::fs::write(split_dir.join("wider_face_train_bbx_gt.txt"), anno_content).unwrap();
+
+        let entries = WiderFaceDataset::parse_annotations(
+            &split_dir.join("wider_face_train_bbx_gt.txt"),
+            &image_dir,
         )
         .unwrap();
-
-        let entries =
-            WiderFaceDataset::parse_annotations(
-                &split_dir.join("wider_face_train_bbx_gt.txt"),
-                &image_dir,
-            )
-            .unwrap();
 
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].bboxes.len(), 3);

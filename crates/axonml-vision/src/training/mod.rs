@@ -24,10 +24,11 @@ pub mod gpu_bench;
 pub mod helios_trainer;
 pub mod integration;
 pub mod metrics;
-pub use assign::{assign_fcos_targets, assign_phantom_targets, fcos_targets_to_tensors, FcosTarget};
+pub use assign::{
+    assign_fcos_targets, assign_phantom_targets, fcos_targets_to_tensors, FcosTarget,
+};
 pub use augment::{
-    DetAugPipeline, DetRandomAffine, DetRandomHFlip, DetSample, HSVJitter, LetterBox, MixUp,
-    Mosaic,
+    DetAugPipeline, DetRandomAffine, DetRandomHFlip, DetSample, HSVJitter, LetterBox, MixUp, Mosaic,
 };
 pub use coco_bench::evaluate_helios_coco;
 pub use ema::ModelEMA;
@@ -87,7 +88,7 @@ impl Default for TrainConfig {
 pub fn nexus_training_step(
     model: &mut crate::models::nexus::Nexus,
     frame: &Variable,
-    gt_boxes: &[[f32; 4]],  // pixel coords
+    gt_boxes: &[[f32; 4]], // pixel coords
     gt_classes: &[usize],
     optimizer: &mut dyn axonml_optim::Optimizer,
 ) -> f32 {
@@ -99,10 +100,14 @@ pub fn nexus_training_step(
 
     // Target assignment
     let strides = [8.0f32, 16.0, 32.0];
-    let feat_sizes: Vec<(usize, usize)> = train_out.scales.iter().map(|s| {
-        let cls_shape = s.cls_logits.shape();
-        (cls_shape[2], cls_shape[3])
-    }).collect();
+    let feat_sizes: Vec<(usize, usize)> = train_out
+        .scales
+        .iter()
+        .map(|s| {
+            let cls_shape = s.cls_logits.shape();
+            (cls_shape[2], cls_shape[3])
+        })
+        .collect();
     let size_ranges = vec![(0.0, 64.0), (64.0, 128.0), (128.0, f32::MAX)];
 
     let targets = assign_fcos_targets(gt_boxes, gt_classes, &feat_sizes, &strides, &size_ranges);
@@ -125,7 +130,9 @@ pub fn nexus_training_step(
         let _cls_tgt = Variable::new(cls_target.clone(), false);
 
         // Convert class targets: -1 (bg) → 0, >=0 → 1 (for binary focal loss)
-        let binary_target_data: Vec<f32> = cls_target.to_vec().iter()
+        let binary_target_data: Vec<f32> = cls_target
+            .to_vec()
+            .iter()
             .map(|&v| if v >= 0.0 { 1.0 } else { 0.0 })
             .collect();
         let binary_target = Variable::new(
@@ -142,7 +149,9 @@ pub fn nexus_training_step(
         let bbox_loss = if num_pos > 0 {
             let bbox_pred = scale_out.bbox_pred.reshape(&[fh * fw, 4]);
             let bbox_tgt = Variable::new(bbox_target.clone(), false);
-            smooth_l1.compute(&bbox_pred, &bbox_tgt).mul_scalar(num_pos as f32 / (fh * fw) as f32)
+            smooth_l1
+                .compute(&bbox_pred, &bbox_tgt)
+                .mul_scalar(num_pos as f32 / (fh * fw) as f32)
         } else {
             Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false)
         };
@@ -167,7 +176,7 @@ pub fn nexus_training_step(
 pub fn phantom_training_step(
     model: &mut crate::models::phantom::Phantom,
     frame: &Variable,
-    gt_faces: &[[f32; 4]],  // pixel coords
+    gt_faces: &[[f32; 4]], // pixel coords
     optimizer: &mut dyn axonml_optim::Optimizer,
 ) -> f32 {
     use crate::losses::FocalLoss;

@@ -35,7 +35,11 @@ pub struct DetSample {
 impl DetSample {
     /// Create from components.
     pub fn new(image: Tensor<f32>, boxes: Vec<[f32; 4]>, classes: Vec<usize>) -> Self {
-        Self { image, boxes, classes }
+        Self {
+            image,
+            boxes,
+            classes,
+        }
     }
 
     /// Image height.
@@ -71,7 +75,9 @@ pub struct Mosaic {
 impl Mosaic {
     /// Create mosaic with target output size.
     pub fn new(target_h: usize, target_w: usize) -> Self {
-        Self { target_size: (target_h, target_w) }
+        Self {
+            target_size: (target_h, target_w),
+        }
     }
 
     /// Apply mosaic to 4 samples. Returns a single merged sample.
@@ -94,9 +100,9 @@ impl Mosaic {
 
         // Quadrant regions: (dst_x_start, dst_y_start, dst_w, dst_h)
         let regions = [
-            (0, 0, cx, cy),           // top-left
-            (cx, 0, tw - cx, cy),     // top-right
-            (0, cy, cx, th - cy),     // bottom-left
+            (0, 0, cx, cy),             // top-left
+            (cx, 0, tw - cx, cy),       // top-right
+            (0, cy, cx, th - cy),       // bottom-left
             (cx, cy, tw - cx, th - cy), // bottom-right
         ];
 
@@ -202,7 +208,9 @@ impl MixUp {
         let a_data = a.image.to_vec();
 
         // Blend pixels
-        let blended: Vec<f32> = a_data.iter().zip(b_data.iter())
+        let blended: Vec<f32> = a_data
+            .iter()
+            .zip(b_data.iter())
             .map(|(&va, &vb)| alpha * va + (1.0 - alpha) * vb)
             .collect();
 
@@ -216,12 +224,7 @@ impl MixUp {
         let sy = h as f32 / b.height() as f32;
 
         for (bi, bbox) in b.boxes.iter().enumerate() {
-            boxes.push([
-                bbox[0] * sx,
-                bbox[1] * sy,
-                bbox[2] * sx,
-                bbox[3] * sy,
-            ]);
+            boxes.push([bbox[0] * sx, bbox[1] * sy, bbox[2] * sx, bbox[3] * sy]);
             classes.push(b.classes[bi]);
         }
 
@@ -274,9 +277,11 @@ impl DetRandomHFlip {
 
         // Flip bounding boxes
         let w_f = w as f32;
-        let boxes: Vec<[f32; 4]> = sample.boxes.iter().map(|[x1, y1, x2, y2]| {
-            [w_f - x2, *y1, w_f - x1, *y2]
-        }).collect();
+        let boxes: Vec<[f32; 4]> = sample
+            .boxes
+            .iter()
+            .map(|[x1, y1, x2, y2]| [w_f - x2, *y1, w_f - x1, *y2])
+            .collect();
 
         let image = Tensor::from_vec(flipped, &[c, h, w]).unwrap();
         DetSample::new(image, boxes, sample.classes.clone())
@@ -398,7 +403,12 @@ impl DetRandomAffine {
 
     /// Create with custom parameters.
     pub fn with_params(degrees: f32, scale: f32, translate: f32, shear: f32) -> Self {
-        Self { degrees, scale, translate, shear }
+        Self {
+            degrees,
+            scale,
+            translate,
+            shear,
+        }
     }
 
     /// Apply random affine. Returns transformed sample at the same size.
@@ -411,22 +421,34 @@ impl DetRandomAffine {
         // Random parameters (guard empty ranges)
         let angle = if self.degrees > 0.0 {
             rng.gen_range(-self.degrees..self.degrees) * std::f32::consts::PI / 180.0
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let scale = if self.scale > 0.0 {
             rng.gen_range(1.0 - self.scale..1.0 + self.scale)
-        } else { 1.0 };
+        } else {
+            1.0
+        };
         let tx = if self.translate > 0.0 {
             rng.gen_range(-self.translate..self.translate) * w as f32
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let ty = if self.translate > 0.0 {
             rng.gen_range(-self.translate..self.translate) * h as f32
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let shear_x = if self.shear > 0.0 {
             rng.gen_range(-self.shear..self.shear) * std::f32::consts::PI / 180.0
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let shear_y = if self.shear > 0.0 {
             rng.gen_range(-self.shear..self.shear) * std::f32::consts::PI / 180.0
-        } else { 0.0 };
+        } else {
+            0.0
+        };
 
         // Affine matrix (2x3): maps dst -> src
         let cos_a = angle.cos() * scale;
@@ -483,10 +505,7 @@ impl DetRandomAffine {
 
         for (bi, bbox) in sample.boxes.iter().enumerate() {
             let [x1, y1, x2, y2] = *bbox;
-            let corners = [
-                (x1, y1), (x2, y1),
-                (x1, y2), (x2, y2),
-            ];
+            let corners = [(x1, y1), (x2, y1), (x1, y2), (x2, y2)];
 
             let mut min_x = f32::MAX;
             let mut min_y = f32::MAX;
@@ -542,7 +561,9 @@ pub struct LetterBox {
 impl LetterBox {
     /// Create letterbox for target size.
     pub fn new(target_h: usize, target_w: usize) -> Self {
-        Self { target_size: (target_h, target_w) }
+        Self {
+            target_size: (target_h, target_w),
+        }
     }
 
     /// Apply letterbox resize.
@@ -578,14 +599,18 @@ impl LetterBox {
         }
 
         // Transform boxes
-        let boxes: Vec<[f32; 4]> = sample.boxes.iter().map(|[x1, y1, x2, y2]| {
-            [
-                x1 * scale + pad_x as f32,
-                y1 * scale + pad_y as f32,
-                x2 * scale + pad_x as f32,
-                y2 * scale + pad_y as f32,
-            ]
-        }).collect();
+        let boxes: Vec<[f32; 4]> = sample
+            .boxes
+            .iter()
+            .map(|[x1, y1, x2, y2]| {
+                [
+                    x1 * scale + pad_x as f32,
+                    y1 * scale + pad_y as f32,
+                    x2 * scale + pad_x as f32,
+                    y2 * scale + pad_y as f32,
+                ]
+            })
+            .collect();
 
         let image = Tensor::from_vec(dst_data, &[channels, th, tw]).unwrap();
         DetSample::new(image, boxes, sample.classes.clone())
@@ -669,19 +694,20 @@ impl DetAugPipeline {
         let mut rng = rand::thread_rng();
 
         // Step 1: Mosaic
-        let mut sample = if self.use_mosaic && others.len() >= 3 && rng.gen::<f32>() < self.mosaic_prob {
-            let (th, tw) = self.letterbox.target_size;
-            let mosaic = Mosaic::new(th, tw);
-            let four = vec![
-                primary.clone(),
-                others[0].clone(),
-                others[1].clone(),
-                others[2].clone(),
-            ];
-            mosaic.apply(&four)
-        } else {
-            primary.clone()
-        };
+        let mut sample =
+            if self.use_mosaic && others.len() >= 3 && rng.gen::<f32>() < self.mosaic_prob {
+                let (th, tw) = self.letterbox.target_size;
+                let mosaic = Mosaic::new(th, tw);
+                let four = vec![
+                    primary.clone(),
+                    others[0].clone(),
+                    others[1].clone(),
+                    others[2].clone(),
+                ];
+                mosaic.apply(&four)
+            } else {
+                primary.clone()
+            };
 
         // Step 2: MixUp
         if self.use_mixup && rng.gen::<f32>() < self.mixup_prob {

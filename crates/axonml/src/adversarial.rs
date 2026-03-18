@@ -55,10 +55,7 @@ pub struct AdversarialTrainer {
 #[cfg(feature = "nn")]
 impl AdversarialTrainer {
     /// Creates a new adversarial trainer.
-    pub fn new(
-        gen_optimizer: Box<dyn Optimizer>,
-        disc_optimizer: Box<dyn Optimizer>,
-    ) -> Self {
+    pub fn new(gen_optimizer: Box<dyn Optimizer>, disc_optimizer: Box<dyn Optimizer>) -> Self {
         Self {
             gen_optimizer,
             disc_optimizer,
@@ -182,29 +179,32 @@ impl AdversarialTrainer {
 /// let adv_input = fgsm_attack(&input, &grad, 0.03);
 /// ```
 #[cfg(feature = "nn")]
-pub fn fgsm_attack(
-    input: &Variable,
-    grad: &Tensor<f32>,
-    epsilon: f32,
-) -> Variable {
+pub fn fgsm_attack(input: &Variable, grad: &Tensor<f32>, epsilon: f32) -> Variable {
     let input_data = input.data().to_vec();
     let grad_data = grad.to_vec();
 
-    assert_eq!(input_data.len(), grad_data.len(), "Input and gradient must have same size");
+    assert_eq!(
+        input_data.len(),
+        grad_data.len(),
+        "Input and gradient must have same size"
+    );
 
     let perturbed: Vec<f32> = input_data
         .iter()
         .zip(grad_data.iter())
         .map(|(x, g)| {
-            let sign = if *g > 0.0 { 1.0 } else if *g < 0.0 { -1.0 } else { 0.0 };
+            let sign = if *g > 0.0 {
+                1.0
+            } else if *g < 0.0 {
+                -1.0
+            } else {
+                0.0
+            };
             x + epsilon * sign
         })
         .collect();
 
-    Variable::new(
-        Tensor::from_vec(perturbed, &input.shape()).unwrap(),
-        false,
-    )
+    Variable::new(Tensor::from_vec(perturbed, &input.shape()).unwrap(), false)
 }
 
 // =============================================================================
@@ -262,10 +262,7 @@ where
 
     for _ in 0..num_steps {
         // Create variable with gradient tracking
-        let adv_input = Variable::new(
-            Tensor::from_vec(perturbed.clone(), &shape).unwrap(),
-            true,
-        );
+        let adv_input = Variable::new(Tensor::from_vec(perturbed.clone(), &shape).unwrap(), true);
 
         // Forward + loss
         let output = model.forward(&adv_input);
@@ -276,7 +273,13 @@ where
         if let Some(grad) = adv_input.grad() {
             let grad_data = grad.to_vec();
             for i in 0..n {
-                let sign = if grad_data[i] > 0.0 { 1.0 } else if grad_data[i] < 0.0 { -1.0 } else { 0.0 };
+                let sign = if grad_data[i] > 0.0 {
+                    1.0
+                } else if grad_data[i] < 0.0 {
+                    -1.0
+                } else {
+                    0.0
+                };
                 perturbed[i] += alpha * sign;
 
                 // Project back to epsilon-ball around original
@@ -286,10 +289,7 @@ where
         }
     }
 
-    Variable::new(
-        Tensor::from_vec(perturbed, &shape).unwrap(),
-        false,
-    )
+    Variable::new(Tensor::from_vec(perturbed, &shape).unwrap(), false)
 }
 
 // =============================================================================
@@ -328,7 +328,15 @@ where
     let alpha = epsilon / pgd_steps.max(1) as f32 * 2.0;
 
     // Generate adversarial examples
-    let adv_input = pgd_attack(model, clean_input, target, epsilon, alpha, pgd_steps, &loss_fn);
+    let adv_input = pgd_attack(
+        model,
+        clean_input,
+        target,
+        epsilon,
+        alpha,
+        pgd_steps,
+        &loss_fn,
+    );
 
     // Train on combined clean + adversarial
     optimizer.zero_grad();
@@ -357,16 +365,13 @@ where
 #[cfg(feature = "nn")]
 mod tests {
     use super::*;
-    use axonml_nn::{Linear, Sequential, ReLU};
+    use axonml_nn::{Linear, ReLU, Sequential};
     use std::ops::Neg;
 
     #[test]
     fn test_fgsm_attack_perturbation_bound() {
         let input_data = vec![1.0, 2.0, 3.0, 4.0];
-        let input = Variable::new(
-            Tensor::from_vec(input_data.clone(), &[1, 4]).unwrap(),
-            true,
-        );
+        let input = Variable::new(Tensor::from_vec(input_data.clone(), &[1, 4]).unwrap(), true);
 
         // Gradient pointing in positive direction
         let grad = Tensor::from_vec(vec![0.5, -0.3, 0.0, 1.0], &[1, 4]).unwrap();
@@ -378,8 +383,12 @@ mod tests {
         // Check perturbation is within epsilon bound
         for (orig, perturbed) in input_data.iter().zip(adv_data.iter()) {
             let delta = (perturbed - orig).abs();
-            assert!(delta <= epsilon + 1e-6,
-                "Perturbation {} exceeds epsilon {}", delta, epsilon);
+            assert!(
+                delta <= epsilon + 1e-6,
+                "Perturbation {} exceeds epsilon {}",
+                delta,
+                epsilon
+            );
         }
     }
 
@@ -395,17 +404,14 @@ mod tests {
         let adv = fgsm_attack(&input, &grad, epsilon);
         let adv_data = adv.data().to_vec();
 
-        assert!((adv_data[0] - 0.5).abs() < 1e-6);  // positive grad → +epsilon
+        assert!((adv_data[0] - 0.5).abs() < 1e-6); // positive grad → +epsilon
         assert!((adv_data[1] - (-0.5)).abs() < 1e-6); // negative grad → -epsilon
-        assert!((adv_data[2] - 0.0).abs() < 1e-6);    // zero grad → no change
+        assert!((adv_data[2] - 0.0).abs() < 1e-6); // zero grad → no change
     }
 
     #[test]
     fn test_fgsm_attack_shape_preserved() {
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 12], &[3, 4]).unwrap(),
-            true,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 12], &[3, 4]).unwrap(), true);
         let grad = Tensor::from_vec(vec![0.1; 12], &[3, 4]).unwrap();
 
         let adv = fgsm_attack(&input, &grad, 0.01);
@@ -414,71 +420,45 @@ mod tests {
 
     #[test]
     fn test_pgd_attack_shape() {
-        let model = Sequential::new()
-            .add(Linear::new(4, 2));
+        let model = Sequential::new().add(Linear::new(4, 2));
 
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 4], &[1, 4]).unwrap(),
-            true,
-        );
-        let target = Variable::new(
-            Tensor::from_vec(vec![1.0, 0.0], &[1, 2]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 4], &[1, 4]).unwrap(), true);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[1, 2]).unwrap(), false);
 
-        let adv = pgd_attack(
-            &model,
-            &input,
-            &target,
-            0.1,
-            0.03,
-            3,
-            |pred, tgt| {
-                // Simple MSE loss
-                let diff = pred.add_var(&tgt.neg());
-                let sq = diff.mul_var(&diff);
-                sq.mean()
-            },
-        );
+        let adv = pgd_attack(&model, &input, &target, 0.1, 0.03, 3, |pred, tgt| {
+            // Simple MSE loss
+            let diff = pred.add_var(&tgt.neg());
+            let sq = diff.mul_var(&diff);
+            sq.mean()
+        });
 
         assert_eq!(adv.shape(), vec![1, 4]);
     }
 
     #[test]
     fn test_pgd_attack_within_epsilon() {
-        let model = Sequential::new()
-            .add(Linear::new(4, 2));
+        let model = Sequential::new().add(Linear::new(4, 2));
 
         let input_data = vec![1.0, 2.0, 3.0, 4.0];
-        let input = Variable::new(
-            Tensor::from_vec(input_data.clone(), &[1, 4]).unwrap(),
-            true,
-        );
-        let target = Variable::new(
-            Tensor::from_vec(vec![1.0, 0.0], &[1, 2]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(input_data.clone(), &[1, 4]).unwrap(), true);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[1, 2]).unwrap(), false);
 
         let epsilon = 0.1;
-        let adv = pgd_attack(
-            &model,
-            &input,
-            &target,
-            epsilon,
-            0.03,
-            5,
-            |pred, tgt| {
-                let diff = pred.add_var(&tgt.neg());
-                let sq = diff.mul_var(&diff);
-                sq.mean()
-            },
-        );
+        let adv = pgd_attack(&model, &input, &target, epsilon, 0.03, 5, |pred, tgt| {
+            let diff = pred.add_var(&tgt.neg());
+            let sq = diff.mul_var(&diff);
+            sq.mean()
+        });
 
         let adv_data = adv.data().to_vec();
         for (orig, perturbed) in input_data.iter().zip(adv_data.iter()) {
             let delta = (perturbed - orig).abs();
-            assert!(delta <= epsilon + 1e-5,
-                "PGD perturbation {} exceeds epsilon {}", delta, epsilon);
+            assert!(
+                delta <= epsilon + 1e-5,
+                "PGD perturbation {} exceeds epsilon {}",
+                delta,
+                epsilon
+            );
         }
     }
 
@@ -486,10 +466,8 @@ mod tests {
     fn test_adversarial_trainer_creation() {
         use axonml_optim::Adam;
 
-        let gen_model = Sequential::new()
-            .add(Linear::new(10, 4));
-        let disc_model = Sequential::new()
-            .add(Linear::new(4, 1));
+        let gen_model = Sequential::new().add(Linear::new(10, 4));
+        let disc_model = Sequential::new().add(Linear::new(4, 1));
 
         let gen_opt = Box::new(Adam::new(gen_model.parameters(), 0.001));
         let disc_opt = Box::new(Adam::new(disc_model.parameters(), 0.001));

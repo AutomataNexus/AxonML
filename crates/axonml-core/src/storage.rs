@@ -24,9 +24,9 @@ use crate::dtype::Scalar;
 use crate::error::{Error, Result};
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::CudaSlice;
-#[cfg(feature = "cuda")]
 use cudarc::driver::safe::DeviceSlice;
+#[cfg(feature = "cuda")]
+use cudarc::driver::CudaSlice;
 
 // =============================================================================
 // Storage Data Enum
@@ -66,7 +66,10 @@ impl Drop for PooledCudaSlice {
 impl PooledCudaSlice {
     /// Create a new pool-managed CUDA slice.
     pub fn new(slice: CudaSlice<f32>, pool_managed: bool) -> Self {
-        Self { slice: Some(slice), pool_managed }
+        Self {
+            slice: Some(slice),
+            pool_managed,
+        }
     }
 
     /// Get a reference to the underlying CudaSlice.
@@ -278,9 +281,7 @@ impl<T: Scalar> Storage<T> {
     pub fn to_vec(&self) -> Vec<T> {
         let inner = self.inner.read();
         match &inner.data {
-            StorageData::Cpu(cpu_data) => {
-                cpu_data[self.offset..self.offset + self.len].to_vec()
-            }
+            StorageData::Cpu(cpu_data) => cpu_data[self.offset..self.offset + self.len].to_vec(),
             #[cfg(feature = "cuda")]
             StorageData::Cuda(_) => {
                 panic!("Cannot call to_vec() on GPU storage for generic T. Use to_vec_f32() on Storage<f32>.");
@@ -331,7 +332,8 @@ impl Storage<f32> {
                 let backend = crate::backends::cuda::get_cuda_backend()
                     .ok_or(Error::DeviceNotAvailable { device })?;
                 let slice = &cpu_data[self.offset..self.offset + self.len];
-                let cuda_slice = backend.htod_copy(slice)
+                let cuda_slice = backend
+                    .htod_copy(slice)
                     .map_err(|_| Error::DeviceNotAvailable { device })?;
                 let len = self.len;
                 Ok(Self {
@@ -345,9 +347,12 @@ impl Storage<f32> {
             }
             // GPU → CPU: dtoh_copy
             (StorageData::Cuda(pooled), Device::Cpu) => {
-                let backend = crate::backends::cuda::get_cuda_backend()
-                    .ok_or(Error::DeviceNotAvailable { device: self.device() })?;
-                let full_vec = backend.dtoh_copy(pooled.slice())
+                let backend =
+                    crate::backends::cuda::get_cuda_backend().ok_or(Error::DeviceNotAvailable {
+                        device: self.device(),
+                    })?;
+                let full_vec = backend
+                    .dtoh_copy(pooled.slice())
                     .map_err(|_| Error::DeviceNotAvailable { device })?;
                 let end = self.offset + self.len;
                 let sliced: Vec<f32> = if self.offset == 0 && self.len == full_vec.len() {
@@ -368,7 +373,8 @@ impl Storage<f32> {
                     };
                     let mut result = vec![0.0f32; self.len];
                     if available > 0 {
-                        result[..available].copy_from_slice(&full_vec[self.offset..self.offset + available]);
+                        result[..available]
+                            .copy_from_slice(&full_vec[self.offset..self.offset + available]);
                     }
                     result
                 };
@@ -395,9 +401,7 @@ impl Storage<f32> {
     pub fn to_vec_f32(&self) -> Vec<f32> {
         let inner = self.inner.read();
         match &inner.data {
-            StorageData::Cpu(cpu_data) => {
-                cpu_data[self.offset..self.offset + self.len].to_vec()
-            }
+            StorageData::Cpu(cpu_data) => cpu_data[self.offset..self.offset + self.len].to_vec(),
             StorageData::Cuda(pooled) => {
                 if let Some(backend) = crate::backends::cuda::get_cuda_backend() {
                     if let Ok(full_vec) = backend.dtoh_copy(pooled.slice()) {
@@ -456,7 +460,6 @@ impl Storage<f32> {
             len,
         }
     }
-
 
     /// Returns a reference to the CudaSlice if on GPU.
     ///
@@ -547,7 +550,9 @@ impl<T: Scalar> Deref for StorageReadGuard<'_, T> {
         match &self.guard.data {
             StorageData::Cpu(data) => &data[self.offset..self.offset + self.len],
             #[cfg(feature = "cuda")]
-            StorageData::Cuda(_) => panic!("Cannot access GPU storage as CPU slice. Use to_vec() for device-safe access."),
+            StorageData::Cuda(_) => panic!(
+                "Cannot access GPU storage as CPU slice. Use to_vec() for device-safe access."
+            ),
         }
     }
 }

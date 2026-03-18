@@ -16,7 +16,9 @@
 
 use std::collections::HashMap;
 
-use axonml_autograd::functions::{Conv1dBackward, Conv2dBackward, ConvTranspose2dBackward, GroupedConv2dBackward};
+use axonml_autograd::functions::{
+    Conv1dBackward, Conv2dBackward, ConvTranspose2dBackward, GroupedConv2dBackward,
+};
 use axonml_autograd::grad_fn::GradFn;
 use axonml_autograd::no_grad::is_grad_enabled;
 use axonml_autograd::Variable;
@@ -111,6 +113,87 @@ impl Module for Conv1d {
 
         let input_data = input.data();
         let weight_data = self.weight.data();
+
+        // GPU-resident fast path: reshape [B,C,L] → [B,C,L,1], use Conv2d CUDA pipeline,
+        // then reshape output [B,Cout,Lout,1] → [B,Cout,Lout].
+        #[cfg(feature = "cuda")]
+        if input_data.device().is_gpu() {
+            // Auto-migrate weights to GPU if needed
+            let input_dev = input_data.device();
+            if !weight_data.device().is_gpu() {
+                self.weight.to_device(input_dev);
+                if let Some(ref b) = self.bias {
+                    b.to_device(input_dev);
+                }
+            }
+            let weight_data = self.weight.data();
+
+            // Reshape input [B, Cin, L] → [B, Cin, L, 1]
+            let input_4d = input_data
+                .reshape(&[
+                    batch_size as isize,
+                    self.in_channels as isize,
+                    in_length as isize,
+                    1,
+                ])
+                .unwrap();
+
+            // Reshape weight [Cout, Cin, K] → [Cout, Cin, K, 1]
+            let weight_4d = weight_data
+                .reshape(&[
+                    self.out_channels as isize,
+                    self.in_channels as isize,
+                    self.kernel_size as isize,
+                    1,
+                ])
+                .unwrap();
+
+            let bias_tensor = self.bias.as_ref().map(|b| b.data());
+            let gpu_output = input_4d.conv2d_cuda(
+                &weight_4d,
+                bias_tensor.as_ref(),
+                (self.stride, 1),
+                (self.padding, 0),
+            );
+
+            if let Some(output_4d) = gpu_output {
+                // Reshape output [B, Cout, Lout, 1] → [B, Cout, Lout]
+                let output_tensor = output_4d
+                    .reshape(&[
+                        batch_size as isize,
+                        self.out_channels as isize,
+                        out_length as isize,
+                    ])
+                    .unwrap();
+
+                let requires_grad =
+                    (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+                if requires_grad {
+                    let weight_var = self.weight.variable();
+                    let bias_grad_fn = self.bias.as_ref().map(|b| b.variable().grad_fn().cloned());
+
+                    let grad_fn = GradFn::new(Conv1dBackward::new(
+                        input.grad_fn().cloned(),
+                        weight_var.grad_fn().cloned(),
+                        bias_grad_fn,
+                        input_data,
+                        weight_data,
+                        input_shape,
+                        self.in_channels,
+                        self.out_channels,
+                        self.kernel_size,
+                        self.stride,
+                        self.padding,
+                        self.bias.is_some(),
+                    ));
+                    return Variable::from_operation(output_tensor, grad_fn, true);
+                } else {
+                    return Variable::new(output_tensor, false);
+                }
+            }
+            // Fall through to CPU path if GPU conv failed
+        }
+
         let input_vec = input_data.to_vec();
         let weight_vec = weight_data.to_vec();
 
@@ -153,7 +236,8 @@ impl Module for Conv1d {
         let output_tensor =
             Tensor::from_vec(output_data, &[batch_size, self.out_channels, out_length]).unwrap();
 
-        let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+        let requires_grad =
+            (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
 
         if requires_grad {
             let weight_var = self.weight.variable();
@@ -253,7 +337,15 @@ impl Conv2d {
         padding: (usize, usize),
         bias: bool,
     ) -> Self {
-        Self::with_groups(in_channels, out_channels, kernel_size, stride, padding, bias, 1)
+        Self::with_groups(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            bias,
+            1,
+        )
     }
 
     /// Creates a Conv2d layer with grouped convolution support.
@@ -269,8 +361,14 @@ impl Conv2d {
         bias: bool,
         groups: usize,
     ) -> Self {
-        assert!(in_channels % groups == 0, "in_channels must be divisible by groups");
-        assert!(out_channels % groups == 0, "out_channels must be divisible by groups");
+        assert!(
+            in_channels % groups == 0,
+            "in_channels must be divisible by groups"
+        );
+        assert!(
+            out_channels % groups == 0,
+            "out_channels must be divisible by groups"
+        );
 
         let (kh, kw) = kernel_size;
         let in_channels_per_group = in_channels / groups;
@@ -364,7 +462,9 @@ fn im2col(
 
         for oh in 0..out_h {
             let h_in = (oh * stride_h + kh_off) as isize - pad_h_s;
-            if h_in < 0 || h_in >= h_signed { continue; }
+            if h_in < 0 || h_in >= h_signed {
+                continue;
+            }
             let input_row = input_c + h_in as usize * width;
             let col_row_base = col_base + oh * out_w;
 
@@ -429,9 +529,16 @@ fn conv2d_im2col(
                 let col = im2col(
                     input_slice,
                     in_channels_per_group,
-                    in_height, in_width,
-                    kh, kw, ph, pw, sh, sw,
-                    out_h, out_w,
+                    in_height,
+                    in_width,
+                    kh,
+                    kw,
+                    ph,
+                    pw,
+                    sh,
+                    sw,
+                    out_h,
+                    out_w,
                 );
 
                 // Weight for this group
@@ -440,7 +547,9 @@ fn conv2d_im2col(
                 let weight_slice = &weight[w_offset..w_offset + w_size];
 
                 // GEMM via Tensor::matmul
-                let w_tensor = Tensor::from_vec(weight_slice.to_vec(), &[out_channels_per_group, col_h]).unwrap();
+                let w_tensor =
+                    Tensor::from_vec(weight_slice.to_vec(), &[out_channels_per_group, col_h])
+                        .unwrap();
                 let col_tensor = Tensor::from_vec(col, &[col_h, col_w]).unwrap();
                 let result = w_tensor.matmul(&col_tensor).unwrap();
                 let result_vec = result.to_vec();
@@ -527,7 +636,8 @@ impl Module for Conv2d {
             };
 
             if let Some(output_tensor) = gpu_output {
-                let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+                let requires_grad =
+                    (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
                 if requires_grad {
                     let weight_var = self.weight.variable();
                     let bias_grad_fn = self.bias.as_ref().map(|b| b.variable().grad_fn().cloned());
@@ -588,9 +698,12 @@ impl Module for Conv2d {
                 in_height,
                 in_width,
                 self.out_channels,
-                kh, kw,
-                sh, sw,
-                ph, pw,
+                kh,
+                kw,
+                sh,
+                sw,
+                ph,
+                pw,
             );
 
             if let Some(result) = gpu_result {
@@ -605,9 +718,12 @@ impl Module for Conv2d {
                     in_height,
                     in_width,
                     self.out_channels,
-                    kh, kw,
-                    sh, sw,
-                    ph, pw,
+                    kh,
+                    kw,
+                    sh,
+                    sw,
+                    ph,
+                    pw,
                     self.groups,
                 )
             }
@@ -621,9 +737,12 @@ impl Module for Conv2d {
                 in_height,
                 in_width,
                 self.out_channels,
-                kh, kw,
-                sh, sw,
-                ph, pw,
+                kh,
+                kw,
+                sh,
+                sw,
+                ph,
+                pw,
                 self.groups,
             )
         };
@@ -634,7 +753,8 @@ impl Module for Conv2d {
         )
         .unwrap();
 
-        let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+        let requires_grad =
+            (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
 
         if requires_grad && self.groups == 1 {
             // Full backward pass for standard convolution
@@ -812,10 +932,8 @@ impl Module for ConvTranspose2d {
             for ic in 0..self.in_channels {
                 for ih in 0..in_h {
                     for iw in 0..in_w {
-                        let in_idx = b * self.in_channels * in_h * in_w
-                            + ic * in_h * in_w
-                            + ih * in_w
-                            + iw;
+                        let in_idx =
+                            b * self.in_channels * in_h * in_w + ic * in_h * in_w + ih * in_w + iw;
                         let in_val = input_vec[in_idx];
 
                         for oc in 0..self.out_channels {
@@ -868,13 +986,11 @@ impl Module for ConvTranspose2d {
             }
         }
 
-        let output_tensor = Tensor::from_vec(
-            output_data,
-            &[batch_size, self.out_channels, out_h, out_w],
-        )
-        .unwrap();
+        let output_tensor =
+            Tensor::from_vec(output_data, &[batch_size, self.out_channels, out_h, out_w]).unwrap();
 
-        let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+        let requires_grad =
+            (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
 
         if requires_grad {
             let weight_var = self.weight.variable();
@@ -962,7 +1078,10 @@ mod tests {
         loss.backward();
 
         // Input should have gradient (not None)
-        assert!(input.grad().is_some(), "Conv1d: input gradient should flow through backward pass");
+        assert!(
+            input.grad().is_some(),
+            "Conv1d: input gradient should flow through backward pass"
+        );
         let grad = input.grad().unwrap();
         assert_eq!(grad.shape(), &[1, 1, 5]);
     }
@@ -997,13 +1116,19 @@ mod tests {
         let loss = output.sum();
         loss.backward();
 
-        assert!(input.grad().is_some(), "Conv2d: input gradient should flow through backward pass");
+        assert!(
+            input.grad().is_some(),
+            "Conv2d: input gradient should flow through backward pass"
+        );
         let grad = input.grad().unwrap();
         assert_eq!(grad.shape(), &[1, 1, 5, 5]);
 
         // Weight should also have gradient
         let w_grad = conv.weight.grad();
-        assert!(w_grad.is_some(), "Conv2d: weight gradient should be computed");
+        assert!(
+            w_grad.is_some(),
+            "Conv2d: weight gradient should be computed"
+        );
     }
 
     #[test]
@@ -1044,14 +1169,14 @@ mod tests {
     #[test]
     fn test_conv_transpose2d_backward() {
         let conv_t = ConvTranspose2d::new(1, 1, 3);
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3]).unwrap(),
-            true,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3]).unwrap(), true);
         let output = conv_t.forward(&input);
         let loss = output.sum();
         loss.backward();
 
-        assert!(input.grad().is_some(), "ConvTranspose2d: input gradient should flow through backward");
+        assert!(
+            input.grad().is_some(),
+            "ConvTranspose2d: input gradient should flow through backward"
+        );
     }
 }

@@ -156,7 +156,7 @@ pub use monitor::TrainingMonitor;
 pub mod adversarial;
 
 #[cfg(feature = "nn")]
-pub use adversarial::{fgsm_attack, pgd_attack, adversarial_training_step, AdversarialTrainer};
+pub use adversarial::{adversarial_training_step, fgsm_attack, pgd_attack, AdversarialTrainer};
 
 // =============================================================================
 // Training Utilities

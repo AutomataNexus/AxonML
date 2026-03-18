@@ -502,7 +502,10 @@ impl GradientFunction for GeluBackward {
             let sqrt_2_pi: f32 = (2.0_f32 / std::f32::consts::PI).sqrt();
             let x2 = x.mul(x).unwrap();
             let x3 = x2.mul(x).unwrap();
-            let inner = x.add(&x3.mul_scalar(0.044715)).unwrap().mul_scalar(sqrt_2_pi);
+            let inner = x
+                .add(&x3.mul_scalar(0.044715))
+                .unwrap()
+                .mul_scalar(sqrt_2_pi);
             // tanh via tensor ops
             let tanh_inner = inner.tanh();
             // sech^2 = 1 - tanh^2
@@ -511,10 +514,18 @@ impl GradientFunction for GeluBackward {
             let ones_gpu = ones.to_device(x.device()).unwrap();
             let sech2 = ones_gpu.sub(&tanh2).unwrap();
             // d_inner = sqrt(2/pi) * (1 + 3*0.044715*x^2)
-            let d_inner = ones_gpu.add(&x2.mul_scalar(3.0 * 0.044715)).unwrap().mul_scalar(sqrt_2_pi);
+            let d_inner = ones_gpu
+                .add(&x2.mul_scalar(3.0 * 0.044715))
+                .unwrap()
+                .mul_scalar(sqrt_2_pi);
             // 0.5*(1+tanh) + 0.5*x*sech2*d_inner
             let term1 = ones_gpu.add(&tanh_inner).unwrap().mul_scalar(0.5);
-            let term2 = x.mul(&sech2).unwrap().mul(&d_inner).unwrap().mul_scalar(0.5);
+            let term2 = x
+                .mul(&sech2)
+                .unwrap()
+                .mul(&d_inner)
+                .unwrap()
+                .mul_scalar(0.5);
             let deriv = term1.add(&term2).unwrap();
             return vec![Some(grad_gpu.mul(&deriv).unwrap())];
         }
@@ -666,7 +677,12 @@ pub struct ClampBackward {
 impl ClampBackward {
     /// Creates a new `ClampBackward`.
     #[must_use]
-    pub fn new(input_grad_fn: Option<GradFn>, input: Tensor<f32>, min_val: f32, max_val: f32) -> Self {
+    pub fn new(
+        input_grad_fn: Option<GradFn>,
+        input: Tensor<f32>,
+        min_val: f32,
+        max_val: f32,
+    ) -> Self {
         Self {
             next_fns: vec![input_grad_fn],
             saved_input: input,
@@ -844,7 +860,11 @@ impl GradientFunction for LogSoftmaxBackward {
                 let mut temp = outer;
                 for d in (0..ndim).rev() {
                     if d != dim {
-                        let _s = if d > dim { strides[d] } else { strides[d] / dim_size };
+                        let _s = if d > dim {
+                            strides[d]
+                        } else {
+                            strides[d] / dim_size
+                        };
                         let coord = temp % shape[d];
                         temp /= shape[d];
                         base_idx += coord * strides[d];
@@ -1063,13 +1083,15 @@ impl GradientFunction for EluBackward {
         let result: Vec<f32> = input_data
             .iter()
             .zip(grad_data.iter())
-            .map(|(&x, &g)| {
-                if x > 0.0 {
-                    g
-                } else {
-                    g * self.alpha * x.exp()
-                }
-            })
+            .map(
+                |(&x, &g)| {
+                    if x > 0.0 {
+                        g
+                    } else {
+                        g * self.alpha * x.exp()
+                    }
+                },
+            )
             .collect();
 
         vec![Some(
@@ -1153,7 +1175,15 @@ mod tests {
     #[test]
     fn test_exp_backward() {
         // exp([0, 1, 2]) = [1, e, e^2]
-        let output = Tensor::from_vec(vec![1.0, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E], &[3]).unwrap();
+        let output = Tensor::from_vec(
+            vec![
+                1.0,
+                std::f32::consts::E,
+                std::f32::consts::E * std::f32::consts::E,
+            ],
+            &[3],
+        )
+        .unwrap();
         let grad_fn = ExpBackward::new(None, output);
 
         let grad_output = Tensor::from_vec(vec![1.0, 1.0, 1.0], &[3]).unwrap();

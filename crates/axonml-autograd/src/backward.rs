@@ -84,8 +84,7 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
         let next_fns = node.next_functions();
         for (i, maybe_next) in next_fns.iter().enumerate() {
             if let Some(next_fn) = maybe_next {
-                if let Some(input_grad) = input_grads.get(i).and_then(std::clone::Clone::clone)
-                {
+                if let Some(input_grad) = input_grads.get(i).and_then(std::clone::Clone::clone) {
                     let next_id = next_fn.id();
 
                     // Accumulate gradient
@@ -106,8 +105,13 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
         sorted.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
         eprintln!("[backward profile] {} nodes total", topo_order.len());
         for (name, (us, count)) in sorted.iter().take(15) {
-            eprintln!("  {:<35} {:>8}us  x{:>4}  ({:.1}ms avg)",
-                name, us, count, *us as f64 / *count as f64 / 1000.0);
+            eprintln!(
+                "  {:<35} {:>8}us  x{:>4}  ({:.1}ms avg)",
+                name,
+                us,
+                count,
+                *us as f64 / *count as f64 / 1000.0
+            );
         }
     }
 

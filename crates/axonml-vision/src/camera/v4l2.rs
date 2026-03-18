@@ -333,13 +333,11 @@ impl CaptureBackend for V4L2Backend {
         let mmap = &self.buffers[idx];
 
         // Copy frame data
-        let data = unsafe {
-            std::slice::from_raw_parts(mmap.ptr, buf.bytesused as usize)
-        };
+        let data = unsafe { std::slice::from_raw_parts(mmap.ptr, buf.bytesused as usize) };
         let frame_data = data.to_vec();
 
-        let timestamp_us = (buf.timestamp.tv_sec as u64) * 1_000_000
-            + (buf.timestamp.tv_usec as u64);
+        let timestamp_us =
+            (buf.timestamp.tv_sec as u64) * 1_000_000 + (buf.timestamp.tv_usec as u64);
 
         // Re-queue the buffer
         self.ioctl(VIDIOC_QBUF, &mut buf as *mut _ as *mut libc::c_void)?;

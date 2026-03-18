@@ -22,7 +22,6 @@ use axonml_tensor::Tensor;
 use crate::module::Module;
 use crate::parameter::Parameter;
 
-
 // =============================================================================
 // GCNConv
 // =============================================================================
@@ -125,7 +124,11 @@ impl GCNConv {
     /// Output features: `(batch, num_nodes, out_features)`
     pub fn forward_graph(&self, x: &Variable, adj: &Variable) -> Variable {
         let shape = x.shape();
-        assert!(shape.len() == 3, "GCNConv expects input shape (batch, nodes, features), got {:?}", shape);
+        assert!(
+            shape.len() == 3,
+            "GCNConv expects input shape (batch, nodes, features), got {:?}",
+            shape
+        );
         assert_eq!(shape[2], self.in_features, "Input features mismatch");
 
         let batch = shape[0];
@@ -319,7 +322,11 @@ impl GATConv {
     /// Output features: `(batch, num_nodes, out_features * num_heads)`
     pub fn forward_graph(&self, x: &Variable, adj: &Variable) -> Variable {
         let shape = x.shape();
-        assert!(shape.len() == 3, "GATConv expects (batch, nodes, features), got {:?}", shape);
+        assert!(
+            shape.len() == 3,
+            "GATConv expects (batch, nodes, features), got {:?}",
+            shape
+        );
 
         let batch = shape[0];
         let nodes = shape[1];
@@ -331,7 +338,11 @@ impl GATConv {
         let attn_src_data = self.attn_src.data().to_vec();
         let attn_dst_data = self.attn_dst.data().to_vec();
 
-        let adj_nodes = if adj.shape().len() == 3 { adj.shape()[1] } else { adj.shape()[0] };
+        let adj_nodes = if adj.shape().len() == 3 {
+            adj.shape()[1]
+        } else {
+            adj.shape()[0]
+        };
         assert_eq!(adj_nodes, nodes, "Adjacency matrix size mismatch");
 
         let mut output = vec![0.0f32; batch * nodes * total_out];
@@ -351,7 +362,11 @@ impl GATConv {
             }
 
             // Step 2: Compute attention per head
-            let adj_off = if adj.shape().len() == 3 { b * nodes * nodes } else { 0 };
+            let adj_off = if adj.shape().len() == 3 {
+                b * nodes * nodes
+            } else {
+                0
+            };
 
             for head in 0..self.num_heads {
                 let head_off = head * self.out_features;
@@ -364,7 +379,8 @@ impl GATConv {
                     // src score for node i
                     let mut src_score = 0.0;
                     for f in 0..self.out_features {
-                        src_score += h[i * total_out + head_off + f] * attn_src_data[head * self.out_features + f];
+                        src_score += h[i * total_out + head_off + f]
+                            * attn_src_data[head * self.out_features + f];
                     }
 
                     for j in 0..nodes {
@@ -372,7 +388,8 @@ impl GATConv {
                         if a_ij != 0.0 {
                             let mut dst_score = 0.0;
                             for f in 0..self.out_features {
-                                dst_score += h[j * total_out + head_off + f] * attn_dst_data[head * self.out_features + f];
+                                dst_score += h[j * total_out + head_off + f]
+                                    * attn_dst_data[head * self.out_features + f];
                             }
 
                             let e = src_score + dst_score;
@@ -486,10 +503,7 @@ mod tests {
             Tensor::from_vec(vec![1.0; 2 * 7 * 72], &[2, 7, 72]).unwrap(),
             false,
         );
-        let adj = Variable::new(
-            Tensor::from_vec(vec![1.0; 7 * 7], &[7, 7]).unwrap(),
-            false,
-        );
+        let adj = Variable::new(Tensor::from_vec(vec![1.0; 7 * 7], &[7, 7]).unwrap(), false);
         let output = gcn.forward_graph(&x, &adj);
         assert_eq!(output.shape(), vec![2, 7, 128]);
     }
@@ -508,10 +522,7 @@ mod tests {
         adj_data[0] = 1.0; // (0,0)
         adj_data[4] = 1.0; // (1,1)
         adj_data[8] = 1.0; // (2,2)
-        let adj = Variable::new(
-            Tensor::from_vec(adj_data, &[3, 3]).unwrap(),
-            false,
-        );
+        let adj = Variable::new(Tensor::from_vec(adj_data, &[3, 3]).unwrap(), false);
 
         let output = gcn.forward_graph(&x, &adj);
         assert_eq!(output.shape(), vec![1, 3, 8]);
@@ -520,8 +531,10 @@ mod tests {
         let data = output.data().to_vec();
         for i in 0..3 {
             for f in 0..8 {
-                assert!((data[i * 8 + f] - data[f]).abs() < 1e-6,
-                    "Node outputs should be identical with identity adj and same input");
+                assert!(
+                    (data[i * 8 + f] - data[f]).abs() < 1e-6,
+                    "Node outputs should be identical with identity adj and same input"
+                );
             }
         }
     }
@@ -558,10 +571,7 @@ mod tests {
             Tensor::from_vec(vec![1.0; 2 * 7 * 72], &[2, 7, 72]).unwrap(),
             false,
         );
-        let adj = Variable::new(
-            Tensor::from_vec(vec![1.0; 7 * 7], &[7, 7]).unwrap(),
-            false,
-        );
+        let adj = Variable::new(Tensor::from_vec(vec![1.0; 7 * 7], &[7, 7]).unwrap(), false);
         let output = gat.forward_graph(&x, &adj);
         assert_eq!(output.shape(), vec![2, 7, 128]); // 32 * 4 = 128
     }
@@ -573,10 +583,7 @@ mod tests {
             Tensor::from_vec(vec![1.0; 1 * 5 * 16], &[1, 5, 16]).unwrap(),
             false,
         );
-        let adj = Variable::new(
-            Tensor::from_vec(vec![1.0; 5 * 5], &[5, 5]).unwrap(),
-            false,
-        );
+        let adj = Variable::new(Tensor::from_vec(vec![1.0; 5 * 5], &[5, 5]).unwrap(), false);
         let output = gat.forward_graph(&x, &adj);
         assert_eq!(output.shape(), vec![1, 5, 8]);
     }
@@ -608,16 +615,16 @@ mod tests {
             Tensor::from_vec(vec![99.0; 1 * 3 * 4], &[1, 3, 4]).unwrap(),
             false,
         );
-        let adj = Variable::new(
-            Tensor::from_vec(vec![0.0; 9], &[3, 3]).unwrap(),
-            false,
-        );
+        let adj = Variable::new(Tensor::from_vec(vec![0.0; 9], &[3, 3]).unwrap(), false);
         let output = gcn.forward_graph(&x, &adj);
 
         // With zero adjacency, output should be just bias (all zeros initially)
         let data = output.data().to_vec();
         for val in &data {
-            assert!(val.abs() < 1e-6, "Zero adjacency should zero out message passing");
+            assert!(
+                val.abs() < 1e-6,
+                "Zero adjacency should zero out message passing"
+            );
         }
     }
 }

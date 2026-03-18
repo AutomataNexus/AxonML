@@ -23,7 +23,7 @@ mod tests {
     use axonml_tensor::Tensor;
 
     use crate::datasets::{SyntheticCIFAR, SyntheticMNIST};
-    use crate::models::lenet::{LeNet, MLP, SimpleCNN};
+    use crate::models::lenet::{LeNet, SimpleCNN, MLP};
     use crate::models::resnet::ResNet;
     use crate::models::transformer::VisionTransformer;
     use crate::transforms::{ImageNormalize, Resize};
@@ -131,11 +131,18 @@ mod tests {
             optimizer.zero_grad();
             let logits = model.forward(&images);
 
-            assert_eq!(logits.shape(), vec![batch_size, 10], "Output shape mismatch");
+            assert_eq!(
+                logits.shape(),
+                vec![batch_size, 10],
+                "Output shape mismatch"
+            );
             let loss = loss_fn.compute(&logits, &targets);
 
             let loss_val = loss.data().to_vec()[0];
-            assert!(loss_val.is_finite(), "Loss is not finite at step {step}: {loss_val}");
+            assert!(
+                loss_val.is_finite(),
+                "Loss is not finite at step {step}: {loss_val}"
+            );
             losses.push(loss_val);
 
             loss.backward();
@@ -173,7 +180,10 @@ mod tests {
 
             let loss = loss_fn.compute(&logits, &targets);
             let loss_val = loss.data().to_vec()[0];
-            assert!(loss_val.is_finite(), "ResNet loss not finite at step {step}");
+            assert!(
+                loss_val.is_finite(),
+                "ResNet loss not finite at step {step}"
+            );
 
             loss.backward();
             optimizer.step();
@@ -187,10 +197,8 @@ mod tests {
     #[test]
     fn integration_cifar_simplecnn_adam() {
         let dataset = SyntheticCIFAR::cifar10(64);
-        let normalize = ImageNormalize::new(
-            vec![0.4914, 0.4822, 0.4465],
-            vec![0.2470, 0.2435, 0.2616],
-        );
+        let normalize =
+            ImageNormalize::new(vec![0.4914, 0.4822, 0.4465], vec![0.2470, 0.2435, 0.2616]);
         let model = SimpleCNN::for_cifar10();
         let mut optimizer = Adam::new(model.parameters(), 0.001);
         let loss_fn = CrossEntropyLoss::new();
@@ -207,7 +215,10 @@ mod tests {
             let loss = loss_fn.compute(&logits, &targets);
 
             let loss_val = loss.data().to_vec()[0];
-            assert!(loss_val.is_finite(), "SimpleCNN loss not finite at step {step}");
+            assert!(
+                loss_val.is_finite(),
+                "SimpleCNN loss not finite at step {step}"
+            );
             losses.push(loss_val);
 
             loss.backward();
@@ -235,7 +246,11 @@ mod tests {
             optimizer.zero_grad();
             let logits = model.forward(&images);
 
-            assert_eq!(logits.shape(), vec![batch_size, 10], "ViT output shape mismatch");
+            assert_eq!(
+                logits.shape(),
+                vec![batch_size, 10],
+                "ViT output shape mismatch"
+            );
 
             let loss = loss_fn.compute(&logits, &targets);
             let loss_val = loss.data().to_vec()[0];
@@ -271,7 +286,9 @@ mod tests {
             let mut targets = Vec::new();
 
             for i in 0..batch_size {
-                let (img, lbl) = dataset.get((step * batch_size + i) % dataset.len()).unwrap();
+                let (img, lbl) = dataset
+                    .get((step * batch_size + i) % dataset.len())
+                    .unwrap();
                 images.extend(img.to_vec());
                 targets.extend(lbl.to_vec()); // one-hot as MSE target
             }
@@ -280,10 +297,8 @@ mod tests {
                 Tensor::from_vec(images, &[batch_size, 1, 28, 28]).unwrap(),
                 false,
             );
-            let targets_var = Variable::new(
-                Tensor::from_vec(targets, &[batch_size, 10]).unwrap(),
-                false,
-            );
+            let targets_var =
+                Variable::new(Tensor::from_vec(targets, &[batch_size, 10]).unwrap(), false);
 
             optimizer.zero_grad();
             let logits = model.forward(&images_var);
@@ -324,14 +339,14 @@ mod tests {
             let pixels: Vec<f32> = (0..3 * 64 * 64)
                 .map(|i| ((i as f32 * 0.001 + seed).sin() * 0.5 + 0.5))
                 .collect();
-            let frame = Variable::new(
-                Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(),
-                false,
-            );
+            let frame = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
             let gt_faces = vec![[8.0, 8.0, 32.0, 32.0]];
 
             let loss = crate::training::phantom_training_step(
-                &mut model, &frame, &gt_faces, &mut optimizer,
+                &mut model,
+                &frame,
+                &gt_faces,
+                &mut optimizer,
             );
             assert!(loss.is_finite(), "Detection loss not finite at step {step}");
             losses.push(loss);
@@ -369,10 +384,7 @@ mod tests {
             let pixels: Vec<f32> = (0..3 * 32 * 32)
                 .map(|i| ((i as f32 * 0.01 + seed).sin() * 0.5 + 0.5))
                 .collect();
-            let face = Variable::new(
-                Tensor::from_vec(pixels, &[1, 3, 32, 32]).unwrap(),
-                false,
-            );
+            let face = Variable::new(Tensor::from_vec(pixels, &[1, 3, 32, 32]).unwrap(), false);
 
             // Target: arbitrary embedding
             let target = Variable::new(
@@ -395,7 +407,10 @@ mod tests {
             // Use MSE as a proxy loss for embedding training
             let loss = loss_fn.compute(&enc_flat, &target);
             let loss_val = loss.data().to_vec()[0];
-            assert!(loss_val.is_finite(), "Mnemosyne loss not finite at step {step}");
+            assert!(
+                loss_val.is_finite(),
+                "Mnemosyne loss not finite at step {step}"
+            );
             losses.push(loss_val);
 
             loss.backward();

@@ -100,11 +100,10 @@ pub use models::{LeNet, SimpleCNN, MLP};
 
 // Biometric Identity (Aegis Identity)
 pub use models::biometric::{
-    AegisIdentity, AriadneFingerprint, ArgusIris, BiometricConfig, BiometricEvidence,
-    BiometricModality, EchoSpeaker, IdentityBank, MnemosyneIdentity, ThemisFusion,
-    VerificationResult, IdentificationResult, EnrollmentResult,
-    AngularMarginLoss, ArgusLoss, CenterLoss, ContrastiveLoss, CrystallizationLoss,
-    DiversityRegularization, EchoLoss, LivenessLoss, ThemisLoss,
+    AegisIdentity, AngularMarginLoss, ArgusIris, ArgusLoss, AriadneFingerprint, BiometricConfig,
+    BiometricEvidence, BiometricModality, CenterLoss, ContrastiveLoss, CrystallizationLoss,
+    DiversityRegularization, EchoLoss, EchoSpeaker, EnrollmentResult, IdentificationResult,
+    IdentityBank, LivenessLoss, MnemosyneIdentity, ThemisFusion, ThemisLoss, VerificationResult,
 };
 
 pub use hub::{

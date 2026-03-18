@@ -17,10 +17,7 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_nn::{
-    BatchNorm1d, Dropout, Linear, Module, Parameter, Sequential, ReLU, GELU,
-    FFT1d,
-};
+use axonml_nn::{BatchNorm1d, Dropout, FFT1d, Linear, Module, Parameter, ReLU, Sequential, GELU};
 
 // =============================================================================
 // Aquilo Model
@@ -106,7 +103,10 @@ impl Aquilo {
     /// Forward pass returning all output heads.
     ///
     /// Returns (fault_logits, severity_logits, phase_health, power_quality, embedding)
-    pub fn forward_all(&self, input: &Variable) -> (Variable, Variable, Variable, Variable, Variable) {
+    pub fn forward_all(
+        &self,
+        input: &Variable,
+    ) -> (Variable, Variable, Variable, Variable, Variable) {
         let shape = input.shape();
         let batch = shape[0];
         let data = input.data().to_vec();
@@ -124,28 +124,35 @@ impl Aquilo {
         }
 
         let volt_var = Variable::new(
-            axonml_tensor::Tensor::from_vec(volt_data.clone(), &[batch, 56]).unwrap(), false);
+            axonml_tensor::Tensor::from_vec(volt_data.clone(), &[batch, 56]).unwrap(),
+            false,
+        );
         let curr_var = Variable::new(
-            axonml_tensor::Tensor::from_vec(curr_data.clone(), &[batch, 56]).unwrap(), false);
+            axonml_tensor::Tensor::from_vec(curr_data.clone(), &[batch, 56]).unwrap(),
+            false,
+        );
         let pq_var = Variable::new(
-            axonml_tensor::Tensor::from_vec(pq_data, &[batch, 56]).unwrap(), false);
+            axonml_tensor::Tensor::from_vec(pq_data, &[batch, 56]).unwrap(),
+            false,
+        );
 
         // Analyzer branches
-        let volt_out = self.voltage_analyzer.forward(&volt_var);  // (batch, 64)
-        let curr_out = self.current_analyzer.forward(&curr_var);  // (batch, 64)
-        let pq_out = self.power_quality.forward(&pq_var);         // (batch, 32)
+        let volt_out = self.voltage_analyzer.forward(&volt_var); // (batch, 64)
+        let curr_out = self.current_analyzer.forward(&curr_var); // (batch, 64)
+        let pq_out = self.power_quality.forward(&pq_var); // (batch, 32)
 
         // FFT spectral features on voltage and current
-        let volt_fft = self.fft.forward(&volt_var);  // (batch, 29)
-        let curr_fft = self.fft.forward(&curr_var);  // (batch, 29)
+        let volt_fft = self.fft.forward(&volt_var); // (batch, 29)
+        let curr_fft = self.fft.forward(&curr_var); // (batch, 29)
 
         // Concatenate everything: raw(168) + volt(64) + curr(64) + pq(32) + fft(58) = 386
-        let all_features = concat_variables(&[
-            input, &volt_out, &curr_out, &pq_out, &volt_fft, &curr_fft,
-        ], batch);
+        let all_features = concat_variables(
+            &[input, &volt_out, &curr_out, &pq_out, &volt_fft, &curr_fft],
+            batch,
+        );
 
         // Main network
-        let embedding = self.main_net.forward(&all_features);  // (batch, 256)
+        let embedding = self.main_net.forward(&all_features); // (batch, 256)
 
         // Output heads
         let fault = self.fault_head.forward(&embedding);
@@ -188,14 +195,30 @@ impl Module for Aquilo {
 
     fn named_parameters(&self) -> HashMap<String, Parameter> {
         let mut params = HashMap::new();
-        for (n, p) in self.voltage_analyzer.named_parameters() { params.insert(format!("voltage_analyzer.{n}"), p); }
-        for (n, p) in self.current_analyzer.named_parameters() { params.insert(format!("current_analyzer.{n}"), p); }
-        for (n, p) in self.power_quality.named_parameters() { params.insert(format!("power_quality.{n}"), p); }
-        for (n, p) in self.main_net.named_parameters() { params.insert(format!("main_net.{n}"), p); }
-        for (n, p) in self.fault_head.named_parameters() { params.insert(format!("fault_head.{n}"), p); }
-        for (n, p) in self.severity_head.named_parameters() { params.insert(format!("severity_head.{n}"), p); }
-        for (n, p) in self.phase_health_head.named_parameters() { params.insert(format!("phase_health_head.{n}"), p); }
-        for (n, p) in self.pq_head.named_parameters() { params.insert(format!("pq_head.{n}"), p); }
+        for (n, p) in self.voltage_analyzer.named_parameters() {
+            params.insert(format!("voltage_analyzer.{n}"), p);
+        }
+        for (n, p) in self.current_analyzer.named_parameters() {
+            params.insert(format!("current_analyzer.{n}"), p);
+        }
+        for (n, p) in self.power_quality.named_parameters() {
+            params.insert(format!("power_quality.{n}"), p);
+        }
+        for (n, p) in self.main_net.named_parameters() {
+            params.insert(format!("main_net.{n}"), p);
+        }
+        for (n, p) in self.fault_head.named_parameters() {
+            params.insert(format!("fault_head.{n}"), p);
+        }
+        for (n, p) in self.severity_head.named_parameters() {
+            params.insert(format!("severity_head.{n}"), p);
+        }
+        for (n, p) in self.phase_health_head.named_parameters() {
+            params.insert(format!("phase_health_head.{n}"), p);
+        }
+        for (n, p) in self.pq_head.named_parameters() {
+            params.insert(format!("pq_head.{n}"), p);
+        }
         params
     }
 
@@ -255,8 +278,11 @@ mod tests {
         let model = Aquilo::new();
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
         // Architecture yields ~355K params
-        assert!(total > 250_000 && total < 500_000,
-            "Aquilo has {} params, expected ~355K", total);
+        assert!(
+            total > 250_000 && total < 500_000,
+            "Aquilo has {} params, expected ~355K",
+            total
+        );
     }
 
     #[test]

@@ -54,7 +54,11 @@ fn compute_iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
     let area_b = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
     let union = area_a + area_b - inter;
 
-    if union > 0.0 { inter / union } else { 0.0 }
+    if union > 0.0 {
+        inter / union
+    } else {
+        0.0
+    }
 }
 
 // =============================================================================
@@ -243,23 +247,30 @@ mod tests {
 
     #[test]
     fn test_ap_perfect() {
-        let dets = vec![
-            DetectionResult { bbox: [0.0, 0.0, 10.0, 10.0], confidence: 0.9, class_id: 0 },
-        ];
-        let gts = vec![
-            GroundTruth { bbox: [0.0, 0.0, 10.0, 10.0], class_id: 0 },
-        ];
+        let dets = vec![DetectionResult {
+            bbox: [0.0, 0.0, 10.0, 10.0],
+            confidence: 0.9,
+            class_id: 0,
+        }];
+        let gts = vec![GroundTruth {
+            bbox: [0.0, 0.0, 10.0, 10.0],
+            class_id: 0,
+        }];
 
         let ap = compute_ap(&dets, &gts, 0.5);
-        assert!((ap - 1.0).abs() < 1e-5, "Perfect detection should have AP=1.0, got {ap}");
+        assert!(
+            (ap - 1.0).abs() < 1e-5,
+            "Perfect detection should have AP=1.0, got {ap}"
+        );
     }
 
     #[test]
     fn test_ap_no_detections() {
         let dets: Vec<DetectionResult> = vec![];
-        let gts = vec![
-            GroundTruth { bbox: [0.0, 0.0, 10.0, 10.0], class_id: 0 },
-        ];
+        let gts = vec![GroundTruth {
+            bbox: [0.0, 0.0, 10.0, 10.0],
+            class_id: 0,
+        }];
 
         let ap = compute_ap(&dets, &gts, 0.5);
         assert!((ap - 0.0).abs() < 1e-5, "No detections should have AP=0.0");
@@ -267,12 +278,15 @@ mod tests {
 
     #[test]
     fn test_ap_false_positive() {
-        let dets = vec![
-            DetectionResult { bbox: [50.0, 50.0, 60.0, 60.0], confidence: 0.9, class_id: 0 },
-        ];
-        let gts = vec![
-            GroundTruth { bbox: [0.0, 0.0, 10.0, 10.0], class_id: 0 },
-        ];
+        let dets = vec![DetectionResult {
+            bbox: [50.0, 50.0, 60.0, 60.0],
+            confidence: 0.9,
+            class_id: 0,
+        }];
+        let gts = vec![GroundTruth {
+            bbox: [0.0, 0.0, 10.0, 10.0],
+            class_id: 0,
+        }];
 
         let ap = compute_ap(&dets, &gts, 0.5);
         assert!(ap < 0.1, "False positive should have low AP, got {ap}");
@@ -280,12 +294,15 @@ mod tests {
 
     #[test]
     fn test_map_single_class() {
-        let all_dets = vec![vec![
-            DetectionResult { bbox: [0.0, 0.0, 10.0, 10.0], confidence: 0.9, class_id: 0 },
-        ]];
-        let all_gts = vec![vec![
-            GroundTruth { bbox: [0.0, 0.0, 10.0, 10.0], class_id: 0 },
-        ]];
+        let all_dets = vec![vec![DetectionResult {
+            bbox: [0.0, 0.0, 10.0, 10.0],
+            confidence: 0.9,
+            class_id: 0,
+        }]];
+        let all_gts = vec![vec![GroundTruth {
+            bbox: [0.0, 0.0, 10.0, 10.0],
+            class_id: 0,
+        }]];
 
         let map = compute_map(&all_dets, &all_gts, 1, 0.5);
         assert!((map - 1.0).abs() < 1e-5);

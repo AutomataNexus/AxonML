@@ -23,12 +23,11 @@ use axonml_tensor::Tensor;
 
 use crate::functions::{
     AddBackward, AddScalarBackward, CatBackward, ClampBackward, DivBackward, EluBackward,
-    ExpBackward, ExpandBackward, GeluBackward, LeakyReluBackward, LogBackward,
-    LogSoftmaxBackward, MatMulBackward, MeanBackward, MeanDimBackward, MulBackward,
-    MulScalarBackward, NarrowBackward, NegBackward, PowBackward, ReluBackward, ReshapeBackward,
-    SelectBackward, SigmoidBackward, SiluBackward, SoftmaxBackward, SqrtBackward, SubBackward,
-    SumBackward, SumDimBackward, TanhBackward, TransposeBackward, UnsqueezeBackward,
-    VarDimBackward,
+    ExpBackward, ExpandBackward, GeluBackward, LeakyReluBackward, LogBackward, LogSoftmaxBackward,
+    MatMulBackward, MeanBackward, MeanDimBackward, MulBackward, MulScalarBackward, NarrowBackward,
+    NegBackward, PowBackward, ReluBackward, ReshapeBackward, SelectBackward, SigmoidBackward,
+    SiluBackward, SoftmaxBackward, SqrtBackward, SubBackward, SumBackward, SumDimBackward,
+    TanhBackward, TransposeBackward, UnsqueezeBackward, VarDimBackward,
 };
 use crate::grad_fn::{AccumulateGrad, GradAccumulator, GradFn};
 use crate::graph::{with_graph, GraphNode};
@@ -159,7 +158,9 @@ impl Variable {
         if current.device() == device {
             return self.clone();
         }
-        let moved = current.to_device(device).expect("Failed to move variable to device");
+        let moved = current
+            .to_device(device)
+            .expect("Failed to move variable to device");
         Variable::new(moved, self.requires_grad)
     }
 
@@ -475,11 +476,7 @@ impl Variable {
         let requires_grad = self.requires_grad && is_grad_enabled();
 
         if requires_grad {
-            let grad_fn = GradFn::new(EluBackward::new(
-                self.grad_fn.clone(),
-                self_data,
-                alpha,
-            ));
+            let grad_fn = GradFn::new(EluBackward::new(self.grad_fn.clone(), self_data, alpha));
             Variable::from_operation(result, grad_fn, true)
         } else {
             Variable::from_tensor(result)
@@ -600,11 +597,7 @@ impl Variable {
         let requires_grad = self.requires_grad && is_grad_enabled();
 
         if requires_grad {
-            let grad_fn = GradFn::new(SumDimBackward::new(
-                self.grad_fn.clone(),
-                self.shape(),
-                dim,
-            ));
+            let grad_fn = GradFn::new(SumDimBackward::new(self.grad_fn.clone(), self.shape(), dim));
             Variable::from_operation(result, grad_fn, true)
         } else {
             Variable::from_tensor(result)
@@ -753,7 +746,9 @@ impl Variable {
     #[must_use]
     pub fn select(&self, dim: usize, index: usize) -> Variable {
         let input_shape = self.shape();
-        let new_data = self.data().select(dim, index)
+        let new_data = self
+            .data()
+            .select(dim, index)
             .unwrap_or_else(|_| self.data().clone());
         let requires_grad = self.requires_grad && is_grad_enabled();
 
@@ -775,7 +770,9 @@ impl Variable {
     /// Tracks the computational graph for backward pass.
     #[must_use]
     pub fn unsqueeze(&self, dim: usize) -> Variable {
-        let new_data = self.data().unsqueeze(dim as i64)
+        let new_data = self
+            .data()
+            .unsqueeze(dim as i64)
             .unwrap_or_else(|_| self.data().clone());
         let requires_grad = self.requires_grad && is_grad_enabled();
 
@@ -957,7 +954,11 @@ impl Variable {
         let data = self.data();
         let input_shape = data.shape().to_vec();
         let ndim = input_shape.len();
-        let dim_usize = if dim < 0 { (ndim as i32 + dim) as usize } else { dim as usize };
+        let dim_usize = if dim < 0 {
+            (ndim as i32 + dim) as usize
+        } else {
+            dim as usize
+        };
         let result = data.mean_dim(dim, keepdim);
         let requires_grad = self.requires_grad && is_grad_enabled();
 
@@ -980,7 +981,11 @@ impl Variable {
         let self_data = self.data();
         let input_shape = self_data.shape().to_vec();
         let ndim = input_shape.len();
-        let dim_usize = if dim < 0 { (ndim as i32 + dim) as usize } else { dim as usize };
+        let dim_usize = if dim < 0 {
+            (ndim as i32 + dim) as usize
+        } else {
+            dim as usize
+        };
         let result = self_data.var_dim(dim, keepdim);
         let requires_grad = self.requires_grad && is_grad_enabled();
 

@@ -17,9 +17,7 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_nn::{
-    Conv1d, Linear, MaxPool1d, Module, MultiHeadAttention, Parameter, ReLU,
-};
+use axonml_nn::{Conv1d, Linear, MaxPool1d, Module, MultiHeadAttention, Parameter, ReLU};
 
 // =============================================================================
 // Naiad Model
@@ -55,15 +53,15 @@ impl Naiad {
     /// Creates a new Naiad model.
     pub fn new() -> Self {
         // Conv backbone
-        let conv1 = Conv1d::new(7, 64, 3);       // (batch, 7, 64) -> (batch, 64, 62)
+        let conv1 = Conv1d::new(7, 64, 3); // (batch, 7, 64) -> (batch, 64, 62)
         let relu1 = ReLU;
-        let pool1 = MaxPool1d::new(2);            // -> (batch, 64, 31)
+        let pool1 = MaxPool1d::new(2); // -> (batch, 64, 31)
 
-        let conv2 = Conv1d::new(64, 128, 3);     // -> (batch, 128, 29)
+        let conv2 = Conv1d::new(64, 128, 3); // -> (batch, 128, 29)
         let relu2 = ReLU;
-        let pool2 = MaxPool1d::new(2);            // -> (batch, 128, 14)
+        let pool2 = MaxPool1d::new(2); // -> (batch, 128, 14)
 
-        let conv3 = Conv1d::new(128, 256, 3);    // -> (batch, 256, 12)
+        let conv3 = Conv1d::new(128, 256, 3); // -> (batch, 256, 12)
         let relu3 = ReLU;
         // GlobalAvgPool over time dim -> (batch, 256)
 
@@ -97,20 +95,23 @@ impl Naiad {
     /// Forward pass returning all output heads.
     ///
     /// Returns (fault_logits, flow_anomaly_logits, water_quality, pump_efficiency, embedding)
-    pub fn forward_all(&self, input: &Variable) -> (Variable, Variable, Variable, Variable, Variable) {
+    pub fn forward_all(
+        &self,
+        input: &Variable,
+    ) -> (Variable, Variable, Variable, Variable, Variable) {
         let shape = input.shape();
         let batch = shape[0];
 
         // Conv1d backbone: input (batch, 7, 64)
-        let x = self.conv1.forward(input);    // (batch, 64, 62)
+        let x = self.conv1.forward(input); // (batch, 64, 62)
         let x = self.relu1.forward(&x);
-        let x = self.pool1.forward(&x);       // (batch, 64, 31)
+        let x = self.pool1.forward(&x); // (batch, 64, 31)
 
-        let x = self.conv2.forward(&x);       // (batch, 128, 29)
+        let x = self.conv2.forward(&x); // (batch, 128, 29)
         let x = self.relu2.forward(&x);
-        let x = self.pool2.forward(&x);       // (batch, 128, 14)
+        let x = self.pool2.forward(&x); // (batch, 128, 14)
 
-        let x = self.conv3.forward(&x);       // (batch, 256, 12)
+        let x = self.conv3.forward(&x); // (batch, 256, 12)
         let x = self.relu3.forward(&x);
 
         // Global average pooling over the time dimension
@@ -131,7 +132,13 @@ impl Naiad {
         let water_quality = self.water_quality_head.forward(&embedding);
         let pump_efficiency = self.pump_efficiency_head.forward(&embedding);
 
-        (fault, flow_anomaly, water_quality, pump_efficiency, embedding)
+        (
+            fault,
+            flow_anomaly,
+            water_quality,
+            pump_efficiency,
+            embedding,
+        )
     }
 
     /// Returns the embedding dimension for downstream aggregators.
@@ -166,14 +173,30 @@ impl Module for Naiad {
 
     fn named_parameters(&self) -> HashMap<String, Parameter> {
         let mut params = HashMap::new();
-        for (n, p) in self.conv1.named_parameters() { params.insert(format!("conv1.{n}"), p); }
-        for (n, p) in self.conv2.named_parameters() { params.insert(format!("conv2.{n}"), p); }
-        for (n, p) in self.conv3.named_parameters() { params.insert(format!("conv3.{n}"), p); }
-        for (n, p) in self.attention.named_parameters() { params.insert(format!("attention.{n}"), p); }
-        for (n, p) in self.fault_head.named_parameters() { params.insert(format!("fault_head.{n}"), p); }
-        for (n, p) in self.flow_anomaly_head.named_parameters() { params.insert(format!("flow_anomaly_head.{n}"), p); }
-        for (n, p) in self.water_quality_head.named_parameters() { params.insert(format!("water_quality_head.{n}"), p); }
-        for (n, p) in self.pump_efficiency_head.named_parameters() { params.insert(format!("pump_efficiency_head.{n}"), p); }
+        for (n, p) in self.conv1.named_parameters() {
+            params.insert(format!("conv1.{n}"), p);
+        }
+        for (n, p) in self.conv2.named_parameters() {
+            params.insert(format!("conv2.{n}"), p);
+        }
+        for (n, p) in self.conv3.named_parameters() {
+            params.insert(format!("conv3.{n}"), p);
+        }
+        for (n, p) in self.attention.named_parameters() {
+            params.insert(format!("attention.{n}"), p);
+        }
+        for (n, p) in self.fault_head.named_parameters() {
+            params.insert(format!("fault_head.{n}"), p);
+        }
+        for (n, p) in self.flow_anomaly_head.named_parameters() {
+            params.insert(format!("flow_anomaly_head.{n}"), p);
+        }
+        for (n, p) in self.water_quality_head.named_parameters() {
+            params.insert(format!("water_quality_head.{n}"), p);
+        }
+        for (n, p) in self.pump_efficiency_head.named_parameters() {
+            params.insert(format!("pump_efficiency_head.{n}"), p);
+        }
         params
     }
 
@@ -220,8 +243,11 @@ mod tests {
         let model = Naiad::new();
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
         // Expected ~533K params
-        assert!(total > 350_000 && total < 700_000,
-            "Naiad has {} params, expected ~533K", total);
+        assert!(
+            total > 350_000 && total < 700_000,
+            "Naiad has {} params, expected ~533K",
+            total
+        );
     }
 
     #[test]

@@ -131,9 +131,15 @@ impl FullEvalResult {
     fn print(&self) {
         println!("  {:<20} {}", "Model:", self.name);
         println!("  {:<20} {}", "Resolution:", self.resolution);
-        println!("  {:<20} {} ({:.2} MB f32)", "Parameters:", self.params, self.size_mb);
+        println!(
+            "  {:<20} {} ({:.2} MB f32)",
+            "Parameters:", self.params, self.size_mb
+        );
         println!("  {:<20} {}", "Images:", self.n_images);
-        println!("  {:<20} {} (avg {:.1}/img)", "Detections:", self.total_dets, self.avg_dets_per_image);
+        println!(
+            "  {:<20} {} (avg {:.1}/img)",
+            "Detections:", self.total_dets, self.avg_dets_per_image
+        );
         println!("  {:<20} {}", "Ground Truths:", self.total_gts);
         println!("  {:<20} {:.4}", "Avg Confidence:", self.avg_confidence);
         println!("  {:<20} {:.4}", "Avg Box Area:", self.avg_box_area);
@@ -141,7 +147,10 @@ impl FullEvalResult {
         println!("  {:<20} {:.4}", "mAP@75:", self.map75);
         println!("  {:<20} {:.4}", "COCO mAP@[.5:.95]:", self.coco_map);
         println!("  {:<20} {:.1}ms", "Warmup latency:", self.warmup_ms);
-        println!("  {:<20} {:.1}ms (mean)", "Inference latency:", self.latency_ms);
+        println!(
+            "  {:<20} {:.1}ms (mean)",
+            "Inference latency:", self.latency_ms
+        );
         println!("  {:<20} {:.1}ms", "P50 latency:", self.p50_latency_ms);
         println!("  {:<20} {:.1}ms", "P95 latency:", self.p95_latency_ms);
         println!("  {:<20} {:.1}", "Throughput (FPS):", self.fps);
@@ -315,31 +324,63 @@ where
 }
 
 fn print_summary_table(results: &[FullEvalResult]) {
-    println!("\n  {:<18} {:>6} {:>7} {:>6} {:>8} {:>8} {:>8} {:>9} {:>9} {:>6}",
-        "Model", "Res", "Params", "MB", "mAP@50", "mAP@75", "COCO mAP", "Mean(ms)", "P95(ms)", "FPS");
+    println!(
+        "\n  {:<18} {:>6} {:>7} {:>6} {:>8} {:>8} {:>8} {:>9} {:>9} {:>6}",
+        "Model",
+        "Res",
+        "Params",
+        "MB",
+        "mAP@50",
+        "mAP@75",
+        "COCO mAP",
+        "Mean(ms)",
+        "P95(ms)",
+        "FPS"
+    );
     println!("  {}", "-".repeat(104));
     for r in results {
-        println!("  {:<18} {:>6} {:>7} {:>5.1} {:>8.4} {:>8.4} {:>8.4} {:>8.1}ms {:>8.1}ms {:>6.1}",
-            r.name, r.resolution, format_params(r.params), r.size_mb,
-            r.map50, r.map75, r.coco_map,
-            r.latency_ms, r.p95_latency_ms, r.fps);
+        println!(
+            "  {:<18} {:>6} {:>7} {:>5.1} {:>8.4} {:>8.4} {:>8.4} {:>8.1}ms {:>8.1}ms {:>6.1}",
+            r.name,
+            r.resolution,
+            format_params(r.params),
+            r.size_mb,
+            r.map50,
+            r.map75,
+            r.coco_map,
+            r.latency_ms,
+            r.p95_latency_ms,
+            r.fps
+        );
     }
 }
 
 fn format_params(p: usize) -> String {
-    if p >= 1_000_000 { format!("{:.1}M", p as f64 / 1_000_000.0) }
-    else if p >= 1_000 { format!("{:.0}K", p as f64 / 1_000.0) }
-    else { format!("{p}") }
+    if p >= 1_000_000 {
+        format!("{:.1}M", p as f64 / 1_000_000.0)
+    } else if p >= 1_000 {
+        format!("{:.0}K", p as f64 / 1_000.0)
+    } else {
+        format!("{p}")
+    }
 }
 
 fn print_detection_stats(results: &[FullEvalResult]) {
-    println!("\n  {:<18} {:>6} {:>8} {:>10} {:>10} {:>10}",
-        "Model", "Res", "Dets", "Avg/Img", "Avg Conf", "Avg Area");
+    println!(
+        "\n  {:<18} {:>6} {:>8} {:>10} {:>10} {:>10}",
+        "Model", "Res", "Dets", "Avg/Img", "Avg Conf", "Avg Area"
+    );
     println!("  {}", "-".repeat(72));
     for r in results {
-        println!("  {:<18} {:>6} {:>8} {:>10.1} {:>10.4} {:>10.4}",
-            r.name, r.resolution, r.total_dets, r.avg_dets_per_image,
-            r.avg_confidence, r.avg_box_area);
+        println!(
+            "  {:<18} {:>6} {:>8} {:>10.1} {:>10.4} {:>10.4}",
+            r.name,
+            r.resolution,
+            r.total_dets,
+            r.avg_dets_per_image,
+            r.avg_confidence,
+            r.avg_box_area
+        );
     }
 }
 
@@ -354,7 +395,10 @@ mod tests {
     use std::time::Instant;
 
     fn count_params(params: &[axonml_nn::Parameter]) -> usize {
-        params.iter().map(|p| p.variable().data().to_vec().len()).sum()
+        params
+            .iter()
+            .map(|p| p.variable().data().to_vec().len())
+            .sum()
     }
 
     // =========================================================================
@@ -381,10 +425,19 @@ mod tests {
             for &(h, w, label) in &[(128, 128, "128"), (320, 320, "320")] {
                 println!("\n--- Helios-Nano @ {label}x{label} ---");
                 let r = run_full_eval(
-                    "Helios-Nano", label, pc, (h, w), num_classes, 50, 3,
+                    "Helios-Nano",
+                    label,
+                    pc,
+                    (h, w),
+                    num_classes,
+                    50,
+                    3,
                     &mut |input, iw, ih| {
-                        model.detect(&input, 0.001, 0.45).iter()
-                            .map(|d| detection_to_result(d, iw, ih)).collect()
+                        model
+                            .detect(&input, 0.001, 0.45)
+                            .iter()
+                            .map(|d| detection_to_result(d, iw, ih))
+                            .collect()
                     },
                 );
                 r.print();
@@ -401,10 +454,19 @@ mod tests {
             for &(h, w, label) in &[(128, 128, "128"), (320, 320, "320")] {
                 println!("\n--- Helios-Small @ {label}x{label} ---");
                 let r = run_full_eval(
-                    "Helios-Small", label, pc, (h, w), num_classes, 30, 2,
+                    "Helios-Small",
+                    label,
+                    pc,
+                    (h, w),
+                    num_classes,
+                    30,
+                    2,
                     &mut |input, iw, ih| {
-                        model.detect(&input, 0.001, 0.45).iter()
-                            .map(|d| detection_to_result(d, iw, ih)).collect()
+                        model
+                            .detect(&input, 0.001, 0.45)
+                            .iter()
+                            .map(|d| detection_to_result(d, iw, ih))
+                            .collect()
                     },
                 );
                 r.print();
@@ -419,8 +481,18 @@ mod tests {
         println!("{}\n", "=".repeat(80));
 
         for r in &results {
-            assert!(r.map50.is_finite(), "{} {}: mAP@50 not finite", r.name, r.resolution);
-            assert!(r.coco_map.is_finite(), "{} {}: COCO mAP not finite", r.name, r.resolution);
+            assert!(
+                r.map50.is_finite(),
+                "{} {}: mAP@50 not finite",
+                r.name,
+                r.resolution
+            );
+            assert!(
+                r.coco_map.is_finite(),
+                "{} {}: COCO mAP not finite",
+                r.name,
+                r.resolution
+            );
         }
     }
 
@@ -446,10 +518,19 @@ mod tests {
         for &(h, w, label) in &[(128, 128, "128"), (320, 320, "320")] {
             println!("\n--- NanoDet @ {label}x{label} ---");
             let r = run_full_eval(
-                "NanoDet", label, pc, (h, w), num_classes, 50, 3,
+                "NanoDet",
+                label,
+                pc,
+                (h, w),
+                num_classes,
+                50,
+                3,
                 &mut |input, iw, ih| {
-                    model.detect(&input, 0.001, 0.45).iter()
-                        .map(|d| detection_to_result(d, iw, ih)).collect()
+                    model
+                        .detect(&input, 0.001, 0.45)
+                        .iter()
+                        .map(|d| detection_to_result(d, iw, ih))
+                        .collect()
                 },
             );
             r.print();
@@ -462,7 +543,9 @@ mod tests {
         print_detection_stats(&results);
         println!("{}\n", "=".repeat(80));
 
-        for r in &results { assert!(r.map50.is_finite()); }
+        for r in &results {
+            assert!(r.map50.is_finite());
+        }
     }
 
     // =========================================================================
@@ -489,19 +572,27 @@ mod tests {
             model.reset();
             println!("\n--- Nexus @ {label}x{label} ---");
             let r = run_full_eval(
-                "Nexus", label, pc, (h, w), num_classes, 50, 3,
+                "Nexus",
+                label,
+                pc,
+                (h, w),
+                num_classes,
+                50,
+                3,
                 &mut |input, iw, ih| {
                     let dets = model.detect(&input);
-                    dets.iter().map(|d| DetectionResult {
-                        bbox: [
-                            (d.bbox_mean[0] / iw).clamp(0.0, 1.0),
-                            (d.bbox_mean[1] / ih).clamp(0.0, 1.0),
-                            (d.bbox_mean[2] / iw).clamp(0.0, 1.0),
-                            (d.bbox_mean[3] / ih).clamp(0.0, 1.0),
-                        ],
-                        confidence: d.confidence,
-                        class_id: d.class_id,
-                    }).collect()
+                    dets.iter()
+                        .map(|d| DetectionResult {
+                            bbox: [
+                                (d.bbox_mean[0] / iw).clamp(0.0, 1.0),
+                                (d.bbox_mean[1] / ih).clamp(0.0, 1.0),
+                                (d.bbox_mean[2] / iw).clamp(0.0, 1.0),
+                                (d.bbox_mean[3] / ih).clamp(0.0, 1.0),
+                            ],
+                            confidence: d.confidence,
+                            class_id: d.class_id,
+                        })
+                        .collect()
                 },
             );
             r.print();
@@ -514,7 +605,9 @@ mod tests {
         print_detection_stats(&results);
         println!("{}\n", "=".repeat(80));
 
-        for r in &results { assert!(r.map50.is_finite()); }
+        for r in &results {
+            assert!(r.map50.is_finite());
+        }
     }
 
     // =========================================================================
@@ -535,12 +628,17 @@ mod tests {
             // Diverse face-like ground truth
             let h = |v: f32| -> f32 { ((v * 127.1 + 311.7).sin() * 43758.5453).fract().abs() };
             let n = 1 + (h(image_idx as f32) * 3.0) as usize; // 1-3 faces
-            (0..n).map(|b| {
-                let s = 0.08 + h(image_idx as f32 + b as f32 * 11.3) * 0.35;
-                let x = h(image_idx as f32 + b as f32 * 23.7) * (1.0 - s);
-                let y = h(image_idx as f32 + b as f32 * 37.1) * (1.0 - s);
-                GroundTruth { bbox: [x, y, x + s, y + s * 1.2], class_id: 0 }
-            }).collect()
+            (0..n)
+                .map(|b| {
+                    let s = 0.08 + h(image_idx as f32 + b as f32 * 11.3) * 0.35;
+                    let x = h(image_idx as f32 + b as f32 * 23.7) * (1.0 - s);
+                    let y = h(image_idx as f32 + b as f32 * 37.1) * (1.0 - s);
+                    GroundTruth {
+                        bbox: [x, y, x + s, y + s * 1.2],
+                        class_id: 0,
+                    }
+                })
+                .collect()
         };
 
         // Phantom
@@ -554,19 +652,27 @@ mod tests {
                 model.reset();
                 println!("\n--- Phantom @ {label}x{label} ---");
                 let r = run_full_eval(
-                    "Phantom", label, pc, (h, w), num_classes, 50, 3,
+                    "Phantom",
+                    label,
+                    pc,
+                    (h, w),
+                    num_classes,
+                    50,
+                    3,
                     &mut |input, iw, ih| {
                         let dets = model.detect_frame(&input);
-                        dets.iter().map(|d| DetectionResult {
-                            bbox: [
-                                (d.bbox[0] / iw).clamp(0.0, 1.0),
-                                (d.bbox[1] / ih).clamp(0.0, 1.0),
-                                (d.bbox[2] / iw).clamp(0.0, 1.0),
-                                (d.bbox[3] / ih).clamp(0.0, 1.0),
-                            ],
-                            confidence: d.confidence,
-                            class_id: 0,
-                        }).collect()
+                        dets.iter()
+                            .map(|d| DetectionResult {
+                                bbox: [
+                                    (d.bbox[0] / iw).clamp(0.0, 1.0),
+                                    (d.bbox[1] / ih).clamp(0.0, 1.0),
+                                    (d.bbox[2] / iw).clamp(0.0, 1.0),
+                                    (d.bbox[3] / ih).clamp(0.0, 1.0),
+                                ],
+                                confidence: d.confidence,
+                                class_id: 0,
+                            })
+                            .collect()
                     },
                 );
                 r.print();
@@ -583,19 +689,27 @@ mod tests {
             for &(h, w, label) in &[(128, 128, "128"), (256, 256, "256")] {
                 println!("\n--- BlazeFace @ {label}x{label} ---");
                 let r = run_full_eval(
-                    "BlazeFace", label, pc, (h, w), num_classes, 50, 3,
+                    "BlazeFace",
+                    label,
+                    pc,
+                    (h, w),
+                    num_classes,
+                    50,
+                    3,
                     &mut |input, iw, ih| {
                         let dets = model.detect(&input, 0.001, 0.45);
-                        dets.iter().map(|d| DetectionResult {
-                            bbox: [
-                                (d.bbox[0] / iw).clamp(0.0, 1.0),
-                                (d.bbox[1] / ih).clamp(0.0, 1.0),
-                                (d.bbox[2] / iw).clamp(0.0, 1.0),
-                                (d.bbox[3] / ih).clamp(0.0, 1.0),
-                            ],
-                            confidence: d.confidence,
-                            class_id: 0,
-                        }).collect()
+                        dets.iter()
+                            .map(|d| DetectionResult {
+                                bbox: [
+                                    (d.bbox[0] / iw).clamp(0.0, 1.0),
+                                    (d.bbox[1] / ih).clamp(0.0, 1.0),
+                                    (d.bbox[2] / iw).clamp(0.0, 1.0),
+                                    (d.bbox[3] / ih).clamp(0.0, 1.0),
+                                ],
+                                confidence: d.confidence,
+                                class_id: 0,
+                            })
+                            .collect()
                     },
                 );
                 r.print();
@@ -612,19 +726,27 @@ mod tests {
             for &(h, w, label) in &[(128, 128, "128"), (320, 320, "320")] {
                 println!("\n--- RetinaFace @ {label}x{label} ---");
                 let r = run_full_eval(
-                    "RetinaFace", label, pc, (h, w), num_classes, 50, 3,
+                    "RetinaFace",
+                    label,
+                    pc,
+                    (h, w),
+                    num_classes,
+                    50,
+                    3,
                     &mut |input, iw, ih| {
                         let dets = model.detect(&input, 0.001, 0.45);
-                        dets.iter().map(|d| DetectionResult {
-                            bbox: [
-                                (d.bbox[0] / iw).clamp(0.0, 1.0),
-                                (d.bbox[1] / ih).clamp(0.0, 1.0),
-                                (d.bbox[2] / iw).clamp(0.0, 1.0),
-                                (d.bbox[3] / ih).clamp(0.0, 1.0),
-                            ],
-                            confidence: d.confidence,
-                            class_id: 0,
-                        }).collect()
+                        dets.iter()
+                            .map(|d| DetectionResult {
+                                bbox: [
+                                    (d.bbox[0] / iw).clamp(0.0, 1.0),
+                                    (d.bbox[1] / ih).clamp(0.0, 1.0),
+                                    (d.bbox[2] / iw).clamp(0.0, 1.0),
+                                    (d.bbox[3] / ih).clamp(0.0, 1.0),
+                                ],
+                                confidence: d.confidence,
+                                class_id: 0,
+                            })
+                            .collect()
                     },
                 );
                 r.print();
@@ -638,7 +760,9 @@ mod tests {
         print_detection_stats(&results);
         println!("{}\n", "=".repeat(80));
 
-        for r in &results { assert!(r.map50.is_finite()); }
+        for r in &results {
+            assert!(r.map50.is_finite());
+        }
     }
 
     // =========================================================================
@@ -663,11 +787,22 @@ mod tests {
             let model = Helios::nano(num_classes);
             let pc = count_params(&model.parameters());
             println!("\n--- Helios-Nano ---");
-            let r = run_full_eval("Helios-Nano", "128", pc, (128,128), num_classes, n_images, 3,
+            let r = run_full_eval(
+                "Helios-Nano",
+                "128",
+                pc,
+                (128, 128),
+                num_classes,
+                n_images,
+                3,
                 &mut |input, iw, ih| {
-                    model.detect(&input, 0.001, 0.45).iter()
-                        .map(|d| detection_to_result(d, iw, ih)).collect()
-                });
+                    model
+                        .detect(&input, 0.001, 0.45)
+                        .iter()
+                        .map(|d| detection_to_result(d, iw, ih))
+                        .collect()
+                },
+            );
             r.print();
             results.push(r);
         }
@@ -678,11 +813,22 @@ mod tests {
             let model = NanoDet::new(num_classes);
             let pc = count_params(&model.parameters());
             println!("\n--- NanoDet ---");
-            let r = run_full_eval("NanoDet", "128", pc, (128,128), num_classes, n_images, 3,
+            let r = run_full_eval(
+                "NanoDet",
+                "128",
+                pc,
+                (128, 128),
+                num_classes,
+                n_images,
+                3,
                 &mut |input, iw, ih| {
-                    model.detect(&input, 0.001, 0.45).iter()
-                        .map(|d| detection_to_result(d, iw, ih)).collect()
-                });
+                    model
+                        .detect(&input, 0.001, 0.45)
+                        .iter()
+                        .map(|d| detection_to_result(d, iw, ih))
+                        .collect()
+                },
+            );
             r.print();
             results.push(r);
         }
@@ -694,15 +840,30 @@ mod tests {
             model.eval();
             let pc = count_params(&model.parameters());
             println!("\n--- Nexus ---");
-            let r = run_full_eval("Nexus", "64", pc, (64,64), num_classes, n_images, 3,
+            let r = run_full_eval(
+                "Nexus",
+                "64",
+                pc,
+                (64, 64),
+                num_classes,
+                n_images,
+                3,
                 &mut |input, iw, ih| {
                     let dets = model.detect(&input);
-                    dets.iter().map(|d| DetectionResult {
-                        bbox: [(d.bbox_mean[0]/iw).clamp(0.0,1.0),(d.bbox_mean[1]/ih).clamp(0.0,1.0),
-                               (d.bbox_mean[2]/iw).clamp(0.0,1.0),(d.bbox_mean[3]/ih).clamp(0.0,1.0)],
-                        confidence: d.confidence, class_id: d.class_id,
-                    }).collect()
-                });
+                    dets.iter()
+                        .map(|d| DetectionResult {
+                            bbox: [
+                                (d.bbox_mean[0] / iw).clamp(0.0, 1.0),
+                                (d.bbox_mean[1] / ih).clamp(0.0, 1.0),
+                                (d.bbox_mean[2] / iw).clamp(0.0, 1.0),
+                                (d.bbox_mean[3] / ih).clamp(0.0, 1.0),
+                            ],
+                            confidence: d.confidence,
+                            class_id: d.class_id,
+                        })
+                        .collect()
+                },
+            );
             r.print();
             results.push(r);
         }
@@ -714,14 +875,31 @@ mod tests {
             model.eval();
             let pc = count_params(&model.parameters());
             println!("\n--- Phantom ---");
-            let r = run_full_eval("Phantom", "64", pc, (64,64), 1, n_images, 3,
+            let r = run_full_eval(
+                "Phantom",
+                "64",
+                pc,
+                (64, 64),
+                1,
+                n_images,
+                3,
                 &mut |input, iw, ih| {
-                    model.detect_frame(&input).iter().map(|d| DetectionResult {
-                        bbox: [(d.bbox[0]/iw).clamp(0.0,1.0),(d.bbox[1]/ih).clamp(0.0,1.0),
-                               (d.bbox[2]/iw).clamp(0.0,1.0),(d.bbox[3]/ih).clamp(0.0,1.0)],
-                        confidence: d.confidence, class_id: 0,
-                    }).collect()
-                });
+                    model
+                        .detect_frame(&input)
+                        .iter()
+                        .map(|d| DetectionResult {
+                            bbox: [
+                                (d.bbox[0] / iw).clamp(0.0, 1.0),
+                                (d.bbox[1] / ih).clamp(0.0, 1.0),
+                                (d.bbox[2] / iw).clamp(0.0, 1.0),
+                                (d.bbox[3] / ih).clamp(0.0, 1.0),
+                            ],
+                            confidence: d.confidence,
+                            class_id: 0,
+                        })
+                        .collect()
+                },
+            );
             r.print();
             results.push(r);
         }
@@ -732,14 +910,31 @@ mod tests {
             let model = BlazeFace::new();
             let pc = count_params(&model.parameters());
             println!("\n--- BlazeFace ---");
-            let r = run_full_eval("BlazeFace", "128", pc, (128,128), 1, n_images, 3,
+            let r = run_full_eval(
+                "BlazeFace",
+                "128",
+                pc,
+                (128, 128),
+                1,
+                n_images,
+                3,
                 &mut |input, iw, ih| {
-                    model.detect(&input, 0.001, 0.45).iter().map(|d| DetectionResult {
-                        bbox: [(d.bbox[0]/iw).clamp(0.0,1.0),(d.bbox[1]/ih).clamp(0.0,1.0),
-                               (d.bbox[2]/iw).clamp(0.0,1.0),(d.bbox[3]/ih).clamp(0.0,1.0)],
-                        confidence: d.confidence, class_id: 0,
-                    }).collect()
-                });
+                    model
+                        .detect(&input, 0.001, 0.45)
+                        .iter()
+                        .map(|d| DetectionResult {
+                            bbox: [
+                                (d.bbox[0] / iw).clamp(0.0, 1.0),
+                                (d.bbox[1] / ih).clamp(0.0, 1.0),
+                                (d.bbox[2] / iw).clamp(0.0, 1.0),
+                                (d.bbox[3] / ih).clamp(0.0, 1.0),
+                            ],
+                            confidence: d.confidence,
+                            class_id: 0,
+                        })
+                        .collect()
+                },
+            );
             r.print();
             results.push(r);
         }
@@ -750,14 +945,31 @@ mod tests {
             let model = RetinaFace::new();
             let pc = count_params(&model.parameters());
             println!("\n--- RetinaFace ---");
-            let r = run_full_eval("RetinaFace", "128", pc, (128,128), 1, n_images, 3,
+            let r = run_full_eval(
+                "RetinaFace",
+                "128",
+                pc,
+                (128, 128),
+                1,
+                n_images,
+                3,
                 &mut |input, iw, ih| {
-                    model.detect(&input, 0.001, 0.45).iter().map(|d| DetectionResult {
-                        bbox: [(d.bbox[0]/iw).clamp(0.0,1.0),(d.bbox[1]/ih).clamp(0.0,1.0),
-                               (d.bbox[2]/iw).clamp(0.0,1.0),(d.bbox[3]/ih).clamp(0.0,1.0)],
-                        confidence: d.confidence, class_id: 0,
-                    }).collect()
-                });
+                    model
+                        .detect(&input, 0.001, 0.45)
+                        .iter()
+                        .map(|d| DetectionResult {
+                            bbox: [
+                                (d.bbox[0] / iw).clamp(0.0, 1.0),
+                                (d.bbox[1] / ih).clamp(0.0, 1.0),
+                                (d.bbox[2] / iw).clamp(0.0, 1.0),
+                                (d.bbox[3] / ih).clamp(0.0, 1.0),
+                            ],
+                            confidence: d.confidence,
+                            class_id: 0,
+                        })
+                        .collect()
+                },
+            );
             r.print();
             results.push(r);
         }
@@ -792,21 +1004,38 @@ mod tests {
             let num_classes = 3;
             let all_dets = vec![
                 vec![
-                    DetectionResult { bbox: [0.1, 0.1, 0.4, 0.4], confidence: 0.95, class_id: 0 },
-                    DetectionResult { bbox: [0.5, 0.5, 0.9, 0.9], confidence: 0.90, class_id: 1 },
+                    DetectionResult {
+                        bbox: [0.1, 0.1, 0.4, 0.4],
+                        confidence: 0.95,
+                        class_id: 0,
+                    },
+                    DetectionResult {
+                        bbox: [0.5, 0.5, 0.9, 0.9],
+                        confidence: 0.90,
+                        class_id: 1,
+                    },
                 ],
-                vec![
-                    DetectionResult { bbox: [0.2, 0.2, 0.6, 0.6], confidence: 0.85, class_id: 2 },
-                ],
+                vec![DetectionResult {
+                    bbox: [0.2, 0.2, 0.6, 0.6],
+                    confidence: 0.85,
+                    class_id: 2,
+                }],
             ];
             let all_gts = vec![
                 vec![
-                    GroundTruth { bbox: [0.1, 0.1, 0.4, 0.4], class_id: 0 },
-                    GroundTruth { bbox: [0.5, 0.5, 0.9, 0.9], class_id: 1 },
+                    GroundTruth {
+                        bbox: [0.1, 0.1, 0.4, 0.4],
+                        class_id: 0,
+                    },
+                    GroundTruth {
+                        bbox: [0.5, 0.5, 0.9, 0.9],
+                        class_id: 1,
+                    },
                 ],
-                vec![
-                    GroundTruth { bbox: [0.2, 0.2, 0.6, 0.6], class_id: 2 },
-                ],
+                vec![GroundTruth {
+                    bbox: [0.2, 0.2, 0.6, 0.6],
+                    class_id: 2,
+                }],
             ];
 
             let map50 = compute_map(&all_dets, &all_gts, num_classes, 0.5);
@@ -825,14 +1054,34 @@ mod tests {
         {
             let num_classes = 3;
             let all_dets = vec![vec![
-                DetectionResult { bbox: [0.0, 0.0, 0.5, 0.5], confidence: 0.9, class_id: 0 },
-                DetectionResult { bbox: [0.5, 0.5, 1.0, 1.0], confidence: 0.8, class_id: 1 },
+                DetectionResult {
+                    bbox: [0.0, 0.0, 0.5, 0.5],
+                    confidence: 0.9,
+                    class_id: 0,
+                },
+                DetectionResult {
+                    bbox: [0.5, 0.5, 1.0, 1.0],
+                    confidence: 0.8,
+                    class_id: 1,
+                },
             ]];
             let all_gts = vec![vec![
-                GroundTruth { bbox: [0.0, 0.0, 0.5, 0.5], class_id: 0 },
-                GroundTruth { bbox: [0.5, 0.5, 1.0, 1.0], class_id: 1 },
-                GroundTruth { bbox: [0.2, 0.2, 0.3, 0.3], class_id: 1 },
-                GroundTruth { bbox: [0.7, 0.1, 0.9, 0.3], class_id: 2 },
+                GroundTruth {
+                    bbox: [0.0, 0.0, 0.5, 0.5],
+                    class_id: 0,
+                },
+                GroundTruth {
+                    bbox: [0.5, 0.5, 1.0, 1.0],
+                    class_id: 1,
+                },
+                GroundTruth {
+                    bbox: [0.2, 0.2, 0.3, 0.3],
+                    class_id: 1,
+                },
+                GroundTruth {
+                    bbox: [0.7, 0.1, 0.9, 0.3],
+                    class_id: 2,
+                },
             ]];
 
             let map50 = compute_map(&all_dets, &all_gts, num_classes, 0.5);
@@ -844,12 +1093,21 @@ mod tests {
         // Test 3: All false positives
         {
             let all_dets = vec![vec![
-                DetectionResult { bbox: [0.0, 0.0, 0.1, 0.1], confidence: 0.9, class_id: 0 },
-                DetectionResult { bbox: [0.9, 0.9, 1.0, 1.0], confidence: 0.8, class_id: 0 },
+                DetectionResult {
+                    bbox: [0.0, 0.0, 0.1, 0.1],
+                    confidence: 0.9,
+                    class_id: 0,
+                },
+                DetectionResult {
+                    bbox: [0.9, 0.9, 1.0, 1.0],
+                    confidence: 0.8,
+                    class_id: 0,
+                },
             ]];
-            let all_gts = vec![vec![
-                GroundTruth { bbox: [0.4, 0.4, 0.6, 0.6], class_id: 0 },
-            ]];
+            let all_gts = vec![vec![GroundTruth {
+                bbox: [0.4, 0.4, 0.6, 0.6],
+                class_id: 0,
+            }]];
 
             let map50 = compute_map(&all_dets, &all_gts, 1, 0.5);
             println!("\n  All false positives:");
@@ -865,10 +1123,13 @@ mod tests {
             for i in 0..20 {
                 let cls = i % nc;
                 all_dets.push(vec![DetectionResult {
-                    bbox: [0.1, 0.1, 0.5, 0.5], confidence: 0.7, class_id: cls,
+                    bbox: [0.1, 0.1, 0.5, 0.5],
+                    confidence: 0.7,
+                    class_id: cls,
                 }]);
                 all_gts.push(vec![GroundTruth {
-                    bbox: [0.1, 0.1, 0.5, 0.5], class_id: cls,
+                    bbox: [0.1, 0.1, 0.5, 0.5],
+                    class_id: cls,
                 }]);
             }
             let map50 = compute_map(&all_dets, &all_gts, nc, 0.5);
@@ -911,14 +1172,20 @@ mod tests {
             (640, 640, "nano", 50),
         ] {
             let input_size = (input_h, input_w);
-            let dataset = match crate::datasets::CocoDataset::new(&image_dir, &anno_json, input_size) {
-                Ok(ds) => ds,
-                Err(e) => { println!("  Failed to load: {e}"); return; }
-            };
+            let dataset =
+                match crate::datasets::CocoDataset::new(&image_dir, &anno_json, input_size) {
+                    Ok(ds) => ds,
+                    Err(e) => {
+                        println!("  Failed to load: {e}");
+                        return;
+                    }
+                };
 
             let num_classes = dataset.num_classes();
             let max_images = std::env::var("COCO_MAX_IMAGES")
-                .ok().and_then(|s| s.parse().ok()).unwrap_or(max_default);
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(max_default);
 
             let model = match variant {
                 "nano" => crate::models::helios::Helios::nano(num_classes),
@@ -928,9 +1195,8 @@ mod tests {
 
             println!("\n--- Helios-{variant} @ {input_h}x{input_w} ({max_images} images) ---");
             let start = Instant::now();
-            let (map50, coco_map) = evaluate_helios_coco(
-                &model, &dataset, input_size, 0.001, 0.45, max_images,
-            );
+            let (map50, coco_map) =
+                evaluate_helios_coco(&model, &dataset, input_size, 0.001, 0.45, max_images);
             let elapsed = start.elapsed();
             let per_image = elapsed.as_secs_f64() * 1000.0 / max_images as f64;
             let _map75 = {
@@ -941,7 +1207,10 @@ mod tests {
 
             println!("  mAP@50:       {map50:.4}");
             println!("  COCO mAP:     {coco_map:.4}");
-            println!("  latency:      {per_image:.1}ms/img ({:.1} FPS)", 1000.0 / per_image);
+            println!(
+                "  latency:      {per_image:.1}ms/img ({:.1} FPS)",
+                1000.0 / per_image
+            );
             println!("  total time:   {:.1}s", elapsed.as_secs_f64());
 
             assert!(map50.is_finite());

@@ -40,11 +40,32 @@ struct ContextModule {
 impl ContextModule {
     fn new(in_channels: usize, out_channels: usize) -> Self {
         Self {
-            conv1: Conv2d::with_options(in_channels, out_channels / 2, (3, 3), (1, 1), (1, 1), true),
+            conv1: Conv2d::with_options(
+                in_channels,
+                out_channels / 2,
+                (3, 3),
+                (1, 1),
+                (1, 1),
+                true,
+            ),
             bn1: BatchNorm2d::new(out_channels / 2),
-            conv2: Conv2d::with_options(out_channels / 2, out_channels / 4, (3, 3), (1, 1), (1, 1), true),
+            conv2: Conv2d::with_options(
+                out_channels / 2,
+                out_channels / 4,
+                (3, 3),
+                (1, 1),
+                (1, 1),
+                true,
+            ),
             bn2: BatchNorm2d::new(out_channels / 4),
-            conv3: Conv2d::with_options(out_channels / 4, out_channels / 4, (3, 3), (1, 1), (1, 1), true),
+            conv3: Conv2d::with_options(
+                out_channels / 4,
+                out_channels / 4,
+                (3, 3),
+                (1, 1),
+                (1, 1),
+                true,
+            ),
             bn3: BatchNorm2d::new(out_channels / 4),
             relu: ReLU,
         }
@@ -52,8 +73,12 @@ impl ContextModule {
 
     fn forward(&self, x: &Variable) -> Variable {
         let out1 = self.relu.forward(&self.bn1.forward(&self.conv1.forward(x)));
-        let out2 = self.relu.forward(&self.bn2.forward(&self.conv2.forward(&out1)));
-        let out3 = self.relu.forward(&self.bn3.forward(&self.conv3.forward(&out2)));
+        let out2 = self
+            .relu
+            .forward(&self.bn2.forward(&self.conv2.forward(&out1)));
+        let out3 = self
+            .relu
+            .forward(&self.bn3.forward(&self.conv3.forward(&out2)));
         // Concatenate branches: out1 (C/2) + out2 (C/4) + out3 (C/4) = C
         concat_channels(&[&out1, &out2, &out3])
     }
@@ -85,9 +110,30 @@ struct DetectionHead {
 impl DetectionHead {
     fn new(in_channels: usize, num_anchors: usize) -> Self {
         Self {
-            cls_conv: Conv2d::with_options(in_channels, num_anchors * 2, (1, 1), (1, 1), (0, 0), true),
-            bbox_conv: Conv2d::with_options(in_channels, num_anchors * 4, (1, 1), (1, 1), (0, 0), true),
-            ldm_conv: Conv2d::with_options(in_channels, num_anchors * 10, (1, 1), (1, 1), (0, 0), true),
+            cls_conv: Conv2d::with_options(
+                in_channels,
+                num_anchors * 2,
+                (1, 1),
+                (1, 1),
+                (0, 0),
+                true,
+            ),
+            bbox_conv: Conv2d::with_options(
+                in_channels,
+                num_anchors * 4,
+                (1, 1),
+                (1, 1),
+                (0, 0),
+                true,
+            ),
+            ldm_conv: Conv2d::with_options(
+                in_channels,
+                num_anchors * 10,
+                (1, 1),
+                (1, 1),
+                (0, 0),
+                true,
+            ),
             _num_anchors: num_anchors,
         }
     }
@@ -266,7 +312,10 @@ impl RetinaFace {
     }
 
     /// Raw forward pass returning per-level predictions.
-    pub(crate) fn forward_raw(&self, x: &Variable) -> (Vec<Variable>, Vec<Variable>, Vec<Variable>) {
+    pub(crate) fn forward_raw(
+        &self,
+        x: &Variable,
+    ) -> (Vec<Variable>, Vec<Variable>, Vec<Variable>) {
         // Extract backbone features at each layer
         let features = self.extract_backbone_features(x);
 
@@ -299,7 +348,12 @@ impl RetinaFace {
         // Simplified: create placeholder features at different scales.
         // In a real implementation, we'd hook into backbone layers.
         let input_shape = x.shape();
-        let (n, _, h, w) = (input_shape[0], input_shape[1], input_shape[2], input_shape[3]);
+        let (n, _, h, w) = (
+            input_shape[0],
+            input_shape[1],
+            input_shape[2],
+            input_shape[3],
+        );
 
         let make_feat = |c: usize, scale: usize| -> Variable {
             let fh = h / scale;
@@ -311,10 +365,10 @@ impl RetinaFace {
         };
 
         vec![
-            make_feat(64, 4),    // C2: H/4
-            make_feat(128, 8),   // C3: H/8
-            make_feat(256, 16),  // C4: H/16
-            make_feat(512, 32),  // C5: H/32
+            make_feat(64, 4),   // C2: H/4
+            make_feat(128, 8),  // C3: H/8
+            make_feat(256, 16), // C4: H/16
+            make_feat(512, 32), // C5: H/32
         ]
     }
 }
@@ -431,8 +485,8 @@ mod tests {
             false,
         );
         let (cls, bbox, ldm) = head.forward(&input);
-        assert_eq!(cls.shape()[1], 4);   // 2 anchors * 2 classes
-        assert_eq!(bbox.shape()[1], 8);  // 2 anchors * 4 coords
-        assert_eq!(ldm.shape()[1], 20);  // 2 anchors * 10 landmark coords
+        assert_eq!(cls.shape()[1], 4); // 2 anchors * 2 classes
+        assert_eq!(bbox.shape()[1], 8); // 2 anchors * 4 coords
+        assert_eq!(ldm.shape()[1], 20); // 2 anchors * 10 landmark coords
     }
 }
