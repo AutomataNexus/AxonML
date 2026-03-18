@@ -16,6 +16,10 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "cuda")]
+use axonml_autograd::functions::FusedAttentionBackward;
+#[cfg(feature = "cuda")]
+use axonml_autograd::grad_fn::GradFn;
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
 
@@ -154,20 +158,40 @@ impl MultiHeadAttention {
             .transpose(1, 2);
 
         // GPU fast path: fused attention kernel avoids materializing the N*N
-        // attention matrix. Used for inference (no grad) or when no mask is needed.
-        // The kernel computes Q@K^T * scale -> softmax -> @V in one pass per row.
+        // attention matrix. Works for both inference and training when no mask
+        // is provided. The kernel computes Q@K^T * scale -> softmax -> @V in
+        // one pass per row. In training mode, a FusedAttentionBackward autograd
+        // function is attached that uses the CUDA backward kernel (or CPU fallback).
         #[cfg(feature = "cuda")]
-        if q.data().device().is_gpu()
-            && attn_mask.is_none()
-            && !axonml_autograd::no_grad::is_grad_enabled()
-        {
-            if let Some(attn_out) = q.data().fused_attention_cuda(
-                &k.data(),
-                &v.data(),
-                self.scale,
+        if q.data().device().is_gpu() && attn_mask.is_none() {
+            let is_training = axonml_autograd::no_grad::is_grad_enabled();
+            let q_tensor = q.data();
+            let k_tensor = k.data();
+            let v_tensor = v.data();
+
+            if let Some(attn_out) = q_tensor.fused_attention_cuda(
+                &k_tensor, &v_tensor, self.scale,
                 false, // not causal by default; causal mask would be in attn_mask
             ) {
-                let attn_output = Variable::new(attn_out, false);
+                let attn_output = if is_training
+                    && (q.requires_grad() || k.requires_grad() || v.requires_grad())
+                {
+                    // Build autograd backward function for training
+                    let backward = FusedAttentionBackward::new(
+                        q.grad_fn().cloned(),
+                        k.grad_fn().cloned(),
+                        v.grad_fn().cloned(),
+                        q_tensor,
+                        k_tensor,
+                        v_tensor,
+                        attn_out.clone(),
+                        self.scale,
+                        false,
+                    );
+                    Variable::from_operation(attn_out, GradFn::new(backward), true)
+                } else {
+                    Variable::new(attn_out, false)
+                };
                 let attn_output =
                     attn_output
                         .transpose(1, 2)
@@ -714,5 +738,178 @@ mod tests {
             "row 0, col 0 should be 1.0"
         );
         assert!((out_vec[1]).abs() < 1e-5, "row 0, col 1 should be 0.0");
+    }
+
+    #[test]
+    fn test_multihead_attention_backward_cpu() {
+        // Test that gradients flow through MHA in training mode (CPU path)
+        use axonml_autograd::backward;
+
+        let mha = MultiHeadAttention::new(32, 4);
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.1; 2 * 4 * 32], &[2, 4, 32]).unwrap(),
+            true,
+        );
+        let output = mha.forward(&input);
+        assert_eq!(output.shape(), vec![2, 4, 32]);
+
+        // Sum the output and backward
+        let loss = output.sum();
+        let ones = Tensor::from_vec(vec![1.0f32], &[1]).unwrap();
+        backward(&loss, &ones);
+
+        // Input should have gradients
+        let grad = input.grad();
+        assert!(grad.is_some(), "Input gradient should exist");
+        let grad_data = grad.unwrap();
+        assert_eq!(grad_data.shape(), &[2, 4, 32]);
+
+        // Gradients should be non-zero
+        let grad_vec = grad_data.to_vec();
+        let non_zero = grad_vec.iter().any(|&v| v.abs() > 1e-10);
+        assert!(non_zero, "Gradients should be non-zero");
+    }
+
+    #[test]
+    fn test_fused_attention_backward_cpu() {
+        // Test the FusedAttentionBackward autograd function directly on CPU
+        use axonml_autograd::functions::FusedAttentionBackward;
+        use axonml_autograd::grad_fn::GradientFunction;
+
+        let batch = 1;
+        let heads = 2;
+        let seq = 4;
+        let dim = 8;
+        let scale = 1.0 / (dim as f32).sqrt();
+
+        // Create random-ish tensors
+        let q_data: Vec<f32> = (0..batch * heads * seq * dim)
+            .map(|i| ((i as f32) * 0.01).sin())
+            .collect();
+        let k_data: Vec<f32> = (0..batch * heads * seq * dim)
+            .map(|i| ((i as f32) * 0.02).cos())
+            .collect();
+        let v_data: Vec<f32> = (0..batch * heads * seq * dim)
+            .map(|i| ((i as f32) * 0.03).sin() + 0.5)
+            .collect();
+
+        let q = Tensor::from_vec(q_data, &[batch, heads, seq, dim]).unwrap();
+        let k = Tensor::from_vec(k_data, &[batch, heads, seq, dim]).unwrap();
+        let v = Tensor::from_vec(v_data, &[batch, heads, seq, dim]).unwrap();
+
+        // Compute forward output using the fused CPU path
+        let output = scaled_dot_product_attention_fused(&q, &k, &v, scale, false);
+        assert_eq!(output.shape(), &[batch, heads, seq, dim]);
+
+        // Create backward function
+        let backward_fn = FusedAttentionBackward::new(
+            None,
+            None,
+            None,
+            q.clone(),
+            k.clone(),
+            v.clone(),
+            output.clone(),
+            scale,
+            false,
+        );
+
+        // Use ones as grad_output
+        let grad_output = Tensor::from_vec(
+            vec![1.0f32; batch * heads * seq * dim],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+
+        let grads = backward_fn.apply(&grad_output);
+        assert_eq!(grads.len(), 3);
+
+        let gq = grads[0].as_ref().expect("grad_Q should exist");
+        let gk = grads[1].as_ref().expect("grad_K should exist");
+        let gv = grads[2].as_ref().expect("grad_V should exist");
+
+        assert_eq!(gq.shape(), &[batch, heads, seq, dim]);
+        assert_eq!(gk.shape(), &[batch, heads, seq, dim]);
+        assert_eq!(gv.shape(), &[batch, heads, seq, dim]);
+
+        // Gradients should be finite
+        for val in gq
+            .to_vec()
+            .iter()
+            .chain(gk.to_vec().iter())
+            .chain(gv.to_vec().iter())
+        {
+            assert!(val.is_finite(), "Gradient should be finite, got {}", val);
+        }
+
+        // grad_V should be non-zero (it's P^T @ grad_output)
+        let gv_nonzero = gv.to_vec().iter().any(|&v| v.abs() > 1e-10);
+        assert!(gv_nonzero, "grad_V should be non-zero");
+    }
+
+    #[test]
+    fn test_fused_attention_backward_causal_cpu() {
+        // Test the backward with causal masking
+        use axonml_autograd::functions::FusedAttentionBackward;
+        use axonml_autograd::grad_fn::GradientFunction;
+
+        let batch = 1;
+        let heads = 1;
+        let seq = 4;
+        let dim = 4;
+        let scale = 1.0 / (dim as f32).sqrt();
+
+        let q = Tensor::from_vec(
+            vec![0.1f32; batch * heads * seq * dim],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+        let k = Tensor::from_vec(
+            vec![0.2f32; batch * heads * seq * dim],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+        let v = Tensor::from_vec(
+            vec![0.5f32; batch * heads * seq * dim],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+
+        let output = scaled_dot_product_attention_fused(&q, &k, &v, scale, true);
+
+        let backward_fn = FusedAttentionBackward::new(
+            None,
+            None,
+            None,
+            q.clone(),
+            k.clone(),
+            v.clone(),
+            output.clone(),
+            scale,
+            true,
+        );
+
+        let grad_output = Tensor::from_vec(
+            vec![1.0f32; batch * heads * seq * dim],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+
+        let grads = backward_fn.apply(&grad_output);
+        assert_eq!(grads.len(), 3);
+
+        let gq = grads[0].as_ref().unwrap();
+        let gk = grads[1].as_ref().unwrap();
+        let gv = grads[2].as_ref().unwrap();
+
+        // All grads should be finite
+        for val in gq
+            .to_vec()
+            .iter()
+            .chain(gk.to_vec().iter())
+            .chain(gv.to_vec().iter())
+        {
+            assert!(val.is_finite(), "Gradient should be finite, got {}", val);
+        }
     }
 }

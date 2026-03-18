@@ -15,6 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 mod activation;
+mod attention;
 mod basic;
 mod conv;
 mod linalg;
@@ -22,6 +23,7 @@ mod loss;
 mod rnn;
 
 pub use activation::*;
+pub use attention::*;
 pub use basic::*;
 pub use conv::*;
 pub use linalg::*;
