@@ -86,7 +86,7 @@ matrixmultiply = { version = "0.3", features = ["threading"] }
 rustc-hash = "2.1"
 
 # GPU backends
-cudarc = { version = "0.12", features = ["cuda-version-from-build-system"] }
+cudarc = { version = "0.19", features = ["std", "driver", "cublas", "curand", "cudnn", "nvrtc", "cuda-12060"] }
 wgpu = "23.0"
 ash = "0.38"
 gpu-allocator = "0.27"

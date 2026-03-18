@@ -615,7 +615,24 @@ impl Module for Conv2d {
             }
             let weight_data = self.weight.data();
 
-            let gpu_output = if self.groups == 1 {
+            // Try cuDNN first (fastest path), fall back to im2col+GEMM
+            #[cfg(feature = "cudnn")]
+            let cudnn_output = {
+                let bias_tensor = self.bias.as_ref().map(|b| b.data());
+                input_data.conv2d_cudnn(
+                    &weight_data,
+                    bias_tensor.as_ref(),
+                    self.stride,
+                    self.padding,
+                    self.groups,
+                )
+            };
+            #[cfg(not(feature = "cudnn"))]
+            let cudnn_output: Option<axonml_tensor::Tensor<f32>> = None;
+
+            let gpu_output = if cudnn_output.is_some() {
+                cudnn_output
+            } else if self.groups == 1 {
                 // Standard convolution: single im2col + GEMM
                 let bias_tensor = self.bias.as_ref().map(|b| b.data());
                 input_data.conv2d_cuda(

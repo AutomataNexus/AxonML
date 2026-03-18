@@ -15,7 +15,9 @@
 //! liable for any damages arising from the use of this software.
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::{CudaDevice, CudaFunction, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, CudaModule, LaunchConfig};
+#[cfg(feature = "cuda")]
+use cudarc::nvrtc::Ptx;
 #[cfg(feature = "cuda")]
 use std::collections::HashMap;
 #[cfg(feature = "cuda")]
@@ -3547,16 +3549,16 @@ pub const ATTENTION_PTX: &str = include_str!("attention.ptx");
 /// CUDA Kernel registry for managing loaded kernels
 #[cfg(feature = "cuda")]
 pub struct CudaKernels {
-    device: Arc<CudaDevice>,
+    ctx: Arc<CudaContext>,
     functions: HashMap<String, CudaFunction>,
 }
 
 #[cfg(feature = "cuda")]
 impl CudaKernels {
     /// Load kernels from embedded PTX
-    pub fn load(device: Arc<CudaDevice>) -> Result<Self, CudaError> {
+    pub fn load(ctx: Arc<CudaContext>) -> Result<Self, CudaError> {
         let mut kernels = Self {
-            device,
+            ctx,
             functions: HashMap::new(),
         };
 
@@ -3718,18 +3720,20 @@ impl CudaKernels {
         ptx: &'static str,
         functions: &'static [&'static str],
     ) -> Result<(), CudaError> {
-        self.device
-            .load_ptx(ptx.into(), name, functions)
-            .map_err(|e| {
-                eprintln!("[AxonML CUDA] Failed to load module '{}': {}", name, e);
-                CudaError::ModuleLoadFailed(e.to_string())
-            })?;
+        let ptx_obj = Ptx::from_src(ptx);
+        let module: Arc<CudaModule> = self.ctx.load_module(ptx_obj).map_err(|e| {
+            eprintln!("[AxonML CUDA] Failed to load module '{}': {}", name, e);
+            CudaError::ModuleLoadFailed(e.to_string())
+        })?;
 
         for func_name in functions {
-            let func = self
-                .device
-                .get_func(name, func_name)
-                .ok_or_else(|| CudaError::KernelNotFound(func_name.to_string()))?;
+            let func = module.load_function(func_name).map_err(|e| {
+                eprintln!(
+                    "[AxonML CUDA] Failed to load function '{}' from '{}': {}",
+                    func_name, name, e
+                );
+                CudaError::KernelNotFound(func_name.to_string())
+            })?;
             self.functions.insert(func_name.to_string(), func);
         }
 
