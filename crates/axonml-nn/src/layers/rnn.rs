@@ -515,20 +515,29 @@ impl Module for LSTM {
                     let c_data = c.data();
 
                     if let Some((h_tensor, c_tensor)) = gates_data.lstm_gates_fused(&c_data, hs) {
+                        // Save forward state for backward
+                        let saved_gates = gates_data.clone();
+                        let saved_c_prev = c_data.clone();
+                        let saved_c_new = c_tensor.clone();
+
+                        // Create proper backward that calls LSTM backward kernel
+                        let backward_fn = axonml_autograd::LstmGatesBackward::new(
+                            gates.grad_fn().cloned(),
+                            c.grad_fn().cloned(),
+                            saved_gates,
+                            saved_c_prev,
+                            saved_c_new,
+                            hs,
+                        );
+                        let grad_fn = axonml_autograd::GradFn::new(backward_fn);
+
                         let h_new = Variable::from_operation(
                             h_tensor,
-                            gates.grad_fn().cloned().unwrap_or_else(|| {
-                                axonml_autograd::GradFn::new(axonml_autograd::IdentityBackward)
-                            }),
+                            grad_fn.clone(),
                             input.requires_grad(),
                         );
-                        let c_new = Variable::from_operation(
-                            c_tensor,
-                            gates.grad_fn().cloned().unwrap_or_else(|| {
-                                axonml_autograd::GradFn::new(axonml_autograd::IdentityBackward)
-                            }),
-                            input.requires_grad(),
-                        );
+                        let c_new =
+                            Variable::from_operation(c_tensor, grad_fn, input.requires_grad());
                         states[0] = (h_new, c_new);
                     }
                 }
@@ -833,13 +842,25 @@ impl Module for GRU {
                     let h_data = hidden.data();
 
                     if let Some(h_tensor) = ih_data.gru_gates_fused(&hh_data, &h_data, hs) {
-                        let h_new = Variable::from_operation(
-                            h_tensor,
-                            hh.grad_fn().cloned().unwrap_or_else(|| {
-                                axonml_autograd::GradFn::new(axonml_autograd::IdentityBackward)
-                            }),
-                            input.requires_grad(),
+                        // Save forward state for backward
+                        let saved_ih = ih_data.clone();
+                        let saved_hh = hh_data.clone();
+                        let saved_h_prev = h_data.clone();
+
+                        // Create proper backward that calls GRU backward kernel
+                        let backward_fn = axonml_autograd::GruGatesBackward::new(
+                            ih_t.grad_fn().cloned(),
+                            hh.grad_fn().cloned(),
+                            hidden.grad_fn().cloned(),
+                            saved_ih,
+                            saved_hh,
+                            saved_h_prev,
+                            hs,
                         );
+                        let grad_fn = axonml_autograd::GradFn::new(backward_fn);
+
+                        let h_new =
+                            Variable::from_operation(h_tensor, grad_fn, input.requires_grad());
                         hidden_states[0] = h_new;
                     }
                 }

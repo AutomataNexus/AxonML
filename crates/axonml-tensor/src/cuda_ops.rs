@@ -1679,6 +1679,163 @@ impl Tensor<f32> {
     }
 
     // =========================================================================
+    // Fused LSTM Gate Backward (GPU)
+    // =========================================================================
+
+    /// Fused LSTM gate backward on GPU.
+    ///
+    /// Given saved forward state and incoming gradients, computes gate gradients
+    /// [batch, 4*hidden] and cell gradient to previous timestep [batch, hidden].
+    ///
+    /// - `self`: gates [batch, 4*hidden] pre-activation from forward
+    /// - `c_prev`: [batch, hidden]
+    /// - `c_new`: [batch, hidden]
+    /// - `grad_h`: [batch, hidden]
+    /// - `grad_c_next`: [batch, hidden]
+    ///
+    /// Returns (grad_gates [batch, 4*hidden], grad_c_prev [batch, hidden]).
+    pub fn lstm_gates_backward_fused(
+        &self,
+        c_prev: &Self,
+        c_new: &Self,
+        grad_h: &Self,
+        grad_c_next: &Self,
+        hidden_size: usize,
+    ) -> Option<(Self, Self)> {
+        let batch_size = grad_h.shape()[0];
+        let total = batch_size * hidden_size;
+        let cuda = get_cuda_backend()?;
+
+        let gates_contig = self.contiguous_gpu();
+        let c_prev_contig = c_prev.contiguous_gpu();
+        let c_new_contig = c_new.contiguous_gpu();
+        let grad_h_contig = grad_h.contiguous_gpu();
+        let grad_c_contig = grad_c_next.contiguous_gpu();
+
+        let gates_guard = gates_contig.storage.as_cuda_slice();
+        let c_prev_guard = c_prev_contig.storage.as_cuda_slice();
+        let c_new_guard = c_new_contig.storage.as_cuda_slice();
+        let grad_h_guard = grad_h_contig.storage.as_cuda_slice();
+        let grad_c_guard = grad_c_contig.storage.as_cuda_slice();
+
+        let mut grad_gates_out = pool_alloc(batch_size * 4 * hidden_size).ok()?;
+        let mut grad_c_prev_out = pool_alloc(total).ok()?;
+
+        cuda.lstm_gates_backward_f32(
+            gates_guard.slice(),
+            c_prev_guard.slice(),
+            c_new_guard.slice(),
+            grad_h_guard.slice(),
+            grad_c_guard.slice(),
+            &mut grad_gates_out,
+            &mut grad_c_prev_out,
+            hidden_size,
+            total,
+        )
+        .ok()?;
+
+        let grad_gates_storage =
+            Storage::from_cuda_slice(grad_gates_out, batch_size * 4 * hidden_size, self.device());
+        let grad_c_prev_storage = Storage::from_cuda_slice(grad_c_prev_out, total, self.device());
+
+        let grad_gates_tensor = Self {
+            storage: grad_gates_storage,
+            shape: vec![batch_size, 4 * hidden_size],
+            strides: contiguous_strides(&[batch_size, 4 * hidden_size]),
+            offset: 0,
+        };
+        let grad_c_prev_tensor = Self {
+            storage: grad_c_prev_storage,
+            shape: vec![batch_size, hidden_size],
+            strides: contiguous_strides(&[batch_size, hidden_size]),
+            offset: 0,
+        };
+
+        Some((grad_gates_tensor, grad_c_prev_tensor))
+    }
+
+    // =========================================================================
+    // Fused GRU Gate Backward (GPU)
+    // =========================================================================
+
+    /// Fused GRU gate backward on GPU.
+    ///
+    /// Given saved forward state and incoming gradient, computes ih/hh gate
+    /// gradients and hidden state gradient to previous timestep.
+    ///
+    /// - `self`: gates_ih [batch, 3*hidden] pre-activation from forward
+    /// - `gates_hh`: [batch, 3*hidden] pre-activation from forward
+    /// - `h_prev`: [batch, hidden]
+    /// - `grad_h_new`: [batch, hidden]
+    ///
+    /// Returns (grad_gates_ih [batch, 3*hidden], grad_gates_hh [batch, 3*hidden], grad_h_prev [batch, hidden]).
+    pub fn gru_gates_backward_fused(
+        &self,
+        gates_hh: &Self,
+        h_prev: &Self,
+        grad_h_new: &Self,
+        hidden_size: usize,
+    ) -> Option<(Self, Self, Self)> {
+        let batch_size = grad_h_new.shape()[0];
+        let total = batch_size * hidden_size;
+        let cuda = get_cuda_backend()?;
+
+        let ih_contig = self.contiguous_gpu();
+        let hh_contig = gates_hh.contiguous_gpu();
+        let h_contig = h_prev.contiguous_gpu();
+        let grad_contig = grad_h_new.contiguous_gpu();
+
+        let ih_guard = ih_contig.storage.as_cuda_slice();
+        let hh_guard = hh_contig.storage.as_cuda_slice();
+        let h_guard = h_contig.storage.as_cuda_slice();
+        let grad_guard = grad_contig.storage.as_cuda_slice();
+
+        let mut grad_ih_out = pool_alloc(batch_size * 3 * hidden_size).ok()?;
+        let mut grad_hh_out = pool_alloc(batch_size * 3 * hidden_size).ok()?;
+        let mut grad_h_prev_out = pool_alloc(total).ok()?;
+
+        cuda.gru_gates_backward_f32(
+            ih_guard.slice(),
+            hh_guard.slice(),
+            h_guard.slice(),
+            grad_guard.slice(),
+            &mut grad_ih_out,
+            &mut grad_hh_out,
+            &mut grad_h_prev_out,
+            hidden_size,
+            total,
+        )
+        .ok()?;
+
+        let grad_ih_storage =
+            Storage::from_cuda_slice(grad_ih_out, batch_size * 3 * hidden_size, self.device());
+        let grad_hh_storage =
+            Storage::from_cuda_slice(grad_hh_out, batch_size * 3 * hidden_size, self.device());
+        let grad_h_prev_storage = Storage::from_cuda_slice(grad_h_prev_out, total, self.device());
+
+        let grad_ih_tensor = Self {
+            storage: grad_ih_storage,
+            shape: vec![batch_size, 3 * hidden_size],
+            strides: contiguous_strides(&[batch_size, 3 * hidden_size]),
+            offset: 0,
+        };
+        let grad_hh_tensor = Self {
+            storage: grad_hh_storage,
+            shape: vec![batch_size, 3 * hidden_size],
+            strides: contiguous_strides(&[batch_size, 3 * hidden_size]),
+            offset: 0,
+        };
+        let grad_h_prev_tensor = Self {
+            storage: grad_h_prev_storage,
+            shape: vec![batch_size, hidden_size],
+            strides: contiguous_strides(&[batch_size, hidden_size]),
+            offset: 0,
+        };
+
+        Some((grad_ih_tensor, grad_hh_tensor, grad_h_prev_tensor))
+    }
+
+    // =========================================================================
     // Fused BatchNorm Forward (GPU)
     // =========================================================================
 

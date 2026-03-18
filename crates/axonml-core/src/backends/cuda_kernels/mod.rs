@@ -3679,7 +3679,9 @@ impl CudaKernels {
             LSTM_PTX,
             &[
                 "lstm_gates_f32",
+                "lstm_gates_backward_f32",
                 "gru_gates_f32",
+                "gru_gates_backward_f32",
                 "batchnorm_stats_f32",
                 "batchnorm_norm_f32",
             ],

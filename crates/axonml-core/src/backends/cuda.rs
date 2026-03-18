@@ -1855,6 +1855,60 @@ impl CudaBackend {
     }
 
     // =========================================================================
+    // Fused LSTM Gate Backward Kernel
+    // =========================================================================
+
+    /// Fused LSTM gate backward computation on GPU.
+    ///
+    /// Given saved forward state and incoming gradients, computes gate gradients
+    /// and cell gradient to previous timestep in a single kernel launch.
+    ///
+    /// - `gates`: [batch, 4*hidden] pre-activation gates from forward
+    /// - `c_prev`: [batch, hidden] previous cell state
+    /// - `c_new`: [batch, hidden] cell state from forward
+    /// - `grad_h`: [batch, hidden] gradient from output
+    /// - `grad_c_next`: [batch, hidden] gradient from next timestep cell
+    /// - `grad_gates`: [batch, 4*hidden] output gate gradients
+    /// - `grad_c_prev`: [batch, hidden] output cell gradient to prev timestep
+    pub fn lstm_gates_backward_f32(
+        &self,
+        gates: &CudaSlice<f32>,
+        c_prev: &CudaSlice<f32>,
+        c_new: &CudaSlice<f32>,
+        grad_h: &CudaSlice<f32>,
+        grad_c_next: &CudaSlice<f32>,
+        grad_gates: &mut CudaSlice<f32>,
+        grad_c_prev: &mut CudaSlice<f32>,
+        hidden_size: usize,
+        total: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("lstm_gates_backward_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("lstm_gates_backward_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (
+                        gates,
+                        c_prev,
+                        c_new,
+                        grad_h,
+                        grad_c_next,
+                        grad_gates,
+                        grad_c_prev,
+                        hidden_size as u32,
+                        total as u32,
+                    ),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    // =========================================================================
     // Fused GRU Gate Kernel
     // =========================================================================
 
@@ -1887,6 +1941,60 @@ impl CudaBackend {
                         gates_hh,
                         h_prev,
                         h_new,
+                        hidden_size as u32,
+                        total as u32,
+                    ),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    // =========================================================================
+    // Fused GRU Gate Backward Kernel
+    // =========================================================================
+
+    /// Fused GRU gate backward computation on GPU.
+    ///
+    /// Given saved forward state and incoming gradient, computes ih/hh gate
+    /// gradients and hidden state gradient to previous timestep.
+    ///
+    /// - `gates_ih`: [batch, 3*hidden] pre-activation ih gates from forward
+    /// - `gates_hh`: [batch, 3*hidden] pre-activation hh gates from forward
+    /// - `h_prev`: [batch, hidden] previous hidden state
+    /// - `grad_h_new`: [batch, hidden] gradient from output
+    /// - `grad_gates_ih`: [batch, 3*hidden] output ih gate gradients
+    /// - `grad_gates_hh`: [batch, 3*hidden] output hh gate gradients
+    /// - `grad_h_prev`: [batch, hidden] output gradient to prev hidden
+    pub fn gru_gates_backward_f32(
+        &self,
+        gates_ih: &CudaSlice<f32>,
+        gates_hh: &CudaSlice<f32>,
+        h_prev: &CudaSlice<f32>,
+        grad_h_new: &CudaSlice<f32>,
+        grad_gates_ih: &mut CudaSlice<f32>,
+        grad_gates_hh: &mut CudaSlice<f32>,
+        grad_h_prev: &mut CudaSlice<f32>,
+        hidden_size: usize,
+        total: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("gru_gates_backward_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("gru_gates_backward_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (
+                        gates_ih,
+                        gates_hh,
+                        h_prev,
+                        grad_h_new,
+                        grad_gates_ih,
+                        grad_gates_hh,
+                        grad_h_prev,
                         hidden_size as u32,
                         total as u32,
                     ),
