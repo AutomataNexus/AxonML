@@ -43,7 +43,14 @@ impl BlazeBlock {
     fn new(in_channels: usize, out_channels: usize, stride: usize) -> Self {
         let project = if in_channels != out_channels || stride != 1 {
             Some((
-                Conv2d::with_options(in_channels, out_channels, (1, 1), (stride, stride), (0, 0), false),
+                Conv2d::with_options(
+                    in_channels,
+                    out_channels,
+                    (1, 1),
+                    (stride, stride),
+                    (0, 0),
+                    false,
+                ),
                 BatchNorm2d::new(out_channels),
             ))
         } else {
@@ -51,7 +58,15 @@ impl BlazeBlock {
         };
 
         Self {
-            dw_conv: Conv2d::with_groups(in_channels, in_channels, (3, 3), (stride, stride), (1, 1), true, in_channels),
+            dw_conv: Conv2d::with_groups(
+                in_channels,
+                in_channels,
+                (3, 3),
+                (stride, stride),
+                (1, 1),
+                true,
+                in_channels,
+            ),
             dw_bn: BatchNorm2d::new(in_channels),
             pw_conv: Conv2d::with_options(in_channels, out_channels, (1, 1), (1, 1), (0, 0), true),
             pw_bn: BatchNorm2d::new(out_channels),
@@ -135,7 +150,14 @@ impl DoubleBlazeBlock {
     fn new(in_channels: usize, mid_channels: usize, out_channels: usize, stride: usize) -> Self {
         let project = if in_channels != out_channels || stride != 1 {
             Some((
-                Conv2d::with_options(in_channels, out_channels, (1, 1), (stride, stride), (0, 0), false),
+                Conv2d::with_options(
+                    in_channels,
+                    out_channels,
+                    (1, 1),
+                    (stride, stride),
+                    (0, 0),
+                    false,
+                ),
                 BatchNorm2d::new(out_channels),
             ))
         } else {
@@ -143,13 +165,36 @@ impl DoubleBlazeBlock {
         };
 
         Self {
-            dw_conv1: Conv2d::with_groups(in_channels, in_channels, (3, 3), (stride, stride), (1, 1), true, in_channels),
+            dw_conv1: Conv2d::with_groups(
+                in_channels,
+                in_channels,
+                (3, 3),
+                (stride, stride),
+                (1, 1),
+                true,
+                in_channels,
+            ),
             dw_bn1: BatchNorm2d::new(in_channels),
             pw_conv1: Conv2d::with_options(in_channels, mid_channels, (1, 1), (1, 1), (0, 0), true),
             pw_bn1: BatchNorm2d::new(mid_channels),
-            dw_conv2: Conv2d::with_groups(mid_channels, mid_channels, (3, 3), (1, 1), (1, 1), true, mid_channels),
+            dw_conv2: Conv2d::with_groups(
+                mid_channels,
+                mid_channels,
+                (3, 3),
+                (1, 1),
+                (1, 1),
+                true,
+                mid_channels,
+            ),
             dw_bn2: BatchNorm2d::new(mid_channels),
-            pw_conv2: Conv2d::with_options(mid_channels, out_channels, (1, 1), (1, 1), (0, 0), true),
+            pw_conv2: Conv2d::with_options(
+                mid_channels,
+                out_channels,
+                (1, 1),
+                (1, 1),
+                (0, 0),
+                true,
+            ),
             pw_bn2: BatchNorm2d::new(out_channels),
             project,
             relu: ReLU,
@@ -241,10 +286,14 @@ pub struct BlazeFace {
     back_blocks: Vec<DoubleBlazeBlock>,
 
     // Scale 1 heads (16x16, 2 anchors per cell)
+    cls_pre1: Conv2d,
+    cls_pre1_bn: BatchNorm2d,
     cls_head1: Conv2d,
     bbox_head1: Conv2d,
 
     // Scale 2 heads (8x8, 6 anchors per cell)
+    cls_pre2: Conv2d,
+    cls_pre2_bn: BatchNorm2d,
     cls_head2: Conv2d,
     bbox_head2: Conv2d,
 }
@@ -274,26 +323,30 @@ impl BlazeFace {
             front_blocks: vec![
                 BlazeBlock::new(24, 24, 1),
                 BlazeBlock::new(24, 28, 1),
-                BlazeBlock::new(28, 32, 2),   // → 32x32
+                BlazeBlock::new(28, 32, 2), // → 32x32
                 BlazeBlock::new(32, 36, 1),
                 BlazeBlock::new(36, 42, 1),
-                BlazeBlock::new(42, 48, 2),   // → 16x16
+                BlazeBlock::new(42, 48, 2), // → 16x16
                 BlazeBlock::new(48, 56, 1),
                 BlazeBlock::new(56, 64, 1),
             ],
 
             // Back backbone: 16x16 → 8x8
             back_blocks: vec![
-                DoubleBlazeBlock::new(64, 64, 96, 2),  // → 8x8
+                DoubleBlazeBlock::new(64, 64, 96, 2), // → 8x8
                 DoubleBlazeBlock::new(96, 96, 96, 1),
                 DoubleBlazeBlock::new(96, 96, 96, 1),
             ],
 
-            // Scale 1: 16x16 with 2 anchors/cell
+            // Scale 1: 16x16 with 2 anchors/cell — deeper cls head for better confidence
+            cls_pre1: Conv2d::with_options(64, 64, (3, 3), (1, 1), (1, 1), true),
+            cls_pre1_bn: BatchNorm2d::new(64),
             cls_head1: Conv2d::with_options(64, 2, (3, 3), (1, 1), (1, 1), true),
             bbox_head1: Conv2d::with_options(64, 2 * 4, (3, 3), (1, 1), (1, 1), true),
 
-            // Scale 2: 8x8 with 6 anchors/cell
+            // Scale 2: 8x8 with 6 anchors/cell — deeper cls head
+            cls_pre2: Conv2d::with_options(96, 96, (3, 3), (1, 1), (1, 1), true),
+            cls_pre2_bn: BatchNorm2d::new(96),
             cls_head2: Conv2d::with_options(96, 6, (3, 3), (1, 1), (1, 1), true),
             bbox_head2: Conv2d::with_options(96, 6 * 4, (3, 3), (1, 1), (1, 1), true),
         }
@@ -307,12 +360,18 @@ impl BlazeFace {
     pub fn forward_train(&self, x: &Variable) -> (Variable, Variable) {
         let (feat1, feat2) = self.forward_features(x);
 
-        // Scale 1: 16x16, 2 anchors
-        let cls1 = self.cls_head1.forward(&feat1);   // [B, 2, 16, 16]
+        // Scale 1: 16x16, 2 anchors — deeper cls path for better confidence
+        let cls1_feat = self
+            .relu
+            .forward(&self.cls_pre1_bn.forward(&self.cls_pre1.forward(&feat1)));
+        let cls1 = self.cls_head1.forward(&cls1_feat); // [B, 2, 16, 16]
         let bbox1 = self.bbox_head1.forward(&feat1); // [B, 8, 16, 16]
 
-        // Scale 2: 8x8, 6 anchors
-        let cls2 = self.cls_head2.forward(&feat2);   // [B, 6, 8, 8]
+        // Scale 2: 8x8, 6 anchors — deeper cls path
+        let cls2_feat = self
+            .relu
+            .forward(&self.cls_pre2_bn.forward(&self.cls_pre2.forward(&feat2)));
+        let cls2 = self.cls_head2.forward(&cls2_feat); // [B, 6, 8, 8]
         let bbox2 = self.bbox_head2.forward(&feat2); // [B, 24, 8, 8]
 
         let batch = x.shape()[0];
@@ -326,12 +385,12 @@ impl BlazeFace {
         // Reshape and concatenate: cls
         // Conv2d outputs [B, A, H, W] but anchors are ordered (H, W, A) — spatial first.
         // Permute to [B, H, W, A] before flattening to match generate_anchors() order.
-        let cls1_perm = cls1.transpose(1, 2);                 // [B, H, A, W]
-        let cls1_perm = cls1_perm.transpose(2, 3);            // [B, H, W, A]
+        let cls1_perm = cls1.transpose(1, 2); // [B, H, A, W]
+        let cls1_perm = cls1_perm.transpose(2, 3); // [B, H, W, A]
         let cls1_flat = cls1_perm.reshape(&[batch, h1 * w1 * 2]);
 
-        let cls2_perm = cls2.transpose(1, 2);                 // [B, H, A, W]
-        let cls2_perm = cls2_perm.transpose(2, 3);            // [B, H, W, A]
+        let cls2_perm = cls2.transpose(1, 2); // [B, H, A, W]
+        let cls2_perm = cls2_perm.transpose(2, 3); // [B, H, W, A]
         let cls2_flat = cls2_perm.reshape(&[batch, h2 * w2 * 6]);
 
         let cls_all = Variable::cat(&[&cls1_flat, &cls2_flat], 1);
@@ -342,13 +401,13 @@ impl BlazeFace {
         let n2 = 6 * h2 * w2;
 
         // bbox1: [B, 8, H, W] → [B, H, W, 8] → [B, H*W*2, 4]
-        let bbox1_perm = bbox1.transpose(1, 2);               // [B, H, 8, W]
-        let bbox1_perm = bbox1_perm.transpose(2, 3);          // [B, H, W, 8]
+        let bbox1_perm = bbox1.transpose(1, 2); // [B, H, 8, W]
+        let bbox1_perm = bbox1_perm.transpose(2, 3); // [B, H, W, 8]
         let bbox1_flat = bbox1_perm.reshape(&[batch, n1, 4]);
 
         // bbox2: [B, 24, H, W] → [B, H, W, 24] → [B, H*W*6, 4]
-        let bbox2_perm = bbox2.transpose(1, 2);               // [B, H, 24, W]
-        let bbox2_perm = bbox2_perm.transpose(2, 3);          // [B, H, W, 24]
+        let bbox2_perm = bbox2.transpose(1, 2); // [B, H, 24, W]
+        let bbox2_perm = bbox2_perm.transpose(2, 3); // [B, H, W, 24]
         let bbox2_flat = bbox2_perm.reshape(&[batch, n2, 4]);
 
         let bbox_all = Variable::cat(&[&bbox1_flat, &bbox2_flat], 1); // [B, 896, 4]
@@ -365,16 +424,16 @@ impl BlazeFace {
         // Scale 2: 8x8 feature map, 6 anchors/cell (matches cls_head2 output)
         // Aspect ratios: (scale, w_ratio, h_ratio)
         let scale1_anchors: Vec<(f32, f32, f32)> = vec![
-            (1.0, 1.0, 1.0),   // square
-            (1.5, 1.0, 1.0),   // larger square
+            (0.75, 1.0, 1.0), // 6px — tiny faces
+            (1.5, 1.0, 1.0),  // 12px — small faces
         ];
         let scale2_anchors: Vec<(f32, f32, f32)> = vec![
-            (1.0, 1.0, 1.0),     // square
-            (1.5, 1.0, 1.0),     // larger square
-            (2.0, 1.0, 1.0),     // even larger
-            (1.0, 1.0, 1.3),     // tall (portrait faces)
-            (1.5, 1.3, 1.0),     // wide (group faces)
-            (3.0, 1.0, 1.0),     // large
+            (1.0, 1.0, 1.0), // 16px — small-medium faces
+            (1.5, 1.0, 1.0), // 24px — medium faces
+            (2.5, 1.0, 1.0), // 40px — medium-large faces
+            (4.0, 1.0, 1.0), // 64px — large faces
+            (1.5, 1.0, 1.3), // 24x31px — tall portrait faces
+            (6.0, 1.0, 1.0), // 96px — very large faces (close-up)
         ];
 
         let mut anchors = Vec::new();
@@ -481,7 +540,9 @@ impl BlazeFace {
 
     /// Forward through backbone, returning features at two scales.
     fn forward_features(&self, x: &Variable) -> (Variable, Variable) {
-        let mut out = self.relu.forward(&self.stem_bn.forward(&self.stem.forward(x)));
+        let mut out = self
+            .relu
+            .forward(&self.stem_bn.forward(&self.stem.forward(x)));
 
         // Front backbone → 16x16
         for block in &self.front_blocks {
@@ -528,8 +589,12 @@ impl Module for BlazeFace {
         for block in &self.back_blocks {
             p.extend(block.parameters());
         }
+        p.extend(self.cls_pre1.parameters());
+        p.extend(self.cls_pre1_bn.parameters());
         p.extend(self.cls_head1.parameters());
         p.extend(self.bbox_head1.parameters());
+        p.extend(self.cls_pre2.parameters());
+        p.extend(self.cls_pre2_bn.parameters());
         p.extend(self.cls_head2.parameters());
         p.extend(self.bbox_head2.parameters());
         p
@@ -537,6 +602,8 @@ impl Module for BlazeFace {
 
     fn train(&mut self) {
         self.stem_bn.train();
+        self.cls_pre1_bn.train();
+        self.cls_pre2_bn.train();
         for block in &mut self.front_blocks {
             block.train_mode();
         }
@@ -547,6 +614,8 @@ impl Module for BlazeFace {
 
     fn eval(&mut self) {
         self.stem_bn.eval();
+        self.cls_pre1_bn.eval();
+        self.cls_pre2_bn.eval();
         for block in &mut self.front_blocks {
             block.eval_mode();
         }
@@ -603,10 +672,13 @@ mod tests {
         let params = model.parameters();
         assert!(!params.is_empty());
 
-        let total: usize = params.iter().map(|p| p.variable().data().to_vec().len()).sum();
+        let total: usize = params
+            .iter()
+            .map(|p| p.variable().data().to_vec().len())
+            .sum();
         println!("BlazeFace total params: {}", total);
-        // Should be lightweight (<200K params)
-        assert!(total < 200_000);
+        // Should be lightweight (<300K params)
+        assert!(total < 300_000);
     }
 
     #[test]
@@ -655,7 +727,9 @@ mod tests {
         let loss = cls.mean();
         loss.backward();
         // Verify at least some gradients flowed (BatchNorm may sever some)
-        let grads: usize = model.parameters().iter()
+        let grads: usize = model
+            .parameters()
+            .iter()
             .filter(|p| p.variable().grad().is_some())
             .count();
         assert!(grads > 0, "At least some parameters should have gradients");

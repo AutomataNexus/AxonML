@@ -474,6 +474,7 @@ impl Module for LSTM {
         // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
         // input: [batch, seq, features] -> reshaped to [batch*seq, features]
         // ih_all: [batch*seq, 4*hidden] = input_2d @ W_ih^T + bias_ih
+        // Note: matmul auto-dispatches to cuBLAS GEMM when tensors are on GPU
         let cell0 = &self.cells[0];
         let input_2d = input.reshape(&[batch_size * seq_len, _input_features]);
         let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
@@ -487,22 +488,61 @@ impl Module for LSTM {
 
         let mut outputs = Vec::with_capacity(seq_len);
 
+        // Check if we're on GPU for fused gate kernel path
+        #[cfg(feature = "cuda")]
+        let on_gpu = input.data().device().is_gpu();
+        #[cfg(not(feature = "cuda"))]
+        let on_gpu = false;
+
         for t in 0..seq_len {
             // Layer 0: use pre-computed ih projection + hoisted weight transpose
             let ih_t = ih_all_3d.select(1, t);
             let (h, c) = &states[0];
 
+            // h @ W_hh^T + bias_hh (cuBLAS on GPU, matrixmultiply on CPU)
             let hh = h.matmul(&w_hh_t_0).add_var(&bias_hh_0);
 
+            // Combined gates = ih + hh
             let gates = ih_t.add_var(&hh);
-            let hs = self.hidden_size;
-            let i_gate = gates.narrow(1, 0, hs).sigmoid();
-            let f_gate = gates.narrow(1, hs, hs).sigmoid();
-            let g_gate = gates.narrow(1, 2 * hs, hs).tanh();
-            let o_gate = gates.narrow(1, 3 * hs, hs).sigmoid();
-            let c_new = f_gate.mul_var(c).add_var(&i_gate.mul_var(&g_gate));
-            let h_new = o_gate.mul_var(&c_new.tanh());
-            states[0] = (h_new, c_new);
+
+            if on_gpu {
+                // GPU path: fused LSTM gate kernel (1 launch vs ~14 separate ops)
+                // gates [batch, 4*hidden], c [batch, hidden] → h_new, c_new [batch, hidden]
+                #[cfg(feature = "cuda")]
+                {
+                    let hs = self.hidden_size;
+                    let gates_data = gates.data();
+                    let c_data = c.data();
+
+                    if let Some((h_tensor, c_tensor)) = gates_data.lstm_gates_fused(&c_data, hs) {
+                        let h_new = Variable::from_operation(
+                            h_tensor,
+                            gates.grad_fn().cloned().unwrap_or_else(|| {
+                                axonml_autograd::GradFn::new(axonml_autograd::IdentityBackward)
+                            }),
+                            input.requires_grad(),
+                        );
+                        let c_new = Variable::from_operation(
+                            c_tensor,
+                            gates.grad_fn().cloned().unwrap_or_else(|| {
+                                axonml_autograd::GradFn::new(axonml_autograd::IdentityBackward)
+                            }),
+                            input.requires_grad(),
+                        );
+                        states[0] = (h_new, c_new);
+                    }
+                }
+            } else {
+                // CPU path: individual ops (each autograd-tracked)
+                let hs = self.hidden_size;
+                let i_gate = gates.narrow(1, 0, hs).sigmoid();
+                let f_gate = gates.narrow(1, hs, hs).sigmoid();
+                let g_gate = gates.narrow(1, 2 * hs, hs).tanh();
+                let o_gate = gates.narrow(1, 3 * hs, hs).sigmoid();
+                let c_new = f_gate.mul_var(c).add_var(&i_gate.mul_var(&g_gate));
+                let h_new = o_gate.mul_var(&c_new.tanh());
+                states[0] = (h_new, c_new);
+            }
 
             // Subsequent layers use the regular cell forward_step
             for l in 1..self.num_layers {
@@ -769,6 +809,12 @@ impl Module for GRU {
 
         let mut output_vars: Vec<Variable> = Vec::with_capacity(seq_len);
 
+        // Check if we're on GPU for fused gate kernel path
+        #[cfg(feature = "cuda")]
+        let on_gpu = input.data().device().is_gpu();
+        #[cfg(not(feature = "cuda"))]
+        let on_gpu = false;
+
         for t in 0..seq_len {
             // Layer 0: use pre-computed ih projection + hoisted weight transpose
             let ih_t = ih_all_3d.select(1, t);
@@ -777,22 +823,45 @@ impl Module for GRU {
 
             let hh = hidden.matmul(&w_hh_t_0).add_var(&bias_hh_0);
 
-            let ih_r = ih_t.narrow(1, 0, hs);
-            let ih_z = ih_t.narrow(1, hs, hs);
-            let ih_n = ih_t.narrow(1, 2 * hs, hs);
-            let hh_r = hh.narrow(1, 0, hs);
-            let hh_z = hh.narrow(1, hs, hs);
-            let hh_n = hh.narrow(1, 2 * hs, hs);
+            if on_gpu {
+                // GPU path: fused GRU gate kernel (1 launch vs ~12 separate ops)
+                // ih_t [batch, 3*hidden], hh [batch, 3*hidden], hidden [batch, hidden] → h_new [batch, hidden]
+                #[cfg(feature = "cuda")]
+                {
+                    let ih_data = ih_t.data();
+                    let hh_data = hh.data();
+                    let h_data = hidden.data();
 
-            let r = ih_r.add_var(&hh_r).sigmoid();
-            let z = ih_z.add_var(&hh_z).sigmoid();
-            let n = ih_n.add_var(&r.mul_var(&hh_n)).tanh();
-            let h_minus_n = hidden.sub_var(&n);
-            let h_new = n.add_var(&z.mul_var(&h_minus_n));
-            hidden_states[0] = h_new.clone();
+                    if let Some(h_tensor) = ih_data.gru_gates_fused(&hh_data, &h_data, hs) {
+                        let h_new = Variable::from_operation(
+                            h_tensor,
+                            hh.grad_fn().cloned().unwrap_or_else(|| {
+                                axonml_autograd::GradFn::new(axonml_autograd::IdentityBackward)
+                            }),
+                            input.requires_grad(),
+                        );
+                        hidden_states[0] = h_new;
+                    }
+                }
+            } else {
+                // CPU path: individual ops (each autograd-tracked)
+                let ih_r = ih_t.narrow(1, 0, hs);
+                let ih_z = ih_t.narrow(1, hs, hs);
+                let ih_n = ih_t.narrow(1, 2 * hs, hs);
+                let hh_r = hh.narrow(1, 0, hs);
+                let hh_z = hh.narrow(1, hs, hs);
+                let hh_n = hh.narrow(1, 2 * hs, hs);
+
+                let r = ih_r.add_var(&hh_r).sigmoid();
+                let z = ih_z.add_var(&hh_z).sigmoid();
+                let n = ih_n.add_var(&r.mul_var(&hh_n)).tanh();
+                let h_minus_n = hidden.sub_var(&n);
+                let h_new = n.add_var(&z.mul_var(&h_minus_n));
+                hidden_states[0] = h_new;
+            }
 
             // Subsequent layers use the regular cell forward_step
-            let mut layer_output = h_new;
+            let mut layer_output = hidden_states[0].clone();
             for l in 1..self.num_layers {
                 let new_hidden = self.cells[l].forward_step(&layer_output, &hidden_states[l]);
                 hidden_states[l] = new_hidden.clone();
