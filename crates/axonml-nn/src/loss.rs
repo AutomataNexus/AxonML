@@ -123,25 +123,22 @@ impl L1Loss {
     pub fn compute(&self, input: &Variable, target: &Variable) -> Variable {
         let input_data = input.data();
         let target_data = target.data();
-        let diff_data: Vec<f32> = input_data
-            .to_vec()
-            .iter()
-            .zip(target_data.to_vec().iter())
-            .map(|(&p, &t)| p - t)
-            .collect();
-        let abs_data: Vec<f32> = diff_data.iter().map(|x| x.abs()).collect();
-        let loss_tensor = Tensor::from_vec(abs_data, input_data.shape()).unwrap();
+        // diff = input - target (Tensor op, auto-dispatches to GPU)
+        let diff_tensor = input_data.sub(&target_data).unwrap();
+        // |diff| = relu(diff) + relu(-diff), using Tensor ops that auto-dispatch to GPU
+        let relu_diff = axonml_tensor::ops::clamp_min(&diff_tensor, 0.0);
+        let relu_neg_diff = axonml_tensor::ops::clamp_min(&diff_tensor.neg(), 0.0);
+        let abs_tensor = relu_diff.add(&relu_neg_diff).unwrap();
 
         let requires_grad = (input.requires_grad() || target.requires_grad()) && is_grad_enabled();
         let loss_var = if requires_grad {
             let grad_fn = GradFn::new(L1LossBackward {
                 next_fns: vec![input.grad_fn().cloned(), target.grad_fn().cloned()],
-                diff_vec: diff_data,
-                shape: input_data.shape().to_vec(),
+                diff_tensor,
             });
-            Variable::from_operation(loss_tensor, grad_fn, true)
+            Variable::from_operation(abs_tensor, grad_fn, true)
         } else {
-            Variable::new(loss_tensor, false)
+            Variable::new(abs_tensor, false)
         };
 
         match self.reduction {
@@ -166,33 +163,35 @@ impl Default for L1Loss {
 ///
 /// d/d(input) = sign(input - target)
 /// d/d(target) = -sign(input - target)
+///
+/// Stores diff as Tensor<f32> so it stays on GPU when applicable.
 #[derive(Debug)]
 struct L1LossBackward {
     next_fns: Vec<Option<GradFn>>,
-    diff_vec: Vec<f32>,
-    shape: Vec<usize>,
+    diff_tensor: Tensor<f32>,
 }
 
 impl GradientFunction for L1LossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let grad_vec = grad_output.to_vec();
-        let grad_input: Vec<f32> = self
-            .diff_vec
-            .iter()
-            .zip(grad_vec.iter())
-            .map(|(&d, &g)| {
-                if d > 0.0 {
-                    g
-                } else if d < 0.0 {
-                    -g
-                } else {
-                    0.0
-                }
-            })
-            .collect();
-        let grad_target: Vec<f32> = grad_input.iter().map(|&g| -g).collect();
-        let gi = Tensor::from_vec(grad_input, &self.shape).unwrap();
-        let gt = Tensor::from_vec(grad_target, &self.shape).unwrap();
+        // sign(diff): +1 where diff > 0, -1 where diff < 0, 0 where diff == 0
+        // Compute as: diff / (|diff| + eps) which gives sign and handles GPU
+        let eps_tensor = Tensor::full(self.diff_tensor.shape(), 1e-12);
+        let eps_on_device = if self.diff_tensor.device().is_gpu() {
+            eps_tensor.to_device(self.diff_tensor.device()).unwrap()
+        } else {
+            eps_tensor
+        };
+        // |diff| approximated as sqrt(diff^2 + eps)  — but simpler: diff * diff then sqrt
+        let diff_sq = self.diff_tensor.mul(&self.diff_tensor).unwrap();
+        let diff_sq_eps = diff_sq.add(&eps_on_device).unwrap();
+        // sqrt via exp(0.5 * ln(x))
+        let abs_diff = diff_sq_eps.ln().mul_scalar(0.5).exp();
+        let sign_diff = self.diff_tensor.div(&abs_diff).unwrap();
+
+        // grad_input = sign(diff) * grad_output
+        let gi = sign_diff.mul(grad_output).unwrap();
+        // grad_target = -grad_input
+        let gt = gi.neg();
         vec![Some(gi), Some(gt)]
     }
 
@@ -459,24 +458,27 @@ impl NLLLoss {
         let batch_size = shape[0];
         let num_classes = shape[1];
 
-        let input_vec = input_data.to_vec();
+        // NLL forward still needs per-sample gather (index into class dimension).
+        // We pull target indices to CPU for the gather but keep input on device.
         let target_vec = target_data.to_vec();
+        let input_vec = input_data.to_vec();
 
         let mut losses = vec![0.0f32; batch_size];
-
         for b in 0..batch_size {
-            let target_class = target_vec[b] as usize;
-            losses[b] = -input_vec[b * num_classes + target_class];
+            let tc = target_vec[b] as usize;
+            losses[b] = -input_vec[b * num_classes + tc];
         }
 
-        let loss_tensor = Tensor::from_vec(losses, &[batch_size]).unwrap();
+        let mut loss_tensor = Tensor::from_vec(losses, &[batch_size]).unwrap();
+        if input_data.device().is_gpu() {
+            loss_tensor = loss_tensor.to_device(input_data.device()).unwrap();
+        }
 
         let requires_grad = input.requires_grad() && is_grad_enabled();
         let loss_var = if requires_grad {
-            let target_classes: Vec<usize> = target_vec.iter().map(|&t| t as usize).collect();
             let grad_fn = GradFn::new(NLLLossBackward {
                 next_fns: vec![input.grad_fn().cloned()],
-                target_classes,
+                target_tensor: target_data.clone(),
                 batch_size,
                 num_classes,
             });
@@ -506,10 +508,14 @@ impl Default for NLLLoss {
 /// Gradient function for NLLLoss.
 ///
 /// d/d(input)[b, c] = -1 if c == target[b], else 0
+///
+/// Stores targets as Tensor<f32> (GPU-resident when applicable).
+/// The scatter in backward still uses CPU indexing since it's a sparse write,
+/// but the result is moved to GPU if needed.
 #[derive(Debug)]
 struct NLLLossBackward {
     next_fns: Vec<Option<GradFn>>,
-    target_classes: Vec<usize>,
+    target_tensor: Tensor<f32>,
     batch_size: usize,
     num_classes: usize,
 }
@@ -517,6 +523,7 @@ struct NLLLossBackward {
 impl GradientFunction for NLLLossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         let grad_out_vec = grad_output.to_vec();
+        let target_vec = self.target_tensor.to_vec();
         let mut grad_input = vec![0.0f32; self.batch_size * self.num_classes];
 
         for b in 0..self.batch_size {
@@ -525,10 +532,14 @@ impl GradientFunction for NLLLossBackward {
             } else {
                 grad_out_vec[b]
             };
-            grad_input[b * self.num_classes + self.target_classes[b]] = -g;
+            let tc = target_vec[b] as usize;
+            grad_input[b * self.num_classes + tc] = -g;
         }
 
-        let gi = Tensor::from_vec(grad_input, &[self.batch_size, self.num_classes]).unwrap();
+        let mut gi = Tensor::from_vec(grad_input, &[self.batch_size, self.num_classes]).unwrap();
+        if grad_output.device().is_gpu() {
+            gi = gi.to_device(grad_output.device()).unwrap();
+        }
         vec![Some(gi)]
     }
 
@@ -572,30 +583,32 @@ impl BCELoss {
 
     /// Computes the loss.
     pub fn compute(&self, input: &Variable, target: &Variable) -> Variable {
-        let eps = 1e-7f32;
         let input_data = input.data();
         let target_data = target.data();
 
-        let input_vec = input_data.to_vec();
-        let target_vec = target_data.to_vec();
+        // Clamp predictions to [eps, 1-eps] using Tensor ops
+        let eps = 1e-7f32;
+        let p_clamped = axonml_tensor::ops::clamp(&input_data, eps, 1.0 - eps);
 
-        let losses: Vec<f32> = input_vec
-            .iter()
-            .zip(target_vec.iter())
-            .map(|(&p, &t)| {
-                let p_clamped = p.max(eps).min(1.0 - eps);
-                -(t * p_clamped.ln() + (1.0 - t) * (1.0 - p_clamped).ln())
-            })
-            .collect();
+        // loss = -(t * ln(p) + (1 - t) * ln(1 - p))
+        let ln_p = p_clamped.ln();
+        let one_minus_p = p_clamped.neg().add_scalar(1.0);
+        let ln_one_minus_p = one_minus_p.ln();
+        let one_minus_t = target_data.neg().add_scalar(1.0);
 
-        let loss_tensor = Tensor::from_vec(losses, input_data.shape()).unwrap();
+        // t * ln(p)
+        let term1 = target_data.mul(&ln_p).unwrap();
+        // (1-t) * ln(1-p)
+        let term2 = one_minus_t.mul(&ln_one_minus_p).unwrap();
+        // -(term1 + term2)
+        let loss_tensor = term1.add(&term2).unwrap().neg();
+
         let requires_grad = input.requires_grad() && is_grad_enabled();
         let loss_var = if requires_grad {
             let grad_fn = GradFn::new(BCELossBackward {
                 next_fns: vec![input.grad_fn().cloned()],
-                input_vec,
-                target_vec,
-                shape: input_data.shape().to_vec(),
+                input_tensor: input_data,
+                target_tensor: target_data,
             });
             Variable::from_operation(loss_tensor, grad_fn, true)
         } else {
@@ -623,29 +636,28 @@ impl Default for BCELoss {
 /// Gradient function for BCELoss.
 ///
 /// d/dp BCE = (p - y) / (p * (1 - p))
+///
+/// Stores input/target as Tensor<f32> (GPU-resident when applicable).
 #[derive(Debug)]
 struct BCELossBackward {
     next_fns: Vec<Option<GradFn>>,
-    input_vec: Vec<f32>,
-    target_vec: Vec<f32>,
-    shape: Vec<usize>,
+    input_tensor: Tensor<f32>,
+    target_tensor: Tensor<f32>,
 }
 
 impl GradientFunction for BCELossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         let eps = 1e-7f32;
-        let grad_vec = grad_output.to_vec();
-        let result: Vec<f32> = self
-            .input_vec
-            .iter()
-            .zip(self.target_vec.iter())
-            .zip(grad_vec.iter())
-            .map(|((&p, &y), &g)| {
-                let p_clamped = p.max(eps).min(1.0 - eps);
-                g * (p_clamped - y) / (p_clamped * (1.0 - p_clamped))
-            })
-            .collect();
-        let grad_tensor = Tensor::from_vec(result, &self.shape).unwrap();
+        // p_clamped = clamp(input, eps, 1-eps)
+        let p_clamped = axonml_tensor::ops::clamp(&self.input_tensor, eps, 1.0 - eps);
+        // (p - y)
+        let p_minus_y = p_clamped.sub(&self.target_tensor).unwrap();
+        // p * (1 - p)
+        let one_minus_p = p_clamped.neg().add_scalar(1.0);
+        let denom = p_clamped.mul(&one_minus_p).unwrap();
+        // grad = grad_output * (p - y) / (p * (1 - p))
+        let ratio = p_minus_y.div(&denom).unwrap();
+        let grad_tensor = grad_output.mul(&ratio).unwrap();
         vec![Some(grad_tensor)]
     }
 
@@ -669,28 +681,21 @@ impl GradientFunction for BCELossBackward {
 /// Gradient function for BCEWithLogitsLoss.
 ///
 /// The gradient of BCE w.r.t. input logits is: sigmoid(input) - target.
+///
+/// Stores input/target as Tensor<f32> (GPU-resident when applicable).
 #[derive(Debug)]
 struct BCEWithLogitsBackward {
     next_fns: Vec<Option<GradFn>>,
-    input_vec: Vec<f32>,
-    target_vec: Vec<f32>,
-    shape: Vec<usize>,
+    input_tensor: Tensor<f32>,
+    target_tensor: Tensor<f32>,
 }
 
 impl GradientFunction for BCEWithLogitsBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let grad_vec = grad_output.to_vec();
-        let result: Vec<f32> = self
-            .input_vec
-            .iter()
-            .zip(self.target_vec.iter())
-            .zip(grad_vec.iter())
-            .map(|((&x, &t), &g)| {
-                let sigmoid = 1.0 / (1.0 + (-x).exp());
-                g * (sigmoid - t)
-            })
-            .collect();
-        let grad_tensor = Tensor::from_vec(result, &self.shape).unwrap();
+        // sigmoid(input) - target, all via Tensor ops (auto-dispatch to GPU)
+        let sig = self.input_tensor.sigmoid();
+        let sig_minus_t = sig.sub(&self.target_tensor).unwrap();
+        let grad_tensor = grad_output.mul(&sig_minus_t).unwrap();
         vec![Some(grad_tensor)]
     }
 
@@ -737,26 +742,27 @@ impl BCEWithLogitsLoss {
         let input_data = input.data();
         let target_data = target.data();
 
-        let input_vec = input_data.to_vec();
-        let target_vec = target_data.to_vec();
-
         // Numerically stable: max(x, 0) - x*t + log(1 + exp(-|x|))
-        let losses: Vec<f32> = input_vec
-            .iter()
-            .zip(target_vec.iter())
-            .map(|(&x, &t)| {
-                let max_val = x.max(0.0);
-                max_val - x * t + (1.0 + (-x.abs()).exp()).ln()
-            })
-            .collect();
+        // max(x, 0) = relu(x) = clamp_min(x, 0)
+        let relu_x = axonml_tensor::ops::clamp_min(&input_data, 0.0);
+        // x * t
+        let x_times_t = input_data.mul(&target_data).unwrap();
+        // |x| via clamp trick: max(x, 0) + max(-x, 0) = relu(x) + relu(-x)
+        let neg_x = input_data.neg();
+        let relu_neg_x = axonml_tensor::ops::clamp_min(&neg_x, 0.0);
+        let abs_x = relu_x.add(&relu_neg_x).unwrap();
+        // exp(-|x|)
+        let exp_neg_abs = abs_x.neg().exp();
+        // log(1 + exp(-|x|))
+        let log_term = exp_neg_abs.add_scalar(1.0).ln();
+        // loss = relu(x) - x*t + log(1 + exp(-|x|))
+        let loss_tensor = relu_x.sub(&x_times_t).unwrap().add(&log_term).unwrap();
 
-        let loss_tensor = Tensor::from_vec(losses, input_data.shape()).unwrap();
         let loss_var = if input.requires_grad() {
             let grad_fn = GradFn::new(BCEWithLogitsBackward {
                 next_fns: vec![input.grad_fn().cloned()],
-                input_vec,
-                target_vec,
-                shape: input_data.shape().to_vec(),
+                input_tensor: input_data,
+                target_tensor: target_data,
             });
             Variable::from_operation(loss_tensor, grad_fn, true)
         } else {
@@ -785,33 +791,64 @@ impl Default for BCEWithLogitsLoss {
 ///
 /// The gradient is: diff/beta if |diff| < beta, else sign(diff).
 /// Returns gradients for both input and target (negated for target).
+///
+/// Stores diff as Tensor<f32> (GPU-resident when applicable).
 #[derive(Debug)]
 struct SmoothL1Backward {
     next_fns: Vec<Option<GradFn>>,
-    diff_vec: Vec<f32>,
+    diff_tensor: Tensor<f32>,
     beta: f32,
     shape: Vec<usize>,
 }
 
 impl GradientFunction for SmoothL1Backward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let grad_vec = grad_output.to_vec();
-        let grad_input: Vec<f32> = self
-            .diff_vec
+        // Compute |diff| = sqrt(diff^2 + eps) to stay differentiable and device-agnostic
+        let eps = 1e-12f32;
+        let diff_sq = self.diff_tensor.mul(&self.diff_tensor).unwrap();
+        let diff_sq_eps = diff_sq.add_scalar(eps);
+        let abs_diff = diff_sq_eps.ln().mul_scalar(0.5).exp();
+
+        // sign(diff) = diff / |diff|
+        let sign_diff = self.diff_tensor.div(&abs_diff).unwrap();
+
+        // For the L2 region (|diff| < beta): grad = diff / beta
+        // For the L1 region (|diff| >= beta): grad = sign(diff)
+        // Blend: mask = clamp(|diff| / beta, 0, 1), but we need a hard cutoff.
+        // Use a smooth approximation via where: if |diff| < beta -> diff/beta, else sign
+        // Since we need element-wise branching and don't have a GPU where_cond,
+        // we use: grad = (1 - mask) * (diff / beta) + mask * sign(diff)
+        // where mask = clamp((|diff| - beta) * large_value, 0, 1) approximates step function.
+        // Actually simpler: mask_l2 = clamp(1 - |diff|/beta, 0, 1) gives 1 in L2 region, 0 in L1
+        // BUT this gives a soft transition. For exact correctness, use CPU branching on the mask.
+        //
+        // Practical approach: compute both branches with Tensor ops, build mask on CPU, blend.
+        let grad_l2 = self.diff_tensor.mul_scalar(1.0 / self.beta); // diff / beta
+        let grad_l1 = sign_diff; // sign(diff)
+
+        // Build mask tensor: 1.0 where |d| < beta, 0.0 otherwise
+        let abs_vec = abs_diff.to_vec();
+        let beta = self.beta;
+        let mask_vec: Vec<f32> = abs_vec
             .iter()
-            .zip(grad_vec.iter())
-            .map(|(&d, &g)| {
-                let abs_d = d.abs();
-                if abs_d < self.beta {
-                    g * d / self.beta
-                } else {
-                    g * d.signum()
-                }
-            })
+            .map(|&a| if a < beta { 1.0 } else { 0.0 })
             .collect();
-        let grad_target: Vec<f32> = grad_input.iter().map(|&g| -g).collect();
-        let gi = Tensor::from_vec(grad_input, &self.shape).unwrap();
-        let gt = Tensor::from_vec(grad_target, &self.shape).unwrap();
+        let mut mask = Tensor::from_vec(mask_vec, &self.shape).unwrap();
+        if self.diff_tensor.device().is_gpu() {
+            mask = mask.to_device(self.diff_tensor.device()).unwrap();
+        }
+        let inv_mask = mask.neg().add_scalar(1.0);
+
+        // grad_per_elem = mask * grad_l2 + (1 - mask) * grad_l1
+        let blended = mask
+            .mul(&grad_l2)
+            .unwrap()
+            .add(&inv_mask.mul(&grad_l1).unwrap())
+            .unwrap();
+
+        // gi = blended * grad_output
+        let gi = blended.mul(grad_output).unwrap();
+        let gt = gi.neg();
         vec![Some(gi), Some(gt)]
     }
 
@@ -860,29 +897,49 @@ impl SmoothL1Loss {
 
     /// Computes the loss.
     pub fn compute(&self, input: &Variable, target: &Variable) -> Variable {
-        let diff = input.sub_var(target);
-        let diff_data = diff.data();
-        let diff_vec = diff_data.to_vec();
+        let input_data = input.data();
+        let target_data = target.data();
+        let diff_tensor = input_data.sub(&target_data).unwrap();
+        let shape = diff_tensor.shape().to_vec();
 
-        let losses: Vec<f32> = diff_vec
+        // Compute |diff| via relu(diff) + relu(-diff)
+        let relu_diff = axonml_tensor::ops::clamp_min(&diff_tensor, 0.0);
+        let relu_neg_diff = axonml_tensor::ops::clamp_min(&diff_tensor.neg(), 0.0);
+        let abs_diff = relu_diff.add(&relu_neg_diff).unwrap();
+
+        // L2 branch: 0.5 * diff^2 / beta
+        let diff_sq = diff_tensor.mul(&diff_tensor).unwrap();
+        let l2_loss = diff_sq.mul_scalar(0.5 / self.beta);
+
+        // L1 branch: |diff| - 0.5 * beta
+        let l1_loss = abs_diff.add_scalar(-0.5 * self.beta);
+
+        // Build mask: 1.0 where |diff| < beta, 0.0 otherwise
+        let abs_vec = abs_diff.to_vec();
+        let beta = self.beta;
+        let mask_vec: Vec<f32> = abs_vec
             .iter()
-            .map(|&d| {
-                let abs_d = d.abs();
-                if abs_d < self.beta {
-                    0.5 * d * d / self.beta
-                } else {
-                    abs_d - 0.5 * self.beta
-                }
-            })
+            .map(|&a| if a < beta { 1.0 } else { 0.0 })
             .collect();
+        let mut mask = Tensor::from_vec(mask_vec, &shape).unwrap();
+        if diff_tensor.device().is_gpu() {
+            mask = mask.to_device(diff_tensor.device()).unwrap();
+        }
+        let inv_mask = mask.neg().add_scalar(1.0);
 
-        let loss_tensor = Tensor::from_vec(losses, diff_data.shape()).unwrap();
+        // loss = mask * l2_loss + (1-mask) * l1_loss
+        let loss_tensor = mask
+            .mul(&l2_loss)
+            .unwrap()
+            .add(&inv_mask.mul(&l1_loss).unwrap())
+            .unwrap();
+
         let loss_var = if input.requires_grad() || target.requires_grad() {
             let grad_fn = GradFn::new(SmoothL1Backward {
                 next_fns: vec![input.grad_fn().cloned(), target.grad_fn().cloned()],
-                diff_vec,
+                diff_tensor,
                 beta: self.beta,
-                shape: diff_data.shape().to_vec(),
+                shape,
             });
             Variable::from_operation(loss_tensor, grad_fn, true)
         } else {

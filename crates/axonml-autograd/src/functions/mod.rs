@@ -19,9 +19,11 @@ mod basic;
 mod conv;
 mod linalg;
 mod loss;
+mod rnn;
 
 pub use activation::*;
 pub use basic::*;
 pub use conv::*;
 pub use linalg::*;
 pub use loss::*;
+pub use rnn::*;
