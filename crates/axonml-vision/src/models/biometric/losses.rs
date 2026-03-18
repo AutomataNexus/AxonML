@@ -46,7 +46,12 @@ fn triplet_loss_raw(anchor: &[f32], positive: &[f32], negative: &[f32], margin: 
 ///
 /// Uses cosine distance: d(a,b) = 1 - sum(a*b) for L2-normalized vectors.
 /// Returns a scalar Variable [1] with gradient connectivity.
-fn triplet_loss_var(anchor: &Variable, positive: &Variable, negative: &Variable, margin: f32) -> Variable {
+fn triplet_loss_var(
+    anchor: &Variable,
+    positive: &Variable,
+    negative: &Variable,
+    margin: f32,
+) -> Variable {
     // d(anchor, positive) = 1 - dot(anchor, positive)
     let dot_pos = anchor.mul_var(positive).sum(); // scalar
     let dist_pos = dot_pos.mul_scalar(-1.0).add_scalar(1.0); // 1 - dot
@@ -116,9 +121,11 @@ impl CrystallizationLoss {
         let triplet = triplet_loss_raw(anchor, positive, negative, self.margin);
 
         // Convergence regularization: penalize velocities above target
-        let conv_reg: f32 = velocities.iter()
+        let conv_reg: f32 = velocities
+            .iter()
             .map(|v| (v - self.target_velocity).max(0.0).powi(2))
-            .sum::<f32>() / velocities.len().max(1) as f32;
+            .sum::<f32>()
+            / velocities.len().max(1) as f32;
 
         triplet + self.convergence_weight * conv_reg
     }
@@ -141,9 +148,11 @@ impl CrystallizationLoss {
         // Convergence regularization: extract velocity data
         // (velocities are scalar outputs from the model, not high-dimensional)
         let v_data = velocities.data().to_vec();
-        let conv_reg: f32 = v_data.iter()
+        let conv_reg: f32 = v_data
+            .iter()
             .map(|v| (v - self.target_velocity).max(0.0).powi(2))
-            .sum::<f32>() / v_data.len().max(1) as f32;
+            .sum::<f32>()
+            / v_data.len().max(1) as f32;
 
         // Add convergence regularization as scalar offset
         triplet.add_scalar(self.convergence_weight * conv_reg)
@@ -182,12 +191,7 @@ impl ContrastiveLoss {
     ///
     /// * `embedding_a`, `embedding_b` - L2-normalized embeddings [D]
     /// * `is_same` - Whether the pair is same-identity
-    pub fn compute(
-        &self,
-        embedding_a: &[f32],
-        embedding_b: &[f32],
-        is_same: bool,
-    ) -> f32 {
+    pub fn compute(&self, embedding_a: &[f32], embedding_b: &[f32], is_same: bool) -> f32 {
         let dim = embedding_a.len();
         let mut dist_sq = 0.0f32;
         for i in 0..dim {
@@ -274,9 +278,11 @@ impl EchoLoss {
         let p = predicted.data().to_vec();
         let a = actual.data().to_vec();
         let n = p.len() as f32;
-        p.iter().zip(a.iter())
+        p.iter()
+            .zip(a.iter())
             .map(|(pi, ai)| (pi - ai) * (pi - ai))
-            .sum::<f32>() / n
+            .sum::<f32>()
+            / n
     }
 
     /// Compute prediction loss as graph-tracked Variable (MSE).
@@ -313,7 +319,8 @@ impl EchoLoss {
         let pred_loss = Self::prediction_loss_var(predicted_mel, actual_mel);
         let speaker_loss = triplet_loss_var(speaker_anchor, speaker_pos, speaker_neg, self.margin);
 
-        pred_loss.mul_scalar(self.prediction_weight)
+        pred_loss
+            .mul_scalar(self.prediction_weight)
             .add_var(&speaker_loss.mul_scalar(self.speaker_weight))
     }
 }
@@ -488,7 +495,8 @@ impl ThemisLoss {
         let cal = Self::calibration_loss(confidence, prediction_correct);
 
         // Combine: scalar BCE/calibration + graph-tracked triplet
-        triplet.mul_scalar(self.triplet_weight)
+        triplet
+            .mul_scalar(self.triplet_weight)
             .add_scalar(self.bce_weight * bce + self.calibration_weight * cal)
     }
 }
@@ -601,9 +609,11 @@ impl CenterLoss {
         // For the Variable path, we sum the element-wise dist_sq and apply
         // the mean uncertainty weight as a scalar multiplier (approximate but
         // keeps the graph clean for the dominant gradient signal).
-        let mean_weight: f32 = lv_data.iter()
+        let mean_weight: f32 = lv_data
+            .iter()
             .map(|lv| (-self.uncertainty_alpha * lv.exp()).exp())
-            .sum::<f32>() / n as f32;
+            .sum::<f32>()
+            / n as f32;
 
         dist_sq.mean().mul_scalar(self.weight * mean_weight)
     }
@@ -661,12 +671,7 @@ impl AngularMarginLoss {
     /// * `cos_similarities` - Cosine similarities to all classes [N_classes]
     /// * `target_class` - Index of the correct class
     /// * `log_variance` - Uncertainty (log-variance) for this sample
-    pub fn compute(
-        &self,
-        cos_similarities: &[f32],
-        target_class: usize,
-        log_variance: f32,
-    ) -> f32 {
+    pub fn compute(&self, cos_similarities: &[f32], target_class: usize, log_variance: f32) -> f32 {
         let n_classes = cos_similarities.len();
         if n_classes == 0 || target_class >= n_classes {
             return 0.0;
@@ -799,12 +804,7 @@ impl DiversityRegularization {
     /// * `embeddings` - Batch of L2-normalized embeddings, flat [N * D]
     /// * `n` - Number of embeddings in batch
     /// * `dim` - Embedding dimensionality
-    pub fn compute(
-        &self,
-        embeddings: &[f32],
-        n: usize,
-        dim: usize,
-    ) -> f32 {
+    pub fn compute(&self, embeddings: &[f32], n: usize, dim: usize) -> f32 {
         if n < 2 || dim == 0 {
             return 0.0;
         }
@@ -840,10 +840,7 @@ impl DiversityRegularization {
     ///
     /// Computes pairwise dot products through the autograd graph so
     /// gradients push embeddings apart when similarity is too high.
-    pub fn compute_var(
-        &self,
-        embeddings: &[Variable],
-    ) -> Variable {
+    pub fn compute_var(&self, embeddings: &[Variable]) -> Variable {
         let n = embeddings.len();
         if n < 2 {
             return Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false);
@@ -976,12 +973,7 @@ impl LivenessLoss {
     /// * `is_live` - Ground truth label (true = real, false = spoof)
     /// * `trajectory_deltas` - Sequence of hidden state delta norms [T]
     ///   (L2 norm of h_t - h_{t-1} for each timestep)
-    pub fn compute(
-        &self,
-        liveness_score: f32,
-        is_live: bool,
-        trajectory_deltas: &[f32],
-    ) -> f32 {
+    pub fn compute(&self, liveness_score: f32, is_live: bool, trajectory_deltas: &[f32]) -> f32 {
         let target = if is_live { 1.0 } else { 0.0 };
         let bce = Self::bce(liveness_score, target);
 
@@ -994,9 +986,11 @@ impl LivenessLoss {
         let n = trajectory_deltas.len();
         let temporal_var = if n > 1 {
             let mean: f32 = trajectory_deltas.iter().sum::<f32>() / n as f32;
-            trajectory_deltas.iter()
+            trajectory_deltas
+                .iter()
                 .map(|d| (d - mean) * (d - mean))
-                .sum::<f32>() / (n - 1) as f32
+                .sum::<f32>()
+                / (n - 1) as f32
         } else {
             0.0
         };
@@ -1024,11 +1018,16 @@ impl LivenessLoss {
         // -[y*ln(p) + (1-y)*ln(1-p)]
         // = -(target * ln(score) + (1-target) * ln(1-score))
         let score_clamped = liveness_score.add_scalar(1e-7).relu(); // ensure > 0
-        let _ln_score = score_clamped.add_scalar(1e-7).sqrt().mul_var(
-            &score_clamped.add_scalar(1e-7).sqrt()
-        ); // Approximate: we use scalar BCE for numerical stability
+        let _ln_score = score_clamped
+            .add_scalar(1e-7)
+            .sqrt()
+            .mul_var(&score_clamped.add_scalar(1e-7).sqrt()); // Approximate: we use scalar BCE for numerical stability
         let liveness_data = liveness_score.data().to_vec();
-        let p = if liveness_data.is_empty() { 0.5 } else { liveness_data[0] };
+        let p = if liveness_data.is_empty() {
+            0.5
+        } else {
+            liveness_data[0]
+        };
         let bce_val = Self::bce(p, target_val);
 
         // Smoothness and variance from trajectory deltas (scalar path)
@@ -1039,9 +1038,11 @@ impl LivenessLoss {
         let n = trajectory_deltas.len();
         let temporal_var = if n > 1 {
             let mean: f32 = trajectory_deltas.iter().sum::<f32>() / n as f32;
-            trajectory_deltas.iter()
+            trajectory_deltas
+                .iter()
                 .map(|d| (d - mean) * (d - mean))
-                .sum::<f32>() / (n - 1) as f32
+                .sum::<f32>()
+                / (n - 1) as f32
         } else {
             0.0
         };
@@ -1077,7 +1078,11 @@ mod tests {
         let negative = vec![0.0, 1.0, 0.0];
 
         let loss = triplet_loss_raw(&anchor, &positive, &negative, 0.3);
-        assert!(loss < 0.01, "Loss should be ~0 when positive is identical: {}", loss);
+        assert!(
+            loss < 0.01,
+            "Loss should be ~0 when positive is identical: {}",
+            loss
+        );
     }
 
     #[test]
@@ -1093,13 +1098,16 @@ mod tests {
     #[test]
     fn test_triplet_loss_var_graph_tracked() {
         let anchor = Variable::new(
-            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(), true,
+            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
         );
         let positive = Variable::new(
-            Tensor::from_vec(vec![0.9, 0.1, 0.0], &[1, 3]).unwrap(), true,
+            Tensor::from_vec(vec![0.9, 0.1, 0.0], &[1, 3]).unwrap(),
+            true,
         );
         let negative = Variable::new(
-            Tensor::from_vec(vec![0.0, 1.0, 0.0], &[1, 3]).unwrap(), true,
+            Tensor::from_vec(vec![0.0, 1.0, 0.0], &[1, 3]).unwrap(),
+            true,
         );
 
         let loss = triplet_loss_var(&anchor, &positive, &negative, 0.3);
@@ -1174,8 +1182,14 @@ mod tests {
     #[test]
     fn test_contrastive_loss_var() {
         let loss_fn = ContrastiveLoss::default();
-        let a = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(), true);
-        let b = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
 
         let loss = loss_fn.compute_var(&a, &b, true);
         let val = loss.data().to_vec()[0];
@@ -1189,22 +1203,30 @@ mod tests {
     #[test]
     fn test_echo_prediction_loss() {
         let predicted = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[1, 1, 3]).unwrap(), false,
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[1, 1, 3]).unwrap(),
+            false,
         );
         let actual = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[1, 1, 3]).unwrap(), false,
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[1, 1, 3]).unwrap(),
+            false,
         );
         let loss = EchoLoss::prediction_loss(&predicted, &actual);
-        assert!(loss < 0.01, "Perfect prediction should have ~0 loss: {}", loss);
+        assert!(
+            loss < 0.01,
+            "Perfect prediction should have ~0 loss: {}",
+            loss
+        );
     }
 
     #[test]
     fn test_echo_loss_var() {
         let predicted = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[1, 3]).unwrap(), true,
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[1, 3]).unwrap(),
+            true,
         );
         let actual = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[1, 3]).unwrap(), false,
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[1, 3]).unwrap(),
+            false,
         );
         let anchor = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[1, 2]).unwrap(), true);
         let pos = Variable::new(Tensor::from_vec(vec![0.9, 0.1], &[1, 2]).unwrap(), true);
@@ -1222,11 +1244,26 @@ mod tests {
 
     #[test]
     fn test_argus_loss_var() {
-        let anchor = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(), true);
-        let pos = Variable::new(Tensor::from_vec(vec![0.9, 0.1, 0.0], &[1, 3]).unwrap(), true);
-        let neg = Variable::new(Tensor::from_vec(vec![0.0, 1.0, 0.0], &[1, 3]).unwrap(), true);
-        let orig = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 0.5], &[1, 3]).unwrap(), true);
-        let rot = Variable::new(Tensor::from_vec(vec![0.9, 0.1, 0.5], &[1, 3]).unwrap(), true);
+        let anchor = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let pos = Variable::new(
+            Tensor::from_vec(vec![0.9, 0.1, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let neg = Variable::new(
+            Tensor::from_vec(vec![0.0, 1.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let orig = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 0.5], &[1, 3]).unwrap(),
+            true,
+        );
+        let rot = Variable::new(
+            Tensor::from_vec(vec![0.9, 0.1, 0.5], &[1, 3]).unwrap(),
+            true,
+        );
 
         let loss_fn = ArgusLoss::default();
         let loss = loss_fn.compute_var(&anchor, &pos, &neg, &orig, &rot);
@@ -1262,13 +1299,26 @@ mod tests {
     #[test]
     fn test_themis_loss_var() {
         let loss_fn = ThemisLoss::default();
-        let anchor = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(), true);
-        let pos = Variable::new(Tensor::from_vec(vec![0.9, 0.1, 0.0], &[1, 3]).unwrap(), true);
-        let neg = Variable::new(Tensor::from_vec(vec![-1.0, 0.0, 0.0], &[1, 3]).unwrap(), true);
+        let anchor = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let pos = Variable::new(
+            Tensor::from_vec(vec![0.9, 0.1, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let neg = Variable::new(
+            Tensor::from_vec(vec![-1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
 
         let loss = loss_fn.compute_var(0.9, true, &anchor, &pos, &neg, 0.9);
         let val = loss.data().to_vec()[0];
-        assert!(val >= 0.0, "Themis var loss should be non-negative: {}", val);
+        assert!(
+            val >= 0.0,
+            "Themis var loss should be non-negative: {}",
+            val
+        );
     }
 
     // =========================================================================
@@ -1293,7 +1343,11 @@ mod tests {
         let centers = vec![0.0, 1.0, 0.0];
         let log_variances = vec![0.0]; // Low uncertainty -> full weight
         let loss = loss_fn.compute(&embeddings, &centers, &log_variances, 3);
-        assert!(loss > 0.0, "Non-zero distance should give positive loss: {}", loss);
+        assert!(
+            loss > 0.0,
+            "Non-zero distance should give positive loss: {}",
+            loss
+        );
     }
 
     #[test]
@@ -1310,21 +1364,36 @@ mod tests {
         assert!(
             loss_confident > loss_uncertain,
             "Uncertain samples should have lower center loss: confident={}, uncertain={}",
-            loss_confident, loss_uncertain
+            loss_confident,
+            loss_uncertain
         );
     }
 
     #[test]
     fn test_center_loss_var() {
         let loss_fn = CenterLoss::default();
-        let emb = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(), true);
-        let center = Variable::new(Tensor::from_vec(vec![0.0, 1.0, 0.0], &[1, 3]).unwrap(), false);
+        let emb = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let center = Variable::new(
+            Tensor::from_vec(vec![0.0, 1.0, 0.0], &[1, 3]).unwrap(),
+            false,
+        );
         let lv = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false);
 
         let loss = loss_fn.compute_var(&emb, &center, &lv);
         let val = loss.data().to_vec()[0];
-        assert!(val >= 0.0, "Center var loss should be non-negative: {}", val);
-        assert!(val > 0.0, "Non-zero distance should produce positive loss: {}", val);
+        assert!(
+            val >= 0.0,
+            "Center var loss should be non-negative: {}",
+            val
+        );
+        assert!(
+            val > 0.0,
+            "Non-zero distance should produce positive loss: {}",
+            val
+        );
     }
 
     #[test]
@@ -1345,7 +1414,11 @@ mod tests {
         let cos_sims = vec![0.95, 0.1, -0.2, 0.05];
         let loss = loss_fn.compute(&cos_sims, 0, 0.0); // Low uncertainty
         assert!(loss >= 0.0, "Loss should be non-negative: {}", loss);
-        assert!(loss < 5.0, "Loss should be reasonable for correct prediction: {}", loss);
+        assert!(
+            loss < 5.0,
+            "Loss should be reasonable for correct prediction: {}",
+            loss
+        );
     }
 
     #[test]
@@ -1354,7 +1427,11 @@ mod tests {
         // Low cosine similarity to target class, high to wrong class
         let cos_sims = vec![0.1, 0.95, -0.2, 0.05];
         let loss = loss_fn.compute(&cos_sims, 0, 0.0);
-        assert!(loss > 5.0, "Loss should be high for wrong prediction: {}", loss);
+        assert!(
+            loss > 5.0,
+            "Loss should be high for wrong prediction: {}",
+            loss
+        );
     }
 
     #[test]
@@ -1370,21 +1447,24 @@ mod tests {
         assert!(
             loss_confident > loss_uncertain,
             "Confident samples should face larger margin: confident={}, uncertain={}",
-            loss_confident, loss_uncertain
+            loss_confident,
+            loss_uncertain
         );
     }
 
     #[test]
     fn test_angular_margin_loss_var() {
         let loss_fn = AngularMarginLoss::default();
-        let cos_var = Variable::new(
-            Tensor::from_vec(vec![0.9, 0.1, -0.1], &[3]).unwrap(), true,
-        );
+        let cos_var = Variable::new(Tensor::from_vec(vec![0.9, 0.1, -0.1], &[3]).unwrap(), true);
         let lv_var = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false);
 
         let loss = loss_fn.compute_var(&cos_var, 0, &lv_var);
         let val = loss.data().to_vec()[0];
-        assert!(val >= 0.0, "Angular margin var loss should be non-negative: {}", val);
+        assert!(
+            val >= 0.0,
+            "Angular margin var loss should be non-negative: {}",
+            val
+        );
     }
 
     #[test]
@@ -1402,26 +1482,26 @@ mod tests {
     fn test_diversity_collapsed_embeddings() {
         let loss_fn = DiversityRegularization::default();
         // All embeddings identical -> maximum similarity -> penalty
-        let embeddings = vec![
-            1.0, 0.0, 0.0,
-            1.0, 0.0, 0.0,
-            1.0, 0.0, 0.0,
-        ];
+        let embeddings = vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
         let loss = loss_fn.compute(&embeddings, 3, 3);
-        assert!(loss > 0.0, "Collapsed embeddings should be penalized: {}", loss);
+        assert!(
+            loss > 0.0,
+            "Collapsed embeddings should be penalized: {}",
+            loss
+        );
     }
 
     #[test]
     fn test_diversity_orthogonal_embeddings() {
         let loss_fn = DiversityRegularization::default();
         // Orthogonal embeddings -> zero similarity -> no penalty
-        let embeddings = vec![
-            1.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0,
-        ];
+        let embeddings = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
         let loss = loss_fn.compute(&embeddings, 3, 3);
-        assert!(loss < 1e-6, "Orthogonal embeddings should have ~0 penalty: {}", loss);
+        assert!(
+            loss < 1e-6,
+            "Orthogonal embeddings should have ~0 penalty: {}",
+            loss
+        );
     }
 
     #[test]
@@ -1434,25 +1514,51 @@ mod tests {
     #[test]
     fn test_diversity_var_collapsed() {
         let loss_fn = DiversityRegularization::default();
-        let emb1 = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(), true);
-        let emb2 = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(), true);
-        let emb3 = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(), true);
+        let emb1 = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let emb2 = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let emb3 = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
 
         let loss = loss_fn.compute_var(&[emb1, emb2, emb3]);
         let val = loss.data().to_vec()[0];
-        assert!(val > 0.0, "Collapsed embeddings should have positive penalty: {}", val);
+        assert!(
+            val > 0.0,
+            "Collapsed embeddings should have positive penalty: {}",
+            val
+        );
     }
 
     #[test]
     fn test_diversity_var_diverse() {
         let loss_fn = DiversityRegularization::default();
-        let emb1 = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(), true);
-        let emb2 = Variable::new(Tensor::from_vec(vec![0.0, 1.0, 0.0], &[1, 3]).unwrap(), true);
-        let emb3 = Variable::new(Tensor::from_vec(vec![0.0, 0.0, 1.0], &[1, 3]).unwrap(), true);
+        let emb1 = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let emb2 = Variable::new(
+            Tensor::from_vec(vec![0.0, 1.0, 0.0], &[1, 3]).unwrap(),
+            true,
+        );
+        let emb3 = Variable::new(
+            Tensor::from_vec(vec![0.0, 0.0, 1.0], &[1, 3]).unwrap(),
+            true,
+        );
 
         let loss = loss_fn.compute_var(&[emb1, emb2, emb3]);
         let val = loss.data().to_vec()[0];
-        assert!(val < 1e-6, "Diverse embeddings should have ~0 penalty: {}", val);
+        assert!(
+            val < 1e-6,
+            "Diverse embeddings should have ~0 penalty: {}",
+            val
+        );
     }
 
     // =========================================================================
@@ -1474,7 +1580,11 @@ mod tests {
         // Spoofed trajectory: very smooth, low variance
         let deltas = vec![0.01, 0.011, 0.012, 0.011, 0.01, 0.011, 0.012, 0.011];
         let loss_spoof = loss_fn.compute(0.1, false, &deltas);
-        assert!(loss_spoof >= 0.0, "Loss should be non-negative: {}", loss_spoof);
+        assert!(
+            loss_spoof >= 0.0,
+            "Loss should be non-negative: {}",
+            loss_spoof
+        );
     }
 
     #[test]
@@ -1492,7 +1602,8 @@ mod tests {
         assert!(
             loss_smooth > loss_irregular,
             "Smooth trajectory should be penalized more: smooth={}, irregular={}",
-            loss_smooth, loss_irregular
+            loss_smooth,
+            loss_irregular
         );
     }
 
@@ -1510,7 +1621,8 @@ mod tests {
         assert!(
             loss_low > loss_high,
             "Low variance should be penalized more: low={}, high={}",
-            loss_low, loss_high
+            loss_low,
+            loss_high
         );
     }
 
@@ -1519,7 +1631,11 @@ mod tests {
         // Constant signal -> autocorrelation = 1.0
         let constant = vec![0.5, 0.5, 0.5, 0.5, 0.5];
         let ac = LivenessLoss::autocorrelation(&constant);
-        assert!((ac - 1.0).abs() < 0.01, "Constant signal autocorrelation should be ~1: {}", ac);
+        assert!(
+            (ac - 1.0).abs() < 0.01,
+            "Constant signal autocorrelation should be ~1: {}",
+            ac
+        );
 
         // Short signal
         let short = vec![1.0, 2.0];
@@ -1535,14 +1651,22 @@ mod tests {
 
         let loss = loss_fn.compute_var(&score, true, &deltas);
         let val = loss.data().to_vec()[0];
-        assert!(val >= 0.0, "Liveness var loss should be non-negative: {}", val);
+        assert!(
+            val >= 0.0,
+            "Liveness var loss should be non-negative: {}",
+            val
+        );
     }
 
     #[test]
     fn test_liveness_bce_correct() {
         // High confidence correct prediction
         let loss = LivenessLoss::bce(0.99, 1.0);
-        assert!(loss < 0.1, "Confident correct should have low BCE: {}", loss);
+        assert!(
+            loss < 0.1,
+            "Confident correct should have low BCE: {}",
+            loss
+        );
     }
 
     #[test]

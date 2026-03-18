@@ -408,7 +408,9 @@ impl GradientFunction for ExpandBackward {
         if in_numel == out_numel {
             // No broadcast happened, just reshape
             let target_isize: Vec<isize> = in_shape.iter().map(|&x| x as isize).collect();
-            let grad = grad_output.reshape(&target_isize).unwrap_or_else(|_| grad_output.clone());
+            let grad = grad_output
+                .reshape(&target_isize)
+                .unwrap_or_else(|_| grad_output.clone());
             return vec![Some(grad)];
         }
 
@@ -489,14 +491,11 @@ impl GradientFunction for SelectBackward {
         #[cfg(feature = "cuda")]
         if grad_output.device().is_gpu() {
             // Unsqueeze: insert dim of size 1 at self.dim
-            let mut unsqueezed_shape: Vec<isize> = grad_output.shape().iter().map(|&x| x as isize).collect();
+            let mut unsqueezed_shape: Vec<isize> =
+                grad_output.shape().iter().map(|&x| x as isize).collect();
             unsqueezed_shape.insert(self.dim, 1);
             let unsqueezed = grad_output.reshape(&unsqueezed_shape).unwrap();
-            let grad = unsqueezed.narrow_backward_cuda(
-                &self.input_shape,
-                self.dim,
-                self.index,
-            );
+            let grad = unsqueezed.narrow_backward_cuda(&self.input_shape, self.dim, self.index);
             return vec![Some(grad)];
         }
 
@@ -587,7 +586,8 @@ impl GradientFunction for CatBackward {
         let mut offset = 0;
         let mut grads = Vec::with_capacity(self.sizes.len());
         for &size in &self.sizes {
-            let grad = grad_output.narrow(self.dim, offset, size)
+            let grad = grad_output
+                .narrow(self.dim, offset, size)
                 .unwrap_or_else(|_| grad_output.clone());
             // narrow returns a view; make it contiguous (stays on GPU if GPU tensor)
             grads.push(Some(grad.contiguous()));
@@ -641,7 +641,8 @@ impl GradientFunction for SumDimBackward {
         #[cfg(feature = "cuda")]
         if grad_output.device().is_gpu() {
             // grad_output has reduced dim removed — insert dim=1 at self.dim
-            let mut unsqueezed_shape: Vec<isize> = grad_output.shape().iter().map(|&x| x as isize).collect();
+            let mut unsqueezed_shape: Vec<isize> =
+                grad_output.shape().iter().map(|&x| x as isize).collect();
             unsqueezed_shape.insert(self.dim, 1);
             let reshaped = grad_output.reshape(&unsqueezed_shape).unwrap();
             let expanded = reshaped.broadcast_to(&self.input_shape);

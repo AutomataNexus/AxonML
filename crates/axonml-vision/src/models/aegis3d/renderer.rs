@@ -43,7 +43,13 @@ pub struct Camera {
 
 impl Camera {
     /// Create a camera looking from `position` at `target`.
-    pub fn look_at(position: [f32; 3], target: [f32; 3], width: usize, height: usize, fov_degrees: f32) -> Self {
+    pub fn look_at(
+        position: [f32; 3],
+        target: [f32; 3],
+        width: usize,
+        height: usize,
+        fov_degrees: f32,
+    ) -> Self {
         let forward = normalize(sub(target, position));
         let world_up = [0.0, 1.0, 0.0];
         let right = normalize(cross(forward, world_up));
@@ -193,11 +199,7 @@ impl DifferentiableRenderer {
     /// - `depth_map`: `[H, W]` depth values (max_distance for misses)
     /// - `normal_map`: `[H, W, 3]` surface normals
     /// - `hit_mask`: `[H, W]` binary mask (1.0 = hit, 0.0 = miss)
-    pub fn render(
-        &self,
-        octree: &AdaptiveOctree,
-        camera: &Camera,
-    ) -> RenderOutput {
+    pub fn render(&self, octree: &AdaptiveOctree, camera: &Camera) -> RenderOutput {
         let w = camera.width;
         let h = camera.height;
 
@@ -374,8 +376,8 @@ fn normalize(v: [f32; 3]) -> [f32; 3] {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::octree::AABB;
+    use super::*;
 
     #[test]
     fn test_camera_creation() {

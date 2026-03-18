@@ -18,8 +18,7 @@ use std::collections::HashMap;
 
 use axonml_autograd::Variable;
 use axonml_nn::{
-    BatchNorm1d, Dropout, Linear, Module, MultiHeadAttention,
-    Parameter, Sequential, ReLU, GELU,
+    BatchNorm1d, Dropout, Linear, Module, MultiHeadAttention, Parameter, ReLU, Sequential, GELU,
 };
 
 // Model dimensions are defined as constants below
@@ -69,7 +68,8 @@ impl Apollo {
     /// Creates a new Apollo master coordinator.
     pub fn new() -> Self {
         // Project each model output to 256
-        let proj_models: Vec<Linear> = MODEL_DIMS.iter()
+        let proj_models: Vec<Linear> = MODEL_DIMS
+            .iter()
             .map(|&dim| Linear::new(dim, 256))
             .collect();
 
@@ -126,11 +126,17 @@ impl Apollo {
         model_embeddings: &[&Variable],
         raw_sensors: &Variable,
     ) -> (Variable, Variable, Variable, Variable, Variable) {
-        assert_eq!(model_embeddings.len(), 7, "Apollo expects 7 model embeddings");
+        assert_eq!(
+            model_embeddings.len(),
+            7,
+            "Apollo expects 7 model embeddings"
+        );
         let batch = model_embeddings[0].shape()[0];
 
         // Project all models to 256
-        let projected: Vec<Variable> = model_embeddings.iter().zip(self.proj_models.iter())
+        let projected: Vec<Variable> = model_embeddings
+            .iter()
+            .zip(self.proj_models.iter())
             .map(|(emb, proj)| proj.forward(emb))
             .collect();
 
@@ -161,7 +167,10 @@ impl Apollo {
     }
 
     /// Forward from concatenated model embeddings + sensor features.
-    pub fn forward_concat(&self, input: &Variable) -> (Variable, Variable, Variable, Variable, Variable) {
+    pub fn forward_concat(
+        &self,
+        input: &Variable,
+    ) -> (Variable, Variable, Variable, Variable, Variable) {
         // Split into model embeddings and raw sensor
         let mut model_parts: Vec<Variable> = Vec::new();
         let mut offset = 0;
@@ -215,13 +224,27 @@ impl Module for Apollo {
                 params.insert(format!("proj_models.{i}.{n}"), p);
             }
         }
-        for (n, p) in self.specialist_attention.named_parameters() { params.insert(format!("specialist_attention.{n}"), p); }
-        for (n, p) in self.sensor_encoder.named_parameters() { params.insert(format!("sensor_encoder.{n}"), p); }
-        for (n, p) in self.decision_net.named_parameters() { params.insert(format!("decision_net.{n}"), p); }
-        for (n, p) in self.diagnosis_head.named_parameters() { params.insert(format!("diagnosis_head.{n}"), p); }
-        for (n, p) in self.cost_head.named_parameters() { params.insert(format!("cost_head.{n}"), p); }
-        for (n, p) in self.action_head.named_parameters() { params.insert(format!("action_head.{n}"), p); }
-        for (n, p) in self.confidence_head.named_parameters() { params.insert(format!("confidence_head.{n}"), p); }
+        for (n, p) in self.specialist_attention.named_parameters() {
+            params.insert(format!("specialist_attention.{n}"), p);
+        }
+        for (n, p) in self.sensor_encoder.named_parameters() {
+            params.insert(format!("sensor_encoder.{n}"), p);
+        }
+        for (n, p) in self.decision_net.named_parameters() {
+            params.insert(format!("decision_net.{n}"), p);
+        }
+        for (n, p) in self.diagnosis_head.named_parameters() {
+            params.insert(format!("diagnosis_head.{n}"), p);
+        }
+        for (n, p) in self.cost_head.named_parameters() {
+            params.insert(format!("cost_head.{n}"), p);
+        }
+        for (n, p) in self.action_head.named_parameters() {
+            params.insert(format!("action_head.{n}"), p);
+        }
+        for (n, p) in self.confidence_head.named_parameters() {
+            params.insert(format!("confidence_head.{n}"), p);
+        }
         params
     }
 
@@ -253,13 +276,20 @@ mod tests {
     fn test_apollo_output_shapes() {
         let model = Apollo::new();
 
-        let embs: Vec<Variable> = MODEL_DIMS.iter()
-            .map(|&dim| Variable::new(
-                Tensor::from_vec(vec![1.0; 2 * dim], &[2, dim]).unwrap(), false))
+        let embs: Vec<Variable> = MODEL_DIMS
+            .iter()
+            .map(|&dim| {
+                Variable::new(
+                    Tensor::from_vec(vec![1.0; 2 * dim], &[2, dim]).unwrap(),
+                    false,
+                )
+            })
             .collect();
         let emb_refs: Vec<&Variable> = embs.iter().collect();
         let sensors = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * RAW_SENSOR_DIM], &[2, RAW_SENSOR_DIM]).unwrap(), false);
+            Tensor::from_vec(vec![1.0; 2 * RAW_SENSOR_DIM], &[2, RAW_SENSOR_DIM]).unwrap(),
+            false,
+        );
 
         let (diag, cost, action, conf, emb) = model.forward_parts(&emb_refs, &sensors);
 
@@ -286,7 +316,10 @@ mod tests {
     fn test_apollo_parameter_count() {
         let model = Apollo::new();
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
-        assert!(total > 1_200_000 && total < 2_400_000,
-            "Apollo has {} params, expected ~1.8M", total);
+        assert!(
+            total > 1_200_000 && total < 2_400_000,
+            "Apollo has {} params, expected ~1.8M",
+            total
+        );
     }
 }

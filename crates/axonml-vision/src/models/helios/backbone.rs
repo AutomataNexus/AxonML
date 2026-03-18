@@ -231,14 +231,14 @@ impl CSPDarknet {
         let depths = config.stage_depths();
 
         Self {
-            stem: CBS::conv3x3(3, ch[0], 2),                          // /2
-            stage1_down: CBS::conv3x3(ch[0], ch[1], 2),               // /4
+            stem: CBS::conv3x3(3, ch[0], 2),            // /2
+            stage1_down: CBS::conv3x3(ch[0], ch[1], 2), // /4
             stage1_c2f: C2f::new(ch[1], ch[1], depths[0], true),
-            stage2_down: CBS::conv3x3(ch[1], ch[2], 2),               // /8  -> P3
+            stage2_down: CBS::conv3x3(ch[1], ch[2], 2), // /8  -> P3
             stage2_c2f: C2f::new(ch[2], ch[2], depths[1], true),
-            stage3_down: CBS::conv3x3(ch[2], ch[3], 2),               // /16 -> P4
+            stage3_down: CBS::conv3x3(ch[2], ch[3], 2), // /16 -> P4
             stage3_c2f: C2f::new(ch[3], ch[3], depths[2], true),
-            stage4_down: CBS::conv3x3(ch[3], ch[4], 2),               // /32 -> P5
+            stage4_down: CBS::conv3x3(ch[3], ch[4], 2), // /32 -> P5
             stage4_c2f: C2f::new(ch[4], ch[4], depths[3], true),
             stage4_sppf: SPPF::new(ch[4], ch[4]),
             out_channels: [ch[2], ch[3], ch[4]],
@@ -253,14 +253,14 @@ impl CSPDarknet {
         let x = self.stage1_c2f.forward(&x);
 
         let x = self.stage2_down.forward(&x);
-        let p3 = self.stage2_c2f.forward(&x);        // P3: /8
+        let p3 = self.stage2_c2f.forward(&x); // P3: /8
 
         let x = self.stage3_down.forward(&p3);
-        let p4 = self.stage3_c2f.forward(&x);        // P4: /16
+        let p4 = self.stage3_c2f.forward(&x); // P4: /16
 
         let x = self.stage4_down.forward(&p4);
         let x = self.stage4_c2f.forward(&x);
-        let p5 = self.stage4_sppf.forward(&x);       // P5: /32
+        let p5 = self.stage4_sppf.forward(&x); // P5: /32
 
         (p3, p4, p5)
     }
@@ -337,7 +337,13 @@ mod tests {
         let cfg = HeliosConfig::nano(80);
         let backbone = CSPDarknet::new(&cfg);
         let params = backbone.parameters();
-        let total: usize = params.iter().map(|p| p.variable().data().to_vec().len()).sum();
-        assert!(total > 10000, "Backbone should have significant params, got {total}");
+        let total: usize = params
+            .iter()
+            .map(|p| p.variable().data().to_vec().len())
+            .sum();
+        assert!(
+            total > 10000,
+            "Backbone should have significant params, got {total}"
+        );
     }
 }

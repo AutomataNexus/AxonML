@@ -21,7 +21,7 @@ pub mod loss;
 pub mod neck;
 
 pub use detector::Helios;
-pub use loss::{HeliosLoss, CIoULoss, TaskAlignedAssigner};
+pub use loss::{CIoULoss, HeliosLoss, TaskAlignedAssigner};
 
 use axonml_autograd::Variable;
 

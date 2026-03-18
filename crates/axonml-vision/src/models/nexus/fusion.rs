@@ -205,13 +205,31 @@ mod tests {
     fn test_multi_scale_fusion() {
         let fusion = MultiScaleFusion::new();
 
-        let v1 = Variable::new(Tensor::from_vec(vec![0.1; 96 * 40 * 40], &[1, 96, 40, 40]).unwrap(), false);
-        let v2 = Variable::new(Tensor::from_vec(vec![0.1; 128 * 20 * 20], &[1, 128, 20, 20]).unwrap(), false);
-        let v3 = Variable::new(Tensor::from_vec(vec![0.1; 192 * 10 * 10], &[1, 192, 10, 10]).unwrap(), false);
+        let v1 = Variable::new(
+            Tensor::from_vec(vec![0.1; 96 * 40 * 40], &[1, 96, 40, 40]).unwrap(),
+            false,
+        );
+        let v2 = Variable::new(
+            Tensor::from_vec(vec![0.1; 128 * 20 * 20], &[1, 128, 20, 20]).unwrap(),
+            false,
+        );
+        let v3 = Variable::new(
+            Tensor::from_vec(vec![0.1; 192 * 10 * 10], &[1, 192, 10, 10]).unwrap(),
+            false,
+        );
 
-        let d1 = Variable::new(Tensor::from_vec(vec![0.1; 48 * 40 * 40], &[1, 48, 40, 40]).unwrap(), false);
-        let d2 = Variable::new(Tensor::from_vec(vec![0.1; 64 * 20 * 20], &[1, 64, 20, 20]).unwrap(), false);
-        let d3 = Variable::new(Tensor::from_vec(vec![0.1; 96 * 10 * 10], &[1, 96, 10, 10]).unwrap(), false);
+        let d1 = Variable::new(
+            Tensor::from_vec(vec![0.1; 48 * 40 * 40], &[1, 48, 40, 40]).unwrap(),
+            false,
+        );
+        let d2 = Variable::new(
+            Tensor::from_vec(vec![0.1; 64 * 20 * 20], &[1, 64, 20, 20]).unwrap(),
+            false,
+        );
+        let d3 = Variable::new(
+            Tensor::from_vec(vec![0.1; 96 * 10 * 10], &[1, 96, 10, 10]).unwrap(),
+            false,
+        );
 
         let (f1, f2, f3) = fusion.forward((&v1, &v2, &v3), (&d1, &d2, &d3));
         assert_eq!(f1.shape(), vec![1, 96, 40, 40]);
@@ -222,8 +240,14 @@ mod tests {
     #[test]
     fn test_fusion_gate_bounded() {
         let fusion = PathwayFusion::new(16, 8, 16);
-        let v = Variable::new(Tensor::from_vec(vec![1.0; 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(), false);
-        let d = Variable::new(Tensor::from_vec(vec![0.5; 8 * 4 * 4], &[1, 8, 4, 4]).unwrap(), false);
+        let v = Variable::new(
+            Tensor::from_vec(vec![1.0; 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(),
+            false,
+        );
+        let d = Variable::new(
+            Tensor::from_vec(vec![0.5; 8 * 4 * 4], &[1, 8, 4, 4]).unwrap(),
+            false,
+        );
         let out = fusion.forward(&v, &d);
 
         // Output should be finite

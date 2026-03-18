@@ -18,9 +18,9 @@
 // Imports
 // =============================================================================
 
-use crate::types::{Q4Block, Q4_1Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
-use crate::quantize::quantize_tensor;
 use crate::dequantize::dequantize_tensor;
+use crate::quantize::quantize_tensor;
+use crate::types::{Q4Block, Q4_1Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
 use axonml_tensor::Tensor;
 use half::f16;
 use rayon::prelude::*;
@@ -137,14 +137,11 @@ impl QuantizedLinear {
         quant_type: QuantType,
     ) -> Self {
         // Weight shape is [out_features, in_features]
-        let weight_tensor = Tensor::from_vec(
-            weight_data.to_vec(),
-            &[out_features, in_features],
-        )
-        .expect("Failed to create weight tensor for quantization");
+        let weight_tensor = Tensor::from_vec(weight_data.to_vec(), &[out_features, in_features])
+            .expect("Failed to create weight tensor for quantization");
 
-        let weight = quantize_tensor(&weight_tensor, quant_type)
-            .expect("Failed to quantize weight tensor");
+        let weight =
+            quantize_tensor(&weight_tensor, quant_type).expect("Failed to quantize weight tensor");
 
         let block_size = quant_type.block_size();
         let blocks_per_row = (in_features + block_size - 1) / block_size;
@@ -254,11 +251,8 @@ impl QuantizedLinear {
 
         let output_data = self.forward_f32(&input_data, batch);
 
-        let output_tensor = Tensor::from_vec(
-            output_data,
-            &[batch, self.out_features],
-        )
-        .expect("Failed to create output tensor");
+        let output_tensor = Tensor::from_vec(output_data, &[batch, self.out_features])
+            .expect("Failed to create output tensor");
 
         axonml_autograd::Variable::new(output_tensor, false)
     }
@@ -486,14 +480,20 @@ pub fn deserialize_quantized(data: &[u8]) -> Result<QuantizedModel, String> {
 
         // Shape
         let shape_len = u32::from_le_bytes([
-            data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
         ]) as usize;
         offset += 4;
 
         let mut shape = Vec::with_capacity(shape_len);
         for _ in 0..shape_len {
             let dim = u32::from_le_bytes([
-                data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
             ]) as usize;
             shape.push(dim);
             offset += 4;
@@ -501,7 +501,10 @@ pub fn deserialize_quantized(data: &[u8]) -> Result<QuantizedModel, String> {
 
         // Number of blocks
         let num_blocks = u32::from_le_bytes([
-            data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
         ]) as usize;
         offset += 4;
 
@@ -514,13 +517,13 @@ pub fn deserialize_quantized(data: &[u8]) -> Result<QuantizedModel, String> {
 
             let block = match quant_type {
                 QuantType::Q8_0 => {
-                    let b = Q8Block::from_bytes(&data[offset..])
-                        .ok_or("Failed to parse Q8 block")?;
+                    let b =
+                        Q8Block::from_bytes(&data[offset..]).ok_or("Failed to parse Q8 block")?;
                     QuantizedBlock::Q8(b)
                 }
                 QuantType::Q4_0 => {
-                    let b = Q4Block::from_bytes(&data[offset..])
-                        .ok_or("Failed to parse Q4 block")?;
+                    let b =
+                        Q4Block::from_bytes(&data[offset..]).ok_or("Failed to parse Q4 block")?;
                     QuantizedBlock::Q4(b)
                 }
                 QuantType::Q4_1 => {
@@ -536,7 +539,10 @@ pub fn deserialize_quantized(data: &[u8]) -> Result<QuantizedModel, String> {
                 }
                 QuantType::F32 => {
                     let v = f32::from_le_bytes([
-                        data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
+                        data[offset],
+                        data[offset + 1],
+                        data[offset + 2],
+                        data[offset + 3],
                     ]);
                     QuantizedBlock::F32(vec![v])
                 }
@@ -577,7 +583,8 @@ mod tests {
         let weight: Vec<f32> = (0..in_f * out_f).map(|i| (i as f32 * 0.01) - 5.0).collect();
         let bias: Vec<f32> = (0..out_f).map(|i| i as f32 * 0.1).collect();
 
-        let ql = QuantizedLinear::from_linear_params(&weight, Some(&bias), in_f, out_f, QuantType::Q8_0);
+        let ql =
+            QuantizedLinear::from_linear_params(&weight, Some(&bias), in_f, out_f, QuantType::Q8_0);
 
         let input: Vec<f32> = (0..in_f).map(|i| i as f32 * 0.1).collect();
         let output = ql.forward_f32(&input, 1);
@@ -588,11 +595,14 @@ mod tests {
         assert!(sum.abs() > 0.01, "Output should be non-zero, got sum={sum}");
 
         // Compare with f32 reference
-        let ref_ql = QuantizedLinear::from_linear_params(&weight, Some(&bias), in_f, out_f, QuantType::F32);
+        let ref_ql =
+            QuantizedLinear::from_linear_params(&weight, Some(&bias), in_f, out_f, QuantType::F32);
         let ref_output = ref_ql.forward_f32(&input, 1);
 
         // Q8 should be very close to f32
-        let max_err: f32 = output.iter().zip(ref_output.iter())
+        let max_err: f32 = output
+            .iter()
+            .zip(ref_output.iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
         assert!(max_err < 1.0, "Q8 error too large: {max_err}");
@@ -635,8 +645,10 @@ mod tests {
         let out_f = 512;
         let weight: Vec<f32> = vec![0.1; in_f * out_f];
 
-        let ql_q8 = QuantizedLinear::from_linear_params(&weight, None, in_f, out_f, QuantType::Q8_0);
-        let ql_q4 = QuantizedLinear::from_linear_params(&weight, None, in_f, out_f, QuantType::Q4_0);
+        let ql_q8 =
+            QuantizedLinear::from_linear_params(&weight, None, in_f, out_f, QuantType::Q8_0);
+        let ql_q4 =
+            QuantizedLinear::from_linear_params(&weight, None, in_f, out_f, QuantType::Q4_0);
 
         assert!(ql_q8.compression_ratio() > 3.5, "Q8 should compress ~4x");
         assert!(ql_q4.compression_ratio() > 6.0, "Q4 should compress ~7-8x");
@@ -673,9 +685,11 @@ mod tests {
         let weight: Vec<f32> = (0..in_f * out_f).map(|i| (i as f32 * 0.01) - 1.0).collect();
         let bias: Vec<f32> = vec![0.5; out_f];
 
-        let ql = QuantizedLinear::from_linear_params(&weight, Some(&bias), in_f, out_f, QuantType::Q8_0);
+        let ql =
+            QuantizedLinear::from_linear_params(&weight, Some(&bias), in_f, out_f, QuantType::Q8_0);
 
-        let input_tensor = Tensor::from_vec((0..2 * in_f).map(|i| i as f32 * 0.1).collect(), &[2, in_f]).unwrap();
+        let input_tensor =
+            Tensor::from_vec((0..2 * in_f).map(|i| i as f32 * 0.1).collect(), &[2, in_f]).unwrap();
         let input_var = axonml_autograd::Variable::new(input_tensor, false);
 
         let output = ql.forward_var(&input_var);

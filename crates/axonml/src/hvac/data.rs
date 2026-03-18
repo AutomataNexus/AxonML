@@ -124,41 +124,89 @@ pub const PUMP_CURRENT_MAX: f32 = 50.0;
 
 /// Electrical fault categories.
 pub const ELECTRICAL_FAULTS: [&str; 13] = [
-    "normal", "phase_imbalance", "overvoltage", "undervoltage",
-    "overcurrent", "ground_fault", "harmonic_distortion", "power_factor_low",
-    "single_phasing", "voltage_sag", "voltage_swell", "transient",
+    "normal",
+    "phase_imbalance",
+    "overvoltage",
+    "undervoltage",
+    "overcurrent",
+    "ground_fault",
+    "harmonic_distortion",
+    "power_factor_low",
+    "single_phasing",
+    "voltage_sag",
+    "voltage_swell",
+    "transient",
     "insulation_breakdown",
 ];
 
 /// Refrigeration fault categories.
 pub const REFRIGERATION_FAULTS: [&str; 16] = [
-    "normal", "low_charge", "overcharge", "compressor_valve_leak",
-    "condenser_fouling", "evaporator_fouling", "txv_malfunction", "liquid_line_restriction",
-    "non_condensable_gas", "oil_logging", "compressor_mechanical", "high_head_pressure",
-    "low_suction", "superheat_high", "subcool_low", "refrigerant_migration",
+    "normal",
+    "low_charge",
+    "overcharge",
+    "compressor_valve_leak",
+    "condenser_fouling",
+    "evaporator_fouling",
+    "txv_malfunction",
+    "liquid_line_restriction",
+    "non_condensable_gas",
+    "oil_logging",
+    "compressor_mechanical",
+    "high_head_pressure",
+    "low_suction",
+    "superheat_high",
+    "subcool_low",
+    "refrigerant_migration",
 ];
 
 /// Water system fault categories.
 pub const WATER_FAULTS: [&str; 11] = [
-    "normal", "air_in_system", "pump_cavitation", "valve_stuck",
-    "flow_restriction", "leak", "scale_buildup", "glycol_degradation",
-    "pump_bearing_wear", "strainer_clog", "heat_exchanger_fouling",
+    "normal",
+    "air_in_system",
+    "pump_cavitation",
+    "valve_stuck",
+    "flow_restriction",
+    "leak",
+    "scale_buildup",
+    "glycol_degradation",
+    "pump_bearing_wear",
+    "strainer_clog",
+    "heat_exchanger_fouling",
 ];
 
 /// Mechanical fault categories.
 pub const MECHANICAL_FAULTS: [&str; 15] = [
-    "normal", "bearing_inner_race", "bearing_outer_race", "bearing_ball",
-    "misalignment_angular", "misalignment_parallel", "imbalance",
-    "looseness_structural", "looseness_rotating", "belt_wear",
-    "belt_misalignment", "coupling_wear", "gear_mesh", "resonance",
+    "normal",
+    "bearing_inner_race",
+    "bearing_outer_race",
+    "bearing_ball",
+    "misalignment_angular",
+    "misalignment_parallel",
+    "imbalance",
+    "looseness_structural",
+    "looseness_rotating",
+    "belt_wear",
+    "belt_misalignment",
+    "coupling_wear",
+    "gear_mesh",
+    "resonance",
     "shaft_crack",
 ];
 
 /// Airflow fault categories.
 pub const AIRFLOW_FAULTS: [&str; 12] = [
-    "normal", "filter_loading", "damper_stuck_open", "damper_stuck_closed",
-    "duct_leak", "fan_belt_slip", "fan_bearing_wear", "coil_blockage",
-    "sensor_drift", "economizer_malfunction", "vav_hunting", "static_pressure_high",
+    "normal",
+    "filter_loading",
+    "damper_stuck_open",
+    "damper_stuck_closed",
+    "duct_leak",
+    "fan_belt_slip",
+    "fan_bearing_wear",
+    "coil_blockage",
+    "sensor_drift",
+    "economizer_malfunction",
+    "vav_hunting",
+    "static_pressure_high",
 ];
 
 // =============================================================================
@@ -190,23 +238,41 @@ impl SyntheticHvacGenerator {
 
         let labels = HvacLabels {
             electrical_fault: Variable::new(
-                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(), false),
+                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(),
+                false,
+            ),
             electrical_severity: Variable::new(
-                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(), false),
+                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(),
+                false,
+            ),
             refrigeration_fault: Variable::new(
-                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(), false),
+                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(),
+                false,
+            ),
             water_fault: Variable::new(
-                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(), false),
+                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(),
+                false,
+            ),
             mechanical_fault: Variable::new(
-                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(), false),
+                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(),
+                false,
+            ),
             airflow_fault: Variable::new(
-                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(), false),
+                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(),
+                false,
+            ),
             system_fault: Variable::new(
-                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(), false),
+                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(),
+                false,
+            ),
             safety_state: Variable::new(
-                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(), false),
+                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(),
+                false,
+            ),
             diagnosis: Variable::new(
-                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(), false),
+                Tensor::from_vec(vec![0.0; batch_size], &[batch_size]).unwrap(),
+                false,
+            ),
         };
 
         (data, labels)
@@ -288,36 +354,58 @@ impl SyntheticHvacGenerator {
 
         let data = HvacSensorData {
             electrical: Variable::new(
-                Tensor::from_vec(electrical, &[batch_size, 64, 7]).unwrap(), false),
+                Tensor::from_vec(electrical, &[batch_size, 64, 7]).unwrap(),
+                false,
+            ),
             refrigeration: Variable::new(
-                Tensor::from_vec(refrigeration, &[batch_size, 80, 7]).unwrap(), false),
+                Tensor::from_vec(refrigeration, &[batch_size, 80, 7]).unwrap(),
+                false,
+            ),
             water: Variable::new(
-                Tensor::from_vec(water, &[batch_size, 64, 7]).unwrap(), false),
+                Tensor::from_vec(water, &[batch_size, 64, 7]).unwrap(),
+                false,
+            ),
             mechanical: Variable::new(
-                Tensor::from_vec(mechanical, &[batch_size, 96, 7]).unwrap(), false),
+                Tensor::from_vec(mechanical, &[batch_size, 96, 7]).unwrap(),
+                false,
+            ),
             airflow: Variable::new(
-                Tensor::from_vec(airflow, &[batch_size, 72, 7]).unwrap(), false),
+                Tensor::from_vec(airflow, &[batch_size, 72, 7]).unwrap(),
+                false,
+            ),
         };
 
         let labels = HvacLabels {
             electrical_fault: Variable::new(
-                Tensor::from_vec(elec_faults, &[batch_size]).unwrap(), false),
+                Tensor::from_vec(elec_faults, &[batch_size]).unwrap(),
+                false,
+            ),
             electrical_severity: Variable::new(
-                Tensor::from_vec(elec_severity, &[batch_size]).unwrap(), false),
+                Tensor::from_vec(elec_severity, &[batch_size]).unwrap(),
+                false,
+            ),
             refrigeration_fault: Variable::new(
-                Tensor::from_vec(refrig_faults, &[batch_size]).unwrap(), false),
+                Tensor::from_vec(refrig_faults, &[batch_size]).unwrap(),
+                false,
+            ),
             water_fault: Variable::new(
-                Tensor::from_vec(water_faults, &[batch_size]).unwrap(), false),
+                Tensor::from_vec(water_faults, &[batch_size]).unwrap(),
+                false,
+            ),
             mechanical_fault: Variable::new(
-                Tensor::from_vec(mech_faults, &[batch_size]).unwrap(), false),
+                Tensor::from_vec(mech_faults, &[batch_size]).unwrap(),
+                false,
+            ),
             airflow_fault: Variable::new(
-                Tensor::from_vec(air_faults, &[batch_size]).unwrap(), false),
+                Tensor::from_vec(air_faults, &[batch_size]).unwrap(),
+                false,
+            ),
             system_fault: Variable::new(
-                Tensor::from_vec(sys_faults, &[batch_size]).unwrap(), false),
-            safety_state: Variable::new(
-                Tensor::from_vec(safety, &[batch_size]).unwrap(), false),
-            diagnosis: Variable::new(
-                Tensor::from_vec(diag, &[batch_size]).unwrap(), false),
+                Tensor::from_vec(sys_faults, &[batch_size]).unwrap(),
+                false,
+            ),
+            safety_state: Variable::new(Tensor::from_vec(safety, &[batch_size]).unwrap(), false),
+            diagnosis: Variable::new(Tensor::from_vec(diag, &[batch_size]).unwrap(), false),
         };
 
         (data, labels)
@@ -361,13 +449,13 @@ impl SyntheticHvacGenerator {
         let mut data = Vec::with_capacity(batch * 80 * 7);
         for _ in 0..batch {
             for _ in 0..80 {
-                data.push(65.0 + rng.gen::<f32>() * 5.0);   // suction_pressure (psig)
+                data.push(65.0 + rng.gen::<f32>() * 5.0); // suction_pressure (psig)
                 data.push(220.0 + rng.gen::<f32>() * 10.0); // discharge_pressure
-                data.push(40.0 + rng.gen::<f32>() * 3.0);   // suction_temp (°F)
-                data.push(160.0 + rng.gen::<f32>() * 5.0);  // discharge_temp
-                data.push(10.0 + rng.gen::<f32>() * 3.0);   // subcool
-                data.push(12.0 + rng.gen::<f32>() * 3.0);   // superheat
-                data.push(8.0 + rng.gen::<f32>() * 1.0);    // flow_rate (GPM)
+                data.push(40.0 + rng.gen::<f32>() * 3.0); // suction_temp (°F)
+                data.push(160.0 + rng.gen::<f32>() * 5.0); // discharge_temp
+                data.push(10.0 + rng.gen::<f32>() * 3.0); // subcool
+                data.push(12.0 + rng.gen::<f32>() * 3.0); // superheat
+                data.push(8.0 + rng.gen::<f32>() * 1.0); // flow_rate (GPM)
             }
         }
         data
@@ -382,13 +470,13 @@ impl SyntheticHvacGenerator {
         let mut data = Vec::with_capacity(batch * 64 * 7);
         for _ in 0..batch {
             for _ in 0..64 {
-                data.push(44.0 + rng.gen::<f32>() * 2.0);  // supply_temp
-                data.push(54.0 + rng.gen::<f32>() * 2.0);  // return_temp
+                data.push(44.0 + rng.gen::<f32>() * 2.0); // supply_temp
+                data.push(54.0 + rng.gen::<f32>() * 2.0); // return_temp
                 data.push(120.0 + rng.gen::<f32>() * 10.0); // flow_rate (GPM)
-                data.push(12.0 + rng.gen::<f32>() * 2.0);  // pressure_diff (psi)
-                data.push(5.0 + rng.gen::<f32>() * 2.0);   // valve_pos (V)
-                data.push(8.0 + rng.gen::<f32>() * 1.0);   // pump_current (A)
-                data.push(7.0 + rng.gen::<f32>() * 0.5);   // pH
+                data.push(12.0 + rng.gen::<f32>() * 2.0); // pressure_diff (psi)
+                data.push(5.0 + rng.gen::<f32>() * 2.0); // valve_pos (V)
+                data.push(8.0 + rng.gen::<f32>() * 1.0); // pump_current (A)
+                data.push(7.0 + rng.gen::<f32>() * 0.5); // pH
             }
         }
         data
@@ -431,13 +519,13 @@ impl SyntheticHvacGenerator {
         for _ in 0..batch {
             let outdoor = 75.0 + rng.gen::<f32>() * 20.0 - 10.0;
             for _ in 0..72 {
-                data.push(55.0 + rng.gen::<f32>() * 2.0);        // supply_temp
-                data.push(74.0 + rng.gen::<f32>() * 2.0);        // return_temp
-                data.push(outdoor + rng.gen::<f32>() * 1.0);      // outdoor_temp
-                data.push(65.0 + rng.gen::<f32>() * 3.0);        // mixed_temp
-                data.push(18.0 + rng.gen::<f32>() * 2.0);        // fan_amps
-                data.push(3.0 + rng.gen::<f32>() * 2.0);         // oa_damper (V)
-                data.push(5.0 + rng.gen::<f32>() * 2.0);         // mixed_damper (V)
+                data.push(55.0 + rng.gen::<f32>() * 2.0); // supply_temp
+                data.push(74.0 + rng.gen::<f32>() * 2.0); // return_temp
+                data.push(outdoor + rng.gen::<f32>() * 1.0); // outdoor_temp
+                data.push(65.0 + rng.gen::<f32>() * 3.0); // mixed_temp
+                data.push(18.0 + rng.gen::<f32>() * 2.0); // fan_amps
+                data.push(3.0 + rng.gen::<f32>() * 2.0); // oa_damper (V)
+                data.push(5.0 + rng.gen::<f32>() * 2.0); // mixed_damper (V)
             }
         }
         data
@@ -447,28 +535,38 @@ impl SyntheticHvacGenerator {
     // Fault Injection
     // =========================================================================
 
-    fn inject_electrical_fault(&self, rng: &mut impl Rng, data: &mut [f32], batch_idx: usize, fault_id: usize) {
+    fn inject_electrical_fault(
+        &self,
+        rng: &mut impl Rng,
+        data: &mut [f32],
+        batch_idx: usize,
+        fault_id: usize,
+    ) {
         let offset = batch_idx * 64 * 7;
         let severity = rng.gen::<f32>() * 0.5 + 0.5; // 0.5-1.0
         for t in 0..64 {
             let idx = offset + t * 7;
             match fault_id {
-                1 => { // phase_imbalance
+                1 => {
+                    // phase_imbalance
                     data[idx] *= 1.0 + severity * 0.15;
                     data[idx + 1] *= 1.0 - severity * 0.10;
                 }
                 2 => data[idx] *= 1.0 + severity * 0.12, // overvoltage
                 3 => data[idx] *= 1.0 - severity * 0.15, // undervoltage
                 4 => data[idx + 3] *= 1.0 + severity * 0.5, // overcurrent
-                5 => { // ground_fault - current spike on one phase
+                5 => {
+                    // ground_fault - current spike on one phase
                     data[idx + 3] += severity * 20.0;
                 }
-                6 => { // harmonic_distortion
+                6 => {
+                    // harmonic_distortion
                     let harmonic = (t as f32 * 0.3 * 3.0).sin() * severity * 15.0;
                     data[idx] += harmonic;
                 }
                 7 => data[idx + 6] -= severity * 0.15, // power_factor_low
-                _ => { // generic fault: add noise
+                _ => {
+                    // generic fault: add noise
                     for c in 0..7 {
                         data[idx + c] += rng.gen::<f32>() * severity * 10.0;
                     }
@@ -477,21 +575,30 @@ impl SyntheticHvacGenerator {
         }
     }
 
-    fn inject_refrigeration_fault(&self, rng: &mut impl Rng, data: &mut [f32], batch_idx: usize, fault_id: usize) {
+    fn inject_refrigeration_fault(
+        &self,
+        rng: &mut impl Rng,
+        data: &mut [f32],
+        batch_idx: usize,
+        fault_id: usize,
+    ) {
         let offset = batch_idx * 80 * 7;
         let severity = rng.gen::<f32>() * 0.5 + 0.5;
         for t in 0..80 {
             let idx = offset + t * 7;
             match fault_id {
-                1 => { // low_charge
-                    data[idx] -= severity * 15.0;     // low suction pressure
-                    data[idx + 5] += severity * 8.0;  // high superheat
+                1 => {
+                    // low_charge
+                    data[idx] -= severity * 15.0; // low suction pressure
+                    data[idx + 5] += severity * 8.0; // high superheat
                 }
-                2 => { // overcharge
+                2 => {
+                    // overcharge
                     data[idx] += severity * 10.0;
-                    data[idx + 4] += severity * 5.0;  // high subcool
+                    data[idx + 4] += severity * 5.0; // high subcool
                 }
-                3 => { // compressor_valve_leak
+                3 => {
+                    // compressor_valve_leak
                     data[idx + 1] -= severity * 20.0; // low discharge pressure
                 }
                 _ => {
@@ -503,16 +610,23 @@ impl SyntheticHvacGenerator {
         }
     }
 
-    fn inject_water_fault(&self, rng: &mut impl Rng, data: &mut [f32], batch_idx: usize, fault_id: usize) {
+    fn inject_water_fault(
+        &self,
+        rng: &mut impl Rng,
+        data: &mut [f32],
+        batch_idx: usize,
+        fault_id: usize,
+    ) {
         let offset = batch_idx * 64 * 7;
         let severity = rng.gen::<f32>() * 0.5 + 0.5;
         for t in 0..64 {
             let idx = offset + t * 7;
             match fault_id {
                 1 => data[idx + 3] += severity * 5.0, // air_in_system - pressure fluctuation
-                2 => { // pump_cavitation
+                2 => {
+                    // pump_cavitation
                     data[idx + 2] -= severity * 30.0; // reduced flow
-                    data[idx + 5] += severity * 3.0;  // pump current spike
+                    data[idx + 5] += severity * 3.0; // pump current spike
                 }
                 3 => data[idx + 4] = if severity > 0.7 { 0.0 } else { 10.0 }, // valve_stuck
                 _ => {
@@ -524,22 +638,31 @@ impl SyntheticHvacGenerator {
         }
     }
 
-    fn inject_mechanical_fault(&self, rng: &mut impl Rng, data: &mut [f32], batch_idx: usize, fault_id: usize) {
+    fn inject_mechanical_fault(
+        &self,
+        rng: &mut impl Rng,
+        data: &mut [f32],
+        batch_idx: usize,
+        fault_id: usize,
+    ) {
         let offset = batch_idx * 96 * 7;
         let severity = rng.gen::<f32>() * 0.5 + 0.5;
         for t in 0..96 {
             let idx = offset + t * 7;
             match fault_id {
-                1..=3 => { // bearing faults - increased vibration
+                1..=3 => {
+                    // bearing faults - increased vibration
                     data[idx] += severity * 3.0 * (t as f32 * 0.8).sin();
                     data[idx + 1] += severity * 2.0;
                     data[idx + 3] += severity * 20.0; // bearing temp rise
                 }
-                4 | 5 => { // misalignment
+                4 | 5 => {
+                    // misalignment
                     data[idx] += severity * 2.0 * (t as f32 * 1.0).sin();
                     data[idx + 2] += severity * 1.5;
                 }
-                6 => { // imbalance
+                6 => {
+                    // imbalance
                     let amp = severity * 4.0;
                     data[idx] += amp * (t as f32 * 0.5).sin();
                     data[idx + 1] += amp * (t as f32 * 0.5).cos();
@@ -553,19 +676,27 @@ impl SyntheticHvacGenerator {
         }
     }
 
-    fn inject_airflow_fault(&self, rng: &mut impl Rng, data: &mut [f32], batch_idx: usize, fault_id: usize) {
+    fn inject_airflow_fault(
+        &self,
+        rng: &mut impl Rng,
+        data: &mut [f32],
+        batch_idx: usize,
+        fault_id: usize,
+    ) {
         let offset = batch_idx * 72 * 7;
         let severity = rng.gen::<f32>() * 0.5 + 0.5;
         for t in 0..72 {
             let idx = offset + t * 7;
             match fault_id {
-                1 => { // filter_loading
+                1 => {
+                    // filter_loading
                     data[idx + 4] += severity * 5.0; // fan amps increase
-                    data[idx] += severity * 3.0;     // supply temp drift
+                    data[idx] += severity * 3.0; // supply temp drift
                 }
                 2 => data[idx + 5] = VALVE_MAX, // damper_stuck_open
                 3 => data[idx + 5] = VALVE_MIN, // damper_stuck_closed
-                4 => { // duct_leak
+                4 => {
+                    // duct_leak
                     data[idx] += severity * 4.0; // supply temp rise
                     data[idx + 4] += severity * 2.0;
                 }
@@ -634,7 +765,11 @@ mod tests {
         // With 100 samples and 60% fault rate, we should have some faults
         let diag = labels.diagnosis.data().to_vec();
         let num_faults = diag.iter().filter(|&&d| d > 0.0).count();
-        assert!(num_faults > 20, "Expected >20 faults in 100 samples, got {}", num_faults);
+        assert!(
+            num_faults > 20,
+            "Expected >20 faults in 100 samples, got {}",
+            num_faults
+        );
     }
 
     #[test]
@@ -645,8 +780,11 @@ mod tests {
         // Check electrical voltages are around 480V
         let elec = data.electrical.data().to_vec();
         let first_voltage = elec[0]; // First sample, first timestep, voltage_a
-        assert!(first_voltage > 400.0 && first_voltage < 600.0,
-            "Voltage {} out of expected range", first_voltage);
+        assert!(
+            first_voltage > 400.0 && first_voltage < 600.0,
+            "Voltage {} out of expected range",
+            first_voltage
+        );
     }
 
     #[test]

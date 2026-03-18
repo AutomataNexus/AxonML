@@ -17,10 +17,7 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_nn::{
-    Dropout, Linear, Module, MultiHeadAttention,
-    Parameter, Sequential, ReLU, GELU,
-};
+use axonml_nn::{Dropout, Linear, Module, MultiHeadAttention, Parameter, ReLU, Sequential, GELU};
 
 // =============================================================================
 // Colossus Model
@@ -37,11 +34,11 @@ use axonml_nn::{
 /// Outputs: system_fault(24), cascade_prob(8), health_score(1), specialist_confidence(5)
 pub struct Colossus {
     // Project each specialist to common dim 256
-    proj_aquilo: Linear,    // 256 → 256
-    proj_boreas: Linear,    // 384 → 256
-    proj_naiad: Linear,     // 256 → 256
-    proj_vulcan: Linear,    // 384 → 256 (see note: vulcan embedding is 256, plan says 384)
-    proj_zephyrus: Linear,  // 320 → 256
+    proj_aquilo: Linear,   // 256 → 256
+    proj_boreas: Linear,   // 384 → 256
+    proj_naiad: Linear,    // 256 → 256
+    proj_vulcan: Linear,   // 384 → 256 (see note: vulcan embedding is 256, plan says 384)
+    proj_zephyrus: Linear, // 320 → 256
     // Cross-specialist attention
     attention: MultiHeadAttention,
     // Decision network
@@ -65,7 +62,8 @@ pub const VULCAN_DIM: usize = 256;
 /// Zephyrus (airflow) embedding dimension.
 pub const ZEPHYRUS_DIM: usize = 320;
 /// Total concatenated specialist embedding dimension.
-pub const TOTAL_SPECIALIST_DIM: usize = AQUILO_DIM + BOREAS_DIM + NAIAD_DIM + VULCAN_DIM + ZEPHYRUS_DIM;
+pub const TOTAL_SPECIALIST_DIM: usize =
+    AQUILO_DIM + BOREAS_DIM + NAIAD_DIM + VULCAN_DIM + ZEPHYRUS_DIM;
 
 impl Colossus {
     /// Creates a new Colossus aggregator.
@@ -122,16 +120,21 @@ impl Colossus {
         let batch = aquilo_emb.shape()[0];
 
         // Project all to 256
-        let a = self.proj_aquilo.forward(aquilo_emb);   // (batch, 256)
-        let b = self.proj_boreas.forward(boreas_emb);   // (batch, 256)
-        let n = self.proj_naiad.forward(naiad_emb);     // (batch, 256)
-        let v = self.proj_vulcan.forward(vulcan_emb);   // (batch, 256)
+        let a = self.proj_aquilo.forward(aquilo_emb); // (batch, 256)
+        let b = self.proj_boreas.forward(boreas_emb); // (batch, 256)
+        let n = self.proj_naiad.forward(naiad_emb); // (batch, 256)
+        let v = self.proj_vulcan.forward(vulcan_emb); // (batch, 256)
         let z = self.proj_zephyrus.forward(zephyrus_emb); // (batch, 256)
 
         // Stack as (batch, 5, 256) for attention
         let stacked_var = Variable::cat(
-            &[&a.unsqueeze(1), &b.unsqueeze(1), &n.unsqueeze(1),
-              &v.unsqueeze(1), &z.unsqueeze(1)],
+            &[
+                &a.unsqueeze(1),
+                &b.unsqueeze(1),
+                &n.unsqueeze(1),
+                &v.unsqueeze(1),
+                &z.unsqueeze(1),
+            ],
             1,
         ); // (batch, 5, 256)
 
@@ -153,7 +156,10 @@ impl Colossus {
     }
 
     /// Forward from concatenated specialist features.
-    pub fn forward_concat(&self, specialist_concat: &Variable) -> (Variable, Variable, Variable, Variable, Variable) {
+    pub fn forward_concat(
+        &self,
+        specialist_concat: &Variable,
+    ) -> (Variable, Variable, Variable, Variable, Variable) {
         // Split concatenated input into individual specialist embeddings
         let mut offset = 0;
         let dims = [AQUILO_DIM, BOREAS_DIM, NAIAD_DIM, VULCAN_DIM, ZEPHYRUS_DIM];
@@ -202,17 +208,39 @@ impl Module for Colossus {
 
     fn named_parameters(&self) -> HashMap<String, Parameter> {
         let mut params = HashMap::new();
-        for (n, p) in self.proj_aquilo.named_parameters() { params.insert(format!("proj_aquilo.{n}"), p); }
-        for (n, p) in self.proj_boreas.named_parameters() { params.insert(format!("proj_boreas.{n}"), p); }
-        for (n, p) in self.proj_naiad.named_parameters() { params.insert(format!("proj_naiad.{n}"), p); }
-        for (n, p) in self.proj_vulcan.named_parameters() { params.insert(format!("proj_vulcan.{n}"), p); }
-        for (n, p) in self.proj_zephyrus.named_parameters() { params.insert(format!("proj_zephyrus.{n}"), p); }
-        for (n, p) in self.attention.named_parameters() { params.insert(format!("attention.{n}"), p); }
-        for (n, p) in self.decision_net.named_parameters() { params.insert(format!("decision_net.{n}"), p); }
-        for (n, p) in self.fault_head.named_parameters() { params.insert(format!("fault_head.{n}"), p); }
-        for (n, p) in self.cascade_head.named_parameters() { params.insert(format!("cascade_head.{n}"), p); }
-        for (n, p) in self.health_head.named_parameters() { params.insert(format!("health_head.{n}"), p); }
-        for (n, p) in self.confidence_head.named_parameters() { params.insert(format!("confidence_head.{n}"), p); }
+        for (n, p) in self.proj_aquilo.named_parameters() {
+            params.insert(format!("proj_aquilo.{n}"), p);
+        }
+        for (n, p) in self.proj_boreas.named_parameters() {
+            params.insert(format!("proj_boreas.{n}"), p);
+        }
+        for (n, p) in self.proj_naiad.named_parameters() {
+            params.insert(format!("proj_naiad.{n}"), p);
+        }
+        for (n, p) in self.proj_vulcan.named_parameters() {
+            params.insert(format!("proj_vulcan.{n}"), p);
+        }
+        for (n, p) in self.proj_zephyrus.named_parameters() {
+            params.insert(format!("proj_zephyrus.{n}"), p);
+        }
+        for (n, p) in self.attention.named_parameters() {
+            params.insert(format!("attention.{n}"), p);
+        }
+        for (n, p) in self.decision_net.named_parameters() {
+            params.insert(format!("decision_net.{n}"), p);
+        }
+        for (n, p) in self.fault_head.named_parameters() {
+            params.insert(format!("fault_head.{n}"), p);
+        }
+        for (n, p) in self.cascade_head.named_parameters() {
+            params.insert(format!("cascade_head.{n}"), p);
+        }
+        for (n, p) in self.health_head.named_parameters() {
+            params.insert(format!("health_head.{n}"), p);
+        }
+        for (n, p) in self.confidence_head.named_parameters() {
+            params.insert(format!("confidence_head.{n}"), p);
+        }
         params
     }
 
@@ -243,14 +271,29 @@ mod tests {
     fn test_colossus_output_shapes() {
         let model = Colossus::new();
 
-        let aquilo = Variable::new(Tensor::from_vec(vec![1.0; 2 * 256], &[2, 256]).unwrap(), false);
-        let boreas = Variable::new(Tensor::from_vec(vec![1.0; 2 * 384], &[2, 384]).unwrap(), false);
-        let naiad = Variable::new(Tensor::from_vec(vec![1.0; 2 * 256], &[2, 256]).unwrap(), false);
-        let vulcan = Variable::new(Tensor::from_vec(vec![1.0; 2 * 256], &[2, 256]).unwrap(), false);
-        let zephyrus = Variable::new(Tensor::from_vec(vec![1.0; 2 * 320], &[2, 320]).unwrap(), false);
+        let aquilo = Variable::new(
+            Tensor::from_vec(vec![1.0; 2 * 256], &[2, 256]).unwrap(),
+            false,
+        );
+        let boreas = Variable::new(
+            Tensor::from_vec(vec![1.0; 2 * 384], &[2, 384]).unwrap(),
+            false,
+        );
+        let naiad = Variable::new(
+            Tensor::from_vec(vec![1.0; 2 * 256], &[2, 256]).unwrap(),
+            false,
+        );
+        let vulcan = Variable::new(
+            Tensor::from_vec(vec![1.0; 2 * 256], &[2, 256]).unwrap(),
+            false,
+        );
+        let zephyrus = Variable::new(
+            Tensor::from_vec(vec![1.0; 2 * 320], &[2, 320]).unwrap(),
+            false,
+        );
 
-        let (fault, cascade, health, conf, emb) = model.forward_specialists(
-            &aquilo, &boreas, &naiad, &vulcan, &zephyrus);
+        let (fault, cascade, health, conf, emb) =
+            model.forward_specialists(&aquilo, &boreas, &naiad, &vulcan, &zephyrus);
 
         assert_eq!(fault.shape(), vec![2, 24]);
         assert_eq!(cascade.shape(), vec![2, 8]);
@@ -263,7 +306,11 @@ mod tests {
     fn test_colossus_concat_forward() {
         let model = Colossus::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * TOTAL_SPECIALIST_DIM], &[2, TOTAL_SPECIALIST_DIM]).unwrap(),
+            Tensor::from_vec(
+                vec![1.0; 2 * TOTAL_SPECIALIST_DIM],
+                &[2, TOTAL_SPECIALIST_DIM],
+            )
+            .unwrap(),
             false,
         );
         let output = model.forward(&input);
@@ -274,7 +321,10 @@ mod tests {
     fn test_colossus_parameter_count() {
         let model = Colossus::new();
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
-        assert!(total > 1_000_000 && total < 2_000_000,
-            "Colossus has {} params, expected ~1.5M", total);
+        assert!(
+            total > 1_000_000 && total < 2_000_000,
+            "Colossus has {} params, expected ~1.5M",
+            total
+        );
     }
 }

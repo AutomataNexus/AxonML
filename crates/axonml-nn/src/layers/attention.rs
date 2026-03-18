@@ -180,11 +180,18 @@ impl MultiHeadAttention {
                 };
 
                 if let Some(expanded_tensor) = mask_gpu.mask_expand_cuda(
-                    &scores_shape, batch_size, self.num_heads, tgt_len, src_len,
+                    &scores_shape,
+                    batch_size,
+                    self.num_heads,
+                    tgt_len,
+                    src_len,
                 ) {
                     let additive_mask = Variable::new(expanded_tensor, false);
                     return self.finish_attention(
-                        scores.add_var(&additive_mask), &v, batch_size, tgt_len,
+                        scores.add_var(&additive_mask),
+                        &v,
+                        batch_size,
+                        tgt_len,
                     );
                 }
                 // Fall through to CPU path on unsupported shape
@@ -214,7 +221,10 @@ impl MultiHeadAttention {
                         }
                     }
                 }
-            } else if mask_shape.len() == 2 && mask_shape[0] == batch_size && mask_shape[1] == src_len {
+            } else if mask_shape.len() == 2
+                && mask_shape[0] == batch_size
+                && mask_shape[1] == src_len
+            {
                 // Padding mask [batch, src_len] → broadcast over heads & tgt positions
                 for b in 0..batch_size {
                     for h in 0..self.num_heads {
@@ -261,9 +271,10 @@ impl MultiHeadAttention {
     ) -> Variable {
         let attn_weights = scores.softmax(-1);
         let attn_output = attn_weights.matmul(v);
-        let attn_output = attn_output
-            .transpose(1, 2)
-            .reshape(&[batch_size, tgt_len, self.embed_dim]);
+        let attn_output =
+            attn_output
+                .transpose(1, 2)
+                .reshape(&[batch_size, tgt_len, self.embed_dim]);
         self.out_proj.forward(&attn_output)
     }
 }
@@ -335,7 +346,12 @@ impl CrossAttention {
     }
 
     /// Creates CrossAttention with all options.
-    pub fn with_options(embed_dim: usize, num_heads: usize, dropout: f32, batch_first: bool) -> Self {
+    pub fn with_options(
+        embed_dim: usize,
+        num_heads: usize,
+        dropout: f32,
+        batch_first: bool,
+    ) -> Self {
         Self {
             mha: MultiHeadAttention::with_options(embed_dim, num_heads, dropout, batch_first),
         }

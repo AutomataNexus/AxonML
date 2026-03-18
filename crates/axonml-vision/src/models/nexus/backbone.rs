@@ -50,7 +50,8 @@ impl SharedStem {
     /// Forward: [B, 3, H, W] → [B, 64, H/4, W/4].
     pub fn forward(&self, x: &Variable) -> Variable {
         let out = self.relu.forward(&self.bn1.forward(&self.conv1.forward(x)));
-        self.relu.forward(&self.bn2.forward(&self.conv2.forward(&out)))
+        self.relu
+            .forward(&self.bn2.forward(&self.conv2.forward(&out)))
     }
 
     pub fn parameters(&self) -> Vec<Parameter> {
@@ -113,7 +114,15 @@ impl InvertedResidualBlock {
         let expand = Conv2d::with_options(in_ch, mid_ch, (1, 1), (1, 1), (0, 0), true);
         let expand_bn = BatchNorm2d::new(mid_ch);
 
-        let dw = Conv2d::with_groups(mid_ch, mid_ch, (3, 3), (stride, stride), (1, 1), true, mid_ch);
+        let dw = Conv2d::with_groups(
+            mid_ch,
+            mid_ch,
+            (3, 3),
+            (stride, stride),
+            (1, 1),
+            true,
+            mid_ch,
+        );
         let dw_bn = BatchNorm2d::new(mid_ch);
 
         let project = Conv2d::with_options(mid_ch, out_ch, (1, 1), (1, 1), (0, 0), true);
@@ -145,8 +154,12 @@ impl InvertedResidualBlock {
     }
 
     pub fn forward(&self, x: &Variable) -> Variable {
-        let out = self.relu.forward(&self.expand_bn.forward(&self.expand.forward(x)));
-        let out = self.relu.forward(&self.dw_bn.forward(&self.dw.forward(&out)));
+        let out = self
+            .relu
+            .forward(&self.expand_bn.forward(&self.expand.forward(x)));
+        let out = self
+            .relu
+            .forward(&self.dw_bn.forward(&self.dw.forward(&out)));
         let out = self.project_bn.forward(&self.project.forward(&out));
 
         if self.use_residual {
@@ -263,15 +276,27 @@ impl VentralPathway {
     }
 
     pub fn eval(&mut self) {
-        for b in &mut self.stage1 { b.eval(); }
-        for b in &mut self.stage2 { b.eval(); }
-        for b in &mut self.stage3 { b.eval(); }
+        for b in &mut self.stage1 {
+            b.eval();
+        }
+        for b in &mut self.stage2 {
+            b.eval();
+        }
+        for b in &mut self.stage3 {
+            b.eval();
+        }
     }
 
     pub fn train(&mut self) {
-        for b in &mut self.stage1 { b.train(); }
-        for b in &mut self.stage2 { b.train(); }
-        for b in &mut self.stage3 { b.train(); }
+        for b in &mut self.stage1 {
+            b.train();
+        }
+        for b in &mut self.stage2 {
+            b.train();
+        }
+        for b in &mut self.stage3 {
+            b.train();
+        }
     }
 }
 
@@ -318,8 +343,12 @@ impl DorsalPathway {
     /// Forward: [B, 64, H/4, W/4] → (D1, D2, D3).
     pub fn forward(&self, x: &Variable) -> (Variable, Variable, Variable) {
         let d1 = self.relu.forward(&self.bn1.forward(&self.conv1.forward(x)));
-        let d2 = self.relu.forward(&self.bn2.forward(&self.conv2.forward(&d1)));
-        let d3 = self.relu.forward(&self.bn3.forward(&self.conv3.forward(&d2)));
+        let d2 = self
+            .relu
+            .forward(&self.bn2.forward(&self.conv2.forward(&d1)));
+        let d3 = self
+            .relu
+            .forward(&self.bn3.forward(&self.conv3.forward(&d2)));
         (d1, d2, d3)
     }
 

@@ -201,12 +201,7 @@ impl ObjectMemoryBank {
     }
 
     /// Extract ROI features for a single bbox.
-    fn extract_roi(
-        &self,
-        features: &Variable,
-        bbox: &[f32; 4],
-        spatial_scale: f32,
-    ) -> Variable {
+    fn extract_roi(&self, features: &Variable, bbox: &[f32; 4], spatial_scale: f32) -> Variable {
         let roi_data = vec![0.0, bbox[0], bbox[1], bbox[2], bbox[3]];
         let roi_tensor = Tensor::from_vec(roi_data, &[1, 5]).unwrap();
         let roi_out = roi_align(
@@ -219,7 +214,11 @@ impl ObjectMemoryBank {
         // Flatten: [1, C, roi_h, roi_w] → [1, C*roi_h*roi_w]
         let flat = roi_out.to_vec();
         Variable::new(
-            Tensor::from_vec(flat, &[1, self.feat_channels * self.roi_size * self.roi_size]).unwrap(),
+            Tensor::from_vec(
+                flat,
+                &[1, self.feat_channels * self.roi_size * self.roi_size],
+            )
+            .unwrap(),
             false,
         )
     }

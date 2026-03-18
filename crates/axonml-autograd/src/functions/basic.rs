@@ -464,7 +464,8 @@ impl GradientFunction for MeanDimBackward {
                 // Need to unsqueeze the reduced dim first
                 let mut expanded_shape = grad_output.shape().to_vec();
                 expanded_shape.insert(self.dim, 1);
-                let reshaped_dims: Vec<isize> = expanded_shape.iter().map(|&x| x as isize).collect();
+                let reshaped_dims: Vec<isize> =
+                    expanded_shape.iter().map(|&x| x as isize).collect();
                 let reshaped = scaled.reshape(&reshaped_dims).unwrap();
                 reshaped.broadcast_to(&self.input_shape)
             };
@@ -593,7 +594,8 @@ impl GradientFunction for VarDimBackward {
                 // Insert dim=1 at the reduced dimension, then broadcast
                 let mut expanded_shape = grad_output.shape().to_vec();
                 expanded_shape.insert(self.dim, 1);
-                let reshaped_dims: Vec<isize> = expanded_shape.iter().map(|&x| x as isize).collect();
+                let reshaped_dims: Vec<isize> =
+                    expanded_shape.iter().map(|&x| x as isize).collect();
                 let reshaped = grad_output.reshape(&reshaped_dims).unwrap();
                 reshaped.broadcast_to(self.saved_input.shape())
             };
@@ -679,7 +681,8 @@ impl GradientFunction for VarDimBackward {
 
         for flat_idx in 0..numel {
             let out_idx = map_to_out(flat_idx);
-            grad_input[flat_idx] = 2.0 * (input_vec[flat_idx] - means[out_idx]) / n * grad_vec[out_idx];
+            grad_input[flat_idx] =
+                2.0 * (input_vec[flat_idx] - means[out_idx]) / n * grad_vec[out_idx];
         }
 
         let mut grad = Tensor::from_vec(grad_input, input_shape).unwrap();
@@ -742,11 +745,7 @@ impl GradientFunction for NarrowBackward {
         // GPU fast path: use tensor-level narrow_backward_cuda
         #[cfg(feature = "cuda")]
         if grad_output.device().is_gpu() {
-            let grad = grad_output.narrow_backward_cuda(
-                &self.input_shape,
-                self.dim,
-                self.start,
-            );
+            let grad = grad_output.narrow_backward_cuda(&self.input_shape, self.dim, self.start);
             return vec![Some(grad)];
         }
 
@@ -847,8 +846,7 @@ fn reduce_grad_for_broadcast(grad: &Tensor<f32>, target_shape: &[usize]) -> Tens
                     .to_device(grad.device())
                     .unwrap();
                 let result_2d = ones.matmul(grad).unwrap();
-                let target_isize: Vec<isize> =
-                    target_shape.iter().map(|&x| x as isize).collect();
+                let target_isize: Vec<isize> = target_shape.iter().map(|&x| x as isize).collect();
                 return result_2d.reshape(&target_isize).unwrap();
             }
             // General case: iteratively sum_dim(0)

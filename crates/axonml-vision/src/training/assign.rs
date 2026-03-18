@@ -44,11 +44,11 @@ pub struct FcosTarget {
 /// - Scale 1 (stride 16): objects with max(l,t,r,b) in [64, 128]
 /// - Scale 2 (stride 32): objects with max(l,t,r,b) in [128, ∞]
 pub fn assign_fcos_targets(
-    gt_boxes: &[[f32; 4]],     // [N, 4] as (x1, y1, x2, y2) in pixel coords
-    gt_classes: &[usize],      // [N] class IDs
+    gt_boxes: &[[f32; 4]],         // [N, 4] as (x1, y1, x2, y2) in pixel coords
+    gt_classes: &[usize],          // [N] class IDs
     feat_sizes: &[(usize, usize)], // [(H, W)] per scale
-    strides: &[f32],           // stride per scale
-    size_ranges: &[(f32, f32)], // (min_size, max_size) per scale
+    strides: &[f32],               // stride per scale
+    size_ranges: &[(f32, f32)],    // (min_size, max_size) per scale
 ) -> Vec<Vec<FcosTarget>> {
     let num_scales = feat_sizes.len();
     let mut all_targets = Vec::with_capacity(num_scales);
@@ -212,9 +212,8 @@ mod tests {
         let strides = vec![8.0];
         let size_ranges = vec![(0.0, f32::MAX)];
 
-        let targets = assign_fcos_targets(
-            &gt_boxes, &gt_classes, &feat_sizes, &strides, &size_ranges,
-        );
+        let targets =
+            assign_fcos_targets(&gt_boxes, &gt_classes, &feat_sizes, &strides, &size_ranges);
 
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].len(), 64); // 8*8
@@ -234,9 +233,8 @@ mod tests {
         let strides = vec![8.0];
         let size_ranges = vec![(0.0, f32::MAX)];
 
-        let targets = assign_fcos_targets(
-            &gt_boxes, &gt_classes, &feat_sizes, &strides, &size_ranges,
-        );
+        let targets =
+            assign_fcos_targets(&gt_boxes, &gt_classes, &feat_sizes, &strides, &size_ranges);
 
         // Cell at (0,0) has center (4,4) — inside [0,0,16,16]
         // l=4, t=4, r=12, b=12 → centerness = sqrt((4/12)*(4/12)) = 4/12 = 1/3
@@ -254,9 +252,8 @@ mod tests {
         let strides = vec![8.0];
         let size_ranges = vec![(0.0, f32::MAX)];
 
-        let targets = assign_fcos_targets(
-            &gt_boxes, &gt_classes, &feat_sizes, &strides, &size_ranges,
-        );
+        let targets =
+            assign_fcos_targets(&gt_boxes, &gt_classes, &feat_sizes, &strides, &size_ranges);
 
         // All cells should be background (GT box center is outside feat map)
         let positives = targets[0].iter().filter(|t| t.class_id >= 0).count();
@@ -279,8 +276,16 @@ mod tests {
     #[test]
     fn test_fcos_targets_to_tensors() {
         let targets = vec![vec![
-            FcosTarget { class_id: 0, ltrb: [1.0, 2.0, 3.0, 4.0], centerness: 0.5 },
-            FcosTarget { class_id: -1, ltrb: [0.0; 4], centerness: 0.0 },
+            FcosTarget {
+                class_id: 0,
+                ltrb: [1.0, 2.0, 3.0, 4.0],
+                centerness: 0.5,
+            },
+            FcosTarget {
+                class_id: -1,
+                ltrb: [0.0; 4],
+                centerness: 0.0,
+            },
         ]];
 
         let tensors = fcos_targets_to_tensors(&targets);

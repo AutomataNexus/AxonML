@@ -181,7 +181,13 @@ impl GradientFunction for L1LossBackward {
             .iter()
             .zip(grad_vec.iter())
             .map(|(&d, &g)| {
-                if d > 0.0 { g } else if d < 0.0 { -g } else { 0.0 }
+                if d > 0.0 {
+                    g
+                } else if d < 0.0 {
+                    -g
+                } else {
+                    0.0
+                }
             })
             .collect();
         let grad_target: Vec<f32> = grad_input.iter().map(|&g| -g).collect();
@@ -234,9 +240,9 @@ impl GradientFunction for CrossEntropyBackward {
             } else {
                 grad_output.to_device(self.softmax_probs.device()).unwrap()
             };
-            let grad_tensor = self.softmax_probs.cross_entropy_bwd_cuda(
-                &self.targets, &grad_out_gpu,
-            );
+            let grad_tensor = self
+                .softmax_probs
+                .cross_entropy_bwd_cuda(&self.targets, &grad_out_gpu);
             return vec![Some(grad_tensor)];
         }
 
@@ -331,8 +337,7 @@ impl CrossEntropyLoss {
                 target_data.to_device(input_data.device()).unwrap()
             };
 
-            let (loss_tensor, softmax_tensor) =
-                input_data.cross_entropy_fwd_cuda(&targets_gpu);
+            let (loss_tensor, softmax_tensor) = input_data.cross_entropy_fwd_cuda(&targets_gpu);
 
             let loss_var = if input.requires_grad() {
                 let grad_fn = GradFn::new(CrossEntropyBackward {
@@ -389,7 +394,8 @@ impl CrossEntropyLoss {
         }
 
         let loss_tensor = Tensor::from_vec(losses, &[batch_size]).unwrap();
-        let softmax_tensor = Tensor::from_vec(softmax_probs_vec, &[batch_size, num_classes]).unwrap();
+        let softmax_tensor =
+            Tensor::from_vec(softmax_probs_vec, &[batch_size, num_classes]).unwrap();
         let targets_f32: Vec<f32> = target_classes.iter().map(|&tc| tc as f32).collect();
         let targets_tensor = Tensor::from_vec(targets_f32, &[batch_size]).unwrap();
 
@@ -952,17 +958,10 @@ mod tests {
 
         // Create input logits with requires_grad=true
         let input = Variable::new(
-            Tensor::from_vec(
-                vec![2.0, 1.0, 0.1, 0.5, 2.5, 0.3],
-                &[2, 3],
-            )
-            .unwrap(),
+            Tensor::from_vec(vec![2.0, 1.0, 0.1, 0.5, 2.5, 0.3], &[2, 3]).unwrap(),
             true,
         );
-        let target = Variable::new(
-            Tensor::from_vec(vec![0.0, 1.0], &[2]).unwrap(),
-            false,
-        );
+        let target = Variable::new(Tensor::from_vec(vec![0.0, 1.0], &[2]).unwrap(), false);
 
         let loss_fn = CrossEntropyLoss::new();
         let loss = loss_fn.compute(&input, &target);
@@ -976,7 +975,9 @@ mod tests {
         backward(&loss, &ones);
 
         // Input should have gradient
-        let grad = input.grad().expect("Input should have gradient after backward");
+        let grad = input
+            .grad()
+            .expect("Input should have gradient after backward");
         let grad_vec = grad.to_vec();
 
         // Gradient should be non-zero
@@ -992,13 +993,25 @@ mod tests {
 
         // For the correct class, gradient should be negative (softmax - 1 < 0)
         // Sample 0, class 0 (target): grad should be (softmax[0,0] - 1) / 2
-        assert!(grad_vec[0] < 0.0, "Gradient for correct class should be negative");
+        assert!(
+            grad_vec[0] < 0.0,
+            "Gradient for correct class should be negative"
+        );
         // Sample 1, class 1 (target): grad should be (softmax[1,1] - 1) / 2
-        assert!(grad_vec[4] < 0.0, "Gradient for correct class should be negative");
+        assert!(
+            grad_vec[4] < 0.0,
+            "Gradient for correct class should be negative"
+        );
 
         // For wrong classes, gradient should be positive (softmax > 0)
-        assert!(grad_vec[1] > 0.0, "Gradient for wrong class should be positive");
-        assert!(grad_vec[2] > 0.0, "Gradient for wrong class should be positive");
+        assert!(
+            grad_vec[1] > 0.0,
+            "Gradient for wrong class should be positive"
+        );
+        assert!(
+            grad_vec[2] > 0.0,
+            "Gradient for wrong class should be positive"
+        );
     }
 
     #[test]
@@ -1009,12 +1022,12 @@ mod tests {
             Tensor::from_vec(vec![10.0, -10.0, -10.0], &[1, 3]).unwrap(),
             false,
         );
-        let target = Variable::new(
-            Tensor::from_vec(vec![0.0], &[1]).unwrap(),
-            false,
-        );
+        let target = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false);
         let loss = loss_fn.compute(&input, &target);
-        assert!(loss.data().to_vec()[0] < 0.001, "Perfect prediction should have near-zero loss");
+        assert!(
+            loss.data().to_vec()[0] < 0.001,
+            "Perfect prediction should have near-zero loss"
+        );
     }
 
     #[test]
@@ -1026,10 +1039,7 @@ mod tests {
             Tensor::from_vec(vec![0.0; num_classes], &[1, num_classes]).unwrap(),
             false,
         );
-        let target = Variable::new(
-            Tensor::from_vec(vec![0.0], &[1]).unwrap(),
-            false,
-        );
+        let target = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false);
         let loss = loss_fn.compute(&input, &target);
         let expected = (num_classes as f32).ln(); // ln(16) ≈ 2.77
         let actual = loss.data().to_vec()[0];
@@ -1075,14 +1085,8 @@ mod tests {
     fn test_smooth_l1_gradient_flow() {
         use axonml_autograd::backward;
 
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 5.0], &[3]).unwrap(),
-            true,
-        );
-        let target = Variable::new(
-            Tensor::from_vec(vec![1.5, 1.5, 1.5], &[3]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 5.0], &[3]).unwrap(), true);
+        let target = Variable::new(Tensor::from_vec(vec![1.5, 1.5, 1.5], &[3]).unwrap(), false);
 
         let loss_fn = SmoothL1Loss::new();
         let loss = loss_fn.compute(&input, &target);

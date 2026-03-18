@@ -304,13 +304,13 @@ impl Database {
 
     /// Set a key-value pair
     pub async fn kv_set(&self, key: &str, value: Value) -> Result<(), DbError> {
-        let mut request = self
-            .client
-            .post(self.build_url("/api/v1/kv/keys")?)
-            .json(&serde_json::json!({
-                "key": key,
-                "value": value
-            }));
+        let mut request =
+            self.client
+                .post(self.build_url("/api/v1/kv/keys")?)
+                .json(&serde_json::json!({
+                    "key": key,
+                    "value": value
+                }));
 
         if let Some(auth) = self.auth_header().await {
             request = request.header("Authorization", auth);

@@ -247,10 +247,7 @@ mod tests {
     #[test]
     fn test_uncertainty_bbox_head() {
         let head = UncertaintyBBoxHead::new(64);
-        let x = Variable::new(
-            Tensor::from_vec(vec![0.1; 64], &[1, 64]).unwrap(),
-            false,
-        );
+        let x = Variable::new(Tensor::from_vec(vec![0.1; 64], &[1, 64]).unwrap(), false);
         let (mean, log_var) = head.forward(&x);
         assert_eq!(mean.shape(), vec![1, 4]);
         assert_eq!(log_var.shape(), vec![1, 4]);

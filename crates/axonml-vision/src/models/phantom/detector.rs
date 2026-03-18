@@ -191,14 +191,8 @@ impl Phantom {
         let n_det = detected_bboxes.len();
         if n_det == 0 {
             // No new detections — still update tracker (decay missing faces)
-            let empty_bb = Variable::new(
-                Tensor::from_vec(vec![], &[0, 48]).unwrap(),
-                false,
-            );
-            let empty_ev = Variable::new(
-                Tensor::from_vec(vec![], &[0, 32]).unwrap(),
-                false,
-            );
+            let empty_bb = Variable::new(Tensor::from_vec(vec![], &[0, 48]).unwrap(), false);
+            let empty_ev = Variable::new(Tensor::from_vec(vec![], &[0, 32]).unwrap(), false);
             return self.tracker.update(&empty_bb, &empty_ev, &[]);
         }
 
@@ -215,7 +209,8 @@ impl Phantom {
         let event_feats = self.extract_event_features(frame, &event_map, &detected_bboxes);
 
         // Step 7: Update tracker
-        self.tracker.update(&backbone_feats, &event_feats, &detected_bboxes)
+        self.tracker
+            .update(&backbone_feats, &event_feats, &detected_bboxes)
     }
 
     /// Extract event features for detected face regions.
@@ -227,10 +222,7 @@ impl Phantom {
     ) -> Variable {
         let n = bboxes.len();
         if n == 0 {
-            return Variable::new(
-                Tensor::from_vec(vec![0.0f32; 0], &[0, 32]).unwrap(),
-                false,
-            );
+            return Variable::new(Tensor::from_vec(vec![0.0f32; 0], &[0, 32]).unwrap(), false);
         }
 
         let shape = frame.shape();
@@ -294,7 +286,10 @@ impl Phantom {
         let face_cls = self.face_cls.forward(&face_feat);
         let face_bbox = self.face_bbox.forward(&face_feat);
 
-        super::PhantomTrainOutput { face_cls, face_bbox }
+        super::PhantomTrainOutput {
+            face_cls,
+            face_bbox,
+        }
     }
 
     /// Get total frames processed.

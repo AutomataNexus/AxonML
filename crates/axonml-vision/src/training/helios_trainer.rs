@@ -19,10 +19,10 @@ use axonml_nn::{Module, Parameter};
 use axonml_optim::{Adam, Optimizer};
 use axonml_tensor::{Device, Tensor};
 
-use crate::models::helios::{Helios, HeliosLoss};
 use super::augment::{DetAugPipeline, DetSample};
 use super::ema::ModelEMA;
 use super::metrics::{compute_map, DetectionResult, GroundTruth};
+use crate::models::helios::{Helios, HeliosLoss};
 
 // =============================================================================
 // Helios Training Config
@@ -177,8 +177,7 @@ impl HeliosTrainer {
         // Move model parameters to target device
         model.to_device(device);
 
-        let optimizer = Adam::new(model.parameters(), config.lr)
-            .weight_decay(config.weight_decay);
+        let optimizer = Adam::new(model.parameters(), config.lr).weight_decay(config.weight_decay);
 
         let ema = if config.use_ema {
             Some(ModelEMA::new(&model.parameters(), config.ema_decay))
@@ -229,12 +228,9 @@ impl HeliosTrainer {
         // Forward
         self.optimizer.zero_grad();
         let train_out = self.model.forward_train(&images_dev);
-        let (total_loss, cls, bx, dfl) = self.loss_fn.compute(
-            &train_out,
-            gt_boxes,
-            gt_classes,
-            self.config.num_classes,
-        );
+        let (total_loss, cls, bx, dfl) =
+            self.loss_fn
+                .compute(&train_out, gt_boxes, gt_classes, self.config.num_classes);
 
         // Backward
         total_loss.backward();
@@ -251,7 +247,10 @@ impl HeliosTrainer {
 
     /// Run augmentation on a batch of samples.
     pub fn augment_batch(&self, samples: &[DetSample]) -> Vec<DetSample> {
-        samples.iter().map(|s| self.augment.apply_single(s)).collect()
+        samples
+            .iter()
+            .map(|s| self.augment.apply_single(s))
+            .collect()
     }
 
     /// Run evaluation on a set of (image, gt) pairs.
@@ -271,10 +270,8 @@ impl HeliosTrainer {
             let mut all_gts = Vec::new();
 
             for (i, img) in eval_images.iter().enumerate() {
-                let input = Variable::new(
-                    Tensor::from_vec(img.to_vec(), img.shape()).unwrap(),
-                    false,
-                );
+                let input =
+                    Variable::new(Tensor::from_vec(img.to_vec(), img.shape()).unwrap(), false);
 
                 // Add batch dimension if needed
                 let input = if input.shape().len() == 3 {
@@ -286,14 +283,22 @@ impl HeliosTrainer {
 
                 let detections = self.model.detect(&input, 0.001, 0.65);
 
-                let dets: Vec<DetectionResult> = detections.iter().map(|d| DetectionResult {
-                    bbox: d.bbox,
-                    confidence: d.confidence,
-                    class_id: d.class_id,
-                }).collect();
+                let dets: Vec<DetectionResult> = detections
+                    .iter()
+                    .map(|d| DetectionResult {
+                        bbox: d.bbox,
+                        confidence: d.confidence,
+                        class_id: d.class_id,
+                    })
+                    .collect();
 
-                let gts: Vec<GroundTruth> = eval_gt_boxes[i].iter().zip(eval_gt_classes[i].iter())
-                    .map(|(bbox, &cls)| GroundTruth { bbox: *bbox, class_id: cls })
+                let gts: Vec<GroundTruth> = eval_gt_boxes[i]
+                    .iter()
+                    .zip(eval_gt_classes[i].iter())
+                    .map(|(bbox, &cls)| GroundTruth {
+                        bbox: *bbox,
+                        class_id: cls,
+                    })
                     .collect();
 
                 all_dets.push(dets);
@@ -321,7 +326,8 @@ impl HeliosTrainer {
                 / (total_steps as f32 - warmup_steps as f32).max(1.0);
             let progress = progress.clamp(0.0, 1.0);
             let min_lr = self.config.lr * 0.01;
-            min_lr + (self.config.lr - min_lr) * 0.5 * (1.0 + (std::f32::consts::PI * progress).cos())
+            min_lr
+                + (self.config.lr - min_lr) * 0.5 * (1.0 + (std::f32::consts::PI * progress).cos())
         } else {
             // Linear warmup
             self.config.lr * (self.global_step as f32 / warmup_steps as f32)
@@ -415,7 +421,10 @@ mod tests {
 
         // At step 0, LR should be near 0 (warmup)
         let lr = trainer.warmup_lr();
-        assert!(lr < 0.001, "LR at step 0 should be small (warmup), got {lr}");
+        assert!(
+            lr < 0.001,
+            "LR at step 0 should be small (warmup), got {lr}"
+        );
     }
 
     #[test]
@@ -466,16 +475,10 @@ mod tests {
             let pixels: Vec<f32> = (0..3 * 64 * 64)
                 .map(|i| ((i as f32 * 0.001 + seed).sin() * 0.5 + 0.5))
                 .collect();
-            let input = Variable::new(
-                Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(),
-                false,
-            );
+            let input = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
 
-            let (total, _, _, _) = trainer.train_step(
-                &input,
-                &[vec![[8.0, 8.0, 48.0, 48.0]]],
-                &[vec![0]],
-            );
+            let (total, _, _, _) =
+                trainer.train_step(&input, &[vec![[8.0, 8.0, 48.0, 48.0]]], &[vec![0]]);
             losses.push(total);
         }
 

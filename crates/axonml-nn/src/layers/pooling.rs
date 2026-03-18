@@ -15,8 +15,8 @@
 //! liable for any damages arising from the use of this software.
 
 use axonml_autograd::functions::{
-    AdaptiveAvgPool2dBackward, AvgPool1dBackward, AvgPool2dBackward,
-    MaxPool1dBackward, MaxPool2dBackward,
+    AdaptiveAvgPool2dBackward, AvgPool1dBackward, AvgPool2dBackward, MaxPool1dBackward,
+    MaxPool2dBackward,
 };
 use axonml_autograd::grad_fn::GradFn;
 use axonml_autograd::no_grad::is_grad_enabled;
@@ -634,7 +634,10 @@ mod tests {
         let loss = output.sum();
         loss.backward();
 
-        assert!(input.grad().is_some(), "AdaptiveAvgPool2d: gradient should flow");
+        assert!(
+            input.grad().is_some(),
+            "AdaptiveAvgPool2d: gradient should flow"
+        );
         let grad = input.grad().unwrap();
         for &v in &grad.to_vec() {
             assert!((v - 0.25).abs() < 1e-6);

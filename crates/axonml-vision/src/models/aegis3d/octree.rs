@@ -17,7 +17,7 @@
 #![allow(missing_docs)]
 
 use super::implicit::LocalSDF;
-use super::mesh::{Mesh, MarchingCubes};
+use super::mesh::{MarchingCubes, Mesh};
 
 use axonml_nn::{Module, Parameter};
 
@@ -80,9 +80,15 @@ impl AABB {
     pub fn octant_for(&self, point: [f32; 3]) -> usize {
         let c = self.center();
         let mut idx = 0;
-        if point[0] >= c[0] { idx |= 1; }
-        if point[1] >= c[1] { idx |= 2; }
-        if point[2] >= c[2] { idx |= 4; }
+        if point[0] >= c[0] {
+            idx |= 1;
+        }
+        if point[1] >= c[1] {
+            idx |= 2;
+        }
+        if point[2] >= c[2] {
+            idx |= 4;
+        }
         idx
     }
 }
@@ -105,10 +111,7 @@ pub enum OctreeNode {
         depth: usize,
     },
     /// Empty node — no geometry expected here.
-    Empty {
-        bounds: AABB,
-        depth: usize,
-    },
+    Empty { bounds: AABB, depth: usize },
 }
 
 impl OctreeNode {
@@ -240,15 +243,29 @@ impl AdaptiveOctree {
                 // Recurse into the child containing the point
                 if let OctreeNode::Internal { children, .. } = node {
                     let octant = parent_bounds.octant_for(point);
-                    Self::subdivide_node(&mut children[octant], point, target_depth, hidden_dim, num_freq);
+                    Self::subdivide_node(
+                        &mut children[octant],
+                        point,
+                        target_depth,
+                        hidden_dim,
+                        num_freq,
+                    );
                 }
             }
-            OctreeNode::Internal { bounds, children, .. } => {
+            OctreeNode::Internal {
+                bounds, children, ..
+            } => {
                 if !bounds.contains(point) {
                     return;
                 }
                 let octant = bounds.octant_for(point);
-                Self::subdivide_node(&mut children[octant], point, target_depth, hidden_dim, num_freq);
+                Self::subdivide_node(
+                    &mut children[octant],
+                    point,
+                    target_depth,
+                    hidden_dim,
+                    num_freq,
+                );
             }
         }
     }
@@ -270,7 +287,9 @@ impl AdaptiveOctree {
                     1.0 // Outside = large positive distance
                 }
             }
-            OctreeNode::Internal { bounds, children, .. } => {
+            OctreeNode::Internal {
+                bounds, children, ..
+            } => {
                 if !bounds.contains(point) {
                     return 1.0;
                 }
@@ -298,7 +317,12 @@ impl AdaptiveOctree {
                     1.0
                 }
             }
-            OctreeNode::Internal { bounds, children, depth, .. } => {
+            OctreeNode::Internal {
+                bounds,
+                children,
+                depth,
+                ..
+            } => {
                 if !bounds.contains(point) {
                     return 1.0;
                 }
@@ -349,9 +373,7 @@ impl AdaptiveOctree {
     fn count_leaves(node: &OctreeNode) -> usize {
         match node {
             OctreeNode::Leaf { .. } => 1,
-            OctreeNode::Internal { children, .. } => {
-                children.iter().map(Self::count_leaves).sum()
-            }
+            OctreeNode::Internal { children, .. } => children.iter().map(Self::count_leaves).sum(),
             OctreeNode::Empty { .. } => 0,
         }
     }
@@ -374,11 +396,7 @@ impl AdaptiveOctree {
     pub fn extract_mesh(&self, resolution: usize) -> Mesh {
         let bounds = self.root.bounds();
         let mc = MarchingCubes::new(resolution);
-        mc.extract(
-            |x, y, z| self.query_sdf([x, y, z]),
-            bounds.min,
-            bounds.max,
-        )
+        mc.extract(|x, y, z| self.query_sdf([x, y, z]), bounds.min, bounds.max)
     }
 
     /// Extract mesh with LOD limit.
@@ -411,7 +429,12 @@ impl AdaptiveOctree {
         num_freq: usize,
     ) {
         match node {
-            OctreeNode::Leaf { bounds, depth, error, .. } => {
+            OctreeNode::Leaf {
+                bounds,
+                depth,
+                error,
+                ..
+            } => {
                 if *error > threshold && *depth < max_depth {
                     let sub_bounds = bounds.subdivide();
                     let current_depth = *depth;

@@ -184,10 +184,7 @@ impl LocalSDF {
 
     /// Evaluate SDF at a single point (returns scalar).
     pub fn evaluate_single(&self, x: f32, y: f32, z: f32) -> f32 {
-        let coords = Variable::new(
-            Tensor::from_vec(vec![x, y, z], &[1, 3]).unwrap(),
-            false,
-        );
+        let coords = Variable::new(Tensor::from_vec(vec![x, y, z], &[1, 3]).unwrap(), false);
         let result = self.evaluate(&coords);
         result.data().to_vec()[0]
     }
@@ -206,12 +203,12 @@ impl LocalSDF {
             let (x, y, z) = (data[i * 3], data[i * 3 + 1], data[i * 3 + 2]);
 
             // Central differences
-            let dx = self.evaluate_single(x + epsilon, y, z)
-                - self.evaluate_single(x - epsilon, y, z);
-            let dy = self.evaluate_single(x, y + epsilon, z)
-                - self.evaluate_single(x, y - epsilon, z);
-            let dz = self.evaluate_single(x, y, z + epsilon)
-                - self.evaluate_single(x, y, z - epsilon);
+            let dx =
+                self.evaluate_single(x + epsilon, y, z) - self.evaluate_single(x - epsilon, y, z);
+            let dy =
+                self.evaluate_single(x, y + epsilon, z) - self.evaluate_single(x, y - epsilon, z);
+            let dz =
+                self.evaluate_single(x, y, z + epsilon) - self.evaluate_single(x, y, z - epsilon);
 
             let scale = 1.0 / (2.0 * epsilon);
             grad_data[i * 3] = dx * scale;

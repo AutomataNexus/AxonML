@@ -201,12 +201,7 @@ impl DFLLoss {
     /// - `mask`: [N*H*W] boolean mask of positive assignments.
     ///
     /// Returns scalar loss.
-    pub fn compute(
-        &self,
-        pred_dfl: &Variable,
-        target_ltrb: &[f32],
-        mask: &[bool],
-    ) -> Variable {
+    pub fn compute(&self, pred_dfl: &Variable, target_ltrb: &[f32], mask: &[bool]) -> Variable {
         let shape = pred_dfl.shape();
         let n = shape[0];
         let h = shape[2];
@@ -375,10 +370,7 @@ impl TaskAlignedAssigner {
                 let s = cls_scores[a * num_classes + gt_cls].max(1e-7);
 
                 // IoU between predicted box and GT box
-                let u = iou_single(
-                    &pred_boxes[a * 4..a * 4 + 4],
-                    &gt_boxes[g * 4..g * 4 + 4],
-                );
+                let u = iou_single(&pred_boxes[a * 4..a * 4 + 4], &gt_boxes[g * 4..g * 4 + 4]);
 
                 alignment[g][a] = s.powf(self.alpha) * u.powf(self.beta);
             }
@@ -571,7 +563,16 @@ impl HeliosLoss {
                 let n = dfl_shape[0];
                 let dfl_data = scale.bbox_dfl.data().to_vec();
                 let reg_max = self.reg_max;
-                decode_dfl_boxes(&dfl_data, n, reg_max, h, w, stride, &all_anchor_points, anchor_offset)
+                decode_dfl_boxes(
+                    &dfl_data,
+                    n,
+                    reg_max,
+                    h,
+                    w,
+                    stride,
+                    &all_anchor_points,
+                    anchor_offset,
+                )
             };
 
             for b in 0..batch_size {
@@ -582,7 +583,8 @@ impl HeliosLoss {
 
                         // Class scores
                         for c in 0..num_classes {
-                            flat_cls_scores[b * total_anchors * num_classes + global_idx * num_classes + c] =
+                            flat_cls_scores
+                                [b * total_anchors * num_classes + global_idx * num_classes + c] =
                                 cls_data[b * num_classes * h * w + c * h * w + yi * w + xi];
                         }
 
@@ -607,9 +609,13 @@ impl HeliosLoss {
         let mut pos_target_boxes: Vec<f32> = Vec::new();
 
         for b in 0..batch_size {
-            let cls_slice = &flat_cls_scores[b * total_anchors * num_classes..(b + 1) * total_anchors * num_classes];
+            let cls_slice = &flat_cls_scores
+                [b * total_anchors * num_classes..(b + 1) * total_anchors * num_classes];
             let box_slice = &flat_pred_boxes[b * total_anchors * 4..(b + 1) * total_anchors * 4];
-            let gt_b: Vec<f32> = gt_boxes[b].iter().flat_map(|bx| bx.iter().copied()).collect();
+            let gt_b: Vec<f32> = gt_boxes[b]
+                .iter()
+                .flat_map(|bx| bx.iter().copied())
+                .collect();
             let gt_cls_b = &gt_classes[b];
 
             let assignment = self.assigner.assign(
@@ -650,14 +656,23 @@ impl HeliosLoss {
         let total_cls_loss = cls_loss.data().to_vec()[0];
 
         if total_positives == 0 {
-            return (cls_loss.mul_scalar(self.cls_weight), total_cls_loss, 0.0, 0.0);
+            return (
+                cls_loss.mul_scalar(self.cls_weight),
+                total_cls_loss,
+                0.0,
+                0.0,
+            );
         }
 
         // ---- Box regression loss (CIoU) — fully graph-connected via DFL decode ----
         // Decode DFL predictions → xyxy boxes using Variable ops (preserves autograd)
         let bbox_pred_all = concat_scale_bbox(
-            &all_bbox_dfl, batch_size, self.reg_max, &scale_hw,
-            &all_anchor_points, &strides_cfg,
+            &all_bbox_dfl,
+            batch_size,
+            self.reg_max,
+            &scale_hw,
+            &all_anchor_points,
+            &strides_cfg,
         );
 
         // Build full-size target and mask tensors for masked L2 loss.
@@ -688,7 +703,9 @@ impl HeliosLoss {
         // anchor_points max ≈ image_size; normalizing by max_coord² puts L2 in ~[0,1] range.
         let max_coord = all_anchor_points.iter().cloned().fold(1.0f32, f32::max);
         let box_norm = max_coord * max_coord;
-        let box_loss = masked_sq.sum().mul_scalar(1.0 / (total_positives as f32 * 4.0 * box_norm));
+        let box_loss = masked_sq
+            .sum()
+            .mul_scalar(1.0 / (total_positives as f32 * 4.0 * box_norm));
 
         // Compute CIoU for monitoring (not used for gradient)
         let bbox_all_data = bbox_pred_all.data().to_vec();
@@ -704,13 +721,12 @@ impl HeliosLoss {
 
         // DFL loss: box loss already flows gradients through DFL softmax decode
         let total_dfl_loss = box_loss_val * 0.2;
-        let dfl_loss_var = Variable::new(
-            Tensor::from_vec(vec![total_dfl_loss], &[1]).unwrap(),
-            false,
-        );
+        let dfl_loss_var =
+            Variable::new(Tensor::from_vec(vec![total_dfl_loss], &[1]).unwrap(), false);
 
         // ---- Combine with gradient flow from both cls and box ----
-        let total = cls_loss.mul_scalar(self.cls_weight)
+        let total = cls_loss
+            .mul_scalar(self.cls_weight)
             .add_var(&box_loss.mul_scalar(self.box_weight))
             .add_var(&dfl_loss_var.mul_scalar(self.dfl_weight));
 
@@ -806,10 +822,12 @@ fn concat_scale_bbox(
             }
         }
         let cx_var = Variable::new(
-            Tensor::from_vec(cx_data, &[batch_size, 1, hw]).unwrap(), false,
+            Tensor::from_vec(cx_data, &[batch_size, 1, hw]).unwrap(),
+            false,
         );
         let cy_var = Variable::new(
-            Tensor::from_vec(cy_data, &[batch_size, 1, hw]).unwrap(), false,
+            Tensor::from_vec(cy_data, &[batch_size, 1, hw]).unwrap(),
+            false,
         );
 
         // LTRB → XYXY conversion (all Variable ops, graph preserved)
@@ -919,7 +937,10 @@ mod tests {
 
         let loss = CIoULoss::compute(&boxes, &target);
         let val = loss.data().to_vec()[0];
-        assert!(val < 0.01, "Identical boxes → near-zero CIoU loss, got {val}");
+        assert!(
+            val < 0.01,
+            "Identical boxes → near-zero CIoU loss, got {val}"
+        );
     }
 
     #[test]
@@ -943,16 +964,20 @@ mod tests {
         let pred = vec![10.0, 10.0, 50.0, 50.0];
         let target = vec![10.0, 10.0, 50.0, 50.0];
         let vals = CIoULoss::ciou_values(&pred, &target, 1);
-        assert!((vals[0] - 1.0).abs() < 0.01, "Identical → CIoU≈1.0, got {}", vals[0]);
+        assert!(
+            (vals[0] - 1.0).abs() < 0.01,
+            "Identical → CIoU≈1.0, got {}",
+            vals[0]
+        );
     }
 
     #[test]
     fn test_task_aligned_assigner_no_gt() {
         let assigner = TaskAlignedAssigner::default_v8();
         let assignment = assigner.assign(
-            &[0.5; 10],      // 5 anchors, 2 classes
-            &[0.0; 20],      // 5 anchors, 4 coords
-            &[],             // no GT
+            &[0.5; 10], // 5 anchors, 2 classes
+            &[0.0; 20], // 5 anchors, 4 coords
+            &[],        // no GT
             &[],
             &[16.0, 16.0, 48.0, 16.0, 16.0, 48.0, 48.0, 48.0, 32.0, 32.0], // 5 anchors
             &[8.0; 5],
@@ -968,10 +993,10 @@ mod tests {
 
         // 4 anchors on a 2x2 grid, stride=16
         let anchor_points = vec![
-            8.0, 8.0,    // (0,0)
-            24.0, 8.0,   // (1,0)
-            8.0, 24.0,   // (0,1)
-            24.0, 24.0,  // (1,1)
+            8.0, 8.0, // (0,0)
+            24.0, 8.0, // (1,0)
+            8.0, 24.0, // (0,1)
+            24.0, 24.0, // (1,1)
         ];
 
         // GT box covering upper half: [0, 0, 32, 16], class 0
@@ -983,8 +1008,8 @@ mod tests {
 
         // Pred boxes: roughly matching
         let pred_boxes = vec![
-            2.0, 2.0, 30.0, 14.0,  // anchor 0: good overlap with GT
-            0.0, 0.0, 32.0, 16.0,  // anchor 1: perfect overlap
+            2.0, 2.0, 30.0, 14.0, // anchor 0: good overlap with GT
+            0.0, 0.0, 32.0, 16.0, // anchor 1: perfect overlap
             2.0, 18.0, 30.0, 30.0, // anchor 2: no overlap (below GT)
             0.0, 18.0, 32.0, 30.0, // anchor 3: no overlap
         ];
@@ -1035,8 +1060,8 @@ mod tests {
         let loss_fn = HeliosLoss::new(2, 16);
         let (total, cls_val, box_val, dfl_val) = loss_fn.compute(
             &train_out,
-            &[vec![]],       // no GT boxes
-            &[vec![]],       // no GT classes
+            &[vec![]], // no GT boxes
+            &[vec![]], // no GT classes
             2,
         );
 
@@ -1062,16 +1087,15 @@ mod tests {
         let gt_boxes = vec![vec![[10.0, 10.0, 40.0, 40.0]]];
         let gt_classes = vec![vec![0usize]];
 
-        let (total, cls_val, box_val, _dfl_val) = loss_fn.compute(
-            &train_out,
-            &gt_boxes,
-            &gt_classes,
-            2,
-        );
+        let (total, cls_val, box_val, _dfl_val) =
+            loss_fn.compute(&train_out, &gt_boxes, &gt_classes, 2);
 
         let total_val = total.data().to_vec()[0];
         assert!(total_val.is_finite(), "Loss should be finite");
-        assert!(total_val > 0.0, "Loss should be positive with GT, got {total_val}");
+        assert!(
+            total_val > 0.0,
+            "Loss should be positive with GT, got {total_val}"
+        );
         assert!(cls_val >= 0.0);
         assert!(box_val >= 0.0);
     }

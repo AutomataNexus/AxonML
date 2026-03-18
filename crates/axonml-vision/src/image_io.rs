@@ -26,8 +26,7 @@ use std::path::Path;
 /// RGB images produce [3, H, W], grayscale produce [1, H, W].
 /// Values are in [0.0, 1.0].
 pub fn load_image<P: AsRef<Path>>(path: P) -> Result<Tensor<f32>, String> {
-    let img = image::open(path.as_ref())
-        .map_err(|e| format!("Failed to load image: {e}"))?;
+    let img = image::open(path.as_ref()).map_err(|e| format!("Failed to load image: {e}"))?;
     let rgb = img.to_rgb8();
     let (w, h) = rgb.dimensions();
     let (w, h) = (w as usize, h as usize);
@@ -53,8 +52,7 @@ pub fn load_image_resized<P: AsRef<Path>>(
     target_h: usize,
     target_w: usize,
 ) -> Result<Tensor<f32>, String> {
-    let img = image::open(path.as_ref())
-        .map_err(|e| format!("Failed to load image: {e}"))?;
+    let img = image::open(path.as_ref()).map_err(|e| format!("Failed to load image: {e}"))?;
     let resized = img.resize_exact(
         target_w as u32,
         target_h as u32,
@@ -82,8 +80,7 @@ pub fn load_image_resized<P: AsRef<Path>>(
 pub fn load_image_with_info<P: AsRef<Path>>(
     path: P,
 ) -> Result<(Tensor<f32>, (usize, usize)), String> {
-    let img = image::open(path.as_ref())
-        .map_err(|e| format!("Failed to load image: {e}"))?;
+    let img = image::open(path.as_ref()).map_err(|e| format!("Failed to load image: {e}"))?;
     let (w, h) = (img.width() as usize, img.height() as usize);
     let rgb = img.to_rgb8();
 
@@ -97,8 +94,8 @@ pub fn load_image_with_info<P: AsRef<Path>>(
         }
     }
 
-    let tensor = Tensor::from_vec(data, &[3, h, w])
-        .map_err(|e| format!("Tensor creation failed: {e}"))?;
+    let tensor =
+        Tensor::from_vec(data, &[3, h, w]).map_err(|e| format!("Tensor creation failed: {e}"))?;
     Ok((tensor, (h, w)))
 }
 
@@ -108,11 +105,7 @@ pub fn load_image_with_info<P: AsRef<Path>>(
 /// Output: `Tensor<f32>` of shape [3, h, w] in [0, 1].
 pub fn rgb_bytes_to_tensor(data: &[u8], h: usize, w: usize) -> Result<Tensor<f32>, String> {
     if data.len() != 3 * h * w {
-        return Err(format!(
-            "Expected {} bytes, got {}",
-            3 * h * w,
-            data.len()
-        ));
+        return Err(format!("Expected {} bytes, got {}", 3 * h * w, data.len()));
     }
 
     let mut chw = vec![0.0f32; 3 * h * w];

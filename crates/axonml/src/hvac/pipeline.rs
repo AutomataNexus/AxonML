@@ -17,15 +17,15 @@
 use axonml_autograd::Variable;
 
 use super::{
+    apollo::Apollo,
     aquilo::Aquilo,
     boreas::Boreas,
+    colossus::Colossus,
+    data::{HvacSensorData, PipelineOutput},
+    gaia::Gaia,
     naiad::Naiad,
     vulcan::Vulcan,
     zephyrus::Zephyrus,
-    colossus::Colossus,
-    gaia::Gaia,
-    apollo::Apollo,
-    data::{HvacSensorData, PipelineOutput},
 };
 
 // =============================================================================
@@ -89,7 +89,8 @@ impl HvacPipeline {
         let (aquilo_fault, _, _, _, aquilo_emb) = self.aquilo.forward_all(&elec_flat);
 
         // Boreas: (batch, 80, 7) as-is
-        let (boreas_fault, _, _, _, boreas_emb) = self.boreas.forward_all(&sensor_data.refrigeration);
+        let (boreas_fault, _, _, _, boreas_emb) =
+            self.boreas.forward_all(&sensor_data.refrigeration);
 
         // Naiad: transpose (batch, 64, 7) → (batch, 7, 64) for Conv1d
         let water_t = transpose_last_two(&sensor_data.water, batch, 64, 7);
@@ -105,7 +106,13 @@ impl HvacPipeline {
 
         // Concatenate specialist embeddings
         let specialist_features = super::aquilo::concat_variables(
-            &[&aquilo_emb, &boreas_emb, &naiad_emb, &vulcan_emb, &zephyrus_emb],
+            &[
+                &aquilo_emb,
+                &boreas_emb,
+                &naiad_emb,
+                &vulcan_emb,
+                &zephyrus_emb,
+            ],
             batch,
         );
 
@@ -114,16 +121,19 @@ impl HvacPipeline {
         // =====================================================================
 
         let (_, _, _, _, colossus_emb) = self.colossus.forward_specialists(
-            &aquilo_emb, &boreas_emb, &naiad_emb, &vulcan_emb, &zephyrus_emb,
+            &aquilo_emb,
+            &boreas_emb,
+            &naiad_emb,
+            &vulcan_emb,
+            &zephyrus_emb,
         );
 
         // =====================================================================
         // Stage 3: Gaia Safety Validator
         // =====================================================================
 
-        let (_, safety_score, _, _, gaia_emb) = self.gaia.forward_parts(
-            &specialist_features, &colossus_emb,
-        );
+        let (_, safety_score, _, _, gaia_emb) =
+            self.gaia.forward_parts(&specialist_features, &colossus_emb);
 
         // =====================================================================
         // Stage 4: Apollo Master Coordinator
@@ -133,8 +143,13 @@ impl HvacPipeline {
         let raw_sensor_summary = summarize_sensors(sensor_data, batch);
 
         let model_embs = [
-            &aquilo_emb, &boreas_emb, &naiad_emb, &vulcan_emb,
-            &zephyrus_emb, &colossus_emb, &gaia_emb,
+            &aquilo_emb,
+            &boreas_emb,
+            &naiad_emb,
+            &vulcan_emb,
+            &zephyrus_emb,
+            &colossus_emb,
+            &gaia_emb,
         ];
         let model_refs: Vec<&Variable> = model_embs.to_vec();
 
@@ -150,7 +165,11 @@ impl HvacPipeline {
             safety_output: safety_score,
             diagnosis,
             specialist_faults: vec![
-                aquilo_fault, boreas_fault, naiad_fault, vulcan_fault, zephyrus_fault,
+                aquilo_fault,
+                boreas_fault,
+                naiad_fault,
+                vulcan_fault,
+                zephyrus_fault,
             ],
         }
     }
@@ -200,7 +219,13 @@ impl HvacPipeline {
 // =============================================================================
 
 /// Flatten sensor data from (batch, time, channels) to (batch, flat_dim).
-fn flatten_sensor(input: &Variable, batch: usize, time: usize, channels: usize, target_dim: usize) -> Variable {
+fn flatten_sensor(
+    input: &Variable,
+    batch: usize,
+    time: usize,
+    channels: usize,
+    target_dim: usize,
+) -> Variable {
     let full_dim = time * channels;
     let dim = target_dim.min(full_dim);
 
@@ -220,14 +245,17 @@ fn transpose_last_two(input: &Variable, _batch: usize, _time: usize, _channels: 
 /// Compute mean sensor values across time for raw sensor summary.
 fn summarize_sensors(data: &HvacSensorData, _batch: usize) -> Variable {
     // Mean over time dimension (dim=1) for each sensor: (batch, T, 7) → (batch, 7)
-    let elec_mean = data.electrical.mean_dim(1, false);    // (batch, 7)
+    let elec_mean = data.electrical.mean_dim(1, false); // (batch, 7)
     let refrig_mean = data.refrigeration.mean_dim(1, false); // (batch, 7)
-    let water_mean = data.water.mean_dim(1, false);        // (batch, 7)
-    let mech_mean = data.mechanical.mean_dim(1, false);    // (batch, 7)
-    let air_mean = data.airflow.mean_dim(1, false);        // (batch, 7)
+    let water_mean = data.water.mean_dim(1, false); // (batch, 7)
+    let mech_mean = data.mechanical.mean_dim(1, false); // (batch, 7)
+    let air_mean = data.airflow.mean_dim(1, false); // (batch, 7)
 
     // Concat along last dim: (batch, 35)
-    Variable::cat(&[&elec_mean, &refrig_mean, &water_mean, &mech_mean, &air_mean], 1)
+    Variable::cat(
+        &[&elec_mean, &refrig_mean, &water_mean, &mech_mean, &air_mean],
+        1,
+    )
 }
 
 // =============================================================================
@@ -236,8 +264,8 @@ fn summarize_sensors(data: &HvacSensorData, _batch: usize) -> Variable {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::data::SyntheticHvacGenerator;
+    use super::*;
     use axonml_nn::Module;
     use axonml_tensor::Tensor;
 
@@ -246,8 +274,11 @@ mod tests {
         let pipeline = HvacPipeline::new();
         let total = pipeline.total_parameters();
         // 8-model pipeline total
-        assert!(total > 3_000_000 && total < 15_000_000,
-            "Total pipeline has {} params", total);
+        assert!(
+            total > 3_000_000 && total < 15_000_000,
+            "Total pipeline has {} params",
+            total
+        );
     }
 
     #[test]
@@ -280,10 +311,16 @@ mod tests {
     #[test]
     fn test_transpose_last_two() {
         let input = Variable::new(
-            Tensor::from_vec(vec![
-                1.0, 2.0, 3.0,  // t=0: [c0, c1, c2]
-                4.0, 5.0, 6.0,  // t=1
-            ], &[1, 2, 3]).unwrap(), false);
+            Tensor::from_vec(
+                vec![
+                    1.0, 2.0, 3.0, // t=0: [c0, c1, c2]
+                    4.0, 5.0, 6.0, // t=1
+                ],
+                &[1, 2, 3],
+            )
+            .unwrap(),
+            false,
+        );
 
         let output = transpose_last_two(&input, 1, 2, 3);
         let data = output.data().to_vec();

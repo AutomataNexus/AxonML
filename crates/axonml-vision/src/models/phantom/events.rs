@@ -198,10 +198,8 @@ impl EventEncoder {
         self.prev_width = w;
         self.prev_height = h;
 
-        let density_tensor =
-            Tensor::from_vec(density, &[batch, 1, cell_h, cell_w]).unwrap();
-        let event_tensor =
-            Tensor::from_vec(event_mag, &[batch, 1, h, w]).unwrap();
+        let density_tensor = Tensor::from_vec(density, &[batch, 1, cell_h, cell_w]).unwrap();
+        let event_tensor = Tensor::from_vec(event_mag, &[batch, 1, h, w]).unwrap();
 
         (
             Variable::new(density_tensor, false),

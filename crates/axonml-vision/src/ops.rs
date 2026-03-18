@@ -795,11 +795,7 @@ mod tests {
 
     #[test]
     fn test_box_iou_batch() {
-        let b1 = Tensor::from_vec(
-            vec![0.0, 0.0, 10.0, 10.0, 0.0, 0.0, 5.0, 5.0],
-            &[2, 4],
-        )
-        .unwrap();
+        let b1 = Tensor::from_vec(vec![0.0, 0.0, 10.0, 10.0, 0.0, 0.0, 5.0, 5.0], &[2, 4]).unwrap();
         let b2 = Tensor::from_vec(vec![0.0, 0.0, 10.0, 10.0], &[1, 4]).unwrap();
         let iou = box_iou(&b1, &b2);
         assert_eq!(iou.shape(), &[2, 1]);
@@ -827,9 +823,7 @@ mod tests {
     fn test_nms_basic() {
         let boxes = Tensor::from_vec(
             vec![
-                0.0, 0.0, 10.0, 10.0,
-                1.0, 1.0, 11.0, 11.0,
-                50.0, 50.0, 60.0, 60.0,
+                0.0, 0.0, 10.0, 10.0, 1.0, 1.0, 11.0, 11.0, 50.0, 50.0, 60.0, 60.0,
             ],
             &[3, 4],
         )
@@ -846,9 +840,7 @@ mod tests {
     fn test_nms_no_suppression() {
         let boxes = Tensor::from_vec(
             vec![
-                0.0, 0.0, 5.0, 5.0,
-                10.0, 10.0, 15.0, 15.0,
-                20.0, 20.0, 25.0, 25.0,
+                0.0, 0.0, 5.0, 5.0, 10.0, 10.0, 15.0, 15.0, 20.0, 20.0, 25.0, 25.0,
             ],
             &[3, 4],
         )
@@ -910,11 +902,8 @@ mod tests {
 
     #[test]
     fn test_roi_align() {
-        let features = Tensor::from_vec(
-            (0..16).map(|i| i as f32).collect(),
-            &[1, 1, 4, 4],
-        )
-        .unwrap();
+        let features =
+            Tensor::from_vec((0..16).map(|i| i as f32).collect(), &[1, 1, 4, 4]).unwrap();
 
         let rois = Tensor::from_vec(vec![0.0, 0.0, 0.0, 4.0, 4.0], &[1, 5]).unwrap();
         let output = roi_align(&features, &rois, (2, 2), 1.0);
@@ -934,14 +923,8 @@ mod tests {
 
     #[test]
     fn test_batched_nms() {
-        let boxes = Tensor::from_vec(
-            vec![
-                0.0, 0.0, 10.0, 10.0,
-                1.0, 1.0, 11.0, 11.0,
-            ],
-            &[2, 4],
-        )
-        .unwrap();
+        let boxes =
+            Tensor::from_vec(vec![0.0, 0.0, 10.0, 10.0, 1.0, 1.0, 11.0, 11.0], &[2, 4]).unwrap();
         let scores = Tensor::from_vec(vec![0.9, 0.8], &[2]).unwrap();
         let classes = Tensor::from_vec(vec![0.0, 1.0], &[2]).unwrap();
 

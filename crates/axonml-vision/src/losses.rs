@@ -62,12 +62,17 @@ impl FocalLoss {
             Tensor::from_vec(vec![1.0; pred_logits.numel()], &pred_logits.shape()).unwrap(),
             false,
         );
-        let p_t = p.mul_var(targets).add_var(&one.sub_var(&p).mul_var(&one.sub_var(targets)));
+        let p_t = p
+            .mul_var(targets)
+            .add_var(&one.sub_var(&p).mul_var(&one.sub_var(targets)));
 
         // alpha_t = alpha * t + (1-alpha) * (1-t)
-        let alpha_t_data: Vec<f32> = targets.data().to_vec().iter().map(|&t| {
-            self.alpha * t + (1.0 - self.alpha) * (1.0 - t)
-        }).collect();
+        let alpha_t_data: Vec<f32> = targets
+            .data()
+            .to_vec()
+            .iter()
+            .map(|&t| self.alpha * t + (1.0 - self.alpha) * (1.0 - t))
+            .collect();
         let alpha_t = Variable::new(
             Tensor::from_vec(alpha_t_data, &targets.shape()).unwrap(),
             false,
@@ -172,7 +177,11 @@ impl GIoULoss {
         // Scale the proxy loss to approximate GIoU magnitude
         let giou_loss = 1.0 - giou_sum / n as f32;
         let proxy_val = l1_proxy.data().to_vec()[0];
-        let scale = if proxy_val > 1e-8 { giou_loss / proxy_val } else { 1.0 };
+        let scale = if proxy_val > 1e-8 {
+            giou_loss / proxy_val
+        } else {
+            1.0
+        };
 
         l1_proxy.mul_scalar(scale)
     }
@@ -198,11 +207,7 @@ impl UncertaintyLoss {
     /// - `target`: Ground truth values [N, D].
     ///
     /// Returns scalar loss.
-    pub fn compute(
-        pred_mean: &Variable,
-        pred_log_var: &Variable,
-        target: &Variable,
-    ) -> Variable {
+    pub fn compute(pred_mean: &Variable, pred_log_var: &Variable, target: &Variable) -> Variable {
         // diff = (pred - target)^2
         let diff_sq = pred_mean.sub_var(target).pow(2.0);
 
@@ -228,8 +233,16 @@ impl UncertaintyLoss {
 ///
 /// where (l, t, r, b) are distances from the point to box edges.
 pub fn compute_centerness(l: f32, t: f32, r: f32, b: f32) -> f32 {
-    let lr = if l.max(r) > 0.0 { l.min(r) / l.max(r) } else { 0.0 };
-    let tb = if t.max(b) > 0.0 { t.min(b) / t.max(b) } else { 0.0 };
+    let lr = if l.max(r) > 0.0 {
+        l.min(r) / l.max(r)
+    } else {
+        0.0
+    };
+    let tb = if t.max(b) > 0.0 {
+        t.min(b) / t.max(b)
+    } else {
+        0.0
+    };
     (lr * tb).sqrt()
 }
 
@@ -261,14 +274,8 @@ mod tests {
 
     #[test]
     fn test_focal_loss_gradient() {
-        let pred = Variable::new(
-            Tensor::from_vec(vec![0.5, -0.5], &[2]).unwrap(),
-            true,
-        );
-        let target = Variable::new(
-            Tensor::from_vec(vec![1.0, 0.0], &[2]).unwrap(),
-            false,
-        );
+        let pred = Variable::new(Tensor::from_vec(vec![0.5, -0.5], &[2]).unwrap(), true);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[2]).unwrap(), false);
 
         let loss = FocalLoss::new().compute(&pred, &target);
         loss.backward();
@@ -291,7 +298,10 @@ mod tests {
         let loss = GIoULoss::compute(&boxes, &target);
         let val = loss.data().to_vec()[0];
         // Identical boxes → GIoU = 1.0 → loss ≈ 0.0
-        assert!(val < 0.01, "Identical boxes should have near-zero loss, got {val}");
+        assert!(
+            val < 0.01,
+            "Identical boxes should have near-zero loss, got {val}"
+        );
     }
 
     #[test]
@@ -308,7 +318,10 @@ mod tests {
         let loss = GIoULoss::compute(&pred, &target);
         let val = loss.data().to_vec()[0];
         // Disjoint boxes → GIoU < 0 → loss > 1.0
-        assert!(val > 0.5, "Disjoint boxes should have large loss, got {val}");
+        assert!(
+            val > 0.5,
+            "Disjoint boxes should have large loss, got {val}"
+        );
     }
 
     #[test]

@@ -17,7 +17,7 @@
 use axonml_nn::Parameter;
 use axonml_tensor::Tensor;
 
-use crate::optimizer::{Optimizer, ParamState};
+use crate::optimizer::Optimizer;
 
 // =============================================================================
 // SGD
@@ -51,8 +51,9 @@ pub struct SGD {
     nesterov: bool,
     /// Dampening factor for momentum.
     dampening: f32,
-    /// Per-parameter state (momentum buffers).
-    state: Vec<ParamState>,
+    /// Per-parameter Tensor-based momentum buffers (GPU or CPU).
+    /// Lazily initialized on first step when momentum != 0.
+    momentum_buffers: Vec<Option<Tensor<f32>>>,
 }
 
 impl SGD {
@@ -67,7 +68,7 @@ impl SGD {
             weight_decay: 0.0,
             nesterov: false,
             dampening: 0.0,
-            state: vec![ParamState::new(); num_params],
+            momentum_buffers: vec![None; num_params],
         }
     }
 
@@ -82,7 +83,7 @@ impl SGD {
             weight_decay: 0.0,
             nesterov: false,
             dampening: 0.0,
-            state: vec![ParamState::new(); num_params],
+            momentum_buffers: vec![None; num_params],
         }
     }
 
@@ -104,7 +105,7 @@ impl SGD {
             weight_decay,
             nesterov,
             dampening,
-            state: vec![ParamState::new(); num_params],
+            momentum_buffers: vec![None; num_params],
         }
     }
 
@@ -150,63 +151,52 @@ impl Optimizer for SGD {
             };
 
             let param_data = param.data();
-            let mut param_vec = param_data.to_vec();
-            let mut grad_vec = grad.to_vec();
 
-            // Apply weight decay — fused into grad_vec, no extra allocation
-            if self.weight_decay != 0.0 {
-                for (g, p) in grad_vec.iter_mut().zip(param_vec.iter()) {
-                    *g += self.weight_decay * p;
-                }
-            }
+            // ============================================================
+            // Tensor-op path: works on both CPU and GPU without to_vec()
+            // All ops (add, mul, mul_scalar, sub) dispatch to CUDA when
+            // the tensors are GPU-resident.
+            // ============================================================
+
+            // Apply weight decay: d = grad + weight_decay * param
+            let d = if self.weight_decay != 0.0 {
+                grad.add(&param_data.mul_scalar(self.weight_decay)).unwrap()
+            } else {
+                grad.clone()
+            };
 
             // Apply momentum
-            if self.momentum != 0.0 {
-                let state = &mut self.state[i];
+            let update_dir = if self.momentum != 0.0 {
+                let buf = &mut self.momentum_buffers[i];
 
-                if state.momentum_buffer.is_none() {
-                    // First iteration: initialize momentum buffer
-                    state.init_momentum(grad_vec.len());
-                    let buf = state.momentum_buffer.as_mut().unwrap();
-                    buf.copy_from_slice(&grad_vec);
+                if buf.is_none() {
+                    // First iteration: momentum buffer = d
+                    *buf = Some(d.clone());
                 } else {
-                    // Subsequent iterations: update momentum buffer in place
-                    let buf = state.momentum_buffer.as_mut().unwrap();
-                    for (b, g) in buf.iter_mut().zip(grad_vec.iter()) {
-                        *b = self.momentum * *b + (1.0 - self.dampening) * *g;
-                    }
+                    // buf = momentum * buf + (1 - dampening) * d
+                    let old = buf.as_ref().unwrap();
+                    let new_buf = old
+                        .mul_scalar(self.momentum)
+                        .add(&d.mul_scalar(1.0 - self.dampening))
+                        .unwrap();
+                    *buf = Some(new_buf);
                 }
 
-                let buf = state.momentum_buffer.as_ref().unwrap();
+                let buf_ref = buf.as_ref().unwrap();
 
                 if self.nesterov {
-                    // Nesterov: reuse grad_vec instead of allocating new Vec
-                    for (g, b) in grad_vec.iter_mut().zip(buf.iter()) {
-                        *g += self.momentum * *b;
-                    }
-                    // grad_vec now contains momentum * buf + grad (original grad was already in grad_vec)
-                    // Wait — nesterov formula: effective_grad = momentum * buf + grad
-                    // grad_vec was modified by weight_decay above, so it holds the current grad.
-                    // We need: momentum * buf[i] + grad_vec[i]
-                    // The loop above does: grad_vec[i] = grad_vec[i] + momentum * buf[i] — correct!
+                    // effective = d + momentum * buf
+                    d.add(&buf_ref.mul_scalar(self.momentum)).unwrap()
                 } else {
-                    // Standard momentum: copy buf into grad_vec (reuse allocation)
-                    grad_vec.copy_from_slice(buf);
+                    buf_ref.clone()
                 }
-            }
+            } else {
+                d
+            };
 
-            // Update parameters in place: param = param - lr * grad
-            let lr = self.lr;
-            for (p, g) in param_vec.iter_mut().zip(grad_vec.iter()) {
-                *p -= lr * g;
-            }
-
-            let mut update = Tensor::from_vec(param_vec, param_data.shape()).unwrap();
-            let device = param_data.device();
-            if device.is_gpu() {
-                update = update.to_device(device).unwrap();
-            }
-            param.update_data(update);
+            // param = param - lr * update_dir
+            let new_param = param_data.sub(&update_dir.mul_scalar(self.lr)).unwrap();
+            param.update_data(new_param);
         }
     }
 

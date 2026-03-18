@@ -51,8 +51,7 @@ impl std::fmt::Debug for CheckpointBackward {
 impl GradientFunction for CheckpointBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         // Re-run the forward pass with gradients enabled
-        let input_for_recompute =
-            Variable::new(self.saved_input.data(), true);
+        let input_for_recompute = Variable::new(self.saved_input.data(), true);
 
         let recomputed_output = enable_grad(|| (self.func)(&input_for_recompute));
 

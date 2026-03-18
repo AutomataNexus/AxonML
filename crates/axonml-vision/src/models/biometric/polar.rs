@@ -231,10 +231,7 @@ pub fn normalized_polar_unwrap(image: &Variable, config: &PolarUnwrapConfig) -> 
         }
     }
 
-    Variable::new(
-        Tensor::from_vec(data, &[batch, 1, rb, ab]).unwrap(),
-        false,
-    )
+    Variable::new(Tensor::from_vec(data, &[batch, 1, rb, ab]).unwrap(), false)
 }
 
 // =============================================================================
@@ -317,7 +314,8 @@ pub fn radial_contrast(strip: &Variable) -> f32 {
         return 0.0;
     }
     let mean: f32 = profile.iter().sum::<f32>() / profile.len() as f32;
-    let var: f32 = profile.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / profile.len() as f32;
+    let var: f32 =
+        profile.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / profile.len() as f32;
     var.sqrt()
 }
 
@@ -389,7 +387,10 @@ pub fn assess_polar_quality(strip: &Variable) -> f32 {
 /// - Coarse: [B, 1, 8, 64] — captures global iris structure
 /// - Medium: [B, 1, 16, 128] — captures main crypts and furrows
 /// - Fine: [B, 1, 32, 256] — captures detailed texture
-pub fn multi_scale_unwrap(image: &Variable, config: &PolarUnwrapConfig) -> (Variable, Variable, Variable) {
+pub fn multi_scale_unwrap(
+    image: &Variable,
+    config: &PolarUnwrapConfig,
+) -> (Variable, Variable, Variable) {
     let coarse_config = PolarUnwrapConfig {
         radial_bins: 8,
         angular_bins: 64,
@@ -513,13 +514,20 @@ mod tests {
         let data = polar.data().to_vec();
         // Uniform input should produce approximately uniform output
         let mean: f32 = data.iter().sum::<f32>() / data.len() as f32;
-        assert!((mean - 0.7).abs() < 0.2, "Mean should be near 0.7: {}", mean);
+        assert!(
+            (mean - 0.7).abs() < 0.2,
+            "Mean should be near 0.7: {}",
+            mean
+        );
     }
 
     #[test]
     fn test_circular_shift_identity() {
         let data = vec![1.0, 2.0, 3.0, 4.0];
-        let strip = Variable::new(Tensor::from_vec(data.clone(), &[1, 1, 1, 4]).unwrap(), false);
+        let strip = Variable::new(
+            Tensor::from_vec(data.clone(), &[1, 1, 1, 4]).unwrap(),
+            false,
+        );
         let shifted = circular_shift(&strip, 0);
         assert_eq!(shifted.data().to_vec(), data);
     }
@@ -535,7 +543,10 @@ mod tests {
     #[test]
     fn test_circular_shift_full_cycle() {
         let data = vec![1.0, 2.0, 3.0, 4.0];
-        let strip = Variable::new(Tensor::from_vec(data.clone(), &[1, 1, 1, 4]).unwrap(), false);
+        let strip = Variable::new(
+            Tensor::from_vec(data.clone(), &[1, 1, 1, 4]).unwrap(),
+            false,
+        );
         let shifted = circular_shift(&strip, 4);
         assert_eq!(shifted.data().to_vec(), data);
     }
@@ -581,7 +592,11 @@ mod tests {
         let strip = make_strip(0.5);
         let hist = angular_histogram(&strip, 16);
         let total: f32 = hist.iter().sum();
-        assert!((total - 1.0).abs() < 0.01, "Histogram should sum to 1: {}", total);
+        assert!(
+            (total - 1.0).abs() < 0.01,
+            "Histogram should sum to 1: {}",
+            total
+        );
     }
 
     #[test]
@@ -614,7 +629,11 @@ mod tests {
     fn test_radial_contrast_uniform() {
         let strip = make_strip(0.5);
         let contrast = radial_contrast(&strip);
-        assert!(contrast < 0.01, "Uniform strip should have low contrast: {}", contrast);
+        assert!(
+            contrast < 0.01,
+            "Uniform strip should have low contrast: {}",
+            contrast
+        );
     }
 
     #[test]
@@ -630,7 +649,11 @@ mod tests {
         }
         let strip = Variable::new(Tensor::from_vec(data, &[1, 1, rb, ab]).unwrap(), false);
         let contrast = radial_contrast(&strip);
-        assert!(contrast > 0.1, "Gradient should have high contrast: {}", contrast);
+        assert!(
+            contrast > 0.1,
+            "Gradient should have high contrast: {}",
+            contrast
+        );
     }
 
     #[test]
@@ -641,19 +664,28 @@ mod tests {
         let mut data = vec![0.0f32; rb * ab];
         for ri in 0..rb {
             for ai in 0..ab {
-                data[ri * ab + ai] = 0.3 + 0.4 * ((ai as f32 * 0.1).sin() * (ri as f32 * 0.2).cos());
+                data[ri * ab + ai] =
+                    0.3 + 0.4 * ((ai as f32 * 0.1).sin() * (ri as f32 * 0.2).cos());
             }
         }
         let strip = Variable::new(Tensor::from_vec(data, &[1, 1, rb, ab]).unwrap(), false);
         let quality = assess_polar_quality(&strip);
-        assert!(quality > 0.0 && quality <= 1.0, "Quality out of range: {}", quality);
+        assert!(
+            quality > 0.0 && quality <= 1.0,
+            "Quality out of range: {}",
+            quality
+        );
     }
 
     #[test]
     fn test_assess_polar_quality_blank() {
         let strip = make_strip(0.0);
         let quality = assess_polar_quality(&strip);
-        assert!(quality < 0.5, "Blank strip should have low quality: {}", quality);
+        assert!(
+            quality < 0.5,
+            "Blank strip should have low quality: {}",
+            quality
+        );
     }
 
     #[test]
@@ -695,14 +727,22 @@ mod tests {
         let strip_a = Variable::new(Tensor::from_vec(data, &[1, 1, rb, ab]).unwrap(), false);
         let strip_b = circular_shift(&strip_a, 5);
         let (shift, _corr) = estimate_rotation(&strip_a, &strip_b, 16);
-        assert!((shift - 5).abs() <= 1, "Should detect shift of ~5, got {}", shift);
+        assert!(
+            (shift - 5).abs() <= 1,
+            "Should detect shift of ~5, got {}",
+            shift
+        );
     }
 
     #[test]
     fn test_bilinear_sample_center() {
         let data = vec![0.0, 0.0, 0.0, 1.0]; // 2x2 image, bottom-right = 1
         let val = bilinear_sample(&data, 0, 2, 2, 0.5, 0.5);
-        assert!((val - 0.25).abs() < 0.01, "Center of 2x2 should be 0.25: {}", val);
+        assert!(
+            (val - 0.25).abs() < 0.01,
+            "Center of 2x2 should be 0.25: {}",
+            val
+        );
     }
 
     #[test]

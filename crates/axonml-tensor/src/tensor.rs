@@ -52,14 +52,9 @@ mod cuda_accel {
         // cuBLAS GEMM: C(m,n) = A(m,k) @ B(k,n) in row-major
         // In column-major terms: C^T(n,m) = B^T(n,k) @ A^T(k,m)
         cuda.gemm_f32(
-            false, false,
-            n, m, k,
-            1.0,
-            &b_gpu, n,
-            &a_gpu, k,
-            0.0,
-            &mut c_gpu, n,
-        ).ok()?;
+            false, false, n, m, k, 1.0, &b_gpu, n, &a_gpu, k, 0.0, &mut c_gpu, n,
+        )
+        .ok()?;
 
         cuda.dtoh_copy(&c_gpu).ok()
     }
@@ -769,11 +764,15 @@ impl<T: Numeric> Tensor<T> {
 
         for t in &tensors[1..] {
             if t.ndim() != ndim {
-                return Err(Error::invalid_operation("cat: all tensors must have same ndim"));
+                return Err(Error::invalid_operation(
+                    "cat: all tensors must have same ndim",
+                ));
             }
             for d in 0..ndim {
                 if d != dim && t.shape[d] != tensors[0].shape[d] {
-                    return Err(Error::invalid_operation("cat: shapes must match on non-cat dims"));
+                    return Err(Error::invalid_operation(
+                        "cat: shapes must match on non-cat dims",
+                    ));
                 }
             }
         }
@@ -794,8 +793,8 @@ impl<T: Numeric> Tensor<T> {
             for outer in 0..outer_size {
                 for d in 0..t_dim_size {
                     let src_base = outer * t_dim_size * inner_size + d * inner_size;
-                    let dst_base = outer * total_dim_size * inner_size
-                        + (dim_offset + d) * inner_size;
+                    let dst_base =
+                        outer * total_dim_size * inner_size + (dim_offset + d) * inner_size;
                     result[dst_base..dst_base + inner_size]
                         .copy_from_slice(&t_data[src_base..src_base + inner_size]);
                 }
@@ -1109,9 +1108,17 @@ impl<T: Float> Tensor<T> {
         let mean = self.mean_dim(dim, true);
         let sq = self.mul(self).unwrap_or_else(|_| self.clone());
         let mean_sq = sq.mean_dim(dim, keepdim);
-        let mean_keepdim = if keepdim { mean.clone() } else { self.mean_dim(dim, keepdim) };
-        let mean_squared = mean_keepdim.mul(&mean_keepdim).unwrap_or_else(|_| mean_keepdim.clone());
-        mean_sq.sub(&mean_squared).unwrap_or_else(|_| mean_sq.clone())
+        let mean_keepdim = if keepdim {
+            mean.clone()
+        } else {
+            self.mean_dim(dim, keepdim)
+        };
+        let mean_squared = mean_keepdim
+            .mul(&mean_keepdim)
+            .unwrap_or_else(|_| mean_keepdim.clone());
+        mean_sq
+            .sub(&mean_squared)
+            .unwrap_or_else(|_| mean_sq.clone())
     }
 
     /// Broadcasts tensor to a new shape.
@@ -1125,7 +1132,13 @@ impl<T: Float> Tensor<T> {
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             let self_f32 = unsafe { gpu_ref(self) };
-            return unsafe { gpu_into(self_f32.broadcast_to_cuda(shape).expect("CUDA broadcast_to failed")) };
+            return unsafe {
+                gpu_into(
+                    self_f32
+                        .broadcast_to_cuda(shape)
+                        .expect("CUDA broadcast_to failed"),
+                )
+            };
         }
 
         let result_shape = broadcast_shape(&self.shape, shape).unwrap_or_else(|_| shape.into());
@@ -1240,9 +1253,21 @@ impl<T: Numeric> Tensor<T> {
                     }
                 }
                 // Mixed device — move to GPU, then operate
-                let target_device = if self_gpu { self.device() } else { other.device() };
-                let a_gpu = if self_gpu { self.clone() } else { self.to_device(target_device)? };
-                let b_gpu = if other_gpu { other.clone() } else { other.to_device(target_device)? };
+                let target_device = if self_gpu {
+                    self.device()
+                } else {
+                    other.device()
+                };
+                let a_gpu = if self_gpu {
+                    self.clone()
+                } else {
+                    self.to_device(target_device)?
+                };
+                let b_gpu = if other_gpu {
+                    other.clone()
+                } else {
+                    other.to_device(target_device)?
+                };
                 return a_gpu.add(&b_gpu);
             }
         }
@@ -1282,9 +1307,21 @@ impl<T: Numeric> Tensor<T> {
                         return Ok(unsafe { gpu_into(s.broadcast_sub_cuda(o)?) });
                     }
                 }
-                let target = if self_gpu { self.device() } else { other.device() };
-                let a_gpu = if self_gpu { self.clone() } else { self.to_device(target)? };
-                let b_gpu = if other_gpu { other.clone() } else { other.to_device(target)? };
+                let target = if self_gpu {
+                    self.device()
+                } else {
+                    other.device()
+                };
+                let a_gpu = if self_gpu {
+                    self.clone()
+                } else {
+                    self.to_device(target)?
+                };
+                let b_gpu = if other_gpu {
+                    other.clone()
+                } else {
+                    other.to_device(target)?
+                };
                 return a_gpu.sub(&b_gpu);
             }
         }
@@ -1324,9 +1361,21 @@ impl<T: Numeric> Tensor<T> {
                         return Ok(unsafe { gpu_into(s.broadcast_mul_cuda(o)?) });
                     }
                 }
-                let target = if self_gpu { self.device() } else { other.device() };
-                let a_gpu = if self_gpu { self.clone() } else { self.to_device(target)? };
-                let b_gpu = if other_gpu { other.clone() } else { other.to_device(target)? };
+                let target = if self_gpu {
+                    self.device()
+                } else {
+                    other.device()
+                };
+                let a_gpu = if self_gpu {
+                    self.clone()
+                } else {
+                    self.to_device(target)?
+                };
+                let b_gpu = if other_gpu {
+                    other.clone()
+                } else {
+                    other.to_device(target)?
+                };
                 return a_gpu.mul(&b_gpu);
             }
         }
@@ -1366,9 +1415,21 @@ impl<T: Numeric> Tensor<T> {
                         return Ok(unsafe { gpu_into(s.broadcast_div_cuda(o)?) });
                     }
                 }
-                let target = if self_gpu { self.device() } else { other.device() };
-                let a_gpu = if self_gpu { self.clone() } else { self.to_device(target)? };
-                let b_gpu = if other_gpu { other.clone() } else { other.to_device(target)? };
+                let target = if self_gpu {
+                    self.device()
+                } else {
+                    other.device()
+                };
+                let a_gpu = if self_gpu {
+                    self.clone()
+                } else {
+                    self.to_device(target)?
+                };
+                let b_gpu = if other_gpu {
+                    other.clone()
+                } else {
+                    other.to_device(target)?
+                };
                 return a_gpu.div(&b_gpu);
             }
         }
@@ -1524,9 +1585,7 @@ impl<T: Numeric> Tensor<T> {
         #[cfg(feature = "cuda")]
         {
             let flops = m * n * k1;
-            if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>()
-                && flops >= 4_000_000
-            {
+            if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() && flops >= 4_000_000 {
                 let a_f32: &[f32] = unsafe { std::mem::transmute(a_data.as_slice()) };
                 let b_f32: &[f32] = unsafe { std::mem::transmute(b_data.as_slice()) };
                 let mut gpu_ok = true;

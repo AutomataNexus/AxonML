@@ -227,10 +227,7 @@ impl TrainingMonitor {
         }
 
         // Compute max gradient norm across all parameters
-        let max_grad_norm = grad_norms
-            .iter()
-            .map(|(_, n)| *n)
-            .fold(0.0_f32, f32::max);
+        let max_grad_norm = grad_norms.iter().map(|(_, n)| *n).fold(0.0_f32, f32::max);
 
         self.grad_norm_history.push(max_grad_norm);
         if self.grad_norm_history.len() > self.config.max_history {
@@ -245,38 +242,66 @@ impl TrainingMonitor {
         // --- NaN/Inf checks ---
         if self.config.nan_check {
             if loss.is_nan() {
-                self.emit_alert(step, AlertSeverity::Critical, AlertKind::NaNDetected,
-                    "NaN detected in loss value".to_string());
+                self.emit_alert(
+                    step,
+                    AlertSeverity::Critical,
+                    AlertKind::NaNDetected,
+                    "NaN detected in loss value".to_string(),
+                );
             } else if loss.is_infinite() {
-                self.emit_alert(step, AlertSeverity::Critical, AlertKind::InfDetected,
-                    "Infinity detected in loss value".to_string());
+                self.emit_alert(
+                    step,
+                    AlertSeverity::Critical,
+                    AlertKind::InfDetected,
+                    "Infinity detected in loss value".to_string(),
+                );
             }
 
             for (name, norm) in grad_norms {
                 if norm.is_nan() {
-                    self.emit_alert(step, AlertSeverity::Critical, AlertKind::NaNDetected,
-                        format!("NaN detected in gradient norm for '{}'", name));
+                    self.emit_alert(
+                        step,
+                        AlertSeverity::Critical,
+                        AlertKind::NaNDetected,
+                        format!("NaN detected in gradient norm for '{}'", name),
+                    );
                 } else if norm.is_infinite() {
-                    self.emit_alert(step, AlertSeverity::Critical, AlertKind::InfDetected,
-                        format!("Infinity detected in gradient norm for '{}'", name));
+                    self.emit_alert(
+                        step,
+                        AlertSeverity::Critical,
+                        AlertKind::InfDetected,
+                        format!("Infinity detected in gradient norm for '{}'", name),
+                    );
                 }
             }
         }
 
         // --- Gradient explosion ---
         if max_grad_norm > self.config.grad_norm_threshold && max_grad_norm.is_finite() {
-            self.emit_alert(step, AlertSeverity::Warning, AlertKind::GradientExplosion,
-                format!("Gradient norm {:.4} exceeds threshold {:.4}",
-                    max_grad_norm, self.config.grad_norm_threshold));
+            self.emit_alert(
+                step,
+                AlertSeverity::Warning,
+                AlertKind::GradientExplosion,
+                format!(
+                    "Gradient norm {:.4} exceeds threshold {:.4}",
+                    max_grad_norm, self.config.grad_norm_threshold
+                ),
+            );
         }
 
         // --- Gradient vanishing ---
         if max_grad_norm < 1e-8 && max_grad_norm.is_finite() {
             self.vanishing_streak += 1;
             if self.vanishing_streak >= 10 {
-                self.emit_alert(step, AlertSeverity::Warning, AlertKind::GradientVanishing,
-                    format!("Gradient norms near zero for {} consecutive steps",
-                        self.vanishing_streak));
+                self.emit_alert(
+                    step,
+                    AlertSeverity::Warning,
+                    AlertKind::GradientVanishing,
+                    format!(
+                        "Gradient norms near zero for {} consecutive steps",
+                        self.vanishing_streak
+                    ),
+                );
             }
         } else {
             self.vanishing_streak = 0;
@@ -297,22 +322,39 @@ impl TrainingMonitor {
             }
         }
         for (name, count) in new_dead_alerts {
-            self.emit_alert(step, AlertSeverity::Warning, AlertKind::DeadNeuron,
-                format!("Parameter '{}' has had zero gradient for {} steps (dead neuron)",
-                    name, count));
+            self.emit_alert(
+                step,
+                AlertSeverity::Warning,
+                AlertKind::DeadNeuron,
+                format!(
+                    "Parameter '{}' has had zero gradient for {} steps (dead neuron)",
+                    name, count
+                ),
+            );
         }
 
         // --- Loss divergence ---
         if self.loss_history.len() >= self.config.window_size && loss.is_finite() {
-            let window_start = self.loss_history.len().saturating_sub(self.config.window_size);
+            let window_start = self
+                .loss_history
+                .len()
+                .saturating_sub(self.config.window_size);
             let window = &self.loss_history[window_start..self.loss_history.len() - 1];
             let finite_vals: Vec<f32> = window.iter().copied().filter(|v| v.is_finite()).collect();
             if !finite_vals.is_empty() {
                 let avg: f32 = finite_vals.iter().sum::<f32>() / finite_vals.len() as f32;
                 if avg > 0.0 && loss > avg * self.config.loss_divergence_factor {
-                    self.emit_alert(step, AlertSeverity::Warning, AlertKind::LossDivergence,
-                        format!("Loss {:.6} diverged from moving average {:.6} (factor {:.1}x)",
-                            loss, avg, loss / avg));
+                    self.emit_alert(
+                        step,
+                        AlertSeverity::Warning,
+                        AlertKind::LossDivergence,
+                        format!(
+                            "Loss {:.6} diverged from moving average {:.6} (factor {:.1}x)",
+                            loss,
+                            avg,
+                            loss / avg
+                        ),
+                    );
                 }
             }
         }
@@ -323,13 +365,22 @@ impl TrainingMonitor {
             let window = &self.loss_history[window_start..];
             let finite_vals: Vec<f32> = window.iter().copied().filter(|v| v.is_finite()).collect();
             if finite_vals.len() >= 2 {
-                let max_val = finite_vals.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                let max_val = finite_vals
+                    .iter()
+                    .copied()
+                    .fold(f32::NEG_INFINITY, f32::max);
                 let min_val = finite_vals.iter().copied().fold(f32::INFINITY, f32::min);
                 let range = max_val - min_val;
                 if range < self.config.convergence_threshold {
-                    self.emit_alert(step, AlertSeverity::Info, AlertKind::Converged,
-                        format!("Training converged: loss range {:.2e} over last {} steps",
-                            range, self.config.window_size));
+                    self.emit_alert(
+                        step,
+                        AlertSeverity::Info,
+                        AlertKind::Converged,
+                        format!(
+                            "Training converged: loss range {:.2e} over last {} steps",
+                            range, self.config.window_size
+                        ),
+                    );
                 }
             }
         }
@@ -344,12 +395,17 @@ impl TrainingMonitor {
         let current_loss = self.loss_history.last().copied().unwrap_or(f32::NAN);
 
         // Count dead neurons
-        let dead_neurons = self.zero_grad_counts.values()
+        let dead_neurons = self
+            .zero_grad_counts
+            .values()
             .filter(|c| **c >= self.config.dead_neuron_threshold)
             .count();
 
         // Determine overall health
-        let has_critical = self.alerts.iter().any(|a| a.severity == AlertSeverity::Critical);
+        let has_critical = self
+            .alerts
+            .iter()
+            .any(|a| a.severity == AlertSeverity::Critical);
         let is_healthy = !has_critical
             && trend != LossTrend::Increasing
             && !current_loss.is_nan()
@@ -357,7 +413,9 @@ impl TrainingMonitor {
 
         // Collect recent alerts (last window_size steps)
         let min_step = self.step_count.saturating_sub(self.config.window_size);
-        let active_alerts: Vec<TrainingAlert> = self.alerts.iter()
+        let active_alerts: Vec<TrainingAlert> = self
+            .alerts
+            .iter()
             .filter(|a| a.step > min_step)
             .cloned()
             .collect();
@@ -422,11 +480,17 @@ impl TrainingMonitor {
 
         // Check for oscillation: high variance in recent window
         let recent_mean = recent_avg;
-        let recent_var = recent_finite.iter()
+        let recent_var = recent_finite
+            .iter()
             .map(|v| (v - recent_mean).powi(2))
-            .sum::<f32>() / recent_finite.len() as f32;
+            .sum::<f32>()
+            / recent_finite.len() as f32;
         let recent_std = recent_var.sqrt();
-        let cv = if recent_mean.abs() > 1e-12 { recent_std / recent_mean.abs() } else { 0.0 };
+        let cv = if recent_mean.abs() > 1e-12 {
+            recent_std / recent_mean.abs()
+        } else {
+            0.0
+        };
 
         if ratio < 0.95 {
             LossTrend::Decreasing
@@ -538,15 +602,37 @@ impl TrainingMonitor {
         let (mean_gn, std_gn, max_gn) = self.grad_norm_stats();
 
         let mut s = String::new();
-        s.push_str(&format!("=== Training Health Report (step {}) ===\n", report.step));
-        s.push_str(&format!("Status: {}\n", if report.is_healthy { "HEALTHY" } else { "UNHEALTHY" }));
-        s.push_str(&format!("Loss: {:.6} (trend: {:?})\n", report.current_loss, report.loss_trend));
-        s.push_str(&format!("Grad norms: mean={:.4}, std={:.4}, max={:.4}\n", mean_gn, std_gn, max_gn));
-        s.push_str(&format!("Convergence: {:.2}%\n", report.convergence_score * 100.0));
+        s.push_str(&format!(
+            "=== Training Health Report (step {}) ===\n",
+            report.step
+        ));
+        s.push_str(&format!(
+            "Status: {}\n",
+            if report.is_healthy {
+                "HEALTHY"
+            } else {
+                "UNHEALTHY"
+            }
+        ));
+        s.push_str(&format!(
+            "Loss: {:.6} (trend: {:?})\n",
+            report.current_loss, report.loss_trend
+        ));
+        s.push_str(&format!(
+            "Grad norms: mean={:.4}, std={:.4}, max={:.4}\n",
+            mean_gn, std_gn, max_gn
+        ));
+        s.push_str(&format!(
+            "Convergence: {:.2}%\n",
+            report.convergence_score * 100.0
+        ));
         s.push_str(&format!("Dead neurons: {}\n", report.dead_neurons));
 
         if !report.active_alerts.is_empty() {
-            s.push_str(&format!("Active alerts ({}):\n", report.active_alerts.len()));
+            s.push_str(&format!(
+                "Active alerts ({}):\n",
+                report.active_alerts.len()
+            ));
             for alert in &report.active_alerts {
                 s.push_str(&format!("  {}\n", alert));
             }
@@ -568,7 +654,13 @@ impl TrainingMonitor {
         // in record_step for each history vector individually.
     }
 
-    fn emit_alert(&mut self, step: usize, severity: AlertSeverity, kind: AlertKind, message: String) {
+    fn emit_alert(
+        &mut self,
+        step: usize,
+        severity: AlertSeverity,
+        kind: AlertKind,
+        message: String,
+    ) {
         self.alerts.push(TrainingAlert {
             step,
             severity,
@@ -672,7 +764,9 @@ mod tests {
         let mut monitor = TrainingMonitor::new();
         monitor.record_step(0.5, &[("w1", f32::NAN)], 0.001);
 
-        let nan_alerts: Vec<_> = monitor.alerts.iter()
+        let nan_alerts: Vec<_> = monitor
+            .alerts
+            .iter()
             .filter(|a| a.kind == AlertKind::NaNDetected)
             .collect();
         assert_eq!(nan_alerts.len(), 1);
@@ -700,7 +794,9 @@ mod tests {
         let mut monitor = TrainingMonitor::new();
         monitor.record_step(0.5, &[("w1", 200.0)], 0.001);
 
-        let explosion_alerts: Vec<_> = monitor.alerts.iter()
+        let explosion_alerts: Vec<_> = monitor
+            .alerts
+            .iter()
             .filter(|a| a.kind == AlertKind::GradientExplosion)
             .collect();
         assert_eq!(explosion_alerts.len(), 1);
@@ -720,7 +816,9 @@ mod tests {
             monitor.record_step(0.5, &[("w1", 1e-10)], 0.001);
         }
 
-        let vanishing_alerts: Vec<_> = monitor.alerts.iter()
+        let vanishing_alerts: Vec<_> = monitor
+            .alerts
+            .iter()
             .filter(|a| a.kind == AlertKind::GradientVanishing)
             .collect();
         assert!(!vanishing_alerts.is_empty());
@@ -760,7 +858,9 @@ mod tests {
         // Spike the loss to trigger divergence
         monitor.record_step(100.0, &[("w1", 0.5)], 0.001);
 
-        let divergence_alerts: Vec<_> = monitor.alerts.iter()
+        let divergence_alerts: Vec<_> = monitor
+            .alerts
+            .iter()
             .filter(|a| a.kind == AlertKind::LossDivergence)
             .collect();
         assert!(!divergence_alerts.is_empty());
@@ -782,7 +882,9 @@ mod tests {
             monitor.record_step(0.5, &[("dead_layer", 0.0), ("alive_layer", 0.5)], 0.001);
         }
 
-        let dead_alerts: Vec<_> = monitor.alerts.iter()
+        let dead_alerts: Vec<_> = monitor
+            .alerts
+            .iter()
             .filter(|a| a.kind == AlertKind::DeadNeuron)
             .collect();
         assert_eq!(dead_alerts.len(), 1);
@@ -825,7 +927,9 @@ mod tests {
             monitor.record_step(0.001, &[("w1", 0.1)], 0.001);
         }
 
-        let converged_alerts: Vec<_> = monitor.alerts.iter()
+        let converged_alerts: Vec<_> = monitor
+            .alerts
+            .iter()
             .filter(|a| a.kind == AlertKind::Converged)
             .collect();
         assert!(!converged_alerts.is_empty());
@@ -1146,10 +1250,18 @@ mod tests {
         monitor.record_step(1.0, &[("w1", 4.0)], 0.001);
 
         let (mean, std, max) = monitor.grad_norm_stats();
-        assert!((mean - 2.5).abs() < 1e-4, "Expected mean ~2.5, got {}", mean);
+        assert!(
+            (mean - 2.5).abs() < 1e-4,
+            "Expected mean ~2.5, got {}",
+            mean
+        );
         assert!((max - 4.0).abs() < 1e-4, "Expected max 4.0, got {}", max);
         // std of [1,2,3,4] = sqrt(1.25) ~= 1.118
-        assert!((std - 1.118).abs() < 0.01, "Expected std ~1.118, got {}", std);
+        assert!(
+            (std - 1.118).abs() < 0.01,
+            "Expected std ~1.118, got {}",
+            std
+        );
     }
 
     #[test]
@@ -1178,7 +1290,14 @@ mod tests {
             let loss = 2.0 * (-0.03 * i as f32).exp(); // Exponential decay
             let grad_norm = 1.0 * (-0.01 * i as f32).exp();
             let lr = 0.001;
-            monitor.record_step(loss, &[("layer1.weight", grad_norm), ("layer2.weight", grad_norm * 0.5)], lr);
+            monitor.record_step(
+                loss,
+                &[
+                    ("layer1.weight", grad_norm),
+                    ("layer2.weight", grad_norm * 0.5),
+                ],
+                lr,
+            );
         }
 
         assert_eq!(monitor.step_count, 100);
@@ -1195,7 +1314,9 @@ mod tests {
         assert_eq!(trend, LossTrend::Decreasing);
 
         // No critical alerts should exist
-        let critical_count = monitor.alerts.iter()
+        let critical_count = monitor
+            .alerts
+            .iter()
             .filter(|a| a.severity == AlertSeverity::Critical)
             .count();
         assert_eq!(critical_count, 0);

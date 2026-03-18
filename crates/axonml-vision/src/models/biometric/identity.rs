@@ -21,10 +21,10 @@ use axonml_nn::Parameter;
 use axonml_tensor::Tensor;
 
 use super::{
-    AriadneFingerprint, ArgusIris, BiometricConfig, BiometricEvidence, BiometricModality,
+    ArgusIris, AriadneFingerprint, BiometricConfig, BiometricEvidence, BiometricModality,
     DriftAlert, DriftRecommendation, EchoSpeaker, EnrollmentResult, ForensicReport,
-    IdentificationCandidate, IdentificationResult, LivenessResult, ModalityOutput,
-    MnemosyneIdentity, QualityIssue, QualityReport, ThemisFusion, VerificationResult,
+    IdentificationCandidate, IdentificationResult, LivenessResult, MnemosyneIdentity,
+    ModalityOutput, QualityIssue, QualityReport, ThemisFusion, VerificationResult,
 };
 
 // =============================================================================
@@ -114,10 +114,18 @@ impl IdentityRecord {
     /// Which modalities have been enrolled.
     fn enrolled_modalities(&self) -> Vec<BiometricModality> {
         let mut mods = Vec::new();
-        if self.face.is_some() { mods.push(BiometricModality::Face); }
-        if self.fingerprint.is_some() { mods.push(BiometricModality::Fingerprint); }
-        if self.voice.is_some() { mods.push(BiometricModality::Voice); }
-        if self.iris.is_some() { mods.push(BiometricModality::Iris); }
+        if self.face.is_some() {
+            mods.push(BiometricModality::Face);
+        }
+        if self.fingerprint.is_some() {
+            mods.push(BiometricModality::Fingerprint);
+        }
+        if self.voice.is_some() {
+            mods.push(BiometricModality::Voice);
+        }
+        if self.iris.is_some() {
+            mods.push(BiometricModality::Iris);
+        }
         mods
     }
 }
@@ -133,7 +141,9 @@ pub struct IdentityBank {
 impl IdentityBank {
     /// Create a new empty identity bank.
     pub fn new() -> Self {
-        Self { records: HashMap::new() }
+        Self {
+            records: HashMap::new(),
+        }
     }
 
     /// Number of enrolled subjects.
@@ -163,13 +173,15 @@ impl IdentityBank {
 
     /// Number of observations for a subject.
     pub fn observation_count(&self, subject_id: u64) -> usize {
-        self.records.get(&subject_id)
+        self.records
+            .get(&subject_id)
             .map_or(0, |r| r.observation_count)
     }
 
     /// Which modalities are enrolled for a subject.
     pub fn enrolled_modalities(&self, subject_id: u64) -> Vec<BiometricModality> {
-        self.records.get(&subject_id)
+        self.records
+            .get(&subject_id)
             .map_or_else(Vec::new, |r| r.enrolled_modalities())
     }
 }
@@ -250,16 +262,23 @@ impl AegisIdentity {
     }
 
     /// Create with custom modality selection.
-    pub fn with_modalities(
-        face: bool,
-        finger: bool,
-        voice: bool,
-        iris: bool,
-    ) -> Self {
+    pub fn with_modalities(face: bool, finger: bool, voice: bool, iris: bool) -> Self {
         Self {
-            face: if face { Some(MnemosyneIdentity::new()) } else { None },
-            finger: if finger { Some(AriadneFingerprint::new()) } else { None },
-            voice: if voice { Some(EchoSpeaker::new()) } else { None },
+            face: if face {
+                Some(MnemosyneIdentity::new())
+            } else {
+                None
+            },
+            finger: if finger {
+                Some(AriadneFingerprint::new())
+            } else {
+                None
+            },
+            voice: if voice {
+                Some(EchoSpeaker::new())
+            } else {
+                None
+            },
             iris: if iris { Some(ArgusIris::new()) } else { None },
             fusion: ThemisFusion::new(),
             bank: IdentityBank::new(),
@@ -350,7 +369,11 @@ impl AegisIdentity {
     pub fn enroll(&mut self, subject_id: u64, evidence: &BiometricEvidence) -> EnrollmentResult {
         let outputs = self.process_evidence(evidence);
 
-        let record = self.bank.records.entry(subject_id).or_insert_with(IdentityRecord::new);
+        let record = self
+            .bank
+            .records
+            .entry(subject_id)
+            .or_insert_with(IdentityRecord::new);
         let mut enrolled_modalities = Vec::new();
         let mut quality_sum = 0.0f32;
         let mut quality_count = 0;
@@ -366,10 +389,8 @@ impl AegisIdentity {
                                 false,
                             )
                         });
-                        let (new_hidden, _vel, logvar, qual) = model.crystallize_step(
-                            face_var,
-                            hidden.as_ref(),
-                        );
+                        let (new_hidden, _vel, logvar, qual) =
+                            model.crystallize_step(face_var, hidden.as_ref());
                         let identity = model.extract_identity(&new_hidden);
                         let lv = logvar.data().to_vec()[0];
                         record.set_original(BiometricModality::Face, &identity);
@@ -433,13 +454,15 @@ impl AegisIdentity {
     pub fn verify(&self, claimed_id: u64, evidence: &BiometricEvidence) -> VerificationResult {
         let record = match self.bank.records.get(&claimed_id) {
             Some(r) => r,
-            None => return VerificationResult {
-                match_score: 0.0,
-                is_match: false,
-                modality_scores: Vec::new(),
-                confidence: 0.0,
-                threshold: self.config.verify_threshold,
-            },
+            None => {
+                return VerificationResult {
+                    match_score: 0.0,
+                    is_match: false,
+                    modality_scores: Vec::new(),
+                    confidence: 0.0,
+                    threshold: self.config.verify_threshold,
+                }
+            }
         };
 
         let outputs = self.process_evidence(evidence);
@@ -464,13 +487,9 @@ impl AegisIdentity {
         let voice_ref = voice_input.as_ref().map(|(v, lv)| (v, *lv));
         let iris_ref = iris_input.as_ref().map(|(v, lv)| (v, *lv));
 
-        let (_fused_identity, match_prob, confidence, _belief) = self.fusion.fuse(
-            face_ref,
-            finger_ref,
-            voice_ref,
-            iris_ref,
-            None,
-        );
+        let (_fused_identity, match_prob, confidence, _belief) = self
+            .fusion
+            .fuse(face_ref, finger_ref, voice_ref, iris_ref, None);
 
         // Score selection: use Themis match_prob when confidence is available,
         // otherwise fall back to raw modality score average
@@ -478,13 +497,12 @@ impl AegisIdentity {
             0.0
         } else if confidence < 0.01 {
             // No modalities had meaningful confidence → raw average
-            modality_scores.iter().map(|(_, s)| s).sum::<f32>()
-                / modality_scores.len() as f32
+            modality_scores.iter().map(|(_, s)| s).sum::<f32>() / modality_scores.len() as f32
         } else {
             // Confidence-weighted blend: Themis decision + raw scores
             // Higher confidence → trust Themis more
-            let raw_avg = modality_scores.iter().map(|(_, s)| s).sum::<f32>()
-                / modality_scores.len() as f32;
+            let raw_avg =
+                modality_scores.iter().map(|(_, s)| s).sum::<f32>() / modality_scores.len() as f32;
             let themis_weight = confidence.min(1.0);
             themis_weight * match_prob + (1.0 - themis_weight) * raw_avg
         };
@@ -537,7 +555,11 @@ impl AegisIdentity {
         }
 
         // Sort by score descending
-        candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         candidates.truncate(self.config.identify_top_k);
 
         // Confidence: gap between top-1 and top-2 (discriminability)
@@ -549,7 +571,10 @@ impl AegisIdentity {
             (candidates[0].score - candidates[1].score).max(0.0)
         };
 
-        IdentificationResult { candidates, confidence }
+        IdentificationResult {
+            candidates,
+            confidence,
+        }
     }
 
     // =========================================================================
@@ -625,7 +650,9 @@ impl AegisIdentity {
 
         // Sort contributions by absolute magnitude, take top 10
         all_contributions.sort_by(|a, b| {
-            b.contribution.abs().partial_cmp(&a.contribution.abs())
+            b.contribution
+                .abs()
+                .partial_cmp(&a.contribution.abs())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         all_contributions.truncate(10);
@@ -634,26 +661,34 @@ impl AegisIdentity {
         let cross_modal_consistency = if modality_scores.len() < 2 {
             1.0
         } else {
-            let mean = modality_scores.iter().map(|(_, s)| s).sum::<f32>()
-                / modality_scores.len() as f32;
-            let var = modality_scores.iter()
+            let mean =
+                modality_scores.iter().map(|(_, s)| s).sum::<f32>() / modality_scores.len() as f32;
+            let var = modality_scores
+                .iter()
                 .map(|(_, s)| (s - mean) * (s - mean))
-                .sum::<f32>() / modality_scores.len() as f32;
+                .sum::<f32>()
+                / modality_scores.len() as f32;
             // Low variance = high consistency. Map var to [0, 1].
             (1.0 - var.sqrt() * 4.0).max(0.0)
         };
 
         // Dominant and weakest modality
-        let dominant = forensic_reports.iter()
-            .max_by(|a, b| (a.raw_score * a.fusion_weight)
-                .partial_cmp(&(b.raw_score * b.fusion_weight))
-                .unwrap_or(std::cmp::Ordering::Equal))
+        let dominant = forensic_reports
+            .iter()
+            .max_by(|a, b| {
+                (a.raw_score * a.fusion_weight)
+                    .partial_cmp(&(b.raw_score * b.fusion_weight))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|r| r.modality);
 
-        let weakest = forensic_reports.iter()
-            .min_by(|a, b| a.fusion_weight
-                .partial_cmp(&b.fusion_weight)
-                .unwrap_or(std::cmp::Ordering::Equal))
+        let weakest = forensic_reports
+            .iter()
+            .min_by(|a, b| {
+                a.fusion_weight
+                    .partial_cmp(&b.fusion_weight)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|r| r.modality);
 
         // Compute the verification result
@@ -688,11 +723,9 @@ impl AegisIdentity {
     ///
     /// Processes each (subject_id, evidence) pair sequentially but shares
     /// model state for efficiency.
-    pub fn batch_enroll(
-        &mut self,
-        subjects: &[(u64, BiometricEvidence)],
-    ) -> Vec<EnrollmentResult> {
-        subjects.iter()
+    pub fn batch_enroll(&mut self, subjects: &[(u64, BiometricEvidence)]) -> Vec<EnrollmentResult> {
+        subjects
+            .iter()
             .map(|(id, evidence)| self.enroll(*id, evidence))
             .collect()
     }
@@ -700,21 +733,17 @@ impl AegisIdentity {
     /// Verify multiple subjects in batch.
     ///
     /// Returns verification results in the same order as input.
-    pub fn batch_verify(
-        &self,
-        claims: &[(u64, BiometricEvidence)],
-    ) -> Vec<VerificationResult> {
-        claims.iter()
+    pub fn batch_verify(&self, claims: &[(u64, BiometricEvidence)]) -> Vec<VerificationResult> {
+        claims
+            .iter()
             .map(|(id, evidence)| self.verify(*id, evidence))
             .collect()
     }
 
     /// Identify multiple probes against the identity bank.
-    pub fn batch_identify(
-        &self,
-        probes: &[BiometricEvidence],
-    ) -> Vec<IdentificationResult> {
-        probes.iter()
+    pub fn batch_identify(&self, probes: &[BiometricEvidence]) -> Vec<IdentificationResult> {
+        probes
+            .iter()
             .map(|evidence| self.identify(evidence))
             .collect()
     }
@@ -739,13 +768,13 @@ impl AegisIdentity {
         let mut drift_count = 0;
 
         for modality in BiometricModality::all() {
-            if let (Some((current_emb, _)), Some(original_emb)) = (
-                record.get_modality(modality),
-                record.get_original(modality),
-            ) {
+            if let (Some((current_emb, _)), Some(original_emb)) =
+                (record.get_modality(modality), record.get_original(modality))
+            {
                 let sim = cosine_similarity(current_emb, original_emb);
                 let drift = 1.0 - sim; // cosine distance
-                if drift > 0.01 { // Only report meaningful drift
+                if drift > 0.01 {
+                    // Only report meaningful drift
                     affected_modalities.push((modality, drift));
                     total_drift += drift;
                     drift_count += 1;
@@ -783,7 +812,9 @@ impl AegisIdentity {
     ///
     /// Returns alerts only for subjects with detectable drift.
     pub fn detect_all_drift(&self) -> Vec<DriftAlert> {
-        self.bank.subjects().iter()
+        self.bank
+            .subjects()
+            .iter()
             .filter_map(|&id| self.detect_drift(id))
             .collect()
     }
@@ -819,7 +850,13 @@ impl AegisIdentity {
         // Fingerprint quality: encoding magnitude as proxy
         if let (Some(ref model), Some(ref finger_var)) = (&self.finger, &evidence.fingerprint) {
             let (emb, logvar) = model.forward_full(finger_var);
-            let mag = emb.data().to_vec().iter().map(|x| x * x).sum::<f32>().sqrt();
+            let mag = emb
+                .data()
+                .to_vec()
+                .iter()
+                .map(|x| x * x)
+                .sum::<f32>()
+                .sqrt();
             let lv = logvar.data().to_vec()[0];
             // Quality from norm (should be ~1.0 for normalized) and low uncertainty
             let quality = (mag.min(1.5) / 1.5 * 0.5 + (-lv).clamp(0.0, 1.0) * 0.5).clamp(0.0, 1.0);
@@ -873,8 +910,7 @@ impl AegisIdentity {
         let overall = if modality_scores.is_empty() {
             0.0
         } else {
-            modality_scores.iter().map(|(_, s)| s).sum::<f32>()
-                / modality_scores.len() as f32
+            modality_scores.iter().map(|(_, s)| s).sum::<f32>() / modality_scores.len() as f32
         };
 
         QualityReport {
@@ -918,8 +954,8 @@ impl AegisIdentity {
         }
 
         // Combined liveness from all available modalities
-        let combined = modality_liveness.iter().map(|(_, s)| s).sum::<f32>()
-            / modality_liveness.len() as f32;
+        let combined =
+            modality_liveness.iter().map(|(_, s)| s).sum::<f32>() / modality_liveness.len() as f32;
 
         LivenessResult {
             liveness_score: combined,
@@ -942,7 +978,11 @@ impl AegisIdentity {
         &self,
         claimed_id: u64,
         evidence: &BiometricEvidence,
-    ) -> (VerificationResult, Option<QualityReport>, Option<LivenessResult>) {
+    ) -> (
+        VerificationResult,
+        Option<QualityReport>,
+        Option<LivenessResult>,
+    ) {
         // Step 1: Quality assessment
         let quality = self.assess_quality(evidence);
         if !quality.meets_threshold {
@@ -1083,10 +1123,18 @@ impl AegisIdentity {
     /// Which modalities are enabled in this configuration.
     pub fn enabled_modalities(&self) -> Vec<BiometricModality> {
         let mut mods = Vec::new();
-        if self.face.is_some() { mods.push(BiometricModality::Face); }
-        if self.finger.is_some() { mods.push(BiometricModality::Fingerprint); }
-        if self.voice.is_some() { mods.push(BiometricModality::Voice); }
-        if self.iris.is_some() { mods.push(BiometricModality::Iris); }
+        if self.face.is_some() {
+            mods.push(BiometricModality::Face);
+        }
+        if self.finger.is_some() {
+            mods.push(BiometricModality::Fingerprint);
+        }
+        if self.voice.is_some() {
+            mods.push(BiometricModality::Voice);
+        }
+        if self.iris.is_some() {
+            mods.push(BiometricModality::Iris);
+        }
         mods
     }
 
@@ -1214,7 +1262,11 @@ mod tests {
     fn test_aegis_total_params() {
         let system = AegisIdentity::full();
         let total = system.total_params();
-        assert!(total < 400_000, "Total params {} exceeds 400K budget", total);
+        assert!(
+            total < 400_000,
+            "Total params {} exceeds 400K budget",
+            total
+        );
         assert!(total > 100_000, "Total params {} seems too low", total);
     }
 
@@ -1279,7 +1331,9 @@ mod tests {
 
         assert!(result.success);
         assert_eq!(result.subject_id, 1);
-        assert!(result.modalities_enrolled.contains(&BiometricModality::Face));
+        assert!(result
+            .modalities_enrolled
+            .contains(&BiometricModality::Face));
         assert_eq!(result.observation_count, 1);
         assert!(system.bank.contains(1));
     }
@@ -1309,7 +1363,11 @@ mod tests {
         system.enroll(42, &make_face_evidence(0.3));
 
         let result = system.verify(42, &make_face_evidence(0.3));
-        assert!(result.match_score > 0.0, "Self-match should be positive: {}", result.match_score);
+        assert!(
+            result.match_score > 0.0,
+            "Self-match should be positive: {}",
+            result.match_score
+        );
         assert!(!result.modality_scores.is_empty());
     }
 
@@ -1452,10 +1510,7 @@ mod tests {
         let mut system = AegisIdentity::face_only();
         system.enroll(1, &make_face_evidence(0.3));
 
-        let probes = vec![
-            make_face_evidence(0.3),
-            make_face_evidence(0.7),
-        ];
+        let probes = vec![make_face_evidence(0.3), make_face_evidence(0.7)];
         let results = system.batch_identify(&probes);
         assert_eq!(results.len(), 2);
     }
@@ -1480,7 +1535,11 @@ mod tests {
         let drift = system.detect_drift(1);
         // Same face data → minimal or no drift
         if let Some(alert) = drift {
-            assert!(alert.drift_magnitude < 0.5, "Same face should have low drift: {}", alert.drift_magnitude);
+            assert!(
+                alert.drift_magnitude < 0.5,
+                "Same face should have low drift: {}",
+                alert.drift_magnitude
+            );
         }
     }
 
@@ -1561,9 +1620,7 @@ mod tests {
     #[test]
     fn test_liveness_with_sequence() {
         let system = AegisIdentity::face_only();
-        let frames: Vec<Variable> = (0..5)
-            .map(|i| make_face(0.3 + i as f32 * 0.01))
-            .collect();
+        let frames: Vec<Variable> = (0..5).map(|i| make_face(0.3 + i as f32 * 0.01)).collect();
         let evidence = BiometricEvidence::face_sequence(frames);
         let liveness = system.assess_liveness(&evidence);
 
@@ -1599,9 +1656,7 @@ mod tests {
         let mut system = AegisIdentity::face_only();
         system.enroll(1, &make_face_evidence(0.3));
 
-        let frames: Vec<Variable> = (0..5)
-            .map(|i| make_face(0.3 + i as f32 * 0.01))
-            .collect();
+        let frames: Vec<Variable> = (0..5).map(|i| make_face(0.3 + i as f32 * 0.01)).collect();
         let mut evidence = BiometricEvidence::face_sequence(frames);
         evidence.face = Some(make_face(0.3));
 

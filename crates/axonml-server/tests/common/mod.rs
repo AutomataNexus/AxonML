@@ -178,7 +178,10 @@ pub async fn is_server_running() -> bool {
 macro_rules! require_server {
     () => {
         if !common::is_server_running().await {
-            eprintln!("SKIP: axonml-server not running on {}", common::TEST_API_URL);
+            eprintln!(
+                "SKIP: axonml-server not running on {}",
+                common::TEST_API_URL
+            );
             return;
         }
         // Also verify admin login works (DB must be initialized)

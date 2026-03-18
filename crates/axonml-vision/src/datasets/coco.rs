@@ -274,12 +274,7 @@ mod tests {
         let img_w = 640.0f32;
         let img_h = 480.0f32;
 
-        let normalized = [
-            x / img_w,
-            y / img_h,
-            (x + w) / img_w,
-            (y + h) / img_h,
-        ];
+        let normalized = [x / img_w, y / img_h, (x + w) / img_w, (y + h) / img_h];
 
         assert!((normalized[0] - 10.0 / 640.0).abs() < 1e-5);
         assert!((normalized[1] - 20.0 / 480.0).abs() < 1e-5);

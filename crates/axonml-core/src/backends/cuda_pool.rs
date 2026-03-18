@@ -123,8 +123,7 @@ impl CudaMemoryPool {
             inner.pooled_bytes -= capacity * 4;
             if let Some(backend) = super::cuda::get_cuda_backend() {
                 unsafe {
-                    let slice: CudaSlice<f32> =
-                        backend.device().upgrade_device_ptr(ptr, capacity);
+                    let slice: CudaSlice<f32> = backend.device().upgrade_device_ptr(ptr, capacity);
                     drop(slice); // Actually free GPU memory
                 }
             }
@@ -175,22 +174,26 @@ pub fn pool_alloc(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> 
 
     // Try to get from pool (pool stores bucket-sized allocations)
     if let Some((ptr, capacity)) = pool.try_acquire(len) {
-        let backend = super::cuda::get_cuda_backend()
-            .ok_or(super::cuda::CudaError::DeviceNotFound)?;
+        let backend =
+            super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
         unsafe {
             // Reconstruct at original capacity and zero it
-            let mut slice: CudaSlice<f32> =
-                backend.device().upgrade_device_ptr(ptr, capacity);
-            backend.device().memset_zeros(&mut slice)
+            let mut slice: CudaSlice<f32> = backend.device().upgrade_device_ptr(ptr, capacity);
+            backend
+                .device()
+                .memset_zeros(&mut slice)
                 .map_err(super::cuda::CudaError::from)?;
             Ok(slice)
         }
     } else {
         // Allocate fresh from CUDA at bucket size for better reuse
         let bucket = CudaMemoryPool::bucket_size(len);
-        let backend = super::cuda::get_cuda_backend()
-            .ok_or(super::cuda::CudaError::DeviceNotFound)?;
-        backend.device().alloc_zeros(bucket).map_err(super::cuda::CudaError::from)
+        let backend =
+            super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
+        backend
+            .device()
+            .alloc_zeros(bucket)
+            .map_err(super::cuda::CudaError::from)
     }
 }
 

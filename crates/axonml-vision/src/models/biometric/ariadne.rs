@@ -107,14 +107,10 @@ struct DWSepBlock {
 
 impl DWSepBlock {
     fn new(in_ch: usize, out_ch: usize, stride: usize) -> Self {
-        let dw_conv = Conv2d::with_groups(
-            in_ch, in_ch, (3, 3),
-            (stride, stride), (1, 1), true, in_ch,
-        );
+        let dw_conv =
+            Conv2d::with_groups(in_ch, in_ch, (3, 3), (stride, stride), (1, 1), true, in_ch);
         let dw_bn = BatchNorm2d::new(in_ch);
-        let pw_conv = Conv2d::with_options(
-            in_ch, out_ch, (1, 1), (1, 1), (0, 0), true,
-        );
+        let pw_conv = Conv2d::with_options(in_ch, out_ch, (1, 1), (1, 1), (0, 0), true);
         let pw_bn = BatchNorm2d::new(out_ch);
 
         let project = if in_ch != out_ch || stride != 1 {
@@ -126,7 +122,13 @@ impl DWSepBlock {
             None
         };
 
-        Self { dw_conv, dw_bn, pw_conv, pw_bn, project }
+        Self {
+            dw_conv,
+            dw_bn,
+            pw_conv,
+            pw_bn,
+            project,
+        }
     }
 
     fn forward(&self, x: &Variable) -> Variable {
@@ -224,18 +226,14 @@ impl AriadneFingerprint {
             // Initialize weights as Gabor kernel (will be fine-tuned during training)
             let kernel = gabor_kernel(7, theta, 2.0, 4.0, 0.0);
             let kernel_tensor = Tensor::from_vec(kernel, &[1, 1, 7, 7]).unwrap();
-            conv.weight = Parameter::named(
-                format!("gabor_{}", i),
-                kernel_tensor,
-                true,
-            );
+            conv.weight = Parameter::named(format!("gabor_{}", i), kernel_tensor, true);
 
             gabor_filters.push(conv);
         }
 
-        let field_block1 = DWSepBlock::new(2, 16, 2);    // [2, 128, 128] -> [16, 64, 64]
-        let field_block2 = DWSepBlock::new(16, 32, 2);   // -> [32, 32, 32]
-        let field_block3 = DWSepBlock::new(32, 64, 1);   // -> [64, 32, 32]
+        let field_block1 = DWSepBlock::new(2, 16, 2); // [2, 128, 128] -> [16, 64, 64]
+        let field_block2 = DWSepBlock::new(16, 32, 2); // -> [32, 32, 32]
+        let field_block3 = DWSepBlock::new(32, 64, 1); // -> [64, 32, 32]
 
         let spatial_conv = Conv2d::with_options(64, 16, (1, 1), (1, 1), (0, 0), true);
         let spatial_bn = BatchNorm2d::new(16);
@@ -247,10 +245,17 @@ impl AriadneFingerprint {
 
         Self {
             gabor_filters,
-            field_block1, field_block2, field_block3,
-            spatial_conv, spatial_bn, pool,
-            proj1, proj2, uncertainty_head,
-            n_orientations, embed_dim,
+            field_block1,
+            field_block2,
+            field_block3,
+            spatial_conv,
+            spatial_bn,
+            pool,
+            proj1,
+            proj2,
+            uncertainty_head,
+            n_orientations,
+            embed_dim,
         }
     }
 
@@ -447,8 +452,14 @@ impl AriadneFingerprint {
 
         // Closed path neighbors (clockwise): right, down-right, down, down-left, left, up-left, up, up-right
         let neighbors: [(isize, isize); 8] = [
-            (0, 1), (1, 1), (1, 0), (1, -1),
-            (0, -1), (-1, -1), (-1, 0), (-1, 1),
+            (0, 1),
+            (1, 1),
+            (1, 0),
+            (1, -1),
+            (0, -1),
+            (-1, -1),
+            (-1, 0),
+            (-1, 1),
         ];
 
         // Threshold for singularity detection (ideally +/- pi)
@@ -682,7 +693,10 @@ impl AriadneFingerprint {
         let x = self.field_block3.forward(&x);
 
         // Spatial hash + adaptive pooling (graph-tracked via AdaptiveAvgPool2d)
-        let x = self.spatial_bn.forward(&self.spatial_conv.forward(&x)).relu();
+        let x = self
+            .spatial_bn
+            .forward(&self.spatial_conv.forward(&x))
+            .relu();
         let x = self.pool.forward(&x); // [B, 16, 4, 4]
 
         // Flatten using Variable::reshape
@@ -785,7 +799,11 @@ mod tests {
         let k90 = gabor_kernel(7, PI / 2.0, 2.0, 4.0, 0.0);
         // Different orientations should produce different kernels
         let diff: f32 = k0.iter().zip(k90.iter()).map(|(a, b)| (a - b).abs()).sum();
-        assert!(diff > 0.1, "Orientations 0 and 90 degrees should differ: {}", diff);
+        assert!(
+            diff > 0.1,
+            "Orientations 0 and 90 degrees should differ: {}",
+            diff
+        );
     }
 
     #[test]
@@ -798,7 +816,8 @@ mod tests {
     #[test]
     fn test_ariadne_param_count() {
         let model = AriadneFingerprint::new();
-        let total: usize = model.parameters()
+        let total: usize = model
+            .parameters()
             .iter()
             .map(|p| p.variable().data().to_vec().len())
             .sum();
@@ -838,7 +857,11 @@ mod tests {
         );
         let identity = model.extract_identity(&input);
         let norm: f32 = identity.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < 0.01, "Embedding not unit norm: {}", norm);
+        assert!(
+            (norm - 1.0).abs() < 0.01,
+            "Embedding not unit norm: {}",
+            norm
+        );
     }
 
     #[test]
@@ -855,8 +878,12 @@ mod tests {
         let data = events.data().to_vec();
         let spatial = 128 * 128;
         for i in 0..spatial {
-            assert!(data[i] >= -1.0 && data[i] <= 1.0,
-                "Orientation {} out of [-1,1]: {}", i, data[i]);
+            assert!(
+                data[i] >= -1.0 && data[i] <= 1.0,
+                "Orientation {} out of [-1,1]: {}",
+                i,
+                data[i]
+            );
         }
     }
 
@@ -920,16 +947,17 @@ mod tests {
                 data[y * 128 + x] = (r * 0.3).sin() * 0.5;
             }
         }
-        let input = Variable::new(
-            Tensor::from_vec(data, &[1, 1, 128, 128]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(data, &[1, 1, 128, 128]).unwrap(), false);
         let singularities = model.detect_singularities(&input);
         // Validate all returned singularities have valid fields
         for s in &singularities {
             assert!(s.x >= 0.0 && s.x < 128.0, "x out of range: {}", s.x);
             assert!(s.y >= 0.0 && s.y < 128.0, "y out of range: {}", s.y);
-            assert!(s.strength > 0.0, "strength should be positive: {}", s.strength);
+            assert!(
+                s.strength > 0.0,
+                "strength should be positive: {}",
+                s.strength
+            );
             assert!(
                 s.kind == SingularityKind::Core || s.kind == SingularityKind::Delta,
                 "Invalid singularity kind"
@@ -943,7 +971,10 @@ mod tests {
         let input = Variable::new(Tensor::zeros(&[1, 1, 128, 128]), false);
         let singularities = model.detect_singularities(&input);
         // Zero input has no magnitude, so no singularities should be detected
-        assert!(singularities.is_empty(), "Zero input should yield no singularities");
+        assert!(
+            singularities.is_empty(),
+            "Zero input should yield no singularities"
+        );
     }
 
     #[test]
@@ -951,10 +982,7 @@ mod tests {
         let model = AriadneFingerprint::new();
         // Very small image (below kernel size, but padded conv handles it)
         let data = vec![0.5f32; 1 * 1 * 8 * 8];
-        let input = Variable::new(
-            Tensor::from_vec(data, &[1, 1, 8, 8]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(data, &[1, 1, 8, 8]).unwrap(), false);
         let singularities = model.detect_singularities(&input);
         // Should not panic; may return empty or a few detections
         for s in &singularities {
@@ -977,7 +1005,11 @@ mod tests {
     fn test_partial_match_identical() {
         let emb = vec![0.5f32; 128];
         let score = AriadneFingerprint::match_partial(&emb, &emb, 0.0);
-        assert!(score > 0.95, "Identical embeddings should match highly: {}", score);
+        assert!(
+            score > 0.95,
+            "Identical embeddings should match highly: {}",
+            score
+        );
     }
 
     #[test]
@@ -991,7 +1023,8 @@ mod tests {
         assert!(
             score < self_score,
             "Random should score lower than self: {} vs {}",
-            score, self_score
+            score,
+            self_score
         );
     }
 
@@ -1040,10 +1073,7 @@ mod tests {
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
             *val = ((seed >> 33) as f32) / (u32::MAX as f32) * 2.0 - 1.0;
         }
-        let random_input = Variable::new(
-            Tensor::from_vec(data, &[1, 1, 128, 128]).unwrap(),
-            false,
-        );
+        let random_input = Variable::new(Tensor::from_vec(data, &[1, 1, 128, 128]).unwrap(), false);
         let uniform_input = Variable::new(
             Tensor::from_vec(vec![0.5f32; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
@@ -1055,7 +1085,8 @@ mod tests {
         assert!(
             random_score < uniform_score,
             "Random should be less consistent than uniform: {} vs {}",
-            random_score, uniform_score
+            random_score,
+            uniform_score
         );
     }
 
@@ -1065,7 +1096,11 @@ mod tests {
         let input = Variable::new(Tensor::zeros(&[1, 1, 128, 128]), false);
         let score = model.orientation_consistency(&input);
         // Zero magnitude means no foreground; score should be 0 or very low
-        assert!(score >= 0.0 && score <= 1.0, "Score out of [0,1]: {}", score);
+        assert!(
+            score >= 0.0 && score <= 1.0,
+            "Score out of [0,1]: {}",
+            score
+        );
     }
 
     #[test]
@@ -1096,7 +1131,10 @@ mod tests {
                 assert!(
                     (top - bot).abs() < 1e-5,
                     "Vertical symmetry broken at ({}, {}): {} vs {}",
-                    x, y, top, bot
+                    x,
+                    y,
+                    top,
+                    bot
                 );
             }
         }
@@ -1107,8 +1145,16 @@ mod tests {
         let k_narrow = gabor_kernel(7, 0.0, 1.0, 4.0, 0.0);
         let k_wide = gabor_kernel(7, 0.0, 3.0, 4.0, 0.0);
         // Different sigma should produce different kernels
-        let diff: f32 = k_narrow.iter().zip(k_wide.iter()).map(|(a, b)| (a - b).abs()).sum();
-        assert!(diff > 0.05, "Different sigma should produce different kernels: {}", diff);
+        let diff: f32 = k_narrow
+            .iter()
+            .zip(k_wide.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(
+            diff > 0.05,
+            "Different sigma should produce different kernels: {}",
+            diff
+        );
     }
 
     #[test]
@@ -1116,7 +1162,11 @@ mod tests {
         let k1 = gabor_kernel(7, 0.0, 2.0, 3.0, 0.0);
         let k2 = gabor_kernel(7, 0.0, 2.0, 6.0, 0.0);
         let diff: f32 = k1.iter().zip(k2.iter()).map(|(a, b)| (a - b).abs()).sum();
-        assert!(diff > 0.05, "Different lambda should produce different kernels: {}", diff);
+        assert!(
+            diff > 0.05,
+            "Different lambda should produce different kernels: {}",
+            diff
+        );
     }
 
     #[test]
@@ -1128,7 +1178,8 @@ mod tests {
             assert!(
                 (l1 - 1.0).abs() < 0.01,
                 "Orientation {} not L1-normalized: {}",
-                i, l1
+                i,
+                l1
             );
         }
     }
@@ -1145,7 +1196,8 @@ mod tests {
             Tensor::from_vec(
                 vec![0.4f32; batch_size * 1 * 128 * 128],
                 &[batch_size, 1, 128, 128],
-            ).unwrap(),
+            )
+            .unwrap(),
             false,
         );
         let output = model.forward(&input);
@@ -1160,7 +1212,8 @@ mod tests {
             Tensor::from_vec(
                 vec![0.3f32; batch_size * 1 * 128 * 128],
                 &[batch_size, 1, 128, 128],
-            ).unwrap(),
+            )
+            .unwrap(),
             false,
         );
         let density = model.ridge_density_map(&input);
@@ -1198,7 +1251,10 @@ mod tests {
             false,
         );
         let score = model.orientation_consistency(&input);
-        assert!(!score.is_nan(), "NaN orientation consistency with large values");
+        assert!(
+            !score.is_nan(),
+            "NaN orientation consistency with large values"
+        );
         assert!(score >= 0.0 && score <= 1.0, "Score {} out of [0,1]", score);
     }
 
@@ -1223,7 +1279,11 @@ mod tests {
         let emb_b = model.extract_identity(&input_b);
 
         // Different inputs should produce different embeddings
-        let diff: f32 = emb_a.iter().zip(emb_b.iter()).map(|(a, b)| (a - b).abs()).sum();
+        let diff: f32 = emb_a
+            .iter()
+            .zip(emb_b.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
         assert!(
             diff > 1e-4,
             "Different inputs should produce different embeddings, diff: {}",
@@ -1240,15 +1300,16 @@ mod tests {
             Tensor::from_vec(data.clone(), &[1, 1, 128, 128]).unwrap(),
             false,
         );
-        let input2 = Variable::new(
-            Tensor::from_vec(data, &[1, 1, 128, 128]).unwrap(),
-            false,
-        );
+        let input2 = Variable::new(Tensor::from_vec(data, &[1, 1, 128, 128]).unwrap(), false);
 
         let emb1 = model.extract_identity(&input1);
         let emb2 = model.extract_identity(&input2);
 
-        let diff: f32 = emb1.iter().zip(emb2.iter()).map(|(a, b)| (a - b).abs()).sum();
+        let diff: f32 = emb1
+            .iter()
+            .zip(emb2.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
         assert!(
             diff < 1e-4,
             "Same input should produce same embedding, diff: {}",
@@ -1303,6 +1364,10 @@ mod tests {
     fn test_partial_match_single_element() {
         let a = vec![1.0f32];
         let score = AriadneFingerprint::match_partial(&a, &a, 0.0);
-        assert!(score > 0.9, "Single-element identical match should be high: {}", score);
+        assert!(
+            score > 0.9,
+            "Single-element identical match should be high: {}",
+            score
+        );
     }
 }

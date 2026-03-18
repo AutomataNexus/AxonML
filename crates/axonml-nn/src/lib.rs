@@ -97,13 +97,12 @@ pub use sequential::Sequential;
 
 // Layer re-exports
 pub use layers::{
-    AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, BatchNorm1d, BatchNorm2d, Conv1d, Conv2d, ConvTranspose2d,
-    CrossAttention, Dropout, Embedding, GRUCell, GroupNorm, InstanceNorm2d, LSTMCell, LayerNorm,
-    Linear, MaxPool1d, MaxPool2d, MultiHeadAttention, RNNCell, ResidualBlock,
-    Seq2SeqTransformer, TransformerDecoder, TransformerDecoderLayer, TransformerEncoder,
-    TransformerEncoderLayer, GRU, LSTM, RNN,
-    FFT1d, STFT, GCNConv, GATConv,
-    SparseLinear, GroupSparsity, LotteryTicket,
+    AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, BatchNorm1d, BatchNorm2d, Conv1d, Conv2d,
+    ConvTranspose2d, CrossAttention, Dropout, Embedding, FFT1d, GATConv, GCNConv, GRUCell,
+    GroupNorm, GroupSparsity, InstanceNorm2d, LSTMCell, LayerNorm, Linear, LotteryTicket,
+    MaxPool1d, MaxPool2d, MultiHeadAttention, RNNCell, ResidualBlock, Seq2SeqTransformer,
+    SparseLinear, TransformerDecoder, TransformerDecoderLayer, TransformerEncoder,
+    TransformerEncoderLayer, GRU, LSTM, RNN, STFT,
 };
 
 // Activation re-exports
@@ -140,6 +139,7 @@ pub mod prelude {
         BatchNorm2d,
         Conv1d,
         Conv2d,
+        CrossAttention,
         CrossEntropyLoss,
         Dropout,
         Embedding,
@@ -158,23 +158,22 @@ pub mod prelude {
         Module,
         ModuleList,
         MultiHeadAttention,
-        CrossAttention,
-        Seq2SeqTransformer,
-        TransformerDecoder,
-        TransformerDecoderLayer,
-        TransformerEncoder,
-        TransformerEncoderLayer,
         NLLLoss,
         Parameter,
         // Activations
         ReLU,
         // Loss functions
         Reduction,
+        Seq2SeqTransformer,
         Sequential,
         SiLU,
         Sigmoid,
         Softmax,
         Tanh,
+        TransformerDecoder,
+        TransformerDecoderLayer,
+        TransformerEncoder,
+        TransformerEncoderLayer,
         ELU,
         GELU,
         GRU,

@@ -136,11 +136,23 @@ struct ShuffleBlock {
 impl ShuffleBlock {
     fn new(in_channels: usize, out_channels: usize, stride: usize) -> Self {
         let branch_channels = out_channels / 2;
-        let inp = if stride == 2 { in_channels } else { in_channels / 2 };
+        let inp = if stride == 2 {
+            in_channels
+        } else {
+            in_channels / 2
+        };
 
         let shortcut = if stride == 2 {
             Some((
-                Conv2d::with_groups(in_channels, in_channels, (3, 3), (2, 2), (1, 1), true, in_channels),
+                Conv2d::with_groups(
+                    in_channels,
+                    in_channels,
+                    (3, 3),
+                    (2, 2),
+                    (1, 1),
+                    true,
+                    in_channels,
+                ),
                 BatchNorm2d::new(in_channels),
                 Conv2d::with_options(in_channels, branch_channels, (1, 1), (1, 1), (0, 0), true),
                 BatchNorm2d::new(branch_channels),
@@ -152,9 +164,24 @@ impl ShuffleBlock {
         Self {
             branch2_pw1: Conv2d::with_options(inp, branch_channels, (1, 1), (1, 1), (0, 0), true),
             branch2_bn1: BatchNorm2d::new(branch_channels),
-            branch2_dw: Conv2d::with_groups(branch_channels, branch_channels, (3, 3), (stride, stride), (1, 1), true, branch_channels),
+            branch2_dw: Conv2d::with_groups(
+                branch_channels,
+                branch_channels,
+                (3, 3),
+                (stride, stride),
+                (1, 1),
+                true,
+                branch_channels,
+            ),
             branch2_bn2: BatchNorm2d::new(branch_channels),
-            branch2_pw2: Conv2d::with_options(branch_channels, branch_channels, (1, 1), (1, 1), (0, 0), true),
+            branch2_pw2: Conv2d::with_options(
+                branch_channels,
+                branch_channels,
+                (1, 1),
+                (1, 1),
+                (0, 0),
+                true,
+            ),
             branch2_bn3: BatchNorm2d::new(branch_channels),
             shortcut,
             relu: ReLU,
@@ -168,13 +195,20 @@ impl ShuffleBlock {
         if self.stride == 2 {
             // Stride-2: both branches process full input
             let (sc_dw, sc_bn, sc_pw, sc_bn2) = self.shortcut.as_ref().unwrap();
-            let branch1 = self.relu.forward(&sc_bn2.forward(&sc_pw.forward(
-                &self.relu.forward(&sc_bn.forward(&sc_dw.forward(x))),
-            )));
+            let branch1 =
+                self.relu.forward(&sc_bn2.forward(
+                    &sc_pw.forward(&self.relu.forward(&sc_bn.forward(&sc_dw.forward(x)))),
+                ));
 
-            let branch2 = self.relu.forward(&self.branch2_bn1.forward(&self.branch2_pw1.forward(x)));
+            let branch2 = self
+                .relu
+                .forward(&self.branch2_bn1.forward(&self.branch2_pw1.forward(x)));
             let branch2 = self.branch2_bn2.forward(&self.branch2_dw.forward(&branch2));
-            let branch2 = self.relu.forward(&self.branch2_bn3.forward(&self.branch2_pw2.forward(&branch2)));
+            let branch2 = self.relu.forward(
+                &self
+                    .branch2_bn3
+                    .forward(&self.branch2_pw2.forward(&branch2)),
+            );
 
             // Concat channels
             concat_channels(&branch1, &branch2)
@@ -186,9 +220,15 @@ impl ShuffleBlock {
             let branch1 = x.narrow(1, 0, mid);
             let inp = x.narrow(1, mid, c - mid);
 
-            let branch2 = self.relu.forward(&self.branch2_bn1.forward(&self.branch2_pw1.forward(&inp)));
+            let branch2 = self
+                .relu
+                .forward(&self.branch2_bn1.forward(&self.branch2_pw1.forward(&inp)));
             let branch2 = self.branch2_bn2.forward(&self.branch2_dw.forward(&branch2));
-            let branch2 = self.relu.forward(&self.branch2_bn3.forward(&self.branch2_pw2.forward(&branch2)));
+            let branch2 = self.relu.forward(
+                &self
+                    .branch2_bn3
+                    .forward(&self.branch2_pw2.forward(&branch2)),
+            );
 
             let out = concat_channels(&branch1, &branch2);
             channel_shuffle(&out, 2)
@@ -237,7 +277,8 @@ impl ShuffleNetBackbone {
         let mut stages = Vec::new();
         let mut in_ch = 24;
 
-        for (_i, (&out_ch, &repeats)) in stage_channels.iter().zip(stage_repeats.iter()).enumerate() {
+        for (_i, (&out_ch, &repeats)) in stage_channels.iter().zip(stage_repeats.iter()).enumerate()
+        {
             let mut blocks = Vec::new();
             // First block with stride 2
             blocks.push(ShuffleBlock::new(in_ch, out_ch, 2));
@@ -260,7 +301,9 @@ impl ShuffleNetBackbone {
 
     /// Forward pass returning multi-scale features [P3, P4, P5].
     pub(crate) fn forward(&self, x: &Variable) -> Vec<Variable> {
-        let mut out = self.relu.forward(&self.stem_bn.forward(&self.stem.forward(x)));
+        let mut out = self
+            .relu
+            .forward(&self.stem_bn.forward(&self.stem.forward(x)));
         let mut features = Vec::new();
 
         for stage in &self.stages {
@@ -312,7 +355,8 @@ impl DepthwiseSeparable {
 
     fn forward(&self, x: &Variable) -> Variable {
         let out = self.relu.forward(&self.dw_bn.forward(&self.dw.forward(x)));
-        self.relu.forward(&self.pw_bn.forward(&self.pw.forward(&out)))
+        self.relu
+            .forward(&self.pw_bn.forward(&self.pw.forward(&out)))
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -366,7 +410,15 @@ impl GhostPAN {
         let downsample: Vec<_> = (0..num_levels - 1)
             .map(|_| {
                 (
-                    Conv2d::with_groups(neck_channels, neck_channels, (3, 3), (2, 2), (1, 1), true, neck_channels),
+                    Conv2d::with_groups(
+                        neck_channels,
+                        neck_channels,
+                        (3, 3),
+                        (2, 2),
+                        (1, 1),
+                        true,
+                        neck_channels,
+                    ),
                     BatchNorm2d::new(neck_channels),
                 )
             })
@@ -713,8 +765,15 @@ mod tests {
         assert!(!params.is_empty());
 
         // Should be lightweight (<1M params)
-        let total: usize = params.iter().map(|p| p.variable().data().to_vec().len()).sum();
-        assert!(total < 1_000_000, "NanoDet has {} params, expected < 1M", total);
+        let total: usize = params
+            .iter()
+            .map(|p| p.variable().data().to_vec().len())
+            .sum();
+        assert!(
+            total < 1_000_000,
+            "NanoDet has {} params, expected < 1M",
+            total
+        );
     }
 
     #[test]

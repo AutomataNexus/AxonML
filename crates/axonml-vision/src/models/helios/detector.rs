@@ -43,11 +43,7 @@ impl Helios {
     pub fn new(config: HeliosConfig) -> Self {
         let backbone = CSPDarknet::new(&config);
         let neck = PANet::new(backbone.out_channels, &config);
-        let head = HeliosHead::new(
-            &neck.out_channels,
-            config.num_classes,
-            config.reg_max,
-        );
+        let head = HeliosHead::new(&neck.out_channels, config.num_classes, config.reg_max);
 
         Self {
             backbone,
@@ -289,7 +285,10 @@ mod tests {
         let params = model.parameters();
         assert!(!params.is_empty());
 
-        let total: usize = params.iter().map(|p| p.variable().data().to_vec().len()).sum();
+        let total: usize = params
+            .iter()
+            .map(|p| p.variable().data().to_vec().len())
+            .sum();
         println!("Helios-Nano params: {total}");
         assert!(total > 100_000, "Too few params: {total}");
     }
@@ -362,12 +361,12 @@ mod tests {
     #[test]
     fn test_helios_sizes() {
         // Verify all sizes construct successfully
-        for (name, model) in [
-            ("Nano", Helios::nano(10)),
-            ("Small", Helios::small(10)),
-        ] {
+        for (name, model) in [("Nano", Helios::nano(10)), ("Small", Helios::small(10))] {
             let params = model.parameters();
-            let total: usize = params.iter().map(|p| p.variable().data().to_vec().len()).sum();
+            let total: usize = params
+                .iter()
+                .map(|p| p.variable().data().to_vec().len())
+                .sum();
             println!("Helios-{name}: {total} params");
             assert!(total > 0);
         }

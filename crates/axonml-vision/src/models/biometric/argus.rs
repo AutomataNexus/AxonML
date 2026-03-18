@@ -108,12 +108,17 @@ impl ArgusIris {
         let uncertainty_head = Linear::new(256, 1);
 
         Self {
-            radial_conv1, radial_conv2,
-            angular_conv1, angular_conv2,
+            radial_conv1,
+            radial_conv2,
+            angular_conv1,
+            angular_conv2,
             phase_conv,
-            reduce_conv, pool, proj,
+            reduce_conv,
+            pool,
+            proj,
             uncertainty_head,
-            polar_config, embed_dim,
+            polar_config,
+            embed_dim,
         }
     }
 
@@ -122,7 +127,13 @@ impl ArgusIris {
     ///
     /// Wraps `pad` elements from each end around to the other side,
     /// ensuring angular continuity at the 0°/360° boundary.
-    fn circular_pad(data: &[f32], batch: usize, channels: usize, length: usize, pad: usize) -> (Vec<f32>, usize) {
+    fn circular_pad(
+        data: &[f32],
+        batch: usize,
+        channels: usize,
+        length: usize,
+        pad: usize,
+    ) -> (Vec<f32>, usize) {
         let new_len = length + 2 * pad;
         let mut padded = vec![0.0f32; batch * channels * new_len];
 
@@ -181,7 +192,7 @@ impl ArgusIris {
         // =====================================================================
         let angular_input = radial_out
             .reshape(&[batch, angular, r_ch, r_len])
-            .transpose(1, 3)  // [B, R', 32, A]
+            .transpose(1, 3) // [B, R', 32, A]
             .reshape(&[batch * r_len, r_ch, angular]);
 
         // Circular padding + angular conv1 (kernel=7, pad=3)
@@ -220,7 +231,8 @@ impl ArgusIris {
                     gradient[base + a] = (ph_data[base + a + 1] - ph_data[base + a - 1]) * 0.5;
                 }
                 if ph_len > 1 {
-                    gradient[base + ph_len - 1] = ph_data[base + ph_len - 1] - ph_data[base + ph_len - 2];
+                    gradient[base + ph_len - 1] =
+                        ph_data[base + ph_len - 1] - ph_data[base + ph_len - 2];
                 }
 
                 // Soft threshold: apply ReLU-like activation to emphasize transitions
@@ -250,7 +262,7 @@ impl ArgusIris {
 
         let spatial_var = phase_out
             .reshape(&[batch, r_len, p_ch, p_len])
-            .transpose(1, 2);  // [B, p_ch, R', p_len]
+            .transpose(1, 2); // [B, p_ch, R', p_len]
 
         // 1×1 conv reduction + adaptive pool (both graph-tracked)
         let reduced = self.reduce_conv.forward(&spatial_var).relu();
@@ -337,10 +349,7 @@ impl ArgusIris {
     ///
     /// Input: [B, 1, H, W] (raw iris image)
     /// Returns: (coarse [B, embed_dim], medium [B, embed_dim], fine [B, embed_dim])
-    pub fn encode_multi_resolution(
-        &self,
-        iris_image: &Variable,
-    ) -> (Variable, Variable, Variable) {
+    pub fn encode_multi_resolution(&self, iris_image: &Variable) -> (Variable, Variable, Variable) {
         let (coarse_strip, medium_strip, fine_strip) =
             polar::multi_scale_unwrap(iris_image, &self.polar_config);
 
@@ -359,11 +368,7 @@ impl ArgusIris {
 
     /// Resize a polar strip to target radial x angular dimensions via
     /// nearest-neighbor interpolation (simple and fast for polar data).
-    fn resize_polar_strip(
-        strip: &Variable,
-        target_r: usize,
-        target_a: usize,
-    ) -> Variable {
+    fn resize_polar_strip(strip: &Variable, target_r: usize, target_a: usize) -> Variable {
         let shape = strip.shape();
         let (batch, ch, src_r, src_a) = (shape[0], shape[1], shape[2], shape[3]);
         let data = strip.data().to_vec();
@@ -379,8 +384,10 @@ impl ArgusIris {
                         let sa = (ta * src_a) / target_a.max(1);
                         let sa = sa.min(src_a.saturating_sub(1));
                         let src_idx = b * ch * src_r * src_a + c * src_r * src_a + sr * src_a + sa;
-                        let dst_idx =
-                            b * ch * target_r * target_a + c * target_r * target_a + tr * target_a + ta;
+                        let dst_idx = b * ch * target_r * target_a
+                            + c * target_r * target_a
+                            + tr * target_a
+                            + ta;
                         resized[dst_idx] = data[src_idx];
                     }
                 }
@@ -436,7 +443,11 @@ impl ArgusIris {
     /// Normalized Hamming distance in [0, 1] where 0 = perfect match,
     /// 0.5 = random/unrelated irises
     pub fn match_hamming(code_a: &[f32], code_b: &[f32]) -> f32 {
-        assert_eq!(code_a.len(), code_b.len(), "Iris codes must have same length");
+        assert_eq!(
+            code_a.len(),
+            code_b.len(),
+            "Iris codes must have same length"
+        );
         if code_a.is_empty() {
             return 0.0;
         }
@@ -588,9 +599,8 @@ mod tests {
                 let r = (dx * dx + dy * dy).sqrt();
                 let theta = dy.atan2(dx);
                 // Radial gradient + angular texture
-                data[y * w + x] = (r * 0.02).min(1.0) * 0.5
-                    + 0.3 * (theta * 5.0).sin()
-                    + 0.2 * (r * 0.5).cos();
+                data[y * w + x] =
+                    (r * 0.02).min(1.0) * 0.5 + 0.3 * (theta * 5.0).sin() + 0.2 * (r * 0.5).cos();
             }
         }
         Variable::new(Tensor::from_vec(data, &[1, 1, h, w]).unwrap(), false)
@@ -607,9 +617,8 @@ mod tests {
                 let r = (dx * dx + dy * dy).sqrt();
                 let theta = dy.atan2(dx);
                 // Different pattern than make_textured_iris
-                data[y * w + x] = (r * 0.03).min(1.0) * 0.4
-                    + 0.4 * (theta * 8.0).cos()
-                    + 0.1 * (r * 0.3).sin();
+                data[y * w + x] =
+                    (r * 0.03).min(1.0) * 0.4 + 0.4 * (theta * 8.0).cos() + 0.1 * (r * 0.3).sin();
             }
         }
         Variable::new(Tensor::from_vec(data, &[1, 1, h, w]).unwrap(), false)
@@ -628,7 +637,8 @@ mod tests {
     #[test]
     fn test_argus_param_count() {
         let model = ArgusIris::new();
-        let total: usize = model.parameters()
+        let total: usize = model
+            .parameters()
             .iter()
             .map(|p| p.variable().data().to_vec().len())
             .sum();
@@ -669,7 +679,11 @@ mod tests {
         );
         let identity = model.extract_identity(&iris);
         let norm: f32 = identity.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < 0.01, "Embedding not unit norm: {}", norm);
+        assert!(
+            (norm - 1.0).abs() < 0.01,
+            "Embedding not unit norm: {}",
+            norm
+        );
     }
 
     #[test]
@@ -840,8 +854,12 @@ mod tests {
     #[test]
     fn test_hamming_random_approximately_half() {
         // Two random-ish codes should give ~0.5 Hamming distance
-        let code_a: Vec<f32> = (0..256).map(|i| if i % 3 == 0 { 0.5 } else { -0.5 }).collect();
-        let code_b: Vec<f32> = (0..256).map(|i| if i % 5 == 0 { 0.5 } else { -0.5 }).collect();
+        let code_a: Vec<f32> = (0..256)
+            .map(|i| if i % 3 == 0 { 0.5 } else { -0.5 })
+            .collect();
+        let code_b: Vec<f32> = (0..256)
+            .map(|i| if i % 5 == 0 { 0.5 } else { -0.5 })
+            .collect();
         let dist = ArgusIris::match_hamming(&code_a, &code_b);
         assert!(
             dist > 0.2 && dist < 0.8,
@@ -918,7 +936,11 @@ mod tests {
         let mask_b = ArgusIris::fragile_bits(&code_b, 0.1);
         let dist = ArgusIris::match_hamming_masked(&code_a, &code_b, &mask_a, &mask_b);
         // Only bits 0 and 2 are reliable in both → both agree → distance = 0
-        assert_eq!(dist, 0.0, "Masked match should ignore fragile bits: {}", dist);
+        assert_eq!(
+            dist, 0.0,
+            "Masked match should ignore fragile bits: {}",
+            dist
+        );
     }
 
     #[test]
@@ -926,11 +948,7 @@ mod tests {
         let code = vec![0.01, -0.01, 0.02, -0.02];
         let mask = ArgusIris::fragile_bits(&code, 0.1);
         let dist = ArgusIris::match_hamming_masked(&code, &code, &mask, &mask);
-        assert_eq!(
-            dist, 1.0,
-            "No reliable bits should return 1.0: {}",
-            dist
-        );
+        assert_eq!(dist, 1.0, "No reliable bits should return 1.0: {}", dist);
     }
 
     // =========================================================================
@@ -999,11 +1017,31 @@ mod tests {
         }
         step_grad[len - 1] = step[len - 1] - step[len - 2]; // = 0.0
 
-        assert!((step_grad[0]).abs() < 1e-6, "No change at 0: {}", step_grad[0]);
-        assert!((step_grad[1] - 0.5).abs() < 1e-6, "Step transition at 1: {}", step_grad[1]);
-        assert!((step_grad[2] - 0.5).abs() < 1e-6, "Step transition at 2: {}", step_grad[2]);
-        assert!((step_grad[3]).abs() < 1e-6, "Flat after step at 3: {}", step_grad[3]);
-        assert!((step_grad[4]).abs() < 1e-6, "Flat after step at 4: {}", step_grad[4]);
+        assert!(
+            (step_grad[0]).abs() < 1e-6,
+            "No change at 0: {}",
+            step_grad[0]
+        );
+        assert!(
+            (step_grad[1] - 0.5).abs() < 1e-6,
+            "Step transition at 1: {}",
+            step_grad[1]
+        );
+        assert!(
+            (step_grad[2] - 0.5).abs() < 1e-6,
+            "Step transition at 2: {}",
+            step_grad[2]
+        );
+        assert!(
+            (step_grad[3]).abs() < 1e-6,
+            "Flat after step at 3: {}",
+            step_grad[3]
+        );
+        assert!(
+            (step_grad[4]).abs() < 1e-6,
+            "Flat after step at 4: {}",
+            step_grad[4]
+        );
     }
 
     #[test]
@@ -1071,7 +1109,10 @@ mod tests {
         assert_eq!(logvar.shape(), &[1, 1]);
         // Should produce finite values
         let data = embedding.data().to_vec();
-        assert!(data.iter().all(|v| v.is_finite()), "All values should be finite");
+        assert!(
+            data.iter().all(|v| v.is_finite()),
+            "All values should be finite"
+        );
     }
 
     #[test]
@@ -1082,7 +1123,10 @@ mod tests {
         assert_eq!(embedding.shape(), &[1, 128]);
         assert_eq!(logvar.shape(), &[1, 1]);
         let data = embedding.data().to_vec();
-        assert!(data.iter().all(|v| v.is_finite()), "Zero input should produce finite embedding");
+        assert!(
+            data.iter().all(|v| v.is_finite()),
+            "Zero input should produce finite embedding"
+        );
     }
 
     // =========================================================================
@@ -1290,7 +1334,15 @@ mod tests {
         assert_eq!(resized.shape(), &[1, 1, 32, 256]);
         let orig = strip.data().to_vec();
         let res = resized.data().to_vec();
-        let diff: f32 = orig.iter().zip(res.iter()).map(|(a, b)| (a - b).abs()).sum();
-        assert!(diff < 1e-5, "Same-size resize should preserve data, diff={}", diff);
+        let diff: f32 = orig
+            .iter()
+            .zip(res.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(
+            diff < 1e-5,
+            "Same-size resize should preserve data, diff={}",
+            diff
+        );
     }
 }

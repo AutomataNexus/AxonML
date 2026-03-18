@@ -19,6 +19,9 @@ use axonml_tensor::Tensor;
 
 use crate::optimizer::Optimizer;
 
+// Re-import Device for state initialization
+use axonml_core;
+
 // =============================================================================
 // RMSprop
 // =============================================================================
@@ -58,31 +61,54 @@ pub struct RMSprop {
     state: Vec<RMSpropState>,
 }
 
-/// State for `RMSprop` optimizer.
+/// Tensor-based state for `RMSprop` optimizer.
+///
+/// All buffers are stored as `Tensor<f32>` so they stay GPU-resident when
+/// parameters are on GPU, avoiding round-trip copies through `to_vec()`.
 #[derive(Debug, Clone)]
 struct RMSpropState {
     /// Square average of gradients.
-    square_avg: Vec<f32>,
+    square_avg: Tensor<f32>,
     /// Momentum buffer.
-    momentum_buffer: Option<Vec<f32>>,
+    momentum_buffer: Option<Tensor<f32>>,
     /// Gradient average (for centered `RMSprop`).
-    grad_avg: Option<Vec<f32>>,
+    grad_avg: Option<Tensor<f32>>,
 }
 
 impl RMSpropState {
-    fn new(size: usize, momentum: bool, centered: bool) -> Self {
+    fn new(shape: &[usize], device: axonml_core::Device, momentum: bool, centered: bool) -> Self {
+        let square_avg = {
+            let t = Tensor::zeros(shape);
+            if device.is_gpu() {
+                t.to_device(device).unwrap()
+            } else {
+                t
+            }
+        };
+        let momentum_buffer = if momentum {
+            let t = Tensor::zeros(shape);
+            Some(if device.is_gpu() {
+                t.to_device(device).unwrap()
+            } else {
+                t
+            })
+        } else {
+            None
+        };
+        let grad_avg = if centered {
+            let t = Tensor::zeros(shape);
+            Some(if device.is_gpu() {
+                t.to_device(device).unwrap()
+            } else {
+                t
+            })
+        } else {
+            None
+        };
         Self {
-            square_avg: vec![0.0; size],
-            momentum_buffer: if momentum {
-                Some(vec![0.0; size])
-            } else {
-                None
-            },
-            grad_avg: if centered {
-                Some(vec![0.0; size])
-            } else {
-                None
-            },
+            square_avg,
+            momentum_buffer,
+            grad_avg,
         }
     }
 }
@@ -181,7 +207,15 @@ impl RMSprop {
             self.state = self
                 .params
                 .iter()
-                .map(|p| RMSpropState::new(p.numel(), self.momentum != 0.0, self.centered))
+                .map(|p| {
+                    let data = p.data();
+                    RMSpropState::new(
+                        data.shape(),
+                        data.device(),
+                        self.momentum != 0.0,
+                        self.centered,
+                    )
+                })
                 .collect();
         }
     }
@@ -190,6 +224,12 @@ impl RMSprop {
 impl Optimizer for RMSprop {
     fn step(&mut self) {
         self.ensure_state_initialized();
+
+        // ============================================================
+        // Tensor-op path: works on both CPU and GPU without to_vec()
+        // All ops (add, mul, mul_scalar, div, sqrt, add_scalar, sub)
+        // dispatch to CUDA when the tensors are GPU-resident.
+        // ============================================================
 
         for (i, param) in self.params.iter().enumerate() {
             if !param.requires_grad() {
@@ -201,69 +241,61 @@ impl Optimizer for RMSprop {
                 None => continue,
             };
 
-            let mut grad_vec = grad.to_vec();
+            let param_data = param.data();
             let state = &mut self.state[i];
 
-            let param_data = param.data();
-            let mut param_vec = param_data.to_vec();
-
-            // Apply weight decay
-            if self.weight_decay != 0.0 {
-                for (g, p) in grad_vec.iter_mut().zip(param_vec.iter()) {
-                    *g += self.weight_decay * p;
-                }
-            }
-
-            // Update square average
-            for (sq, g) in state.square_avg.iter_mut().zip(grad_vec.iter()) {
-                *sq = self.alpha * *sq + (1.0 - self.alpha) * g * g;
-            }
-
-            // Fused parameter update — no intermediate Vec allocation for denominator
-            let lr = self.lr;
-            let eps = self.eps;
-
-            if self.centered {
-                // Update gradient average for centered RMSprop
-                let grad_avg = state.grad_avg.as_mut().unwrap();
-                if self.momentum == 0.0 {
-                    for i in 0..param_vec.len() {
-                        grad_avg[i] = self.alpha * grad_avg[i] + (1.0 - self.alpha) * grad_vec[i];
-                        let avg = (state.square_avg[i] - grad_avg[i] * grad_avg[i]).sqrt() + eps;
-                        param_vec[i] -= lr * grad_vec[i] / avg;
-                    }
-                } else {
-                    let buf = state.momentum_buffer.as_mut().unwrap();
-                    for i in 0..param_vec.len() {
-                        grad_avg[i] = self.alpha * grad_avg[i] + (1.0 - self.alpha) * grad_vec[i];
-                        let avg = (state.square_avg[i] - grad_avg[i] * grad_avg[i]).sqrt() + eps;
-                        buf[i] = self.momentum * buf[i] + grad_vec[i] / avg;
-                        param_vec[i] -= lr * buf[i];
-                    }
-                }
-            } else if self.momentum == 0.0 {
-                // Without momentum, without centering
-                for i in 0..param_vec.len() {
-                    let avg = state.square_avg[i].sqrt() + eps;
-                    param_vec[i] -= lr * grad_vec[i] / avg;
-                }
+            // Apply weight decay: d = grad + weight_decay * param
+            let d = if self.weight_decay != 0.0 {
+                grad.add(&param_data.mul_scalar(self.weight_decay)).unwrap()
             } else {
-                // With momentum, without centering
-                let buf = state.momentum_buffer.as_mut().unwrap();
-                for i in 0..param_vec.len() {
-                    let avg = state.square_avg[i].sqrt() + eps;
-                    buf[i] = self.momentum * buf[i] + grad_vec[i] / avg;
-                    param_vec[i] -= lr * buf[i];
-                }
-            }
+                grad.clone()
+            };
 
-            let mut update = Tensor::from_vec(param_vec, param_data.shape()).unwrap();
-            // Preserve device: from_vec creates CPU, move back to param device
-            let device = param_data.device();
-            if device.is_gpu() {
-                update = update.to_device(device).unwrap();
-            }
-            param.update_data(update);
+            // Update square average: sq_avg = alpha * sq_avg + (1 - alpha) * d^2
+            let d_sq = d.mul(&d).unwrap();
+            state.square_avg = state
+                .square_avg
+                .mul_scalar(self.alpha)
+                .add(&d_sq.mul_scalar(1.0 - self.alpha))
+                .unwrap();
+
+            // Compute denominator
+            let denom = if self.centered {
+                // Update gradient average: grad_avg = alpha * grad_avg + (1 - alpha) * d
+                let grad_avg = state.grad_avg.as_mut().unwrap();
+                *grad_avg = grad_avg
+                    .mul_scalar(self.alpha)
+                    .add(&d.mul_scalar(1.0 - self.alpha))
+                    .unwrap();
+
+                // denom = sqrt(sq_avg - grad_avg^2) + eps
+                let ga_sq = grad_avg.mul(grad_avg).unwrap();
+                state
+                    .square_avg
+                    .sub(&ga_sq)
+                    .unwrap()
+                    .sqrt()
+                    .add_scalar(self.eps)
+            } else {
+                // denom = sqrt(sq_avg) + eps
+                state.square_avg.sqrt().add_scalar(self.eps)
+            };
+
+            // Apply update with or without momentum
+            let update = if self.momentum != 0.0 {
+                // buf = momentum * buf + d / denom
+                let normalized = d.div(&denom).unwrap();
+                let buf = state.momentum_buffer.as_mut().unwrap();
+                *buf = buf.mul_scalar(self.momentum).add(&normalized).unwrap();
+                buf.clone()
+            } else {
+                // update = d / denom
+                d.div(&denom).unwrap()
+            };
+
+            // param = param - lr * update
+            let new_param = param_data.sub(&update.mul_scalar(self.lr)).unwrap();
+            param.update_data(new_param);
         }
     }
 

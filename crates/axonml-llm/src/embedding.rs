@@ -39,10 +39,7 @@ impl TokenEmbedding {
         // Convert u32 indices to f32 and delegate to Embedding::lookup
         // which has proper EmbeddingBackward for gradient tracking
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var = Variable::new(
-            Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(),
-            false,
-        );
+        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
         self.embedding.forward(&ids_var)
     }
 }

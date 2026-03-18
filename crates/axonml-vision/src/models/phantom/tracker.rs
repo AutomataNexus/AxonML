@@ -327,7 +327,11 @@ fn compute_iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
     let area_b = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
     let union = area_a + area_b - inter;
 
-    if union > 0.0 { inter / union } else { 0.0 }
+    if union > 0.0 {
+        inter / union
+    } else {
+        0.0
+    }
 }
 
 /// Extract a single row from a batched Variable, preserving the computational graph.
@@ -354,14 +358,8 @@ mod tests {
     fn test_spawn_and_track() {
         let mut tracker = FaceStateTracker::default_config();
 
-        let bb_feats = Variable::new(
-            Tensor::from_vec(vec![0.1; 48], &[1, 48]).unwrap(),
-            false,
-        );
-        let ev_feats = Variable::new(
-            Tensor::from_vec(vec![0.5; 32], &[1, 32]).unwrap(),
-            false,
-        );
+        let bb_feats = Variable::new(Tensor::from_vec(vec![0.1; 48], &[1, 48]).unwrap(), false);
+        let ev_feats = Variable::new(Tensor::from_vec(vec![0.5; 32], &[1, 32]).unwrap(), false);
         let bboxes = vec![[10.0, 10.0, 50.0, 50.0]];
 
         let detections = tracker.update(&bb_feats, &ev_feats, &bboxes);

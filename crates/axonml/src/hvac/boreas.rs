@@ -17,11 +17,11 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_tensor::Tensor;
 use axonml_nn::{
-    BatchNorm1d, Conv1d, Dropout, Linear, Module, MultiHeadAttention,
-    Parameter, ResidualBlock, Sequential, ReLU, LSTM,
+    BatchNorm1d, Conv1d, Dropout, Linear, Module, MultiHeadAttention, Parameter, ReLU,
+    ResidualBlock, Sequential, LSTM,
 };
+use axonml_tensor::Tensor;
 
 // =============================================================================
 // Boreas Model
@@ -93,7 +93,7 @@ impl Boreas {
             .add(Conv1d::new(32, 32, 3))
             .add(BatchNorm1d::new(32));
         let res1_down = Sequential::new()
-            .add(Conv1d::new(7, 32, 5))   // 80→76, matches 80→78→76
+            .add(Conv1d::new(7, 32, 5)) // 80→76, matches 80→78→76
             .add(BatchNorm1d::new(32));
         let res_block1 = ResidualBlock::new(res1_main).with_downsample(res1_down);
 
@@ -162,7 +162,10 @@ impl Boreas {
     /// Forward pass returning all heads.
     ///
     /// Returns (fault, efficiency, charge, health, embedding)
-    pub fn forward_all(&self, input: &Variable) -> (Variable, Variable, Variable, Variable, Variable) {
+    pub fn forward_all(
+        &self,
+        input: &Variable,
+    ) -> (Variable, Variable, Variable, Variable, Variable) {
         let shape = input.shape();
         let batch = shape[0];
         // Input: (batch, 80, 7) — need to extract per-channel features and transpose
@@ -176,37 +179,40 @@ impl Boreas {
         for b in 0..batch {
             for t in 0..80 {
                 let idx = (b * 80 + t) * 7;
-                pressure_data.push(data[idx]);     // ch0
+                pressure_data.push(data[idx]); // ch0
                 pressure_data.push(data[idx + 1]); // ch1
             }
             for t in 0..80 {
                 let idx = (b * 80 + t) * 7;
-                temp_data.push(data[idx + 2]);     // ch2
-                temp_data.push(data[idx + 3]);     // ch3
+                temp_data.push(data[idx + 2]); // ch2
+                temp_data.push(data[idx + 3]); // ch3
             }
             for t in 0..80 {
                 let idx = (b * 80 + t) * 7;
-                flow_data.push(data[idx + 4]);     // ch4
-                flow_data.push(data[idx + 5]);     // ch5
-                flow_data.push(data[idx + 6]);     // ch6
+                flow_data.push(data[idx + 4]); // ch4
+                flow_data.push(data[idx + 5]); // ch5
+                flow_data.push(data[idx + 6]); // ch6
             }
         }
 
-        let pressure_var = Variable::new(Tensor::from_vec(pressure_data, &[batch, 160]).unwrap(), false);
+        let pressure_var = Variable::new(
+            Tensor::from_vec(pressure_data, &[batch, 160]).unwrap(),
+            false,
+        );
         let temp_var = Variable::new(Tensor::from_vec(temp_data, &[batch, 160]).unwrap(), false);
         let flow_var = Variable::new(Tensor::from_vec(flow_data, &[batch, 240]).unwrap(), false);
 
         let press_out = self.pressure_analyzer.forward(&pressure_var); // (batch, 64)
-        let temp_out = self.temp_analyzer.forward(&temp_var);          // (batch, 64)
-        let flow_out = self.flow_analyzer.forward(&flow_var);          // (batch, 64)
+        let temp_out = self.temp_analyzer.forward(&temp_var); // (batch, 64)
+        let flow_out = self.flow_analyzer.forward(&flow_var); // (batch, 64)
 
         // Transpose input for Conv1d: (batch, 80, 7) → (batch, 7, 80)
         let conv_input = input.transpose(1, 2);
 
         // ResNet blocks
         let res_out = self.res_block1.forward(&conv_input); // (batch, 32, 76)
-        let res_out = self.res_block2.forward(&res_out);    // (batch, 32, 72)
-        let res_out = self.res_block3.forward(&res_out);    // (batch, 64, 68)
+        let res_out = self.res_block2.forward(&res_out); // (batch, 32, 72)
+        let res_out = self.res_block3.forward(&res_out); // (batch, 64, 68)
 
         // Transpose for LSTM: (batch, 64, T) → (batch, T, 64)
         let lstm_input = res_out.transpose(1, 2);
@@ -222,10 +228,9 @@ impl Boreas {
         let seq_features = attn_out.select(1, attn_time - 1);
 
         // Concat analyzers + sequence: (64+64+64) + 256 = 448
-        let analyzer_features = super::aquilo::concat_variables(
-            &[&press_out, &temp_out, &flow_out], batch);
-        let fused = super::aquilo::concat_variables(
-            &[&analyzer_features, &seq_features], batch);
+        let analyzer_features =
+            super::aquilo::concat_variables(&[&press_out, &temp_out, &flow_out], batch);
+        let fused = super::aquilo::concat_variables(&[&analyzer_features, &seq_features], batch);
 
         let embedding = self.pre_head.forward(&fused); // (batch, 384)
 
@@ -274,19 +279,45 @@ impl Module for Boreas {
 
     fn named_parameters(&self) -> HashMap<String, Parameter> {
         let mut params = HashMap::new();
-        for (n, p) in self.pressure_analyzer.named_parameters() { params.insert(format!("pressure_analyzer.{n}"), p); }
-        for (n, p) in self.temp_analyzer.named_parameters() { params.insert(format!("temp_analyzer.{n}"), p); }
-        for (n, p) in self.flow_analyzer.named_parameters() { params.insert(format!("flow_analyzer.{n}"), p); }
-        for (n, p) in self.res_block1.named_parameters() { params.insert(format!("res_block1.{n}"), p); }
-        for (n, p) in self.res_block2.named_parameters() { params.insert(format!("res_block2.{n}"), p); }
-        for (n, p) in self.res_block3.named_parameters() { params.insert(format!("res_block3.{n}"), p); }
-        for (n, p) in self.lstm.named_parameters() { params.insert(format!("lstm.{n}"), p); }
-        for (n, p) in self.attention.named_parameters() { params.insert(format!("attention.{n}"), p); }
-        for (n, p) in self.pre_head.named_parameters() { params.insert(format!("pre_head.{n}"), p); }
-        for (n, p) in self.fault_head.named_parameters() { params.insert(format!("fault_head.{n}"), p); }
-        for (n, p) in self.efficiency_head.named_parameters() { params.insert(format!("efficiency_head.{n}"), p); }
-        for (n, p) in self.charge_head.named_parameters() { params.insert(format!("charge_head.{n}"), p); }
-        for (n, p) in self.health_head.named_parameters() { params.insert(format!("health_head.{n}"), p); }
+        for (n, p) in self.pressure_analyzer.named_parameters() {
+            params.insert(format!("pressure_analyzer.{n}"), p);
+        }
+        for (n, p) in self.temp_analyzer.named_parameters() {
+            params.insert(format!("temp_analyzer.{n}"), p);
+        }
+        for (n, p) in self.flow_analyzer.named_parameters() {
+            params.insert(format!("flow_analyzer.{n}"), p);
+        }
+        for (n, p) in self.res_block1.named_parameters() {
+            params.insert(format!("res_block1.{n}"), p);
+        }
+        for (n, p) in self.res_block2.named_parameters() {
+            params.insert(format!("res_block2.{n}"), p);
+        }
+        for (n, p) in self.res_block3.named_parameters() {
+            params.insert(format!("res_block3.{n}"), p);
+        }
+        for (n, p) in self.lstm.named_parameters() {
+            params.insert(format!("lstm.{n}"), p);
+        }
+        for (n, p) in self.attention.named_parameters() {
+            params.insert(format!("attention.{n}"), p);
+        }
+        for (n, p) in self.pre_head.named_parameters() {
+            params.insert(format!("pre_head.{n}"), p);
+        }
+        for (n, p) in self.fault_head.named_parameters() {
+            params.insert(format!("fault_head.{n}"), p);
+        }
+        for (n, p) in self.efficiency_head.named_parameters() {
+            params.insert(format!("efficiency_head.{n}"), p);
+        }
+        for (n, p) in self.charge_head.named_parameters() {
+            params.insert(format!("charge_head.{n}"), p);
+        }
+        for (n, p) in self.health_head.named_parameters() {
+            params.insert(format!("health_head.{n}"), p);
+        }
         params
     }
 
@@ -338,8 +369,11 @@ mod tests {
     fn test_boreas_parameter_count() {
         let model = Boreas::new();
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
-        assert!(total > 800_000 && total < 1_600_000,
-            "Boreas has {} params, expected ~1.2M", total);
+        assert!(
+            total > 800_000 && total < 1_600_000,
+            "Boreas has {} params, expected ~1.2M",
+            total
+        );
     }
 
     #[test]

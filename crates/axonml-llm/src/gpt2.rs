@@ -252,7 +252,11 @@ impl GPT2LMHead {
             .iter()
             .map(|&l| {
                 let label = l as usize;
-                if label < vocab_size { l as f32 } else { 0.0f32 }
+                if label < vocab_size {
+                    l as f32
+                } else {
+                    0.0f32
+                }
             })
             .collect();
         let target_var = Variable::new(

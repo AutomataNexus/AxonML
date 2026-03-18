@@ -40,33 +40,29 @@ struct BlazeBlock {
 
 impl BlazeBlock {
     fn new(in_ch: usize, out_ch: usize, stride: usize) -> Self {
-        let dw_conv = Conv2d::with_groups(
-            in_ch, in_ch, (3, 3),
-            (stride, stride),
-            (1, 1), true,
-            in_ch,
-        );
+        let dw_conv =
+            Conv2d::with_groups(in_ch, in_ch, (3, 3), (stride, stride), (1, 1), true, in_ch);
         let dw_bn = BatchNorm2d::new(in_ch);
 
-        let pw_conv = Conv2d::with_options(
-            in_ch, out_ch, (1, 1),
-            (1, 1), (0, 0), true,
-        );
+        let pw_conv = Conv2d::with_options(in_ch, out_ch, (1, 1), (1, 1), (0, 0), true);
         let pw_bn = BatchNorm2d::new(out_ch);
 
         let project = if in_ch != out_ch || stride != 1 {
             Some((
-                Conv2d::with_options(
-                    in_ch, out_ch, (1, 1),
-                    (stride, stride), (0, 0), true,
-                ),
+                Conv2d::with_options(in_ch, out_ch, (1, 1), (stride, stride), (0, 0), true),
                 BatchNorm2d::new(out_ch),
             ))
         } else {
             None
         };
 
-        Self { dw_conv, dw_bn, pw_conv, pw_bn, project }
+        Self {
+            dw_conv,
+            dw_bn,
+            pw_conv,
+            pw_bn,
+            project,
+        }
     }
 
     fn forward(&self, x: &Variable) -> Variable {
@@ -191,9 +187,13 @@ impl MnemosyneIdentity {
         let convergence_head = Linear::new(hidden_dim, 2);
 
         Self {
-            stem_conv, stem_bn,
-            block1, block2, block3,
-            pool, face_proj,
+            stem_conv,
+            stem_bn,
+            block1,
+            block2,
+            block3,
+            pool,
+            face_proj,
             quality_gate,
             gru,
             convergence_head,
@@ -368,7 +368,9 @@ impl MnemosyneIdentity {
     pub fn convergence_delta(hidden_prev: &[f32], hidden_curr: &[f32]) -> f32 {
         assert_eq!(hidden_prev.len(), hidden_curr.len());
         let dim = hidden_prev.len() as f32;
-        let sq_dist: f32 = hidden_prev.iter().zip(hidden_curr.iter())
+        let sq_dist: f32 = hidden_prev
+            .iter()
+            .zip(hidden_curr.iter())
             .map(|(a, b)| (a - b) * (a - b))
             .sum();
         (sq_dist / dim).sqrt()
@@ -419,8 +421,7 @@ impl MnemosyneIdentity {
         let mut hidden_states: Vec<Vec<f32>> = Vec::new();
 
         for frame in face_sequence {
-            let (h, _velocity, _logvar, _quality) =
-                self.crystallize_step(frame, hidden.as_ref());
+            let (h, _velocity, _logvar, _quality) = self.crystallize_step(frame, hidden.as_ref());
             hidden_states.push(h.data().to_vec());
             hidden = Some(h);
         }
@@ -450,8 +451,7 @@ impl MnemosyneIdentity {
             })
             .collect();
 
-        let mean_mag: f32 =
-            delta_magnitudes.iter().sum::<f32>() / delta_magnitudes.len() as f32;
+        let mean_mag: f32 = delta_magnitudes.iter().sum::<f32>() / delta_magnitudes.len() as f32;
         let temporal_variance: f32 = if delta_magnitudes.len() > 1 {
             delta_magnitudes
                 .iter()
@@ -526,11 +526,7 @@ impl MnemosyneIdentity {
     /// # Returns
     /// Cosine distance in [0, 2] where 0 = identical, 2 = opposite.
     /// Typical thresholds: <0.3 normal, 0.3-0.6 monitor, >0.6 re-enroll.
-    pub fn detect_drift(
-        &self,
-        current_hidden: &Variable,
-        original_embedding: &[f32],
-    ) -> f32 {
+    pub fn detect_drift(&self, current_hidden: &Variable, original_embedding: &[f32]) -> f32 {
         let current_embedding = self.extract_identity(current_hidden);
         assert_eq!(
             current_embedding.len(),
@@ -575,10 +571,7 @@ impl MnemosyneIdentity {
     ///
     /// # Panics
     /// Panics if `faces` is empty.
-    pub fn crystallize_sequence(
-        &self,
-        faces: &[Variable],
-    ) -> (Variable, Vec<f32>, f32) {
+    pub fn crystallize_sequence(&self, faces: &[Variable]) -> (Variable, Vec<f32>, f32) {
         assert!(!faces.is_empty(), "Face sequence must not be empty");
 
         let mut hidden: Option<Variable> = None;
@@ -586,8 +579,7 @@ impl MnemosyneIdentity {
         let mut final_velocity: f32 = 1.0;
 
         for frame in faces {
-            let (h, velocity, _logvar, quality) =
-                self.crystallize_step(frame, hidden.as_ref());
+            let (h, velocity, _logvar, quality) = self.crystallize_step(frame, hidden.as_ref());
 
             // Extract scalar quality for this frame
             let q_val = quality.data().to_vec()[0];
@@ -714,10 +706,7 @@ mod tests {
                 v * 2.0 - 1.0 // Map to [-1, 1]
             })
             .collect();
-        Variable::new(
-            Tensor::from_vec(data, &[batch, 3, 64, 64]).unwrap(),
-            false,
-        )
+        Variable::new(Tensor::from_vec(data, &[batch, 3, 64, 64]).unwrap(), false)
     }
 
     // =========================================================================
@@ -734,7 +723,8 @@ mod tests {
     #[test]
     fn test_mnemosyne_param_count() {
         let model = MnemosyneIdentity::new();
-        let total: usize = model.parameters()
+        let total: usize = model
+            .parameters()
             .iter()
             .map(|p| p.variable().data().to_vec().len())
             .sum();
@@ -769,11 +759,19 @@ mod tests {
 
         // Velocity should be in [0, 1] (sigmoid output)
         let vel_val = velocity.data().to_vec()[0];
-        assert!(vel_val >= 0.0 && vel_val <= 1.0, "Velocity {} not in [0,1]", vel_val);
+        assert!(
+            vel_val >= 0.0 && vel_val <= 1.0,
+            "Velocity {} not in [0,1]",
+            vel_val
+        );
 
         // Quality should be in [0, 1] (sigmoid output)
         let qual_val = quality.data().to_vec()[0];
-        assert!(qual_val >= 0.0 && qual_val <= 1.0, "Quality {} not in [0,1]", qual_val);
+        assert!(
+            qual_val >= 0.0 && qual_val <= 1.0,
+            "Quality {} not in [0,1]",
+            qual_val
+        );
     }
 
     #[test]
@@ -786,9 +784,7 @@ mod tests {
         let mut convergence_deltas = Vec::new();
 
         for _ in 0..5 {
-            let (h, _velocity, _logvar, _quality) = model.crystallize_step(
-                &face, hidden.as_ref(),
-            );
+            let (h, _velocity, _logvar, _quality) = model.crystallize_step(&face, hidden.as_ref());
 
             let h_data = h.data().to_vec();
             if let Some(ref prev) = prev_hidden_data {
@@ -816,11 +812,19 @@ mod tests {
 
         let c = vec![-0.5, -0.3, -0.8, -0.1];
         let score2 = MnemosyneIdentity::match_identities(&a, &c, -1.0, -1.0);
-        assert!(score2 < 0.0, "Opposite embedding score {} should be negative", score2);
+        assert!(
+            score2 < 0.0,
+            "Opposite embedding score {} should be negative",
+            score2
+        );
 
         // Higher uncertainty should reduce confidence
         let score_uncertain = MnemosyneIdentity::match_identities(&a, &b, 2.0, 2.0);
-        assert!(score_uncertain > 0.9, "Same embedding should still match: {}", score_uncertain);
+        assert!(
+            score_uncertain > 0.9,
+            "Same embedding should still match: {}",
+            score_uncertain
+        );
     }
 
     #[test]
@@ -874,20 +878,27 @@ mod tests {
         let model = MnemosyneIdentity::new();
 
         // Simulate a real face: each frame has different pixel values
-        let sequence: Vec<Variable> = (0..8)
-            .map(|i| make_varied_face(1, i * 12345 + 7))
-            .collect();
+        let sequence: Vec<Variable> = (0..8).map(|i| make_varied_face(1, i * 12345 + 7)).collect();
 
         let result = model.assess_liveness(&sequence);
 
-        assert!(result.liveness_score >= 0.0 && result.liveness_score <= 1.0,
-            "Liveness score {} out of range", result.liveness_score);
-        assert!(result.temporal_variance.is_finite(),
-            "Temporal variance should be finite");
-        assert!(result.trajectory_smoothness.is_finite(),
-            "Trajectory smoothness should be finite");
-        assert!(!result.modality_liveness.is_empty(),
-            "Should have modality liveness entries");
+        assert!(
+            result.liveness_score >= 0.0 && result.liveness_score <= 1.0,
+            "Liveness score {} out of range",
+            result.liveness_score
+        );
+        assert!(
+            result.temporal_variance.is_finite(),
+            "Temporal variance should be finite"
+        );
+        assert!(
+            result.trajectory_smoothness.is_finite(),
+            "Trajectory smoothness should be finite"
+        );
+        assert!(
+            !result.modality_liveness.is_empty(),
+            "Should have modality liveness entries"
+        );
     }
 
     #[test]
@@ -903,10 +914,15 @@ mod tests {
         // Constant input should produce low temporal variance
         // The GRU will still evolve the hidden state, but the deltas will be
         // more repetitive than with varied input
-        assert!(result.temporal_variance.is_finite(),
-            "Temporal variance should be finite");
-        assert!(result.liveness_score >= 0.0 && result.liveness_score <= 1.0,
-            "Liveness score {} out of range", result.liveness_score);
+        assert!(
+            result.temporal_variance.is_finite(),
+            "Temporal variance should be finite"
+        );
+        assert!(
+            result.liveness_score >= 0.0 && result.liveness_score <= 1.0,
+            "Liveness score {} out of range",
+            result.liveness_score
+        );
     }
 
     #[test]
@@ -951,7 +967,10 @@ mod tests {
         let result = model.assess_liveness(&seq);
 
         // Should return unknown result
-        assert_eq!(result.liveness_score, 0.5, "Too few frames should return unknown");
+        assert_eq!(
+            result.liveness_score, 0.5,
+            "Too few frames should return unknown"
+        );
         assert!(!result.is_live, "Too few frames should not be judged live");
     }
 
@@ -973,9 +992,7 @@ mod tests {
     fn test_liveness_smoothness_range() {
         let model = MnemosyneIdentity::new();
 
-        let seq: Vec<Variable> = (0..6)
-            .map(|i| make_varied_face(1, i * 77777))
-            .collect();
+        let seq: Vec<Variable> = (0..6).map(|i| make_varied_face(1, i * 77777)).collect();
         let result = model.assess_liveness(&seq);
 
         // Trajectory smoothness is mean autocorrelation, should be in [-1, 1]
@@ -1030,16 +1047,8 @@ mod tests {
         let drift = model.detect_drift(hidden_b.as_ref().unwrap(), &embedding_a);
 
         // Drift should be non-trivial for different faces
-        assert!(
-            drift.is_finite(),
-            "Drift should be finite, got {}",
-            drift
-        );
-        assert!(
-            drift >= 0.0,
-            "Drift should be non-negative, got {}",
-            drift
-        );
+        assert!(drift.is_finite(), "Drift should be finite, got {}", drift);
+        assert!(drift >= 0.0, "Drift should be non-negative, got {}", drift);
     }
 
     #[test]
@@ -1069,12 +1078,9 @@ mod tests {
     fn test_crystallize_sequence_basic() {
         let model = MnemosyneIdentity::new();
 
-        let faces: Vec<Variable> = (0..5)
-            .map(|i| make_varied_face(1, i * 11111))
-            .collect();
+        let faces: Vec<Variable> = (0..5).map(|i| make_varied_face(1, i * 11111)).collect();
 
-        let (final_hidden, qualities, final_velocity) =
-            model.crystallize_sequence(&faces);
+        let (final_hidden, qualities, final_velocity) = model.crystallize_sequence(&faces);
 
         assert_eq!(final_hidden.shape(), &[1, 64]);
         assert_eq!(qualities.len(), 5);
@@ -1284,7 +1290,11 @@ mod tests {
         let output = model.forward(&face);
         let data = output.data().to_vec();
         for v in &data {
-            assert!(v.is_finite(), "Output should be finite for large input, got {}", v);
+            assert!(
+                v.is_finite(),
+                "Output should be finite for large input, got {}",
+                v
+            );
         }
     }
 
@@ -1296,7 +1306,11 @@ mod tests {
         let output = model.forward(&face);
         let data = output.data().to_vec();
         for v in &data {
-            assert!(v.is_finite(), "Output should be finite for small input, got {}", v);
+            assert!(
+                v.is_finite(),
+                "Output should be finite for small input, got {}",
+                v
+            );
         }
     }
 
@@ -1308,7 +1322,11 @@ mod tests {
         let output = model.forward(&face);
         let data = output.data().to_vec();
         for v in &data {
-            assert!(v.is_finite(), "Output should be finite for negative input, got {}", v);
+            assert!(
+                v.is_finite(),
+                "Output should be finite for negative input, got {}",
+                v
+            );
         }
     }
 
@@ -1352,10 +1370,7 @@ mod tests {
         let model = MnemosyneIdentity::new();
 
         // Zero hidden state should return zero embedding (safeguard)
-        let hidden = Variable::new(
-            Tensor::zeros(&[1, model.hidden_dim()]),
-            false,
-        );
+        let hidden = Variable::new(Tensor::zeros(&[1, model.hidden_dim()]), false);
         let embedding = model.extract_identity(&hidden);
 
         assert_eq!(embedding.len(), model.hidden_dim());
@@ -1379,7 +1394,11 @@ mod tests {
         // should be 3/4 = 0.75
         if data[1].abs() > 1e-8 {
             let ratio = data[0] / data[1];
-            assert!((ratio - 0.75).abs() < 0.01, "Direction not preserved: ratio={}", ratio);
+            assert!(
+                (ratio - 0.75).abs() < 0.01,
+                "Direction not preserved: ratio={}",
+                ratio
+            );
         }
     }
 
@@ -1412,9 +1431,7 @@ mod tests {
     fn test_liveness_and_crystallize_sequence_together() {
         let model = MnemosyneIdentity::new();
 
-        let faces: Vec<Variable> = (0..6)
-            .map(|i| make_varied_face(1, i * 31337))
-            .collect();
+        let faces: Vec<Variable> = (0..6).map(|i| make_varied_face(1, i * 31337)).collect();
 
         // Both should work on the same sequence
         let liveness = model.assess_liveness(&faces);
@@ -1434,16 +1451,18 @@ mod tests {
     fn test_drift_after_crystallize_sequence() {
         let model = MnemosyneIdentity::new();
 
-        let faces: Vec<Variable> = (0..5)
-            .map(|_| make_face(1, 0.5))
-            .collect();
+        let faces: Vec<Variable> = (0..5).map(|_| make_face(1, 0.5)).collect();
 
         let (hidden, _qualities, _vel) = model.crystallize_sequence(&faces);
         let embedding = model.extract_identity(&hidden);
 
         // Drift from the crystallized state to its own embedding should be ~0
         let drift = model.detect_drift(&hidden, &embedding);
-        assert!(drift < 0.01, "Self-drift should be near zero, got {}", drift);
+        assert!(
+            drift < 0.01,
+            "Self-drift should be near zero, got {}",
+            drift
+        );
     }
 
     // =========================================================================
@@ -1497,17 +1516,18 @@ mod tests {
         for step in 0..20 {
             // Generate triplet: anchor/positive are perturbations of same base
             let anchor_face = Variable::new(
-                base_face.add(&Tensor::randn(&[1, 3, 64, 64]).mul_scalar(0.1)).unwrap(),
+                base_face
+                    .add(&Tensor::randn(&[1, 3, 64, 64]).mul_scalar(0.1))
+                    .unwrap(),
                 false,
             );
             let positive_face = Variable::new(
-                base_face.add(&Tensor::randn(&[1, 3, 64, 64]).mul_scalar(0.1)).unwrap(),
+                base_face
+                    .add(&Tensor::randn(&[1, 3, 64, 64]).mul_scalar(0.1))
+                    .unwrap(),
                 false,
             );
-            let negative_face = Variable::new(
-                Tensor::randn(&[1, 3, 64, 64]),
-                false,
-            );
+            let negative_face = Variable::new(Tensor::randn(&[1, 3, 64, 64]), false);
 
             // Forward pass — single frame crystallization
             let (hidden_a, vel_a, _, _) = model.crystallize_step(&anchor_face, None);
@@ -1532,7 +1552,11 @@ mod tests {
 
             if step == 0 {
                 println!("Step 0: loss = {}", loss_val);
-                assert!(loss_val.is_finite(), "Initial loss must be finite, got {}", loss_val);
+                assert!(
+                    loss_val.is_finite(),
+                    "Initial loss must be finite, got {}",
+                    loss_val
+                );
             }
 
             // Backward
@@ -1550,7 +1574,12 @@ mod tests {
                         let grad_norm: f32 = g.to_vec().iter().map(|x| x * x).sum::<f32>().sqrt();
                         if grad_norm > 1e-10 {
                             has_grad += 1;
-                            println!("  HAS GRAD: {} shape={:?} grad_norm={:.6}", name, p.variable().shape(), grad_norm);
+                            println!(
+                                "  HAS GRAD: {} shape={:?} grad_norm={:.6}",
+                                name,
+                                p.variable().shape(),
+                                grad_norm
+                            );
                         } else {
                             zero_grad += 1;
                             println!("  ZERO GRAD: {} shape={:?}", name, p.variable().shape());
@@ -1560,9 +1589,14 @@ mod tests {
                         println!("  NO GRAD: {} shape={:?}", name, p.variable().shape());
                     }
                 }
-                println!("Params with nonzero grad: {}, zero grad: {}, no grad: {}",
-                    has_grad, zero_grad, no_grad);
-                assert!(has_grad > 0, "At least some parameters must have non-zero gradients");
+                println!(
+                    "Params with nonzero grad: {}, zero grad: {}, no grad: {}",
+                    has_grad, zero_grad, no_grad
+                );
+                assert!(
+                    has_grad > 0,
+                    "At least some parameters must have non-zero gradients"
+                );
             }
 
             // Step optimizer
@@ -1573,7 +1607,10 @@ mod tests {
         // Check that loss trajectory shows some learning
         let first_5_avg: f32 = losses[..5].iter().sum::<f32>() / 5.0;
         let last_5_avg: f32 = losses[15..].iter().sum::<f32>() / 5.0;
-        println!("First 5 avg loss: {:.4}, Last 5 avg loss: {:.4}", first_5_avg, last_5_avg);
+        println!(
+            "First 5 avg loss: {:.4}, Last 5 avg loss: {:.4}",
+            first_5_avg, last_5_avg
+        );
         println!("All losses: {:?}", losses);
 
         // Loss should at least not explode
@@ -1586,7 +1623,8 @@ mod tests {
         assert!(
             last_5_avg <= first_5_avg + 0.5,
             "Loss should not increase significantly: first_5={:.4} last_5={:.4}",
-            first_5_avg, last_5_avg
+            first_5_avg,
+            last_5_avg
         );
     }
 

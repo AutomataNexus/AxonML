@@ -17,11 +17,9 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
+use axonml_nn::{BatchNorm1d, Dropout, Linear, Module, Parameter, ReLU, Sequential, GELU};
 #[cfg(test)]
 use axonml_tensor::Tensor;
-use axonml_nn::{
-    BatchNorm1d, Dropout, Linear, Module, Parameter, Sequential, ReLU, GELU,
-};
 
 use super::colossus;
 
@@ -76,9 +74,7 @@ impl Gaia {
             .add(ReLU);
 
         // Fusion: safety(256) + validation(128) = 384 → 256
-        let fusion = Sequential::new()
-            .add(Linear::new(384, 256))
-            .add(ReLU);
+        let fusion = Sequential::new().add(Linear::new(384, 256)).add(ReLU);
 
         let validation_head = Linear::new(256, 5);
         let safety_head = Linear::new(256, 1);
@@ -112,21 +108,23 @@ impl Gaia {
         let batch = specialist_features.shape()[0];
 
         // Concat specialist + colossus
-        let input = super::aquilo::concat_variables(
-            &[specialist_features, colossus_embedding], batch);
+        let input =
+            super::aquilo::concat_variables(&[specialist_features, colossus_embedding], batch);
 
         self.forward_all(&input)
     }
 
     /// Forward from pre-concatenated input.
-    pub fn forward_all(&self, input: &Variable) -> (Variable, Variable, Variable, Variable, Variable) {
+    pub fn forward_all(
+        &self,
+        input: &Variable,
+    ) -> (Variable, Variable, Variable, Variable, Variable) {
         let batch = input.shape()[0];
 
-        let safety_out = self.safety_encoder.forward(input);     // (batch, 256)
+        let safety_out = self.safety_encoder.forward(input); // (batch, 256)
         let validation_out = self.validation_net.forward(input); // (batch, 128)
 
-        let fused = super::aquilo::concat_variables(
-            &[&safety_out, &validation_out], batch);
+        let fused = super::aquilo::concat_variables(&[&safety_out, &validation_out], batch);
         let embedding = self.fusion.forward(&fused); // (batch, 256)
 
         let validation = self.validation_head.forward(&embedding);
@@ -168,13 +166,27 @@ impl Module for Gaia {
 
     fn named_parameters(&self) -> HashMap<String, Parameter> {
         let mut params = HashMap::new();
-        for (n, p) in self.safety_encoder.named_parameters() { params.insert(format!("safety_encoder.{n}"), p); }
-        for (n, p) in self.validation_net.named_parameters() { params.insert(format!("validation_net.{n}"), p); }
-        for (n, p) in self.fusion.named_parameters() { params.insert(format!("fusion.{n}"), p); }
-        for (n, p) in self.validation_head.named_parameters() { params.insert(format!("validation_head.{n}"), p); }
-        for (n, p) in self.safety_head.named_parameters() { params.insert(format!("safety_head.{n}"), p); }
-        for (n, p) in self.override_head.named_parameters() { params.insert(format!("override_head.{n}"), p); }
-        for (n, p) in self.confidence_head.named_parameters() { params.insert(format!("confidence_head.{n}"), p); }
+        for (n, p) in self.safety_encoder.named_parameters() {
+            params.insert(format!("safety_encoder.{n}"), p);
+        }
+        for (n, p) in self.validation_net.named_parameters() {
+            params.insert(format!("validation_net.{n}"), p);
+        }
+        for (n, p) in self.fusion.named_parameters() {
+            params.insert(format!("fusion.{n}"), p);
+        }
+        for (n, p) in self.validation_head.named_parameters() {
+            params.insert(format!("validation_head.{n}"), p);
+        }
+        for (n, p) in self.safety_head.named_parameters() {
+            params.insert(format!("safety_head.{n}"), p);
+        }
+        for (n, p) in self.override_head.named_parameters() {
+            params.insert(format!("override_head.{n}"), p);
+        }
+        for (n, p) in self.confidence_head.named_parameters() {
+            params.insert(format!("confidence_head.{n}"), p);
+        }
         params
     }
 
@@ -207,12 +219,20 @@ mod tests {
         let model = Gaia::new();
 
         let specialist = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * colossus::TOTAL_SPECIALIST_DIM],
-                &[2, colossus::TOTAL_SPECIALIST_DIM]).unwrap(), false);
+            Tensor::from_vec(
+                vec![1.0; 2 * colossus::TOTAL_SPECIALIST_DIM],
+                &[2, colossus::TOTAL_SPECIALIST_DIM],
+            )
+            .unwrap(),
+            false,
+        );
         let colossus_emb = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * 256], &[2, 256]).unwrap(), false);
+            Tensor::from_vec(vec![1.0; 2 * 256], &[2, 256]).unwrap(),
+            false,
+        );
 
-        let (val, safety, override_out, conf, emb) = model.forward_parts(&specialist, &colossus_emb);
+        let (val, safety, override_out, conf, emb) =
+            model.forward_parts(&specialist, &colossus_emb);
 
         assert_eq!(val.shape(), vec![2, 5]);
         assert_eq!(safety.shape(), vec![2, 1]);
@@ -237,7 +257,10 @@ mod tests {
         let model = Gaia::new();
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
         // Dual-path with 1728-dim input yields ~2.2M params
-        assert!(total > 1_500_000 && total < 3_000_000,
-            "Gaia has {} params, expected ~2.2M", total);
+        assert!(
+            total > 1_500_000 && total < 3_000_000,
+            "Gaia has {} params, expected ~2.2M",
+            total
+        );
     }
 }

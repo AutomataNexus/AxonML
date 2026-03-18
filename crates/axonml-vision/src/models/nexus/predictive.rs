@@ -17,7 +17,7 @@
 #![allow(missing_docs)]
 
 use axonml_autograd::Variable;
-use axonml_nn::{Conv2d, BatchNorm2d, Module, Parameter};
+use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter};
 use axonml_tensor::Tensor;
 
 // =============================================================================
@@ -117,7 +117,8 @@ impl PredictiveCodingModule {
 
                 // Update prediction for next frame
                 self.prediction = Some(
-                    self.predict_bn.forward(&self.predict_conv.forward(&gated_var))
+                    self.predict_bn
+                        .forward(&self.predict_conv.forward(&gated_var)),
                 );
 
                 return (gated_var, surprise_var);
@@ -132,9 +133,7 @@ impl PredictiveCodingModule {
         );
 
         // Generate prediction for next frame
-        self.prediction = Some(
-            self.predict_bn.forward(&self.predict_conv.forward(actual))
-        );
+        self.prediction = Some(self.predict_bn.forward(&self.predict_conv.forward(actual)));
 
         (actual.clone(), surprise_var)
     }
@@ -194,7 +193,11 @@ impl MultiScalePredictiveCoding {
         f1: &Variable,
         f2: &Variable,
         f3: &Variable,
-    ) -> ((Variable, Variable), (Variable, Variable), (Variable, Variable)) {
+    ) -> (
+        (Variable, Variable),
+        (Variable, Variable),
+        (Variable, Variable),
+    ) {
         let r1 = self.scale1.forward(f1);
         let r2 = self.scale2.forward(f2);
         let r3 = self.scale3.forward(f3);
@@ -297,7 +300,10 @@ mod tests {
         // Big change → high surprise
         let s_data = surprise.data().to_vec();
         let avg_surprise: f32 = s_data.iter().sum::<f32>() / s_data.len() as f32;
-        assert!(avg_surprise > 0.3, "Expected high surprise, got {avg_surprise}");
+        assert!(
+            avg_surprise > 0.3,
+            "Expected high surprise, got {avg_surprise}"
+        );
     }
 
     #[test]
@@ -334,9 +340,18 @@ mod tests {
     fn test_multi_scale_predictive_coding() {
         let mut mspc = MultiScalePredictiveCoding::new(96);
 
-        let f1 = Variable::new(Tensor::from_vec(vec![0.1; 96 * 40 * 40], &[1, 96, 40, 40]).unwrap(), false);
-        let f2 = Variable::new(Tensor::from_vec(vec![0.1; 96 * 20 * 20], &[1, 96, 20, 20]).unwrap(), false);
-        let f3 = Variable::new(Tensor::from_vec(vec![0.1; 96 * 10 * 10], &[1, 96, 10, 10]).unwrap(), false);
+        let f1 = Variable::new(
+            Tensor::from_vec(vec![0.1; 96 * 40 * 40], &[1, 96, 40, 40]).unwrap(),
+            false,
+        );
+        let f2 = Variable::new(
+            Tensor::from_vec(vec![0.1; 96 * 20 * 20], &[1, 96, 20, 20]).unwrap(),
+            false,
+        );
+        let f3 = Variable::new(
+            Tensor::from_vec(vec![0.1; 96 * 10 * 10], &[1, 96, 10, 10]).unwrap(),
+            false,
+        );
 
         let ((g1, s1), (g2, s2), (g3, s3)) = mspc.forward(&f1, &f2, &f3);
 

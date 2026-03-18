@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
-use rustfft::{FftPlanner, num_complex::Complex};
+use rustfft::{num_complex::Complex, FftPlanner};
 
 use crate::module::Module;
 use crate::parameter::Parameter;
@@ -381,10 +381,7 @@ mod tests {
     #[test]
     fn test_fft1d_shape_2d() {
         let fft = FFT1d::new(64);
-        let input = Variable::new(
-            Tensor::from_vec(vec![0.0; 128], &[2, 64]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![0.0; 128], &[2, 64]).unwrap(), false);
         let output = fft.forward(&input);
         assert_eq!(output.shape(), vec![2, 33]); // n_fft/2+1 = 33
     }
@@ -414,10 +411,7 @@ mod tests {
             .collect();
 
         let fft = FFT1d::new(n);
-        let input = Variable::new(
-            Tensor::from_vec(signal, &[1, n]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(signal, &[1, n]).unwrap(), false);
         let output = fft.forward(&input);
         let spectrum = output.data().to_vec();
 
@@ -435,10 +429,7 @@ mod tests {
     fn test_fft1d_zero_padding() {
         // Input shorter than n_fft gets zero-padded
         let fft = FFT1d::new(128);
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 32], &[1, 32]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 32], &[1, 32]).unwrap(), false);
         let output = fft.forward(&input);
         assert_eq!(output.shape(), vec![1, 65]);
     }
@@ -449,10 +440,7 @@ mod tests {
         let fft_raw = FFT1d::new(64);
 
         let signal = vec![1.0; 64];
-        let input = Variable::new(
-            Tensor::from_vec(signal, &[1, 64]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(signal, &[1, 64]).unwrap(), false);
 
         let out_norm = fft_norm.forward(&input).data().to_vec();
         let out_raw = fft_raw.forward(&input).data().to_vec();

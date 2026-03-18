@@ -143,7 +143,9 @@ impl Parameter {
         if current.device() == device {
             return;
         }
-        let moved = current.to_device(device).expect("Failed to move parameter to device");
+        let moved = current
+            .to_device(device)
+            .expect("Failed to move parameter to device");
         self.update_data(moved);
     }
 }

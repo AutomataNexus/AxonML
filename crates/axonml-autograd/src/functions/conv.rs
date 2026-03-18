@@ -27,19 +27,42 @@ use crate::grad_fn::{GradFn, GradientFunction};
 
 /// C += A × B  using matrixmultiply (BLAS-level GEMM).
 /// A: [m, k] (or [k, m] if trans_a), B: [k, n] (or [n, k] if trans_b), C: [m, n]
-fn gemm_acc(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize,
-    trans_a: bool, trans_b: bool)
-{
-    let (rsa, csa) = if trans_a { (1isize, m as isize) } else { (k as isize, 1isize) };
-    let (rsb, csb) = if trans_b { (1isize, k as isize) } else { (n as isize, 1isize) };
+fn gemm_acc(
+    a: &[f32],
+    b: &[f32],
+    c: &mut [f32],
+    m: usize,
+    k: usize,
+    n: usize,
+    trans_a: bool,
+    trans_b: bool,
+) {
+    let (rsa, csa) = if trans_a {
+        (1isize, m as isize)
+    } else {
+        (k as isize, 1isize)
+    };
+    let (rsb, csb) = if trans_b {
+        (1isize, k as isize)
+    } else {
+        (n as isize, 1isize)
+    };
     unsafe {
         matrixmultiply::sgemm(
-            m, k, n,
-            1.0,               // alpha
-            a.as_ptr(), rsa, csa,
-            b.as_ptr(), rsb, csb,
-            1.0,               // beta (accumulate into C)
-            c.as_mut_ptr(), n as isize, 1,
+            m,
+            k,
+            n,
+            1.0, // alpha
+            a.as_ptr(),
+            rsa,
+            csa,
+            b.as_ptr(),
+            rsb,
+            csb,
+            1.0, // beta (accumulate into C)
+            c.as_mut_ptr(),
+            n as isize,
+            1,
         );
     }
 }
@@ -173,7 +196,9 @@ impl GradientFunction for Conv2dBackward {
                     let col_base = cr * out_hw;
                     for oh in 0..out_h {
                         let ih = (oh * sh + ki) as isize - ph_s;
-                        if ih < 0 || ih >= in_h_s { continue; }
+                        if ih < 0 || ih >= in_h_s {
+                            continue;
+                        }
                         let input_row = input_c + ih as usize * in_w;
                         let col_row_base = col_base + oh * out_w;
                         for ow in 0..out_w {
@@ -193,13 +218,29 @@ impl GradientFunction for Conv2dBackward {
 
                 // Thread-local grad_weight
                 let mut local_grad_weight = vec![0.0f32; out_channels * col_rows];
-                gemm_acc(go_slice, &col, &mut local_grad_weight,
-                    out_channels, out_hw, col_rows, false, true);
+                gemm_acc(
+                    go_slice,
+                    &col,
+                    &mut local_grad_weight,
+                    out_channels,
+                    out_hw,
+                    col_rows,
+                    false,
+                    true,
+                );
 
                 // grad_col = weight^T × grad_out
                 let mut grad_col = vec![0.0f32; col_rows * out_hw];
-                gemm_acc(&weight_vec, go_slice, &mut grad_col,
-                    col_rows, out_channels, out_hw, true, false);
+                gemm_acc(
+                    &weight_vec,
+                    go_slice,
+                    &mut grad_col,
+                    col_rows,
+                    out_channels,
+                    out_hw,
+                    true,
+                    false,
+                );
 
                 // Fused col2im → local grad_input for this batch element
                 let mut gi_batch = vec![0.0f32; in_per_batch];
@@ -212,15 +253,17 @@ impl GradientFunction for Conv2dBackward {
                     let col_base = cr * out_hw;
                     for oh in 0..out_h {
                         let ih = (oh * sh + ki) as isize - ph_s;
-                        if ih < 0 || ih >= in_h_s { continue; }
+                        if ih < 0 || ih >= in_h_s {
+                            continue;
+                        }
                         let gi_row = gi_c + ih as usize * in_w;
                         let col_row_base = col_base + oh * out_w;
                         for ow in 0..out_w {
                             let iw = (ow * sw + kj) as isize - pw_s;
                             if iw >= 0 && iw < in_w_s {
                                 unsafe {
-                                    *gi_batch.get_unchecked_mut(gi_row + iw as usize)
-                                        += *grad_col.get_unchecked(col_row_base + ow);
+                                    *gi_batch.get_unchecked_mut(gi_row + iw as usize) +=
+                                        *grad_col.get_unchecked(col_row_base + ow);
                                 }
                             }
                         }
@@ -242,9 +285,8 @@ impl GradientFunction for Conv2dBackward {
         }
 
         let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape).unwrap();
-        let grad_weight_tensor = Tensor::from_vec(
-            grad_weight, &[self.out_channels, self.in_channels, kh, kw],
-        ).unwrap();
+        let grad_weight_tensor =
+            Tensor::from_vec(grad_weight, &[self.out_channels, self.in_channels, kh, kw]).unwrap();
 
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
@@ -327,9 +369,17 @@ impl GroupedConv2dBackward {
             next_fns.push(bias_fn);
         }
         Self {
-            next_fns, saved_input, saved_weight, input_shape,
-            in_channels, out_channels, kernel_size, stride, padding,
-            groups, has_bias,
+            next_fns,
+            saved_input,
+            saved_weight,
+            input_shape,
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            groups,
+            has_bias,
         }
     }
 }
@@ -383,12 +433,18 @@ impl GradientFunction for GroupedConv2dBackward {
                                     for ow in 0..out_w {
                                         let ih = (oh * sh + ki) as isize - ph as isize;
                                         let iw = (ow * sw + kj) as isize - pw as isize;
-                                        let val = if ih >= 0 && (ih as usize) < in_h
-                                            && iw >= 0 && (iw as usize) < in_w
+                                        let val = if ih >= 0
+                                            && (ih as usize) < in_h
+                                            && iw >= 0
+                                            && (iw as usize) < in_w
                                         {
                                             input_vec[b * in_per_batch
-                                                + c * in_h * in_w + ih as usize * in_w + iw as usize]
-                                        } else { 0.0 };
+                                                + c * in_h * in_w
+                                                + ih as usize * in_w
+                                                + iw as usize]
+                                        } else {
+                                            0.0
+                                        };
                                         col[col_row * out_hw + oh * out_w + ow] = val;
                                     }
                                 }
@@ -407,15 +463,30 @@ impl GradientFunction for GroupedConv2dBackward {
 
                     // grad_weight[group] += go_group × col^T
                     let w_offset = oc_start * ic_per_group * kh * kw;
-                    gemm_acc(&go_group, &col,
+                    gemm_acc(
+                        &go_group,
+                        &col,
                         &mut local_grad_weight[w_offset..w_offset + oc_per_group * col_rows_g],
-                        oc_per_group, out_hw, col_rows_g, false, true);
+                        oc_per_group,
+                        out_hw,
+                        col_rows_g,
+                        false,
+                        true,
+                    );
 
                     // grad_col = weight[group]^T × go_group
                     let w_group = &weight_vec[w_offset..w_offset + oc_per_group * col_rows_g];
                     let mut grad_col = vec![0.0f32; col_rows_g * out_hw];
-                    gemm_acc(w_group, &go_group, &mut grad_col,
-                        col_rows_g, oc_per_group, out_hw, true, false);
+                    gemm_acc(
+                        w_group,
+                        &go_group,
+                        &mut grad_col,
+                        col_rows_g,
+                        oc_per_group,
+                        out_hw,
+                        true,
+                        false,
+                    );
 
                     // col2im: scatter grad_col back
                     for c_local in 0..ic_per_group {
@@ -427,12 +498,15 @@ impl GradientFunction for GroupedConv2dBackward {
                                     for ow in 0..out_w {
                                         let ih = (oh * sh + ki) as isize - ph as isize;
                                         let iw = (ow * sw + kj) as isize - pw as isize;
-                                        if ih >= 0 && (ih as usize) < in_h
-                                            && iw >= 0 && (iw as usize) < in_w
+                                        if ih >= 0
+                                            && (ih as usize) < in_h
+                                            && iw >= 0
+                                            && (iw as usize) < in_w
                                         {
                                             gi_batch[c * in_h * in_w
-                                                + ih as usize * in_w + iw as usize]
-                                                += grad_col[col_row * out_hw + oh * out_w + ow];
+                                                + ih as usize * in_w
+                                                + iw as usize] +=
+                                                grad_col[col_row * out_hw + oh * out_w + ow];
                                         }
                                     }
                                 }
@@ -456,9 +530,8 @@ impl GradientFunction for GroupedConv2dBackward {
         }
 
         let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape).unwrap();
-        let grad_weight_tensor = Tensor::from_vec(
-            grad_weight, &[self.out_channels, ic_per_group, kh, kw],
-        ).unwrap();
+        let grad_weight_tensor =
+            Tensor::from_vec(grad_weight, &[self.out_channels, ic_per_group, kh, kw]).unwrap();
 
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
@@ -472,7 +545,9 @@ impl GradientFunction for GroupedConv2dBackward {
                     grad_bias[oc] += grad_out_vec[start..start + out_hw].iter().sum::<f32>();
                 }
             }
-            result.push(Some(Tensor::from_vec(grad_bias, &[self.out_channels]).unwrap()));
+            result.push(Some(
+                Tensor::from_vec(grad_bias, &[self.out_channels]).unwrap(),
+            ));
         }
 
         result
@@ -527,8 +602,13 @@ impl BatchNorm2dBackward {
     ) -> Self {
         let next_fns = vec![input_grad_fn, weight_grad_fn, bias_grad_fn];
         Self {
-            next_fns, saved_input, saved_mean, saved_var,
-            saved_weight, eps, _num_features: num_features,
+            next_fns,
+            saved_input,
+            saved_mean,
+            saved_var,
+            saved_weight,
+            eps,
+            _num_features: num_features,
         }
     }
 }
@@ -586,8 +666,7 @@ impl GradientFunction for BatchNorm2dBackward {
                     let x_hat = x_hat_cache[b_idx * spatial + s];
                     let g = grad_vec[idx];
 
-                    grad_input[idx] = scale
-                        * (n * g - sum_grad - x_hat * sum_grad_xhat);
+                    grad_input[idx] = scale * (n * g - sum_grad - x_hat * sum_grad_xhat);
                 }
             }
         }
@@ -649,8 +728,13 @@ impl BatchNorm1dBackward {
     ) -> Self {
         let next_fns = vec![input_grad_fn, weight_grad_fn, bias_grad_fn];
         Self {
-            next_fns, saved_input, saved_mean, saved_var,
-            saved_weight, eps, _num_features: num_features,
+            next_fns,
+            saved_input,
+            saved_mean,
+            saved_var,
+            saved_weight,
+            eps,
+            _num_features: num_features,
         }
     }
 }
@@ -706,8 +790,7 @@ impl GradientFunction for BatchNorm1dBackward {
                     let x_hat = x_hat_cache[b_idx * spatial + s];
                     let g = grad_vec[idx];
 
-                    grad_input[idx] = scale
-                        * (n * g - sum_grad - x_hat * sum_grad_xhat);
+                    grad_input[idx] = scale * (n * g - sum_grad - x_hat * sum_grad_xhat);
                 }
             }
         }
@@ -842,13 +925,29 @@ impl GradientFunction for Conv1dBackward {
 
                 // Thread-local grad_weight
                 let mut local_grad_weight = vec![0.0f32; out_channels * col_rows];
-                gemm_acc(go_slice, &col, &mut local_grad_weight,
-                    out_channels, out_length, col_rows, false, true);
+                gemm_acc(
+                    go_slice,
+                    &col,
+                    &mut local_grad_weight,
+                    out_channels,
+                    out_length,
+                    col_rows,
+                    false,
+                    true,
+                );
 
                 // grad_col = weight^T × grad_out
                 let mut grad_col = vec![0.0f32; col_rows * out_length];
-                gemm_acc(&weight_vec, go_slice, &mut grad_col,
-                    col_rows, out_channels, out_length, true, false);
+                gemm_acc(
+                    &weight_vec,
+                    go_slice,
+                    &mut grad_col,
+                    col_rows,
+                    out_channels,
+                    out_length,
+                    true,
+                    false,
+                );
 
                 // col2im → local grad_input
                 let mut gi_batch = vec![0.0f32; in_per_batch];
@@ -858,8 +957,8 @@ impl GradientFunction for Conv1dBackward {
                         for ol in 0..out_length {
                             let il_signed = (ol * stride + k) as isize - padding as isize;
                             if il_signed >= 0 && (il_signed as usize) < in_length {
-                                gi_batch[c * in_length + il_signed as usize]
-                                    += grad_col[col_row * out_length + ol];
+                                gi_batch[c * in_length + il_signed as usize] +=
+                                    grad_col[col_row * out_length + ol];
                             }
                         }
                     }
@@ -879,13 +978,9 @@ impl GradientFunction for Conv1dBackward {
             }
         }
 
-        let grad_input_tensor =
-            Tensor::from_vec(grad_input, &self.input_shape).unwrap();
-        let grad_weight_tensor = Tensor::from_vec(
-            grad_weight,
-            &[self.out_channels, self.in_channels, ks],
-        )
-        .unwrap();
+        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape).unwrap();
+        let grad_weight_tensor =
+            Tensor::from_vec(grad_weight, &[self.out_channels, self.in_channels, ks]).unwrap();
 
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
@@ -1114,7 +1209,11 @@ impl GradientFunction for AvgPool2dBackward {
                         let go_idx =
                             b * channels * out_h * out_w + c * out_h * out_w + oh * out_w + ow;
                         let go_val = grad_out_vec[go_idx];
-                        let grad_per_elem = if count > 0 { go_val / count as f32 } else { 0.0 };
+                        let grad_per_elem = if count > 0 {
+                            go_val / count as f32
+                        } else {
+                            0.0
+                        };
 
                         // Single pass to scatter gradients
                         for ki in 0..kh {
@@ -1207,21 +1306,28 @@ impl GradientFunction for AvgPool1dBackward {
                     let in_start = ol * self.stride;
                     // Compute count analytically instead of iterating kernel twice
                     let il_begin = in_start.max(self.padding) - self.padding;
-                    let il_end = ((in_start + self.kernel_size).min(in_length + self.padding)) - self.padding;
-                    let count = if il_end > il_begin { il_end - il_begin } else { 0 };
+                    let il_end = ((in_start + self.kernel_size).min(in_length + self.padding))
+                        - self.padding;
+                    let count = if il_end > il_begin {
+                        il_end - il_begin
+                    } else {
+                        0
+                    };
 
-                    let go_idx =
-                        b * channels * out_length + c * out_length + ol;
+                    let go_idx = b * channels * out_length + c * out_length + ol;
                     let go_val = grad_out_vec[go_idx];
-                    let grad_per_elem = if count > 0 { go_val / count as f32 } else { 0.0 };
+                    let grad_per_elem = if count > 0 {
+                        go_val / count as f32
+                    } else {
+                        0.0
+                    };
 
                     // Single pass to scatter gradients
                     for k in 0..self.kernel_size {
                         let il = in_start + k;
                         if il >= self.padding && il < in_length + self.padding {
                             let actual_il = il - self.padding;
-                            let in_idx =
-                                b * channels * in_length + c * in_length + actual_il;
+                            let in_idx = b * channels * in_length + c * in_length + actual_il;
                             grad_input[in_idx] += grad_per_elem;
                         }
                     }
@@ -1297,14 +1403,16 @@ impl GradientFunction for AdaptiveAvgPool2dBackward {
                         let go_idx =
                             b * channels * out_h * out_w + c * out_h * out_w + oh * out_w + ow;
                         let go_val = grad_out_vec[go_idx];
-                        let grad_per_elem = if count > 0 { go_val / count as f32 } else { 0.0 };
+                        let grad_per_elem = if count > 0 {
+                            go_val / count as f32
+                        } else {
+                            0.0
+                        };
 
                         for ih in ih_start..ih_end {
                             for iw in iw_start..iw_end {
-                                let in_idx = b * channels * in_h * in_w
-                                    + c * in_h * in_w
-                                    + ih * in_w
-                                    + iw;
+                                let in_idx =
+                                    b * channels * in_h * in_w + c * in_h * in_w + ih * in_w + iw;
                                 grad_input[in_idx] += grad_per_elem;
                             }
                         }
@@ -1505,8 +1613,8 @@ impl GradientFunction for ConvTranspose2dBackward {
                                 let gw_kij = gw_ic + ki * kw + kj;
 
                                 for oc in 0..self.out_channels {
-                                    grad_weight[gw_kij + oc * kh * kw]
-                                        += in_val * grad_out_vec[go_b + oc * out_hw + go_spatial];
+                                    grad_weight[gw_kij + oc * kh * kw] +=
+                                        in_val * grad_out_vec[go_b + oc * out_hw + go_spatial];
                                 }
                             }
                         }
@@ -1516,10 +1624,8 @@ impl GradientFunction for ConvTranspose2dBackward {
         }
 
         let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape).unwrap();
-        let grad_weight_tensor = Tensor::from_vec(
-            grad_weight,
-            &[self.in_channels, self.out_channels, kh, kw],
-        ).unwrap();
+        let grad_weight_tensor =
+            Tensor::from_vec(grad_weight, &[self.in_channels, self.out_channels, kh, kw]).unwrap();
 
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
@@ -1607,7 +1713,9 @@ impl GradientFunction for LayerNormBackward {
             let weight_gpu = if self.saved_weight.device().is_gpu() {
                 self.saved_weight.clone()
             } else {
-                self.saved_weight.to_device(self.saved_input.device()).unwrap()
+                self.saved_weight
+                    .to_device(self.saved_input.device())
+                    .unwrap()
             };
 
             // d_input via CUDA kernel
@@ -1673,7 +1781,11 @@ impl GradientFunction for LayerNormBackward {
         let d_weight_tensor = Tensor::from_vec(d_weight, self.saved_weight.shape()).unwrap();
         let d_bias_tensor = Tensor::from_vec(d_bias, self.saved_weight.shape()).unwrap();
 
-        vec![Some(d_input_tensor), Some(d_weight_tensor), Some(d_bias_tensor)]
+        vec![
+            Some(d_input_tensor),
+            Some(d_weight_tensor),
+            Some(d_bias_tensor),
+        ]
     }
 
     fn name(&self) -> &'static str {
@@ -1807,7 +1919,11 @@ impl GradientFunction for GroupNormBackward {
         let d_weight_tensor = Tensor::from_vec(d_weight, &[num_channels]).unwrap();
         let d_bias_tensor = Tensor::from_vec(d_bias, &[num_channels]).unwrap();
 
-        vec![Some(d_input_tensor), Some(d_weight_tensor), Some(d_bias_tensor)]
+        vec![
+            Some(d_input_tensor),
+            Some(d_weight_tensor),
+            Some(d_bias_tensor),
+        ]
     }
 
     fn name(&self) -> &'static str {
@@ -1926,7 +2042,11 @@ impl GradientFunction for InstanceNorm2dBackward {
         let d_weight_tensor = Tensor::from_vec(d_weight, &[channels]).unwrap();
         let d_bias_tensor = Tensor::from_vec(d_bias, &[channels]).unwrap();
 
-        vec![Some(d_input_tensor), Some(d_weight_tensor), Some(d_bias_tensor)]
+        vec![
+            Some(d_input_tensor),
+            Some(d_weight_tensor),
+            Some(d_bias_tensor),
+        ]
     }
 
     fn name(&self) -> &'static str {
@@ -1958,11 +2078,17 @@ mod tests {
         let weight = Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3]).unwrap();
 
         let backward = Conv2dBackward::new(
-            None, None, None,
-            input, weight,
+            None,
+            None,
+            None,
+            input,
+            weight,
             vec![1, 1, 4, 4],
-            1, 1,
-            (3, 3), (1, 1), (0, 0),
+            1,
+            1,
+            (3, 3),
+            (1, 1),
+            (0, 0),
             false,
         );
 
@@ -1980,11 +2106,17 @@ mod tests {
         let weight = Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3]).unwrap();
 
         let backward = Conv2dBackward::new(
-            None, None, Some(None),
-            input, weight,
+            None,
+            None,
+            Some(None),
+            input,
+            weight,
             vec![1, 1, 4, 4],
-            1, 1,
-            (3, 3), (1, 1), (0, 0),
+            1,
+            1,
+            (3, 3),
+            (1, 1),
+            (0, 0),
             true,
         );
 
@@ -2003,12 +2135,8 @@ mod tests {
         // Input: (1,1,4,4), pool 2x2, output (1,1,2,2)
         // Max indices should point to max positions
         let max_indices = vec![5, 7, 13, 15]; // positions of max in each 2x2 block
-        let backward = MaxPool2dBackward::new(
-            None,
-            vec![1, 1, 4, 4],
-            max_indices,
-            (2, 2), (2, 2), (0, 0),
-        );
+        let backward =
+            MaxPool2dBackward::new(None, vec![1, 1, 4, 4], max_indices, (2, 2), (2, 2), (0, 0));
 
         let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 1, 2, 2]).unwrap();
         let grads = backward.apply(&grad_output);
@@ -2027,11 +2155,7 @@ mod tests {
 
     #[test]
     fn test_avgpool2d_backward() {
-        let backward = AvgPool2dBackward::new(
-            None,
-            vec![1, 1, 4, 4],
-            (2, 2), (2, 2), (0, 0),
-        );
+        let backward = AvgPool2dBackward::new(None, vec![1, 1, 4, 4], (2, 2), (2, 2), (0, 0));
 
         let grad_output = Tensor::from_vec(vec![4.0, 4.0, 4.0, 4.0], &[1, 1, 2, 2]).unwrap();
         let grads = backward.apply(&grad_output);
@@ -2046,11 +2170,7 @@ mod tests {
 
     #[test]
     fn test_adaptive_avgpool2d_backward() {
-        let backward = AdaptiveAvgPool2dBackward::new(
-            None,
-            vec![1, 1, 4, 4],
-            (1, 1),
-        );
+        let backward = AdaptiveAvgPool2dBackward::new(None, vec![1, 1, 4, 4], (1, 1));
 
         let grad_output = Tensor::from_vec(vec![16.0], &[1, 1, 1, 1]).unwrap();
         let grads = backward.apply(&grad_output);

@@ -292,11 +292,7 @@ pub fn operation_names(variable: &Variable) -> Vec<String> {
 }
 
 /// DFS helper for collecting operation names.
-fn op_names_dfs(
-    grad_fn: &GradFn,
-    visited: &mut HashSet<GradFnId>,
-    names: &mut HashSet<String>,
-) {
+fn op_names_dfs(grad_fn: &GradFn, visited: &mut HashSet<GradFnId>, names: &mut HashSet<String>) {
     let fn_id = grad_fn.id();
     if !visited.insert(fn_id) {
         return;
@@ -523,7 +519,7 @@ mod tests {
         let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).unwrap(), true);
         let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).unwrap(), true);
         let left = a.relu().sigmoid(); // depth 3 from leaf
-        let right = b.relu();          // depth 2 from leaf
+        let right = b.relu(); // depth 2 from leaf
         let merged = left.add_var(&right);
         // AddBackward at top, max path is left side: Add->Sig->Relu->Accum = 4
         assert_eq!(depth(&merged), 4);
@@ -644,7 +640,9 @@ mod tests {
         let abc = ab.add_var(&c);
         let summary = gradient_flow_summary(&abc);
         // Two AddBackward nodes
-        assert!(summary.iter().any(|(name, count)| name == "AddBackward" && *count == 2));
+        assert!(summary
+            .iter()
+            .any(|(name, count)| name == "AddBackward" && *count == 2));
     }
 
     #[test]
@@ -746,10 +744,7 @@ mod tests {
 
     #[test]
     fn test_trace_sum_mean_chain() {
-        let a = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(),
-            true,
-        );
+        let a = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
         let b = a.sum();
         let snap = trace_backward(&b);
         assert_eq!(snap.nodes.len(), 2); // SumBackward + AccumulateGrad

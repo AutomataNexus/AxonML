@@ -29,15 +29,17 @@ mod tests {
     /// Create a dummy input batch of given shape.
     fn dummy_input(shape: &[usize]) -> Variable {
         let size: usize = shape.iter().product();
-        Variable::new(
-            Tensor::from_vec(vec![0.5f32; size], shape).unwrap(),
-            false,
-        )
+        Variable::new(Tensor::from_vec(vec![0.5f32; size], shape).unwrap(), false)
     }
 
     /// Benchmark a model's forward pass.
     /// Returns (latency_ms, images_per_sec).
-    fn bench_forward<M: Module>(model: &M, input: &Variable, warmup: usize, iters: usize) -> (f64, f64) {
+    fn bench_forward<M: Module>(
+        model: &M,
+        input: &Variable,
+        warmup: usize,
+        iters: usize,
+    ) -> (f64, f64) {
         let batch_size = input.shape()[0];
 
         // Warmup
@@ -345,12 +347,12 @@ mod tests {
 
     #[test]
     fn benchmark_param_counts() {
+        use crate::models::biometric::MnemosyneIdentity;
+        use crate::models::blazeface::BlazeFace;
         use crate::models::lenet::{LeNet, SimpleCNN, MLP};
+        use crate::models::nanodet::NanoDet;
         use crate::models::resnet::ResNet;
         use crate::models::transformer::VisionTransformer;
-        use crate::models::nanodet::NanoDet;
-        use crate::models::blazeface::BlazeFace;
-        use crate::models::biometric::MnemosyneIdentity;
 
         println!("\n--- Parameter Counts ---");
 
@@ -359,14 +361,18 @@ mod tests {
             ("SimpleCNN-MNIST", SimpleCNN::for_mnist().parameters()),
             ("MLP-MNIST", MLP::for_mnist().parameters()),
             ("ResNet18", ResNet::resnet18(10).parameters()),
-            ("ViT-Small", VisionTransformer::new(32, 8, 3, 10, 64, 2, 4, 128, 0.0).parameters()),
+            (
+                "ViT-Small",
+                VisionTransformer::new(32, 8, 3, 10, 64, 2, 4, 128, 0.0).parameters(),
+            ),
             ("NanoDet-1", NanoDet::new(1).parameters()),
             ("BlazeFace", BlazeFace::new().parameters()),
             ("Mnemosyne", MnemosyneIdentity::new().parameters()),
         ];
 
         for (name, params) in &models {
-            let total: usize = params.iter()
+            let total: usize = params
+                .iter()
                 .map(|p| p.variable().data().to_vec().len())
                 .sum();
             let size_mb = total as f64 * 4.0 / 1_048_576.0;
@@ -381,7 +387,8 @@ mod tests {
             ("Helios-Small", Helios::small(80)),
         ] {
             let params = model.parameters();
-            let total: usize = params.iter()
+            let total: usize = params
+                .iter()
                 .map(|p| p.variable().data().to_vec().len())
                 .sum();
             let size_mb = total as f64 * 4.0 / 1_048_576.0;

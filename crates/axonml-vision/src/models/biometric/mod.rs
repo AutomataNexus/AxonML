@@ -14,8 +14,8 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-pub mod ariadne;
 pub mod argus;
+pub mod ariadne;
 pub mod echo;
 pub mod identity;
 pub mod losses;
@@ -27,8 +27,8 @@ pub mod themis;
 // Re-exports
 // =============================================================================
 
-pub use ariadne::AriadneFingerprint;
 pub use argus::ArgusIris;
+pub use ariadne::AriadneFingerprint;
 pub use echo::EchoSpeaker;
 pub use identity::{AegisIdentity, IdentityBank};
 pub use losses::{
@@ -513,11 +513,7 @@ impl OperatingCurve {
     /// * `genuine_scores` - Match scores for same-identity comparisons
     /// * `impostor_scores` - Match scores for different-identity comparisons
     /// * `n_thresholds` - Number of threshold points to evaluate
-    pub fn compute(
-        genuine_scores: &[f32],
-        impostor_scores: &[f32],
-        n_thresholds: usize,
-    ) -> Self {
+    pub fn compute(genuine_scores: &[f32], impostor_scores: &[f32], n_thresholds: usize) -> Self {
         if genuine_scores.is_empty() || impostor_scores.is_empty() {
             return Self {
                 points: Vec::new(),
@@ -792,7 +788,9 @@ mod tests {
         let ev = BiometricEvidence::multi(Some(face), None, Some(voice), None);
         assert_eq!(ev.modality_count(), 2);
         assert!(ev.available_modalities().contains(&BiometricModality::Face));
-        assert!(ev.available_modalities().contains(&BiometricModality::Voice));
+        assert!(ev
+            .available_modalities()
+            .contains(&BiometricModality::Voice));
     }
 
     #[test]
@@ -898,7 +896,10 @@ mod tests {
     fn test_drift_recommendation_display() {
         assert_eq!(format!("{}", DriftRecommendation::None), "No action");
         assert_eq!(format!("{}", DriftRecommendation::ReEnroll), "Re-enroll");
-        assert_eq!(format!("{}", DriftRecommendation::Investigate), "Investigate");
+        assert_eq!(
+            format!("{}", DriftRecommendation::Investigate),
+            "Investigate"
+        );
     }
 
     // --- OperatingCurve ---
@@ -1018,7 +1019,11 @@ mod tests {
         let b = vec![1.0, 1.0];
         let w = vec![1.0, 0.0]; // Ignore second dimension
         let sim = weighted_cosine_similarity(&a, &b, &w);
-        assert!((sim - 1.0).abs() < 0.001, "Should ignore zero-weighted dim: {}", sim);
+        assert!(
+            (sim - 1.0).abs() < 0.001,
+            "Should ignore zero-weighted dim: {}",
+            sim
+        );
     }
 
     #[test]
@@ -1033,6 +1038,10 @@ mod tests {
     fn test_entropy_certain() {
         let probs = vec![1.0, 0.0, 0.0];
         let h = entropy(&probs);
-        assert!(h < 0.001, "Certain distribution should have ~0 entropy: {}", h);
+        assert!(
+            h < 0.001,
+            "Certain distribution should have ~0 entropy: {}",
+            h
+        );
     }
 }

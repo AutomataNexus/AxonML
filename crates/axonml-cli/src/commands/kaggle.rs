@@ -214,7 +214,14 @@ pub fn execute_login(username: &str, key: &str) -> Result<(), String> {
         kaggle_credentials_path()
     );
     println!("  Username: {}", username);
-    println!("  Key: ****{}", if key.len() > 4 { &key[key.len()-4..] } else { "****" });
+    println!(
+        "  Key: ****{}",
+        if key.len() > 4 {
+            &key[key.len() - 4..]
+        } else {
+            "****"
+        }
+    );
 
     Ok(())
 }

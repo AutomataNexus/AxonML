@@ -256,8 +256,8 @@ impl GradientFunction for RMSNormBackward {
 
             for i in 0..d {
                 // d_out/d_x_i = w_i / rms - x_i * dot / (rms^3 * D)
-                grad_input[off + i] =
-                    w_vec[i] * g_vec[off + i] * rms_inv - x_vec[off + i] * dot * rms3_inv / d as f32;
+                grad_input[off + i] = w_vec[i] * g_vec[off + i] * rms_inv
+                    - x_vec[off + i] * dot * rms3_inv / d as f32;
             }
         }
 
@@ -455,8 +455,14 @@ impl GradientFunction for RoPEBackward {
 
         let g_vec = grad_output.to_vec();
         // Only copy the needed slice of cached cos/sin tables
-        let cos_slice = self.cos_cached.narrow(0, self.position_offset, seq_len).unwrap();
-        let sin_slice = self.sin_cached.narrow(0, self.position_offset, seq_len).unwrap();
+        let cos_slice = self
+            .cos_cached
+            .narrow(0, self.position_offset, seq_len)
+            .unwrap();
+        let sin_slice = self
+            .sin_cached
+            .narrow(0, self.position_offset, seq_len)
+            .unwrap();
         let cos_vec = cos_slice.to_vec();
         let sin_vec = sin_slice.to_vec();
 
@@ -529,9 +535,10 @@ impl GradientFunction for RepeatKVBackward {
             for h in 0..self.num_kv_heads {
                 for r in 0..self.n_rep {
                     for s in 0..seq_len {
-                        let src_off =
-                            ((b * self.num_kv_heads * self.n_rep + h * self.n_rep + r) * seq_len + s)
-                                * head_dim;
+                        let src_off = ((b * self.num_kv_heads * self.n_rep + h * self.n_rep + r)
+                            * seq_len
+                            + s)
+                            * head_dim;
                         let dst_off = ((b * self.num_kv_heads + h) * seq_len + s) * head_dim;
                         for d in 0..head_dim {
                             grad_input[dst_off + d] += g_vec[src_off + d];
@@ -541,11 +548,8 @@ impl GradientFunction for RepeatKVBackward {
             }
         }
 
-        let gi = Tensor::from_vec(
-            grad_input,
-            &[batch, self.num_kv_heads, seq_len, head_dim],
-        )
-        .unwrap();
+        let gi =
+            Tensor::from_vec(grad_input, &[batch, self.num_kv_heads, seq_len, head_dim]).unwrap();
         vec![Some(gi)]
     }
 

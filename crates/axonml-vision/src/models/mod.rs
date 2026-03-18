@@ -26,8 +26,8 @@ pub mod lenet;
 pub mod nanodet;
 pub mod nexus;
 pub mod phantom;
-pub mod retinaface;
 pub mod resnet;
+pub mod retinaface;
 pub mod transformer;
 pub mod vgg;
 pub mod vqa;
@@ -47,7 +47,7 @@ pub use fpn::FPN;
 // Detection
 pub use blazeface::BlazeFace;
 pub use detr::DETR;
-pub use helios::{Helios, HeliosLoss, CIoULoss, TaskAlignedAssigner};
+pub use helios::{CIoULoss, Helios, HeliosLoss, TaskAlignedAssigner};
 pub use nanodet::NanoDet;
 pub use retinaface::RetinaFace;
 
@@ -55,7 +55,7 @@ pub use retinaface::RetinaFace;
 pub use anomaly::{PatchCore, StudentTeacher};
 
 // Depth Estimation
-pub use depth::{DPT, FastDepth};
+pub use depth::{FastDepth, DPT};
 
 // Visual Question Answering
 pub use vqa::VQAModel;
@@ -69,6 +69,6 @@ pub use phantom::Phantom;
 
 // Biometric Identity (Aegis Identity)
 pub use biometric::{
-    AegisIdentity, AriadneFingerprint, ArgusIris, EchoSpeaker, IdentityBank,
-    MnemosyneIdentity, ThemisFusion,
+    AegisIdentity, ArgusIris, AriadneFingerprint, EchoSpeaker, IdentityBank, MnemosyneIdentity,
+    ThemisFusion,
 };

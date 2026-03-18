@@ -19,7 +19,7 @@
 use axonml_autograd::Variable;
 use axonml_nn::Parameter;
 
-use super::backbone::{CBS, C2f};
+use super::backbone::{C2f, CBS};
 use super::HeliosConfig;
 use crate::ops::InterpolateMode;
 
@@ -81,19 +81,34 @@ impl PANet {
     }
 
     /// Forward pass: (P3, P4, P5) from backbone -> fused (P3', P4', P5').
-    pub fn forward(&self, p3: &Variable, p4: &Variable, p5: &Variable) -> (Variable, Variable, Variable) {
+    pub fn forward(
+        &self,
+        p3: &Variable,
+        p4: &Variable,
+        p5: &Variable,
+    ) -> (Variable, Variable, Variable) {
         let p4_shape = p4.shape();
         let p3_shape = p3.shape();
 
         // Top-down: P5 -> P4
         let p5_lat = self.lateral_p5.forward(p5);
-        let p5_up = crate::ops::interpolate_var(&p5_lat, p4_shape[2], p4_shape[3], InterpolateMode::Nearest);
+        let p5_up = crate::ops::interpolate_var(
+            &p5_lat,
+            p4_shape[2],
+            p4_shape[3],
+            InterpolateMode::Nearest,
+        );
         let p4_cat = Variable::cat(&[&p5_up, p4], 1);
         let p4_td = self.td_c2f_p4.forward(&p4_cat);
 
         // Top-down: P4 -> P3
         let p4_lat = self.lateral_p4.forward(&p4_td);
-        let p4_up = crate::ops::interpolate_var(&p4_lat, p3_shape[2], p3_shape[3], InterpolateMode::Nearest);
+        let p4_up = crate::ops::interpolate_var(
+            &p4_lat,
+            p3_shape[2],
+            p3_shape[3],
+            InterpolateMode::Nearest,
+        );
         let p3_cat = Variable::cat(&[&p4_up, p3], 1);
         let p3_td = self.td_c2f_p3.forward(&p3_cat);
 
@@ -148,11 +163,11 @@ mod tests {
         let (n3, n4, n5) = neck.forward(&p3, &p4, &p5);
 
         // Should preserve spatial dimensions and output channels
-        assert_eq!(n3.shape()[1], 64);   // ch[2]
-        assert_eq!(n3.shape()[2], 8);    // 64/8
-        assert_eq!(n4.shape()[1], 128);  // ch[3]
-        assert_eq!(n4.shape()[2], 4);    // 64/16
-        assert_eq!(n5.shape()[1], 256);  // ch[4]
-        assert_eq!(n5.shape()[2], 2);    // 64/32
+        assert_eq!(n3.shape()[1], 64); // ch[2]
+        assert_eq!(n3.shape()[2], 8); // 64/8
+        assert_eq!(n4.shape()[1], 128); // ch[3]
+        assert_eq!(n4.shape()[2], 4); // 64/16
+        assert_eq!(n5.shape()[1], 256); // ch[4]
+        assert_eq!(n5.shape()[2], 2); // 64/32
     }
 }

@@ -102,13 +102,7 @@ pub fn frame_to_rgb(frame: &FrameBuffer) -> Vec<u8> {
 ///
 /// # Returns
 /// Resized RGB bytes (length = dst_h * dst_w * 3)
-pub fn resize_bilinear(
-    rgb: &[u8],
-    src_w: u32,
-    src_h: u32,
-    dst_w: u32,
-    dst_h: u32,
-) -> Vec<u8> {
+pub fn resize_bilinear(rgb: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
     let sw = src_w as usize;
     let sh = src_h as usize;
     let dw = dst_w as usize;
@@ -193,11 +187,7 @@ pub fn normalize_imagenet(
 /// Full preprocessing: FrameBuffer → normalized [1, 3, target_h, target_w] Variable.
 ///
 /// Steps: format convert → resize → normalize (ImageNet defaults).
-pub fn preprocess_frame(
-    frame: &FrameBuffer,
-    target_w: u32,
-    target_h: u32,
-) -> Variable {
+pub fn preprocess_frame(frame: &FrameBuffer, target_w: u32, target_h: u32) -> Variable {
     let rgb = frame_to_rgb(frame);
     let resized = resize_bilinear(&rgb, frame.width, frame.height, target_w, target_h);
     normalize_imagenet(

@@ -166,31 +166,40 @@ impl ThemisFusion {
 
         // Project each available modality to common space (graph-tracked)
         // For missing modalities, create zero-vectors
-        let zero_proj = Variable::new(
-            Tensor::zeros(&[batch, self.fusion_dim]),
-            false,
-        );
+        let zero_proj = Variable::new(Tensor::zeros(&[batch, self.fusion_dim]), false);
 
         let (face_proj, face_unc) = if let Some((emb, logvar)) = face {
-            (self.face_proj.forward(emb), Self::uncertainty_gate(logvar, self.temperature))
+            (
+                self.face_proj.forward(emb),
+                Self::uncertainty_gate(logvar, self.temperature),
+            )
         } else {
             (zero_proj.clone(), 0.0)
         };
 
         let (finger_proj, finger_unc) = if let Some((emb, logvar)) = finger {
-            (self.finger_proj.forward(emb), Self::uncertainty_gate(logvar, self.temperature))
+            (
+                self.finger_proj.forward(emb),
+                Self::uncertainty_gate(logvar, self.temperature),
+            )
         } else {
             (zero_proj.clone(), 0.0)
         };
 
         let (voice_proj, voice_unc) = if let Some((emb, logvar)) = voice {
-            (self.voice_proj.forward(emb), Self::uncertainty_gate(logvar, self.temperature))
+            (
+                self.voice_proj.forward(emb),
+                Self::uncertainty_gate(logvar, self.temperature),
+            )
         } else {
             (zero_proj.clone(), 0.0)
         };
 
         let (iris_proj, iris_unc) = if let Some((emb, logvar)) = iris {
-            (self.iris_proj.forward(emb), Self::uncertainty_gate(logvar, self.temperature))
+            (
+                self.iris_proj.forward(emb),
+                Self::uncertainty_gate(logvar, self.temperature),
+            )
         } else {
             (zero_proj, 0.0)
         };
@@ -198,10 +207,7 @@ impl ThemisFusion {
         let unc_weights = [face_unc, finger_unc, voice_unc, iris_unc];
 
         // Cross-modal consistency checking via Variable::cat (graph-tracked)
-        let concat = Variable::cat(
-            &[&face_proj, &finger_proj, &voice_proj, &iris_proj],
-            1,
-        );
+        let concat = Variable::cat(&[&face_proj, &finger_proj, &voice_proj, &iris_proj], 1);
         let consistency_h = self.consistency_fc1.forward(&concat).relu();
         let consistency_logits = self.consistency_fc2.forward(&consistency_h).sigmoid();
 
@@ -216,7 +222,8 @@ impl ThemisFusion {
 
         // Weighted combination using Variable ops (graph-tracked for projections)
         // Each projection is scaled by its combined weight, then summed
-        let fused = face_proj.mul_scalar(combined_weights[0] / total_weight)
+        let fused = face_proj
+            .mul_scalar(combined_weights[0] / total_weight)
             .add_var(&finger_proj.mul_scalar(combined_weights[1] / total_weight))
             .add_var(&voice_proj.mul_scalar(combined_weights[2] / total_weight))
             .add_var(&iris_proj.mul_scalar(combined_weights[3] / total_weight));
@@ -224,10 +231,7 @@ impl ThemisFusion {
         // Belief GRU: accumulate evidence over time (graph-tracked)
         let belief = match belief_state {
             Some(b) => b.clone(),
-            None => Variable::new(
-                Tensor::zeros(&[batch, self.fusion_dim]),
-                false,
-            ),
+            None => Variable::new(Tensor::zeros(&[batch, self.fusion_dim]), false),
         };
         let new_belief = self.belief_gru.forward_step(&fused, &belief);
 
@@ -272,17 +276,9 @@ impl ThemisFusion {
         let decay_rate = decay_rate.clamp(0.0, 1.0);
 
         // Apply exponential decay to belief: belief *= (1 - decay_rate)
-        let decayed_belief = belief_state.map(|b| {
-            b.mul_scalar(1.0 - decay_rate)
-        });
+        let decayed_belief = belief_state.map(|b| b.mul_scalar(1.0 - decay_rate));
 
-        self.fuse(
-            face,
-            finger,
-            voice,
-            iris,
-            decayed_belief.as_ref(),
-        )
+        self.fuse(face, finger, voice, iris, decayed_belief.as_ref())
     }
 
     /// Fuse with full forensic breakdown for audit trails.
@@ -300,39 +296,64 @@ impl ThemisFusion {
     ) -> (Variable, f32, f32, Variable, ForensicReport) {
         let batch = 1;
 
-        let zero_proj = Variable::new(
-            Tensor::zeros(&[batch, self.fusion_dim]),
-            false,
-        );
+        let zero_proj = Variable::new(Tensor::zeros(&[batch, self.fusion_dim]), false);
 
         // Project and compute uncertainty for each modality
         let modalities_info: [(BiometricModality, bool, f32); 4] = [
-            (BiometricModality::Face, face.is_some(), face.map_or(0.0, |(_, lv)| lv)),
-            (BiometricModality::Fingerprint, finger.is_some(), finger.map_or(0.0, |(_, lv)| lv)),
-            (BiometricModality::Voice, voice.is_some(), voice.map_or(0.0, |(_, lv)| lv)),
-            (BiometricModality::Iris, iris.is_some(), iris.map_or(0.0, |(_, lv)| lv)),
+            (
+                BiometricModality::Face,
+                face.is_some(),
+                face.map_or(0.0, |(_, lv)| lv),
+            ),
+            (
+                BiometricModality::Fingerprint,
+                finger.is_some(),
+                finger.map_or(0.0, |(_, lv)| lv),
+            ),
+            (
+                BiometricModality::Voice,
+                voice.is_some(),
+                voice.map_or(0.0, |(_, lv)| lv),
+            ),
+            (
+                BiometricModality::Iris,
+                iris.is_some(),
+                iris.map_or(0.0, |(_, lv)| lv),
+            ),
         ];
 
         let (face_proj, face_unc) = if let Some((emb, logvar)) = face {
-            (self.face_proj.forward(emb), Self::uncertainty_gate(logvar, self.temperature))
+            (
+                self.face_proj.forward(emb),
+                Self::uncertainty_gate(logvar, self.temperature),
+            )
         } else {
             (zero_proj.clone(), 0.0)
         };
 
         let (finger_proj, finger_unc) = if let Some((emb, logvar)) = finger {
-            (self.finger_proj.forward(emb), Self::uncertainty_gate(logvar, self.temperature))
+            (
+                self.finger_proj.forward(emb),
+                Self::uncertainty_gate(logvar, self.temperature),
+            )
         } else {
             (zero_proj.clone(), 0.0)
         };
 
         let (voice_proj, voice_unc) = if let Some((emb, logvar)) = voice {
-            (self.voice_proj.forward(emb), Self::uncertainty_gate(logvar, self.temperature))
+            (
+                self.voice_proj.forward(emb),
+                Self::uncertainty_gate(logvar, self.temperature),
+            )
         } else {
             (zero_proj.clone(), 0.0)
         };
 
         let (iris_proj, iris_unc) = if let Some((emb, logvar)) = iris {
-            (self.iris_proj.forward(emb), Self::uncertainty_gate(logvar, self.temperature))
+            (
+                self.iris_proj.forward(emb),
+                Self::uncertainty_gate(logvar, self.temperature),
+            )
         } else {
             (zero_proj, 0.0)
         };
@@ -340,10 +361,7 @@ impl ThemisFusion {
         let unc_weights = [face_unc, finger_unc, voice_unc, iris_unc];
 
         // Cross-modal consistency
-        let concat = Variable::cat(
-            &[&face_proj, &finger_proj, &voice_proj, &iris_proj],
-            1,
-        );
+        let concat = Variable::cat(&[&face_proj, &finger_proj, &voice_proj, &iris_proj], 1);
         let consistency_h = self.consistency_fc1.forward(&concat).relu();
         let consistency_logits = self.consistency_fc2.forward(&consistency_h).sigmoid();
         let consistency_data = consistency_logits.data().to_vec();
@@ -357,7 +375,8 @@ impl ThemisFusion {
         ];
         let combined_weights: Vec<f32> = (0..4)
             .map(|i| {
-                let reliability = self.reliability_scores
+                let reliability = self
+                    .reliability_scores
                     .get(&modality_keys[i])
                     .copied()
                     .unwrap_or(1.0);
@@ -366,12 +385,12 @@ impl ThemisFusion {
             .collect();
         let total_weight: f32 = combined_weights.iter().sum::<f32>().max(1e-8);
 
-        let normalized_weights: Vec<f32> = combined_weights.iter()
-            .map(|w| w / total_weight)
-            .collect();
+        let normalized_weights: Vec<f32> =
+            combined_weights.iter().map(|w| w / total_weight).collect();
 
         // Weighted combination
-        let fused = face_proj.mul_scalar(normalized_weights[0])
+        let fused = face_proj
+            .mul_scalar(normalized_weights[0])
             .add_var(&finger_proj.mul_scalar(normalized_weights[1]))
             .add_var(&voice_proj.mul_scalar(normalized_weights[2]))
             .add_var(&iris_proj.mul_scalar(normalized_weights[3]));
@@ -458,7 +477,10 @@ impl ThemisFusion {
             })
             .collect();
         dim_contributions.sort_by(|a, b| {
-            b.contribution.abs().partial_cmp(&a.contribution.abs()).unwrap()
+            b.contribution
+                .abs()
+                .partial_cmp(&a.contribution.abs())
+                .unwrap()
         });
         dim_contributions.truncate(10); // Top 10
 
@@ -524,9 +546,7 @@ impl ThemisFusion {
     /// # Returns
     ///
     /// Vector of detected conflicts, sorted by severity descending.
-    pub fn detect_conflicts(
-        modality_scores: &[(BiometricModality, f32)],
-    ) -> Vec<ModalityConflict> {
+    pub fn detect_conflicts(modality_scores: &[(BiometricModality, f32)]) -> Vec<ModalityConflict> {
         let mut conflicts = Vec::new();
         let conflict_threshold = 0.3;
 
@@ -561,22 +581,24 @@ impl ThemisFusion {
     /// * `modality` - Which modality to update.
     /// * `success` - Whether this modality's prediction agreed with ground truth.
     /// * `alpha` - Learning rate for the EMA (default recommendation: 0.1).
-    pub fn update_reliability(
-        &mut self,
-        modality: BiometricModality,
-        success: bool,
-        alpha: f32,
-    ) {
+    pub fn update_reliability(&mut self, modality: BiometricModality, success: bool, alpha: f32) {
         let alpha = alpha.clamp(0.0, 1.0);
         let outcome = if success { 1.0 } else { 0.0 };
-        let old = self.reliability_scores.get(&modality).copied().unwrap_or(1.0);
+        let old = self
+            .reliability_scores
+            .get(&modality)
+            .copied()
+            .unwrap_or(1.0);
         let new_reliability = alpha * outcome + (1.0 - alpha) * old;
         self.reliability_scores.insert(modality, new_reliability);
     }
 
     /// Get the current reliability score for a modality.
     pub fn reliability(&self, modality: &BiometricModality) -> f32 {
-        self.reliability_scores.get(modality).copied().unwrap_or(1.0)
+        self.reliability_scores
+            .get(modality)
+            .copied()
+            .unwrap_or(1.0)
     }
 
     /// Get all reliability scores.
@@ -655,7 +677,8 @@ mod tests {
     #[test]
     fn test_themis_param_count() {
         let model = ThemisFusion::new();
-        let total: usize = model.parameters()
+        let total: usize = model
+            .parameters()
             .iter()
             .map(|p| p.variable().data().to_vec().len())
             .sum();
@@ -668,35 +691,24 @@ mod tests {
     #[test]
     fn test_themis_single_modality() {
         let model = ThemisFusion::new();
-        let face_emb = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(),
-            false,
-        );
+        let face_emb = Variable::new(Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(), false);
 
-        let (fused, match_prob, confidence, _belief) = model.fuse(
-            Some((&face_emb, -1.0)),
-            None,
-            None,
-            None,
-            None,
-        );
+        let (fused, match_prob, confidence, _belief) =
+            model.fuse(Some((&face_emb, -1.0)), None, None, None, None);
 
         assert_eq!(fused.shape(), &[1, 48]);
         assert!(match_prob >= 0.0 && match_prob <= 1.0);
-        assert!(confidence > 0.0, "Single modality should have positive confidence");
+        assert!(
+            confidence > 0.0,
+            "Single modality should have positive confidence"
+        );
     }
 
     #[test]
     fn test_themis_multi_modality() {
         let model = ThemisFusion::new();
-        let face_emb = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(),
-            false,
-        );
-        let voice_emb = Variable::new(
-            Tensor::from_vec(vec![0.3f32; 64], &[1, 64]).unwrap(),
-            false,
-        );
+        let face_emb = Variable::new(Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(), false);
+        let voice_emb = Variable::new(Tensor::from_vec(vec![0.3f32; 64], &[1, 64]).unwrap(), false);
 
         let (fused, match_prob, confidence, _belief) = model.fuse(
             Some((&face_emb, -1.0)),
@@ -716,9 +728,7 @@ mod tests {
         let model = ThemisFusion::new();
 
         // No modalities at all — should still produce valid output
-        let (fused, _match_prob, confidence, _belief) = model.fuse(
-            None, None, None, None, None,
-        );
+        let (fused, _match_prob, confidence, _belief) = model.fuse(None, None, None, None, None);
 
         assert_eq!(fused.shape(), &[1, 48]);
         assert_eq!(confidence, 0.0, "No modalities = zero confidence");
@@ -728,9 +738,15 @@ mod tests {
     fn test_themis_all_modalities() {
         let model = ThemisFusion::new();
         let face = Variable::new(Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(), false);
-        let finger = Variable::new(Tensor::from_vec(vec![0.3f32; 128], &[1, 128]).unwrap(), false);
+        let finger = Variable::new(
+            Tensor::from_vec(vec![0.3f32; 128], &[1, 128]).unwrap(),
+            false,
+        );
         let voice = Variable::new(Tensor::from_vec(vec![0.2f32; 64], &[1, 64]).unwrap(), false);
-        let iris = Variable::new(Tensor::from_vec(vec![0.4f32; 128], &[1, 128]).unwrap(), false);
+        let iris = Variable::new(
+            Tensor::from_vec(vec![0.4f32; 128], &[1, 128]).unwrap(),
+            false,
+        );
 
         let (fused, match_prob, confidence, belief) = model.fuse(
             Some((&face, -1.0)),
@@ -745,13 +761,8 @@ mod tests {
         assert!(confidence > 0.0);
 
         // Test temporal accumulation: reuse belief state
-        let (fused2, _match_prob2, _conf2, _belief2) = model.fuse(
-            Some((&face, -1.0)),
-            None,
-            None,
-            None,
-            Some(&belief),
-        );
+        let (fused2, _match_prob2, _conf2, _belief2) =
+            model.fuse(Some((&face, -1.0)), None, None, None, Some(&belief));
         assert_eq!(fused2.shape(), &[1, 48]);
     }
 
@@ -761,7 +772,12 @@ mod tests {
         let w1 = ThemisFusion::uncertainty_gate(-2.0, 2.0);
         // High uncertainty (positive log_var) -> low weight
         let w2 = ThemisFusion::uncertainty_gate(2.0, 2.0);
-        assert!(w1 > w2, "Low uncertainty should give higher weight: {} vs {}", w1, w2);
+        assert!(
+            w1 > w2,
+            "Low uncertainty should give higher weight: {} vs {}",
+            w1,
+            w2
+        );
         assert!(w1 > 0.9, "Low uncertainty weight should be near 1: {}", w1);
         assert!(w2 < 0.1, "High uncertainty weight should be near 0: {}", w2);
     }
@@ -772,22 +788,26 @@ mod tests {
         let face = Variable::new(Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(), false);
 
         // First observation
-        let (_fused1, _prob1, _conf1, belief1) = model.fuse(
-            Some((&face, -1.0)), None, None, None, None,
-        );
+        let (_fused1, _prob1, _conf1, belief1) =
+            model.fuse(Some((&face, -1.0)), None, None, None, None);
 
         // Second observation with accumulated belief
-        let (_fused2, _prob2, _conf2, belief2) = model.fuse(
-            Some((&face, -1.0)), None, None, None, Some(&belief1),
-        );
+        let (_fused2, _prob2, _conf2, belief2) =
+            model.fuse(Some((&face, -1.0)), None, None, None, Some(&belief1));
 
         // Belief states should differ (GRU updated them)
         let b1_data = belief1.data().to_vec();
         let b2_data = belief2.data().to_vec();
-        let diff: f32 = b1_data.iter().zip(b2_data.iter())
+        let diff: f32 = b1_data
+            .iter()
+            .zip(b2_data.iter())
             .map(|(a, b)| (a - b).abs())
             .sum();
-        assert!(diff > 1e-6, "Belief should change with accumulation, diff={}", diff);
+        assert!(
+            diff > 1e-6,
+            "Belief should change with accumulation, diff={}",
+            diff
+        );
     }
 
     #[test]
@@ -795,9 +815,7 @@ mod tests {
         let model = ThemisFusion::new();
         let face = Variable::new(Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(), false);
 
-        let (fused, _, _, _) = model.fuse(
-            Some((&face, -1.0)), None, None, None, None,
-        );
+        let (fused, _, _, _) = model.fuse(Some((&face, -1.0)), None, None, None, None);
 
         // Check L2 norm is ~1.0
         let data = fused.data().to_vec();
@@ -816,12 +834,15 @@ mod tests {
         // Face with very low uncertainty (should dominate)
         let face = Variable::new(Tensor::from_vec(vec![1.0f32; 64], &[1, 64]).unwrap(), false);
         // Voice with very high uncertainty (should be suppressed)
-        let voice = Variable::new(Tensor::from_vec(vec![-1.0f32; 64], &[1, 64]).unwrap(), false);
+        let voice = Variable::new(
+            Tensor::from_vec(vec![-1.0f32; 64], &[1, 64]).unwrap(),
+            false,
+        );
 
         let (_, _, confidence, _) = model.fuse(
-            Some((&face, -5.0)),  // Very confident
+            Some((&face, -5.0)), // Very confident
             None,
-            Some((&voice, 5.0)),  // Very uncertain
+            Some((&voice, 5.0)), // Very uncertain
             None,
             None,
         );
@@ -864,7 +885,8 @@ mod tests {
         assert!(
             (al1 - al100).abs() < 1e-5,
             "Aleatoric should not depend on n_observations: {} vs {}",
-            al1, al100
+            al1,
+            al100
         );
     }
 
@@ -875,7 +897,8 @@ mod tests {
         assert!(
             (aleatoric - epistemic).abs() < 1e-5,
             "Zero observations: epistemic should equal aleatoric: {} vs {}",
-            aleatoric, epistemic
+            aleatoric,
+            epistemic
         );
     }
 
@@ -883,19 +906,43 @@ mod tests {
     fn test_evidential_numerical_stability_extreme_positive() {
         // Very large logvar should be clamped
         let (aleatoric, epistemic) = ThemisFusion::evidential_uncertainty(100.0, 10);
-        assert!(aleatoric.is_finite(), "aleatoric should be finite: {}", aleatoric);
-        assert!(epistemic.is_finite(), "epistemic should be finite: {}", epistemic);
+        assert!(
+            aleatoric.is_finite(),
+            "aleatoric should be finite: {}",
+            aleatoric
+        );
+        assert!(
+            epistemic.is_finite(),
+            "epistemic should be finite: {}",
+            epistemic
+        );
         // Clamped at 20 -> exp(20) ~ 4.85e8
-        assert!((aleatoric - 20.0f32.exp()).abs() < 1.0, "aleatoric={}", aleatoric);
+        assert!(
+            (aleatoric - 20.0f32.exp()).abs() < 1.0,
+            "aleatoric={}",
+            aleatoric
+        );
     }
 
     #[test]
     fn test_evidential_numerical_stability_extreme_negative() {
         // Very negative logvar -> near-zero variance
         let (aleatoric, epistemic) = ThemisFusion::evidential_uncertainty(-100.0, 10);
-        assert!(aleatoric.is_finite(), "aleatoric should be finite: {}", aleatoric);
-        assert!(epistemic.is_finite(), "epistemic should be finite: {}", epistemic);
-        assert!(aleatoric < 1e-6, "Very negative logvar -> tiny aleatoric: {}", aleatoric);
+        assert!(
+            aleatoric.is_finite(),
+            "aleatoric should be finite: {}",
+            aleatoric
+        );
+        assert!(
+            epistemic.is_finite(),
+            "epistemic should be finite: {}",
+            epistemic
+        );
+        assert!(
+            aleatoric < 1e-6,
+            "Very negative logvar -> tiny aleatoric: {}",
+            aleatoric
+        );
     }
 
     // =========================================================================
@@ -910,17 +957,16 @@ mod tests {
         let belief = Variable::new(Tensor::from_vec(vec![1.0f32; 48], &[1, 48]).unwrap(), false);
 
         // decay_rate=0.0 should be equivalent to regular fuse
-        let (_, prob_no_decay, _, _) = model.fuse(
-            Some((&face, -1.0)), None, None, None, Some(&belief),
-        );
-        let (_, prob_zero_decay, _, _) = model.fuse_with_decay(
-            Some((&face, -1.0)), None, None, None, Some(&belief), 0.0,
-        );
+        let (_, prob_no_decay, _, _) =
+            model.fuse(Some((&face, -1.0)), None, None, None, Some(&belief));
+        let (_, prob_zero_decay, _, _) =
+            model.fuse_with_decay(Some((&face, -1.0)), None, None, None, Some(&belief), 0.0);
 
         assert!(
             (prob_no_decay - prob_zero_decay).abs() < 1e-5,
             "Zero decay should equal no decay: {} vs {}",
-            prob_no_decay, prob_zero_decay
+            prob_no_decay,
+            prob_zero_decay
         );
     }
 
@@ -932,18 +978,16 @@ mod tests {
         let belief = Variable::new(Tensor::from_vec(vec![1.0f32; 48], &[1, 48]).unwrap(), false);
 
         // decay_rate=1.0 should fully forget the old belief (equivalent to no belief)
-        let (_, prob_no_belief, _, _) = model.fuse(
-            Some((&face, -1.0)), None, None, None, None,
-        );
-        let (_, prob_full_decay, _, _) = model.fuse_with_decay(
-            Some((&face, -1.0)), None, None, None, Some(&belief), 1.0,
-        );
+        let (_, prob_no_belief, _, _) = model.fuse(Some((&face, -1.0)), None, None, None, None);
+        let (_, prob_full_decay, _, _) =
+            model.fuse_with_decay(Some((&face, -1.0)), None, None, None, Some(&belief), 1.0);
 
         // With full decay the old belief is zeroed, so it should match no-belief
         assert!(
             (prob_no_belief - prob_full_decay).abs() < 0.05,
             "Full decay should approximate no belief: {} vs {}",
-            prob_no_belief, prob_full_decay
+            prob_no_belief,
+            prob_full_decay
         );
     }
 
@@ -953,24 +997,40 @@ mod tests {
         let face = Variable::new(Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(), false);
 
         // Build up a strong belief
-        let (_, _, _, belief) = model.fuse(
-            Some((&face, -1.0)), None, None, None, None,
-        );
-        let belief_norm: f32 = belief.data().to_vec().iter().map(|x| x * x).sum::<f32>().sqrt();
+        let (_, _, _, belief) = model.fuse(Some((&face, -1.0)), None, None, None, None);
+        let belief_norm: f32 = belief
+            .data()
+            .to_vec()
+            .iter()
+            .map(|x| x * x)
+            .sum::<f32>()
+            .sqrt();
 
         // Apply heavy decay
-        let (_, _, _, decayed_belief) = model.fuse_with_decay(
-            Some((&face, -1.0)), None, None, None, Some(&belief), 0.9,
-        );
+        let (_, _, _, decayed_belief) =
+            model.fuse_with_decay(Some((&face, -1.0)), None, None, None, Some(&belief), 0.9);
 
         // The decayed input (belief * 0.1) should produce a different GRU output
         // than the full belief input — we verify the function runs without error
-        let decayed_norm: f32 = decayed_belief.data().to_vec().iter()
-            .map(|x| x * x).sum::<f32>().sqrt();
-        assert!(decayed_norm.is_finite(), "Decayed belief norm should be finite");
+        let decayed_norm: f32 = decayed_belief
+            .data()
+            .to_vec()
+            .iter()
+            .map(|x| x * x)
+            .sum::<f32>()
+            .sqrt();
+        assert!(
+            decayed_norm.is_finite(),
+            "Decayed belief norm should be finite"
+        );
         // With 90% decay on input, GRU output magnitude should differ
         let diff = (belief_norm - decayed_norm).abs();
-        assert!(diff > 0.0 || true, "Norms: original={}, decayed={}", belief_norm, decayed_norm);
+        assert!(
+            diff > 0.0 || true,
+            "Norms: original={}, decayed={}",
+            belief_norm,
+            decayed_norm
+        );
     }
 
     // =========================================================================
@@ -1020,7 +1080,11 @@ mod tests {
         let conflicts = ThemisFusion::detect_conflicts(&scores);
         // Face vs Fingerprint, Face vs Voice should be conflicts
         // Iris vs Fingerprint, Iris vs Voice should be conflicts
-        assert!(conflicts.len() >= 2, "Should detect multiple conflicts, got {}", conflicts.len());
+        assert!(
+            conflicts.len() >= 2,
+            "Should detect multiple conflicts, got {}",
+            conflicts.len()
+        );
 
         // Should be sorted by severity descending
         for i in 1..conflicts.len() {
@@ -1087,7 +1151,8 @@ mod tests {
         assert!(
             after < before,
             "Reliability should decrease on failure: {} -> {}",
-            before, after
+            before,
+            after
         );
     }
 
@@ -1103,7 +1168,8 @@ mod tests {
         assert!(
             after > low,
             "Reliability should increase on success: {} -> {}",
-            low, after
+            low,
+            after
         );
     }
 
@@ -1114,7 +1180,11 @@ mod tests {
             model.update_reliability(BiometricModality::Iris, false, 0.2);
         }
         let r = model.reliability(&BiometricModality::Iris);
-        assert!(r < 0.1, "Many failures should drive reliability near 0: {}", r);
+        assert!(
+            r < 0.1,
+            "Many failures should drive reliability near 0: {}",
+            r
+        );
     }
 
     #[test]
@@ -1136,15 +1206,13 @@ mod tests {
     fn test_forensic_report_all_fields_populated() {
         let model = ThemisFusion::new();
         let face = Variable::new(Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(), false);
-        let finger = Variable::new(Tensor::from_vec(vec![0.3f32; 128], &[1, 128]).unwrap(), false);
-
-        let (fused, match_prob, confidence, belief, forensic) = model.fuse_forensic(
-            Some((&face, -1.0)),
-            Some((&finger, -0.5)),
-            None,
-            None,
-            None,
+        let finger = Variable::new(
+            Tensor::from_vec(vec![0.3f32; 128], &[1, 128]).unwrap(),
+            false,
         );
+
+        let (fused, match_prob, confidence, belief, forensic) =
+            model.fuse_forensic(Some((&face, -1.0)), Some((&finger, -0.5)), None, None, None);
 
         assert_eq!(fused.shape(), &[1, 48]);
         assert!(match_prob >= 0.0 && match_prob <= 1.0);
@@ -1167,9 +1235,9 @@ mod tests {
         let voice = Variable::new(Tensor::from_vec(vec![0.3f32; 64], &[1, 64]).unwrap(), false);
 
         let (_, _, _, _, forensic) = model.fuse_forensic(
-            Some((&face, -5.0)),  // Very confident
+            Some((&face, -5.0)), // Very confident
             None,
-            Some((&voice, 5.0)),  // Very uncertain
+            Some((&voice, 5.0)), // Very uncertain
             None,
             None,
         );
@@ -1185,18 +1253,19 @@ mod tests {
     #[test]
     fn test_forensic_single_modality() {
         let model = ThemisFusion::new();
-        let iris = Variable::new(Tensor::from_vec(vec![0.4f32; 128], &[1, 128]).unwrap(), false);
-
-        let (_, _, _, _, forensic) = model.fuse_forensic(
-            None,
-            None,
-            None,
-            Some((&iris, -1.0)),
-            None,
+        let iris = Variable::new(
+            Tensor::from_vec(vec![0.4f32; 128], &[1, 128]).unwrap(),
+            false,
         );
 
+        let (_, _, _, _, forensic) =
+            model.fuse_forensic(None, None, None, Some((&iris, -1.0)), None);
+
         assert_eq!(forensic.modality_reports.len(), 1);
-        assert_eq!(forensic.modality_reports[0].modality, BiometricModality::Iris);
+        assert_eq!(
+            forensic.modality_reports[0].modality,
+            BiometricModality::Iris
+        );
         assert_eq!(forensic.dominant_modality, Some(BiometricModality::Iris));
     }
 
@@ -1205,13 +1274,8 @@ mod tests {
         let model = ThemisFusion::new();
         let face = Variable::new(Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(), false);
 
-        let (_, _, _, _, forensic) = model.fuse_forensic(
-            Some((&face, -1.0)),
-            None,
-            None,
-            None,
-            None,
-        );
+        let (_, _, _, _, forensic) =
+            model.fuse_forensic(Some((&face, -1.0)), None, None, None, None);
 
         // Top contributing dimensions should be sorted by |contribution| descending
         let dims = &forensic.top_contributing_dimensions;
@@ -1234,7 +1298,7 @@ mod tests {
         let face = Variable::new(Tensor::from_vec(vec![0.9f32; 64], &[1, 64]).unwrap(), false);
 
         let (fused, match_prob, confidence, _) = model.fuse(
-            Some((&face, -10.0)),  // Extremely confident
+            Some((&face, -10.0)), // Extremely confident
             None,
             None,
             None,
@@ -1244,7 +1308,11 @@ mod tests {
         assert_eq!(fused.shape(), &[1, 48]);
         assert!(match_prob >= 0.0 && match_prob <= 1.0);
         // Very negative logvar -> uncertainty gate near 1.0
-        assert!(confidence > 0.99, "Extremely confident modality: conf={}", confidence);
+        assert!(
+            confidence > 0.99,
+            "Extremely confident modality: conf={}",
+            confidence
+        );
     }
 
     #[test]
@@ -1259,7 +1327,11 @@ mod tests {
         assert_eq!(output.shape(), &[3, 1]);
         let data = output.data().to_vec();
         for val in &data {
-            assert!(*val >= 0.0 && *val <= 1.0, "Sigmoid output should be [0,1]: {}", val);
+            assert!(
+                *val >= 0.0 && *val <= 1.0,
+                "Sigmoid output should be [0,1]: {}",
+                val
+            );
         }
     }
 
@@ -1278,17 +1350,14 @@ mod tests {
         let mut deltas = Vec::new();
 
         for _ in 0..20 {
-            let (_, _, _, new_belief) = model.fuse(
-                Some((&face, -1.0)),
-                None,
-                None,
-                None,
-                belief.as_ref(),
-            );
+            let (_, _, _, new_belief) =
+                model.fuse(Some((&face, -1.0)), None, None, None, belief.as_ref());
 
             if let Some(prev) = &prev_belief_data {
                 let curr = new_belief.data().to_vec();
-                let delta: f32 = prev.iter().zip(curr.iter())
+                let delta: f32 = prev
+                    .iter()
+                    .zip(curr.iter())
                     .map(|(a, b)| (a - b).abs())
                     .sum();
                 deltas.push(delta);
@@ -1306,7 +1375,8 @@ mod tests {
             assert!(
                 late_avg <= early_avg + 1e-3,
                 "Belief should converge (early_delta={}, late_delta={})",
-                early_avg, late_avg
+                early_avg,
+                late_avg
             );
         }
     }
@@ -1319,18 +1389,17 @@ mod tests {
     fn test_reliability_affects_forensic_weights() {
         let mut model = ThemisFusion::new();
         let face = Variable::new(Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(), false);
-        let finger = Variable::new(Tensor::from_vec(vec![0.3f32; 128], &[1, 128]).unwrap(), false);
-
-        // Get forensic with full reliability
-        let (_, _, _, _, forensic_full) = model.fuse_forensic(
-            Some((&face, -1.0)),
-            Some((&finger, -1.0)),
-            None,
-            None,
-            None,
+        let finger = Variable::new(
+            Tensor::from_vec(vec![0.3f32; 128], &[1, 128]).unwrap(),
+            false,
         );
 
-        let face_weight_full = forensic_full.modality_reports
+        // Get forensic with full reliability
+        let (_, _, _, _, forensic_full) =
+            model.fuse_forensic(Some((&face, -1.0)), Some((&finger, -1.0)), None, None, None);
+
+        let face_weight_full = forensic_full
+            .modality_reports
             .iter()
             .find(|r| r.modality == BiometricModality::Face)
             .unwrap()
@@ -1343,15 +1412,11 @@ mod tests {
         assert!(model.reliability(&BiometricModality::Face) < 0.2);
 
         // Get forensic with degraded face reliability
-        let (_, _, _, _, forensic_degraded) = model.fuse_forensic(
-            Some((&face, -1.0)),
-            Some((&finger, -1.0)),
-            None,
-            None,
-            None,
-        );
+        let (_, _, _, _, forensic_degraded) =
+            model.fuse_forensic(Some((&face, -1.0)), Some((&finger, -1.0)), None, None, None);
 
-        let face_weight_degraded = forensic_degraded.modality_reports
+        let face_weight_degraded = forensic_degraded
+            .modality_reports
             .iter()
             .find(|r| r.modality == BiometricModality::Face)
             .unwrap()
@@ -1360,7 +1425,8 @@ mod tests {
         assert!(
             face_weight_degraded < face_weight_full,
             "Degraded reliability should lower fusion weight: {} -> {}",
-            face_weight_full, face_weight_degraded
+            face_weight_full,
+            face_weight_degraded
         );
     }
 
@@ -1370,9 +1436,8 @@ mod tests {
         let face = Variable::new(Tensor::from_vec(vec![0.5f32; 64], &[1, 64]).unwrap(), false);
 
         // Should work fine with None belief_state regardless of decay_rate
-        let (fused, prob, conf, _) = model.fuse_with_decay(
-            Some((&face, -1.0)), None, None, None, None, 0.5,
-        );
+        let (fused, prob, conf, _) =
+            model.fuse_with_decay(Some((&face, -1.0)), None, None, None, None, 0.5);
         assert_eq!(fused.shape(), &[1, 48]);
         assert!(prob >= 0.0 && prob <= 1.0);
         assert!(conf > 0.0);
@@ -1398,7 +1463,8 @@ mod tests {
         assert!(
             conflicts_far[0].severity > conflicts_close[0].severity,
             "Larger disagreement should have higher severity: {} vs {}",
-            conflicts_far[0].severity, conflicts_close[0].severity
+            conflicts_far[0].severity,
+            conflicts_close[0].severity
         );
     }
 
@@ -1409,7 +1475,8 @@ mod tests {
         assert!(
             al_high > al_low,
             "Higher logvar should give higher aleatoric: {} vs {}",
-            al_high, al_low
+            al_high,
+            al_low
         );
     }
 }

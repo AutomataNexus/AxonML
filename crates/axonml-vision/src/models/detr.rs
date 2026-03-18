@@ -15,9 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 use axonml_autograd::Variable;
-use axonml_nn::{
-    Conv2d, LayerNorm, Linear, Module, MultiHeadAttention, Parameter, ReLU,
-};
+use axonml_nn::{Conv2d, LayerNorm, Linear, Module, MultiHeadAttention, Parameter, ReLU};
 use axonml_tensor::Tensor;
 
 use crate::ops::{positional_encoding_2d, Detection};
@@ -71,7 +69,9 @@ impl DETREncoderLayer {
         let x = self.norm1.forward(&x.add_var(&attn));
 
         // FFN + residual
-        let ffn = self.ffn2.forward(&self.relu.forward(&self.ffn1.forward(&x)));
+        let ffn = self
+            .ffn2
+            .forward(&self.relu.forward(&self.ffn1.forward(&x)));
         self.norm2.forward(&x.add_var(&ffn))
     }
 
@@ -110,7 +110,9 @@ impl DETRDecoderLayer {
         let query = self.norm2.forward(&query.add_var(&cross));
 
         // FFN
-        let ffn = self.ffn2.forward(&self.relu.forward(&self.ffn1.forward(&query)));
+        let ffn = self
+            .ffn2
+            .forward(&self.relu.forward(&self.ffn1.forward(&query)));
         self.norm3.forward(&query.add_var(&ffn))
     }
 
@@ -128,7 +130,12 @@ impl DETRDecoderLayer {
 }
 
 impl DETRTransformer {
-    fn new(d_model: usize, nhead: usize, num_encoder_layers: usize, num_decoder_layers: usize) -> Self {
+    fn new(
+        d_model: usize,
+        nhead: usize,
+        num_encoder_layers: usize,
+        num_decoder_layers: usize,
+    ) -> Self {
         let dim_feedforward = d_model * 4;
         let encoder_layers = (0..num_encoder_layers)
             .map(|_| DETREncoderLayer::new(d_model, nhead, dim_feedforward))
@@ -216,9 +223,8 @@ impl DETR {
         backbone_channels: usize,
     ) -> Self {
         // Project backbone features to d_model
-        let input_proj = Conv2d::with_options(
-            backbone_channels, d_model, (1, 1), (1, 1), (0, 0), true,
-        );
+        let input_proj =
+            Conv2d::with_options(backbone_channels, d_model, (1, 1), (1, 1), (0, 0), true);
 
         let transformer = DETRTransformer::new(d_model, nhead, 6, 6);
 

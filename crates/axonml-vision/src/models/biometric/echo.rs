@@ -106,10 +106,16 @@ impl EchoSpeaker {
         let uncertainty_head = Linear::new(pool_dim, 1);
 
         Self {
-            pred_conv_in, pred_gru, pred_conv_out,
-            res_conv1, res_conv2,
-            speaker_head, uncertainty_head,
-            n_mels, pred_hidden, embed_dim,
+            pred_conv_in,
+            pred_gru,
+            pred_conv_out,
+            res_conv1,
+            res_conv2,
+            speaker_head,
+            uncertainty_head,
+            n_mels,
+            pred_hidden,
+            embed_dim,
         }
     }
 
@@ -131,7 +137,11 @@ impl EchoSpeaker {
         // Run GRU frame by frame for autoregressive prediction
         // Zero-init hidden state (requires_grad=false is correct for initial state)
         let mut h = Variable::new(
-            Tensor::from_vec(vec![0.0f32; batch * self.pred_hidden], &[batch, self.pred_hidden]).unwrap(),
+            Tensor::from_vec(
+                vec![0.0f32; batch * self.pred_hidden],
+                &[batch, self.pred_hidden],
+            )
+            .unwrap(),
             false,
         );
 
@@ -177,9 +187,9 @@ impl EchoSpeaker {
 
         // Statistics pooling: mean + std across time (graph-tracked)
         // mean_dim and var_dim backward are now fixed
-        let x_mean = x.mean_dim(2, false);  // [B, C]
-        let x_std = x.var_dim(2, false).add_scalar(1e-8).sqrt();  // [B, C]
-        let pooled_var = Variable::cat(&[&x_mean, &x_std], 1);  // [B, 2*C]
+        let x_mean = x.mean_dim(2, false); // [B, C]
+        let x_std = x.var_dim(2, false).add_scalar(1e-8).sqrt(); // [B, C]
+        let pooled_var = Variable::cat(&[&x_mean, &x_std], 1); // [B, 2*C]
 
         // Speaker embedding
         let embedding = self.speaker_head.forward(&pooled_var);
@@ -199,10 +209,7 @@ impl EchoSpeaker {
     ///
     /// Runs the complete pipeline: speech prediction, residual extraction,
     /// residual encoding, and speaker embedding extraction.
-    pub fn forward_full(
-        &self,
-        mel: &Variable,
-    ) -> (Variable, Variable, Variable) {
+    pub fn forward_full(&self, mel: &Variable) -> (Variable, Variable, Variable) {
         let (predicted, residuals) = self.predict_and_residual(mel);
         let (embedding, logvar) = self.encode_residuals(&residuals);
         (predicted, embedding, logvar)
@@ -293,9 +300,11 @@ impl EchoSpeaker {
         // Compute variance of per-frame spectral flatness
         let n = flatness_values.len() as f32;
         let mean_flatness: f32 = flatness_values.iter().sum::<f32>() / n;
-        let var_flatness: f32 = flatness_values.iter()
+        let var_flatness: f32 = flatness_values
+            .iter()
             .map(|f| (f - mean_flatness) * (f - mean_flatness))
-            .sum::<f32>() / n;
+            .sum::<f32>()
+            / n;
 
         // Live speech: high variance in flatness (voiced/unvoiced transitions,
         // consonants vs vowels). Spoofed: low variance (compressed dynamics).
@@ -350,8 +359,8 @@ impl EchoSpeaker {
         sorted_energies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let p25_idx = (sorted_energies.len() as f32 * 0.25) as usize;
-        let p75_idx = ((sorted_energies.len() as f32 * 0.75) as usize)
-            .min(sorted_energies.len() - 1);
+        let p75_idx =
+            ((sorted_energies.len() as f32 * 0.75) as usize).min(sorted_energies.len() - 1);
 
         let p25 = sorted_energies[p25_idx];
         let p75 = sorted_energies[p75_idx];
@@ -502,7 +511,7 @@ impl EchoSpeaker {
         // Compute normalized autocorrelation for lags corresponding to
         // syllable rates between 2 Hz and 10 Hz
         let min_lag = (frames_per_second / 10.0) as usize; // ~10 frames (10 Hz)
-        let max_lag = (frames_per_second / 2.0) as usize;  // ~50 frames (2 Hz)
+        let max_lag = (frames_per_second / 2.0) as usize; // ~50 frames (2 Hz)
         let max_lag = max_lag.min(time / 2);
 
         if min_lag >= max_lag || max_lag >= time {
@@ -625,7 +634,8 @@ mod tests {
     #[test]
     fn test_echo_param_count() {
         let model = EchoSpeaker::new();
-        let total: usize = model.parameters()
+        let total: usize = model
+            .parameters()
             .iter()
             .map(|p| p.variable().data().to_vec().len())
             .sum();
@@ -671,7 +681,11 @@ mod tests {
         );
         let identity = model.extract_identity(&mel);
         let norm: f32 = identity.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < 0.01, "Embedding not unit norm: {}", norm);
+        assert!(
+            (norm - 1.0).abs() < 0.01,
+            "Embedding not unit norm: {}",
+            norm
+        );
     }
 
     #[test]
@@ -682,8 +696,16 @@ mod tests {
             false,
         );
         let error = model.prediction_error(&mel);
-        assert!(error >= 0.0, "Prediction error should be non-negative: {}", error);
-        assert!(error.is_finite(), "Prediction error should be finite: {}", error);
+        assert!(
+            error >= 0.0,
+            "Prediction error should be non-negative: {}",
+            error
+        );
+        assert!(
+            error.is_finite(),
+            "Prediction error should be finite: {}",
+            error
+        );
     }
 
     #[test]
@@ -703,8 +725,13 @@ mod tests {
         let res_data = residuals.data().to_vec();
         for i in 0..mel_data.len() {
             let reconstructed = pred_data[i] + res_data[i];
-            assert!((reconstructed - mel_data[i]).abs() < 1e-4,
-                "Residual reconstruction error at {}: {} vs {}", i, reconstructed, mel_data[i]);
+            assert!(
+                (reconstructed - mel_data[i]).abs() < 1e-4,
+                "Residual reconstruction error at {}: {} vs {}",
+                i,
+                reconstructed,
+                mel_data[i]
+            );
         }
     }
 
@@ -741,8 +768,11 @@ mod tests {
             false,
         );
         let score = model.detect_replay(&mel);
-        assert!(score >= 0.0 && score <= 1.0,
-            "Spoofing score should be in [0,1], got {}", score);
+        assert!(
+            score >= 0.0 && score <= 1.0,
+            "Spoofing score should be in [0,1], got {}",
+            score
+        );
         assert!(score.is_finite(), "Spoofing score should be finite");
     }
 
@@ -777,17 +807,18 @@ mod tests {
                 }
             }
         }
-        let mel_varied = Variable::new(
-            Tensor::from_vec(varied_data, &[1, 40, 100]).unwrap(),
-            false,
-        );
+        let mel_varied =
+            Variable::new(Tensor::from_vec(varied_data, &[1, 40, 100]).unwrap(), false);
         let score_varied = model.detect_replay(&mel_varied);
 
         // The uniform input should have a HIGHER spoofing score (more likely spoofed)
         // than the varied input (more like real speech)
-        assert!(score_uniform > score_varied,
+        assert!(
+            score_uniform > score_varied,
             "Uniform mel (score={}) should be more spoofed than varied mel (score={})",
-            score_uniform, score_varied);
+            score_uniform,
+            score_varied
+        );
     }
 
     #[test]
@@ -799,7 +830,10 @@ mod tests {
             false,
         );
         let score = model.detect_replay(&mel);
-        assert!(score.is_finite(), "Replay score should be finite for short input");
+        assert!(
+            score.is_finite(),
+            "Replay score should be finite for short input"
+        );
         assert!(score >= 0.0 && score <= 1.0);
     }
 
@@ -816,7 +850,11 @@ mod tests {
             false,
         );
         let mask = model.voice_activity(&mel);
-        assert_eq!(mask.len(), time, "VAD mask length should equal number of time frames");
+        assert_eq!(
+            mask.len(),
+            time,
+            "VAD mask length should equal number of time frames"
+        );
     }
 
     #[test]
@@ -847,22 +885,25 @@ mod tests {
             }
         }
 
-        let mel = Variable::new(
-            Tensor::from_vec(data, &[1, n_mels, time]).unwrap(),
-            false,
-        );
+        let mel = Variable::new(Tensor::from_vec(data, &[1, n_mels, time]).unwrap(), false);
         let mask = model.voice_activity(&mel);
 
         // Speech region (30-69) should mostly be active
         let speech_active: usize = mask[30..70].iter().filter(|&&v| v).count();
-        assert!(speech_active > 30,
-            "At least 75% of speech frames should be active, got {}/40", speech_active);
+        assert!(
+            speech_active > 30,
+            "At least 75% of speech frames should be active, got {}/40",
+            speech_active
+        );
 
         // Silence regions should mostly be inactive
         let silence_active: usize = mask[0..30].iter().filter(|&&v| v).count()
             + mask[70..100].iter().filter(|&&v| v).count();
-        assert!(silence_active < 20,
-            "Most silence frames should be inactive, got {}/60 active", silence_active);
+        assert!(
+            silence_active < 20,
+            "Most silence frames should be inactive, got {}/60 active",
+            silence_active
+        );
     }
 
     #[test]
@@ -903,11 +944,17 @@ mod tests {
             false,
         );
         let consistency = model.temporal_consistency(&mel);
-        assert!(consistency.is_finite(),
-            "Temporal consistency should be finite, got {}", consistency);
+        assert!(
+            consistency.is_finite(),
+            "Temporal consistency should be finite, got {}",
+            consistency
+        );
         // Cosine similarity range is [-1, 1]
-        assert!(consistency >= -1.01 && consistency <= 1.01,
-            "Temporal consistency should be in [-1, 1], got {}", consistency);
+        assert!(
+            consistency >= -1.01 && consistency <= 1.01,
+            "Temporal consistency should be in [-1, 1], got {}",
+            consistency
+        );
     }
 
     #[test]
@@ -921,8 +968,11 @@ mod tests {
         );
         let consistency = model.temporal_consistency(&mel);
         // Same input across all segments should yield high consistency
-        assert!(consistency > 0.5,
-            "Constant mel should have high temporal consistency, got {}", consistency);
+        assert!(
+            consistency > 0.5,
+            "Constant mel should have high temporal consistency, got {}",
+            consistency
+        );
     }
 
     #[test]
@@ -935,8 +985,11 @@ mod tests {
         );
         let consistency = model.temporal_consistency(&mel);
         // Too short to meaningfully segment; should return 1.0 (neutral)
-        assert!((consistency - 1.0).abs() < 0.01,
-            "Very short input should return ~1.0 consistency, got {}", consistency);
+        assert!(
+            (consistency - 1.0).abs() < 0.01,
+            "Very short input should return ~1.0 consistency, got {}",
+            consistency
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -951,8 +1004,16 @@ mod tests {
             false,
         );
         let rate = model.speaking_rate(&mel);
-        assert!(rate >= 0.0, "Speaking rate should be non-negative, got {}", rate);
-        assert!(rate.is_finite(), "Speaking rate should be finite, got {}", rate);
+        assert!(
+            rate >= 0.0,
+            "Speaking rate should be non-negative, got {}",
+            rate
+        );
+        assert!(
+            rate.is_finite(),
+            "Speaking rate should be finite, got {}",
+            rate
+        );
     }
 
     #[test]
@@ -965,8 +1026,11 @@ mod tests {
         );
         let rate = model.speaking_rate(&mel);
         // Should return 0 or a valid rate, but must be finite and non-negative
-        assert!(rate >= 0.0 && rate.is_finite(),
-            "Short input speaking rate should be finite and >= 0, got {}", rate);
+        assert!(
+            rate >= 0.0 && rate.is_finite(),
+            "Short input speaking rate should be finite and >= 0, got {}",
+            rate
+        );
     }
 
     #[test]
@@ -980,22 +1044,27 @@ mod tests {
 
         // 5 Hz modulation: period = 20 frames at 100 fps
         for t in 0..time {
-            let modulation = 0.5 + 0.5 * (2.0 * std::f32::consts::PI * 5.0 * t as f32 / 100.0).sin();
+            let modulation =
+                0.5 + 0.5 * (2.0 * std::f32::consts::PI * 5.0 * t as f32 / 100.0).sin();
             for m in 0..n_mels {
                 data[m * time + t] = modulation * (0.5 + 0.1 * ((m as f32 * 0.2).sin()));
             }
         }
 
-        let mel = Variable::new(
-            Tensor::from_vec(data, &[1, n_mels, time]).unwrap(),
-            false,
-        );
+        let mel = Variable::new(Tensor::from_vec(data, &[1, n_mels, time]).unwrap(), false);
         let rate = model.speaking_rate(&mel);
-        assert!(rate > 0.0, "Modulated signal should produce non-zero rate, got {}", rate);
+        assert!(
+            rate > 0.0,
+            "Modulated signal should produce non-zero rate, got {}",
+            rate
+        );
         assert!(rate.is_finite(), "Rate should be finite");
         // Expect rate near 5 Hz (allow generous tolerance)
-        assert!(rate > 2.0 && rate < 10.0,
-            "Expected rate near 5 Hz for 5 Hz modulation, got {} Hz", rate);
+        assert!(
+            rate > 2.0 && rate < 10.0,
+            "Expected rate near 5 Hz for 5 Hz modulation, got {} Hz",
+            rate
+        );
     }
 
     #[test]
@@ -1006,7 +1075,11 @@ mod tests {
             false,
         );
         let rate = model.speaking_rate(&mel);
-        assert_eq!(rate, 0.0, "Silent input should produce 0 speaking rate, got {}", rate);
+        assert_eq!(
+            rate, 0.0,
+            "Silent input should produce 0 speaking rate, got {}",
+            rate
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1053,8 +1126,10 @@ mod tests {
         assert_eq!(output.shape(), &[1, 64]);
         // All values should be finite
         let data = output.data().to_vec();
-        assert!(data.iter().all(|v| v.is_finite()),
-            "All output values should be finite for minimum-length input");
+        assert!(
+            data.iter().all(|v| v.is_finite()),
+            "All output values should be finite for minimum-length input"
+        );
     }
 
     #[test]
@@ -1068,8 +1143,10 @@ mod tests {
         let output = model.forward(&mel);
         assert_eq!(output.shape(), &[1, 64]);
         let data = output.data().to_vec();
-        assert!(data.iter().all(|v| v.is_finite()),
-            "Single-frame output should be finite");
+        assert!(
+            data.iter().all(|v| v.is_finite()),
+            "Single-frame output should be finite"
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1086,16 +1163,22 @@ mod tests {
         let (predicted, embedding, logvar) = model.forward_full(&mel);
 
         let pred_data = predicted.data().to_vec();
-        assert!(pred_data.iter().all(|v| v.is_finite()),
-            "All predicted values should be finite");
+        assert!(
+            pred_data.iter().all(|v| v.is_finite()),
+            "All predicted values should be finite"
+        );
 
         let emb_data = embedding.data().to_vec();
-        assert!(emb_data.iter().all(|v| v.is_finite()),
-            "All embedding values should be finite");
+        assert!(
+            emb_data.iter().all(|v| v.is_finite()),
+            "All embedding values should be finite"
+        );
 
         let logvar_data = logvar.data().to_vec();
-        assert!(logvar_data.iter().all(|v| v.is_finite()),
-            "All logvar values should be finite");
+        assert!(
+            logvar_data.iter().all(|v| v.is_finite()),
+            "All logvar values should be finite"
+        );
     }
 
     #[test]
@@ -1110,8 +1193,12 @@ mod tests {
             );
             let identity = model.extract_identity(&mel);
             let norm: f32 = identity.iter().map(|x| x * x).sum::<f32>().sqrt();
-            assert!((norm - 1.0).abs() < 0.02,
-                "Embedding should be unit norm for input val={}, got norm={}", val, norm);
+            assert!(
+                (norm - 1.0).abs() < 0.02,
+                "Embedding should be unit norm for input val={}, got norm={}",
+                val,
+                norm
+            );
         }
     }
 
@@ -1147,8 +1234,11 @@ mod tests {
             let error = (reconstructed - mel_data[i]).abs();
             max_error = max_error.max(error);
         }
-        assert!(max_error < 1e-4,
-            "Max reconstruction error should be < 1e-4, got {}", max_error);
+        assert!(
+            max_error < 1e-4,
+            "Max reconstruction error should be < 1e-4, got {}",
+            max_error
+        );
     }
 
     #[test]
@@ -1158,12 +1248,12 @@ mod tests {
         for i in 0..data.len() {
             data[i] = ((i as f32) * 0.1).cos() * 0.8;
         }
-        let mel = Variable::new(
-            Tensor::from_vec(data, &[1, 40, 50]).unwrap(),
-            false,
-        );
+        let mel = Variable::new(Tensor::from_vec(data, &[1, 40, 50]).unwrap(), false);
         let error = model.prediction_error(&mel);
-        assert!(error.is_finite(), "Prediction error should be finite for varied input");
+        assert!(
+            error.is_finite(),
+            "Prediction error should be finite for varied input"
+        );
         assert!(error >= 0.0, "Prediction error should be non-negative");
     }
 

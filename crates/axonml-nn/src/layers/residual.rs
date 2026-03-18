@@ -18,10 +18,10 @@ use std::collections::HashMap;
 
 use axonml_autograd::Variable;
 
+use crate::activation::ReLU;
 use crate::module::Module;
 use crate::parameter::Parameter;
 use crate::sequential::Sequential;
-use crate::activation::ReLU;
 
 // =============================================================================
 // ResidualBlock
@@ -164,9 +164,9 @@ impl Module for ResidualBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axonml_tensor::Tensor;
-    use crate::layers::{Linear, BatchNorm1d, Conv1d};
     use crate::activation::{ReLU, GELU};
+    use crate::layers::{BatchNorm1d, Conv1d, Linear};
+    use axonml_tensor::Tensor;
 
     #[test]
     fn test_residual_block_identity_skip() {
@@ -178,10 +178,7 @@ mod tests {
 
         let block = ResidualBlock::new(main);
 
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 64], &[2, 32]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 64], &[2, 32]).unwrap(), false);
         let output = block.forward(&input);
 
         // Output shape should match input
@@ -197,45 +194,33 @@ mod tests {
             .add(Linear::new(64, 64));
 
         // Downsample projects input: 32 -> 64
-        let downsample = Sequential::new()
-            .add(Linear::new(32, 64));
+        let downsample = Sequential::new().add(Linear::new(32, 64));
 
         let block = ResidualBlock::new(main).with_downsample(downsample);
 
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 64], &[2, 32]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 64], &[2, 32]).unwrap(), false);
         let output = block.forward(&input);
         assert_eq!(output.shape(), vec![2, 64]);
     }
 
     #[test]
     fn test_residual_block_custom_activation() {
-        let main = Sequential::new()
-            .add(Linear::new(16, 16));
+        let main = Sequential::new().add(Linear::new(16, 16));
 
         let block = ResidualBlock::new(main).with_activation(GELU);
 
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 32], &[2, 16]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 32], &[2, 16]).unwrap(), false);
         let output = block.forward(&input);
         assert_eq!(output.shape(), vec![2, 16]);
     }
 
     #[test]
     fn test_residual_block_no_activation() {
-        let main = Sequential::new()
-            .add(Linear::new(16, 16));
+        let main = Sequential::new().add(Linear::new(16, 16));
 
         let block = ResidualBlock::new(main).without_activation();
 
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 32], &[2, 16]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 32], &[2, 16]).unwrap(), false);
         let output = block.forward(&input);
         assert_eq!(output.shape(), vec![2, 16]);
     }
@@ -243,8 +228,8 @@ mod tests {
     #[test]
     fn test_residual_block_parameters() {
         let main = Sequential::new()
-            .add(Linear::new(32, 32))   // weight(32x32) + bias(32) = 1056
-            .add(Linear::new(32, 32));  // weight(32x32) + bias(32) = 1056
+            .add(Linear::new(32, 32)) // weight(32x32) + bias(32) = 1056
+            .add(Linear::new(32, 32)); // weight(32x32) + bias(32) = 1056
 
         let block = ResidualBlock::new(main);
         let params = block.parameters();
@@ -257,8 +242,7 @@ mod tests {
             .add_named("conv1", Linear::new(32, 32))
             .add_named("conv2", Linear::new(32, 32));
 
-        let downsample = Sequential::new()
-            .add_named("proj", Linear::new(32, 32));
+        let downsample = Sequential::new().add_named("proj", Linear::new(32, 32));
 
         let block = ResidualBlock::new(main).with_downsample(downsample);
         let params = block.named_parameters();
@@ -317,8 +301,7 @@ mod tests {
 
     #[test]
     fn test_residual_block_gradient_flow() {
-        let main = Sequential::new()
-            .add(Linear::new(4, 4));
+        let main = Sequential::new().add(Linear::new(4, 4));
 
         let block = ResidualBlock::new(main);
 

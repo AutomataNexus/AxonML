@@ -314,34 +314,35 @@ impl Module for AlphaDropout {
         let b = -a * alpha_p * self.p;
 
         let input_data = input.data();
-        let input_vec = input_data.to_vec();
         let shape = input_data.shape().to_vec();
+        let numel = input_data.numel();
         let mut rng = rand::thread_rng();
 
-        // For alpha dropout, the mask stores the scale factor 'a' where kept
-        // and 0.0 where dropped (the additive term b is a constant, no gradient)
-        let mask: Vec<f32> = input_vec
-            .iter()
+        // Build mask on CPU: 'a' where kept, 0.0 where dropped
+        let dropped_val = a * alpha_p + b;
+        let mask_raw: Vec<f32> = (0..numel)
             .map(|_| if rng.gen::<f32>() < self.p { 0.0 } else { a })
             .collect();
 
-        let output_vec: Vec<f32> = input_vec
+        // Build bias tensor: dropped_val where dropped, b where kept
+        let bias_raw: Vec<f32> = mask_raw
             .iter()
-            .zip(mask.iter())
-            .map(|(&x, &m)| {
-                if m == 0.0 {
-                    a * alpha_p + b
-                } else {
-                    m * x + b
-                }
-            })
+            .map(|&m| if m == 0.0 { dropped_val } else { b })
             .collect();
 
-        let output = Tensor::from_vec(output_vec, &shape).unwrap();
-        let mut mask_tensor = Tensor::from_vec(mask, &shape).unwrap();
+        let mut mask_tensor = Tensor::from_vec(mask_raw, &shape).unwrap();
+        let mut bias_tensor = Tensor::from_vec(bias_raw, &shape).unwrap();
         if input_data.device().is_gpu() {
             mask_tensor = mask_tensor.to_device(input_data.device()).unwrap();
+            bias_tensor = bias_tensor.to_device(input_data.device()).unwrap();
         }
+
+        // output = mask * input + bias  (all Tensor ops, GPU-dispatched)
+        let output = input_data
+            .mul(&mask_tensor)
+            .unwrap()
+            .add(&bias_tensor)
+            .unwrap();
         let requires_grad = input.requires_grad() && is_grad_enabled();
 
         if requires_grad {

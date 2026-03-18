@@ -100,7 +100,10 @@ impl TrainingMonitor {
             epoch,
             train_loss,
             val_loss,
-            extras: extras.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+            extras: extras
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
         };
         state.epochs.push(metrics);
         if train_loss < state.best_loss {
@@ -242,57 +245,72 @@ fn serve_http(listener: TcpListener, state: Arc<Mutex<MonitorState>>) {
         let n = stream.read(&mut buf).unwrap_or(0);
         let request = String::from_utf8_lossy(&buf[..n]);
 
-        let (status, content_type, body) = if request.starts_with("GET /api/metrics")
-            || request.starts_with("GET /api/state")
-        {
-            let state = state.lock().unwrap();
-            let json = TrainingMonitor::build_json(&state);
-            ("200 OK", "application/json", json)
-        } else if request.starts_with("POST /api/epoch") {
-            // REST API: accept metrics from any language (Python, JS, etc.)
-            // POST /api/epoch  {"epoch":1,"train_loss":0.5,"val_loss":null,"extras":{"cls":0.1}}
-            // POST /api/status {"status":"complete"}
-            let body_str = extract_http_body(&request);
-            match parse_epoch_post(&body_str) {
-                Ok(metrics) => {
-                    let mut state = state.lock().unwrap();
-                    if metrics.train_loss < state.best_loss {
-                        state.best_loss = metrics.train_loss;
+        let (status, content_type, body) =
+            if request.starts_with("GET /api/metrics") || request.starts_with("GET /api/state") {
+                let state = state.lock().unwrap();
+                let json = TrainingMonitor::build_json(&state);
+                ("200 OK", "application/json", json)
+            } else if request.starts_with("POST /api/epoch") {
+                // REST API: accept metrics from any language (Python, JS, etc.)
+                // POST /api/epoch  {"epoch":1,"train_loss":0.5,"val_loss":null,"extras":{"cls":0.1}}
+                // POST /api/status {"status":"complete"}
+                let body_str = extract_http_body(&request);
+                match parse_epoch_post(&body_str) {
+                    Ok(metrics) => {
+                        let mut state = state.lock().unwrap();
+                        if metrics.train_loss < state.best_loss {
+                            state.best_loss = metrics.train_loss;
+                        }
+                        state.status = "training".to_string();
+                        state.epochs.push(metrics);
+                        ("200 OK", "application/json", r#"{"ok":true}"#.to_string())
                     }
-                    state.status = "training".to_string();
-                    state.epochs.push(metrics);
-                    ("200 OK", "application/json", r#"{"ok":true}"#.to_string())
+                    Err(e) => (
+                        "400 Bad Request",
+                        "application/json",
+                        format!("{{\"error\":\"{e}\"}}"),
+                    ),
                 }
-                Err(e) => ("400 Bad Request", "application/json", format!("{{\"error\":\"{e}\"}}")),
-            }
-        } else if request.starts_with("POST /api/status") {
-            let body_str = extract_http_body(&request);
-            if let Some(s) = extract_json_value(&body_str, "status") {
-                state.lock().unwrap().status = s;
+            } else if request.starts_with("POST /api/status") {
+                let body_str = extract_http_body(&request);
+                if let Some(s) = extract_json_value(&body_str, "status") {
+                    state.lock().unwrap().status = s;
+                    ("200 OK", "application/json", r#"{"ok":true}"#.to_string())
+                } else {
+                    (
+                        "400 Bad Request",
+                        "application/json",
+                        r#"{"error":"missing status"}"#.to_string(),
+                    )
+                }
+            } else if request.starts_with("POST /api/config") {
+                // Allow updating model_name, total_epochs, batch_size, param_count
+                let body_str = extract_http_body(&request);
+                let mut state = state.lock().unwrap();
+                if let Some(v) = extract_json_value(&body_str, "model") {
+                    state.model_name = v;
+                }
+                if let Some(v) = extract_json_value(&body_str, "total_epochs") {
+                    if let Ok(n) = v.parse::<usize>() {
+                        state.total_epochs = n;
+                    }
+                }
+                if let Some(v) = extract_json_value(&body_str, "batch_size") {
+                    if let Ok(n) = v.parse::<usize>() {
+                        state.batch_size = n;
+                    }
+                }
+                if let Some(v) = extract_json_value(&body_str, "params") {
+                    if let Ok(n) = v.parse::<usize>() {
+                        state.param_count = n;
+                    }
+                }
                 ("200 OK", "application/json", r#"{"ok":true}"#.to_string())
+            } else if request.starts_with("GET / ") || request.starts_with("GET / HTTP") {
+                ("200 OK", "text/html", DASHBOARD_HTML.to_string())
             } else {
-                ("400 Bad Request", "application/json", r#"{"error":"missing status"}"#.to_string())
-            }
-        } else if request.starts_with("POST /api/config") {
-            // Allow updating model_name, total_epochs, batch_size, param_count
-            let body_str = extract_http_body(&request);
-            let mut state = state.lock().unwrap();
-            if let Some(v) = extract_json_value(&body_str, "model") { state.model_name = v; }
-            if let Some(v) = extract_json_value(&body_str, "total_epochs") {
-                if let Ok(n) = v.parse::<usize>() { state.total_epochs = n; }
-            }
-            if let Some(v) = extract_json_value(&body_str, "batch_size") {
-                if let Ok(n) = v.parse::<usize>() { state.batch_size = n; }
-            }
-            if let Some(v) = extract_json_value(&body_str, "params") {
-                if let Ok(n) = v.parse::<usize>() { state.param_count = n; }
-            }
-            ("200 OK", "application/json", r#"{"ok":true}"#.to_string())
-        } else if request.starts_with("GET / ") || request.starts_with("GET / HTTP") {
-            ("200 OK", "text/html", DASHBOARD_HTML.to_string())
-        } else {
-            ("404 Not Found", "text/plain", "Not Found".to_string())
-        };
+                ("404 Not Found", "text/plain", "Not Found".to_string())
+            };
 
         let response = format!(
             "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{}",
@@ -326,7 +344,10 @@ fn extract_json_value(json: &str, key: &str) -> Option<String> {
         None
     } else {
         // Number value
-        let num: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-').collect();
+        let num: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+            .collect();
         Some(num)
     }
 }
@@ -339,8 +360,7 @@ fn parse_epoch_post(body: &str) -> Result<EpochMetrics, &'static str> {
     let loss_str = extract_json_value(body, "train_loss").ok_or("missing train_loss")?;
     let train_loss: f32 = loss_str.parse().map_err(|_| "invalid train_loss")?;
 
-    let val_loss = extract_json_value(body, "val_loss")
-        .and_then(|v| v.parse::<f32>().ok());
+    let val_loss = extract_json_value(body, "val_loss").and_then(|v| v.parse::<f32>().ok());
 
     // Parse extras object: {"extras":{"cls":0.1,"bbox":0.4}}
     let mut extras = Vec::new();
@@ -363,7 +383,12 @@ fn parse_epoch_post(body: &str) -> Result<EpochMetrics, &'static str> {
         }
     }
 
-    Ok(EpochMetrics { epoch, train_loss, val_loss, extras })
+    Ok(EpochMetrics {
+        epoch,
+        train_loss,
+        val_loss,
+        extras,
+    })
 }
 
 // =============================================================================
@@ -373,7 +398,6 @@ fn parse_epoch_post(body: &str) -> Result<EpochMetrics, &'static str> {
 const DASHBOARD_HTML: &str = include_str!("monitor_dashboard.html");
 
 // Old HTML removed — now loaded from monitor_dashboard.html via include_str!
-
 
 // =============================================================================
 // Tests

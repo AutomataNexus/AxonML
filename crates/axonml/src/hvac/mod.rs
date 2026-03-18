@@ -14,25 +14,29 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-pub mod data;
+pub mod apollo;
 pub mod aquilo;
 pub mod boreas;
+pub mod colossus;
+pub mod data;
+pub mod gaia;
 pub mod naiad;
+pub mod panoptes;
+pub mod panoptes_datagen;
+pub mod pipeline;
 pub mod vulcan;
 pub mod zephyrus;
-pub mod colossus;
-pub mod gaia;
-pub mod apollo;
-pub mod pipeline;
 
 // Re-exports
+pub use apollo::Apollo;
 pub use aquilo::Aquilo;
 pub use boreas::Boreas;
+pub use colossus::Colossus;
+pub use data::{HvacLabels, HvacSensorData, PipelineOutput, SyntheticHvacGenerator};
+pub use gaia::Gaia;
 pub use naiad::Naiad;
+pub use panoptes::Panoptes;
+pub use panoptes_datagen::{PanoptesTrainingData, WarrenSimulator};
+pub use pipeline::HvacPipeline;
 pub use vulcan::Vulcan;
 pub use zephyrus::Zephyrus;
-pub use colossus::Colossus;
-pub use gaia::Gaia;
-pub use apollo::Apollo;
-pub use pipeline::HvacPipeline;
-pub use data::{HvacSensorData, HvacLabels, PipelineOutput, SyntheticHvacGenerator};

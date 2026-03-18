@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
 
-use crate::init::{kaiming_uniform, zeros, constant};
+use crate::init::{constant, kaiming_uniform, zeros};
 use crate::module::Module;
 use crate::parameter::Parameter;
 
@@ -171,16 +171,26 @@ impl SparseLinear {
 
         let mask_vec: Vec<f32> = if self.structured {
             // One threshold per output neuron — broadcast across in_features
-            w_vec.iter().enumerate().map(|(idx, &w)| {
-                let out_idx = idx / self.in_features;
-                let t = t_vec[out_idx];
-                if w.abs() >= t { 1.0 } else { 0.0 }
-            }).collect()
+            w_vec
+                .iter()
+                .enumerate()
+                .map(|(idx, &w)| {
+                    let out_idx = idx / self.in_features;
+                    let t = t_vec[out_idx];
+                    if w.abs() >= t {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect()
         } else {
             // One threshold per weight
-            w_vec.iter().zip(t_vec.iter()).map(|(&w, &t)| {
-                if w.abs() >= t { 1.0 } else { 0.0 }
-            }).collect()
+            w_vec
+                .iter()
+                .zip(t_vec.iter())
+                .map(|(&w, &t)| if w.abs() >= t { 1.0 } else { 0.0 })
+                .collect()
         };
 
         Tensor::from_vec(mask_vec, &[self.out_features, self.in_features]).unwrap()
@@ -222,7 +232,9 @@ impl SparseLinear {
         let w_vec = weight_data.to_vec();
         let m_vec = mask.to_vec();
 
-        let pruned: Vec<f32> = w_vec.iter().zip(m_vec.iter())
+        let pruned: Vec<f32> = w_vec
+            .iter()
+            .zip(m_vec.iter())
             .map(|(&w, &m)| w * m)
             .collect();
 
@@ -261,7 +273,9 @@ impl SparseLinear {
         let w_vec = weight_data.to_vec();
         let m_vec = mask.to_vec();
 
-        let effective: Vec<f32> = w_vec.iter().zip(m_vec.iter())
+        let effective: Vec<f32> = w_vec
+            .iter()
+            .zip(m_vec.iter())
             .map(|(&w, &m)| w * m)
             .collect();
 
@@ -285,23 +299,29 @@ impl SparseLinear {
 
         // Compute sigmoid((|w| - threshold) * temperature) element-wise
         let mask_vec: Vec<f32> = if self.structured {
-            w_vec.iter().enumerate().map(|(idx, &w)| {
-                let out_idx = idx / self.in_features;
-                let t = t_vec[out_idx];
-                let x = (w.abs() - t) * TEMPERATURE;
-                1.0 / (1.0 + (-x).exp())
-            }).collect()
+            w_vec
+                .iter()
+                .enumerate()
+                .map(|(idx, &w)| {
+                    let out_idx = idx / self.in_features;
+                    let t = t_vec[out_idx];
+                    let x = (w.abs() - t) * TEMPERATURE;
+                    1.0 / (1.0 + (-x).exp())
+                })
+                .collect()
         } else {
-            w_vec.iter().zip(t_vec.iter()).map(|(&w, &t)| {
-                let x = (w.abs() - t) * TEMPERATURE;
-                1.0 / (1.0 + (-x).exp())
-            }).collect()
+            w_vec
+                .iter()
+                .zip(t_vec.iter())
+                .map(|(&w, &t)| {
+                    let x = (w.abs() - t) * TEMPERATURE;
+                    1.0 / (1.0 + (-x).exp())
+                })
+                .collect()
         };
 
-        let mask_tensor = Tensor::from_vec(
-            mask_vec,
-            &[self.out_features, self.in_features],
-        ).unwrap();
+        let mask_tensor =
+            Tensor::from_vec(mask_vec, &[self.out_features, self.in_features]).unwrap();
 
         // Create as a variable that participates in the graph
         // The mask depends on both weight and threshold, but since we compute
@@ -587,7 +607,9 @@ impl LotteryTicket {
                 let init_vec = initial.to_vec();
                 let mask_vec = mask.to_vec();
 
-                let rewound: Vec<f32> = init_vec.iter().zip(mask_vec.iter())
+                let rewound: Vec<f32> = init_vec
+                    .iter()
+                    .zip(mask_vec.iter())
                     .map(|(&w, &m)| if m > 0.5 { w } else { 0.0 })
                     .collect();
 
@@ -657,10 +679,7 @@ mod tests {
     #[test]
     fn test_sparse_linear_forward_batch() {
         let layer = SparseLinear::new(4, 3);
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 12], &[3, 4]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 12], &[3, 4]).unwrap(), false);
         let output = layer.forward(&input);
         assert_eq!(output.shape(), vec![3, 3]);
     }
@@ -668,10 +687,7 @@ mod tests {
     #[test]
     fn test_sparse_linear_forward_no_bias() {
         let layer = SparseLinear::with_bias(4, 3, false);
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 8], &[2, 4]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 8], &[2, 4]).unwrap(), false);
         let output = layer.forward(&input);
         assert_eq!(output.shape(), vec![2, 3]);
     }
@@ -682,14 +698,22 @@ mod tests {
         // should be above threshold (density close to 1.0).
         let layer = SparseLinear::new(100, 50);
         let density = layer.density();
-        assert!(density > 0.9, "Initial density should be high, got {}", density);
+        assert!(
+            density > 0.9,
+            "Initial density should be high, got {}",
+            density
+        );
     }
 
     #[test]
     fn test_sparse_linear_sparsity_initial() {
         let layer = SparseLinear::new(100, 50);
         let sparsity = layer.sparsity();
-        assert!(sparsity < 0.1, "Initial sparsity should be low, got {}", sparsity);
+        assert!(
+            sparsity < 0.1,
+            "Initial sparsity should be low, got {}",
+            sparsity
+        );
         assert!((layer.density() + layer.sparsity() - 1.0).abs() < 1e-6);
     }
 
@@ -714,7 +738,8 @@ mod tests {
         assert!(
             density_high_thresh < density_low_thresh,
             "Higher threshold should reduce density: low_thresh={}, high_thresh={}",
-            density_low_thresh, density_high_thresh
+            density_low_thresh,
+            density_high_thresh
         );
     }
 
@@ -726,7 +751,8 @@ mod tests {
         let density = layer.density();
         assert!(
             (density - 1.0).abs() < 1e-6,
-            "Zero threshold should give density=1.0, got {}", density
+            "Zero threshold should give density=1.0, got {}",
+            density
         );
     }
 
@@ -738,8 +764,7 @@ mod tests {
         let mask_vec = mask.data().to_vec();
 
         for &v in &mask_vec {
-            assert!(v >= 0.0 && v <= 1.0,
-                "Soft mask value {} not in [0, 1]", v);
+            assert!(v >= 0.0 && v <= 1.0, "Soft mask value {} not in [0, 1]", v);
         }
     }
 
@@ -759,8 +784,10 @@ mod tests {
 
         // The number of zeros should correspond to the pruned fraction
         let expected_zeros = ((1.0 - pre_prune_density) * (10 * 5) as f32).round() as usize;
-        assert_eq!(zeros_count, expected_zeros,
-            "Hard prune should zero out pruned weights");
+        assert_eq!(
+            zeros_count, expected_zeros,
+            "Hard prune should zero out pruned weights"
+        );
     }
 
     #[test]
@@ -771,8 +798,10 @@ mod tests {
 
         // After hard prune, thresholds should be zero
         let t_vec = layer.threshold.data().to_vec();
-        assert!(t_vec.iter().all(|&v| v == 0.0),
-            "Thresholds should be zero after hard_prune");
+        assert!(
+            t_vec.iter().all(|&v| v == 0.0),
+            "Thresholds should be zero after hard_prune"
+        );
     }
 
     #[test]
@@ -794,8 +823,10 @@ mod tests {
         let e_vec = effective.to_vec();
         let p_vec = pruned.to_vec();
         for (e, p) in e_vec.iter().zip(p_vec.iter()) {
-            assert!((e - p).abs() < 1e-6,
-                "effective_weight and hard_prune should match");
+            assert!(
+                (e - p).abs() < 1e-6,
+                "effective_weight and hard_prune should match"
+            );
         }
     }
 
@@ -888,20 +919,24 @@ mod tests {
         );
         let penalty = reg.penalty(&weight);
         let penalty_val = penalty.data().to_vec()[0];
-        assert!(penalty_val >= 0.0, "Penalty should be non-negative, got {}", penalty_val);
+        assert!(
+            penalty_val >= 0.0,
+            "Penalty should be non-negative, got {}",
+            penalty_val
+        );
     }
 
     #[test]
     fn test_group_sparsity_zero_weights_zero_penalty() {
         let reg = GroupSparsity::new(0.01, 4);
-        let weight = Variable::new(
-            Tensor::from_vec(vec![0.0; 8], &[2, 4]).unwrap(),
-            true,
-        );
+        let weight = Variable::new(Tensor::from_vec(vec![0.0; 8], &[2, 4]).unwrap(), true);
         let penalty = reg.penalty(&weight);
         let penalty_val = penalty.data().to_vec()[0];
-        assert!((penalty_val).abs() < 1e-6,
-            "Zero weights should give zero penalty, got {}", penalty_val);
+        assert!(
+            (penalty_val).abs() < 1e-6,
+            "Zero weights should give zero penalty, got {}",
+            penalty_val
+        );
     }
 
     #[test]
@@ -919,13 +954,17 @@ mod tests {
         assert!(
             penalty_large > penalty_small,
             "Larger lambda should give larger penalty: small={}, large={}",
-            penalty_small, penalty_large
+            penalty_small,
+            penalty_large
         );
 
         // Should scale linearly with lambda
         let ratio = penalty_large / penalty_small;
-        assert!((ratio - 10.0).abs() < 1e-4,
-            "Penalty should scale linearly with lambda, ratio={}", ratio);
+        assert!(
+            (ratio - 10.0).abs() < 1e-4,
+            "Penalty should scale linearly with lambda, ratio={}",
+            ratio
+        );
     }
 
     #[test]
@@ -1013,8 +1052,11 @@ mod tests {
         ticket.rewind_with_mask(&params, &[mask]);
 
         let result = params[0].data().to_vec();
-        assert_eq!(result, vec![1.0, 2.0, 0.0, 0.0],
-            "Masked weights should be zero, unmasked should be initial values");
+        assert_eq!(
+            result,
+            vec![1.0, 2.0, 0.0, 0.0],
+            "Masked weights should be zero, unmasked should be initial values"
+        );
     }
 
     #[test]
@@ -1036,10 +1078,7 @@ mod tests {
         let layer = SparseLinear::new(8, 4);
 
         // Forward pass
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 16], &[2, 8]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 16], &[2, 8]).unwrap(), false);
         let output = layer.forward(&input);
         assert_eq!(output.shape(), vec![2, 4]);
 
@@ -1048,7 +1087,10 @@ mod tests {
         let weight_var = layer.weight.variable();
         let penalty = reg.penalty(&weight_var);
         let penalty_val = penalty.data().to_vec()[0];
-        assert!(penalty_val > 0.0, "Penalty should be positive for non-zero weights");
+        assert!(
+            penalty_val > 0.0,
+            "Penalty should be positive for non-zero weights"
+        );
     }
 
     #[test]

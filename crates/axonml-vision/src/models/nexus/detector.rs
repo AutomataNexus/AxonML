@@ -178,7 +178,10 @@ impl Nexus {
         }
 
         // Step 6: NMS
-        let boxes_flat: Vec<f32> = all_proposals.iter().flat_map(|b| b.iter().copied()).collect();
+        let boxes_flat: Vec<f32> = all_proposals
+            .iter()
+            .flat_map(|b| b.iter().copied())
+            .collect();
         let n = all_proposals.len();
         let boxes_tensor = Tensor::from_vec(boxes_flat, &[n, 4]).unwrap();
         let scores_tensor = Tensor::from_vec(all_scores.clone(), &[n]).unwrap();
@@ -189,7 +192,9 @@ impl Nexus {
 
         // Step 7: Update object memory
         let spatial_scale = 1.0 / 16.0; // g2 scale
-        let hidden_states = self.memory.update(&g2, &nms_proposals, &nms_scores, spatial_scale);
+        let hidden_states = self
+            .memory
+            .update(&g2, &nms_proposals, &nms_scores, spatial_scale);
 
         // Step 8: Generate final detections with uncertainty
         let mut detections = Vec::new();
@@ -213,7 +218,12 @@ impl Nexus {
 
             detections.push(NexusDetection {
                 bbox_mean: refined_bbox,
-                bbox_log_var: [logvar_data[0], logvar_data[1], logvar_data[2], logvar_data[3]],
+                bbox_log_var: [
+                    logvar_data[0],
+                    logvar_data[1],
+                    logvar_data[2],
+                    logvar_data[3],
+                ],
                 confidence: slot.confidence,
                 class_id: 0, // Without class head input features, default to 0
                 tracking_id: slot.id,
@@ -256,7 +266,9 @@ impl Nexus {
             });
         }
 
-        super::NexusTrainOutput { scales: scale_outputs }
+        super::NexusTrainOutput {
+            scales: scale_outputs,
+        }
     }
 
     /// Detect with temporal context (for video frame sequences).

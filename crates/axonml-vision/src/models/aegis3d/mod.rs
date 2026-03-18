@@ -21,7 +21,7 @@ pub mod renderer;
 
 pub use implicit::{FourierFeatures, GlobalSDF, LocalSDF};
 pub use mesh::{MarchingCubes, Mesh, Triangle, Vertex};
-pub use octree::{AdaptiveOctree, AABB, OctreeNode};
+pub use octree::{AdaptiveOctree, OctreeNode, AABB};
 pub use renderer::{Camera, DifferentiableRenderer, RayHit, RenderOutput, SphereTracingConfig};
 
 use axonml_nn::Parameter;
@@ -126,11 +126,7 @@ impl Aegis3D {
     ///
     /// # Returns
     /// Reconstructed triangle mesh
-    pub fn reconstruct_from_depth(
-        &mut self,
-        depth_map: &[f32],
-        camera: &Camera,
-    ) -> Mesh {
+    pub fn reconstruct_from_depth(&mut self, depth_map: &[f32], camera: &Camera) -> Mesh {
         let _w = camera.width;
         let _h = camera.height;
 
@@ -182,11 +178,8 @@ impl Aegis3D {
                 let rendered = self.renderer.render(&self.octree, &view.camera);
 
                 // Depth loss: MSE between rendered and observed depth (at hit pixels)
-                let depth_loss = compute_depth_loss(
-                    &rendered.depth_map,
-                    &view.depth_map,
-                    &rendered.hit_mask,
-                );
+                let depth_loss =
+                    compute_depth_loss(&rendered.depth_map, &view.depth_map, &rendered.hit_mask);
 
                 total_loss += depth_loss;
             }
@@ -223,12 +216,12 @@ impl Aegis3D {
             let y = bounds.min[1] + ((t * 7.0) % 1.0) * (bounds.max[1] - bounds.min[1]);
             let z = bounds.min[2] + ((t * 13.0) % 1.0) * (bounds.max[2] - bounds.min[2]);
 
-            let dx = self.octree.query_sdf([x + eps, y, z])
-                - self.octree.query_sdf([x - eps, y, z]);
-            let dy = self.octree.query_sdf([x, y + eps, z])
-                - self.octree.query_sdf([x, y - eps, z]);
-            let dz = self.octree.query_sdf([x, y, z + eps])
-                - self.octree.query_sdf([x, y, z - eps]);
+            let dx =
+                self.octree.query_sdf([x + eps, y, z]) - self.octree.query_sdf([x - eps, y, z]);
+            let dy =
+                self.octree.query_sdf([x, y + eps, z]) - self.octree.query_sdf([x, y - eps, z]);
+            let dz =
+                self.octree.query_sdf([x, y, z + eps]) - self.octree.query_sdf([x, y, z - eps]);
 
             let grad_mag = ((dx * dx + dy * dy + dz * dz) / (4.0 * eps * eps)).sqrt();
             loss += (grad_mag - 1.0).powi(2);
@@ -357,7 +350,10 @@ mod tests {
         // Points should be roughly at z ≈ 1.5 distance from camera
         for p in &points {
             let dist = ((p[0] - 0.0).powi(2) + (p[1] - 0.0).powi(2) + (p[2] - 3.0).powi(2)).sqrt();
-            assert!((dist - 1.5).abs() < 0.5, "Point distance {dist} should be ~1.5");
+            assert!(
+                (dist - 1.5).abs() < 0.5,
+                "Point distance {dist} should be ~1.5"
+            );
         }
     }
 
@@ -373,7 +369,10 @@ mod tests {
 
         aegis.add_view(&depth_map, camera);
         assert_eq!(aegis.views.len(), 1);
-        assert!(aegis.num_sdf_networks() > 1, "Should have subdivided octree");
+        assert!(
+            aegis.num_sdf_networks() > 1,
+            "Should have subdivided octree"
+        );
     }
 
     #[test]

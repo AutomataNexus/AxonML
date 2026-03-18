@@ -194,7 +194,8 @@ pub async fn search_datasets(
 
     // SECURITY: Build URL from validated base, append query params safely
     let mut search_url = kaggle_url("datasets/list")?;
-    search_url.query_pairs_mut()
+    search_url
+        .query_pairs_mut()
         .append_pair("search", &query.query)
         .append_pair("page", &page.to_string())
         .append_pair("pageSize", &limit.to_string());
