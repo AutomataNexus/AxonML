@@ -2352,4 +2352,145 @@ impl Tensor<f32> {
 
         Some((grad_input_t, grad_weight_t, grad_bias_t))
     }
+
+    // =========================================================================
+    // Pooling Operations (GPU)
+    // =========================================================================
+
+    /// GPU MaxPool2d forward. Input must be [N, C, H, W] on GPU.
+    /// Returns (output_tensor, indices_vec) where indices are flat i32 offsets.
+    /// Output tensor stays on GPU.
+    pub fn maxpool2d_cuda(
+        &self,
+        kernel_size: (usize, usize),
+        stride: (usize, usize),
+        padding: (usize, usize),
+    ) -> Option<(Self, Vec<i32>)> {
+        if !self.device().is_gpu() {
+            return None;
+        }
+        let cuda = get_cuda_backend()?;
+
+        let batch = self.shape[0];
+        let channels = self.shape[1];
+        let in_h = self.shape[2];
+        let in_w = self.shape[3];
+        let (kh, kw) = kernel_size;
+        let (sh, sw) = stride;
+        let (ph, pw) = padding;
+
+        let out_h = (in_h + 2 * ph - kh) / sh + 1;
+        let out_w = (in_w + 2 * pw - kw) / sw + 1;
+        let total = batch * channels * out_h * out_w;
+
+        // Ensure contiguous on GPU
+        let input_data = self.contiguous_gpu();
+        let input_guard = input_data.storage.as_cuda_slice();
+
+        // Upload params
+        let params: [u32; 8] = [
+            in_h as u32,
+            in_w as u32,
+            kh as u32,
+            kw as u32,
+            sh as u32,
+            sw as u32,
+            ph as u32,
+            pw as u32,
+        ];
+        let params_gpu = cuda.htod_copy(&params[..]).ok()?;
+
+        // Allocate output + indices on GPU
+        let mut output_gpu = pool_alloc(total).ok()?;
+        let mut indices_gpu = cuda.alloc::<i32>(total).ok()?;
+
+        cuda.maxpool2d_fwd_f32(
+            input_guard.slice(),
+            &mut output_gpu,
+            &mut indices_gpu,
+            &params_gpu,
+            channels,
+            out_h,
+            out_w,
+            total,
+        )
+        .ok()?;
+
+        // Download indices to CPU (needed for backward bookkeeping)
+        let indices = cuda.dtoh_copy(&indices_gpu).ok()?;
+
+        let out_shape = Shape::from_slice(&[batch, channels, out_h, out_w]);
+        let output = Self {
+            storage: Storage::from_cuda_slice(output_gpu, total, self.device()),
+            shape: out_shape.clone(),
+            strides: contiguous_strides(&out_shape),
+            offset: 0,
+        };
+
+        Some((output, indices))
+    }
+
+    /// GPU AvgPool2d forward. Input must be [N, C, H, W] on GPU.
+    /// Output tensor stays on GPU.
+    pub fn avgpool2d_cuda(
+        &self,
+        kernel_size: (usize, usize),
+        stride: (usize, usize),
+        padding: (usize, usize),
+        count_include_pad: bool,
+    ) -> Option<Self> {
+        if !self.device().is_gpu() {
+            return None;
+        }
+        let cuda = get_cuda_backend()?;
+
+        let batch = self.shape[0];
+        let channels = self.shape[1];
+        let in_h = self.shape[2];
+        let in_w = self.shape[3];
+        let (kh, kw) = kernel_size;
+        let (sh, sw) = stride;
+        let (ph, pw) = padding;
+
+        let out_h = (in_h + 2 * ph - kh) / sh + 1;
+        let out_w = (in_w + 2 * pw - kw) / sw + 1;
+        let total = batch * channels * out_h * out_w;
+
+        let input_data = self.contiguous_gpu();
+        let input_guard = input_data.storage.as_cuda_slice();
+
+        let params: [u32; 9] = [
+            in_h as u32,
+            in_w as u32,
+            kh as u32,
+            kw as u32,
+            sh as u32,
+            sw as u32,
+            ph as u32,
+            pw as u32,
+            count_include_pad as u32,
+        ];
+        let params_gpu = cuda.htod_copy(&params[..]).ok()?;
+
+        let mut output_gpu = pool_alloc(total).ok()?;
+
+        cuda.avgpool2d_fwd_f32(
+            input_guard.slice(),
+            &mut output_gpu,
+            &params_gpu,
+            channels,
+            out_h,
+            out_w,
+            total,
+        )
+        .ok()?;
+
+        let out_shape = Shape::from_slice(&[batch, channels, out_h, out_w]);
+        Some(Self {
+            storage: Storage::from_cuda_slice(output_gpu, total, self.device()),
+            shape: out_shape.clone(),
+            strides: contiguous_strides(&out_shape),
+            offset: 0,
+        })
+    }
 }

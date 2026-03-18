@@ -2223,6 +2223,346 @@ pub fn cuda_conv2d_forward(
 }
 
 // =============================================================================
+// Pooling GPU Operations (MaxPool2d + AvgPool2d)
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+impl CudaBackend {
+    /// Launch MaxPool2d forward kernel on GPU (device-resident).
+    ///
+    /// - `input`: GPU slice [N*C*H*W]
+    /// - `output`: GPU slice [N*C*out_h*out_w] (pre-allocated, zero-init)
+    /// - `indices`: GPU slice [N*C*out_h*out_w] (pre-allocated, i32)
+    /// - `params`: GPU u32[8] = {H, W, kH, kW, sH, sW, pH, pW}
+    pub fn maxpool2d_fwd_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        indices: &mut CudaSlice<i32>,
+        params: &CudaSlice<u32>,
+        channels: usize,
+        out_h: usize,
+        out_w: usize,
+        total: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("maxpool2d_fwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("maxpool2d_fwd_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (
+                        input,
+                        output,
+                        indices,
+                        params,
+                        channels as u32,
+                        out_h as u32,
+                        out_w as u32,
+                        total as u32,
+                    ),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Launch MaxPool2d backward kernel on GPU (device-resident).
+    ///
+    /// Scatters grad_output to grad_input at max index positions using atomicAdd.
+    /// `grad_input` must be zero-initialized.
+    pub fn maxpool2d_bwd_f32(
+        &self,
+        grad_output: &CudaSlice<f32>,
+        indices: &CudaSlice<i32>,
+        grad_input: &mut CudaSlice<f32>,
+        total: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("maxpool2d_bwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("maxpool2d_bwd_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(cfg, (grad_output, indices, grad_input, total as u32))
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Launch AvgPool2d forward kernel on GPU (device-resident).
+    ///
+    /// - `params`: GPU u32[9] = {H, W, kH, kW, sH, sW, pH, pW, count_include_pad}
+    pub fn avgpool2d_fwd_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        channels: usize,
+        out_h: usize,
+        out_w: usize,
+        total: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("avgpool2d_fwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("avgpool2d_fwd_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (
+                        input,
+                        output,
+                        params,
+                        channels as u32,
+                        out_h as u32,
+                        out_w as u32,
+                        total as u32,
+                    ),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Launch AvgPool2d backward kernel on GPU (device-resident).
+    ///
+    /// `grad_input` must be zero-initialized.
+    pub fn avgpool2d_bwd_f32(
+        &self,
+        grad_output: &CudaSlice<f32>,
+        grad_input: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        channels: usize,
+        out_h: usize,
+        out_w: usize,
+        total: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("avgpool2d_bwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("avgpool2d_bwd_f32".to_string()))?;
+
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (
+                        grad_output,
+                        grad_input,
+                        params,
+                        channels as u32,
+                        out_h as u32,
+                        out_w as u32,
+                        total as u32,
+                    ),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Pinned (Page-Locked) Host Memory
+// =============================================================================
+
+/// A page-locked (pinned) host memory buffer for fast CPU-to-GPU transfers.
+///
+/// Pinned memory is allocated via `cuMemAllocHost` and is not subject to
+/// OS paging, enabling the GPU to DMA directly from the host buffer. This
+/// typically provides 2-3x faster host-to-device transfer compared to
+/// pageable (regular) memory.
+///
+/// # Usage
+/// ```ignore
+/// use axonml_core::backends::cuda::PinnedBuffer;
+///
+/// let data = vec![1.0f32; 1024];
+/// let pinned = PinnedBuffer::from_slice(&data).expect("pin failed");
+/// // Use pinned.as_slice() as the source for htod transfers
+/// ```
+#[cfg(feature = "cuda")]
+pub struct PinnedBuffer {
+    /// Raw pointer to the pinned host allocation (from cuMemAllocHost).
+    ptr: *mut f32,
+    /// Number of f32 elements in the buffer.
+    len: usize,
+}
+
+#[cfg(feature = "cuda")]
+unsafe impl Send for PinnedBuffer {}
+#[cfg(feature = "cuda")]
+unsafe impl Sync for PinnedBuffer {}
+
+#[cfg(feature = "cuda")]
+impl PinnedBuffer {
+    /// Allocates a pinned host buffer and copies `data` into it.
+    ///
+    /// The returned buffer can be used as a source for fast CPU-to-GPU
+    /// transfers. The memory is page-locked so the GPU can DMA from it
+    /// without going through the OS page cache.
+    ///
+    /// # Errors
+    /// Returns `CudaError` if pinned memory allocation fails (e.g., out of
+    /// lockable memory, CUDA not initialized).
+    pub fn from_slice(data: &[f32]) -> Result<Self, CudaError> {
+        use cudarc::driver::sys::lib;
+        use std::ptr;
+
+        if data.is_empty() {
+            return Ok(Self {
+                ptr: ptr::null_mut(),
+                len: 0,
+            });
+        }
+
+        let byte_size = data.len() * std::mem::size_of::<f32>();
+        let mut host_ptr: *mut std::ffi::c_void = ptr::null_mut();
+
+        // Ensure CUDA is initialized before calling driver API
+        let _ = get_cuda_backend().ok_or(CudaError::DeviceNotFound)?;
+
+        unsafe {
+            let result = lib().cuMemAllocHost_v2(&mut host_ptr, byte_size);
+            if result != cudarc::driver::sys::CUresult::CUDA_SUCCESS {
+                return Err(CudaError::AllocationFailed);
+            }
+
+            // Copy data into pinned buffer
+            ptr::copy_nonoverlapping(data.as_ptr(), host_ptr as *mut f32, data.len());
+        }
+
+        Ok(Self {
+            ptr: host_ptr as *mut f32,
+            len: data.len(),
+        })
+    }
+
+    /// Allocates an uninitialized pinned host buffer of the given length.
+    ///
+    /// # Safety
+    /// The contents are uninitialized. Caller must write to the buffer
+    /// before reading from it.
+    ///
+    /// # Errors
+    /// Returns `CudaError` if pinned memory allocation fails.
+    pub fn alloc(len: usize) -> Result<Self, CudaError> {
+        use cudarc::driver::sys::lib;
+        use std::ptr;
+
+        if len == 0 {
+            return Ok(Self {
+                ptr: ptr::null_mut(),
+                len: 0,
+            });
+        }
+
+        let byte_size = len * std::mem::size_of::<f32>();
+        let mut host_ptr: *mut std::ffi::c_void = ptr::null_mut();
+
+        let _ = get_cuda_backend().ok_or(CudaError::DeviceNotFound)?;
+
+        unsafe {
+            let result = lib().cuMemAllocHost_v2(&mut host_ptr, byte_size);
+            if result != cudarc::driver::sys::CUresult::CUDA_SUCCESS {
+                return Err(CudaError::AllocationFailed);
+            }
+        }
+
+        Ok(Self {
+            ptr: host_ptr as *mut f32,
+            len,
+        })
+    }
+
+    /// Returns a slice view of the pinned buffer.
+    pub fn as_slice(&self) -> &[f32] {
+        if self.ptr.is_null() || self.len == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+
+    /// Returns a mutable slice view of the pinned buffer.
+    pub fn as_slice_mut(&mut self) -> &mut [f32] {
+        if self.ptr.is_null() || self.len == 0 {
+            return &mut [];
+        }
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
+    }
+
+    /// Returns the number of elements in the buffer.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns true if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Returns the raw host pointer.
+    pub fn as_ptr(&self) -> *const f32 {
+        self.ptr
+    }
+
+    /// Returns a mutable raw host pointer.
+    pub fn as_mut_ptr(&mut self) -> *mut f32 {
+        self.ptr
+    }
+
+    /// Transfers the pinned buffer contents to a GPU `CudaSlice`.
+    ///
+    /// This is the fast path: since the source memory is pinned, the GPU
+    /// can DMA directly without staging through pageable memory.
+    pub fn to_gpu(&self) -> Result<CudaSlice<f32>, CudaError> {
+        let backend = get_cuda_backend().ok_or(CudaError::DeviceNotFound)?;
+        backend.htod_copy(self.as_slice())
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl Drop for PinnedBuffer {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe {
+                let lib = cudarc::driver::sys::lib();
+                let _ = lib.cuMemFreeHost(self.ptr as *mut std::ffi::c_void);
+            }
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
+
+/// Convenience function: allocate pinned host memory and copy data into it.
+///
+/// This is a shorthand for `PinnedBuffer::from_slice(data)`.
+///
+/// # Errors
+/// Returns `CudaError` if CUDA is not available or allocation fails.
+#[cfg(feature = "cuda")]
+pub fn pin_memory(data: &[f32]) -> Result<PinnedBuffer, CudaError> {
+    PinnedBuffer::from_slice(data)
+}
+
+/// Stub when CUDA is not enabled - pinned memory is not available.
+#[cfg(not(feature = "cuda"))]
+pub fn pin_memory(_data: &[f32]) -> Result<(), CudaError> {
+    Err(CudaError::DeviceNotFound)
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 

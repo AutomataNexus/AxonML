@@ -3538,6 +3538,9 @@ $L__col2im_exit:
 /// LSTM/GRU/BatchNorm fused kernels (compiled from lstm.cu)
 pub const LSTM_PTX: &str = include_str!("lstm.ptx");
 
+/// Pooling kernels: MaxPool2d + AvgPool2d forward/backward (compiled from pooling.cu)
+pub const POOLING_PTX: &str = include_str!("pooling.ptx");
+
 /// CUDA Kernel registry for managing loaded kernels
 #[cfg(feature = "cuda")]
 pub struct CudaKernels {
@@ -3679,6 +3682,18 @@ impl CudaKernels {
                 "gru_gates_f32",
                 "batchnorm_stats_f32",
                 "batchnorm_norm_f32",
+            ],
+        )?;
+
+        // Load pooling kernels (MaxPool2d + AvgPool2d forward/backward)
+        kernels.load_module(
+            "pooling",
+            POOLING_PTX,
+            &[
+                "maxpool2d_fwd_f32",
+                "maxpool2d_bwd_f32",
+                "avgpool2d_fwd_f32",
+                "avgpool2d_bwd_f32",
             ],
         )?;
 
