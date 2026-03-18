@@ -37,6 +37,8 @@ jit = ["core", "dep:axonml-jit"]
 onnx = ["core", "dep:axonml-onnx"]
 # CUDA GPU acceleration
 cuda = ["axonml-core/cuda", "axonml-tensor/cuda"]
+# cuDNN acceleration (requires CUDA)
+cudnn = ["cuda", "axonml-core/cudnn", "axonml-tensor/cudnn", "axonml-nn/cudnn"]
 # WebGPU/Vulkan GPU acceleration
 wgpu = ["axonml-core/wgpu"]
 # Full feature set

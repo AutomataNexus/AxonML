@@ -29,6 +29,9 @@ pub mod cuda_kernels;
 
 pub mod cuda_pool;
 
+#[cfg(feature = "cudnn")]
+pub mod cudnn_ops;
+
 #[cfg(feature = "vulkan")]
 pub mod vulkan;
 

@@ -15,9 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::safe::DeviceSlice;
-#[cfg(feature = "cuda")]
-use cudarc::driver::{CudaSlice, DevicePtr};
+use cudarc::driver::{CudaSlice, DeviceSlice};
 
 #[cfg(feature = "cuda")]
 use std::collections::HashMap;
@@ -123,7 +121,7 @@ impl CudaMemoryPool {
             inner.pooled_bytes -= capacity * 4;
             if let Some(backend) = super::cuda::get_cuda_backend() {
                 unsafe {
-                    let slice: CudaSlice<f32> = backend.device().upgrade_device_ptr(ptr, capacity);
+                    let slice: CudaSlice<f32> = backend.stream().upgrade_device_ptr(ptr, capacity);
                     drop(slice); // Actually free GPU memory
                 }
             }
@@ -145,7 +143,7 @@ impl CudaMemoryPool {
                 if let Some(ref be) = backend {
                     unsafe {
                         let slice: CudaSlice<f32> =
-                            be.device().upgrade_device_ptr(block.ptr, block.capacity);
+                            be.stream().upgrade_device_ptr(block.ptr, block.capacity);
                         drop(slice);
                     }
                 }
@@ -178,9 +176,9 @@ pub fn pool_alloc(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> 
             super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
         unsafe {
             // Reconstruct at original capacity and zero it
-            let mut slice: CudaSlice<f32> = backend.device().upgrade_device_ptr(ptr, capacity);
+            let mut slice: CudaSlice<f32> = backend.stream().upgrade_device_ptr(ptr, capacity);
             backend
-                .device()
+                .stream()
                 .memset_zeros(&mut slice)
                 .map_err(super::cuda::CudaError::from)?;
             Ok(slice)
@@ -191,7 +189,7 @@ pub fn pool_alloc(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> 
         let backend =
             super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
         backend
-            .device()
+            .stream()
             .alloc_zeros(bucket)
             .map_err(super::cuda::CudaError::from)
     }
@@ -201,10 +199,9 @@ pub fn pool_alloc(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> 
 #[cfg(feature = "cuda")]
 pub fn pool_free(slice: CudaSlice<f32>) {
     let pool = get_memory_pool();
-    let capacity = DeviceSlice::len(&slice);
-    let ptr = *slice.device_ptr();
-    // Leak prevents Drop from calling cudaFree
-    slice.leak();
+    let capacity = slice.len();
+    // Leak returns the raw device pointer and prevents Drop from calling cudaFree
+    let ptr = slice.leak();
     pool.release(ptr, capacity);
 }
 

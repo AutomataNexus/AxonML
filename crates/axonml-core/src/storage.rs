@@ -24,9 +24,9 @@ use crate::dtype::Scalar;
 use crate::error::{Error, Result};
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::safe::DeviceSlice;
-#[cfg(feature = "cuda")]
 use cudarc::driver::CudaSlice;
+#[cfg(feature = "cuda")]
+use cudarc::driver::DeviceSlice;
 
 // =============================================================================
 // Storage Data Enum

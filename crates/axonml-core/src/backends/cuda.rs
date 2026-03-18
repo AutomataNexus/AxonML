@@ -16,9 +16,12 @@
 
 #[cfg(feature = "cuda")]
 use cudarc::cublas::{sys::cublasOperation_t, CudaBlas, Gemm, GemmConfig};
+#[cfg(feature = "cudnn")]
+use cudarc::cudnn::Cudnn;
 #[cfg(feature = "cuda")]
 use cudarc::driver::{
-    CudaDevice, CudaSlice, DeviceRepr, LaunchAsync, LaunchConfig, ValidAsZeroBits,
+    CudaContext, CudaSlice, CudaStream, DeviceRepr, DeviceSlice, LaunchConfig, PushKernelArg,
+    ValidAsZeroBits,
 };
 
 #[cfg(feature = "cuda")]
@@ -68,9 +71,12 @@ pub fn get_cuda_backend() -> Option<&'static CudaBackend> {
 #[cfg(feature = "cuda")]
 pub struct CudaBackend {
     device_index: usize,
-    device: Arc<CudaDevice>,
+    ctx: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
     blas: CudaBlas,
     kernels: CudaKernels,
+    #[cfg(feature = "cudnn")]
+    cudnn_handle: Option<Arc<Cudnn>>,
 }
 
 /// CUDA backend stub when the `cuda` feature is disabled.
@@ -81,7 +87,7 @@ pub struct CudaBackend {
 }
 
 // Implement Send and Sync for CudaBackend
-// Safe because CudaDevice and CudaBlas are internally synchronized
+// Safe because CudaContext/CudaStream and CudaBlas are internally synchronized
 #[cfg(feature = "cuda")]
 unsafe impl Send for CudaBackend {}
 #[cfg(feature = "cuda")]
@@ -100,10 +106,10 @@ impl CudaBackend {
     /// Creates a new CUDA backend for the specified device.
     #[cfg(feature = "cuda")]
     pub fn new(device_index: usize) -> Option<Self> {
-        // CudaDevice::new returns Result<Arc<CudaDevice>, _>
-        let device = CudaDevice::new(device_index).ok()?;
-        let blas = CudaBlas::new(device.clone()).ok()?;
-        let kernels = match CudaKernels::load(device.clone()) {
+        let ctx = CudaContext::new(device_index).ok()?;
+        let stream = ctx.default_stream();
+        let blas = CudaBlas::new(stream.clone()).ok()?;
+        let kernels = match CudaKernels::load(ctx.clone()) {
             Ok(k) => k,
             Err(e) => {
                 eprintln!("[AxonML CUDA] Kernel loading failed: {:?}", e);
@@ -111,11 +117,29 @@ impl CudaBackend {
             }
         };
 
+        #[cfg(feature = "cudnn")]
+        let cudnn_handle = match Cudnn::new(stream.clone()) {
+            Ok(handle) => {
+                eprintln!("[AxonML] cuDNN handle initialized");
+                Some(handle)
+            }
+            Err(e) => {
+                eprintln!(
+                    "[AxonML CUDA] cuDNN init failed: {:?} (falling back to im2col+GEMM)",
+                    e
+                );
+                None
+            }
+        };
+
         Some(Self {
             device_index,
-            device,
+            ctx,
+            stream,
             blas,
             kernels,
+            #[cfg(feature = "cudnn")]
+            cudnn_handle,
         })
     }
 
@@ -131,10 +155,16 @@ impl CudaBackend {
         self.device_index
     }
 
-    /// Returns the underlying CUDA device.
+    /// Returns the underlying CUDA context.
     #[cfg(feature = "cuda")]
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    pub fn context(&self) -> &Arc<CudaContext> {
+        &self.ctx
+    }
+
+    /// Returns the underlying CUDA stream.
+    #[cfg(feature = "cuda")]
+    pub fn stream(&self) -> &Arc<CudaStream> {
+        &self.stream
     }
 
     /// Returns the cuBLAS handle.
@@ -143,37 +173,37 @@ impl CudaBackend {
         &self.blas
     }
 
+    /// Returns the cuDNN handle, if available.
+    #[cfg(feature = "cudnn")]
+    pub fn cudnn(&self) -> Option<&Arc<Cudnn>> {
+        self.cudnn_handle.as_ref()
+    }
+
     /// Allocates a typed buffer on the GPU initialized to zeros.
     #[cfg(feature = "cuda")]
     pub fn alloc<T: DeviceRepr + ValidAsZeroBits>(
         &self,
         len: usize,
     ) -> Result<CudaSlice<T>, CudaError> {
-        self.device.alloc_zeros(len).map_err(CudaError::from)
+        self.stream.alloc_zeros(len).map_err(CudaError::from)
     }
 
     /// Allocates uninitialized memory on the GPU.
     #[cfg(feature = "cuda")]
     pub fn alloc_uninit<T: DeviceRepr>(&self, len: usize) -> Result<CudaSlice<T>, CudaError> {
-        unsafe { self.device.alloc(len).map_err(CudaError::from) }
+        unsafe { self.stream.alloc(len).map_err(CudaError::from) }
     }
 
     /// Copies data from host to device.
     #[cfg(feature = "cuda")]
-    pub fn htod_copy<T: DeviceRepr + Clone + Unpin>(
-        &self,
-        src: &[T],
-    ) -> Result<CudaSlice<T>, CudaError> {
-        self.device.htod_copy(src.to_vec()).map_err(CudaError::from)
+    pub fn htod_copy<T: DeviceRepr>(&self, src: &[T]) -> Result<CudaSlice<T>, CudaError> {
+        self.stream.clone_htod(src).map_err(CudaError::from)
     }
 
     /// Copies data from device to host.
     #[cfg(feature = "cuda")]
-    pub fn dtoh_copy<T: DeviceRepr + Clone + Default + Unpin>(
-        &self,
-        src: &CudaSlice<T>,
-    ) -> Result<Vec<T>, CudaError> {
-        self.device.dtoh_sync_copy(src).map_err(CudaError::from)
+    pub fn dtoh_copy<T: DeviceRepr>(&self, src: &CudaSlice<T>) -> Result<Vec<T>, CudaError> {
+        self.stream.clone_dtoh(src).map_err(CudaError::from)
     }
 }
 
@@ -210,12 +240,10 @@ impl Backend for CudaBackend {
     }
 
     fn allocate(&self, size: usize) -> *mut u8 {
-        match self.device.alloc_zeros::<u8>(size) {
+        match self.stream.alloc_zeros::<u8>(size) {
             Ok(slice) => {
-                // Get the raw device pointer
-                use cudarc::driver::DevicePtr;
-                let ptr = *slice.device_ptr() as *mut u8;
-                std::mem::forget(slice); // Don't drop, we're managing memory manually
+                // Get the raw device pointer via leak
+                let ptr = slice.leak() as *mut u8;
                 ptr
             }
             Err(_) => std::ptr::null_mut(),
@@ -226,7 +254,9 @@ impl Backend for CudaBackend {
         if !ptr.is_null() {
             // Reconstruct the CudaSlice to properly free
             unsafe {
-                let slice: CudaSlice<u8> = self.device.upgrade_device_ptr(ptr as u64, size);
+                let slice: CudaSlice<u8> = self
+                    .stream
+                    .upgrade_device_ptr(ptr as cudarc::driver::sys::CUdeviceptr, size);
                 drop(slice);
             }
         }
@@ -238,7 +268,10 @@ impl Backend for CudaBackend {
         }
         unsafe {
             let src_slice = std::slice::from_raw_parts(src, size);
-            let _ = cudarc::driver::result::memcpy_htod_sync(dst as u64, src_slice);
+            let _ = cudarc::driver::result::memcpy_htod_sync(
+                dst as cudarc::driver::sys::CUdeviceptr,
+                src_slice,
+            );
         }
     }
 
@@ -248,7 +281,10 @@ impl Backend for CudaBackend {
         }
         unsafe {
             let dst_slice = std::slice::from_raw_parts_mut(dst, size);
-            let _ = cudarc::driver::result::memcpy_dtoh_sync(dst_slice, src as u64);
+            let _ = cudarc::driver::result::memcpy_dtoh_sync(
+                dst_slice,
+                src as cudarc::driver::sys::CUdeviceptr,
+            );
         }
     }
 
@@ -257,12 +293,16 @@ impl Backend for CudaBackend {
             return;
         }
         unsafe {
-            let _ = cudarc::driver::result::memcpy_dtod_sync(dst as u64, src as u64, size);
+            let _ = cudarc::driver::result::memcpy_dtod_sync(
+                dst as cudarc::driver::sys::CUdeviceptr,
+                src as cudarc::driver::sys::CUdeviceptr,
+                size,
+            );
         }
     }
 
     fn synchronize(&self) {
-        let _ = self.device.synchronize();
+        let _ = self.stream.synchronize();
     }
 }
 
@@ -271,7 +311,7 @@ impl Backend for CudaBackend {
 #[cfg(feature = "cuda")]
 pub fn cuda_sync() -> bool {
     if let Some(backend) = get_cuda_backend() {
-        let _ = backend.device.synchronize();
+        let _ = backend.stream.synchronize();
         true
     } else {
         false
@@ -385,7 +425,7 @@ impl From<cudarc::cublas::result::CublasError> for CudaError {
 pub fn is_available() -> bool {
     #[cfg(feature = "cuda")]
     {
-        CudaDevice::new(0).is_ok()
+        CudaContext::new(0).is_ok()
     }
     #[cfg(not(feature = "cuda"))]
     {
@@ -583,7 +623,8 @@ impl CudaBackend {
         batch_count: usize,
     ) -> Result<(), CudaError> {
         use cudarc::cublas::result::sgemm_strided_batched;
-        use cudarc::driver::safe::DevicePtr;
+        use cudarc::driver::DevicePtr as _;
+        use cudarc::driver::DevicePtrMut as _;
 
         let op_a = if transa {
             cublasOperation_t::CUBLAS_OP_T
@@ -596,9 +637,12 @@ impl CudaBackend {
             cublasOperation_t::CUBLAS_OP_N
         };
 
-        let a_ptr = *a.device_ptr() as *const f32;
-        let b_ptr = *b.device_ptr() as *const f32;
-        let c_ptr = *c.device_ptr() as *mut f32;
+        let (a_devptr, _ga) = a.device_ptr(&self.stream);
+        let (b_devptr, _gb) = b.device_ptr(&self.stream);
+        let (c_devptr, _gc) = c.device_ptr_mut(&self.stream);
+        let a_ptr = a_devptr as *const f32;
+        let b_ptr = b_devptr as *const f32;
+        let c_ptr = c_devptr as *mut f32;
 
         unsafe {
             sgemm_strided_batched(
@@ -640,8 +684,14 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -661,8 +711,13 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (dst, alpha, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(dst)
+                .arg(&alpha)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -683,8 +738,14 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -704,8 +765,13 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -725,8 +791,13 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -746,8 +817,13 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -767,8 +843,14 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("sub_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -788,8 +870,14 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("div_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -815,8 +903,15 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_add_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, n as u32, b_len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(n as u32))
+                .arg(&(b_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -837,8 +932,15 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_sub_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, n as u32, b_len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(n as u32))
+                .arg(&(b_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -859,8 +961,15 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_mul_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, n as u32, b_len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(n as u32))
+                .arg(&(b_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -881,8 +990,15 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_div_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, n as u32, b_len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(n as u32))
+                .arg(&(b_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -903,8 +1019,15 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_add_rev_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, n as u32, a_len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(n as u32))
+                .arg(&(a_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -925,8 +1048,15 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_sub_rev_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, n as u32, a_len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(n as u32))
+                .arg(&(a_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -947,8 +1077,15 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_mul_rev_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, n as u32, a_len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(n as u32))
+                .arg(&(a_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -969,8 +1106,15 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_div_rev_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, n as u32, a_len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(n as u32))
+                .arg(&(a_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -989,8 +1133,13 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("neg_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1010,8 +1159,14 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("pow_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (a, b, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(b)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1031,8 +1186,14 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("pow_scalar_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, exp, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(&exp)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1051,8 +1212,13 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("exp_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1071,8 +1237,13 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("log_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1091,8 +1262,13 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("sqrt_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1111,8 +1287,13 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("gelu_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1131,8 +1312,13 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("silu_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1152,8 +1338,14 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("add_scalar_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, scalar, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(&scalar)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1173,8 +1365,14 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("relu_backward_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (grad_output, input, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(grad_output)
+                .arg(input)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1194,8 +1392,14 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("sigmoid_backward_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (grad_output, output, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(grad_output)
+                .arg(output)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1215,8 +1419,14 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("tanh_backward_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
         unsafe {
-            func.clone()
-                .launch(cfg, (grad_output, output, dst, len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(grad_output)
+                .arg(output)
+                .arg(dst)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1239,17 +1449,15 @@ impl CudaBackend {
         let out_len = outer_size * inner_size;
         let cfg = cuda_kernels::launch_config(out_len);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        src,
-                        dst,
-                        outer_size as u32,
-                        dim_size as u32,
-                        inner_size as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(outer_size as u32))
+                .arg(&(dim_size as u32))
+                .arg(&(inner_size as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1275,8 +1483,13 @@ impl CudaBackend {
             shared_mem_bytes: BLOCK_SIZE * 4,
         };
         unsafe {
-            func.clone()
-                .launch(cfg, (data, num_rows as u32, row_size as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(data)
+                .arg(&(num_rows as u32))
+                .arg(&(row_size as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1296,8 +1509,14 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_copy_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, dst, n as u32, src_len as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(n as u32))
+                .arg(&(src_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1325,19 +1544,17 @@ impl CudaBackend {
             shared_mem_bytes: BLOCK_SIZE * 4,
         };
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        input,
-                        gamma,
-                        beta,
-                        dst,
-                        norm_size as u32,
-                        eps,
-                        num_rows as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(gamma)
+                .arg(beta)
+                .arg(dst)
+                .arg(&(norm_size as u32))
+                .arg(&eps)
+                .arg(&(num_rows as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1364,17 +1581,15 @@ impl CudaBackend {
             shared_mem_bytes: BLOCK_SIZE * 4,
         };
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        softmax_output,
-                        grad_output,
-                        dst,
-                        num_rows as u32,
-                        row_size as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(softmax_output)
+                .arg(grad_output)
+                .arg(dst)
+                .arg(&(num_rows as u32))
+                .arg(&(row_size as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1404,19 +1619,17 @@ impl CudaBackend {
             shared_mem_bytes: BLOCK_SIZE * 4 * 2, // two shared arrays
         };
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        grad_output,
-                        input,
-                        gamma,
-                        d_input,
-                        norm_size as u32,
-                        eps,
-                        num_rows as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(grad_output)
+                .arg(input)
+                .arg(gamma)
+                .arg(d_input)
+                .arg(&(norm_size as u32))
+                .arg(&eps)
+                .arg(&(num_rows as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1442,19 +1655,17 @@ impl CudaBackend {
             })?;
         let cfg = cuda_kernels::launch_config(norm_size);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        grad_output,
-                        input,
-                        d_weight,
-                        d_bias,
-                        norm_size as u32,
-                        eps,
-                        num_rows as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(grad_output)
+                .arg(input)
+                .arg(d_weight)
+                .arg(d_bias)
+                .arg(&(norm_size as u32))
+                .arg(&eps)
+                .arg(&(num_rows as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1474,8 +1685,14 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("gather_contiguous_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (src, indices, dst, n as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(indices)
+                .arg(dst)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1497,17 +1714,15 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("embedding_scatter_add_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(total_n);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        grad_src,
-                        indices,
-                        weight_grad,
-                        total_n as u32,
-                        emb_dim as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(grad_src)
+                .arg(indices)
+                .arg(weight_grad)
+                .arg(&(total_n as u32))
+                .arg(&(emb_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1537,24 +1752,22 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("adam_step_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        param,
-                        grad,
-                        exp_avg,
-                        exp_avg_sq,
-                        n as u32,
-                        lr,
-                        beta1,
-                        beta2,
-                        eps,
-                        weight_decay,
-                        bias_correction1,
-                        bias_correction2,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(param)
+                .arg(grad)
+                .arg(exp_avg)
+                .arg(exp_avg_sq)
+                .arg(&(n as u32))
+                .arg(&lr)
+                .arg(&beta1)
+                .arg(&beta2)
+                .arg(&eps)
+                .arg(&weight_decay)
+                .arg(&bias_correction1)
+                .arg(&bias_correction2)
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1574,8 +1787,13 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("grad_norm_sq_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (data, output, n as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(data)
+                .arg(output)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1594,8 +1812,13 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("grad_scale_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (data, n as u32, scale))
+            self.stream
+                .launch_builder(func)
+                .arg(data)
+                .arg(&(n as u32))
+                .arg(&scale)
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1623,11 +1846,15 @@ impl CudaBackend {
             shared_mem_bytes: BLOCK_SIZE * 4,
         };
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (logits, targets, losses, softmax_out, num_classes as u32),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(logits)
+                .arg(targets)
+                .arg(losses)
+                .arg(softmax_out)
+                .arg(&(num_classes as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1651,18 +1878,16 @@ impl CudaBackend {
         let total = batch_size * num_classes;
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        softmax_probs,
-                        targets,
-                        grad_output,
-                        grad_input,
-                        batch_size as u32,
-                        num_classes as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(softmax_probs)
+                .arg(targets)
+                .arg(grad_output)
+                .arg(grad_input)
+                .arg(&(batch_size as u32))
+                .arg(&(num_classes as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1671,7 +1896,7 @@ impl CudaBackend {
     /// Zero-fills a GPU allocation using cudaMemset.
     #[cfg(feature = "cuda")]
     pub fn memset_zeros_f32(&self, dst: &mut CudaSlice<f32>) -> Result<(), CudaError> {
-        self.device
+        self.stream
             .memset_zeros(dst)
             .map_err(|e| CudaError::DriverError(e.to_string()))
     }
@@ -1687,10 +1912,14 @@ impl CudaBackend {
         src_offset: usize,
         count: usize,
     ) -> Result<(), CudaError> {
-        use cudarc::driver::safe::{DevicePtr, DevicePtrMut};
-        let src_ptr = *src.device_ptr() as u64 + (src_offset * std::mem::size_of::<f32>()) as u64;
+        use cudarc::driver::DevicePtr as _;
+        let (src_ptr, _guard_s) = src.device_ptr(&self.stream);
+        let src_ptr =
+            src_ptr + (src_offset * std::mem::size_of::<f32>()) as cudarc::driver::sys::CUdeviceptr;
+        use cudarc::driver::DevicePtrMut as _;
+        let (dst_ptr, _guard_d) = dst.device_ptr_mut(&self.stream);
         let dst_ptr =
-            *dst.device_ptr_mut() as u64 + (dst_offset * std::mem::size_of::<f32>()) as u64;
+            dst_ptr + (dst_offset * std::mem::size_of::<f32>()) as cudarc::driver::sys::CUdeviceptr;
         let size = count * std::mem::size_of::<f32>();
         unsafe {
             cudarc::driver::result::memcpy_dtod_sync(dst_ptr, src_ptr, size)
@@ -1721,11 +1950,15 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("mask_expand_causal_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(total_n);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (mask, output, total_n as u32, tgt_len as u32, src_len as u32),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(mask)
+                .arg(output)
+                .arg(&(total_n as u32))
+                .arg(&(tgt_len as u32))
+                .arg(&(src_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1747,18 +1980,16 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("mask_expand_padding_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(total_n);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        mask,
-                        output,
-                        total_n as u32,
-                        num_heads as u32,
-                        tgt_len as u32,
-                        src_len as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(mask)
+                .arg(output)
+                .arg(&(total_n as u32))
+                .arg(&(num_heads as u32))
+                .arg(&(tgt_len as u32))
+                .arg(&(src_len as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1790,19 +2021,17 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(total_n);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        src,
-                        dst,
-                        strides,
-                        shape,
-                        ndim as u32,
-                        offset as u32,
-                        total_n as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(strides)
+                .arg(shape)
+                .arg(&(ndim as u32))
+                .arg(&(offset as u32))
+                .arg(&(total_n as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1837,18 +2066,16 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("lstm_gates_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        gates,
-                        c_prev,
-                        h_new,
-                        c_new,
-                        hidden_size as u32,
-                        total as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(gates)
+                .arg(c_prev)
+                .arg(h_new)
+                .arg(c_new)
+                .arg(&(hidden_size as u32))
+                .arg(&(total as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1888,21 +2115,19 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("lstm_gates_backward_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        gates,
-                        c_prev,
-                        c_new,
-                        grad_h,
-                        grad_c_next,
-                        grad_gates,
-                        grad_c_prev,
-                        hidden_size as u32,
-                        total as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(gates)
+                .arg(c_prev)
+                .arg(c_new)
+                .arg(grad_h)
+                .arg(grad_c_next)
+                .arg(grad_gates)
+                .arg(grad_c_prev)
+                .arg(&(hidden_size as u32))
+                .arg(&(total as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1933,18 +2158,16 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("gru_gates_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        gates_ih,
-                        gates_hh,
-                        h_prev,
-                        h_new,
-                        hidden_size as u32,
-                        total as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(gates_ih)
+                .arg(gates_hh)
+                .arg(h_prev)
+                .arg(h_new)
+                .arg(&(hidden_size as u32))
+                .arg(&(total as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1984,21 +2207,19 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("gru_gates_backward_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        gates_ih,
-                        gates_hh,
-                        h_prev,
-                        grad_h_new,
-                        grad_gates_ih,
-                        grad_gates_hh,
-                        grad_h_prev,
-                        hidden_size as u32,
-                        total as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(gates_ih)
+                .arg(gates_hh)
+                .arg(h_prev)
+                .arg(grad_h_new)
+                .arg(grad_gates_ih)
+                .arg(grad_gates_hh)
+                .arg(grad_h_prev)
+                .arg(&(hidden_size as u32))
+                .arg(&(total as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2025,11 +2246,16 @@ impl CudaBackend {
         let total = n * c * spatial;
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (x, sum_out, sum_sq_out, n as u32, c as u32, spatial as u32),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(x)
+                .arg(sum_out)
+                .arg(sum_sq_out)
+                .arg(&(n as u32))
+                .arg(&(c as u32))
+                .arg(&(spatial as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2055,22 +2281,20 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("batchnorm_norm_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        x,
-                        mean,
-                        var,
-                        gamma,
-                        beta,
-                        y,
-                        eps,
-                        c as u32,
-                        spatial as u32,
-                        total as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(x)
+                .arg(mean)
+                .arg(var)
+                .arg(gamma)
+                .arg(beta)
+                .arg(y)
+                .arg(&eps)
+                .arg(&(c as u32))
+                .arg(&(spatial as u32))
+                .arg(&(total as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2110,23 +2334,21 @@ impl CudaBackend {
         let cfg = cuda_kernels::launch_config(total_rows);
         let is_causal_u32: u32 = if is_causal { 1 } else { 0 };
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        q,
-                        k,
-                        v,
-                        output,
-                        scale,
-                        batch_size as u32,
-                        num_heads as u32,
-                        tgt_len as u32,
-                        src_len as u32,
-                        head_dim as u32,
-                        is_causal_u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(q)
+                .arg(k)
+                .arg(v)
+                .arg(output)
+                .arg(&scale)
+                .arg(&(batch_size as u32))
+                .arg(&(num_heads as u32))
+                .arg(&(tgt_len as u32))
+                .arg(&(src_len as u32))
+                .arg(&(head_dim as u32))
+                .arg(&is_causal_u32)
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2172,27 +2394,25 @@ impl CudaBackend {
         let cfg = cuda_kernels::launch_config(total_rows);
         let is_causal_u32: u32 = if is_causal { 1 } else { 0 };
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        q,
-                        k,
-                        v,
-                        o,
-                        grad_o,
-                        grad_q,
-                        grad_k,
-                        grad_v,
-                        scale,
-                        batch_size as u32,
-                        num_heads as u32,
-                        tgt_len as u32,
-                        src_len as u32,
-                        head_dim as u32,
-                        is_causal_u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(q)
+                .arg(k)
+                .arg(v)
+                .arg(o)
+                .arg(grad_o)
+                .arg(grad_q)
+                .arg(grad_k)
+                .arg(grad_v)
+                .arg(&scale)
+                .arg(&(batch_size as u32))
+                .arg(&(num_heads as u32))
+                .arg(&(tgt_len as u32))
+                .arg(&(src_len as u32))
+                .arg(&(head_dim as u32))
+                .arg(&is_causal_u32)
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2225,8 +2445,14 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (input, col, params, n as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(col)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2250,8 +2476,14 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (col, output, params, n as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(col)
+                .arg(output)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2274,8 +2506,14 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone()
-                .launch(cfg, (data, bias, spatial as u32, n as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(data)
+                .arg(bias)
+                .arg(&(spatial as u32))
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2482,20 +2720,18 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        input,
-                        output,
-                        indices,
-                        params,
-                        channels as u32,
-                        out_h as u32,
-                        out_w as u32,
-                        total as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(output)
+                .arg(indices)
+                .arg(params)
+                .arg(&(channels as u32))
+                .arg(&(out_h as u32))
+                .arg(&(out_w as u32))
+                .arg(&(total as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2519,8 +2755,14 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(cfg, (grad_output, indices, grad_input, total as u32))
+            self.stream
+                .launch_builder(func)
+                .arg(grad_output)
+                .arg(indices)
+                .arg(grad_input)
+                .arg(&(total as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2546,19 +2788,17 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        input,
-                        output,
-                        params,
-                        channels as u32,
-                        out_h as u32,
-                        out_w as u32,
-                        total as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(output)
+                .arg(params)
+                .arg(&(channels as u32))
+                .arg(&(out_h as u32))
+                .arg(&(out_w as u32))
+                .arg(&(total as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2584,19 +2824,17 @@ impl CudaBackend {
 
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
-            func.clone()
-                .launch(
-                    cfg,
-                    (
-                        grad_output,
-                        grad_input,
-                        params,
-                        channels as u32,
-                        out_h as u32,
-                        out_w as u32,
-                        total as u32,
-                    ),
-                )
+            self.stream
+                .launch_builder(func)
+                .arg(grad_output)
+                .arg(grad_input)
+                .arg(params)
+                .arg(&(channels as u32))
+                .arg(&(out_h as u32))
+                .arg(&(out_w as u32))
+                .arg(&(total as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -2647,7 +2885,6 @@ impl PinnedBuffer {
     /// Returns `CudaError` if pinned memory allocation fails (e.g., out of
     /// lockable memory, CUDA not initialized).
     pub fn from_slice(data: &[f32]) -> Result<Self, CudaError> {
-        use cudarc::driver::sys::lib;
         use std::ptr;
 
         if data.is_empty() {
@@ -2664,7 +2901,7 @@ impl PinnedBuffer {
         let _ = get_cuda_backend().ok_or(CudaError::DeviceNotFound)?;
 
         unsafe {
-            let result = lib().cuMemAllocHost_v2(&mut host_ptr, byte_size);
+            let result = cudarc::driver::sys::cuMemAllocHost_v2(&mut host_ptr, byte_size);
             if result != cudarc::driver::sys::CUresult::CUDA_SUCCESS {
                 return Err(CudaError::AllocationFailed);
             }
@@ -2688,7 +2925,6 @@ impl PinnedBuffer {
     /// # Errors
     /// Returns `CudaError` if pinned memory allocation fails.
     pub fn alloc(len: usize) -> Result<Self, CudaError> {
-        use cudarc::driver::sys::lib;
         use std::ptr;
 
         if len == 0 {
@@ -2704,7 +2940,7 @@ impl PinnedBuffer {
         let _ = get_cuda_backend().ok_or(CudaError::DeviceNotFound)?;
 
         unsafe {
-            let result = lib().cuMemAllocHost_v2(&mut host_ptr, byte_size);
+            let result = cudarc::driver::sys::cuMemAllocHost_v2(&mut host_ptr, byte_size);
             if result != cudarc::driver::sys::CUresult::CUDA_SUCCESS {
                 return Err(CudaError::AllocationFailed);
             }
@@ -2767,8 +3003,7 @@ impl Drop for PinnedBuffer {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
             unsafe {
-                let lib = cudarc::driver::sys::lib();
-                let _ = lib.cuMemFreeHost(self.ptr as *mut std::ffi::c_void);
+                let _ = cudarc::driver::sys::cuMemFreeHost(self.ptr as *mut std::ffi::c_void);
             }
             self.ptr = std::ptr::null_mut();
         }

@@ -2083,6 +2083,86 @@ impl Tensor<f32> {
         })
     }
 
+    /// GPU-resident Conv2d forward using cuDNN.
+    ///
+    /// `self` is `[N, C_in, H, W]` on GPU.
+    /// `weight` is `[C_out, C_in/groups, kH, kW]` on GPU.
+    /// `bias` is optional `[C_out]` on GPU.
+    /// `groups` is the number of convolution groups.
+    ///
+    /// Returns `None` if cuDNN is not available or any operation fails.
+    /// Caller should fall back to im2col+GEMM.
+    #[cfg(feature = "cudnn")]
+    pub fn conv2d_cudnn(
+        &self,
+        weight: &Self,
+        bias: Option<&Self>,
+        stride: (usize, usize),
+        padding: (usize, usize),
+        groups: usize,
+    ) -> Option<Self> {
+        if !self.device().is_gpu() || !weight.device().is_gpu() {
+            return None;
+        }
+        if let Some(b) = bias {
+            if !b.device().is_gpu() {
+                return None;
+            }
+        }
+
+        let cuda = get_cuda_backend()?;
+        let cudnn_handle = cuda.cudnn()?;
+
+        let batch_size = self.shape[0];
+        let in_channels = self.shape[1];
+        let in_height = self.shape[2];
+        let in_width = self.shape[3];
+        let out_channels = weight.shape[0];
+        let kernel_h = weight.shape[2];
+        let kernel_w = weight.shape[3];
+        let (stride_h, stride_w) = stride;
+        let (pad_h, pad_w) = padding;
+
+        let out_h = (in_height + 2 * pad_h - kernel_h) / stride_h + 1;
+        let out_w = (in_width + 2 * pad_w - kernel_w) / stride_w + 1;
+
+        let input_contig = self.contiguous_gpu();
+        let weight_contig = weight.contiguous_gpu();
+        let input_guard = input_contig.storage.as_cuda_slice();
+        let weight_guard = weight_contig.storage.as_cuda_slice();
+
+        let bias_contig = bias.map(|b| b.contiguous_gpu());
+        let bias_guard = bias_contig.as_ref().map(|b| b.storage.as_cuda_slice());
+
+        let output_slice = axonml_core::backends::cudnn_ops::cudnn_conv2d_forward(
+            cudnn_handle,
+            cuda.stream(),
+            cuda,
+            input_guard.slice(),
+            weight_guard.slice(),
+            bias_guard.as_ref().map(|g| g.slice()),
+            batch_size,
+            in_channels,
+            in_height,
+            in_width,
+            out_channels,
+            kernel_h,
+            kernel_w,
+            stride,
+            padding,
+            groups,
+        )?;
+
+        let total_out = batch_size * out_channels * out_h * out_w;
+        let out_shape = Shape::from_slice(&[batch_size, out_channels, out_h, out_w]);
+        Some(Self {
+            storage: Storage::from_cuda_slice(output_slice, total_out, self.device()),
+            shape: out_shape.clone(),
+            strides: contiguous_strides(&out_shape),
+            offset: 0,
+        })
+    }
+
     /// GPU-resident grouped Conv2d forward (depthwise separable, etc.).
     ///
     /// Runs each group as a separate im2col + GEMM on GPU.

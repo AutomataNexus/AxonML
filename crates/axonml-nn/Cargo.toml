@@ -14,6 +14,7 @@ readme = "README.md"
 [features]
 default = []
 cuda = ["axonml-tensor/cuda", "axonml-core/cuda"]
+cudnn = ["cuda", "axonml-core/cudnn", "axonml-tensor/cudnn"]
 
 [dependencies]
 axonml-core.workspace = true
