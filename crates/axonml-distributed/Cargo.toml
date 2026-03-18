@@ -11,8 +11,13 @@ documentation.workspace = true
 description = "Distributed training utilities for the Axonml ML framework"
 readme = "README.md"
 
+[features]
+default = []
+nccl = ["dep:libloading"]
+
 [dependencies]
 axonml-core.workspace = true
 axonml-tensor.workspace = true
 axonml-autograd.workspace = true
 axonml-nn.workspace = true
+libloading = { version = "0.8", optional = true }

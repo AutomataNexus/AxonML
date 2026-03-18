@@ -35,6 +35,8 @@ llm = ["nn", "dep:axonml-llm"]
 jit = ["core", "dep:axonml-jit"]
 # ONNX import/export
 onnx = ["core", "dep:axonml-onnx"]
+# NCCL distributed communication (requires CUDA + libnccl.so.2)
+nccl = ["distributed", "axonml-distributed/nccl"]
 # CUDA GPU acceleration
 cuda = ["axonml-core/cuda", "axonml-tensor/cuda"]
 # cuDNN acceleration (requires CUDA)
