@@ -153,6 +153,30 @@ impl MultiHeadAttention {
             .reshape(&[batch_size, src_len, self.num_heads, self.head_dim])
             .transpose(1, 2);
 
+        // GPU fast path: fused attention kernel avoids materializing the N*N
+        // attention matrix. Used for inference (no grad) or when no mask is needed.
+        // The kernel computes Q@K^T * scale -> softmax -> @V in one pass per row.
+        #[cfg(feature = "cuda")]
+        if q.data().device().is_gpu()
+            && attn_mask.is_none()
+            && !axonml_autograd::no_grad::is_grad_enabled()
+        {
+            if let Some(attn_out) = q.data().fused_attention_cuda(
+                &k.data(),
+                &v.data(),
+                self.scale,
+                false, // not causal by default; causal mask would be in attn_mask
+            ) {
+                let attn_output = Variable::new(attn_out, false);
+                let attn_output =
+                    attn_output
+                        .transpose(1, 2)
+                        .reshape(&[batch_size, tgt_len, self.embed_dim]);
+                return self.out_proj.forward(&attn_output);
+            }
+            // Fall through to standard path if fused kernel fails
+        }
+
         // Scaled dot-product attention: scores = Q @ K^T * scale
         // K^T: [batch, heads, head_dim, src_len]
         let k_t = k.transpose(2, 3);
@@ -408,6 +432,121 @@ impl Module for CrossAttention {
 }
 
 // =============================================================================
+// Fused Scaled Dot-Product Attention
+// =============================================================================
+
+/// Fused scaled dot-product attention on Tensors.
+///
+/// Computes `softmax(Q @ K^T * scale) @ V` without materializing the full
+/// N*N attention matrix. On GPU, this uses a CUDA kernel that processes one
+/// query row per thread. On CPU, falls back to standard matmul + softmax.
+///
+/// # Arguments
+/// * `q` - Query tensor `[B, H, Tq, D]`
+/// * `k` - Key tensor `[B, H, Tk, D]`
+/// * `v` - Value tensor `[B, H, Tk, D]`
+/// * `scale` - Scaling factor (typically `1/sqrt(head_dim)`)
+/// * `is_causal` - Whether to apply causal masking
+///
+/// # Returns
+/// Output tensor `[B, H, Tq, D]`
+///
+/// # Note on Flash Attention
+/// This is a fused kernel (Option B) — it avoids the N*N memory allocation
+/// but each thread still iterates over the full key sequence. True Flash
+/// Attention (Option A) would use shared memory tiling with online softmax
+/// (the Dao et al. algorithm), processing in blocks of ~64-128 and requiring:
+/// - Shared memory for Q/K/V tile loading
+/// - Online softmax with running max/sum correction across tiles
+/// - Two passes: forward for output + logsumexp, backward with recomputation
+/// - ~3x more complex kernel code but O(N) memory and better cache behavior
+///
+/// For sequences up to ~2048, this fused kernel provides most of the benefit.
+/// For longer sequences, use the tiled CPU Flash Attention in `axonml-llm`.
+pub fn scaled_dot_product_attention_fused(
+    q: &Tensor<f32>,
+    k: &Tensor<f32>,
+    v: &Tensor<f32>,
+    scale: f32,
+    is_causal: bool,
+) -> Tensor<f32> {
+    // Try GPU fused kernel
+    #[cfg(feature = "cuda")]
+    if q.device().is_gpu() {
+        if let Some(result) = q.fused_attention_cuda(k, v, scale, is_causal) {
+            return result;
+        }
+    }
+
+    // CPU fallback: standard matmul-based attention
+    let shape = q.shape();
+    let batch_size = shape[0];
+    let num_heads = shape[1];
+    let tgt_len = shape[2];
+    let head_dim = shape[3];
+    let src_len = k.shape()[2];
+
+    let q_data = q.to_vec();
+    let k_data = k.to_vec();
+    let v_data = v.to_vec();
+
+    let mut output = vec![0.0f32; batch_size * num_heads * tgt_len * head_dim];
+
+    for b in 0..batch_size {
+        for h in 0..num_heads {
+            for i in 0..tgt_len {
+                // Compute attention scores for row i
+                let mut scores = vec![0.0f32; src_len];
+                let mut max_score = f32::NEG_INFINITY;
+
+                for j in 0..src_len {
+                    if is_causal && j > i {
+                        scores[j] = f32::NEG_INFINITY;
+                        continue;
+                    }
+                    let mut score = 0.0f32;
+                    for d in 0..head_dim {
+                        let q_idx = ((b * num_heads + h) * tgt_len + i) * head_dim + d;
+                        let k_idx = ((b * num_heads + h) * src_len + j) * head_dim + d;
+                        score += q_data[q_idx] * k_data[k_idx];
+                    }
+                    score *= scale;
+                    scores[j] = score;
+                    if score > max_score {
+                        max_score = score;
+                    }
+                }
+
+                // Softmax
+                let mut sum_exp = 0.0f32;
+                for s in &mut scores {
+                    if *s > f32::NEG_INFINITY {
+                        *s = (*s - max_score).exp();
+                        sum_exp += *s;
+                    } else {
+                        *s = 0.0;
+                    }
+                }
+                let inv_sum = if sum_exp > 0.0 { 1.0 / sum_exp } else { 0.0 };
+
+                // Weighted sum of V
+                for d in 0..head_dim {
+                    let mut val = 0.0f32;
+                    for j in 0..src_len {
+                        let v_idx = ((b * num_heads + h) * src_len + j) * head_dim + d;
+                        val += scores[j] * v_data[v_idx];
+                    }
+                    let out_idx = ((b * num_heads + h) * tgt_len + i) * head_dim + d;
+                    output[out_idx] = val * inv_sum;
+                }
+            }
+        }
+    }
+
+    Tensor::from_vec(output, &[batch_size, num_heads, tgt_len, head_dim]).unwrap()
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -501,5 +640,79 @@ mod tests {
         let named = ca.named_parameters();
         assert!(named.contains_key("mha.q_proj.weight"));
         assert!(named.contains_key("mha.out_proj.bias"));
+    }
+
+    #[test]
+    fn test_fused_attention_cpu() {
+        // Test fused attention on CPU (fallback path)
+        let batch = 2;
+        let heads = 4;
+        let seq = 8;
+        let dim = 16;
+        let scale = 1.0 / (dim as f32).sqrt();
+
+        let q = Tensor::from_vec(
+            vec![0.1; batch * heads * seq * dim],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+        let k = Tensor::from_vec(
+            vec![0.1; batch * heads * seq * dim],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+        let v = Tensor::from_vec(
+            vec![0.5; batch * heads * seq * dim],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+
+        let out = scaled_dot_product_attention_fused(&q, &k, &v, scale, false);
+        assert_eq!(out.shape(), &[batch, heads, seq, dim]);
+
+        // With uniform V=0.5, output should be close to 0.5
+        let out_vec = out.to_vec();
+        for val in &out_vec {
+            assert!((*val - 0.5).abs() < 0.01, "Expected ~0.5, got {}", val);
+        }
+    }
+
+    #[test]
+    fn test_fused_attention_causal() {
+        let batch = 1;
+        let heads = 1;
+        let seq = 4;
+        let dim = 4;
+        let scale = 1.0 / (dim as f32).sqrt();
+
+        // Q and K are identity-like so attention focuses on matching positions
+        let q = Tensor::from_vec(
+            vec![0.1; batch * heads * seq * dim],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+        let k = Tensor::from_vec(
+            vec![0.1; batch * heads * seq * dim],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+        let v = Tensor::from_vec(
+            vec![
+                1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            ],
+            &[batch, heads, seq, dim],
+        )
+        .unwrap();
+
+        let out = scaled_dot_product_attention_fused(&q, &k, &v, scale, true);
+        assert_eq!(out.shape(), &[batch, heads, seq, dim]);
+
+        // First position can only attend to position 0, so output = V[0] = [1,0,0,0]
+        let out_vec = out.to_vec();
+        assert!(
+            (out_vec[0] - 1.0).abs() < 1e-5,
+            "row 0, col 0 should be 1.0"
+        );
+        assert!((out_vec[1]).abs() < 1e-5, "row 0, col 1 should be 0.0");
     }
 }

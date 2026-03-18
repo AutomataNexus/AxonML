@@ -875,13 +875,90 @@ impl Conv1dBackward {
 
 impl GradientFunction for Conv1dBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let grad_out_vec = grad_output.to_vec();
         let grad_out_shape = grad_output.shape();
         let batch_size = grad_out_shape[0];
         let out_length = grad_out_shape[2];
 
         let in_length = self.input_shape[2];
         let ks = self.kernel_size;
+
+        // GPU fast path: reshape to Conv2d format and use conv2d_backward_cuda.
+        // [B,C,L] -> [B,C,L,1], kernel [Cout,Cin,K] -> [Cout,Cin,K,1]
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() && self.saved_input.device().is_gpu() {
+            // Reshape grad_output [B, Cout, Lout] -> [B, Cout, Lout, 1]
+            let grad_out_4d = grad_output
+                .reshape(&[
+                    batch_size as isize,
+                    self.out_channels as isize,
+                    out_length as isize,
+                    1,
+                ])
+                .unwrap();
+
+            // Reshape saved_input [B, Cin, L] -> [B, Cin, L, 1]
+            let input_4d = self
+                .saved_input
+                .reshape(&[
+                    batch_size as isize,
+                    self.in_channels as isize,
+                    in_length as isize,
+                    1,
+                ])
+                .unwrap();
+
+            // Reshape saved_weight [Cout, Cin, K] -> [Cout, Cin, K, 1]
+            let weight_4d = self
+                .saved_weight
+                .reshape(&[
+                    self.out_channels as isize,
+                    self.in_channels as isize,
+                    ks as isize,
+                    1,
+                ])
+                .unwrap();
+
+            let input_shape_4d = vec![batch_size, self.in_channels, in_length, 1];
+
+            if let Some((grad_input_4d, grad_weight_4d, grad_bias)) = grad_out_4d
+                .conv2d_backward_cuda(
+                    &input_4d,
+                    &weight_4d,
+                    &input_shape_4d,
+                    self.in_channels,
+                    self.out_channels,
+                    (ks, 1),
+                    (self.stride, 1),
+                    (self.padding, 0),
+                    self.has_bias,
+                )
+            {
+                // Reshape back: [B,Cin,L,1] -> [B,Cin,L] and [Cout,Cin,K,1] -> [Cout,Cin,K]
+                let grad_input = grad_input_4d
+                    .reshape(&[
+                        batch_size as isize,
+                        self.in_channels as isize,
+                        in_length as isize,
+                    ])
+                    .unwrap();
+                let grad_weight = grad_weight_4d
+                    .reshape(&[
+                        self.out_channels as isize,
+                        self.in_channels as isize,
+                        ks as isize,
+                    ])
+                    .unwrap();
+
+                let mut result = vec![Some(grad_input), Some(grad_weight)];
+                if self.has_bias {
+                    result.push(grad_bias);
+                }
+                return result;
+            }
+            // Fall through to CPU path if GPU backward failed
+        }
+
+        let grad_out_vec = grad_output.to_vec();
         let col_rows = self.in_channels * ks; // im2col column height
 
         let input_vec = self.saved_input.to_vec();

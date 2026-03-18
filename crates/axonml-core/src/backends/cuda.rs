@@ -2078,6 +2078,62 @@ impl CudaBackend {
 }
 
 // =============================================================================
+// Fused Scaled Dot-Product Attention
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+impl CudaBackend {
+    /// Fused attention forward: Q @ K^T * scale -> softmax -> @ V
+    /// without materializing the full N*N attention matrix.
+    ///
+    /// Q: [B, H, Tq, D], K: [B, H, Tk, D], V: [B, H, Tk, D]
+    /// Output: [B, H, Tq, D]
+    pub fn fused_attention_fwd_f32(
+        &self,
+        q: &CudaSlice<f32>,
+        k: &CudaSlice<f32>,
+        v: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        scale: f32,
+        batch_size: usize,
+        num_heads: usize,
+        tgt_len: usize,
+        src_len: usize,
+        head_dim: usize,
+        is_causal: bool,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("fused_attention_fwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("fused_attention_fwd_f32".to_string()))?;
+        let total_rows = batch_size * num_heads * tgt_len;
+        let cfg = cuda_kernels::launch_config(total_rows);
+        let is_causal_u32: u32 = if is_causal { 1 } else { 0 };
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (
+                        q,
+                        k,
+                        v,
+                        output,
+                        scale,
+                        batch_size as u32,
+                        num_heads as u32,
+                        tgt_len as u32,
+                        src_len as u32,
+                        head_dim as u32,
+                        is_causal_u32,
+                    ),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
 // Conv2d GPU Operations (im2col + GEMM)
 // =============================================================================
 

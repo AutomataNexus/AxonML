@@ -1621,16 +1621,17 @@ impl Tensor<f32> {
         let h_storage = Storage::from_cuda_slice(h_out, total, self.device());
         let c_storage = Storage::from_cuda_slice(c_out, total, self.device());
 
+        let sh = Shape::from_slice(&[batch_size, hidden_size]);
         let h_tensor = Self {
             storage: h_storage,
-            shape: vec![batch_size, hidden_size],
-            strides: contiguous_strides(&[batch_size, hidden_size]),
+            shape: sh.clone(),
+            strides: contiguous_strides(&sh),
             offset: 0,
         };
         let c_tensor = Self {
             storage: c_storage,
-            shape: vec![batch_size, hidden_size],
-            strides: contiguous_strides(&[batch_size, hidden_size]),
+            shape: sh.clone(),
+            strides: contiguous_strides(&sh),
             offset: 0,
         };
 
@@ -1670,10 +1671,11 @@ impl Tensor<f32> {
 
         let h_storage = Storage::from_cuda_slice(h_out, total, self.device());
 
+        let sh = Shape::from_slice(&[batch_size, hidden_size]);
         Some(Self {
             storage: h_storage,
-            shape: vec![batch_size, hidden_size],
-            strides: contiguous_strides(&[batch_size, hidden_size]),
+            shape: sh.clone(),
+            strides: contiguous_strides(&sh),
             offset: 0,
         })
     }
@@ -1738,16 +1740,18 @@ impl Tensor<f32> {
             Storage::from_cuda_slice(grad_gates_out, batch_size * 4 * hidden_size, self.device());
         let grad_c_prev_storage = Storage::from_cuda_slice(grad_c_prev_out, total, self.device());
 
+        let sh_gates = Shape::from_slice(&[batch_size, 4 * hidden_size]);
+        let sh_hidden = Shape::from_slice(&[batch_size, hidden_size]);
         let grad_gates_tensor = Self {
             storage: grad_gates_storage,
-            shape: vec![batch_size, 4 * hidden_size],
-            strides: contiguous_strides(&[batch_size, 4 * hidden_size]),
+            shape: sh_gates.clone(),
+            strides: contiguous_strides(&sh_gates),
             offset: 0,
         };
         let grad_c_prev_tensor = Self {
             storage: grad_c_prev_storage,
-            shape: vec![batch_size, hidden_size],
-            strides: contiguous_strides(&[batch_size, hidden_size]),
+            shape: sh_hidden.clone(),
+            strides: contiguous_strides(&sh_hidden),
             offset: 0,
         };
 
@@ -1813,22 +1817,24 @@ impl Tensor<f32> {
             Storage::from_cuda_slice(grad_hh_out, batch_size * 3 * hidden_size, self.device());
         let grad_h_prev_storage = Storage::from_cuda_slice(grad_h_prev_out, total, self.device());
 
+        let sh_3h = Shape::from_slice(&[batch_size, 3 * hidden_size]);
+        let sh_h = Shape::from_slice(&[batch_size, hidden_size]);
         let grad_ih_tensor = Self {
             storage: grad_ih_storage,
-            shape: vec![batch_size, 3 * hidden_size],
-            strides: contiguous_strides(&[batch_size, 3 * hidden_size]),
+            shape: sh_3h.clone(),
+            strides: contiguous_strides(&sh_3h),
             offset: 0,
         };
         let grad_hh_tensor = Self {
             storage: grad_hh_storage,
-            shape: vec![batch_size, 3 * hidden_size],
-            strides: contiguous_strides(&[batch_size, 3 * hidden_size]),
+            shape: sh_3h.clone(),
+            strides: contiguous_strides(&sh_3h),
             offset: 0,
         };
         let grad_h_prev_tensor = Self {
             storage: grad_h_prev_storage,
-            shape: vec![batch_size, hidden_size],
-            strides: contiguous_strides(&[batch_size, hidden_size]),
+            shape: sh_h.clone(),
+            strides: contiguous_strides(&sh_h),
             offset: 0,
         };
 
@@ -2645,6 +2651,75 @@ impl Tensor<f32> {
         let out_shape = Shape::from_slice(&[batch, channels, out_h, out_w]);
         Some(Self {
             storage: Storage::from_cuda_slice(output_gpu, total, self.device()),
+            shape: out_shape.clone(),
+            strides: contiguous_strides(&out_shape),
+            offset: 0,
+        })
+    }
+
+    // =========================================================================
+    // Fused Scaled Dot-Product Attention
+    // =========================================================================
+
+    /// Fused attention on GPU: computes softmax(Q @ K^T * scale) @ V
+    /// without materializing the full N*N attention matrix in global memory.
+    ///
+    /// - `self` (Q): [B, H, Tq, D]
+    /// - `k`: [B, H, Tk, D]
+    /// - `v`: [B, H, Tk, D]
+    /// - Returns output [B, H, Tq, D] on GPU
+    ///
+    /// `is_causal`: if true, applies causal mask (positions j > i are masked out).
+    ///
+    /// For very long sequences (>2048), consider the CPU tiled Flash Attention
+    /// in axonml-llm which uses online softmax with O(N) memory.
+    pub fn fused_attention_cuda(
+        &self,
+        k: &Self,
+        v: &Self,
+        scale: f32,
+        is_causal: bool,
+    ) -> Option<Self> {
+        let cuda = get_cuda_backend()?;
+
+        let q_shape = self.shape();
+        assert!(q_shape.len() == 4, "Q must be [B, H, Tq, D]");
+        let batch_size = q_shape[0];
+        let num_heads = q_shape[1];
+        let tgt_len = q_shape[2];
+        let head_dim = q_shape[3];
+        let src_len = k.shape()[2];
+
+        let total_out = batch_size * num_heads * tgt_len * head_dim;
+
+        let q_contig = self.contiguous_gpu();
+        let k_contig = k.contiguous_gpu();
+        let v_contig = v.contiguous_gpu();
+
+        let q_guard = q_contig.storage.as_cuda_slice();
+        let k_guard = k_contig.storage.as_cuda_slice();
+        let v_guard = v_contig.storage.as_cuda_slice();
+
+        let mut out_gpu = pool_alloc(total_out).ok()?;
+
+        cuda.fused_attention_fwd_f32(
+            q_guard.slice(),
+            k_guard.slice(),
+            v_guard.slice(),
+            &mut out_gpu,
+            scale,
+            batch_size,
+            num_heads,
+            tgt_len,
+            src_len,
+            head_dim,
+            is_causal,
+        )
+        .ok()?;
+
+        let out_shape = Shape::from_slice(&[batch_size, num_heads, tgt_len, head_dim]);
+        Some(Self {
+            storage: Storage::from_cuda_slice(out_gpu, total_out, self.device()),
             shape: out_shape.clone(),
             strides: contiguous_strides(&out_shape),
             offset: 0,
