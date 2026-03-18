@@ -14,6 +14,7 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+use axonml_core;
 use axonml_nn::Parameter;
 use axonml_tensor::Tensor;
 
@@ -24,21 +25,31 @@ use crate::optimizer::Optimizer;
 // =============================================================================
 
 /// Per-parameter state for LAMB optimizer.
+///
+/// Stores momentum tensors on the same device as parameters (CPU or GPU).
+/// When parameters are on GPU, all state stays GPU-resident — zero CPU round-trips.
 #[derive(Debug, Clone)]
 struct LambState {
-    /// First moment (exponential moving average of gradient)
-    exp_avg: Vec<f32>,
-    /// Second moment (exponential moving average of squared gradient)
-    exp_avg_sq: Vec<f32>,
+    /// First moment (exponential moving average of gradient) — on same device as param.
+    exp_avg: Tensor<f32>,
+    /// Second moment (exponential moving average of squared gradient) — on same device as param.
+    exp_avg_sq: Tensor<f32>,
     /// Step count for bias correction
     step: usize,
 }
 
 impl LambState {
-    fn new(size: usize) -> Self {
+    fn new(shape: &[usize], device: axonml_core::Device) -> Self {
+        let size: usize = shape.iter().product();
+        let mut exp_avg = Tensor::from_vec(vec![0.0f32; size], shape).unwrap();
+        let mut exp_avg_sq = Tensor::from_vec(vec![0.0f32; size], shape).unwrap();
+        if device.is_gpu() {
+            exp_avg = exp_avg.to_device(device.clone()).unwrap();
+            exp_avg_sq = exp_avg_sq.to_device(device).unwrap();
+        }
         Self {
-            exp_avg: vec![0.0; size],
-            exp_avg_sq: vec![0.0; size],
+            exp_avg,
+            exp_avg_sq,
             step: 0,
         }
     }
@@ -174,20 +185,24 @@ impl LAMB {
             self.state = self
                 .params
                 .iter()
-                .map(|p| LambState::new(p.numel()))
+                .map(|p| {
+                    let data = p.data();
+                    LambState::new(data.shape(), data.device())
+                })
                 .collect();
         }
-    }
-
-    /// Computes the L2 norm of a vector.
-    fn _l2_norm(vec: &[f32]) -> f32 {
-        vec.iter().map(|x| x * x).sum::<f32>().sqrt()
     }
 }
 
 impl Optimizer for LAMB {
     fn step(&mut self) {
         self.ensure_state_initialized();
+
+        // ============================================================
+        // Tensor-op path: works on both CPU and GPU without to_vec()
+        // All ops (add, mul, mul_scalar, div, sqrt, add_scalar, sub)
+        // dispatch to CUDA when the tensors are GPU-resident.
+        // ============================================================
 
         for (i, param) in self.params.iter().enumerate() {
             if !param.requires_grad() {
@@ -199,22 +214,25 @@ impl Optimizer for LAMB {
                 None => continue,
             };
 
-            let grad_vec = grad.to_vec();
             let state = &mut self.state[i];
             state.step += 1;
 
             let param_data = param.data();
-            let mut param_vec = param_data.to_vec();
 
-            // Update biased first moment estimate
-            for (m, g) in state.exp_avg.iter_mut().zip(grad_vec.iter()) {
-                *m = self.beta1 * *m + (1.0 - self.beta1) * g;
-            }
+            // Update biased first moment: m = beta1 * m + (1 - beta1) * grad
+            state.exp_avg = state
+                .exp_avg
+                .mul_scalar(self.beta1)
+                .add(&grad.mul_scalar(1.0 - self.beta1))
+                .unwrap();
 
-            // Update biased second moment estimate
-            for (v, g) in state.exp_avg_sq.iter_mut().zip(grad_vec.iter()) {
-                *v = self.beta2 * *v + (1.0 - self.beta2) * g * g;
-            }
+            // Update biased second moment: v = beta2 * v + (1 - beta2) * grad^2
+            let grad_sq = grad.mul(&grad).unwrap();
+            state.exp_avg_sq = state
+                .exp_avg_sq
+                .mul_scalar(self.beta2)
+                .add(&grad_sq.mul_scalar(1.0 - self.beta2))
+                .unwrap();
 
             // Compute bias-corrected moments
             let (bias_correction1, bias_correction2) = if self.bias_correction {
@@ -226,31 +244,30 @@ impl Optimizer for LAMB {
                 (1.0, 1.0)
             };
 
-            // Fused: compute update direction + weight decay + both norms in single pass
-            let eps = self.eps;
-            let wd = self.weight_decay;
-            let has_wd = wd > 0.0;
-            let n = param_vec.len();
+            // m_hat = m / bc1, v_hat = v / bc2
+            let m_hat = state.exp_avg.mul_scalar(1.0 / bias_correction1);
+            let v_hat = state.exp_avg_sq.mul_scalar(1.0 / bias_correction2);
 
-            // Reuse grad_vec allocation for update storage
-            let mut update = grad_vec; // take ownership, no new allocation
-            let mut weight_norm_sq: f32 = 0.0;
-            let mut update_norm_sq: f32 = 0.0;
+            // adam_update = m_hat / (sqrt(v_hat) + eps)
+            let adam_update = m_hat.div(&v_hat.sqrt().add_scalar(self.eps)).unwrap();
 
-            for i in 0..n {
-                let m_hat = state.exp_avg[i] / bias_correction1;
-                let v_hat = state.exp_avg_sq[i] / bias_correction2;
-                let mut u = m_hat / (v_hat.sqrt() + eps);
-                if has_wd {
-                    u += wd * param_vec[i];
-                }
-                update[i] = u;
-                weight_norm_sq += param_vec[i] * param_vec[i];
-                update_norm_sq += u * u;
-            }
+            // update = adam_update + weight_decay * param (decoupled weight decay)
+            let update = if self.weight_decay > 0.0 {
+                adam_update
+                    .add(&param_data.mul_scalar(self.weight_decay))
+                    .unwrap()
+            } else {
+                adam_update
+            };
 
-            let weight_norm = weight_norm_sq.sqrt();
-            let update_norm = update_norm_sq.sqrt();
+            // Compute trust ratio: ||param|| / ||update||
+            // norm = sqrt(sum(x^2))  using Tensor ops
+            let weight_norm_sq = param_data.mul(&param_data).unwrap().sum();
+            let update_norm_sq = update.mul(&update).unwrap().sum();
+
+            // Extract scalar norms (single element tensors)
+            let weight_norm = weight_norm_sq.to_vec()[0].sqrt();
+            let update_norm = update_norm_sq.to_vec()[0].sqrt();
 
             let trust_ratio = if weight_norm > 0.0 && update_norm > 0.0 {
                 weight_norm / update_norm
@@ -258,19 +275,10 @@ impl Optimizer for LAMB {
                 1.0
             };
 
-            // Apply update in place — reuse param_vec, no new allocation
+            // param = param - lr * trust_ratio * update
             let effective_lr = self.lr * trust_ratio;
-            for i in 0..n {
-                param_vec[i] -= effective_lr * update[i];
-            }
-
-            let mut new_tensor = Tensor::from_vec(param_vec, param_data.shape()).unwrap();
-            // Preserve device: from_vec creates CPU, move back to param device
-            let device = param_data.device();
-            if device.is_gpu() {
-                new_tensor = new_tensor.to_device(device).unwrap();
-            }
-            param.update_data(new_tensor);
+            let new_param = param_data.sub(&update.mul_scalar(effective_lr)).unwrap();
+            param.update_data(new_param);
         }
     }
 
@@ -403,9 +411,10 @@ mod tests {
     }
 
     #[test]
-    fn test_l2_norm() {
-        let vec = vec![3.0, 4.0];
-        let norm = LAMB::_l2_norm(&vec);
+    fn test_l2_norm_via_tensor() {
+        let t = Tensor::from_vec(vec![3.0f32, 4.0], &[2]).unwrap();
+        let norm_sq = t.mul(&t).unwrap().sum();
+        let norm = norm_sq.to_vec()[0].sqrt();
         assert!((norm - 5.0).abs() < 1e-6);
     }
 }

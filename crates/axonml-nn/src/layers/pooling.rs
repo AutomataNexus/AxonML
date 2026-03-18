@@ -173,6 +173,34 @@ impl Module for MaxPool2d {
         let out_h = (height + 2 * ph - kh) / sh + 1;
         let out_w = (width + 2 * pw - kw) / sw + 1;
 
+        // Try GPU path
+        #[cfg(feature = "cuda")]
+        {
+            if let Some((gpu_output, gpu_indices)) =
+                input
+                    .data()
+                    .maxpool2d_cuda(self.kernel_size, self.stride, self.padding)
+            {
+                let max_indices: Vec<usize> = gpu_indices.iter().map(|&i| i as usize).collect();
+
+                let requires_grad = input.requires_grad() && is_grad_enabled();
+                if requires_grad {
+                    let grad_fn = GradFn::new(MaxPool2dBackward::new(
+                        input.grad_fn().cloned(),
+                        shape,
+                        max_indices,
+                        self.kernel_size,
+                        self.stride,
+                        self.padding,
+                    ));
+                    return Variable::from_operation(gpu_output, grad_fn, true);
+                } else {
+                    return Variable::new(gpu_output, false);
+                }
+            }
+        }
+
+        // CPU path
         let input_vec = input.data().to_vec();
         let mut output_data = vec![f32::NEG_INFINITY; batch * channels * out_h * out_w];
         let mut max_indices = vec![0usize; batch * channels * out_h * out_w];
@@ -374,6 +402,32 @@ impl Module for AvgPool2d {
         let out_h = (height + 2 * ph - kh) / sh + 1;
         let out_w = (width + 2 * pw - kw) / sw + 1;
 
+        // Try GPU path
+        #[cfg(feature = "cuda")]
+        {
+            if let Some(gpu_output) = input.data().avgpool2d_cuda(
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                false, // count_include_pad=false matches CPU behavior
+            ) {
+                let requires_grad = input.requires_grad() && is_grad_enabled();
+                if requires_grad {
+                    let grad_fn = GradFn::new(AvgPool2dBackward::new(
+                        input.grad_fn().cloned(),
+                        shape,
+                        self.kernel_size,
+                        self.stride,
+                        self.padding,
+                    ));
+                    return Variable::from_operation(gpu_output, grad_fn, true);
+                } else {
+                    return Variable::new(gpu_output, false);
+                }
+            }
+        }
+
+        // CPU path
         let input_vec = input.data().to_vec();
         let mut output_data = vec![0.0f32; batch * channels * out_h * out_w];
 

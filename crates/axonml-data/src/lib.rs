@@ -89,7 +89,7 @@ pub mod transforms;
 // =============================================================================
 
 pub use collate::{Collate, DefaultCollate, StackCollate};
-pub use dataloader::{Batch, DataLoader, DataLoaderIter};
+pub use dataloader::{Batch, DataLoader, DataLoaderIter, GpuPrefetchIter};
 pub use dataset::{
     ConcatDataset, Dataset, InMemoryDataset, MapDataset, SubsetDataset, TensorDataset,
 };
@@ -107,9 +107,9 @@ pub use transforms::{Compose, Normalize, RandomNoise, ToTensor, Transform};
 pub mod prelude {
     pub use crate::{
         Batch, BatchSampler, Collate, Compose, ConcatDataset, DataLoader, DataLoaderIter, Dataset,
-        DefaultCollate, InMemoryDataset, MapDataset, Normalize, RandomNoise, RandomSampler,
-        Sampler, SequentialSampler, StackCollate, SubsetDataset, SubsetRandomSampler,
-        TensorDataset, ToTensor, Transform, WeightedRandomSampler,
+        DefaultCollate, GpuPrefetchIter, InMemoryDataset, MapDataset, Normalize, RandomNoise,
+        RandomSampler, Sampler, SequentialSampler, StackCollate, SubsetDataset,
+        SubsetRandomSampler, TensorDataset, ToTensor, Transform, WeightedRandomSampler,
     };
     pub use axonml_tensor::Tensor;
 }
