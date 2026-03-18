@@ -3535,6 +3535,9 @@ $L__col2im_exit:
 }
 "#;
 
+/// LSTM/GRU/BatchNorm fused kernels (compiled from lstm.cu)
+pub const LSTM_PTX: &str = include_str!("lstm.ptx");
+
 /// CUDA Kernel registry for managing loaded kernels
 #[cfg(feature = "cuda")]
 pub struct CudaKernels {
@@ -3556,10 +3559,16 @@ impl CudaKernels {
             "elementwise",
             ELEMENTWISE_PTX,
             &[
-                "add_f32", "sub_f32", "mul_f32", "div_f32",
-                "scale_f32", "add_scalar_f32",
-                "neg_f32", "sqrt_f32",
-                "pow_f32", "pow_scalar_f32",
+                "add_f32",
+                "sub_f32",
+                "mul_f32",
+                "div_f32",
+                "scale_f32",
+                "add_scalar_f32",
+                "neg_f32",
+                "sqrt_f32",
+                "pow_f32",
+                "pow_scalar_f32",
             ],
         )?;
 
@@ -3568,10 +3577,14 @@ impl CudaKernels {
             "activations",
             ACTIVATIONS_PTX,
             &[
-                "relu_f32", "relu_backward_f32",
-                "sigmoid_f32", "sigmoid_backward_f32",
-                "tanh_f32", "tanh_backward_f32",
-                "exp_f32", "log_f32",
+                "relu_f32",
+                "relu_backward_f32",
+                "sigmoid_f32",
+                "sigmoid_backward_f32",
+                "tanh_f32",
+                "tanh_backward_f32",
+                "exp_f32",
+                "log_f32",
                 "gelu_f32",
                 "silu_f32",
             ],
@@ -3582,10 +3595,14 @@ impl CudaKernels {
             "broadcast",
             BROADCAST_PTX,
             &[
-                "broadcast_add_f32", "broadcast_sub_f32",
-                "broadcast_mul_f32", "broadcast_div_f32",
-                "broadcast_add_rev_f32", "broadcast_sub_rev_f32",
-                "broadcast_mul_rev_f32", "broadcast_div_rev_f32",
+                "broadcast_add_f32",
+                "broadcast_sub_f32",
+                "broadcast_mul_f32",
+                "broadcast_div_f32",
+                "broadcast_add_rev_f32",
+                "broadcast_sub_rev_f32",
+                "broadcast_mul_rev_f32",
+                "broadcast_div_rev_f32",
             ],
         )?;
 
@@ -3602,11 +3619,7 @@ impl CudaKernels {
         )?;
 
         // Load sum_dim reduction kernel
-        kernels.load_module(
-            "sum_dim",
-            SUM_DIM_PTX,
-            &["sum_dim_f32"],
-        )?;
+        kernels.load_module("sum_dim", SUM_DIM_PTX, &["sum_dim_f32"])?;
 
         // Load LayerNorm kernels (forward + backward)
         kernels.load_module(
@@ -3641,11 +3654,7 @@ impl CudaKernels {
         )?;
 
         // Load strided gather kernel (for GPU-native contiguous())
-        kernels.load_module(
-            "strided_copy",
-            STRIDED_COPY_PTX,
-            &["strided_gather_f32"],
-        )?;
+        kernels.load_module("strided_copy", STRIDED_COPY_PTX, &["strided_gather_f32"])?;
 
         // Load embedding scatter-add kernel (for GPU-native embedding backward)
         kernels.load_module(
@@ -3659,6 +3668,18 @@ impl CudaKernels {
             "adam",
             ADAM_PTX,
             &["adam_step_f32", "grad_norm_sq_f32", "grad_scale_f32"],
+        )?;
+
+        // Load fused LSTM/GRU/BatchNorm kernels
+        kernels.load_module(
+            "lstm",
+            LSTM_PTX,
+            &[
+                "lstm_gates_f32",
+                "gru_gates_f32",
+                "batchnorm_stats_f32",
+                "batchnorm_norm_f32",
+            ],
         )?;
 
         Ok(kernels)

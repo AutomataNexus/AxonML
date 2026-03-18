@@ -187,7 +187,8 @@ impl Module for BatchNorm1d {
 
         let output = Tensor::from_vec(output_vec, &shape).unwrap();
 
-        let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+        let requires_grad =
+            (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
         if requires_grad {
             let weight_var = self.weight.variable();
             let bias_var = self.bias.variable();
@@ -304,41 +305,96 @@ impl Module for BatchNorm2d {
             self.num_features, channels
         );
 
+        let is_training = self.training.load(Ordering::Relaxed);
+
+        // GPU fast path: use fused batchnorm kernels when input is on GPU
+        #[cfg(feature = "cuda")]
+        if input_data.device().is_gpu() && is_training {
+            let gamma_data = self.weight.data();
+            let beta_data = self.bias.data();
+
+            // Auto-migrate weight/bias to GPU if needed
+            let gamma_gpu = if !gamma_data.device().is_gpu() {
+                gamma_data
+                    .to_device(input_data.device())
+                    .unwrap_or(gamma_data)
+            } else {
+                gamma_data
+            };
+            let beta_gpu = if !beta_data.device().is_gpu() {
+                beta_data
+                    .to_device(input_data.device())
+                    .unwrap_or(beta_data)
+            } else {
+                beta_data
+            };
+
+            if let Some((output_tensor, means, vars)) =
+                input_data.batchnorm_fused(&gamma_gpu, &beta_gpu, self.eps, channels, spatial_size)
+            {
+                // Update running statistics
+                let mut running_mean = self.running_mean.write();
+                let mut running_var = self.running_var.write();
+                let running_mean_vec = running_mean.to_vec();
+                let running_var_vec = running_var.to_vec();
+                let new_mean: Vec<f32> = running_mean_vec
+                    .iter()
+                    .zip(means.iter())
+                    .map(|(&rm, &m)| (1.0 - self.momentum) * rm + self.momentum * m)
+                    .collect();
+                let new_var: Vec<f32> = running_var_vec
+                    .iter()
+                    .zip(vars.iter())
+                    .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
+                    .collect();
+                *running_mean = Tensor::from_vec(new_mean, &[channels]).unwrap();
+                *running_var = Tensor::from_vec(new_var, &[channels]).unwrap();
+
+                let weight_vec = gamma_gpu.to_vec();
+                let requires_grad =
+                    (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+                if requires_grad {
+                    let weight_var = self.weight.variable();
+                    let bias_var = self.bias.variable();
+                    let grad_fn = GradFn::new(BatchNorm2dBackward::new(
+                        input.grad_fn().cloned(),
+                        weight_var.grad_fn().cloned(),
+                        bias_var.grad_fn().cloned(),
+                        input_data,
+                        means,
+                        vars,
+                        weight_vec,
+                        self.eps,
+                    ));
+                    return Variable::from_operation(output_tensor, grad_fn, true);
+                }
+                return Variable::new(output_tensor, false);
+            }
+        }
+
+        // CPU path
         let input_vec = input_data.to_vec();
         let weight_vec = self.weight.data().to_vec();
         let bias_vec = self.bias.data().to_vec();
-
-        let is_training = self.training.load(Ordering::Relaxed);
 
         let mut means = vec![0.0f32; channels];
         let mut vars = vec![0.0f32; channels];
 
         if is_training {
+            let n_per_channel = (batch_size * spatial_size) as f32;
             for c in 0..channels {
                 let mut sum = 0.0f32;
+                let mut sum_sq = 0.0f32;
                 for b in 0..batch_size {
-                    for h in 0..height {
-                        for w in 0..width {
-                            let idx =
-                                b * channels * spatial_size + c * spatial_size + h * width + w;
-                            sum += input_vec[idx];
-                        }
+                    let base = b * channels * spatial_size + c * spatial_size;
+                    for s in 0..spatial_size {
+                        let val = input_vec[base + s];
+                        sum += val;
+                        sum_sq += val * val;
                     }
                 }
-                means[c] = sum / (batch_size * spatial_size) as f32;
-
-                let mut var_sum = 0.0f32;
-                for b in 0..batch_size {
-                    for h in 0..height {
-                        for w in 0..width {
-                            let idx =
-                                b * channels * spatial_size + c * spatial_size + h * width + w;
-                            let diff = input_vec[idx] - means[c];
-                            var_sum += diff * diff;
-                        }
-                    }
-                }
-                vars[c] = var_sum / (batch_size * spatial_size) as f32;
+                means[c] = sum / n_per_channel;
+                vars[c] = sum_sq / n_per_channel - means[c] * means[c];
             }
 
             // Update running statistics
@@ -365,22 +421,22 @@ impl Module for BatchNorm2d {
             vars = self.running_var.read().to_vec();
         }
 
-        let mut output_vec = vec![0.0f32; input_vec.len()];
-        for b in 0..batch_size {
-            for c in 0..channels {
-                for h in 0..height {
-                    for w in 0..width {
-                        let idx = b * channels * spatial_size + c * spatial_size + h * width + w;
-                        let normalized = (input_vec[idx] - means[c]) / (vars[c] + self.eps).sqrt();
-                        output_vec[idx] = normalized * weight_vec[c] + bias_vec[c];
-                    }
-                }
-            }
+        // Normalize + affine transform (optimized single-pass)
+        let total = input_vec.len();
+        let mut output_vec = vec![0.0f32; total];
+
+        // Pre-compute inv_std per channel to avoid repeated sqrt
+        let inv_stds: Vec<f32> = vars.iter().map(|v| 1.0 / (v + self.eps).sqrt()).collect();
+
+        for i in 0..total {
+            let c = (i / spatial_size) % channels;
+            output_vec[i] = (input_vec[i] - means[c]) * inv_stds[c] * weight_vec[c] + bias_vec[c];
         }
 
         let output = Tensor::from_vec(output_vec, &shape).unwrap();
 
-        let requires_grad = (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+        let requires_grad =
+            (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
         if requires_grad {
             let weight_var = self.weight.variable();
             let bias_var = self.bias.variable();
@@ -859,8 +915,16 @@ impl Module for InstanceNorm2d {
         if requires_grad {
             let grad_fn = GradFn::new(InstanceNorm2dBackward::new(
                 input.grad_fn().cloned(),
-                if self.affine { self.weight.variable().grad_fn().cloned() } else { None },
-                if self.affine { self.bias.variable().grad_fn().cloned() } else { None },
+                if self.affine {
+                    self.weight.variable().grad_fn().cloned()
+                } else {
+                    None
+                },
+                if self.affine {
+                    self.bias.variable().grad_fn().cloned()
+                } else {
+                    None
+                },
                 input_data.clone(),
                 self.weight.data().clone(),
                 self.eps,

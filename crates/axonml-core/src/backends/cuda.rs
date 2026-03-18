@@ -17,7 +17,9 @@
 #[cfg(feature = "cuda")]
 use cudarc::cublas::{sys::cublasOperation_t, CudaBlas, Gemm, GemmConfig};
 #[cfg(feature = "cuda")]
-use cudarc::driver::{CudaDevice, CudaSlice, DeviceRepr, LaunchAsync, LaunchConfig, ValidAsZeroBits};
+use cudarc::driver::{
+    CudaDevice, CudaSlice, DeviceRepr, LaunchAsync, LaunchConfig, ValidAsZeroBits,
+};
 
 #[cfg(feature = "cuda")]
 use super::cuda_kernels::{self, CudaKernels, BLOCK_SIZE};
@@ -807,11 +809,14 @@ impl CudaBackend {
         n: usize,
         b_len: usize,
     ) -> Result<(), CudaError> {
-        let func = self.kernels.get("broadcast_add_f32")
+        let func = self
+            .kernels
+            .get("broadcast_add_f32")
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_add_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone().launch(cfg, (a, b, dst, n as u32, b_len as u32))
+            func.clone()
+                .launch(cfg, (a, b, dst, n as u32, b_len as u32))
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -826,11 +831,14 @@ impl CudaBackend {
         n: usize,
         b_len: usize,
     ) -> Result<(), CudaError> {
-        let func = self.kernels.get("broadcast_sub_f32")
+        let func = self
+            .kernels
+            .get("broadcast_sub_f32")
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_sub_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone().launch(cfg, (a, b, dst, n as u32, b_len as u32))
+            func.clone()
+                .launch(cfg, (a, b, dst, n as u32, b_len as u32))
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -845,11 +853,14 @@ impl CudaBackend {
         n: usize,
         b_len: usize,
     ) -> Result<(), CudaError> {
-        let func = self.kernels.get("broadcast_mul_f32")
+        let func = self
+            .kernels
+            .get("broadcast_mul_f32")
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_mul_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone().launch(cfg, (a, b, dst, n as u32, b_len as u32))
+            func.clone()
+                .launch(cfg, (a, b, dst, n as u32, b_len as u32))
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -864,11 +875,14 @@ impl CudaBackend {
         n: usize,
         b_len: usize,
     ) -> Result<(), CudaError> {
-        let func = self.kernels.get("broadcast_div_f32")
+        let func = self
+            .kernels
+            .get("broadcast_div_f32")
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_div_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone().launch(cfg, (a, b, dst, n as u32, b_len as u32))
+            func.clone()
+                .launch(cfg, (a, b, dst, n as u32, b_len as u32))
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -883,11 +897,14 @@ impl CudaBackend {
         n: usize,
         a_len: usize,
     ) -> Result<(), CudaError> {
-        let func = self.kernels.get("broadcast_add_rev_f32")
+        let func = self
+            .kernels
+            .get("broadcast_add_rev_f32")
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_add_rev_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone().launch(cfg, (a, b, dst, n as u32, a_len as u32))
+            func.clone()
+                .launch(cfg, (a, b, dst, n as u32, a_len as u32))
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -902,11 +919,14 @@ impl CudaBackend {
         n: usize,
         a_len: usize,
     ) -> Result<(), CudaError> {
-        let func = self.kernels.get("broadcast_sub_rev_f32")
+        let func = self
+            .kernels
+            .get("broadcast_sub_rev_f32")
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_sub_rev_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone().launch(cfg, (a, b, dst, n as u32, a_len as u32))
+            func.clone()
+                .launch(cfg, (a, b, dst, n as u32, a_len as u32))
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -921,11 +941,14 @@ impl CudaBackend {
         n: usize,
         a_len: usize,
     ) -> Result<(), CudaError> {
-        let func = self.kernels.get("broadcast_mul_rev_f32")
+        let func = self
+            .kernels
+            .get("broadcast_mul_rev_f32")
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_mul_rev_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone().launch(cfg, (a, b, dst, n as u32, a_len as u32))
+            func.clone()
+                .launch(cfg, (a, b, dst, n as u32, a_len as u32))
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -940,11 +963,14 @@ impl CudaBackend {
         n: usize,
         a_len: usize,
     ) -> Result<(), CudaError> {
-        let func = self.kernels.get("broadcast_div_rev_f32")
+        let func = self
+            .kernels
+            .get("broadcast_div_rev_f32")
             .ok_or_else(|| CudaError::KernelNotFound("broadcast_div_rev_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
-            func.clone().launch(cfg, (a, b, dst, n as u32, a_len as u32))
+            func.clone()
+                .launch(cfg, (a, b, dst, n as u32, a_len as u32))
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1214,7 +1240,16 @@ impl CudaBackend {
         let cfg = cuda_kernels::launch_config(out_len);
         unsafe {
             func.clone()
-                .launch(cfg, (src, dst, outer_size as u32, dim_size as u32, inner_size as u32))
+                .launch(
+                    cfg,
+                    (
+                        src,
+                        dst,
+                        outer_size as u32,
+                        dim_size as u32,
+                        inner_size as u32,
+                    ),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1291,7 +1326,18 @@ impl CudaBackend {
         };
         unsafe {
             func.clone()
-                .launch(cfg, (input, gamma, beta, dst, norm_size as u32, eps, num_rows as u32))
+                .launch(
+                    cfg,
+                    (
+                        input,
+                        gamma,
+                        beta,
+                        dst,
+                        norm_size as u32,
+                        eps,
+                        num_rows as u32,
+                    ),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1319,7 +1365,16 @@ impl CudaBackend {
         };
         unsafe {
             func.clone()
-                .launch(cfg, (softmax_output, grad_output, dst, num_rows as u32, row_size as u32))
+                .launch(
+                    cfg,
+                    (
+                        softmax_output,
+                        grad_output,
+                        dst,
+                        num_rows as u32,
+                        row_size as u32,
+                    ),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1340,7 +1395,9 @@ impl CudaBackend {
         let func = self
             .kernels
             .get("layer_norm_backward_dinput_f32")
-            .ok_or_else(|| CudaError::KernelNotFound("layer_norm_backward_dinput_f32".to_string()))?;
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("layer_norm_backward_dinput_f32".to_string())
+            })?;
         let cfg = LaunchConfig {
             grid_dim: (num_rows as u32, 1, 1),
             block_dim: (BLOCK_SIZE, 1, 1),
@@ -1348,7 +1405,18 @@ impl CudaBackend {
         };
         unsafe {
             func.clone()
-                .launch(cfg, (grad_output, input, gamma, d_input, norm_size as u32, eps, num_rows as u32))
+                .launch(
+                    cfg,
+                    (
+                        grad_output,
+                        input,
+                        gamma,
+                        d_input,
+                        norm_size as u32,
+                        eps,
+                        num_rows as u32,
+                    ),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1369,11 +1437,24 @@ impl CudaBackend {
         let func = self
             .kernels
             .get("layer_norm_backward_dweight_dbias_f32")
-            .ok_or_else(|| CudaError::KernelNotFound("layer_norm_backward_dweight_dbias_f32".to_string()))?;
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("layer_norm_backward_dweight_dbias_f32".to_string())
+            })?;
         let cfg = cuda_kernels::launch_config(norm_size);
         unsafe {
             func.clone()
-                .launch(cfg, (grad_output, input, d_weight, d_bias, norm_size as u32, eps, num_rows as u32))
+                .launch(
+                    cfg,
+                    (
+                        grad_output,
+                        input,
+                        d_weight,
+                        d_bias,
+                        norm_size as u32,
+                        eps,
+                        num_rows as u32,
+                    ),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1417,7 +1498,16 @@ impl CudaBackend {
         let cfg = cuda_kernels::launch_config(total_n);
         unsafe {
             func.clone()
-                .launch(cfg, (grad_src, indices, weight_grad, total_n as u32, emb_dim as u32))
+                .launch(
+                    cfg,
+                    (
+                        grad_src,
+                        indices,
+                        weight_grad,
+                        total_n as u32,
+                        emb_dim as u32,
+                    ),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1448,11 +1538,23 @@ impl CudaBackend {
         let cfg = cuda_kernels::launch_config(n);
         unsafe {
             func.clone()
-                .launch(cfg, (
-                    param, grad, exp_avg, exp_avg_sq,
-                    n as u32, lr, beta1, beta2, eps, weight_decay,
-                    bias_correction1, bias_correction2,
-                ))
+                .launch(
+                    cfg,
+                    (
+                        param,
+                        grad,
+                        exp_avg,
+                        exp_avg_sq,
+                        n as u32,
+                        lr,
+                        beta1,
+                        beta2,
+                        eps,
+                        weight_decay,
+                        bias_correction1,
+                        bias_correction2,
+                    ),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1522,7 +1624,10 @@ impl CudaBackend {
         };
         unsafe {
             func.clone()
-                .launch(cfg, (logits, targets, losses, softmax_out, num_classes as u32))
+                .launch(
+                    cfg,
+                    (logits, targets, losses, softmax_out, num_classes as u32),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1547,7 +1652,17 @@ impl CudaBackend {
         let cfg = cuda_kernels::launch_config(total);
         unsafe {
             func.clone()
-                .launch(cfg, (softmax_probs, targets, grad_output, grad_input, batch_size as u32, num_classes as u32))
+                .launch(
+                    cfg,
+                    (
+                        softmax_probs,
+                        targets,
+                        grad_output,
+                        grad_input,
+                        batch_size as u32,
+                        num_classes as u32,
+                    ),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1555,10 +1670,7 @@ impl CudaBackend {
 
     /// Zero-fills a GPU allocation using cudaMemset.
     #[cfg(feature = "cuda")]
-    pub fn memset_zeros_f32(
-        &self,
-        dst: &mut CudaSlice<f32>,
-    ) -> Result<(), CudaError> {
+    pub fn memset_zeros_f32(&self, dst: &mut CudaSlice<f32>) -> Result<(), CudaError> {
         self.device
             .memset_zeros(dst)
             .map_err(|e| CudaError::DriverError(e.to_string()))
@@ -1610,7 +1722,10 @@ impl CudaBackend {
         let cfg = cuda_kernels::launch_config(total_n);
         unsafe {
             func.clone()
-                .launch(cfg, (mask, output, total_n as u32, tgt_len as u32, src_len as u32))
+                .launch(
+                    cfg,
+                    (mask, output, total_n as u32, tgt_len as u32, src_len as u32),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1633,7 +1748,17 @@ impl CudaBackend {
         let cfg = cuda_kernels::launch_config(total_n);
         unsafe {
             func.clone()
-                .launch(cfg, (mask, output, total_n as u32, num_heads as u32, tgt_len as u32, src_len as u32))
+                .launch(
+                    cfg,
+                    (
+                        mask,
+                        output,
+                        total_n as u32,
+                        num_heads as u32,
+                        tgt_len as u32,
+                        src_len as u32,
+                    ),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1666,7 +1791,178 @@ impl CudaBackend {
         let cfg = cuda_kernels::launch_config(total_n);
         unsafe {
             func.clone()
-                .launch(cfg, (src, dst, strides, shape, ndim as u32, offset as u32, total_n as u32))
+                .launch(
+                    cfg,
+                    (
+                        src,
+                        dst,
+                        strides,
+                        shape,
+                        ndim as u32,
+                        offset as u32,
+                        total_n as u32,
+                    ),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    // =========================================================================
+    // Fused LSTM Gate Kernel
+    // =========================================================================
+
+    /// Fused LSTM gate computation on GPU.
+    ///
+    /// Takes pre-computed gates (ih + hh from cuBLAS GEMM) and c_prev,
+    /// applies sigmoid/tanh activations and cell/hidden state update
+    /// in a single kernel launch.
+    ///
+    /// - `gates`: [batch, 4*hidden] = x@W_ih^T + b_ih + h@W_hh^T + b_hh
+    /// - `c_prev`: [batch, hidden]
+    /// - `h_new`: [batch, hidden] output
+    /// - `c_new`: [batch, hidden] output
+    pub fn lstm_gates_f32(
+        &self,
+        gates: &CudaSlice<f32>,
+        c_prev: &CudaSlice<f32>,
+        h_new: &mut CudaSlice<f32>,
+        c_new: &mut CudaSlice<f32>,
+        hidden_size: usize,
+        total: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("lstm_gates_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("lstm_gates_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (
+                        gates,
+                        c_prev,
+                        h_new,
+                        c_new,
+                        hidden_size as u32,
+                        total as u32,
+                    ),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    // =========================================================================
+    // Fused GRU Gate Kernel
+    // =========================================================================
+
+    /// Fused GRU gate computation on GPU.
+    ///
+    /// - `gates_ih`: [batch, 3*hidden] = x@W_ih^T + b_ih
+    /// - `gates_hh`: [batch, 3*hidden] = h@W_hh^T + b_hh
+    /// - `h_prev`: [batch, hidden]
+    /// - `h_new`: [batch, hidden] output
+    pub fn gru_gates_f32(
+        &self,
+        gates_ih: &CudaSlice<f32>,
+        gates_hh: &CudaSlice<f32>,
+        h_prev: &CudaSlice<f32>,
+        h_new: &mut CudaSlice<f32>,
+        hidden_size: usize,
+        total: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("gru_gates_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("gru_gates_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (
+                        gates_ih,
+                        gates_hh,
+                        h_prev,
+                        h_new,
+                        hidden_size as u32,
+                        total as u32,
+                    ),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    // =========================================================================
+    // Fused BatchNorm Forward Kernels
+    // =========================================================================
+
+    /// BatchNorm pass 1: compute per-channel sum and sum_sq via atomics.
+    pub fn batchnorm_stats_f32(
+        &self,
+        x: &CudaSlice<f32>,
+        sum_out: &mut CudaSlice<f32>,
+        sum_sq_out: &mut CudaSlice<f32>,
+        n: usize,
+        c: usize,
+        spatial: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("batchnorm_stats_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("batchnorm_stats_f32".to_string()))?;
+        let total = n * c * spatial;
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (x, sum_out, sum_sq_out, n as u32, c as u32, spatial as u32),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// BatchNorm pass 2: normalize + affine transform using pre-computed mean/var.
+    pub fn batchnorm_norm_f32(
+        &self,
+        x: &CudaSlice<f32>,
+        mean: &CudaSlice<f32>,
+        var: &CudaSlice<f32>,
+        gamma: &CudaSlice<f32>,
+        beta: &CudaSlice<f32>,
+        y: &mut CudaSlice<f32>,
+        eps: f32,
+        c: usize,
+        spatial: usize,
+        total: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("batchnorm_norm_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("batchnorm_norm_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (
+                        x,
+                        mean,
+                        var,
+                        gamma,
+                        beta,
+                        y,
+                        eps,
+                        c as u32,
+                        spatial as u32,
+                        total as u32,
+                    ),
+                )
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1795,11 +2091,16 @@ impl CudaBackend {
 
         // Upload im2col parameters as u32 buffer (reused across batches)
         let im2col_params: [u32; 10] = [
-            in_height as u32, in_width as u32,
-            kernel_h as u32, kernel_w as u32,
-            pad_h as u32, pad_w as u32,
-            stride_h as u32, stride_w as u32,
-            out_h as u32, out_w as u32,
+            in_height as u32,
+            in_width as u32,
+            kernel_h as u32,
+            kernel_w as u32,
+            pad_h as u32,
+            pad_w as u32,
+            stride_h as u32,
+            stride_w as u32,
+            out_h as u32,
+            out_w as u32,
         ];
         let params_gpu = self.htod_copy(&im2col_params[..]).ok()?;
 
@@ -1817,9 +2118,8 @@ impl CudaBackend {
             let input_gpu = self.htod_copy(input_slice).ok()?;
 
             // GPU im2col: input [C_in, H, W] → col [col_h, col_w]
-            self.im2col_f32(
-                &input_gpu, &mut col_gpu, &params_gpu, col_n,
-            ).ok()?;
+            self.im2col_f32(&input_gpu, &mut col_gpu, &params_gpu, col_n)
+                .ok()?;
 
             // GPU GEMM: out = weight @ col
             // weight: [out_channels, col_h] (row-major)
@@ -1829,20 +2129,26 @@ impl CudaBackend {
             // cuBLAS column-major: C^T = B^T @ A^T
             // m=col_w, n=out_channels, k=col_h
             self.gemm_f32(
-                false, false,
-                col_w, out_channels, col_h,
+                false,
+                false,
+                col_w,
+                out_channels,
+                col_h,
                 1.0,
-                &col_gpu, col_w,
-                &weight_gpu, col_h,
+                &col_gpu,
+                col_w,
+                &weight_gpu,
+                col_h,
                 0.0,
-                &mut batch_out_gpu, col_w,
-            ).ok()?;
+                &mut batch_out_gpu,
+                col_w,
+            )
+            .ok()?;
 
             // GPU bias add (in-place on batch_out_gpu)
             if let Some(ref bg) = bias_gpu {
-                self.bias_add_channels_f32(
-                    &mut batch_out_gpu, bg, spatial, out_per_batch,
-                ).ok()?;
+                self.bias_add_channels_f32(&mut batch_out_gpu, bg, spatial, out_per_batch)
+                    .ok()?;
             }
 
             // Download output for this batch
@@ -1878,10 +2184,20 @@ pub fn cuda_conv2d_forward(
 ) -> Option<Vec<f32>> {
     let cuda = get_cuda_backend()?;
     cuda.conv2d_forward(
-        input, weight, bias,
-        batch_size, in_channels, in_height, in_width,
-        out_channels, kernel_h, kernel_w,
-        stride_h, stride_w, pad_h, pad_w,
+        input,
+        weight,
+        bias,
+        batch_size,
+        in_channels,
+        in_height,
+        in_width,
+        out_channels,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        pad_h,
+        pad_w,
     )
 }
 
@@ -2201,16 +2517,36 @@ mod tests {
         let bias = vec![0.5f32; 2];
 
         let result = cuda_conv2d_forward(
-            &input, &weight, Some(&bias),
-            1, 3, 4, 4, 2, 1, 1, 1, 1, 0, 0,
+            &input,
+            &weight,
+            Some(&bias),
+            1,
+            3,
+            4,
+            4,
+            2,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
         );
 
         let out = result.expect("CUDA conv2d should succeed");
         assert_eq!(out.len(), 2 * 4 * 4);
         // out_ch0 = 1.0*1 + 0.5 = 1.5
-        assert!((out[0] - 1.5).abs() < 0.01, "1x1 conv ch0: expected 1.5, got {}", out[0]);
+        assert!(
+            (out[0] - 1.5).abs() < 0.01,
+            "1x1 conv ch0: expected 1.5, got {}",
+            out[0]
+        );
         // out_ch1 = 1.0*1 + 0.5 = 1.5
-        assert!((out[16] - 1.5).abs() < 0.01, "1x1 conv ch1: expected 1.5, got {}", out[16]);
+        assert!(
+            (out[16] - 1.5).abs() < 0.01,
+            "1x1 conv ch1: expected 1.5, got {}",
+            out[16]
+        );
 
         // 3x3 conv with padding=1: all-ones input, all-ones weight
         let input2 = vec![1.0f32; 1 * 3 * 8 * 8];
@@ -2218,16 +2554,36 @@ mod tests {
         let bias2 = vec![0.0f32; 2];
 
         let result2 = cuda_conv2d_forward(
-            &input2, &weight2, Some(&bias2),
-            1, 3, 8, 8, 2, 3, 3, 1, 1, 1, 1,
+            &input2,
+            &weight2,
+            Some(&bias2),
+            1,
+            3,
+            8,
+            8,
+            2,
+            3,
+            3,
+            1,
+            1,
+            1,
+            1,
         );
 
         let out2 = result2.expect("CUDA 3x3 conv should succeed");
         assert_eq!(out2.len(), 2 * 8 * 8);
         // Center pixel (row 4, col 4) = 3 channels * 9 kernel positions * 1.0 = 27.0
         let center = 4 * 8 + 4;
-        assert!((out2[center] - 27.0).abs() < 0.1, "3x3 conv center: expected 27.0, got {}", out2[center]);
+        assert!(
+            (out2[center] - 27.0).abs() < 0.1,
+            "3x3 conv center: expected 27.0, got {}",
+            out2[center]
+        );
         // Corner pixel (0,0) with pad=1: only 2x2x3 = 12 valid positions
-        assert!((out2[0] - 12.0).abs() < 0.1, "3x3 conv corner: expected 12.0, got {}", out2[0]);
+        assert!(
+            (out2[0] - 12.0).abs() < 0.1,
+            "3x3 conv corner: expected 12.0, got {}",
+            out2[0]
+        );
     }
 }
