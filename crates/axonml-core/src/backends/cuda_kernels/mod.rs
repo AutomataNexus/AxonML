@@ -3541,6 +3541,9 @@ pub const LSTM_PTX: &str = include_str!("lstm.ptx");
 /// Pooling kernels: MaxPool2d + AvgPool2d forward/backward (compiled from pooling.cu)
 pub const POOLING_PTX: &str = include_str!("pooling.ptx");
 
+/// Fused attention kernel: scaled dot-product attention without materializing N*N matrix
+pub const ATTENTION_PTX: &str = include_str!("attention.ptx");
+
 /// CUDA Kernel registry for managing loaded kernels
 #[cfg(feature = "cuda")]
 pub struct CudaKernels {
@@ -3698,6 +3701,9 @@ impl CudaKernels {
                 "avgpool2d_bwd_f32",
             ],
         )?;
+
+        // Load fused attention kernel (scaled dot-product attention)
+        kernels.load_module("attention", ATTENTION_PTX, &["fused_attention_fwd_f32"])?;
 
         Ok(kernels)
     }

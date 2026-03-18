@@ -29,7 +29,7 @@ pub mod sparse;
 pub mod transformer;
 
 // Re-exports
-pub use attention::{CrossAttention, MultiHeadAttention};
+pub use attention::{scaled_dot_product_attention_fused, CrossAttention, MultiHeadAttention};
 pub use conv::{Conv1d, Conv2d, ConvTranspose2d};
 pub use dropout::Dropout;
 pub use embedding::Embedding;

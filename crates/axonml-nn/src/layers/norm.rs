@@ -109,16 +109,91 @@ impl Module for BatchNorm1d {
             self.num_features, num_features
         );
 
-        let input_vec = input_data.to_vec();
-        let weight_vec = self.weight.data().to_vec();
-        let bias_vec = self.bias.data().to_vec();
-
         let is_training = self.training.load(Ordering::Relaxed);
         let spatial_size: usize = if shape.len() > 2 {
             shape[2..].iter().product()
         } else {
             1
         };
+
+        // GPU fast path: use fused batchnorm kernels when input is on GPU.
+        // For [batch, features] layout, spatial=1. The kernel indexes as
+        // (idx / spatial) % C which with spatial=1 becomes idx % C — correct
+        // for [batch, features] since it's the same layout as [batch, features, 1].
+        #[cfg(feature = "cuda")]
+        if input_data.device().is_gpu() && is_training {
+            let gamma_data = self.weight.data();
+            let beta_data = self.bias.data();
+
+            // Auto-migrate weight/bias to GPU if needed
+            let gamma_gpu = if !gamma_data.device().is_gpu() {
+                gamma_data
+                    .to_device(input_data.device())
+                    .unwrap_or(gamma_data)
+            } else {
+                gamma_data
+            };
+            let beta_gpu = if !beta_data.device().is_gpu() {
+                beta_data
+                    .to_device(input_data.device())
+                    .unwrap_or(beta_data)
+            } else {
+                beta_data
+            };
+
+            if let Some((output_tensor, means, vars)) = input_data.batchnorm_fused(
+                &gamma_gpu,
+                &beta_gpu,
+                self.eps,
+                num_features,
+                spatial_size,
+            ) {
+                // Update running statistics
+                if self.track_running_stats {
+                    let mut running_mean = self.running_mean.write();
+                    let mut running_var = self.running_var.write();
+                    let running_mean_vec = running_mean.to_vec();
+                    let running_var_vec = running_var.to_vec();
+                    let new_mean: Vec<f32> = running_mean_vec
+                        .iter()
+                        .zip(means.iter())
+                        .map(|(&rm, &m)| (1.0 - self.momentum) * rm + self.momentum * m)
+                        .collect();
+                    let new_var: Vec<f32> = running_var_vec
+                        .iter()
+                        .zip(vars.iter())
+                        .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
+                        .collect();
+                    *running_mean = Tensor::from_vec(new_mean, &[num_features]).unwrap();
+                    *running_var = Tensor::from_vec(new_var, &[num_features]).unwrap();
+                }
+
+                let weight_vec = gamma_gpu.to_vec();
+                let requires_grad =
+                    (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
+                if requires_grad {
+                    let weight_var = self.weight.variable();
+                    let bias_var = self.bias.variable();
+                    let grad_fn = GradFn::new(BatchNorm1dBackward::new(
+                        input.grad_fn().cloned(),
+                        weight_var.grad_fn().cloned(),
+                        bias_var.grad_fn().cloned(),
+                        input_data,
+                        means,
+                        vars,
+                        weight_vec,
+                        self.eps,
+                        self.num_features,
+                    ));
+                    return Variable::from_operation(output_tensor, grad_fn, true);
+                }
+                return Variable::new(output_tensor, false);
+            }
+        }
+
+        let input_vec = input_data.to_vec();
+        let weight_vec = self.weight.data().to_vec();
+        let bias_vec = self.bias.data().to_vec();
 
         let mut means = vec![0.0f32; num_features];
         let mut vars = vec![0.0f32; num_features];
@@ -365,6 +440,7 @@ impl Module for BatchNorm2d {
                         vars,
                         weight_vec,
                         self.eps,
+                        self.num_features,
                     ));
                     return Variable::from_operation(output_tensor, grad_fn, true);
                 }
