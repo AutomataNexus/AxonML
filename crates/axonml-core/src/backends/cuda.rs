@@ -2134,6 +2134,72 @@ impl CudaBackend {
 }
 
 // =============================================================================
+// Fused Attention Backward (recomputation-based, memory-efficient)
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+impl CudaBackend {
+    /// Fused attention backward: recomputes attention weights from Q, K, O
+    /// and computes grad_Q, grad_K, grad_V without materializing the N*N matrix.
+    ///
+    /// Q, K, V: [B, H, Tq/Tk, D]
+    /// O: forward output [B, H, Tq, D]
+    /// grad_O: gradient of loss w.r.t. output [B, H, Tq, D]
+    /// grad_Q, grad_K, grad_V: output buffers (must be zero-initialized)
+    pub fn fused_attention_bwd_f32(
+        &self,
+        q: &CudaSlice<f32>,
+        k: &CudaSlice<f32>,
+        v: &CudaSlice<f32>,
+        o: &CudaSlice<f32>,
+        grad_o: &CudaSlice<f32>,
+        grad_q: &mut CudaSlice<f32>,
+        grad_k: &mut CudaSlice<f32>,
+        grad_v: &mut CudaSlice<f32>,
+        scale: f32,
+        batch_size: usize,
+        num_heads: usize,
+        tgt_len: usize,
+        src_len: usize,
+        head_dim: usize,
+        is_causal: bool,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("fused_attention_bwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("fused_attention_bwd_f32".to_string()))?;
+        let total_rows = batch_size * num_heads * tgt_len;
+        let cfg = cuda_kernels::launch_config(total_rows);
+        let is_causal_u32: u32 = if is_causal { 1 } else { 0 };
+        unsafe {
+            func.clone()
+                .launch(
+                    cfg,
+                    (
+                        q,
+                        k,
+                        v,
+                        o,
+                        grad_o,
+                        grad_q,
+                        grad_k,
+                        grad_v,
+                        scale,
+                        batch_size as u32,
+                        num_heads as u32,
+                        tgt_len as u32,
+                        src_len as u32,
+                        head_dim as u32,
+                        is_causal_u32,
+                    ),
+                )
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
 // Conv2d GPU Operations (im2col + GEMM)
 // =============================================================================
 

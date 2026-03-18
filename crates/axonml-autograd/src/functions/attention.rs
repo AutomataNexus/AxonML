@@ -1,0 +1,221 @@
+//! Fused Attention Gradient Functions
+//!
+//! # File
+//! `crates/axonml-autograd/src/functions/attention.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr - AutomataNexus
+//!
+//! # Updated
+//! March 18, 2026
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+use std::any::Any;
+
+use axonml_tensor::Tensor;
+
+use crate::grad_fn::{GradFn, GradientFunction};
+
+// =============================================================================
+// Fused Attention Backward
+// =============================================================================
+
+/// Gradient function for fused scaled dot-product attention.
+///
+/// For output = softmax(Q @ K^T * scale) @ V:
+/// - grad_Q = grad_scores @ K * scale
+/// - grad_K = grad_scores^T @ Q * scale
+/// - grad_V = attn_weights^T @ grad_output
+///
+/// where grad_scores = P * (grad_output @ V^T - sum(grad_output * output))
+///
+/// On GPU, this uses a CUDA kernel that recomputes attention weights per query
+/// row (memory-efficient). On CPU, falls back to standard matmul-based backward.
+#[derive(Debug)]
+pub struct FusedAttentionBackward {
+    next_fns: Vec<Option<GradFn>>,
+    saved_q: Tensor<f32>,
+    saved_k: Tensor<f32>,
+    saved_v: Tensor<f32>,
+    saved_output: Tensor<f32>,
+    scale: f32,
+    is_causal: bool,
+}
+
+impl FusedAttentionBackward {
+    /// Creates a new `FusedAttentionBackward`.
+    ///
+    /// # Arguments
+    /// * `q_grad_fn`, `k_grad_fn`, `v_grad_fn` - Gradient functions for Q, K, V inputs
+    /// * `q`, `k`, `v` - Saved input tensors [B, H, Tq/Tk, D]
+    /// * `output` - Forward output [B, H, Tq, D]
+    /// * `scale` - Attention scale factor (1/sqrt(head_dim))
+    /// * `is_causal` - Whether causal masking was applied
+    #[must_use]
+    pub fn new(
+        q_grad_fn: Option<GradFn>,
+        k_grad_fn: Option<GradFn>,
+        v_grad_fn: Option<GradFn>,
+        q: Tensor<f32>,
+        k: Tensor<f32>,
+        v: Tensor<f32>,
+        output: Tensor<f32>,
+        scale: f32,
+        is_causal: bool,
+    ) -> Self {
+        Self {
+            next_fns: vec![q_grad_fn, k_grad_fn, v_grad_fn],
+            saved_q: q,
+            saved_k: k,
+            saved_v: v,
+            saved_output: output,
+            scale,
+            is_causal,
+        }
+    }
+
+    /// CPU fallback for attention backward using standard matmul operations.
+    ///
+    /// Recomputes attention weights and computes gradients without the CUDA kernel.
+    fn backward_cpu(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let q_shape = self.saved_q.shape();
+        let batch_size = q_shape[0];
+        let num_heads = q_shape[1];
+        let tgt_len = q_shape[2];
+        let head_dim = q_shape[3];
+        let src_len = self.saved_k.shape()[2];
+
+        let q_data = self.saved_q.to_vec();
+        let k_data = self.saved_k.to_vec();
+        let v_data = self.saved_v.to_vec();
+        let o_data = self.saved_output.to_vec();
+        let go_data = grad_output.to_vec();
+
+        let total_q = batch_size * num_heads * tgt_len * head_dim;
+        let total_kv = batch_size * num_heads * src_len * head_dim;
+
+        let mut grad_q = vec![0.0f32; total_q];
+        let mut grad_k = vec![0.0f32; total_kv];
+        let mut grad_v = vec![0.0f32; total_kv];
+
+        for b in 0..batch_size {
+            for h in 0..num_heads {
+                for i in 0..tgt_len {
+                    let eff_src = if self.is_causal {
+                        (i + 1).min(src_len)
+                    } else {
+                        src_len
+                    };
+                    let qi_base = ((b * num_heads + h) * tgt_len + i) * head_dim;
+
+                    // Recompute attention scores and softmax
+                    let mut max_score = f32::NEG_INFINITY;
+                    let mut scores = vec![0.0f32; eff_src];
+                    for j in 0..eff_src {
+                        let kj_base = ((b * num_heads + h) * src_len + j) * head_dim;
+                        let mut s = 0.0f32;
+                        for d in 0..head_dim {
+                            s += q_data[qi_base + d] * k_data[kj_base + d];
+                        }
+                        s *= self.scale;
+                        scores[j] = s;
+                        if s > max_score {
+                            max_score = s;
+                        }
+                    }
+
+                    // Softmax
+                    let mut sum_exp = 0.0f32;
+                    for s in &mut scores {
+                        *s = (*s - max_score).exp();
+                        sum_exp += *s;
+                    }
+                    let inv_sum = if sum_exp > 0.0 { 1.0 / sum_exp } else { 0.0 };
+                    for s in &mut scores {
+                        *s *= inv_sum;
+                    }
+
+                    // D_i = sum_d(grad_O[i,d] * O[i,d])
+                    let mut d_i = 0.0f32;
+                    for d in 0..head_dim {
+                        d_i += go_data[qi_base + d] * o_data[qi_base + d];
+                    }
+
+                    // For each key position j
+                    for j in 0..eff_src {
+                        let kj_base = ((b * num_heads + h) * src_len + j) * head_dim;
+                        let p_ij = scores[j];
+
+                        // grad_attn[i,j] = sum_d(grad_O[i,d] * V[j,d])
+                        let mut grad_attn_ij = 0.0f32;
+                        for d in 0..head_dim {
+                            grad_attn_ij += go_data[qi_base + d] * v_data[kj_base + d];
+                        }
+
+                        // grad_score[i,j] = P[i,j] * (grad_attn[i,j] - D_i)
+                        let grad_score_ij = p_ij * (grad_attn_ij - d_i);
+                        let scaled_gs = grad_score_ij * self.scale;
+
+                        for d in 0..head_dim {
+                            grad_v[kj_base + d] += p_ij * go_data[qi_base + d];
+                            grad_q[qi_base + d] += scaled_gs * k_data[kj_base + d];
+                            grad_k[kj_base + d] += scaled_gs * q_data[qi_base + d];
+                        }
+                    }
+                }
+            }
+        }
+
+        let gq = Tensor::from_vec(grad_q, q_shape).unwrap();
+        let gk = Tensor::from_vec(grad_k, self.saved_k.shape()).unwrap();
+        let gv = Tensor::from_vec(grad_v, self.saved_v.shape()).unwrap();
+
+        vec![Some(gq), Some(gk), Some(gv)]
+    }
+}
+
+impl GradientFunction for FusedAttentionBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        // Try GPU backward kernel
+        #[cfg(feature = "cuda")]
+        if self.saved_q.device().is_gpu() {
+            // Ensure grad_output is on GPU
+            let go_gpu = if grad_output.device().is_gpu() {
+                grad_output.clone()
+            } else {
+                grad_output.to_device(self.saved_q.device()).unwrap()
+            };
+
+            if let Some((gq, gk, gv)) = self.saved_q.fused_attention_bwd_cuda(
+                &self.saved_k,
+                &self.saved_v,
+                &self.saved_output,
+                &go_gpu,
+                self.scale,
+                self.is_causal,
+            ) {
+                return vec![Some(gq), Some(gk), Some(gv)];
+            }
+            // Fall through to CPU on failure
+        }
+
+        // CPU fallback
+        self.backward_cpu(grad_output)
+    }
+
+    fn name(&self) -> &'static str {
+        "FusedAttentionBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}

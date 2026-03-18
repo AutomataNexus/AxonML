@@ -3702,8 +3702,12 @@ impl CudaKernels {
             ],
         )?;
 
-        // Load fused attention kernel (scaled dot-product attention)
-        kernels.load_module("attention", ATTENTION_PTX, &["fused_attention_fwd_f32"])?;
+        // Load fused attention kernels (scaled dot-product attention forward + backward)
+        kernels.load_module(
+            "attention",
+            ATTENTION_PTX,
+            &["fused_attention_fwd_f32", "fused_attention_bwd_f32"],
+        )?;
 
         Ok(kernels)
     }

@@ -2725,4 +2725,96 @@ impl Tensor<f32> {
             offset: 0,
         })
     }
+
+    /// Fused attention backward on GPU: computes grad_Q, grad_K, grad_V by
+    /// recomputing attention weights from Q, K, O without storing the N*N matrix.
+    ///
+    /// - `self` (Q): [B, H, Tq, D]
+    /// - `k`: [B, H, Tk, D]
+    /// - `v`: [B, H, Tk, D]
+    /// - `output`: [B, H, Tq, D]  (forward output)
+    /// - `grad_output`: [B, H, Tq, D]
+    /// - Returns (grad_Q, grad_K, grad_V) on GPU, or None if kernel unavailable
+    pub fn fused_attention_bwd_cuda(
+        &self,
+        k: &Self,
+        v: &Self,
+        output: &Self,
+        grad_output: &Self,
+        scale: f32,
+        is_causal: bool,
+    ) -> Option<(Self, Self, Self)> {
+        let cuda = get_cuda_backend()?;
+
+        let q_shape = self.shape();
+        assert!(q_shape.len() == 4, "Q must be [B, H, Tq, D]");
+        let batch_size = q_shape[0];
+        let num_heads = q_shape[1];
+        let tgt_len = q_shape[2];
+        let head_dim = q_shape[3];
+        let src_len = k.shape()[2];
+
+        let total_q = batch_size * num_heads * tgt_len * head_dim;
+        let total_kv = batch_size * num_heads * src_len * head_dim;
+
+        let q_contig = self.contiguous_gpu();
+        let k_contig = k.contiguous_gpu();
+        let v_contig = v.contiguous_gpu();
+        let o_contig = output.contiguous_gpu();
+        let go_contig = grad_output.contiguous_gpu();
+
+        let q_guard = q_contig.storage.as_cuda_slice();
+        let k_guard = k_contig.storage.as_cuda_slice();
+        let v_guard = v_contig.storage.as_cuda_slice();
+        let o_guard = o_contig.storage.as_cuda_slice();
+        let go_guard = go_contig.storage.as_cuda_slice();
+
+        // Zero-initialized output buffers (htod_copy from zeros)
+        let mut gq_gpu = cuda.htod_copy(&vec![0.0f32; total_q]).ok()?;
+        let mut gk_gpu = cuda.htod_copy(&vec![0.0f32; total_kv]).ok()?;
+        let mut gv_gpu = cuda.htod_copy(&vec![0.0f32; total_kv]).ok()?;
+
+        cuda.fused_attention_bwd_f32(
+            q_guard.slice(),
+            k_guard.slice(),
+            v_guard.slice(),
+            o_guard.slice(),
+            go_guard.slice(),
+            &mut gq_gpu,
+            &mut gk_gpu,
+            &mut gv_gpu,
+            scale,
+            batch_size,
+            num_heads,
+            tgt_len,
+            src_len,
+            head_dim,
+            is_causal,
+        )
+        .ok()?;
+
+        let q_out_shape = Shape::from_slice(&[batch_size, num_heads, tgt_len, head_dim]);
+        let kv_out_shape = Shape::from_slice(&[batch_size, num_heads, src_len, head_dim]);
+
+        let grad_q = Self {
+            storage: Storage::from_cuda_slice(gq_gpu, total_q, self.device()),
+            shape: q_out_shape.clone(),
+            strides: contiguous_strides(&q_out_shape),
+            offset: 0,
+        };
+        let grad_k = Self {
+            storage: Storage::from_cuda_slice(gk_gpu, total_kv, self.device()),
+            shape: kv_out_shape.clone(),
+            strides: contiguous_strides(&kv_out_shape),
+            offset: 0,
+        };
+        let grad_v = Self {
+            storage: Storage::from_cuda_slice(gv_gpu, total_kv, self.device()),
+            shape: kv_out_shape.clone(),
+            strides: contiguous_strides(&kv_out_shape),
+            offset: 0,
+        };
+
+        Some((grad_q, grad_k, grad_v))
+    }
 }
