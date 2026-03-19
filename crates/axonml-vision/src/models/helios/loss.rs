@@ -588,10 +588,11 @@ impl HeliosLoss {
                                 cls_data[b * num_classes * h * w + c * h * w + yi * w + xi];
                         }
 
-                        // Boxes
+                        // Boxes — bbox_decoded is [batch_size * this_scale_anchors * 4]
+                        let this_scale_anchors = h * w;
                         for coord in 0..4 {
                             flat_pred_boxes[b * total_anchors * 4 + global_idx * 4 + coord] =
-                                bbox_decoded[b * total_anchors * 4 + local_idx * 4 + coord];
+                                bbox_decoded[b * this_scale_anchors * 4 + local_idx * 4 + coord];
                         }
                     }
                 }
