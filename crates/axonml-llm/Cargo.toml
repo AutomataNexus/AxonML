@@ -54,6 +54,8 @@ half = "2.3"
 
 [dev-dependencies]
 approx = { workspace = true }
+axonml-optim = { workspace = true }
+axonml = { path = "../axonml" }
 
 [features]
 default = []
