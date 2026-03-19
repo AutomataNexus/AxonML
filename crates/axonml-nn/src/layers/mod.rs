@@ -16,21 +16,26 @@
 
 pub mod attention;
 pub mod conv;
+pub mod diff_attention;
 pub mod dropout;
 pub mod embedding;
 pub mod fft;
 pub mod graph;
 pub mod linear;
+pub mod moe;
 pub mod norm;
 pub mod pooling;
 pub mod residual;
 pub mod rnn;
 pub mod sparse;
+pub mod ternary;
 pub mod transformer;
 
 // Re-exports
 pub use attention::{scaled_dot_product_attention_fused, CrossAttention, MultiHeadAttention};
 pub use conv::{Conv1d, Conv2d, ConvTranspose2d};
+pub use diff_attention::DifferentialAttention;
+pub use moe::{Expert, MoELayer, MoERouter};
 pub use dropout::Dropout;
 pub use embedding::Embedding;
 pub use fft::{FFT1d, STFT};
@@ -41,6 +46,7 @@ pub use pooling::{AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, MaxPool1d, MaxPool2d}
 pub use residual::ResidualBlock;
 pub use rnn::{GRUCell, LSTMCell, RNNCell, GRU, LSTM, RNN};
 pub use sparse::{GroupSparsity, LotteryTicket, SparseLinear};
+pub use ternary::{PackedTernaryWeights, TernaryLinear};
 pub use transformer::{
     Seq2SeqTransformer, TransformerDecoder, TransformerDecoderLayer, TransformerEncoder,
     TransformerEncoderLayer,

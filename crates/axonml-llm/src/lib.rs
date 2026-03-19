@@ -19,6 +19,7 @@
 
 pub mod attention;
 pub mod bert;
+pub mod chimera;
 pub mod config;
 pub mod embedding;
 pub mod error;
@@ -26,12 +27,15 @@ pub mod generation;
 pub mod gpt2;
 pub mod hf_loader;
 pub mod hub;
+pub mod hydra;
 pub mod llama;
 pub mod mistral;
 pub mod phi;
+pub mod ssm;
 pub mod state_dict;
 pub mod tokenizer;
 pub mod transformer;
+pub mod trident;
 
 pub use attention::{
     scaled_dot_product_attention, CausalSelfAttention, FlashAttention, FlashAttentionConfig,
@@ -50,6 +54,10 @@ pub use mistral::{Mistral, MistralConfig, MistralForCausalLM};
 pub use phi::{Phi, PhiConfig, PhiForCausalLM};
 pub use state_dict::{LoadResult, LoadStateDict};
 pub use tokenizer::{HFTokenizer, SpecialTokens};
+pub use chimera::{ChimeraConfig, ChimeraModel};
+pub use hydra::{HydraConfig, HydraModel};
+pub use ssm::{SSMBlock, SSMConfig};
+pub use trident::{TridentConfig, TridentModel};
 pub use transformer::{TransformerBlock, TransformerDecoder, TransformerEncoder};
 
 // =============================================================================
