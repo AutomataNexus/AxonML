@@ -134,10 +134,10 @@ pm2 startup  # Follow the instructions to enable boot persistence
 - `axonml-text` - Tokenizers (Whitespace, Char, BPE), vocabulary
 
 **Advanced Features:**
-- `axonml-distributed` - DDP, FSDP (ZeRO-2/3), Pipeline Parallelism, Tensor Parallelism, collective ops
+- `axonml-distributed` - DDP, FSDP (ZeRO-2/3), Pipeline Parallelism, Tensor Parallelism, NCCL backend
 - `axonml-serialize` - Model save/load (SafeTensors, StateDict)
 - `axonml-onnx` - ONNX import/export (40+ operators)
-- `axonml-quant` - Quantization (INT8/INT4/INT5, F16)
+- `axonml-quant` - Quantization (INT8/INT4/INT5, F16) + quantized inference (QuantizedLinear, QuantizedModel)
 - `axonml-fusion` - Kernel fusion optimization, Flash Attention
 - `axonml-jit` - JIT compilation, graph tracing
 - `axonml-profile` - Profiling tools
@@ -149,6 +149,63 @@ pm2 startup  # Follow the instructions to enable boot persistence
 - `axonml-tui` - Terminal UI dashboard
 - `axonml-dashboard` - Leptos/WASM web frontend
 - `axonml-server` - Axum REST API backend with JWT auth
+
+## GPU Acceleration (CUDA)
+
+**59 custom CUDA kernels + CUDNN integration. 98% forward / 98% backward GPU coverage.**
+
+```bash
+# Build with CUDA support
+cargo build --release --features cuda
+
+# Build with CUDA + CUDNN (requires libcudnn)
+cargo build --release --features cudnn
+
+# Build with NCCL multi-GPU (requires libnccl)
+cargo build --release --features nccl
+```
+
+**CUDA Kernels (59 total):**
+- Element-wise: add, sub, mul, div (+ broadcast variants, + backward)
+- Activations: relu, sigmoid, tanh, gelu, silu, elu, leaky_relu (+ backward)
+- Fused LSTM gates: forward (lstm_gates_f32) + backward (lstm_gates_backward_f32)
+- Fused GRU gates: forward (gru_gates_f32) + backward (gru_gates_backward_f32)
+- BatchNorm: stats (batchnorm_stats_f32) + normalize (batchnorm_norm_f32)
+- Pooling: MaxPool2d fwd/bwd, AvgPool2d fwd/bwd (with atomicAdd scatter)
+- Fused Attention: forward + backward (recomputation-based, no N*N storage)
+- Conv2d: im2col + cuBLAS GEMM + bias_add + col2im backward
+- Optimizers: fused Adam (adam_step_f32), grad_norm, grad_scale
+- Embedding: scatter-add, gather
+- Attention masks: causal + padding expansion
+- LayerNorm: forward + backward (dinput, dweight/dbias)
+- CrossEntropy: fused forward + backward
+- Softmax: forward + backward (row-wise)
+- Reductions: sum_dim, strided_gather
+
+**CUDNN Integration (cudarc 0.19.3):**
+- Conv2d forward with auto algorithm selection (Winograd/FFT/GEMM)
+- Conv2d backward (data + filter) via CUDNN
+- Falls back to custom im2col+GEMM if CUDNN unavailable
+
+**NCCL Multi-GPU:**
+- NcclBackend implements Backend trait (all_reduce, broadcast, all_gather, reduce_scatter)
+- Dynamic loading via libloading (no link-time dependency)
+- Point-to-point: send/recv
+- Grouped gather/scatter via NCCL send/recv
+
+**Quantized Inference:**
+- QuantizedLinear: Q8/Q4/F16 dequant-on-the-fly matmul with rayon parallelism
+- QuantizedModel: one-call model quantization + AXQT binary serialization
+- Compression: Q8 ~4x, Q4 ~7x
+
+**Training Monitor:**
+- Browser-based live dashboard (Prometheus NexusEdge theme)
+- REST API: POST /api/epoch, /api/config, /api/status (Python/any language)
+- `TrainingMonitor::new("Model", params).total_epochs(50).batch_size(32).launch()`
+
+**Async DataLoader:**
+- `DataLoader::prefetch_to_gpu(device)` — background thread pre-transfers next batch
+- PinnedBuffer: RAII page-locked memory for fast DMA CPU→GPU transfers
 
 ## Code Conventions
 
@@ -220,5 +277,7 @@ trunk build --release
 - **Frontend:** leptos, gloo-net
 - **Auth:** jsonwebtoken, totp-rs, argon2
 - **ML:** matrixmultiply, rayon, half, bytemuck
+- **GPU:** cudarc 0.19.3 (CUDA driver, cuBLAS, cuRAND, CUDNN, NVRTC)
+- **Distributed:** libloading (NCCL dynamic loading)
 - **Serialization:** serde, bincode, prost
 - **CLI:** clap (derive), indicatif, colored
