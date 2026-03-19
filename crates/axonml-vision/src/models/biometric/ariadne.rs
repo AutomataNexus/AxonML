@@ -309,10 +309,16 @@ impl AriadneFingerprint {
             }
         }
 
-        Variable::new(
+        let result = Variable::new(
             Tensor::from_vec(ridge_events, &[batch, 2, h, w]).unwrap(),
             fingerprint.requires_grad(),
-        )
+        );
+        // Ensure output lives on the same device as the input (GPU-ready)
+        if fingerprint.device() != result.device() {
+            result.to_device(fingerprint.device())
+        } else {
+            result
+        }
     }
 
     /// Compute Gabor response magnitudes for each orientation.
@@ -423,10 +429,16 @@ impl AriadneFingerprint {
             }
         }
 
-        Variable::new(
+        let result = Variable::new(
             Tensor::from_vec(density, &[batch, 1, cells_h, cells_w]).unwrap(),
             false,
-        )
+        );
+        // Ensure output lives on the same device as the input (GPU-ready)
+        if fingerprint.device() != result.device() {
+            result.to_device(fingerprint.device())
+        } else {
+            result
+        }
     }
 
     /// Detect core and delta singularities using the Poincare index method.

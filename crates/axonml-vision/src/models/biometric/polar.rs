@@ -130,10 +130,16 @@ pub fn polar_unwrap(image: &Variable, config: &PolarUnwrapConfig) -> Variable {
         }
     }
 
-    Variable::new(
+    let result = Variable::new(
         Tensor::from_vec(output, &[batch, 1, rb, ab]).unwrap(),
         false,
-    )
+    );
+    // Ensure output lives on the same device as the input (GPU-ready)
+    if image.device() != result.device() {
+        result.to_device(image.device())
+    } else {
+        result
+    }
 }
 
 /// Bilinear interpolation sampling from a single-channel image.
@@ -192,10 +198,16 @@ pub fn circular_shift(strip: &Variable, shift: isize) -> Variable {
         }
     }
 
-    Variable::new(
+    let result = Variable::new(
         Tensor::from_vec(shifted, &[batch, ch, r, a]).unwrap(),
         false,
-    )
+    );
+    // Ensure output lives on the same device as the input (GPU-ready)
+    if strip.device() != result.device() {
+        result.to_device(strip.device())
+    } else {
+        result
+    }
 }
 
 // =============================================================================
@@ -231,7 +243,13 @@ pub fn normalized_polar_unwrap(image: &Variable, config: &PolarUnwrapConfig) -> 
         }
     }
 
-    Variable::new(Tensor::from_vec(data, &[batch, 1, rb, ab]).unwrap(), false)
+    let result = Variable::new(Tensor::from_vec(data, &[batch, 1, rb, ab]).unwrap(), false);
+    // Ensure output lives on the same device as the input (GPU-ready)
+    if image.device() != result.device() {
+        result.to_device(image.device())
+    } else {
+        result
+    }
 }
 
 // =============================================================================

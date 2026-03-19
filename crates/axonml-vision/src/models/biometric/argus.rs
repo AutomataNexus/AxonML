@@ -249,6 +249,12 @@ impl ArgusIris {
             Tensor::from_vec(gradient, &[batch * r_len, ph_ch, ph_len]).unwrap(),
             false,
         );
+        // Ensure gradient variable lives on the same device as the input (GPU-ready)
+        let grad_var = if polar_strip.device() != grad_var.device() {
+            grad_var.to_device(polar_strip.device())
+        } else {
+            grad_var
+        };
         let phase_out = self.phase_conv.forward(&grad_var).relu();
         // [B*R', 32, A']
 
@@ -394,10 +400,16 @@ impl ArgusIris {
             }
         }
 
-        Variable::new(
+        let result = Variable::new(
             Tensor::from_vec(resized, &[batch, ch, target_r, target_a]).unwrap(),
             false,
-        )
+        );
+        // Ensure output lives on the same device as the input (GPU-ready)
+        if strip.device() != result.device() {
+            result.to_device(strip.device())
+        } else {
+            result
+        }
     }
 
     // =========================================================================
