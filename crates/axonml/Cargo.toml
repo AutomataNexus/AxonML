@@ -38,7 +38,7 @@ onnx = ["core", "dep:axonml-onnx"]
 # NCCL distributed communication (requires CUDA + libnccl.so.2)
 nccl = ["distributed", "axonml-distributed/nccl"]
 # CUDA GPU acceleration
-cuda = ["axonml-core/cuda", "axonml-tensor/cuda"]
+cuda = ["axonml-core/cuda", "axonml-tensor/cuda", "axonml-nn/cuda"]
 # cuDNN acceleration (requires CUDA)
 cudnn = ["cuda", "axonml-core/cudnn", "axonml-tensor/cudnn", "axonml-nn/cudnn"]
 # WebGPU/Vulkan GPU acceleration
