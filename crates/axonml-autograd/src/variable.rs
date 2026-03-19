@@ -672,6 +672,22 @@ impl Variable {
         }
     }
 
+    /// Flattens all dimensions from `start_dim` to the end into a single dimension.
+    ///
+    /// `flatten(1)` on a `[batch, C, H, W]` tensor produces `[batch, C*H*W]`.
+    /// `flatten(0)` flattens everything into a 1D vector.
+    #[must_use]
+    pub fn flatten(&self, start_dim: usize) -> Variable {
+        let shape = self.shape();
+        if start_dim >= shape.len() {
+            return self.clone();
+        }
+        let mut new_shape: Vec<usize> = shape[..start_dim].to_vec();
+        let flat: usize = shape[start_dim..].iter().product();
+        new_shape.push(flat);
+        self.reshape(&new_shape)
+    }
+
     /// Transposes two dimensions.
     #[must_use]
     pub fn transpose(&self, dim0: usize, dim1: usize) -> Variable {

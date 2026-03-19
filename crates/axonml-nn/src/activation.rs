@@ -330,6 +330,56 @@ impl Module for Identity {
 }
 
 // =============================================================================
+// Flatten
+// =============================================================================
+
+/// Flattens all dimensions from `start_dim` to the end into a single dimension.
+///
+/// Default: `start_dim = 1` (preserves batch dimension).
+///
+/// # Examples
+/// ```ignore
+/// let flatten = Flatten::new();      // flattens from dim 1 (batch preserved)
+/// let flat_all = Flatten::from(0);   // flattens everything
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct Flatten {
+    start_dim: usize,
+}
+
+impl Flatten {
+    /// Creates a Flatten module that flattens from dimension 1 (preserves batch dim).
+    pub fn new() -> Self {
+        Self { start_dim: 1 }
+    }
+
+    /// Creates a Flatten module that flattens from the specified start dimension.
+    pub fn from(start_dim: usize) -> Self {
+        Self { start_dim }
+    }
+}
+
+impl Default for Flatten {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Module for Flatten {
+    fn forward(&self, input: &Variable) -> Variable {
+        input.flatten(self.start_dim)
+    }
+
+    fn parameters(&self) -> Vec<crate::Parameter> {
+        Vec::new()
+    }
+
+    fn name(&self) -> &'static str {
+        "Flatten"
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
