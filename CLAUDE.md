@@ -119,36 +119,88 @@ pm2 startup  # Follow the instructions to enable boot persistence
 ## Architecture
 
 **Foundation Layer:**
-- `axonml-core` - Device abstraction (CPU, CUDA, Vulkan, Metal, WebGPU), data types, storage, GPU test suite
-- `axonml-tensor` - N-dimensional arrays with broadcasting, views, slicing, BLAS ops, sparse tensors, topk/sort/gather/scatter/unique
+- `axonml-core` - Device abstraction (CPU, CUDA, Vulkan, Metal, WebGPU), data types, storage, GPU memory pool, CUDNN/NCCL integration
+- `axonml-tensor` - N-dimensional arrays with broadcasting, views, slicing, BLAS ops, sparse tensors, topk/sort/gather/scatter/unique, 59 CUDA kernels
 
 **Computation Layer:**
-- `axonml-autograd` - Reverse-mode automatic differentiation, computational graphs, AMP (autocast), gradient checkpointing
-- `axonml-nn` - Neural network modules (Linear, Conv, BatchNorm, LayerNorm, GroupNorm, InstanceNorm, Attention, RNN/LSTM/GRU)
-- `axonml-optim` - Optimizers (SGD, Adam, AdamW, RMSprop, LAMB), GradScaler, LR schedulers
+- `axonml-autograd` - Reverse-mode automatic differentiation, computational graphs, AMP (autocast), gradient checkpointing, fused LSTM/GRU/Attention backward
+- `axonml-nn` - Neural network modules (Linear, Conv1d/2d, BatchNorm1d/2d, LayerNorm, GroupNorm, InstanceNorm, MultiHeadAttention, RNN/LSTM/GRU, Dropout, Pooling)
+- `axonml-optim` - Optimizers (SGD, Adam, AdamW, RMSprop, LAMB) — all GPU-resident with fused kernels
 
 **Data & Domain Layer:**
-- `axonml-data` - DataLoader, Dataset trait, batching, samplers, parallel data loading
-- `axonml-vision` - Image transforms, MNIST/CIFAR datasets, CNN architectures, pretrained model hub
+- `axonml-data` - DataLoader, Dataset trait, batching, samplers, parallel data loading, async GPU prefetch, pinned memory
+- `axonml-vision` - Image transforms, MNIST/CIFAR/WIDER FACE datasets, 40+ model architectures, pretrained hub
 - `axonml-audio` - MelSpectrogram, MFCC, audio transforms
 - `axonml-text` - Tokenizers (Whitespace, Char, BPE), vocabulary
 
 **Advanced Features:**
-- `axonml-distributed` - DDP, FSDP (ZeRO-2/3), Pipeline Parallelism, Tensor Parallelism, NCCL backend
-- `axonml-serialize` - Model save/load (SafeTensors, StateDict)
+- `axonml-distributed` - DDP, FSDP (ZeRO-2/3), Pipeline Parallelism, Tensor Parallelism, NCCL multi-GPU backend
+- `axonml-serialize` - Model save/load (SafeTensors, StateDict), indexed key serialization
 - `axonml-onnx` - ONNX import/export (40+ operators)
-- `axonml-quant` - Quantization (INT8/INT4/INT5, F16) + quantized inference (QuantizedLinear, QuantizedModel)
-- `axonml-fusion` - Kernel fusion optimization, Flash Attention
+- `axonml-quant` - Quantization (INT8/INT4/F16) + quantized inference engine (QuantizedLinear, QuantizedModel, AXQT format)
+- `axonml-fusion` - Kernel fusion optimization, fused scaled dot-product attention
 - `axonml-jit` - JIT compilation, graph tracing
 - `axonml-profile` - Profiling tools
 - `axonml-llm` - LLM architectures (BERT, GPT-2), pretrained hub (LLaMA, Mistral, Phi, Qwen)
 
 **Application Layer:**
-- `axonml` - Main umbrella crate with feature flags, unified model hub, benchmarking utilities
+- `axonml` - Main umbrella crate with feature flags, unified model hub, benchmarking, training monitor, HVAC models
 - `axonml-cli` - CLI for training, evaluation, model management
 - `axonml-tui` - Terminal UI dashboard
 - `axonml-dashboard` - Leptos/WASM web frontend
 - `axonml-server` - Axum REST API backend with JWT auth
+
+## Model Architectures
+
+**Vision — Detection:**
+- BlazeFace - Lightweight face detector (dual-scale SSD, 246K params)
+- Helios - YOLO detector (CSPDarknet + PANet + DFL head)
+- NanoDet - Ultra-lightweight detector (ShuffleNet + PAN)
+- RetinaFace - Face detector with landmarks (FPN + context module)
+- DETR - Detection Transformer (encoder-decoder attention)
+
+**Vision — Classification:**
+- LeNet - Classic CNN (Conv2d + Pool + FC)
+- ResNet - Residual networks (ResNet-18/34/50, skip connections)
+- VGG - Deep sequential CNN (VGG-11/16/19)
+- Vision Transformer (ViT) - Patch-based transformer classifier
+
+**Vision — Other:**
+- Depth - Monocular depth estimation (FPN decoder)
+- VQA - Visual question answering (multimodal fusion)
+- Anomaly - Autoencoder-based anomaly detection
+- FPN - Feature Pyramid Network (multi-scale features)
+
+**Vision — Biometric Suite:**
+- Argus - Face recognition (ArcFace embedding)
+- Echo - Speaker verification (GRU + stats pooling)
+- Ariadne - Gait recognition (temporal modeling)
+- Themis - Anti-spoofing (binary classifier)
+- Polar - Iris recognition
+- Mnemosyne - Person re-identification
+
+**Vision — Multi-Sensor:**
+- Nexus - Multi-modal fusion (backbone + attention + gated blending)
+- Phantom - Edge surveillance (lightweight backbone + tracker)
+- Aegis3D - 3D reconstruction (implicit/mesh/octree/renderer)
+
+**HVAC Models (Edge Deployment):**
+- Panoptes - Facility-wide anomaly detection (per-type encoders + cross-equipment transformer + temporal LSTM, 47K params)
+- Boreas - AHU controller (LSTM)
+- Zephyrus - DOAS controller (GRU)
+- Vulcan - Boiler controller (MLP)
+- Naiad - Pump controller (LSTM)
+- Aquilo - Steam bundle controller (GRU)
+- Colossus - Chiller plant controller (transformer)
+- Apollo - Multi-equipment coordinator (transformer)
+- Gaia - Geothermal controller
+
+**LLM Architectures:**
+- BERT - Bidirectional encoder (classification, NER)
+- GPT-2 - Autoregressive decoder (text generation)
+- LLaMA - Meta's efficient transformer (RMSNorm, RoPE, GQA)
+- Mistral - Sliding window attention
+- Phi - Microsoft's compact LLM (partial RoPE)
 
 ## GPU Acceleration (CUDA)
 
