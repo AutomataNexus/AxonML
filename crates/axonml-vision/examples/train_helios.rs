@@ -78,9 +78,13 @@ fn generate_batch(
     let mut pixels = Vec::with_capacity(numel);
 
     // Deterministic pseudo-random via simple LCG
-    let mut rng_state = (seed as u64).wrapping_mul(6364136223846793005).wrapping_add(1);
+    let mut rng_state = (seed as u64)
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1);
     let mut next_f32 = || -> f32 {
-        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        rng_state = rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((rng_state >> 33) as f32) / (u32::MAX as f32)
     };
 
@@ -208,9 +212,7 @@ fn main() {
             no_grad_params += 1;
         }
     }
-    println!(
-        "Trainable:      {has_grad_params}/{num_param_tensors} tensors require grad"
-    );
+    println!("Trainable:      {has_grad_params}/{num_param_tensors} tensors require grad");
     if no_grad_params > 0 {
         println!("Non-trainable:  {no_grad_params} tensors (frozen/buffers)");
     }
@@ -270,12 +272,8 @@ fn main() {
 
     optimizer.zero_grad();
     let step_out = model.forward_train(&step_input);
-    let (step_loss, _, _, _) = loss_fn.compute(
-        &step_out,
-        &step_gt_boxes,
-        &step_gt_classes,
-        NUM_CLASSES,
-    );
+    let (step_loss, _, _, _) =
+        loss_fn.compute(&step_out, &step_gt_boxes, &step_gt_classes, NUM_CLASSES);
     let loss_before = step_loss.data().to_vec()[0];
 
     let t3 = Instant::now();

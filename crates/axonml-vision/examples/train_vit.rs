@@ -66,10 +66,7 @@ fn detect_device() -> Device {
 // =============================================================================
 
 /// Generate synthetic CIFAR-like data: random 3x32x32 images with random labels.
-fn generate_synthetic_data(
-    num_samples: usize,
-    rng: &mut StdRng,
-) -> (Vec<Vec<f32>>, Vec<usize>) {
+fn generate_synthetic_data(num_samples: usize, rng: &mut StdRng) -> (Vec<Vec<f32>>, Vec<usize>) {
     let pixels = IN_CHANNELS * IMAGE_SIZE * IMAGE_SIZE;
     let mut images = Vec::with_capacity(num_samples);
     let mut labels = Vec::with_capacity(num_samples);
@@ -160,7 +157,14 @@ fn main() {
 
     // Build model
     let mut vit = VisionTransformer::new(
-        IMAGE_SIZE, PATCH_SIZE, IN_CHANNELS, NUM_CLASSES, D_MODEL, NHEAD, NUM_LAYERS, DIM_FF,
+        IMAGE_SIZE,
+        PATCH_SIZE,
+        IN_CHANNELS,
+        NUM_CLASSES,
+        D_MODEL,
+        NHEAD,
+        NUM_LAYERS,
+        DIM_FF,
         DROPOUT,
     );
     let params = vit.parameters();

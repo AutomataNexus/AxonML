@@ -167,12 +167,7 @@ fn main() {
         );
 
         if let Some(ref m) = monitor {
-            m.log_epoch(
-                epoch,
-                avg_loss,
-                None,
-                vec![("perplexity", perplexity)],
-            );
+            m.log_epoch(epoch, avg_loss, None, vec![("perplexity", perplexity)]);
         }
     }
 

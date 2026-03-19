@@ -57,8 +57,15 @@ fn main() {
     let model = LeNet::new();
     model.to_device(device);
     let params = model.parameters();
-    let total_params: usize = params.iter().map(|p| p.variable().data().to_vec().len()).sum();
-    println!("   Parameters: {} ({} total weights)", params.len(), total_params);
+    let total_params: usize = params
+        .iter()
+        .map(|p| p.variable().data().to_vec().len())
+        .sum();
+    println!(
+        "   Parameters: {} ({} total weights)",
+        params.len(),
+        total_params
+    );
     println!("   Device: {:?}", device);
 
     // 4. Create optimizer and loss
