@@ -169,17 +169,30 @@ fn main() {
     println!("   Test batches:     {}", test_loader.len());
 
     // Model
-    println!("3. Creating VGG-11 with BatchNorm ({} classes)...", NUM_CLASSES);
+    println!(
+        "3. Creating VGG-11 with BatchNorm ({} classes)...",
+        NUM_CLASSES
+    );
     let mut model = CifarVGG11::new(NUM_CLASSES);
     model.train();
     model.to_device(device);
 
     let params = model.parameters();
-    let total_params: usize = params.iter().map(|p| p.variable().data().to_vec().len()).sum();
-    println!("   Parameters: {} tensors ({} total weights)", params.len(), total_params);
+    let total_params: usize = params
+        .iter()
+        .map(|p| p.variable().data().to_vec().len())
+        .sum();
+    println!(
+        "   Parameters: {} tensors ({} total weights)",
+        params.len(),
+        total_params
+    );
 
     // Optimizer + Loss
-    println!("4. Creating Adam optimizer (lr={}) + CrossEntropyLoss...", LEARNING_RATE);
+    println!(
+        "4. Creating Adam optimizer (lr={}) + CrossEntropyLoss...",
+        LEARNING_RATE
+    );
     let mut optimizer = Adam::new(params, LEARNING_RATE);
     let criterion = CrossEntropyLoss::new();
 
@@ -337,7 +350,10 @@ fn main() {
             best_test_acc = test_acc;
             let path = format!("{}/best_model.axonml", CHECKPOINT_DIR);
             match save_model(&model, &path) {
-                Ok(()) => println!("   -> Saved best model (test_acc={:.1}%) to {}", test_acc, path),
+                Ok(()) => println!(
+                    "   -> Saved best model (test_acc={:.1}%) to {}",
+                    test_acc, path
+                ),
                 Err(e) => println!("   -> Warning: could not save checkpoint: {}", e),
             }
         }

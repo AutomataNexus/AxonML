@@ -21,7 +21,7 @@ use axonml_autograd::{GradFn, GradientFunction, Variable};
 use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter, ReLU};
 use axonml_tensor::Tensor;
 
-use crate::ops::{nms, Detection, InterpolateMode, interpolate_var};
+use crate::ops::{interpolate_var, nms, Detection, InterpolateMode};
 
 // =============================================================================
 // ShuffleNet V2 Backbone

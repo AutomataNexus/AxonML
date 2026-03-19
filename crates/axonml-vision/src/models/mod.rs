@@ -137,7 +137,11 @@ mod detection_smoke_tests {
             false,
         );
         let (cls, bbox) = model.forward_detection(&features);
-        eprintln!("DETR cls shape: {:?}, bbox shape: {:?}", cls.shape(), bbox.shape());
+        eprintln!(
+            "DETR cls shape: {:?}, bbox shape: {:?}",
+            cls.shape(),
+            bbox.shape()
+        );
         assert_eq!(cls.shape(), vec![1, 10, 11]);
         assert_eq!(bbox.shape(), vec![1, 10, 4]);
     }
@@ -163,7 +167,11 @@ mod detection_smoke_tests {
         let model = super::FastDepth::new();
         let count = param_count(&model);
         eprintln!("FastDepth: {} params", count);
-        assert!(count > 10_000 && count < 4_000_000, "FastDepth: {} params", count);
+        assert!(
+            count > 10_000 && count < 4_000_000,
+            "FastDepth: {} params",
+            count
+        );
 
         let input = Variable::new(
             Tensor::from_vec(vec![0.1; 1 * 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),

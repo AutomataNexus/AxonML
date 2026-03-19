@@ -171,16 +171,11 @@ fn main() {
             for seq in &train_seqs[start..end] {
                 token_data.extend_from_slice(seq);
             }
-            let input_ids =
-                Tensor::<u32>::from_vec(token_data, &[bs, MAX_SEQ_LEN]).unwrap();
+            let input_ids = Tensor::<u32>::from_vec(token_data, &[bs, MAX_SEQ_LEN]).unwrap();
 
             // Labels as f32 for CrossEntropyLoss target
-            let label_data: Vec<f32> =
-                train_labels[start..end].iter().map(|&l| l as f32).collect();
-            let targets = Variable::new(
-                Tensor::<f32>::from_vec(label_data, &[bs]).unwrap(),
-                false,
-            );
+            let label_data: Vec<f32> = train_labels[start..end].iter().map(|&l| l as f32).collect();
+            let targets = Variable::new(Tensor::<f32>::from_vec(label_data, &[bs]).unwrap(), false);
 
             // Forward
             optimizer.zero_grad();
@@ -233,15 +228,10 @@ fn main() {
             for seq in &test_seqs[start..end] {
                 token_data.extend_from_slice(seq);
             }
-            let input_ids =
-                Tensor::<u32>::from_vec(token_data, &[bs, MAX_SEQ_LEN]).unwrap();
+            let input_ids = Tensor::<u32>::from_vec(token_data, &[bs, MAX_SEQ_LEN]).unwrap();
 
-            let label_data: Vec<f32> =
-                test_labels[start..end].iter().map(|&l| l as f32).collect();
-            let targets = Variable::new(
-                Tensor::<f32>::from_vec(label_data, &[bs]).unwrap(),
-                false,
-            );
+            let label_data: Vec<f32> = test_labels[start..end].iter().map(|&l| l as f32).collect();
+            let targets = Variable::new(Tensor::<f32>::from_vec(label_data, &[bs]).unwrap(), false);
 
             let logits = model
                 .forward_classification(&input_ids)
