@@ -85,8 +85,8 @@ if [ "$1" = "--with-user" ]; then
             "id": "devops",
             "document": {
                 "id": "devops",
-                "email": "DevOps@AutomataNexus.com",
-                "name": "Andrew Jewell",
+                "email": "devops@example.com",
+                "name": "DevOps Admin",
                 "password_hash": "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$RdescudvJCsgt3ub+b+dWRWJTmaaJObG",
                 "role": "admin",
                 "mfa_enabled": false,
@@ -100,7 +100,7 @@ if [ "$1" = "--with-user" ]; then
                 "updated_at": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"
             }
         }' 2>/dev/null)
-    echo "  DevOps@AutomataNexus.com: $DEVOPS_RESULT"
+    echo "  devops@example.com: $DEVOPS_RESULT"
 fi
 
 echo ""

@@ -121,25 +121,7 @@ impl Zephyrus {
         // Input is (batch, 7, 72) — treat as (batch, num_nodes=7, features=72)
         // Apply softmax to adjacency for proper graph attention weights
         let adj_var = self.adjacency.variable();
-        let adj_data = adj_var.data().to_vec();
-        let mut adj_softmax = vec![0.0f32; 49];
-        for i in 0..7 {
-            let row_start = i * 7;
-            let max_val = adj_data[row_start..row_start + 7]
-                .iter()
-                .cloned()
-                .fold(f32::NEG_INFINITY, f32::max);
-            let mut sum_exp = 0.0f32;
-            for j in 0..7 {
-                let e = (adj_data[row_start + j] - max_val).exp();
-                adj_softmax[row_start + j] = e;
-                sum_exp += e;
-            }
-            for j in 0..7 {
-                adj_softmax[row_start + j] /= sum_exp;
-            }
-        }
-        let adj_norm = Variable::new(Tensor::from_vec(adj_softmax, &[7, 7]).unwrap(), false);
+        let adj_norm = adj_var.softmax(1); // row-wise softmax using Variable ops (GPU-compatible)
 
         let gcn_out = self.gcn1.forward_graph(input, &adj_norm); // (batch, 7, 128)
         let gcn_out = self.gcn_relu.forward(&gcn_out);

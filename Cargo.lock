@@ -519,9 +519,11 @@ name = "axonml-llm"
 version = "0.4.1"
 dependencies = [
  "approx",
+ "axonml",
  "axonml-autograd",
  "axonml-core",
  "axonml-nn",
+ "axonml-optim",
  "axonml-tensor",
  "byteorder",
  "dirs",

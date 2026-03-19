@@ -21,7 +21,7 @@ use axonml_autograd::{GradFn, GradientFunction, Variable};
 use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter, ReLU};
 use axonml_tensor::Tensor;
 
-use crate::ops::{nms, Detection};
+use crate::ops::{nms, Detection, InterpolateMode, interpolate_var};
 
 // =============================================================================
 // ShuffleNet V2 Backbone
@@ -450,13 +450,7 @@ impl GhostPAN {
             let shape = reduced[i].shape();
             let (target_h, target_w) = (shape[2], shape[3]);
 
-            let upsampled = crate::ops::interpolate(
-                &coarse.data(),
-                target_h,
-                target_w,
-                crate::ops::InterpolateMode::Nearest,
-            );
-            let up_var = Variable::new(upsampled, coarse.requires_grad());
+            let up_var = interpolate_var(coarse, target_h, target_w, InterpolateMode::Nearest);
             let fused = reduced[i].add_var(&up_var);
             reduced[i] = self.top_down[i].forward(&fused);
         }

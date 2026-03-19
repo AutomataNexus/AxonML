@@ -141,8 +141,8 @@ if [ "$WITH_USER" = true ]; then
     "document": {
         "_id": "$user_id",
         "id": "$user_id",
-        "email": "DevOps@automatanexus.com",
-        "name": "Andrew Jewell",
+        "email": "devops@example.com",
+        "name": "DevOps Admin",
         "password_hash": "\$argon2id\$v=19\$m=19456,t=2,p=1\$acr9WUuS7lg2yoi8AHZAOQ\$JsbYql+uEabmalV21GLetVjDZ3Q4MImyqXEx77nOlfM",
         "role": "admin",
         "mfa_enabled": false,
@@ -164,8 +164,8 @@ EOF
         -d "$devops_doc" > /dev/null 2>&1
 
     echo -e "${GREEN}✓ DevOps admin user created${NC}"
-    echo "    Email: DevOps@automatanexus.com"
-    echo "    Name: Andrew Jewell"
+    echo "    Email: devops@example.com"
+    echo "    Name: DevOps Admin"
     echo ""
 fi
 
@@ -177,7 +177,7 @@ echo "╠═══════════════════════�
 echo "║  Collections: ${#COLLECTIONS[@]} created                                            ║"
 echo "║  Admin User:  admin@axonml.local / admin                               ║"
 if [ "$WITH_USER" = true ]; then
-echo "║  DevOps User: DevOps@automatanexus.com                                 ║"
+echo "║  DevOps User: devops@example.com                                        ║"
 fi
 echo "║                                                                        ║"
 echo "║  Start AxonML Server:                                                  ║"
