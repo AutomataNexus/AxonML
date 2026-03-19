@@ -21,6 +21,7 @@ use axonml_nn::{
     BatchNorm1d, Conv1d, Dropout, Linear, Module, MultiHeadAttention, Parameter, ReLU,
     ResidualBlock, Sequential, LSTM,
 };
+#[cfg(test)]
 use axonml_tensor::Tensor;
 
 // =============================================================================
@@ -168,39 +169,15 @@ impl Boreas {
     ) -> (Variable, Variable, Variable, Variable, Variable) {
         let shape = input.shape();
         let batch = shape[0];
-        // Input: (batch, 80, 7) — need to extract per-channel features and transpose
-        let data = input.data().to_vec();
+        // Input: (batch, 80, 7) — extract per-channel features using Variable ops
 
-        // Extract pressure channels (0,1), temp channels (2,3), flow channels (4,5,6)
-        let mut pressure_data = Vec::with_capacity(batch * 160);
-        let mut temp_data = Vec::with_capacity(batch * 160);
-        let mut flow_data = Vec::with_capacity(batch * 240);
-
-        for b in 0..batch {
-            for t in 0..80 {
-                let idx = (b * 80 + t) * 7;
-                pressure_data.push(data[idx]); // ch0
-                pressure_data.push(data[idx + 1]); // ch1
-            }
-            for t in 0..80 {
-                let idx = (b * 80 + t) * 7;
-                temp_data.push(data[idx + 2]); // ch2
-                temp_data.push(data[idx + 3]); // ch3
-            }
-            for t in 0..80 {
-                let idx = (b * 80 + t) * 7;
-                flow_data.push(data[idx + 4]); // ch4
-                flow_data.push(data[idx + 5]); // ch5
-                flow_data.push(data[idx + 6]); // ch6
-            }
-        }
-
-        let pressure_var = Variable::new(
-            Tensor::from_vec(pressure_data, &[batch, 160]).unwrap(),
-            false,
-        );
-        let temp_var = Variable::new(Tensor::from_vec(temp_data, &[batch, 160]).unwrap(), false);
-        let flow_var = Variable::new(Tensor::from_vec(flow_data, &[batch, 240]).unwrap(), false);
+        // Extract pressure channels (0,1): narrow on last dim, then flatten
+        // (batch, 80, 7) → narrow → (batch, 80, 2) → reshape → (batch, 160)
+        let pressure_var = input.narrow(2, 0, 2).reshape(&[batch, 160]);
+        // Extract temperature channels (2,3): (batch, 80, 2) → (batch, 160)
+        let temp_var = input.narrow(2, 2, 2).reshape(&[batch, 160]);
+        // Extract flow channels (4,5,6): (batch, 80, 3) → (batch, 240)
+        let flow_var = input.narrow(2, 4, 3).reshape(&[batch, 240]);
 
         let press_out = self.pressure_analyzer.forward(&pressure_var); // (batch, 64)
         let temp_out = self.temp_analyzer.forward(&temp_var); // (batch, 64)

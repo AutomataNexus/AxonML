@@ -109,32 +109,11 @@ impl Aquilo {
     ) -> (Variable, Variable, Variable, Variable, Variable) {
         let shape = input.shape();
         let batch = shape[0];
-        let data = input.data().to_vec();
 
-        // Split input into 3 segments of 56
-        let mut volt_data = Vec::with_capacity(batch * 56);
-        let mut curr_data = Vec::with_capacity(batch * 56);
-        let mut pq_data = Vec::with_capacity(batch * 56);
-
-        for b in 0..batch {
-            let offset = b * 168;
-            volt_data.extend_from_slice(&data[offset..offset + 56]);
-            curr_data.extend_from_slice(&data[offset + 56..offset + 112]);
-            pq_data.extend_from_slice(&data[offset + 112..offset + 168]);
-        }
-
-        let volt_var = Variable::new(
-            axonml_tensor::Tensor::from_vec(volt_data.clone(), &[batch, 56]).unwrap(),
-            false,
-        );
-        let curr_var = Variable::new(
-            axonml_tensor::Tensor::from_vec(curr_data.clone(), &[batch, 56]).unwrap(),
-            false,
-        );
-        let pq_var = Variable::new(
-            axonml_tensor::Tensor::from_vec(pq_data, &[batch, 56]).unwrap(),
-            false,
-        );
+        // Split input into 3 segments of 56 using narrow (GPU-compatible)
+        let volt_var = input.narrow(1, 0, 56); // (batch, 56)
+        let curr_var = input.narrow(1, 56, 56); // (batch, 56)
+        let pq_var = input.narrow(1, 112, 56); // (batch, 56)
 
         // Analyzer branches
         let volt_out = self.voltage_analyzer.forward(&volt_var); // (batch, 64)

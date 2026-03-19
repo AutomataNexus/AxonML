@@ -175,14 +175,14 @@ predictors) deployed via cross-compiled ARM binaries, each running at ~2-3 MB RS
 
 ### Production Deployments
 
-| Building | Unit | Anomaly Model | Failure Predictor | Controller |
-|----------|------|---------------|-------------------|------------|
-| FCOG | Mechroom | Erebus (128K params) | Kairos (288K params) | 100.123.60.69 |
-| Warren | AHU-1 | Aether (32K params) | Moros (73K params) | 100.124.76.93 |
-| Warren | AHU-2 | Phanes (71K params) | Hecate (162K params) | 100.95.58.104 |
-| Warren | AHU-4 | Nyctos (32K params) | Cassandra (73K params) | 100.121.143.51 |
-| Warren | AHU-7 | Poseidon (32K params) | Triton (73K params) | 100.125.245.8 |
-| Huntington | Mechroom | Plutus (127K params) | Moira (288K params) | 100.73.201.107 |
+| Building | Unit | Anomaly Model | Failure Predictor |
+|----------|------|---------------|-------------------|
+| Site A | Mechroom | Erebus (128K params) | Kairos (288K params) |
+| Site B | AHU-1 | Aether (32K params) | Moros (73K params) |
+| Site B | AHU-2 | Phanes (71K params) | Hecate (162K params) |
+| Site B | AHU-4 | Nyctos (32K params) | Cassandra (73K params) |
+| Site B | AHU-7 | Poseidon (32K params) | Triton (73K params) |
+| Site C | Mechroom | Plutus (127K params) | Moira (288K params) |
 
 ### Changed
 - Bumped version from 0.2.8 to 0.3.0

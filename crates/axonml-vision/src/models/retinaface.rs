@@ -410,7 +410,7 @@ impl Module for RetinaFace {
 // Helper
 // =============================================================================
 
-/// Concatenate Variables along the channel dimension.
+/// Concatenate Variables along the channel dimension (autograd-tracked).
 fn concat_channels(inputs: &[&Variable]) -> Variable {
     if inputs.is_empty() {
         panic!("concat_channels: empty input");
@@ -419,36 +419,7 @@ fn concat_channels(inputs: &[&Variable]) -> Variable {
         return inputs[0].clone();
     }
 
-    let shapes: Vec<Vec<usize>> = inputs.iter().map(|v| v.shape()).collect();
-    let n = shapes[0][0];
-    let h = shapes[0][2];
-    let w = shapes[0][3];
-    let total_c: usize = shapes.iter().map(|s| s[1]).sum();
-
-    let mut result = vec![0.0f32; n * total_c * h * w];
-    let mut c_offset = 0;
-
-    for &input in inputs {
-        let data = input.data().to_vec();
-        let c = input.shape()[1];
-
-        for batch in 0..n {
-            for ch in 0..c {
-                for row in 0..h {
-                    let src_start = batch * c * h * w + ch * h * w + row * w;
-                    let dst_start = batch * total_c * h * w + (c_offset + ch) * h * w + row * w;
-                    result[dst_start..dst_start + w]
-                        .copy_from_slice(&data[src_start..src_start + w]);
-                }
-            }
-        }
-        c_offset += c;
-    }
-
-    Variable::new(
-        Tensor::from_vec(result, &[n, total_c, h, w]).unwrap(),
-        inputs.iter().any(|v| v.requires_grad()),
-    )
+    Variable::cat(inputs, 1)
 }
 
 // =============================================================================
@@ -488,5 +459,30 @@ mod tests {
         assert_eq!(cls.shape()[1], 4); // 2 anchors * 2 classes
         assert_eq!(bbox.shape()[1], 8); // 2 anchors * 4 coords
         assert_eq!(ldm.shape()[1], 20); // 2 anchors * 10 landmark coords
+    }
+
+    #[test]
+    fn test_retinaface_forward_smoke() {
+        let model = RetinaFace::new();
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.1; 1 * 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
+            false,
+        );
+        let output = model.forward(&input);
+        // First pyramid level cls output: [1, num_anchors*2, H/4, W/4]
+        assert_eq!(output.shape()[0], 1);
+        assert_eq!(output.shape()[1], 4); // 2 anchors * 2 classes
+    }
+
+    #[test]
+    fn test_retinaface_param_count() {
+        let model = RetinaFace::new();
+        let params = model.parameters();
+        let total: usize = params
+            .iter()
+            .map(|p| p.variable().data().to_vec().len())
+            .sum();
+        // ResNet34 backbone + FPN + context + heads
+        assert!(total > 10_000, "RetinaFace has {} params", total);
     }
 }
