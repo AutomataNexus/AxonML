@@ -121,8 +121,14 @@ fn main() {
     let fp32_bytes = config.fp32_storage_bytes();
     let compression = fp32_bytes as f32 / ternary_bytes as f32;
     println!("Storage Analysis:");
-    println!("  fp32 storage     : {:.2} MB", fp32_bytes as f32 / (1024.0 * 1024.0));
-    println!("  ternary storage  : {:.2} MB", ternary_bytes as f32 / (1024.0 * 1024.0));
+    println!(
+        "  fp32 storage     : {:.2} MB",
+        fp32_bytes as f32 / (1024.0 * 1024.0)
+    );
+    println!(
+        "  ternary storage  : {:.2} MB",
+        ternary_bytes as f32 / (1024.0 * 1024.0)
+    );
     println!("  compression      : {:.1}x", compression);
     println!();
 
@@ -157,8 +163,10 @@ fn main() {
     // ---- Training loop ----
     let total_start = Instant::now();
 
-    println!("{:<6} {:<10} {:<10} {:<10} {:<10} {:<8}",
-             "Epoch", "Loss", "PPL", "Sparsity", "CompRatio", "Time");
+    println!(
+        "{:<6} {:<10} {:<10} {:<10} {:<10} {:<8}",
+        "Epoch", "Loss", "PPL", "Sparsity", "CompRatio", "Time"
+    );
     println!("{}", "-".repeat(60));
 
     for epoch in 1..=NUM_EPOCHS {
@@ -180,8 +188,7 @@ fn main() {
             }
             let input_ids =
                 Tensor::<u32>::from_vec(token_data.clone(), &[bs, MAX_SEQ_LEN]).unwrap();
-            let labels =
-                Tensor::<u32>::from_vec(token_data, &[bs, MAX_SEQ_LEN]).unwrap();
+            let labels = Tensor::<u32>::from_vec(token_data, &[bs, MAX_SEQ_LEN]).unwrap();
 
             // Forward + loss
             optimizer.zero_grad();
@@ -234,8 +241,14 @@ fn main() {
     // ---- Final report ----
     println!("=== Final Model Statistics ===");
     let final_sparsity = model.average_sparsity();
-    println!("Weight sparsity    : {:.1}% zeros in ternary representation", final_sparsity * 100.0);
-    println!("Memory savings     : {:.1}x compression (ternary vs fp32)", compression);
+    println!(
+        "Weight sparsity    : {:.1}% zeros in ternary representation",
+        final_sparsity * 100.0
+    );
+    println!(
+        "Memory savings     : {:.1}x compression (ternary vs fp32)",
+        compression
+    );
     println!("Inference benefit  : Matmul reduces to add/sub (no FP multiply)");
 
     if let Some(ref m) = monitor {

@@ -169,10 +169,7 @@ impl MoERouter {
     /// * `gate_probs` - Full probability distribution [num_tokens, num_experts] (for load balancing)
     /// * `top_k_weights` - Normalized weights for selected experts [num_tokens, top_k]
     /// * `top_k_indices` - Indices of selected experts [num_tokens, top_k]
-    pub fn route(
-        &self,
-        x: &Variable,
-    ) -> (Variable, Vec<Vec<f32>>, Vec<Vec<usize>>) {
+    pub fn route(&self, x: &Variable) -> (Variable, Vec<Vec<f32>>, Vec<Vec<usize>>) {
         let gate_logits = self.gate.forward(x);
         let gate_probs = gate_logits.softmax(-1);
 
@@ -402,10 +399,8 @@ impl Module for MoELayer {
             let mut token_indices = Vec::new();
             let mut token_weights = Vec::new();
 
-            for (t, (indices, weights)) in top_k_indices
-                .iter()
-                .zip(top_k_weights.iter())
-                .enumerate()
+            for (t, (indices, weights)) in
+                top_k_indices.iter().zip(top_k_weights.iter()).enumerate()
             {
                 for (k, (&idx, &w)) in indices.iter().zip(weights.iter()).enumerate() {
                     if idx == expert_idx {

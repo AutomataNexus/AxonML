@@ -325,10 +325,7 @@ impl ChimeraModel {
     pub fn forward_ids(&self, input_ids: &Tensor<u32>) -> Variable {
         // Convert u32 indices to f32 for embedding lookup
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var = Variable::new(
-            Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(),
-            false,
-        );
+        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
 
         // Embed tokens
         let mut hidden = self.token_embedding.forward(&ids_var);
@@ -413,11 +410,7 @@ impl ChimeraModel {
 
         // Total loss = CE + weight * LB
         let total_loss = ce_loss.add_var(&Variable::new(
-            Tensor::from_vec(
-                vec![self.config.load_balance_weight * lb_loss_val],
-                &[1],
-            )
-            .unwrap(),
+            Tensor::from_vec(vec![self.config.load_balance_weight * lb_loss_val], &[1]).unwrap(),
             false,
         ));
 
@@ -447,10 +440,7 @@ impl ChimeraModel {
 
     /// Returns total parameter count (all experts).
     pub fn total_param_count(&self) -> usize {
-        self.parameters()
-            .iter()
-            .map(|p| p.data().numel())
-            .sum()
+        self.parameters().iter().map(|p| p.data().numel()).sum()
     }
 
     /// Returns estimated active parameter count per forward pass.
@@ -547,11 +537,7 @@ mod tests {
         let config = ChimeraConfig::tiny();
         let model = ChimeraModel::new(&config);
 
-        let input_ids = Tensor::from_vec(
-            vec![1u32, 2, 3, 4, 5, 6, 7, 8],
-            &[2, 4],
-        )
-        .unwrap();
+        let input_ids = Tensor::from_vec(vec![1u32, 2, 3, 4, 5, 6, 7, 8], &[2, 4]).unwrap();
         let logits = model.forward_ids(&input_ids);
         assert_eq!(logits.shape(), vec![2, 4, 1000]);
     }

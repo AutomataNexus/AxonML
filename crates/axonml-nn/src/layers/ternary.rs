@@ -320,8 +320,14 @@ impl TernaryLinear {
         let input_vec = input_data.to_vec();
 
         // Ternary matmul
-        let output_vec =
-            Self::ternary_matmul(&input_vec, &ternary, scale, total_batch, self.in_features, self.out_features);
+        let output_vec = Self::ternary_matmul(
+            &input_vec,
+            &ternary,
+            scale,
+            total_batch,
+            self.in_features,
+            self.out_features,
+        );
 
         // Build output tensor
         let mut out_shape = batch_dims.clone();
@@ -353,7 +359,10 @@ impl TernaryLinear {
             let in_f = self.in_features;
             let out_f = self.out_features;
             let shadow_grad_fn = self.shadow_weight.variable().grad_fn().cloned();
-            let bias_grad_fn = self.bias.as_ref().and_then(|b| b.variable().grad_fn().cloned());
+            let bias_grad_fn = self
+                .bias
+                .as_ref()
+                .and_then(|b| b.variable().grad_fn().cloned());
 
             let mut next_fns = vec![input.grad_fn().cloned(), shadow_grad_fn];
             if bias_grad_fn.is_some() {
@@ -393,8 +402,14 @@ impl TernaryLinear {
         let scale = packed.scale();
 
         let input_vec = input_data.to_vec();
-        let output_vec =
-            Self::ternary_matmul(&input_vec, &ternary, scale, total_batch, self.in_features, self.out_features);
+        let output_vec = Self::ternary_matmul(
+            &input_vec,
+            &ternary,
+            scale,
+            total_batch,
+            self.in_features,
+            self.out_features,
+        );
 
         let mut out_shape = batch_dims;
         out_shape.push(self.out_features);
@@ -511,8 +526,7 @@ impl GradientFunction for TernaryLinearBackward {
             }
         }
 
-        let gi_tensor =
-            Tensor::from_vec(grad_input, self.saved_input.shape()).unwrap();
+        let gi_tensor = Tensor::from_vec(grad_input, self.saved_input.shape()).unwrap();
 
         // 2. grad_weight (STE): grad_output^T @ input
         //    grad_weight[o,j] = sum_b(grad_output[b,o] * input[b,j])
@@ -587,10 +601,7 @@ mod tests {
     #[test]
     fn test_ternary_linear_forward() {
         let layer = TernaryLinear::new(8, 4);
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 16], &[2, 8]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 16], &[2, 8]).unwrap(), false);
         let output = layer.forward(&input);
         assert_eq!(output.shape(), vec![2, 4]);
     }
@@ -649,10 +660,7 @@ mod tests {
     fn test_ternary_linear_inference_mode() {
         let mut layer = TernaryLinear::new(8, 4);
 
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 8], &[1, 8]).unwrap(),
-            false,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 8], &[1, 8]).unwrap(), false);
 
         // Training forward
         let train_out = layer.forward(&input);
@@ -665,12 +673,7 @@ mod tests {
         let train_vec = train_out.data().to_vec();
         let infer_vec = infer_out.data().to_vec();
         for (a, b) in train_vec.iter().zip(infer_vec.iter()) {
-            assert!(
-                (a - b).abs() < 1e-5,
-                "Training {} vs inference {}",
-                a,
-                b
-            );
+            assert!((a - b).abs() < 1e-5, "Training {} vs inference {}", a, b);
         }
     }
 

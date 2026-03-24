@@ -193,9 +193,10 @@ impl DifferentialAttention {
         let attn_output = diff_attn.matmul(&v);
 
         // Reshape back: [batch, heads, seq, head_dim] -> [batch, seq, embed_dim]
-        let attn_output = attn_output
-            .transpose(1, 2)
-            .reshape(&[batch_size, tgt_len, self.embed_dim]);
+        let attn_output =
+            attn_output
+                .transpose(1, 2)
+                .reshape(&[batch_size, tgt_len, self.embed_dim]);
 
         // Output projection
         self.out_proj.forward(&attn_output)

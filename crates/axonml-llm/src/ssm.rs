@@ -82,9 +82,7 @@ impl DepthwiseConv1d {
         let n = channels * kernel_size;
         use rand::{Rng, SeedableRng};
         let mut rng = rand::rngs::StdRng::seed_from_u64(42 + channels as u64);
-        let weight_data: Vec<f32> = (0..n)
-            .map(|_| rng.gen_range(-bound..bound))
-            .collect();
+        let weight_data: Vec<f32> = (0..n).map(|_| rng.gen_range(-bound..bound)).collect();
         let bias_data = vec![0.0f32; channels];
 
         Self {
@@ -120,8 +118,7 @@ impl DepthwiseConv1d {
                     for k in 0..self.kernel_size {
                         let input_pos = s as isize + k as isize - pad as isize;
                         if input_pos >= 0 && (input_pos as usize) < seq_len {
-                            let x_idx =
-                                (b * seq_len + input_pos as usize) * channels + c;
+                            let x_idx = (b * seq_len + input_pos as usize) * channels + c;
                             let w_idx = c * self.kernel_size + k;
                             val += x_vec[x_idx] * w_vec[w_idx];
                         }
@@ -131,8 +128,7 @@ impl DepthwiseConv1d {
             }
         }
 
-        let out_tensor =
-            Tensor::from_vec(output, &[batch_size, seq_len, channels]).unwrap();
+        let out_tensor = Tensor::from_vec(output, &[batch_size, seq_len, channels]).unwrap();
 
         let requires_grad = x.requires_grad() && is_grad_enabled();
         if requires_grad {
@@ -189,8 +185,7 @@ impl GradientFunction for DepthwiseConv1dBackward {
                     for k in 0..self.kernel_size {
                         let out_pos = s as isize - k as isize + pad as isize;
                         if out_pos >= 0 && (out_pos as usize) < seq_len {
-                            let g_idx =
-                                (b * seq_len + out_pos as usize) * channels + c;
+                            let g_idx = (b * seq_len + out_pos as usize) * channels + c;
                             let w_idx = c * self.kernel_size + k;
                             val += g_vec[g_idx] * w_vec[w_idx];
                         }
@@ -307,8 +302,7 @@ impl SelectiveScan {
                 }
             })
             .collect();
-        let dt_tensor =
-            Tensor::from_vec(dt_softplus, &[batch_size, seq_len, d_inner]).unwrap();
+        let dt_tensor = Tensor::from_vec(dt_softplus, &[batch_size, seq_len, d_inner]).unwrap();
 
         // Get A (negative exponent)
         let a_vec = self.a_log.to_vec(); // [d_inner, d_state] - these are already -log values
@@ -342,7 +336,7 @@ impl SelectiveScan {
 
                     for s in 0..d_state {
                         let a_val = a_exp[d * d_state + s]; // exp(a_log) which is negative
-                        // Clamp dt*A to prevent extreme values
+                                                            // Clamp dt*A to prevent extreme values
                         let dt_a = (dt_val * a_val).clamp(-20.0, 0.0);
                         let a_bar = dt_a.exp(); // discretized A: exp(dt * A)
                         let b_val = b_vec[bc_offset + s];
@@ -368,8 +362,7 @@ impl SelectiveScan {
             }
         }
 
-        let out_tensor =
-            Tensor::from_vec(output, &[batch_size, seq_len, d_inner]).unwrap();
+        let out_tensor = Tensor::from_vec(output, &[batch_size, seq_len, d_inner]).unwrap();
 
         // For gradient flow, wrap with backward fn
         let requires_grad = x.requires_grad() && is_grad_enabled();
@@ -532,7 +525,10 @@ mod tests {
     #[test]
     fn test_depthwise_conv1d_shape() {
         let conv = DepthwiseConv1d::new(64, 4);
-        let x = Variable::new(Tensor::from_vec(vec![0.1f32; 2 * 8 * 64], &[2, 8, 64]).unwrap(), true);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1f32; 2 * 8 * 64], &[2, 8, 64]).unwrap(),
+            true,
+        );
         let y = conv.forward(&x);
         assert_eq!(y.data().shape(), &[2, 8, 64]);
     }
@@ -540,7 +536,10 @@ mod tests {
     #[test]
     fn test_selective_scan_shape() {
         let scan = SelectiveScan::new(64, 16, 4);
-        let x = Variable::new(Tensor::from_vec(vec![0.1f32; 2 * 8 * 64], &[2, 8, 64]).unwrap(), true);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1f32; 2 * 8 * 64], &[2, 8, 64]).unwrap(),
+            true,
+        );
         let y = scan.forward(&x);
         assert_eq!(y.data().shape(), &[2, 8, 64]);
     }

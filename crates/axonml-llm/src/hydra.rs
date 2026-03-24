@@ -217,8 +217,7 @@ impl WindowedAttention {
                     let q_off = ((b * self.num_heads + h) * seq_len + i) * self.head_dim;
 
                     for (wi, j) in (win_start..win_end).enumerate() {
-                        let k_off =
-                            ((b * self.num_heads + h) * seq_len + j) * self.head_dim;
+                        let k_off = ((b * self.num_heads + h) * seq_len + j) * self.head_dim;
                         let mut dot = 0.0f32;
                         for d in 0..self.head_dim {
                             dot += q_vec[q_off + d] * k_vec[k_off + d];
@@ -242,8 +241,7 @@ impl WindowedAttention {
                     // Weighted sum of values
                     let o_off = ((b * self.num_heads + h) * seq_len + i) * self.head_dim;
                     for (wi, j) in (win_start..win_end).enumerate() {
-                        let v_off =
-                            ((b * self.num_heads + h) * seq_len + j) * self.head_dim;
+                        let v_off = ((b * self.num_heads + h) * seq_len + j) * self.head_dim;
                         for d in 0..self.head_dim {
                             output[o_off + d] += scores[wi] * v_vec[v_off + d];
                         }
@@ -603,8 +601,7 @@ impl HydraModel {
     pub fn forward_ids(&self, input_ids: &Tensor<u32>) -> Variable {
         // Convert to f32 for embedding lookup
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var =
-            Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
+        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
 
         // Embed tokens
         let mut hidden = self.embed_tokens.forward(&ids_var);

@@ -210,7 +210,7 @@ impl GPT2LMHead {
         // logits: [batch, seq-1, vocab] for positions 0..seq-1
         // labels: [batch, seq-1] for positions 1..seq
         if seq_len > 1 {
-            let shift_logits = logits.slice(&[0..batch_size, 0..(seq_len - 1), 0..vocab_size]);
+            let shift_logits = logits.narrow(1, 0, seq_len - 1);
 
             // Manually slice u32 labels since slice() requires Float trait
             let labels_vec = labels.to_vec();

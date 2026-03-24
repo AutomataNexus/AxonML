@@ -102,7 +102,10 @@ fn main() {
     println!();
     println!("Parameters:");
     println!("  Total params  = {total_params}");
-    println!("  Active/token  = {active_params} ({:.1}%)", 100.0 * active_params as f64 / total_params as f64);
+    println!(
+        "  Active/token  = {active_params} ({:.1}%)",
+        100.0 * active_params as f64 / total_params as f64
+    );
     println!();
     println!("Training:");
     println!("  Sequences     = {NUM_TRAIN}");
@@ -121,8 +124,10 @@ fn main() {
     // ---- Training loop ----
     let total_start = Instant::now();
 
-    println!("{:<6} {:<10} {:<10} {:<8} {:<30} {}",
-             "Epoch", "Loss", "PPL", "Time", "Expert Util (layer 0)", "Lambda[0]");
+    println!(
+        "{:<6} {:<10} {:<10} {:<8} {:<30} {}",
+        "Epoch", "Loss", "PPL", "Time", "Expert Util (layer 0)", "Lambda[0]"
+    );
     println!("{}", "-".repeat(85));
 
     for epoch in 1..=NUM_EPOCHS {

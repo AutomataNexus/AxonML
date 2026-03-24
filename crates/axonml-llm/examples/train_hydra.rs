@@ -94,7 +94,10 @@ fn main() {
         NUM_LAYERS / 2,
         NUM_LAYERS / 2
     );
-    println!("SSM     : d_state={}, d_conv={}, expansion={}", config.d_state, config.d_conv, config.ssm_expansion);
+    println!(
+        "SSM     : d_state={}, d_conv={}, expansion={}",
+        config.d_state, config.d_conv, config.ssm_expansion
+    );
     println!("Attn    : window_size={}", config.window_size);
     println!("Data    : {NUM_TRAIN} sequences, seq_len={MAX_SEQ_LEN}, batch_size={BATCH_SIZE}");
     println!("Epochs  : {NUM_EPOCHS}, lr={LEARNING_RATE}");
@@ -106,11 +109,22 @@ fn main() {
     println!("  Embed({VOCAB_SIZE}, {D_MODEL})");
     for i in 0..config.num_layers {
         if i % 2 == 0 {
-            println!("  Layer {i}: SSMBlock(d_inner={}, d_state={}, conv_k={})", config.d_inner(), config.d_state, config.d_conv);
+            println!(
+                "  Layer {i}: SSMBlock(d_inner={}, d_state={}, conv_k={})",
+                config.d_inner(),
+                config.d_state,
+                config.d_conv
+            );
         } else {
-            println!("  Layer {i}: WindowedAttn(heads={NUM_HEADS}, window={})", config.window_size);
+            println!(
+                "  Layer {i}: WindowedAttn(heads={NUM_HEADS}, window={})",
+                config.window_size
+            );
         }
-        println!("           + SwiGLU MLP({D_MODEL} -> {} -> {D_MODEL})", config.intermediate_size);
+        println!(
+            "           + SwiGLU MLP({D_MODEL} -> {} -> {D_MODEL})",
+            config.intermediate_size
+        );
     }
     println!("  RMSNorm({D_MODEL})");
     println!("  LMHead({D_MODEL}, {VOCAB_SIZE})");

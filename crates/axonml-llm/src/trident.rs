@@ -134,9 +134,11 @@ impl TridentConfig {
         // 2 bits per weight, packed 4 per byte, + scale factors
         let packed_bytes = (total_ternary_weights + 3) / 4;
         let scale_bytes = self.num_layers * 6 * 4; // 6 TernaryLinear layers per block, 4 bytes per scale
-        // Add fp32 embeddings + lm_head + norms
-        let fp32_bytes = (self.vocab_size * self.d_model + self.d_model * self.vocab_size
-            + self.num_layers * 2 * self.d_model) * 4;
+                                                   // Add fp32 embeddings + lm_head + norms
+        let fp32_bytes = (self.vocab_size * self.d_model
+            + self.d_model * self.vocab_size
+            + self.num_layers * 2 * self.d_model)
+            * 4;
         packed_bytes + scale_bytes + fp32_bytes
     }
 
@@ -345,9 +347,10 @@ impl TridentAttention {
         let attn_output = attn_weights.matmul(&v);
 
         // Reshape back: [batch, heads, seq, head_dim] -> [batch, seq, hidden]
-        let attn_output = attn_output
-            .transpose(1, 2)
-            .reshape(&[batch_size, seq_len, self.hidden_size]);
+        let attn_output =
+            attn_output
+                .transpose(1, 2)
+                .reshape(&[batch_size, seq_len, self.hidden_size]);
 
         // Output projection (ternary)
         self.o_proj.forward(&attn_output)
@@ -533,10 +536,7 @@ impl TridentModel {
     pub fn forward_ids(&self, input_ids: &Tensor<u32>) -> Variable {
         // Convert token IDs to float for embedding lookup
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var = Variable::new(
-            Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(),
-            false,
-        );
+        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
 
         // Embed tokens
         let mut hidden = self.embed_tokens.forward(&ids_var);
@@ -572,7 +572,8 @@ impl TridentModel {
 
         if seq_len > 1 {
             // Shift for next-token prediction: logits[..., :-1, :] predicts labels[..., 1:]
-            let shift_logits = logits.slice(&[0..batch_size, 0..(seq_len - 1), 0..vocab_size]);
+            // Use narrow() instead of slice() to preserve the autograd graph
+            let shift_logits = logits.narrow(1, 0, seq_len - 1);
 
             // Build shifted labels
             let labels_vec = labels.to_vec();
@@ -588,10 +589,7 @@ impl TridentModel {
             let loss = Self::cross_entropy_loss(&shift_logits, &shift_labels);
             (logits, loss)
         } else {
-            let zero_loss = Variable::new(
-                Tensor::from_vec(vec![0.0f32], &[1]).unwrap(),
-                false,
-            );
+            let zero_loss = Variable::new(Tensor::from_vec(vec![0.0f32], &[1]).unwrap(), false);
             (logits, zero_loss)
         }
     }
@@ -749,8 +747,12 @@ mod tests {
         let ternary = config.ternary_storage_bytes();
         // Ternary should be significantly smaller
         assert!(ternary < fp32);
-        println!("FP32: {} bytes, Ternary: {} bytes, Ratio: {:.1}x",
-                 fp32, ternary, fp32 as f32 / ternary as f32);
+        println!(
+            "FP32: {} bytes, Ternary: {} bytes, Ratio: {:.1}x",
+            fp32,
+            ternary,
+            fp32 as f32 / ternary as f32
+        );
     }
 
     #[test]
@@ -819,11 +821,7 @@ mod tests {
         let train_vec = logits_train.data().to_vec();
         let infer_vec = logits_infer.data().to_vec();
         for (a, b) in train_vec.iter().zip(infer_vec.iter()) {
-            assert!(
-                (a - b).abs() < 1e-4,
-                "Train {} vs infer {} mismatch",
-                a, b
-            );
+            assert!((a - b).abs() < 1e-4, "Train {} vs infer {} mismatch", a, b);
         }
     }
 }
