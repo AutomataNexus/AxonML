@@ -47,9 +47,8 @@ pub fn KagglePage() -> impl IntoView {
                 Err(e) => state.toast_error("Error", e.message),
             }
 
-            match api::kaggle::list_downloaded().await {
-                Ok(d) => set_downloaded.set(d),
-                Err(_) => {} // Not critical
+            if let Ok(d) = api::kaggle::list_downloaded().await {
+                set_downloaded.set(d);
             }
 
             set_loading.set(false);

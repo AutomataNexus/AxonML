@@ -210,9 +210,8 @@ fn DatasetSelector(
                             num_samples: Some(5),
                         };
 
-                        match api::data::preview(&id, &preview_query).await {
-                            Ok(p) => set_preview.set(Some(p)),
-                            Err(_) => {} // Preview failure is not critical
+                        if let Ok(p) = api::data::preview(&id, &preview_query).await {
+                            set_preview.set(Some(p));
                         }
 
                         // Run validation
@@ -221,9 +220,8 @@ fn DatasetSelector(
                             check_balance: Some(true),
                         };
 
-                        match api::data::validate(&id, &validate_query).await {
-                            Ok(v) => set_validation.set(Some(v)),
-                            Err(_) => {} // Validation failure is not critical
+                        if let Ok(v) = api::data::validate(&id, &validate_query).await {
+                            set_validation.set(Some(v));
                         }
 
                         // Generate config
@@ -231,9 +229,8 @@ fn DatasetSelector(
                             format: Some("toml".to_string()),
                         };
 
-                        match api::data::generate_config(&id, &config_request).await {
-                            Ok(c) => set_generated_config.set(Some(c)),
-                            Err(_) => {} // Config generation failure is not critical
+                        if let Ok(c) = api::data::generate_config(&id, &config_request).await {
+                            set_generated_config.set(Some(c));
                         }
 
                         set_analyzing.set(false);

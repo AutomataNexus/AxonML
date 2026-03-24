@@ -119,7 +119,6 @@ impl WiderFaceDataset {
                     break;
                 }
                 let parts: Vec<f32> = lines[i]
-                    .trim()
                     .split_whitespace()
                     .filter_map(|s| s.parse().ok())
                     .collect();

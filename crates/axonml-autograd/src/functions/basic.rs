@@ -873,7 +873,7 @@ fn reduce_grad_for_broadcast(grad: &Tensor<f32>, target_shape: &[usize]) -> Tens
     // Reshape to target shape
     if result.shape() != target_shape {
         let target_isize: Vec<isize> = target_shape.iter().map(|&x| x as isize).collect();
-        result = result.reshape(&target_isize).unwrap_or_else(|_| result);
+        result = result.reshape(&target_isize).unwrap_or(result);
     }
     result
 }

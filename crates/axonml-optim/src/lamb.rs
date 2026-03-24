@@ -44,7 +44,7 @@ impl LambState {
         let mut exp_avg = Tensor::from_vec(vec![0.0f32; size], shape).unwrap();
         let mut exp_avg_sq = Tensor::from_vec(vec![0.0f32; size], shape).unwrap();
         if device.is_gpu() {
-            exp_avg = exp_avg.to_device(device.clone()).unwrap();
+            exp_avg = exp_avg.to_device(device).unwrap();
             exp_avg_sq = exp_avg_sq.to_device(device).unwrap();
         }
         Self {

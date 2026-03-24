@@ -54,20 +54,14 @@ pub fn NewTrainingPage() -> impl IntoView {
     // Fetch models and datasets on mount
     create_effect(move |_| {
         spawn_local(async move {
-            match api::models::list().await {
-                Ok(m) => set_models.set(m),
-                Err(_) => {}
-            }
+            if let Ok(m) = api::models::list().await { set_models.set(m) }
             set_models_loading.set(false);
         });
     });
 
     create_effect(move |_| {
         spawn_local(async move {
-            match api::datasets::list().await {
-                Ok(d) => set_datasets.set(d),
-                Err(_) => {}
-            }
+            if let Ok(d) = api::datasets::list().await { set_datasets.set(d) }
             set_datasets_loading.set(false);
         });
     });

@@ -64,6 +64,12 @@ pub const MODEL_DIMS: [usize; 7] = [256, 384, 256, 256, 320, 256, 256];
 /// Sum of all model embedding dimensions.
 pub const TOTAL_MODEL_DIM: usize = 1984;
 
+impl Default for Apollo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Apollo {
     /// Creates a new Apollo master coordinator.
     pub fn new() -> Self {

@@ -164,7 +164,7 @@ impl FullEvalResult {
 fn diverse_gt(image_idx: usize, num_classes: usize) -> Vec<GroundTruth> {
     // Deterministic pseudo-random from image index
     let seed = image_idx as f32;
-    let hash = |v: f32| -> f32 { ((v * 127.1 + 311.7).sin() * 43758.5453).fract().abs() };
+    let hash = |v: f32| -> f32 { ((v * 127.1 + 311.7).sin() * 43_758.547).fract().abs() };
 
     let n_boxes = 2 + (hash(seed) * 4.0) as usize; // 2-5 boxes per image
     let mut gts = Vec::with_capacity(n_boxes);

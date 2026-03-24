@@ -659,7 +659,7 @@ impl VisionTransformer {
         if x.requires_grad() && is_grad_enabled() {
             let grad_fn = GradFn::new(PatchExtractBackward {
                 next_fns: vec![x.grad_fn().cloned()],
-                input_shape: shape.to_vec(),
+                input_shape: shape.clone(),
                 patch_size: self.patch_size,
                 num_patches_h,
                 num_patches_w,

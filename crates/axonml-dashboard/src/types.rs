@@ -23,17 +23,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum UserRole {
     Admin,
     User,
+    #[default]
     Viewer,
 }
 
-impl Default for UserRole {
-    fn default() -> Self {
-        Self::Viewer
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
@@ -730,31 +727,25 @@ pub struct ExportResponse {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CellType {
+    #[default]
     Code,
     Markdown,
 }
 
-impl Default for CellType {
-    fn default() -> Self {
-        Self::Code
-    }
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CellStatus {
+    #[default]
     Idle,
     Running,
     Completed,
     Error,
 }
 
-impl Default for CellStatus {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CellOutput {

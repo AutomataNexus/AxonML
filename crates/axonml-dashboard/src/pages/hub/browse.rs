@@ -187,9 +187,9 @@ where
                             match api::hub::download_model(&model_name, false).await {
                                 Ok(response) => {
                                     if response.was_cached {
-                                        state.toast_success("Already Cached", &format!("{} is already in cache", model_name));
+                                        state.toast_success("Already Cached", format!("{} is already in cache", model_name));
                                     } else {
-                                        state.toast_success("Downloaded", &format!("{} downloaded successfully", model_name));
+                                        state.toast_success("Downloaded", format!("{} downloaded successfully", model_name));
                                     }
                                     // Refresh to update cached status
                                     if let Ok(data) = api::hub::list_models(None, None, None).await {

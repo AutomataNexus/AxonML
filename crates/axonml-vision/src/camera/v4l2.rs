@@ -129,7 +129,7 @@ impl Drop for MmapBuffer {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
             unsafe {
-                libc::munmap(self.ptr as *mut libc::c_void, self.length);
+                libc::munmap(self.ptr.cast::<libc::c_void>(), self.length);
             }
         }
     }
@@ -224,7 +224,7 @@ impl V4L2Backend {
         fmt.fmt.height = config.height;
         fmt.fmt.pixelformat = pixfmt;
 
-        self.ioctl(VIDIOC_S_FMT, &mut fmt as *mut _ as *mut libc::c_void)?;
+        self.ioctl(VIDIOC_S_FMT, std::ptr::addr_of_mut!(fmt).cast::<libc::c_void>())?;
 
         self.width = fmt.fmt.width;
         self.height = fmt.fmt.height;
@@ -239,7 +239,7 @@ impl V4L2Backend {
         req.type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         req.memory = V4L2_MEMORY_MMAP;
 
-        self.ioctl(VIDIOC_REQBUFS, &mut req as *mut _ as *mut libc::c_void)?;
+        self.ioctl(VIDIOC_REQBUFS, std::ptr::addr_of_mut!(req).cast::<libc::c_void>())?;
 
         let fd = self.fd()?;
 
@@ -249,7 +249,7 @@ impl V4L2Backend {
             buf.type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE;
             buf.memory = V4L2_MEMORY_MMAP;
 
-            self.ioctl(VIDIOC_QUERYBUF, &mut buf as *mut _ as *mut libc::c_void)?;
+            self.ioctl(VIDIOC_QUERYBUF, std::ptr::addr_of_mut!(buf).cast::<libc::c_void>())?;
 
             let ptr = unsafe {
                 libc::mmap(
@@ -267,12 +267,12 @@ impl V4L2Backend {
             }
 
             self.buffers.push(MmapBuffer {
-                ptr: ptr as *mut u8,
+                ptr: ptr.cast::<u8>(),
                 length: buf.length as usize,
             });
 
             // Queue the buffer
-            self.ioctl(VIDIOC_QBUF, &mut buf as *mut _ as *mut libc::c_void)?;
+            self.ioctl(VIDIOC_QBUF, std::ptr::addr_of_mut!(buf).cast::<libc::c_void>())?;
         }
 
         Ok(())
@@ -280,7 +280,7 @@ impl V4L2Backend {
 
     fn start_streaming(&mut self) -> Result<(), CaptureError> {
         let mut type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        self.ioctl(VIDIOC_STREAMON, &mut type_ as *mut _ as *mut libc::c_void)?;
+        self.ioctl(VIDIOC_STREAMON, std::ptr::addr_of_mut!(type_).cast::<libc::c_void>())?;
         self.streaming = true;
         Ok(())
     }
@@ -288,7 +288,7 @@ impl V4L2Backend {
     fn stop_streaming(&mut self) {
         if self.streaming {
             let mut type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-            let _ = self.ioctl(VIDIOC_STREAMOFF, &mut type_ as *mut _ as *mut libc::c_void);
+            let _ = self.ioctl(VIDIOC_STREAMOFF, std::ptr::addr_of_mut!(type_).cast::<libc::c_void>());
             self.streaming = false;
         }
     }
@@ -308,7 +308,7 @@ impl CaptureBackend for V4L2Backend {
 
         // Query capabilities
         let mut cap: V4l2Capability = unsafe { std::mem::zeroed() };
-        self.ioctl(VIDIOC_QUERYCAP, &mut cap as *mut _ as *mut libc::c_void)?;
+        self.ioctl(VIDIOC_QUERYCAP, std::ptr::addr_of_mut!(cap).cast::<libc::c_void>())?;
 
         self.set_format(config)?;
         self.request_buffers()?;
@@ -327,7 +327,7 @@ impl CaptureBackend for V4L2Backend {
         buf.type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
 
-        self.ioctl(VIDIOC_DQBUF, &mut buf as *mut _ as *mut libc::c_void)?;
+        self.ioctl(VIDIOC_DQBUF, std::ptr::addr_of_mut!(buf).cast::<libc::c_void>())?;
 
         let idx = buf.index as usize;
         let mmap = &self.buffers[idx];
@@ -340,7 +340,7 @@ impl CaptureBackend for V4L2Backend {
             (buf.timestamp.tv_sec as u64) * 1_000_000 + (buf.timestamp.tv_usec as u64);
 
         // Re-queue the buffer
-        self.ioctl(VIDIOC_QBUF, &mut buf as *mut _ as *mut libc::c_void)?;
+        self.ioctl(VIDIOC_QBUF, std::ptr::addr_of_mut!(buf).cast::<libc::c_void>())?;
 
         Ok(FrameBuffer {
             data: frame_data,

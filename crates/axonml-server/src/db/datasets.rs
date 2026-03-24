@@ -25,19 +25,16 @@ const COLLECTION: &str = "axonml_datasets";
 /// Dataset type enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum DatasetType {
     Image,
+    #[default]
     Tabular,
     Text,
     Audio,
     Custom,
 }
 
-impl Default for DatasetType {
-    fn default() -> Self {
-        DatasetType::Tabular
-    }
-}
 
 /// Dataset data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]

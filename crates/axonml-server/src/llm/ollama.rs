@@ -31,6 +31,7 @@ pub enum OllamaError {
     Request(#[from] reqwest::Error),
 
     #[error("Ollama service unavailable")]
+    #[allow(dead_code)]
     ServiceUnavailable,
 
     #[error("Model not found: {0}")]
@@ -79,18 +80,24 @@ pub struct GenerateOptions {
 pub struct GenerateResponse {
     pub model: String,
     pub response: String,
+    #[allow(dead_code)]
     pub done: bool,
     #[serde(default)]
+    #[allow(dead_code)]
     pub context: Option<Vec<i64>>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub total_duration: Option<u64>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub load_duration: Option<u64>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub prompt_eval_count: Option<u32>,
     #[serde(default)]
     pub eval_count: Option<u32>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub eval_duration: Option<u64>,
 }
 
@@ -114,6 +121,7 @@ impl OllamaClient {
 
     /// Create with custom URL and model.
     /// Only allows connections to loopback/private network addresses to prevent SSRF.
+    #[allow(dead_code)]
     pub fn with_config(base_url: &str, model: &str) -> Result<Self, OllamaError> {
         validate_internal_url(base_url)?;
         Ok(Self {
@@ -255,6 +263,7 @@ pub struct CodeSuggestion {
 
 /// SECURITY: Validate that a URL points to a loopback or private network address.
 /// Prevents SSRF by ensuring we only connect to internal services.
+#[allow(dead_code)]
 fn validate_internal_url(url_str: &str) -> Result<(), OllamaError> {
     let parsed = Url::parse(url_str)
         .map_err(|e| OllamaError::InvalidUrl(format!("Invalid URL '{}': {}", url_str, e)))?;

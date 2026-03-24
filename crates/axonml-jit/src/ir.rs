@@ -29,8 +29,10 @@ impl NodeId {
 
 /// Data type for tensor elements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum DataType {
     /// 32-bit floating point.
+    #[default]
     F32,
     /// 64-bit floating point.
     F64,
@@ -53,11 +55,6 @@ impl DataType {
     }
 }
 
-impl Default for DataType {
-    fn default() -> Self {
-        Self::F32
-    }
-}
 
 /// Shape of a tensor (dimensions).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

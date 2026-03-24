@@ -858,7 +858,7 @@ impl ConcatOp {
 impl OnnxOperator for ConcatOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
         let tensors: Vec<Tensor<f32>> =
-            inputs.iter().filter_map(|i| i.map(|t| t.clone())).collect();
+            inputs.iter().filter_map(|i| i.cloned()).collect();
 
         if tensors.is_empty() {
             return Err(OnnxError::MissingAttribute("inputs".to_string()));
@@ -1134,8 +1134,7 @@ impl OnnxOperator for ConvOp {
 
         let out_channels = weight_shape[0];
         let kernel_h = self
-            .kernel_shape
-            .get(0)
+            .kernel_shape.first()
             .copied()
             .unwrap_or(weight_shape[2] as i64) as usize;
         let kernel_w = self
@@ -1144,15 +1143,15 @@ impl OnnxOperator for ConvOp {
             .copied()
             .unwrap_or(weight_shape[3] as i64) as usize;
 
-        let stride_h = self.strides.get(0).copied().unwrap_or(1) as usize;
+        let stride_h = self.strides.first().copied().unwrap_or(1) as usize;
         let stride_w = self.strides.get(1).copied().unwrap_or(1) as usize;
 
-        let pad_h_begin = self.pads.get(0).copied().unwrap_or(0) as usize;
+        let pad_h_begin = self.pads.first().copied().unwrap_or(0) as usize;
         let pad_w_begin = self.pads.get(1).copied().unwrap_or(0) as usize;
         let pad_h_end = self.pads.get(2).copied().unwrap_or(pad_h_begin as i64) as usize;
         let pad_w_end = self.pads.get(3).copied().unwrap_or(pad_w_begin as i64) as usize;
 
-        let dilation_h = self.dilations.get(0).copied().unwrap_or(1) as usize;
+        let dilation_h = self.dilations.first().copied().unwrap_or(1) as usize;
         let dilation_w = self.dilations.get(1).copied().unwrap_or(1) as usize;
 
         let group = self.group as usize;
@@ -1283,11 +1282,11 @@ impl OnnxOperator for MaxPoolOp {
         }
 
         let (n, c, h, w) = (shape[0], shape[1], shape[2], shape[3]);
-        let kh = self.kernel_shape.get(0).copied().unwrap_or(2) as usize;
+        let kh = self.kernel_shape.first().copied().unwrap_or(2) as usize;
         let kw = self.kernel_shape.get(1).copied().unwrap_or(2) as usize;
-        let sh = self.strides.get(0).copied().unwrap_or(1) as usize;
+        let sh = self.strides.first().copied().unwrap_or(1) as usize;
         let sw = self.strides.get(1).copied().unwrap_or(1) as usize;
-        let pad_top = self.pads.get(0).copied().unwrap_or(0) as usize;
+        let pad_top = self.pads.first().copied().unwrap_or(0) as usize;
         let pad_left = self.pads.get(1).copied().unwrap_or(0) as usize;
         let pad_bottom = self.pads.get(2).copied().unwrap_or(0) as usize;
         let pad_right = self.pads.get(3).copied().unwrap_or(0) as usize;
@@ -1382,11 +1381,11 @@ impl OnnxOperator for AvgPoolOp {
         }
 
         let (n, c, h, w) = (shape[0], shape[1], shape[2], shape[3]);
-        let kh = self.kernel_shape.get(0).copied().unwrap_or(2) as usize;
+        let kh = self.kernel_shape.first().copied().unwrap_or(2) as usize;
         let kw = self.kernel_shape.get(1).copied().unwrap_or(2) as usize;
-        let sh = self.strides.get(0).copied().unwrap_or(1) as usize;
+        let sh = self.strides.first().copied().unwrap_or(1) as usize;
         let sw = self.strides.get(1).copied().unwrap_or(1) as usize;
-        let pad_top = self.pads.get(0).copied().unwrap_or(0) as usize;
+        let pad_top = self.pads.first().copied().unwrap_or(0) as usize;
         let pad_left = self.pads.get(1).copied().unwrap_or(0) as usize;
         let pad_bottom = self.pads.get(2).copied().unwrap_or(0) as usize;
         let pad_right = self.pads.get(3).copied().unwrap_or(0) as usize;

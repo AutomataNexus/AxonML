@@ -428,6 +428,7 @@ where
     }
 
     /// Creates an iterator over batches.
+    #[allow(clippy::iter_not_returning_iterator)]
     pub fn iter(&self) -> GenericDataLoaderIter<'_, D, C, T> {
         let indices: Vec<usize> = if self.shuffle {
             let sampler = RandomSampler::new(self.dataset.len());

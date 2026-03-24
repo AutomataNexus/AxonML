@@ -133,10 +133,9 @@ impl ModelView {
             load_state_dict(path).map_err(|e| format!("Failed to load model: {}", e))?;
 
         // Group parameters by layer prefix and extract layer info
-        let mut layer_map: std::collections::BTreeMap<
-            String,
-            Vec<(String, Vec<usize>, usize, bool)>,
-        > = std::collections::BTreeMap::new();
+        type LayerParamList = Vec<(String, Vec<usize>, usize, bool)>;
+        let mut layer_map: std::collections::BTreeMap<String, LayerParamList> =
+            std::collections::BTreeMap::new();
 
         for (param_name, entry) in state_dict.entries() {
             let shape = entry.data.shape.clone();
@@ -461,7 +460,9 @@ fn infer_layer_type(params: &[(String, Vec<usize>, usize, bool)]) -> String {
                 return "BatchNorm".to_string();
             }
         }
-        if name.ends_with(".gamma") || name.ends_with(".beta") {
+        if name.to_ascii_lowercase().ends_with(".gamma")
+            || name.to_ascii_lowercase().ends_with(".beta")
+        {
             return "LayerNorm".to_string();
         }
         if name.ends_with(".embedding") {

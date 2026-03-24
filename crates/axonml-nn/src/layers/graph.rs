@@ -64,7 +64,7 @@ impl GCNConv {
         let weight_data: Vec<f32> = (0..in_features * out_features)
             .map(|i| {
                 // Simple deterministic-ish init for reproducibility
-                let x = ((i as f32 * 0.6180339887) % 1.0) * 2.0 - 1.0;
+                let x = ((i as f32 * 0.618_034) % 1.0) * 2.0 - 1.0;
                 x * scale
             })
             .collect();
@@ -95,7 +95,7 @@ impl GCNConv {
         let scale = (2.0 / (in_features + out_features) as f32).sqrt();
         let weight_data: Vec<f32> = (0..in_features * out_features)
             .map(|i| {
-                let x = ((i as f32 * 0.6180339887) % 1.0) * 2.0 - 1.0;
+                let x = ((i as f32 * 0.618_034) % 1.0) * 2.0 - 1.0;
                 x * scale
             })
             .collect();
@@ -132,7 +132,6 @@ impl GCNConv {
         assert_eq!(shape[2], self.in_features, "Input features mismatch");
 
         let batch = shape[0];
-        let _nodes = shape[1];
         let adj_shape = adj.shape();
 
         // GCN: output = adj @ x @ weight + bias
@@ -255,7 +254,7 @@ impl GATConv {
 
         let w_data: Vec<f32> = (0..in_features * total_out)
             .map(|i| {
-                let x = ((i as f32 * 0.6180339887) % 1.0) * 2.0 - 1.0;
+                let x = ((i as f32 * 0.618_034) % 1.0) * 2.0 - 1.0;
                 x * scale
             })
             .collect();
@@ -270,13 +269,13 @@ impl GATConv {
         let attn_scale = (1.0 / out_features as f32).sqrt();
         let attn_src_data: Vec<f32> = (0..total_out)
             .map(|i| {
-                let x = ((i as f32 * 0.7236067977) % 1.0) * 2.0 - 1.0;
+                let x = ((i as f32 * 0.723_606_8) % 1.0) * 2.0 - 1.0;
                 x * attn_scale
             })
             .collect();
         let attn_dst_data: Vec<f32> = (0..total_out)
             .map(|i| {
-                let x = ((i as f32 * 0.3819660113) % 1.0) * 2.0 - 1.0;
+                let x = ((i as f32 * 0.381_966_02) % 1.0) * 2.0 - 1.0;
                 x * attn_scale
             })
             .collect();
@@ -406,7 +405,7 @@ impl GATConv {
                     let row_end = row_start + nodes;
                     let row = &attn_scores[row_start..row_end];
 
-                    let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                    let max_val = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                     if max_val == f32::NEG_INFINITY {
                         continue; // No neighbors
                     }

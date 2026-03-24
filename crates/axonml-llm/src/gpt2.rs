@@ -18,6 +18,8 @@ use axonml_autograd::Variable;
 use axonml_nn::{Linear, Module, Parameter};
 use axonml_tensor::Tensor;
 
+use crate::attention::KVCacheEntry;
+
 use crate::config::GPT2Config;
 use crate::embedding::GPT2Embedding;
 use crate::transformer::TransformerDecoder;
@@ -107,7 +109,7 @@ impl GPT2 {
         &self,
         input_ids: &Tensor<u32>,
         past_key_values: Option<Vec<(Tensor<f32>, Tensor<f32>)>>,
-    ) -> (Variable, Vec<(Tensor<f32>, Tensor<f32>)>) {
+    ) -> (Variable, Vec<KVCacheEntry>) {
         let hidden_states = self.forward_ids(input_ids);
 
         // Pass through existing cache or return empty for first token
@@ -204,7 +206,7 @@ impl GPT2LMHead {
         let shape = logits_data.shape();
         let batch_size = shape[0];
         let seq_len = shape[1];
-        let vocab_size = shape[2];
+        let _vocab_size = shape[2];
 
         // Shift: predict next token
         // logits: [batch, seq-1, vocab] for positions 0..seq-1

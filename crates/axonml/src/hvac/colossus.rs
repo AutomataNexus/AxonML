@@ -65,6 +65,12 @@ pub const ZEPHYRUS_DIM: usize = 320;
 pub const TOTAL_SPECIALIST_DIM: usize =
     AQUILO_DIM + BOREAS_DIM + NAIAD_DIM + VULCAN_DIM + ZEPHYRUS_DIM;
 
+impl Default for Colossus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Colossus {
     /// Creates a new Colossus aggregator.
     pub fn new() -> Self {

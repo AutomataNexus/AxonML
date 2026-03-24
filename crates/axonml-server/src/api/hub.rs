@@ -258,13 +258,13 @@ fn get_cache_dir() -> PathBuf {
         .join("weights")
 }
 
-fn is_model_cached(cache_dir: &PathBuf, model_name: &str) -> bool {
+fn is_model_cached(cache_dir: &std::path::Path, model_name: &str) -> bool {
     cache_dir
         .join(format!("{}.safetensors", model_name))
         .exists()
 }
 
-fn get_cached_path(cache_dir: &PathBuf, model_name: &str) -> Option<String> {
+fn get_cached_path(cache_dir: &std::path::Path, model_name: &str) -> Option<String> {
     let path = cache_dir.join(format!("{}.safetensors", model_name));
     if path.exists() {
         Some(path.to_string_lossy().to_string())

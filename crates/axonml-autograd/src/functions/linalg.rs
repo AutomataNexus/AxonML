@@ -112,20 +112,20 @@ impl GradientFunction for MatMulBackward {
             go_dev // all CPU
         };
 
-        let go = if grad_output.device() != target {
-            grad_output.to_device(target).unwrap()
-        } else {
+        let go = if grad_output.device() == target {
             grad_output.clone()
-        };
-        let rt = if rhs_t.device() != target {
-            rhs_t.to_device(target).unwrap()
         } else {
+            grad_output.to_device(target).unwrap()
+        };
+        let rt = if rhs_t.device() == target {
             rhs_t
-        };
-        let lt = if lhs_t.device() != target {
-            lhs_t.to_device(target).unwrap()
         } else {
+            rhs_t.to_device(target).unwrap()
+        };
+        let lt = if lhs_t.device() == target {
             lhs_t
+        } else {
+            lhs_t.to_device(target).unwrap()
         };
 
         // grad_lhs = grad_output @ rhs^T
@@ -432,7 +432,7 @@ impl GradientFunction for ExpandBackward {
         // Reshape to original input shape
         if result.shape() != in_shape {
             let target_isize: Vec<isize> = in_shape.iter().map(|&x| x as isize).collect();
-            result = result.reshape(&target_isize).unwrap_or_else(|_| result);
+            result = result.reshape(&target_isize).unwrap_or(result);
         }
         vec![Some(result)]
     }

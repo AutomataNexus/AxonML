@@ -49,6 +49,12 @@ pub struct Naiad {
     training: bool,
 }
 
+impl Default for Naiad {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Naiad {
     /// Creates a new Naiad model.
     pub fn new() -> Self {

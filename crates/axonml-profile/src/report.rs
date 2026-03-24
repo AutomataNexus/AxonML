@@ -174,13 +174,9 @@ impl ProfileReport {
     pub fn to_text(&self) -> String {
         let mut output = String::new();
 
-        output.push_str(&format!(
-            "═══════════════════════════════════════════════════════════════\n"
-        ));
+        output.push_str("═══════════════════════════════════════════════════════════════\n");
         output.push_str(&format!("                    {}\n", self.title));
-        output.push_str(&format!(
-            "═══════════════════════════════════════════════════════════════\n\n"
-        ));
+        output.push_str("═══════════════════════════════════════════════════════════════\n\n");
 
         output.push_str(&format!(
             "Total Duration: {:.3} seconds\n\n",
@@ -266,7 +262,7 @@ impl ProfileReport {
                 output.push_str(&format!("     {}\n", b.description));
                 output.push_str(&format!("     → {}\n", b.suggestion));
             }
-            output.push_str("\n");
+            output.push('\n');
         } else {
             output.push_str("─── Bottlenecks ───────────────────────────────────────────────\n");
             output.push_str("  No bottlenecks detected.\n\n");
@@ -343,7 +339,7 @@ impl ProfileReport {
                     op.time_percentage
                 ));
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         // Bottlenecks section

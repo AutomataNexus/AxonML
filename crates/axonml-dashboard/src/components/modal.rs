@@ -146,7 +146,6 @@ pub fn ConfirmDialog(
     };
 
     let on_cancel_click = {
-        let on_cancel = on_cancel.clone();
         move |_| {
             if let Some(cb) = on_cancel.as_ref() {
                 cb.call(());

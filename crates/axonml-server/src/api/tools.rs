@@ -810,7 +810,7 @@ fn export_to_onnx(state_dict: &StateDict, output_path: &PathBuf) -> Result<(), A
 // Helper Functions
 // ============================================================================
 
-fn detect_format(path: &PathBuf) -> String {
+fn detect_format(path: &std::path::Path) -> String {
     path.extension()
         .and_then(|e| e.to_str())
         .map(|e| match e.to_lowercase().as_str() {

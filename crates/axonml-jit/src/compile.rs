@@ -28,8 +28,10 @@ use std::sync::Mutex;
 
 /// Compilation mode controlling optimization level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum Mode {
     /// Default mode: balanced optimization
+    #[default]
     Default,
     /// Reduce overhead: minimize compilation time
     ReduceOverhead,
@@ -37,16 +39,13 @@ pub enum Mode {
     MaxAutotune,
 }
 
-impl Default for Mode {
-    fn default() -> Self {
-        Self::Default
-    }
-}
 
 /// Backend for code generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum Backend {
     /// Default backend (Cranelift)
+    #[default]
     Default,
     /// Eager mode (no compilation)
     Eager,
@@ -56,11 +55,6 @@ pub enum Backend {
     ONNX,
 }
 
-impl Default for Backend {
-    fn default() -> Self {
-        Self::Default
-    }
-}
 
 // =============================================================================
 // Compile Configuration
@@ -296,7 +290,7 @@ impl CompiledModel {
                 values
                     .get(&key)
                     .cloned()
-                    .ok_or_else(|| JitError::InputNotFound(key))
+                    .ok_or(JitError::InputNotFound(key))
             }
             Op::Constant { value } => Ok(vec![*value as f32]),
             Op::Add { lhs, rhs } => {
@@ -375,7 +369,7 @@ impl CompiledModel {
         values
             .get(&key)
             .cloned()
-            .ok_or_else(|| JitError::InputNotFound(key))
+            .ok_or(JitError::InputNotFound(key))
     }
 }
 

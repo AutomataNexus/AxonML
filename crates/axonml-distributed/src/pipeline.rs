@@ -25,20 +25,17 @@ use axonml_tensor::Tensor;
 
 /// Pipeline execution schedule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum PipelineSchedule {
     /// GPipe: Fill-drain schedule with synchronized updates
     GPipe,
     /// 1F1B: One forward, one backward schedule for memory efficiency
+    #[default]
     OneFOneBSchedule,
     /// Interleaved 1F1B for better efficiency
     InterleavedOneFOneB,
 }
 
-impl Default for PipelineSchedule {
-    fn default() -> Self {
-        Self::OneFOneBSchedule
-    }
-}
 
 // =============================================================================
 // Pipeline Stage
@@ -245,7 +242,7 @@ impl<M: Module + Clone> Pipeline<M> {
     fn split_microbatches(&self, input: &Variable) -> Vec<Variable> {
         let data = input.data();
         let batch_size = data.shape()[0];
-        let microbatch_size = (batch_size + self.num_microbatches - 1) / self.num_microbatches;
+        let microbatch_size = batch_size.div_ceil(self.num_microbatches);
 
         let mut microbatches = Vec::new();
         let flat_data = data.to_vec();
@@ -336,8 +333,7 @@ impl<M: Module + Clone> Module for Pipeline<M> {
     fn is_training(&self) -> bool {
         self.stages
             .first()
-            .map(|s| s.is_training())
-            .unwrap_or(false)
+            .is_some_and(|s| s.is_training())
     }
 }
 

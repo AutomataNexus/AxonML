@@ -100,6 +100,7 @@ impl QuantType {
     }
 
     /// Parses a quantization type from a string.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "Q8_0" | "Q8" | "INT8" => Some(QuantType::Q8_0),

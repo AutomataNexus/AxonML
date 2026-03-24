@@ -98,22 +98,22 @@ impl TrainingHistory {
         // Try to parse as JSON array first
         if let Ok(records) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
             for record in records {
-                if let Some(epoch) = record.get("epoch").and_then(|v| v.as_u64()) {
+                if let Some(epoch) = record.get("epoch").and_then(serde_json::Value::as_u64) {
                     history.epochs.push(epoch as usize);
                 }
-                if let Some(loss) = record.get("train_loss").and_then(|v| v.as_f64()) {
+                if let Some(loss) = record.get("train_loss").and_then(serde_json::Value::as_f64) {
                     history.train_loss.push(loss);
                 }
-                if let Some(loss) = record.get("val_loss").and_then(|v| v.as_f64()) {
+                if let Some(loss) = record.get("val_loss").and_then(serde_json::Value::as_f64) {
                     history.val_loss.push(loss);
                 }
-                if let Some(acc) = record.get("train_accuracy").and_then(|v| v.as_f64()) {
+                if let Some(acc) = record.get("train_accuracy").and_then(serde_json::Value::as_f64) {
                     history.train_accuracy.push(acc);
                 }
-                if let Some(acc) = record.get("val_accuracy").and_then(|v| v.as_f64()) {
+                if let Some(acc) = record.get("val_accuracy").and_then(serde_json::Value::as_f64) {
                     history.val_accuracy.push(acc);
                 }
-                if let Some(lr) = record.get("learning_rate").and_then(|v| v.as_f64()) {
+                if let Some(lr) = record.get("learning_rate").and_then(serde_json::Value::as_f64) {
                     history.learning_rates.push(lr);
                 }
             }
@@ -121,28 +121,28 @@ impl TrainingHistory {
             // Try to parse as newline-delimited JSON (JSONL format)
             for line in content.lines() {
                 if let Ok(record) = serde_json::from_str::<serde_json::Value>(line) {
-                    if let Some(epoch) = record.get("epoch").and_then(|v| v.as_u64()) {
+                    if let Some(epoch) = record.get("epoch").and_then(serde_json::Value::as_u64) {
                         history.epochs.push(epoch as usize);
                     }
-                    if let Some(loss) = record.get("train_loss").and_then(|v| v.as_f64()) {
+                    if let Some(loss) = record.get("train_loss").and_then(serde_json::Value::as_f64) {
                         history.train_loss.push(loss);
-                    } else if let Some(loss) = record.get("loss").and_then(|v| v.as_f64()) {
+                    } else if let Some(loss) = record.get("loss").and_then(serde_json::Value::as_f64) {
                         history.train_loss.push(loss);
                     }
-                    if let Some(loss) = record.get("val_loss").and_then(|v| v.as_f64()) {
+                    if let Some(loss) = record.get("val_loss").and_then(serde_json::Value::as_f64) {
                         history.val_loss.push(loss);
                     }
-                    if let Some(acc) = record.get("train_accuracy").and_then(|v| v.as_f64()) {
+                    if let Some(acc) = record.get("train_accuracy").and_then(serde_json::Value::as_f64) {
                         history.train_accuracy.push(acc);
-                    } else if let Some(acc) = record.get("accuracy").and_then(|v| v.as_f64()) {
+                    } else if let Some(acc) = record.get("accuracy").and_then(serde_json::Value::as_f64) {
                         history.train_accuracy.push(acc);
                     }
-                    if let Some(acc) = record.get("val_accuracy").and_then(|v| v.as_f64()) {
+                    if let Some(acc) = record.get("val_accuracy").and_then(serde_json::Value::as_f64) {
                         history.val_accuracy.push(acc);
                     }
-                    if let Some(lr) = record.get("learning_rate").and_then(|v| v.as_f64()) {
+                    if let Some(lr) = record.get("learning_rate").and_then(serde_json::Value::as_f64) {
                         history.learning_rates.push(lr);
-                    } else if let Some(lr) = record.get("lr").and_then(|v| v.as_f64()) {
+                    } else if let Some(lr) = record.get("lr").and_then(serde_json::Value::as_f64) {
                         history.learning_rates.push(lr);
                     }
                 }
@@ -162,6 +162,7 @@ impl TrainingHistory {
     }
 
     /// Check if we have real training data
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.train_loss.is_empty()
     }
@@ -1374,8 +1375,8 @@ fn generate_loss_curve_svg_from_history(history: &TrainingHistory) -> String {
     let x_scale = f64::from(width - 2 * padding) / num_epochs.max(1) as f64;
 
     // Calculate y_max dynamically from actual data
-    let train_max = train_loss.iter().cloned().fold(0.0f64, f64::max);
-    let val_max = val_loss.iter().cloned().fold(0.0f64, f64::max);
+    let train_max = train_loss.iter().copied().fold(0.0f64, f64::max);
+    let val_max = val_loss.iter().copied().fold(0.0f64, f64::max);
     let y_max = (train_max.max(val_max) * 1.1).max(0.1); // Add 10% padding, ensure non-zero
     let y_scale = f64::from(height - 2 * padding) / y_max;
 

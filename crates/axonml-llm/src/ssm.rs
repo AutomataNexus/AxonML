@@ -50,7 +50,7 @@ impl SSMConfig {
             d_state,
             d_inner,
             d_conv: 4,
-            dt_rank: (d_model + 15) / 16, // ceil(d_model / 16)
+            dt_rank: d_model.div_ceil(16), // ceil(d_model / 16)
         }
     }
 }
@@ -461,6 +461,7 @@ pub struct SSMBlock {
     /// Output projection: d_inner -> d_model
     out_proj: Linear,
     /// Model dimension
+    #[allow(dead_code)]
     d_model: usize,
     /// Inner dimension
     d_inner: usize,

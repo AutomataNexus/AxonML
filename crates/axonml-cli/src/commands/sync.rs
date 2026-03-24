@@ -84,6 +84,7 @@ pub async fn login(args: &LoginArgs) -> CliResult<()> {
 }
 
 /// Execute the logout command
+#[allow(clippy::unused_async)]
 pub async fn logout() -> CliResult<()> {
     match ApiClient::logout() {
         Ok(()) => {

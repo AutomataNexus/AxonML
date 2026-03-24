@@ -245,10 +245,10 @@ impl Optimizer for RMSprop {
             let state = &mut self.state[i];
 
             // Apply weight decay: d = grad + weight_decay * param
-            let d = if self.weight_decay != 0.0 {
-                grad.add(&param_data.mul_scalar(self.weight_decay)).unwrap()
-            } else {
+            let d = if self.weight_decay == 0.0 {
                 grad.clone()
+            } else {
+                grad.add(&param_data.mul_scalar(self.weight_decay)).unwrap()
             };
 
             // Update square average: sq_avg = alpha * sq_avg + (1 - alpha) * d^2
@@ -282,15 +282,15 @@ impl Optimizer for RMSprop {
             };
 
             // Apply update with or without momentum
-            let update = if self.momentum != 0.0 {
+            let update = if self.momentum == 0.0 {
+                // update = d / denom
+                d.div(&denom).unwrap()
+            } else {
                 // buf = momentum * buf + d / denom
                 let normalized = d.div(&denom).unwrap();
                 let buf = state.momentum_buffer.as_mut().unwrap();
                 *buf = buf.mul_scalar(self.momentum).add(&normalized).unwrap();
                 buf.clone()
-            } else {
-                // update = d / denom
-                d.div(&denom).unwrap()
             };
 
             // param = param - lr * update

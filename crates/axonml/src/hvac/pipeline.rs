@@ -55,6 +55,12 @@ pub struct HvacPipeline {
     pub apollo: Apollo,
 }
 
+impl Default for HvacPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HvacPipeline {
     /// Creates a new pipeline with all models initialized.
     pub fn new() -> Self {

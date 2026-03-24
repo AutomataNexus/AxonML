@@ -561,7 +561,7 @@ pub async fn record_metrics(
             req.custom.clone(),
         )
         .await
-        .map_err(|e| AuthError::Internal(e))?;
+        .map_err(AuthError::Internal)?;
 
     // Update status to running if pending
     if run.status == RunStatus::Pending {

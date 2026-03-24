@@ -429,7 +429,7 @@ impl Upsample {
         if input.requires_grad() && is_grad_enabled() {
             let grad_fn = GradFn::new(InterpolateBackward {
                 next_fns: vec![input.grad_fn().cloned()],
-                input_shape: shape.to_vec(),
+                input_shape: shape.clone(),
                 mode: self.mode,
             });
             Variable::from_operation(output, grad_fn, true)
@@ -450,7 +450,7 @@ pub fn interpolate_var(
     if input.requires_grad() && is_grad_enabled() {
         let grad_fn = GradFn::new(InterpolateBackward {
             next_fns: vec![input.grad_fn().cloned()],
-            input_shape: input.shape().to_vec(),
+            input_shape: input.shape().clone(),
             mode,
         });
         Variable::from_operation(output, grad_fn, true)

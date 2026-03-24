@@ -106,7 +106,6 @@ impl Module for Conv1d {
     fn forward(&self, input: &Variable) -> Variable {
         let input_shape = input.shape();
         let batch_size = input_shape[0];
-        let _in_channels = input_shape[1];
         let in_length = input_shape[2];
 
         let out_length = (in_length + 2 * self.padding - self.kernel_size) / self.stride + 1;
@@ -561,13 +560,13 @@ fn conv2d_im2col(
                     let bias_val = bias.map_or(0.0, |bv| bv[oc]);
                     let src_start = oc_local * col_w;
                     let dst_start = out_offset + oc_local * spatial;
-                    if bias_val != 0.0 {
+                    if bias_val == 0.0 {
+                        batch_out[dst_start..dst_start + spatial]
+                            .copy_from_slice(&result_vec[src_start..src_start + spatial]);
+                    } else {
                         for i in 0..spatial {
                             batch_out[dst_start + i] = result_vec[src_start + i] + bias_val;
                         }
-                    } else {
-                        batch_out[dst_start..dst_start + spatial]
-                            .copy_from_slice(&result_vec[src_start..src_start + spatial]);
                     }
                 }
             }

@@ -388,12 +388,12 @@ impl TrainingHistory {
 
     /// Returns the best training loss.
     pub fn best_train_loss(&self) -> Option<f32> {
-        self.train_loss.iter().cloned().reduce(f32::min)
+        self.train_loss.iter().copied().reduce(f32::min)
     }
 
     /// Returns the best validation loss.
     pub fn best_val_loss(&self) -> Option<f32> {
-        self.val_loss.iter().cloned().reduce(f32::min)
+        self.val_loss.iter().copied().reduce(f32::min)
     }
 }
 

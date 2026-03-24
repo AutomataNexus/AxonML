@@ -368,6 +368,132 @@ let map = compute_map(&all_dets, &all_gts, num_classes, 0.5); // mAP@0.5
 let coco_map = compute_coco_map(&all_dets, &all_gts, num_classes); // mAP@[0.5:0.95]
 ```
 
+## Biometric Model Training
+
+AxonML includes the Aegis Biometric Suite with specialized losses and training infrastructure for identity verification models.
+
+### Biometric Losses
+
+```rust
+use axonml_vision::models::biometric::losses::{
+    ArgusLoss, EchoLoss, ContrastiveLoss, CenterLoss, AngularMarginLoss,
+    CrystallizationLoss, ThemisLoss, LivenessLoss,
+};
+
+// Argus (face recognition) — ArcFace angular margin + center loss
+let argus_loss = ArgusLoss::new(num_classes, embed_dim);
+let loss = argus_loss.compute_var(&embeddings, &labels);
+
+// Echo (speaker verification) — contrastive + prediction loss
+let echo_loss = EchoLoss::new(margin);
+let loss = echo_loss.compute_var(&embed_a, &embed_b, is_same);
+
+// Themis (anti-spoofing) — liveness classification + trajectory regularization
+let themis_loss = ThemisLoss::new();
+let loss = themis_loss.compute_var(&scores, &labels);
+
+// Mnemosyne (person re-id) — center loss + diversity regularization
+let center_loss = CenterLoss::new(num_classes, embed_dim);
+let loss = center_loss.compute_var(&embeddings, &labels);
+```
+
+### Biometric Training Example
+
+```rust
+use axonml_vision::models::biometric::argus::Argus;
+
+// Create model and move to GPU
+let mut model = Argus::new(num_identities, 512);
+let device = Device::CUDA(0);
+
+let mut optimizer = Adam::new(model.parameters(), 1e-4)
+    .weight_decay(5e-4);
+
+for epoch in 0..epochs {
+    for (images, labels) in train_loader.iter() {
+        // Move BOTH parameters AND inputs to device
+        let x = Variable::new(images.to(device), false);
+        let y = labels.to(device);
+
+        let embeddings = model.forward(&x);
+        let loss = argus_loss.compute_var(&embeddings, &y);
+
+        optimizer.zero_grad();
+        loss.backward();
+        optimizer.step();
+    }
+}
+```
+
+## NightVision Infrared Detection Training
+
+NightVision is a multi-domain infrared object detector with domain-adaptive thermal feature extraction. It supports wildlife monitoring, human detection, and astronomical/interstellar thermal imaging.
+
+### NightVision Configuration
+
+```rust
+use axonml_vision::models::nightvision::{NightVision, NightVisionConfig, ThermalDomain};
+
+// Wildlife detection (thermal cameras)
+let config = NightVisionConfig::wildlife(num_species);
+
+// Human detection (search & rescue, perimeter security)
+let config = NightVisionConfig::human();
+
+// Interstellar (astronomical thermal sources)
+let config = NightVisionConfig::interstellar(num_classes, bands);
+
+// Multi-domain (all thermal domains)
+let config = NightVisionConfig::multi_domain(num_classes);
+
+// Edge deployment (lightweight)
+let config = NightVisionConfig::edge(num_classes);
+
+let model = NightVision::new(config);
+```
+
+### NightVision Architecture
+
+```
+IR Image [B, 1, H, W] or [B, 3, H, W]
+  → ThermalBackbone (CSP blocks, multi-scale P3/P4/P5)
+  → ThermalFPN (Feature Pyramid Network)
+  → DecoupledHead (cls + bbox + objectness per scale)
+  → Detections: [class, x, y, w, h, confidence, domain]
+```
+
+## GPU Device Placement
+
+When training on GPU, you must move **both** model parameters and input tensors to the same device. Forgetting to move inputs is the most common source of device mismatch errors.
+
+```rust
+use axonml::core::Device;
+
+let device = Device::CUDA(0);
+
+// Move model parameters to GPU
+for param in model.parameters() {
+    param.to(device);
+}
+
+// In the training loop, move EACH batch to GPU
+for (inputs, targets) in train_loader.iter() {
+    let x = Variable::new(inputs.to(device), false);
+    let y = targets.to(device);
+
+    let output = model.forward(&x);
+    // ... loss, backward, step ...
+}
+```
+
+For async GPU prefetch (overlaps data transfer with compute):
+
+```rust
+// Enable prefetch — background thread pre-transfers next batch to GPU
+let train_loader = DataLoader::new(dataset, batch_size, shuffle)
+    .prefetch_to_gpu(device);
+```
+
 ## Complete Training Script
 
 ```rust

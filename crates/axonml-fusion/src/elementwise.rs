@@ -159,12 +159,14 @@ impl FusedElementwiseBuilder {
     }
 
     /// Adds an addition by constant.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, c: f32) -> Self {
         self.ops.push(ElementwiseOp::AddConst(c));
         self
     }
 
     /// Adds a multiplication by constant.
+    #[allow(clippy::should_implement_trait)]
     pub fn mul(mut self, c: f32) -> Self {
         self.ops.push(ElementwiseOp::MulConst(c));
         self
@@ -225,6 +227,7 @@ impl FusedElementwiseBuilder {
     }
 
     /// Adds negation.
+    #[allow(clippy::should_implement_trait)]
     pub fn neg(mut self) -> Self {
         self.ops.push(ElementwiseOp::Neg);
         self

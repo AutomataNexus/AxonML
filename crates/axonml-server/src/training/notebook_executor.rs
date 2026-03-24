@@ -26,6 +26,7 @@ pub struct ExecutionResult {
     pub success: bool,
     pub stdout: String,
     pub stderr: String,
+    #[allow(dead_code)]
     pub duration_ms: u64,
 }
 
@@ -352,13 +353,6 @@ debug = false
                     .replace(r"/tmp/", "")
                     .replace("notebook_cell/src/main.rs", "cell");
                 cleaned.push(cleaned_line);
-            } else if line.starts_with("error")
-                || line.starts_with("warning")
-                || line.contains("-->")
-            {
-                cleaned.push(line.to_string());
-            } else if line.trim().starts_with('|') || line.trim().starts_with('=') {
-                cleaned.push(line.to_string());
             } else if !line.trim().is_empty() {
                 cleaned.push(line.to_string());
             }

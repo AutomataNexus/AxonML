@@ -314,6 +314,22 @@ ticket.rewind(&mut sparse); // rewind to init weights with mask
 
 This makes the mask continuous and differentiable — gradients flow through the pruning decision. PyTorch's pruning (`torch.nn.utils.prune`) uses binary masks that are not differentiable.
 
+### Additional Layers
+
+The following layers are also available in `axonml-nn`:
+
+| Layer | Module | Description |
+|:------|:-------|:------------|
+| `DiffAttention` | `layers::diff_attention` | Differential attention (used by Chimera SLM) |
+| `MoELayer` | `layers::moe` | Mixture of Experts with top-k routing |
+| `TernaryLinear` | `layers::ternary` | 1.58-bit ternary weight layer (BitNet b1.58) |
+| `ResidualBlock` | `layers::residual` | Pre-configured residual skip connection |
+| `GCNConv` | `layers::graph` | Graph Convolutional Network layer |
+| `GATConv` | `layers::graph` | Graph Attention Network layer |
+| `FFT1d` / `STFT` | `layers::fft` | Fourier transform layers |
+
+These layers are used as building blocks by higher-level models in `axonml-vision` (NightVision, Biometric Suite) and `axonml-llm` (Chimera, Trident).
+
 ## Related Modules
 
 - [Autograd](../autograd/README.md) - Gradient computation

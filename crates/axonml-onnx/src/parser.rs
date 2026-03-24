@@ -393,7 +393,7 @@ fn validate_model(proto: &ModelProto) -> OnnxResult<()> {
 
     // Check opset version
     let opset_version = proto.opset_version();
-    if opset_version < 7 || opset_version > crate::SUPPORTED_OPSET_VERSION {
+    if !(7..=crate::SUPPORTED_OPSET_VERSION).contains(&opset_version) {
         // Warning but don't fail - try to support anyway
         eprintln!(
             "Warning: ONNX opset version {} may not be fully supported",

@@ -340,7 +340,7 @@ impl HSVJitter {
         for y in 0..h {
             for x in 0..w {
                 let r = data[0 * h * w + y * w + x];
-                let g = data[1 * h * w + y * w + x];
+                let g = data[h * w + y * w + x];
                 let b = data[2 * h * w + y * w + x];
 
                 // RGB -> HSV
@@ -355,7 +355,7 @@ impl HSVJitter {
                 let (nr, ng, nb) = hsv_to_rgb(hue, sat, val);
 
                 result[0 * h * w + y * w + x] = nr;
-                result[1 * h * w + y * w + x] = ng;
+                result[h * w + y * w + x] = ng;
                 result[2 * h * w + y * w + x] = nb;
             }
         }

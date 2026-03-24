@@ -51,6 +51,12 @@ pub struct Gaia {
 /// Total input dimension: specialist features + colossus embedding (256).
 pub const GAIA_INPUT_DIM: usize = colossus::TOTAL_SPECIALIST_DIM + 256;
 
+impl Default for Gaia {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Gaia {
     /// Creates a new Gaia safety validator.
     pub fn new() -> Self {

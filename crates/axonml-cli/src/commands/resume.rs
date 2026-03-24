@@ -362,9 +362,9 @@ fn run_resumed_training(
     let data_path_buf = PathBuf::from(data_path);
 
     // Detect or use specified format
-    let detected_format = format.map(String::from).unwrap_or_else(|| {
+    let detected_format = format.map_or_else(|| {
         ResumeDataset::detect_format(&data_path_buf).unwrap_or_else(|| "mnist".to_string())
-    });
+    }, String::from);
 
     print_info(&format!(
         "Loading {} dataset from: {}",

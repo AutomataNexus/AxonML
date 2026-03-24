@@ -118,10 +118,8 @@ pub fn TextInput(
                         value.set(event_target_value(&e));
                     }
                     on:blur=move |_| {
-                        if let Some(cb_opt) = on_blur_stored.try_with_value(|cb| cb.clone()) {
-                            if let Some(cb) = cb_opt {
-                                cb.call(());
-                            }
+                        if let Some(Some(cb)) = on_blur_stored.try_with_value(|cb| *cb) {
+                            cb.call(());
                         }
                     }
                 />
@@ -434,7 +432,7 @@ pub fn FileInput(
     let helper_empty = helper_text.is_empty();
     let helper_display = store_value(helper_text);
 
-    let on_select_for_drop = on_select.clone();
+    let on_select_for_drop = on_select;
 
     // Store error MaybeSignal for use in closures
     let error_stored = store_value(error);

@@ -120,11 +120,9 @@ fn trace_dfs(
     visited.insert(fn_id, idx);
 
     // Recurse into parents
-    for maybe_next in grad_fn.next_functions() {
-        if let Some(next) = maybe_next {
-            let child_idx = trace_dfs(next, nodes, edges, visited);
-            edges.push((idx, child_idx));
-        }
+    for next in grad_fn.next_functions().iter().flatten() {
+        let child_idx = trace_dfs(next, nodes, edges, visited);
+        edges.push((idx, child_idx));
     }
 
     idx
@@ -194,10 +192,8 @@ fn count_dfs(grad_fn: &GradFn, visited: &mut HashSet<GradFnId>) {
     if !visited.insert(fn_id) {
         return;
     }
-    for maybe_next in grad_fn.next_functions() {
-        if let Some(next) = maybe_next {
-            count_dfs(next, visited);
-        }
+    for next in grad_fn.next_functions().iter().flatten() {
+        count_dfs(next, visited);
     }
 }
 
@@ -223,11 +219,9 @@ fn depth_dfs(grad_fn: &GradFn, visited: &mut HashSet<GradFnId>) -> usize {
     }
 
     let mut max_child_depth: usize = 0;
-    for maybe_next in grad_fn.next_functions() {
-        if let Some(next) = maybe_next {
-            let d = depth_dfs(next, visited);
-            max_child_depth = max_child_depth.max(d);
-        }
+    for next in grad_fn.next_functions().iter().flatten() {
+        let d = depth_dfs(next, visited);
+        max_child_depth = max_child_depth.max(d);
     }
 
     // Remove from visited so other paths can explore this node at different depths
@@ -244,11 +238,7 @@ pub fn leaf_count(variable: &Variable) -> usize {
             leaf_count_dfs(gf, &mut visited)
         }
         None => {
-            if variable.requires_grad() {
-                1
-            } else {
-                0
-            }
+            usize::from(variable.requires_grad())
         }
     }
 }
@@ -265,10 +255,8 @@ fn leaf_count_dfs(grad_fn: &GradFn, visited: &mut HashSet<GradFnId>) -> usize {
     }
 
     let mut count = 0;
-    for maybe_next in grad_fn.next_functions() {
-        if let Some(next) = maybe_next {
-            count += leaf_count_dfs(next, visited);
-        }
+    for next in grad_fn.next_functions().iter().flatten() {
+        count += leaf_count_dfs(next, visited);
     }
     count
 }
@@ -303,10 +291,8 @@ fn op_names_dfs(grad_fn: &GradFn, visited: &mut HashSet<GradFnId>, names: &mut H
         names.insert(name.to_string());
     }
 
-    for maybe_next in grad_fn.next_functions() {
-        if let Some(next) = maybe_next {
-            op_names_dfs(next, visited, names);
-        }
+    for next in grad_fn.next_functions().iter().flatten() {
+        op_names_dfs(next, visited, names);
     }
 }
 
@@ -345,10 +331,8 @@ fn summary_dfs(
         *counts.entry(name.to_string()).or_insert(0) += 1;
     }
 
-    for maybe_next in grad_fn.next_functions() {
-        if let Some(next) = maybe_next {
-            summary_dfs(next, visited, counts);
-        }
+    for next in grad_fn.next_functions().iter().flatten() {
+        summary_dfs(next, visited, counts);
     }
 }
 

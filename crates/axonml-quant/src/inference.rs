@@ -35,8 +35,8 @@ use rayon::prelude::*;
 fn dot_q8_block(block: &Q8Block, activations: &[f32]) -> f32 {
     let scale = f32::from(block.scale);
     let mut sum = 0.0f32;
-    for i in 0..block.data.len().min(activations.len()) {
-        sum += (block.data[i] as f32) * activations[i];
+    for (d, a) in block.data.iter().zip(activations.iter()) {
+        sum += (*d as f32) * a;
     }
     sum * scale
 }
@@ -144,7 +144,7 @@ impl QuantizedLinear {
             quantize_tensor(&weight_tensor, quant_type).expect("Failed to quantize weight tensor");
 
         let block_size = quant_type.block_size();
-        let blocks_per_row = (in_features + block_size - 1) / block_size;
+        let blocks_per_row = in_features.div_ceil(block_size);
 
         QuantizedLinear {
             weight,

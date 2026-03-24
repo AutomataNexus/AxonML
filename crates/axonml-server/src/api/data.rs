@@ -33,20 +33,17 @@ use crate::db::datasets::Dataset;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum DatasetType {
     Image,
     Tabular,
     Text,
     Audio,
     Mixed,
+    #[default]
     Unknown,
 }
 
-impl Default for DatasetType {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataStatistics {

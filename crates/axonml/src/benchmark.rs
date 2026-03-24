@@ -16,8 +16,6 @@
 
 use std::time::Instant;
 
-#[cfg(all(feature = "core", feature = "nn"))]
-use axonml_tensor::Tensor;
 
 #[cfg(all(feature = "core", feature = "nn"))]
 use axonml_autograd::Variable;

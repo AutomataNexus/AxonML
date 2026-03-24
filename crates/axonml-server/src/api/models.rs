@@ -621,14 +621,12 @@ pub async fn download_version(
 
     if version_dir.exists() {
         for entry in
-            std::fs::read_dir(&version_dir).map_err(|e| AuthError::Internal(e.to_string()))?
+            std::fs::read_dir(&version_dir).map_err(|e| AuthError::Internal(e.to_string()))?.flatten()
         {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.is_file() {
-                    file_path = Some(path);
-                    break;
-                }
+            let path = entry.path();
+            if path.is_file() {
+                file_path = Some(path);
+                break;
             }
         }
     }

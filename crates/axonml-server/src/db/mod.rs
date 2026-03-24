@@ -292,11 +292,13 @@ impl Database {
     }
 
     /// Execute a statement (INSERT, UPDATE, DELETE)
+    #[allow(dead_code)]
     pub async fn execute(&self, sql: &str) -> Result<u64, DbError> {
         self.execute_with_params(sql, vec![]).await
     }
 
     /// Execute a statement with parameters
+    #[allow(dead_code)]
     pub async fn execute_with_params(&self, sql: &str, params: Vec<Value>) -> Result<u64, DbError> {
         let result = self.query_with_params(sql, params).await?;
         Ok(result.affected_rows)

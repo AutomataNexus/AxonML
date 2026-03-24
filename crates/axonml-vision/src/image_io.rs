@@ -36,7 +36,7 @@ pub fn load_image<P: AsRef<Path>>(path: P) -> Result<Tensor<f32>, String> {
         for x in 0..w {
             let pixel = rgb.get_pixel(x as u32, y as u32);
             data[0 * h * w + y * w + x] = pixel[0] as f32 / 255.0;
-            data[1 * h * w + y * w + x] = pixel[1] as f32 / 255.0;
+            data[h * w + y * w + x] = pixel[1] as f32 / 255.0;
             data[2 * h * w + y * w + x] = pixel[2] as f32 / 255.0;
         }
     }
@@ -65,7 +65,7 @@ pub fn load_image_resized<P: AsRef<Path>>(
         for x in 0..target_w {
             let pixel = rgb.get_pixel(x as u32, y as u32);
             data[0 * target_h * target_w + y * target_w + x] = pixel[0] as f32 / 255.0;
-            data[1 * target_h * target_w + y * target_w + x] = pixel[1] as f32 / 255.0;
+            data[target_h * target_w + y * target_w + x] = pixel[1] as f32 / 255.0;
             data[2 * target_h * target_w + y * target_w + x] = pixel[2] as f32 / 255.0;
         }
     }
@@ -89,7 +89,7 @@ pub fn load_image_with_info<P: AsRef<Path>>(
         for x in 0..w {
             let pixel = rgb.get_pixel(x as u32, y as u32);
             data[0 * h * w + y * w + x] = pixel[0] as f32 / 255.0;
-            data[1 * h * w + y * w + x] = pixel[1] as f32 / 255.0;
+            data[h * w + y * w + x] = pixel[1] as f32 / 255.0;
             data[2 * h * w + y * w + x] = pixel[2] as f32 / 255.0;
         }
     }
@@ -113,7 +113,7 @@ pub fn rgb_bytes_to_tensor(data: &[u8], h: usize, w: usize) -> Result<Tensor<f32
         for x in 0..w {
             let idx = (y * w + x) * 3;
             chw[0 * h * w + y * w + x] = data[idx] as f32 / 255.0;
-            chw[1 * h * w + y * w + x] = data[idx + 1] as f32 / 255.0;
+            chw[h * w + y * w + x] = data[idx + 1] as f32 / 255.0;
             chw[2 * h * w + y * w + x] = data[idx + 2] as f32 / 255.0;
         }
     }

@@ -159,14 +159,16 @@ impl Optimizer for SGD {
             // ============================================================
 
             // Apply weight decay: d = grad + weight_decay * param
-            let d = if self.weight_decay != 0.0 {
-                grad.add(&param_data.mul_scalar(self.weight_decay)).unwrap()
-            } else {
+            let d = if self.weight_decay == 0.0 {
                 grad.clone()
+            } else {
+                grad.add(&param_data.mul_scalar(self.weight_decay)).unwrap()
             };
 
             // Apply momentum
-            let update_dir = if self.momentum != 0.0 {
+            let update_dir = if self.momentum == 0.0 {
+                d
+            } else {
                 let buf = &mut self.momentum_buffers[i];
 
                 if buf.is_none() {
@@ -190,8 +192,6 @@ impl Optimizer for SGD {
                 } else {
                     buf_ref.clone()
                 }
-            } else {
-                d
             };
 
             // param = param - lr * update_dir

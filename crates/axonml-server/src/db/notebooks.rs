@@ -29,37 +29,33 @@ const CHECKPOINTS_COLLECTION: &str = "axonml_checkpoints";
 /// Cell type enum
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CellType {
+    #[default]
     Code,
     Markdown,
 }
 
-impl Default for CellType {
-    fn default() -> Self {
-        Self::Code
-    }
-}
 
 /// Cell execution status
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CellStatus {
+    #[default]
     Idle,
     Running,
     Completed,
     Error,
 }
 
-impl Default for CellStatus {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
 
 /// Notebook status
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum NotebookStatus {
+    #[default]
     Draft,
     Running,
     Completed,
@@ -67,11 +63,6 @@ pub enum NotebookStatus {
     Stopped,
 }
 
-impl Default for NotebookStatus {
-    fn default() -> Self {
-        Self::Draft
-    }
-}
 
 /// Cell output
 #[derive(Debug, Clone, Serialize, Deserialize)]

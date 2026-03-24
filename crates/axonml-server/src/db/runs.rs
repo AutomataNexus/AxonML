@@ -26,7 +26,9 @@ const COLLECTION: &str = "axonml_runs";
 /// Training run status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum RunStatus {
+    #[default]
     Pending,
     Running,
     Completed,
@@ -34,11 +36,6 @@ pub enum RunStatus {
     Stopped,
 }
 
-impl Default for RunStatus {
-    fn default() -> Self {
-        RunStatus::Pending
-    }
-}
 
 /// Training run configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
