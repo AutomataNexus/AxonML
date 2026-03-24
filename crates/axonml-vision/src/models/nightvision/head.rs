@@ -84,10 +84,7 @@ impl DecoupledHead {
     /// - bbox_pred: [B, 4, H, W]
     /// - obj_logits: [B, 1, H, W]
     /// - domain_logits: [B, num_domains, H, W] or None
-    pub fn forward(
-        &self,
-        x: &Variable,
-    ) -> (Variable, Variable, Variable, Option<Variable>) {
+    pub fn forward(&self, x: &Variable) -> (Variable, Variable, Variable, Option<Variable>) {
         let stem_out = self.stem.forward(x);
 
         // Classification branch
@@ -122,11 +119,17 @@ impl DecoupledHead {
     /// Returns named parameters with the given prefix.
     pub fn named_parameters(&self, prefix: &str) -> HashMap<String, Parameter> {
         let mut p = self.stem.named_parameters(&format!("{}.stem", prefix));
-        p.extend(self.cls_conv.named_parameters(&format!("{}.cls_conv", prefix)));
+        p.extend(
+            self.cls_conv
+                .named_parameters(&format!("{}.cls_conv", prefix)),
+        );
         for (k, v) in self.cls_pred.named_parameters() {
             p.insert(format!("{}.cls_pred.{}", prefix, k), v);
         }
-        p.extend(self.reg_conv.named_parameters(&format!("{}.reg_conv", prefix)));
+        p.extend(
+            self.reg_conv
+                .named_parameters(&format!("{}.reg_conv", prefix)),
+        );
         for (k, v) in self.reg_pred.named_parameters() {
             p.insert(format!("{}.reg_pred.{}", prefix, k), v);
         }

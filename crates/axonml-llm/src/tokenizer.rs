@@ -411,9 +411,9 @@ impl HFTokenizer {
                 && (Some(id) == self.special_tokens.bos_token_id
                     || Some(id) == self.special_tokens.eos_token_id
                     || Some(id) == self.special_tokens.pad_token_id)
-                {
-                    continue;
-                }
+            {
+                continue;
+            }
 
             if let Some(token) = self.id_to_token.get(&id) {
                 // Handle byte tokens

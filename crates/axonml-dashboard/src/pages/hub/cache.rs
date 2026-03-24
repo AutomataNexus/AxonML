@@ -74,10 +74,8 @@ pub fn HubCachePage() -> impl IntoView {
             spawn_local(async move {
                 match api::hub::clear_cache(Some(&name)).await {
                     Ok(_) => {
-                        state.toast_success(
-                            "Model Removed",
-                            format!("{} removed from cache", name),
-                        );
+                        state
+                            .toast_success("Model Removed", format!("{} removed from cache", name));
                         if let Ok(info) = api::hub::get_cache_info().await {
                             set_cache_info.set(Some(info));
                         }

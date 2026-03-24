@@ -7,6 +7,8 @@ use std::collections::HashMap;
 
 use axonml_autograd::Variable;
 use axonml_nn::{Module, Parameter};
+#[cfg(test)]
+use axonml_tensor::Tensor;
 
 use super::backbone::ThermalBackbone;
 use super::head::DecoupledHead;
@@ -261,12 +263,8 @@ impl NightVision {
             let cls_flat = cls
                 .reshape(&[batch, self.config.num_classes, n_anchors])
                 .transpose(1, 2); // [B, H*W, num_classes]
-            let bbox_flat = bbox
-                .reshape(&[batch, 4, n_anchors])
-                .transpose(1, 2); // [B, H*W, 4]
-            let obj_flat = obj
-                .reshape(&[batch, 1, n_anchors])
-                .transpose(1, 2); // [B, H*W, 1]
+            let bbox_flat = bbox.reshape(&[batch, 4, n_anchors]).transpose(1, 2); // [B, H*W, 4]
+            let obj_flat = obj.reshape(&[batch, 1, n_anchors]).transpose(1, 2); // [B, H*W, 1]
 
             all_cls.push(cls_flat);
             all_bbox.push(bbox_flat);

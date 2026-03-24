@@ -40,7 +40,8 @@ fn load_iris_identities(data_dir: &Path) -> Vec<IdentityData> {
         .expect("Failed to read data dir")
         .filter_map(|e| e.ok())
         .filter(|e| {
-            e.path().file_name()
+            e.path()
+                .file_name()
                 .map(|f| f.to_string_lossy().starts_with("identity_"))
                 .unwrap_or(false)
         })
@@ -176,14 +177,37 @@ impl TrainConfig {
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
-                "--data-dir" => { i += 1; config.data_dir = PathBuf::from(&args[i]); }
-                "--output-dir" => { i += 1; config.output_dir = PathBuf::from(&args[i]); }
-                "--epochs" => { i += 1; config.epochs = args[i].parse().unwrap(); }
-                "--lr" => { i += 1; config.lr = args[i].parse().unwrap(); }
-                "--batch-size" | "--bs" => { i += 1; config.batch_size = args[i].parse().unwrap(); }
-                "--batches" => { i += 1; config.batches_per_epoch = args[i].parse().unwrap(); }
-                "--resume" => { i += 1; config.resume = args[i].clone(); }
-                "--fresh" => { config.resume = "none".to_string(); }
+                "--data-dir" => {
+                    i += 1;
+                    config.data_dir = PathBuf::from(&args[i]);
+                }
+                "--output-dir" => {
+                    i += 1;
+                    config.output_dir = PathBuf::from(&args[i]);
+                }
+                "--epochs" => {
+                    i += 1;
+                    config.epochs = args[i].parse().unwrap();
+                }
+                "--lr" => {
+                    i += 1;
+                    config.lr = args[i].parse().unwrap();
+                }
+                "--batch-size" | "--bs" => {
+                    i += 1;
+                    config.batch_size = args[i].parse().unwrap();
+                }
+                "--batches" => {
+                    i += 1;
+                    config.batches_per_epoch = args[i].parse().unwrap();
+                }
+                "--resume" => {
+                    i += 1;
+                    config.resume = args[i].clone();
+                }
+                "--fresh" => {
+                    config.resume = "none".to_string();
+                }
                 _ => {}
             }
             i += 1;
@@ -201,24 +225,42 @@ fn find_checkpoint(output_dir: &Path, mode: &str) -> Option<PathBuf> {
         "none" => None,
         "latest" => {
             let p = output_dir.join("checkpoint_latest.axonml");
-            if p.exists() { Some(p) } else {
+            if p.exists() {
+                Some(p)
+            } else {
                 let b = output_dir.join("checkpoint_best.axonml");
-                if b.exists() { Some(b) } else {
+                if b.exists() {
+                    Some(b)
+                } else {
                     let m = output_dir.join("best_model.axonml");
-                    if m.exists() { Some(m) } else { None }
+                    if m.exists() {
+                        Some(m)
+                    } else {
+                        None
+                    }
                 }
             }
         }
         "best" => {
             let p = output_dir.join("checkpoint_best.axonml");
-            if p.exists() { Some(p) } else {
+            if p.exists() {
+                Some(p)
+            } else {
                 let b = output_dir.join("best_model.axonml");
-                if b.exists() { Some(b) } else { None }
+                if b.exists() {
+                    Some(b)
+                } else {
+                    None
+                }
             }
         }
         path => {
             let p = PathBuf::from(path);
-            if p.exists() { Some(p) } else { None }
+            if p.exists() {
+                Some(p)
+            } else {
+                None
+            }
         }
     }
 }
@@ -238,8 +280,13 @@ fn load_model_weights(model: &ArgusIris, path: &Path) -> (usize, TrainingState) 
                 }
             }
         }
-        println!("  Loaded checkpoint: {} (epoch {}, {}/{} params)",
-            path.display(), checkpoint.epoch(), loaded, model_params.len());
+        println!(
+            "  Loaded checkpoint: {} (epoch {}, {}/{} params)",
+            path.display(),
+            checkpoint.epoch(),
+            loaded,
+            model_params.len()
+        );
         return (checkpoint.epoch(), checkpoint.training_state.clone());
     }
 
@@ -256,12 +303,19 @@ fn load_model_weights(model: &ArgusIris, path: &Path) -> (usize, TrainingState) 
                 }
             }
         }
-        println!("  Loaded model weights: {} ({}/{} params)",
-            path.display(), loaded, model_params.len());
+        println!(
+            "  Loaded model weights: {} ({}/{} params)",
+            path.display(),
+            loaded,
+            model_params.len()
+        );
         return (0, TrainingState::new());
     }
 
-    println!("  WARNING: Failed to load checkpoint from {}", path.display());
+    println!(
+        "  WARNING: Failed to load checkpoint from {}",
+        path.display()
+    );
     (0, TrainingState::new())
 }
 
@@ -278,24 +332,28 @@ fn main() {
     println!("═══════════════════════════════════════════════════════════");
     println!();
 
-    println!("Loading iris identities from {}...", config.data_dir.display());
+    println!(
+        "Loading iris identities from {}...",
+        config.data_dir.display()
+    );
     let identities = load_iris_identities(&config.data_dir);
     let total: usize = identities.iter().map(|id| id.images.len()).sum();
     println!("  {} identities, {} iris images", identities.len(), total);
 
     // Detect GPU
-    let device = if cfg!(feature = "cuda") {
-        match Device::cuda(0) {
-            d @ Device::Cuda(_) => {
-                println!("  Using GPU: {:?}", d);
-                d
-            }
-            _ => {
-                println!("  GPU not available, using CPU");
-                Device::Cpu
-            }
+    #[cfg(feature = "cuda")]
+    let device = match Device::cuda(0) {
+        d @ Device::Cuda(_) => {
+            println!("  Using GPU: {:?}", d);
+            d
         }
-    } else {
+        _ => {
+            println!("  GPU not available, using CPU");
+            Device::Cpu
+        }
+    };
+    #[cfg(not(feature = "cuda"))]
+    let device = {
         println!("  Using CPU (build with --features cuda for GPU)");
         Device::Cpu
     };
@@ -341,7 +399,10 @@ fn main() {
                 }
             }
         } else {
-            println!("  No checkpoint found for resume='{}', starting fresh.", config.resume);
+            println!(
+                "  No checkpoint found for resume='{}', starting fresh.",
+                config.resume
+            );
         }
     }
 
@@ -350,7 +411,11 @@ fn main() {
     let triplets_per_epoch = config.batch_size * config.batches_per_epoch;
     println!(
         "\nTraining: epochs {}-{}, batch={}, {}/epoch ({} batches)",
-        start_epoch + 1, config.epochs, config.batch_size, triplets_per_epoch, config.batches_per_epoch
+        start_epoch + 1,
+        config.epochs,
+        config.batch_size,
+        triplets_per_epoch,
+        config.batches_per_epoch
     );
     println!("  Best so far: {:.6}", best_loss);
     println!();
@@ -369,7 +434,8 @@ fn main() {
             let (anchor_data, pos_data, neg_data) =
                 mine_triplet_batch(&identities, &mut rng_state, config.batch_size);
 
-            let mut anchor_t = Tensor::from_vec(anchor_data, &[config.batch_size, 1, 32, 256]).unwrap();
+            let mut anchor_t =
+                Tensor::from_vec(anchor_data, &[config.batch_size, 1, 32, 256]).unwrap();
             let mut pos_t = Tensor::from_vec(pos_data, &[config.batch_size, 1, 32, 256]).unwrap();
             let mut neg_t = Tensor::from_vec(neg_data, &[config.batch_size, 1, 32, 256]).unwrap();
 
@@ -410,7 +476,11 @@ fn main() {
 
         println!(
             "Epoch {:3}/{} | loss: {:.4} | lr: {:.6} | {:.1}s",
-            epoch + 1, config.epochs, avg_loss, lr, epoch_time.as_secs_f32()
+            epoch + 1,
+            config.epochs,
+            avg_loss,
+            lr,
+            epoch_time.as_secs_f32()
         );
 
         monitor.log_epoch(epoch + 1, avg_loss, None, vec![("lr", lr)]);
@@ -434,10 +504,20 @@ fn main() {
             .training_state(training_state.clone())
             .epoch(epoch + 1)
             .build();
-        save_checkpoint(&latest_ckpt, config.output_dir.join("checkpoint_latest.axonml")).ok();
+        save_checkpoint(
+            &latest_ckpt,
+            config.output_dir.join("checkpoint_latest.axonml"),
+        )
+        .ok();
 
         if (epoch + 1) % config.save_every == 0 {
-            save_checkpoint(&latest_ckpt, config.output_dir.join(format!("checkpoint_epoch_{:04}.axonml", epoch + 1))).ok();
+            save_checkpoint(
+                &latest_ckpt,
+                config
+                    .output_dir
+                    .join(format!("checkpoint_epoch_{:04}.axonml", epoch + 1)),
+            )
+            .ok();
         }
 
         training_state.next_epoch();
@@ -447,6 +527,11 @@ fn main() {
     let total_time = training_start.elapsed();
     println!();
     println!("═══════════════════════════════════════════════════════════");
-    println!(" Done — {:.1}s ({:.1} min) | Best: {:.4}", total_time.as_secs_f32(), total_time.as_secs_f32() / 60.0, best_loss);
+    println!(
+        " Done — {:.1}s ({:.1} min) | Best: {:.4}",
+        total_time.as_secs_f32(),
+        total_time.as_secs_f32() / 60.0,
+        best_loss
+    );
     println!("═══════════════════════════════════════════════════════════");
 }

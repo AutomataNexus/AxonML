@@ -277,8 +277,7 @@ impl ShuffleNetBackbone {
         let mut stages = Vec::new();
         let mut in_ch = 24;
 
-        for (&out_ch, &repeats) in stage_channels.iter().zip(stage_repeats.iter())
-        {
+        for (&out_ch, &repeats) in stage_channels.iter().zip(stage_repeats.iter()) {
             let mut blocks = Vec::new();
             // First block with stride 2
             blocks.push(ShuffleBlock::new(in_ch, out_ch, 2));

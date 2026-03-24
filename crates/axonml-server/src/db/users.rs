@@ -33,7 +33,6 @@ pub enum UserRole {
     Viewer,
 }
 
-
 /// User data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {

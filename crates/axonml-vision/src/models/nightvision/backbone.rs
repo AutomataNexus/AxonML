@@ -31,16 +31,11 @@ pub struct ConvBNSiLU {
 
 impl ConvBNSiLU {
     /// Create a new ConvBNSiLU block.
-    pub fn new(
-        in_ch: usize,
-        out_ch: usize,
-        kernel: usize,
-        stride: usize,
-        padding: usize,
-    ) -> Self {
+    pub fn new(in_ch: usize, out_ch: usize, kernel: usize, stride: usize, padding: usize) -> Self {
         Self {
             conv: Conv2d::with_options(
-                in_ch, out_ch,
+                in_ch,
+                out_ch,
                 (kernel, kernel),
                 (stride, stride),
                 (padding, padding),
@@ -206,7 +201,9 @@ impl CSPBlock {
 
     /// Returns named parameters with the given prefix.
     pub fn named_parameters(&self, prefix: &str) -> HashMap<String, Parameter> {
-        let mut p = self.downsample.named_parameters(&format!("{}.down", prefix));
+        let mut p = self
+            .downsample
+            .named_parameters(&format!("{}.down", prefix));
         p.extend(self.cv1.named_parameters(&format!("{}.cv1", prefix)));
         p.extend(self.cv2.named_parameters(&format!("{}.cv2", prefix)));
         for (i, b) in self.bottlenecks.iter().enumerate() {
@@ -276,10 +273,10 @@ impl ThermalBackbone {
             x.clone()
         };
 
-        let x = self.stem.forward(&x);       // [B, 32, H/2, W/2]
-        let p3 = self.stage1.forward(&x);     // [B, 64, H/4, W/4]
-        let p4 = self.stage2.forward(&p3);    // [B, 128, H/8, W/8]
-        let p5 = self.stage3.forward(&p4);    // [B, 256, H/16, W/16]
+        let x = self.stem.forward(&x); // [B, 32, H/2, W/2]
+        let p3 = self.stage1.forward(&x); // [B, 64, H/4, W/4]
+        let p4 = self.stage2.forward(&p3); // [B, 128, H/8, W/8]
+        let p5 = self.stage3.forward(&p4); // [B, 256, H/16, W/16]
 
         (p3, p4, p5)
     }

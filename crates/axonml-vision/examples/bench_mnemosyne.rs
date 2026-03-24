@@ -79,10 +79,7 @@ fn load_identities(data_dir: &Path) -> Vec<IdentityData> {
 // Crystallize a face sequence → embedding
 // =============================================================================
 
-fn crystallize_to_embedding(
-    model: &MnemosyneIdentity,
-    faces: &[&Vec<f32>],
-) -> Vec<f32> {
+fn crystallize_to_embedding(model: &MnemosyneIdentity, faces: &[&Vec<f32>]) -> Vec<f32> {
     let mut hidden: Option<Variable> = None;
 
     for face_data in faces {
@@ -132,8 +129,10 @@ fn generate_pairs(
         .map(|(i, _)| i)
         .collect();
 
-    println!("  Generating {} same + {} different pairs (seq_len={})...",
-        num_pairs, num_pairs, seq_len);
+    println!(
+        "  Generating {} same + {} different pairs (seq_len={})...",
+        num_pairs, num_pairs, seq_len
+    );
     println!("  {} identities with {}+ faces", usable.len(), seq_len * 2);
 
     let start = Instant::now();
@@ -198,7 +197,11 @@ fn generate_pairs(
     }
 
     let elapsed = start.elapsed();
-    println!("  Generated {} pairs in {:.1}s", pairs.len(), elapsed.as_secs_f32());
+    println!(
+        "  Generated {} pairs in {:.1}s",
+        pairs.len(),
+        elapsed.as_secs_f32()
+    );
 
     pairs
 }
@@ -208,8 +211,16 @@ fn generate_pairs(
 // =============================================================================
 
 fn compute_metrics(pairs: &[VerificationPair]) {
-    let same: Vec<f32> = pairs.iter().filter(|p| p.is_same).map(|p| p.score).collect();
-    let diff: Vec<f32> = pairs.iter().filter(|p| !p.is_same).map(|p| p.score).collect();
+    let same: Vec<f32> = pairs
+        .iter()
+        .filter(|p| p.is_same)
+        .map(|p| p.score)
+        .collect();
+    let diff: Vec<f32> = pairs
+        .iter()
+        .filter(|p| !p.is_same)
+        .map(|p| p.score)
+        .collect();
 
     let same_mean: f32 = same.iter().sum::<f32>() / same.len() as f32;
     let diff_mean: f32 = diff.iter().sum::<f32>() / diff.len() as f32;
@@ -224,12 +235,24 @@ fn compute_metrics(pairs: &[VerificationPair]) {
     println!("═══════════════════════════════════════════════════════════");
     println!();
     println!("  Score Distribution:");
-    println!("    Same-identity:  mean={:.4}, min={:.4}, max={:.4} (n={})",
-        same_mean, same_min, same_max, same.len());
-    println!("    Diff-identity:  mean={:.4}, min={:.4}, max={:.4} (n={})",
-        diff_mean, diff_min, diff_max, diff.len());
-    println!("    Separation:     {:.4} (same_mean - diff_mean)",
-        same_mean - diff_mean);
+    println!(
+        "    Same-identity:  mean={:.4}, min={:.4}, max={:.4} (n={})",
+        same_mean,
+        same_min,
+        same_max,
+        same.len()
+    );
+    println!(
+        "    Diff-identity:  mean={:.4}, min={:.4}, max={:.4} (n={})",
+        diff_mean,
+        diff_min,
+        diff_max,
+        diff.len()
+    );
+    println!(
+        "    Separation:     {:.4} (same_mean - diff_mean)",
+        same_mean - diff_mean
+    );
     println!();
 
     // ROC-AUC
@@ -239,8 +262,10 @@ fn compute_metrics(pairs: &[VerificationPair]) {
     // Accuracy at various thresholds
     println!();
     println!("  Threshold Analysis:");
-    println!("  {:>10} {:>8} {:>8} {:>8} {:>8}",
-        "Threshold", "Acc", "FAR", "FRR", "F1");
+    println!(
+        "  {:>10} {:>8} {:>8} {:>8} {:>8}",
+        "Threshold", "Acc", "FAR", "FRR", "F1"
+    );
     println!("  {}", "-".repeat(50));
 
     let thresholds = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
@@ -269,8 +294,14 @@ fn compute_metrics(pairs: &[VerificationPair]) {
             best_thresh = thresh;
         }
 
-        println!("  {:>10.2} {:>7.1}% {:>7.1}% {:>7.1}% {:>8.4}",
-            thresh, acc * 100.0, far * 100.0, frr * 100.0, f1);
+        println!(
+            "  {:>10.2} {:>7.1}% {:>7.1}% {:>7.1}% {:>8.4}",
+            thresh,
+            acc * 100.0,
+            far * 100.0,
+            frr * 100.0,
+            f1
+        );
     }
 
     // EER (Equal Error Rate) — find threshold where FAR ≈ FRR
@@ -278,7 +309,11 @@ fn compute_metrics(pairs: &[VerificationPair]) {
 
     println!();
     println!("  Summary:");
-    println!("    Best accuracy: {:.1}% at threshold {:.2}", best_acc * 100.0, best_thresh);
+    println!(
+        "    Best accuracy: {:.1}% at threshold {:.2}",
+        best_acc * 100.0,
+        best_thresh
+    );
     println!("    ROC-AUC:       {:.4}", auc);
     println!("    EER:           {:.2}%", eer * 100.0);
     println!();
@@ -317,10 +352,10 @@ fn compute_eer(same_scores: &[f32], diff_scores: &[f32]) -> f32 {
     let mut best_eer = 1.0f32;
     for i in 0..100 {
         let thresh = i as f32 / 100.0;
-        let far = diff_scores.iter().filter(|&&s| s >= thresh).count() as f32
-            / diff_scores.len() as f32;
-        let frr = same_scores.iter().filter(|&&s| s < thresh).count() as f32
-            / same_scores.len() as f32;
+        let far =
+            diff_scores.iter().filter(|&&s| s >= thresh).count() as f32 / diff_scores.len() as f32;
+        let frr =
+            same_scores.iter().filter(|&&s| s < thresh).count() as f32 / same_scores.len() as f32;
         let diff = (far - frr).abs();
         if diff < (best_eer - 0.0).abs() {
             best_eer = (far + frr) / 2.0;
@@ -350,9 +385,17 @@ fn load_model(model_path: &Path) -> MnemosyneIdentity {
                 }
             }
         }
-        println!("  Loaded {}/{} parameters from {}", loaded, params.len(), model_path.display());
+        println!(
+            "  Loaded {}/{} parameters from {}",
+            loaded,
+            params.len(),
+            model_path.display()
+        );
     } else {
-        println!("  WARNING: No model found at {} — using random weights!", model_path.display());
+        println!(
+            "  WARNING: No model found at {} — using random weights!",
+            model_path.display()
+        );
     }
 
     model
@@ -365,19 +408,27 @@ fn load_model(model_path: &Path) -> MnemosyneIdentity {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    let data_dir = args.iter().position(|a| a == "--data-dir")
+    let data_dir = args
+        .iter()
+        .position(|a| a == "--data-dir")
         .map(|i| PathBuf::from(&args[i + 1]))
         .unwrap_or_else(|| PathBuf::from("/opt/datasets/lfw/processed"));
 
-    let model_path = args.iter().position(|a| a == "--model")
+    let model_path = args
+        .iter()
+        .position(|a| a == "--model")
         .map(|i| PathBuf::from(&args[i + 1]))
         .unwrap_or_else(|| PathBuf::from("/opt/AxonML/checkpoints/mnemosyne/best_model.axonml"));
 
-    let num_pairs: usize = args.iter().position(|a| a == "--pairs")
+    let num_pairs: usize = args
+        .iter()
+        .position(|a| a == "--pairs")
         .map(|i| args[i + 1].parse().unwrap())
         .unwrap_or(1000);
 
-    let seq_len: usize = args.iter().position(|a| a == "--seq-len")
+    let seq_len: usize = args
+        .iter()
+        .position(|a| a == "--seq-len")
         .map(|i| args[i + 1].parse().unwrap())
         .unwrap_or(5);
 

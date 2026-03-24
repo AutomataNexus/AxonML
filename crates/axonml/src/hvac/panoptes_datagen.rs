@@ -26,7 +26,10 @@
 use rand::Rng;
 use rand::SeedableRng;
 
-use super::panoptes::{FacilityConfig, FacilitySnapshot, EQUIP_AHU, EQUIP_DOAS, EQUIP_BOILER, EQUIP_STEAM_BUNDLE, EQUIP_FAN_COIL, EQUIP_PUMP, EQUIP_CHILLER};
+use super::panoptes::{
+    FacilityConfig, FacilitySnapshot, EQUIP_AHU, EQUIP_BOILER, EQUIP_CHILLER, EQUIP_DOAS,
+    EQUIP_FAN_COIL, EQUIP_PUMP, EQUIP_STEAM_BUNDLE,
+};
 
 // =============================================================================
 // Operating Mode
@@ -1129,6 +1132,7 @@ impl PanoptesTrainingData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hvac::panoptes::MAX_SENSORS;
 
     #[test]
     fn test_hvac_mode() {

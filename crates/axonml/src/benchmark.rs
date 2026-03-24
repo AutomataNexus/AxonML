@@ -16,7 +16,6 @@
 
 use std::time::Instant;
 
-
 #[cfg(all(feature = "core", feature = "nn"))]
 use axonml_autograd::Variable;
 
@@ -299,6 +298,7 @@ mod tests {
     #[test]
     fn test_benchmark_model() {
         use axonml_nn::Linear;
+        use axonml_tensor::Tensor;
 
         let model = Linear::new(10, 5);
         let input = Variable::new(Tensor::randn(&[4, 10]), false);

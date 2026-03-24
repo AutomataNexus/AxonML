@@ -251,16 +251,45 @@ impl TrainConfig {
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
-                "--data-dir" => { i += 1; config.data_dir = PathBuf::from(&args[i]); }
-                "--output-dir" => { i += 1; config.output_dir = PathBuf::from(&args[i]); }
-                "--epochs" => { i += 1; config.epochs = args[i].parse().unwrap(); }
-                "--lr" => { i += 1; config.lr = args[i].parse().unwrap(); }
-                "--batch-size" | "--bs" => { i += 1; config.batch_size = args[i].parse().unwrap(); }
-                "--seq-len" => { i += 1; config.seq_len = args[i].parse().unwrap(); }
-                "--batches" => { i += 1; config.batches_per_epoch = args[i].parse().unwrap(); }
-                "--save-every" => { i += 1; config.save_every = args[i].parse().unwrap(); }
-                "--resume" => { i += 1; config.resume = args[i].clone(); }
-                "--fresh" => { config.resume = "none".to_string(); }
+                "--data-dir" => {
+                    i += 1;
+                    config.data_dir = PathBuf::from(&args[i]);
+                }
+                "--output-dir" => {
+                    i += 1;
+                    config.output_dir = PathBuf::from(&args[i]);
+                }
+                "--epochs" => {
+                    i += 1;
+                    config.epochs = args[i].parse().unwrap();
+                }
+                "--lr" => {
+                    i += 1;
+                    config.lr = args[i].parse().unwrap();
+                }
+                "--batch-size" | "--bs" => {
+                    i += 1;
+                    config.batch_size = args[i].parse().unwrap();
+                }
+                "--seq-len" => {
+                    i += 1;
+                    config.seq_len = args[i].parse().unwrap();
+                }
+                "--batches" => {
+                    i += 1;
+                    config.batches_per_epoch = args[i].parse().unwrap();
+                }
+                "--save-every" => {
+                    i += 1;
+                    config.save_every = args[i].parse().unwrap();
+                }
+                "--resume" => {
+                    i += 1;
+                    config.resume = args[i].clone();
+                }
+                "--fresh" => {
+                    config.resume = "none".to_string();
+                }
                 _ => {}
             }
             i += 1;
@@ -278,26 +307,44 @@ fn find_checkpoint(output_dir: &Path, mode: &str) -> Option<PathBuf> {
         "none" => None,
         "latest" => {
             let p = output_dir.join("checkpoint_latest.axonml");
-            if p.exists() { Some(p) } else {
+            if p.exists() {
+                Some(p)
+            } else {
                 // Try best as fallback
                 let b = output_dir.join("checkpoint_best.axonml");
-                if b.exists() { Some(b) } else {
+                if b.exists() {
+                    Some(b)
+                } else {
                     // Try any epoch checkpoint
                     let best_model = output_dir.join("best_model.axonml");
-                    if best_model.exists() { Some(best_model) } else { None }
+                    if best_model.exists() {
+                        Some(best_model)
+                    } else {
+                        None
+                    }
                 }
             }
         }
         "best" => {
             let p = output_dir.join("checkpoint_best.axonml");
-            if p.exists() { Some(p) } else {
+            if p.exists() {
+                Some(p)
+            } else {
                 let b = output_dir.join("best_model.axonml");
-                if b.exists() { Some(b) } else { None }
+                if b.exists() {
+                    Some(b)
+                } else {
+                    None
+                }
             }
         }
         path => {
             let p = PathBuf::from(path);
-            if p.exists() { Some(p) } else { None }
+            if p.exists() {
+                Some(p)
+            } else {
+                None
+            }
         }
     }
 }
@@ -318,8 +365,13 @@ fn load_model_weights(model: &MnemosyneIdentity, path: &Path) -> (usize, Trainin
                 }
             }
         }
-        println!("  Loaded checkpoint: {} (epoch {}, {}/{} params)",
-            path.display(), checkpoint.epoch(), loaded, model_params.len());
+        println!(
+            "  Loaded checkpoint: {} (epoch {}, {}/{} params)",
+            path.display(),
+            checkpoint.epoch(),
+            loaded,
+            model_params.len()
+        );
         return (checkpoint.epoch(), checkpoint.training_state.clone());
     }
 
@@ -337,12 +389,19 @@ fn load_model_weights(model: &MnemosyneIdentity, path: &Path) -> (usize, Trainin
                 }
             }
         }
-        println!("  Loaded model weights: {} ({}/{} params)",
-            path.display(), loaded, model_params.len());
+        println!(
+            "  Loaded model weights: {} ({}/{} params)",
+            path.display(),
+            loaded,
+            model_params.len()
+        );
         return (0, TrainingState::new());
     }
 
-    println!("  WARNING: Failed to load checkpoint from {}", path.display());
+    println!(
+        "  WARNING: Failed to load checkpoint from {}",
+        path.display()
+    );
     (0, TrainingState::new())
 }
 
@@ -359,25 +418,34 @@ fn main() {
     println!("═══════════════════════════════════════════════════════════");
     println!();
 
-    println!("Loading LFW identities from {}...", config.data_dir.display());
+    println!(
+        "Loading LFW identities from {}...",
+        config.data_dir.display()
+    );
     let identities = load_lfw_identities(&config.data_dir);
     let total_faces: usize = identities.iter().map(|id| id.faces.len()).sum();
     let usable: usize = identities.iter().filter(|id| id.faces.len() >= 2).count();
-    println!("  {} identities, {} faces ({} usable)", identities.len(), total_faces, usable);
+    println!(
+        "  {} identities, {} faces ({} usable)",
+        identities.len(),
+        total_faces,
+        usable
+    );
 
     // Detect GPU
-    let device = if cfg!(feature = "cuda") {
-        match Device::cuda(0) {
-            d @ Device::Cuda(_) => {
-                println!("  Using GPU: {:?}", d);
-                d
-            }
-            _ => {
-                println!("  GPU not available, using CPU");
-                Device::Cpu
-            }
+    #[cfg(feature = "cuda")]
+    let device = match Device::cuda(0) {
+        d @ Device::Cuda(_) => {
+            println!("  Using GPU: {:?}", d);
+            d
         }
-    } else {
+        _ => {
+            println!("  GPU not available, using CPU");
+            Device::Cpu
+        }
+    };
+    #[cfg(not(feature = "cuda"))]
+    let device = {
         println!("  Using CPU (build with --features cuda for GPU)");
         Device::Cpu
     };
@@ -424,7 +492,10 @@ fn main() {
                 }
             }
         } else {
-            println!("  No checkpoint found for resume='{}', starting fresh.", config.resume);
+            println!(
+                "  No checkpoint found for resume='{}', starting fresh.",
+                config.resume
+            );
         }
     }
 
@@ -433,10 +504,17 @@ fn main() {
     let triplets_per_epoch = config.batch_size * config.batches_per_epoch;
     println!(
         "\nTraining: epochs {}-{}, batch={}, seq_len={}, {}/epoch ({} batches)",
-        start_epoch + 1, config.epochs, config.batch_size, config.seq_len,
-        triplets_per_epoch, config.batches_per_epoch
+        start_epoch + 1,
+        config.epochs,
+        config.batch_size,
+        config.seq_len,
+        triplets_per_epoch,
+        config.batches_per_epoch
     );
-    println!("  LR: {}, Warmup: {} epochs, Best so far: {:.4}", config.lr, config.warmup_epochs, best_loss);
+    println!(
+        "  LR: {}, Warmup: {} epochs, Best so far: {:.4}",
+        config.lr, config.warmup_epochs, best_loss
+    );
     println!();
 
     let training_start = Instant::now();
@@ -452,7 +530,12 @@ fn main() {
 
         for _ in 0..config.batches_per_epoch {
             // Mine a batch of triplets
-            let steps = mine_batch(&identities, &mut rng_state, config.batch_size, config.seq_len);
+            let steps = mine_batch(
+                &identities,
+                &mut rng_state,
+                config.batch_size,
+                config.seq_len,
+            );
 
             // Split steps into anchor/pos/neg
             let anchor_steps: Vec<Vec<f32>> = steps.iter().map(|(a, _, _)| a.clone()).collect();
@@ -460,7 +543,8 @@ fn main() {
             let neg_steps: Vec<Vec<f32>> = steps.iter().map(|(_, _, n)| n.clone()).collect();
 
             // Batched crystallization
-            let (anchor_h, anchor_vel) = crystallize_batched(&model, &anchor_steps, config.batch_size, &device);
+            let (anchor_h, anchor_vel) =
+                crystallize_batched(&model, &anchor_steps, config.batch_size, &device);
             let (pos_h, _) = crystallize_batched(&model, &pos_steps, config.batch_size, &device);
             let (neg_h, _) = crystallize_batched(&model, &neg_steps, config.batch_size, &device);
 
@@ -492,10 +576,20 @@ fn main() {
 
         println!(
             "Epoch {:3}/{} | loss: {:.4} | vel: {:.4} | lr: {:.6} | {:.1}s",
-            epoch + 1, config.epochs, avg_loss, avg_velocity, lr, epoch_time.as_secs_f32()
+            epoch + 1,
+            config.epochs,
+            avg_loss,
+            avg_velocity,
+            lr,
+            epoch_time.as_secs_f32()
         );
 
-        monitor.log_epoch(epoch + 1, avg_loss, None, vec![("velocity", avg_velocity), ("lr", lr)]);
+        monitor.log_epoch(
+            epoch + 1,
+            avg_loss,
+            None,
+            vec![("velocity", avg_velocity), ("lr", lr)],
+        );
 
         if avg_loss < best_loss {
             best_loss = avg_loss;
@@ -519,11 +613,17 @@ fn main() {
             .training_state(training_state.clone())
             .epoch(epoch + 1)
             .build();
-        save_checkpoint(&latest_ckpt, config.output_dir.join("checkpoint_latest.axonml")).ok();
+        save_checkpoint(
+            &latest_ckpt,
+            config.output_dir.join("checkpoint_latest.axonml"),
+        )
+        .ok();
 
         // Periodic numbered checkpoint
         if (epoch + 1) % config.save_every == 0 {
-            let ckpt_path = config.output_dir.join(format!("checkpoint_epoch_{:04}.axonml", epoch + 1));
+            let ckpt_path = config
+                .output_dir
+                .join(format!("checkpoint_epoch_{:04}.axonml", epoch + 1));
             save_checkpoint(&latest_ckpt, &ckpt_path).ok();
         }
 
@@ -534,6 +634,11 @@ fn main() {
     let total_time = training_start.elapsed();
     println!();
     println!("═══════════════════════════════════════════════════════════");
-    println!(" Done — {:.1}s ({:.1} min) | Best: {:.4}", total_time.as_secs_f32(), total_time.as_secs_f32() / 60.0, best_loss);
+    println!(
+        " Done — {:.1}s ({:.1} min) | Best: {:.4}",
+        total_time.as_secs_f32(),
+        total_time.as_secs_f32() / 60.0,
+        best_loss
+    );
     println!("═══════════════════════════════════════════════════════════");
 }

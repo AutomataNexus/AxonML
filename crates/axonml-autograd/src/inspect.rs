@@ -237,9 +237,7 @@ pub fn leaf_count(variable: &Variable) -> usize {
             let mut visited = HashSet::new();
             leaf_count_dfs(gf, &mut visited)
         }
-        None => {
-            usize::from(variable.requires_grad())
-        }
+        None => usize::from(variable.requires_grad()),
     }
 }
 

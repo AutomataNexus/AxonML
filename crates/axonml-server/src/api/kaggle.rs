@@ -262,7 +262,10 @@ fn validate_dataset_ref(dataset_ref: &str) -> Result<(), AuthError> {
 }
 
 /// SECURITY: Validate that a path is within the allowed base directory
-fn validate_path_within_base(path: &std::path::Path, base: &std::path::Path) -> Result<(), AuthError> {
+fn validate_path_within_base(
+    path: &std::path::Path,
+    base: &std::path::Path,
+) -> Result<(), AuthError> {
     // Canonicalize both paths to resolve any .. or symlinks
     let canonical_base = base
         .canonicalize()
@@ -436,8 +439,6 @@ fn kaggle_url(path: &str) -> Result<Url, AuthError> {
 }
 
 fn get_kaggle_config_dir(user_id: &str) -> PathBuf {
-    
-
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("axonml")

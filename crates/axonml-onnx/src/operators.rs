@@ -857,8 +857,7 @@ impl ConcatOp {
 
 impl OnnxOperator for ConcatOp {
     fn execute(&self, inputs: &[Option<&Tensor<f32>>]) -> OnnxResult<Vec<Tensor<f32>>> {
-        let tensors: Vec<Tensor<f32>> =
-            inputs.iter().filter_map(|i| i.cloned()).collect();
+        let tensors: Vec<Tensor<f32>> = inputs.iter().filter_map(|i| i.cloned()).collect();
 
         if tensors.is_empty() {
             return Err(OnnxError::MissingAttribute("inputs".to_string()));
@@ -1134,7 +1133,8 @@ impl OnnxOperator for ConvOp {
 
         let out_channels = weight_shape[0];
         let kernel_h = self
-            .kernel_shape.first()
+            .kernel_shape
+            .first()
             .copied()
             .unwrap_or(weight_shape[2] as i64) as usize;
         let kernel_w = self

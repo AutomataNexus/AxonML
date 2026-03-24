@@ -752,7 +752,6 @@ impl AngularMarginLoss {
         let scaled_var = cos_similarities.mul_scalar(self.scale);
         // Use the difference between graph-tracked and margin-adjusted as the
         // gradient signal, anchored at the computed NLL value
-        
 
         scaled_var.mul_scalar(0.0).add_scalar(nll)
     }

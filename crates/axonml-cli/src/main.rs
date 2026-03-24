@@ -158,9 +158,7 @@ fn execute_kaggle(args: cli::KaggleArgs) -> CliResult<()> {
             commands::kaggle::execute_download(&dl_args.dataset, dl_args.output.as_deref())
                 .map_err(error::CliError::Other)
         }
-        KaggleSubcommand::List => {
-            commands::kaggle::execute_list().map_err(error::CliError::Other)
-        }
+        KaggleSubcommand::List => commands::kaggle::execute_list().map_err(error::CliError::Other),
     }
 }
 
@@ -176,9 +174,7 @@ fn execute_hub(args: cli::HubArgs) -> CliResult<()> {
             commands::hub::execute_download(&dl_args.model, dl_args.force)
                 .map_err(error::CliError::Other)
         }
-        HubSubcommand::Cached => {
-            commands::hub::execute_cached().map_err(error::CliError::Other)
-        }
+        HubSubcommand::Cached => commands::hub::execute_cached().map_err(error::CliError::Other),
         HubSubcommand::Clear(clear_args) => {
             commands::hub::execute_clear(clear_args.model.as_deref())
                 .map_err(error::CliError::Other)
@@ -194,8 +190,9 @@ fn execute_dataset(args: cli::DatasetArgs) -> CliResult<()> {
             commands::dataset::execute_list(list_args.source.as_deref())
                 .map_err(error::CliError::Other)
         }
-        DatasetSubcommand::Info(info_args) => commands::dataset::execute_info(&info_args.dataset)
-            .map_err(error::CliError::Other),
+        DatasetSubcommand::Info(info_args) => {
+            commands::dataset::execute_info(&info_args.dataset).map_err(error::CliError::Other)
+        }
         DatasetSubcommand::Search(search_args) => commands::dataset::execute_search(
             &search_args.query,
             search_args.source.as_deref(),

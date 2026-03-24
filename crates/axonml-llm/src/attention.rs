@@ -921,7 +921,8 @@ impl FlashAttention {
                                     let p = (score - new_max).exp();
                                     row_sum[i] += p;
 
-                                    for (d, val) in row_out[i].iter_mut().enumerate().take(head_dim) {
+                                    for (d, val) in row_out[i].iter_mut().enumerate().take(head_dim)
+                                    {
                                         let v_idx =
                                             ((b * num_heads + h) * seq_len + j) * head_dim + d;
                                         *val += p * v_data[v_idx];

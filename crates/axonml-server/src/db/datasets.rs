@@ -35,7 +35,6 @@ pub enum DatasetType {
     Custom,
 }
 
-
 /// Dataset data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dataset {

@@ -31,7 +31,6 @@ pub enum UserRole {
     Viewer,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
     pub id: String,
@@ -734,7 +733,6 @@ pub enum CellType {
     Markdown,
 }
 
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
@@ -745,7 +743,6 @@ pub enum CellStatus {
     Completed,
     Error,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CellOutput {

@@ -36,7 +36,6 @@ pub enum CellType {
     Markdown,
 }
 
-
 /// Cell execution status
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -48,7 +47,6 @@ pub enum CellStatus {
     Completed,
     Error,
 }
-
 
 /// Notebook status
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -62,7 +60,6 @@ pub enum NotebookStatus {
     Failed,
     Stopped,
 }
-
 
 /// Cell output
 #[derive(Debug, Clone, Serialize, Deserialize)]

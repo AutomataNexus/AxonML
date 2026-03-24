@@ -1,0 +1,19 @@
+name: "AxonML CodeQL Configuration"
+
+# Paths to exclude from analysis
+paths-ignore:
+  - "crates/axonml-dashboard/**"
+  - "crates/axonml-server/static/**"
+  - "docs/**"
+  - "release-artifacts/**"
+
+# Query filters — suppress false positives
+query-filters:
+  # HTTP URLs in local server code are intentional (localhost, tailscale, LAN)
+  # These are not external-facing and don't need HTTPS
+  - exclude:
+      id: rust/non-https-url
+
+  # Extraction errors on CUDA-gated code (cudarc conditional compilation)
+  - exclude:
+      id: rust/diagnostics/extraction-errors

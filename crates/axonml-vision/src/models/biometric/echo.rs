@@ -549,7 +549,6 @@ impl EchoSpeaker {
             return 0.0;
         }
 
-        
         frames_per_second / best_lag as f32
     }
 

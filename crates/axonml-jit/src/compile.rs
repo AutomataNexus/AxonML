@@ -27,8 +27,7 @@ use std::sync::Mutex;
 // =============================================================================
 
 /// Compilation mode controlling optimization level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
     /// Default mode: balanced optimization
     #[default]
@@ -39,10 +38,8 @@ pub enum Mode {
     MaxAutotune,
 }
 
-
 /// Backend for code generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Backend {
     /// Default backend (Cranelift)
     #[default]
@@ -54,7 +51,6 @@ pub enum Backend {
     /// ONNX export
     ONNX,
 }
-
 
 // =============================================================================
 // Compile Configuration

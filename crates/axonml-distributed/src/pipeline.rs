@@ -24,8 +24,7 @@ use axonml_tensor::Tensor;
 // =============================================================================
 
 /// Pipeline execution schedule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PipelineSchedule {
     /// GPipe: Fill-drain schedule with synchronized updates
     GPipe,
@@ -35,7 +34,6 @@ pub enum PipelineSchedule {
     /// Interleaved 1F1B for better efficiency
     InterleavedOneFOneB,
 }
-
 
 // =============================================================================
 // Pipeline Stage
@@ -331,9 +329,7 @@ impl<M: Module + Clone> Module for Pipeline<M> {
     }
 
     fn is_training(&self) -> bool {
-        self.stages
-            .first()
-            .is_some_and(|s| s.is_training())
+        self.stages.first().is_some_and(|s| s.is_training())
     }
 }
 

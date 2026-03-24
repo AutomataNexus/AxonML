@@ -56,12 +56,14 @@ pub fn ModelUploadPage() -> impl IntoView {
         }
     });
 
-    let model_types = [("neural_network".to_string(), "Neural Network".to_string()),
+    let model_types = [
+        ("neural_network".to_string(), "Neural Network".to_string()),
         ("transformer".to_string(), "Transformer".to_string()),
         ("cnn".to_string(), "CNN".to_string()),
         ("rnn".to_string(), "RNN".to_string()),
         ("lstm".to_string(), "LSTM".to_string()),
-        ("custom".to_string(), "Custom".to_string())];
+        ("custom".to_string(), "Custom".to_string()),
+    ];
 
     let on_file_select = move |files: FileList| {
         if files.length() > 0 {
