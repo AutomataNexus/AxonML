@@ -23,9 +23,9 @@ use axonml_data::{DataLoader, Dataset};
 use axonml_nn::CrossEntropyLoss;
 use axonml_nn::{Conv2d, Dropout, Linear, MaxPool2d, Module, ReLU, Sequential};
 use axonml_optim::{Adam, AdamW, Optimizer, RMSprop, SGD};
-use axonml_serialize::{save_state_dict, Format, StateDict};
+use axonml_serialize::{Format, StateDict, save_state_dict};
 use axonml_tensor::Tensor;
-use axonml_vision::{FashionMNIST, CIFAR10, MNIST};
+use axonml_vision::{CIFAR10, FashionMNIST, MNIST};
 
 use super::utils::{
     ensure_dir, epoch_progress_bar, parse_device, print_header, print_info, print_kv, print_success,
@@ -38,7 +38,7 @@ use crate::error::{CliError, CliResult};
 #[cfg(feature = "wandb")]
 use super::wandb::WandbConfig;
 #[cfg(feature = "wandb")]
-use super::wandb_client::{init_training_run, is_available as wandb_is_available, WandbRun};
+use super::wandb_client::{WandbRun, init_training_run, is_available as wandb_is_available};
 
 // =============================================================================
 // Execute Command

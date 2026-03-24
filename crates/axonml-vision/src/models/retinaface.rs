@@ -20,7 +20,7 @@ use axonml_tensor::Tensor;
 
 use crate::models::fpn::FPN;
 use crate::models::resnet::ResNet;
-use crate::ops::{nms, FaceDetection};
+use crate::ops::{FaceDetection, nms};
 
 // =============================================================================
 // Context Module (SSH-style)

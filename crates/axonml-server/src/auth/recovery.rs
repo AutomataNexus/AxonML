@@ -16,11 +16,11 @@
 
 use super::AuthError;
 use argon2::{
-    password_hash::{
-        rand_core::OsRng, rand_core::RngCore, PasswordHash, PasswordHasher, PasswordVerifier,
-        SaltString,
-    },
     Argon2,
+    password_hash::{
+        PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng,
+        rand_core::RngCore,
+    },
 };
 
 /// Recovery code authentication handler

@@ -18,7 +18,7 @@ use axonml_autograd::Variable;
 use axonml_nn::{Conv2d, LayerNorm, Linear, Module, MultiHeadAttention, Parameter, ReLU};
 use axonml_tensor::Tensor;
 
-use crate::ops::{positional_encoding_2d, Detection};
+use crate::ops::{Detection, positional_encoding_2d};
 
 // =============================================================================
 // DETR Transformer

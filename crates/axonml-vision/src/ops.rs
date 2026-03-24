@@ -101,8 +101,8 @@ pub fn box_xyxy_to_cxcywh(boxes: &Tensor<f32>) -> Tensor<f32> {
         let y1 = data[i * 4 + 1];
         let x2 = data[i * 4 + 2];
         let y2 = data[i * 4 + 3];
-        result[i * 4] = (x1 + x2) / 2.0;
-        result[i * 4 + 1] = (y1 + y2) / 2.0;
+        result[i * 4] = f32::midpoint(x1, x2);
+        result[i * 4 + 1] = f32::midpoint(y1, y2);
         result[i * 4 + 2] = x2 - x1;
         result[i * 4 + 3] = y2 - y1;
     }

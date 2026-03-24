@@ -17,7 +17,7 @@
 use crate::codegen::{CompiledFunction, JitCompiler};
 use crate::ir::{Graph, Node, Op};
 use crate::optimize::{OptimizationPass, Optimizer};
-use crate::trace::{trace, TracedValue, Tracer};
+use crate::trace::{TracedValue, Tracer, trace};
 use crate::{JitError, JitResult};
 use std::collections::HashMap;
 use std::sync::Mutex;

@@ -19,7 +19,7 @@ pub mod coco;
 pub mod mnist;
 pub mod wider_face;
 
-pub use cifar::{SyntheticCIFAR, CIFAR10, CIFAR100};
+pub use cifar::{CIFAR10, CIFAR100, SyntheticCIFAR};
 pub use coco::{CocoAnnotation, CocoDataset};
-pub use mnist::{FashionMNIST, SyntheticMNIST, MNIST};
+pub use mnist::{FashionMNIST, MNIST, SyntheticMNIST};
 pub use wider_face::WiderFaceDataset;

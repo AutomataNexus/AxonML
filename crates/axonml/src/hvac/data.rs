@@ -301,7 +301,7 @@ impl SyntheticHvacGenerator {
 
         // Inject faults into ~60% of samples
         for b in 0..batch_size {
-            if rng.gen::<f32>() < 0.6 {
+            if rng.r#gen::<f32>() < 0.6 {
                 let fault_type = rng.gen_range(0..5);
                 match fault_type {
                     0 => {
@@ -426,15 +426,15 @@ impl SyntheticHvacGenerator {
             for t in 0..64 {
                 let phase = t as f32 * 0.1;
                 // voltage_a/b/c (around 480V, 120° phase shifted)
-                data.push(480.0 + 5.0 * (phase).sin() + rng.gen::<f32>() * 2.0);
-                data.push(480.0 + 5.0 * (phase + 2.094).sin() + rng.gen::<f32>() * 2.0);
-                data.push(480.0 + 5.0 * (phase + 4.189).sin() + rng.gen::<f32>() * 2.0);
+                data.push(480.0 + 5.0 * (phase).sin() + rng.r#gen::<f32>() * 2.0);
+                data.push(480.0 + 5.0 * (phase + 2.094).sin() + rng.r#gen::<f32>() * 2.0);
+                data.push(480.0 + 5.0 * (phase + 4.189).sin() + rng.r#gen::<f32>() * 2.0);
                 // current_a/b/c (balanced ~15A)
-                data.push(15.0 + rng.gen::<f32>() * 1.0);
-                data.push(15.0 + rng.gen::<f32>() * 1.0);
-                data.push(15.0 + rng.gen::<f32>() * 1.0);
+                data.push(15.0 + rng.r#gen::<f32>() * 1.0);
+                data.push(15.0 + rng.r#gen::<f32>() * 1.0);
+                data.push(15.0 + rng.r#gen::<f32>() * 1.0);
                 // power_factor (0.85-0.95)
-                data.push(0.90 + rng.gen::<f32>() * 0.05);
+                data.push(0.90 + rng.r#gen::<f32>() * 0.05);
             }
         }
         data
@@ -449,13 +449,13 @@ impl SyntheticHvacGenerator {
         let mut data = Vec::with_capacity(batch * 80 * 7);
         for _ in 0..batch {
             for _ in 0..80 {
-                data.push(65.0 + rng.gen::<f32>() * 5.0); // suction_pressure (psig)
-                data.push(220.0 + rng.gen::<f32>() * 10.0); // discharge_pressure
-                data.push(40.0 + rng.gen::<f32>() * 3.0); // suction_temp (°F)
-                data.push(160.0 + rng.gen::<f32>() * 5.0); // discharge_temp
-                data.push(10.0 + rng.gen::<f32>() * 3.0); // subcool
-                data.push(12.0 + rng.gen::<f32>() * 3.0); // superheat
-                data.push(8.0 + rng.gen::<f32>() * 1.0); // flow_rate (GPM)
+                data.push(65.0 + rng.r#gen::<f32>() * 5.0); // suction_pressure (psig)
+                data.push(220.0 + rng.r#gen::<f32>() * 10.0); // discharge_pressure
+                data.push(40.0 + rng.r#gen::<f32>() * 3.0); // suction_temp (°F)
+                data.push(160.0 + rng.r#gen::<f32>() * 5.0); // discharge_temp
+                data.push(10.0 + rng.r#gen::<f32>() * 3.0); // subcool
+                data.push(12.0 + rng.r#gen::<f32>() * 3.0); // superheat
+                data.push(8.0 + rng.r#gen::<f32>() * 1.0); // flow_rate (GPM)
             }
         }
         data
@@ -470,13 +470,13 @@ impl SyntheticHvacGenerator {
         let mut data = Vec::with_capacity(batch * 64 * 7);
         for _ in 0..batch {
             for _ in 0..64 {
-                data.push(44.0 + rng.gen::<f32>() * 2.0); // supply_temp
-                data.push(54.0 + rng.gen::<f32>() * 2.0); // return_temp
-                data.push(120.0 + rng.gen::<f32>() * 10.0); // flow_rate (GPM)
-                data.push(12.0 + rng.gen::<f32>() * 2.0); // pressure_diff (psi)
-                data.push(5.0 + rng.gen::<f32>() * 2.0); // valve_pos (V)
-                data.push(8.0 + rng.gen::<f32>() * 1.0); // pump_current (A)
-                data.push(7.0 + rng.gen::<f32>() * 0.5); // pH
+                data.push(44.0 + rng.r#gen::<f32>() * 2.0); // supply_temp
+                data.push(54.0 + rng.r#gen::<f32>() * 2.0); // return_temp
+                data.push(120.0 + rng.r#gen::<f32>() * 10.0); // flow_rate (GPM)
+                data.push(12.0 + rng.r#gen::<f32>() * 2.0); // pressure_diff (psi)
+                data.push(5.0 + rng.r#gen::<f32>() * 2.0); // valve_pos (V)
+                data.push(8.0 + rng.r#gen::<f32>() * 1.0); // pump_current (A)
+                data.push(7.0 + rng.r#gen::<f32>() * 0.5); // pH
             }
         }
         data
@@ -493,17 +493,17 @@ impl SyntheticHvacGenerator {
             for t in 0..96 {
                 let freq = t as f32 * 0.5;
                 // vibration_x/y/z (low amplitude, mm/s)
-                data.push(0.5 * freq.sin() + rng.gen::<f32>() * 0.2);
-                data.push(0.3 * (freq * 1.1).sin() + rng.gen::<f32>() * 0.2);
-                data.push(0.2 * (freq * 0.9).cos() + rng.gen::<f32>() * 0.1);
+                data.push(0.5 * freq.sin() + rng.r#gen::<f32>() * 0.2);
+                data.push(0.3 * (freq * 1.1).sin() + rng.r#gen::<f32>() * 0.2);
+                data.push(0.2 * (freq * 0.9).cos() + rng.r#gen::<f32>() * 0.1);
                 // bearing_temp (°F, normal 120-150)
-                data.push(135.0 + rng.gen::<f32>() * 10.0);
+                data.push(135.0 + rng.r#gen::<f32>() * 10.0);
                 // motor_current (A)
-                data.push(12.0 + rng.gen::<f32>() * 1.0);
+                data.push(12.0 + rng.r#gen::<f32>() * 1.0);
                 // speed_rpm
-                data.push(1770.0 + rng.gen::<f32>() * 10.0);
+                data.push(1770.0 + rng.r#gen::<f32>() * 10.0);
                 // torque (Nm)
-                data.push(45.0 + rng.gen::<f32>() * 3.0);
+                data.push(45.0 + rng.r#gen::<f32>() * 3.0);
             }
         }
         data
@@ -517,15 +517,15 @@ impl SyntheticHvacGenerator {
     fn gen_airflow_normal_raw(&self, rng: &mut impl Rng, batch: usize) -> Vec<f32> {
         let mut data = Vec::with_capacity(batch * 72 * 7);
         for _ in 0..batch {
-            let outdoor = 75.0 + rng.gen::<f32>() * 20.0 - 10.0;
+            let outdoor = 75.0 + rng.r#gen::<f32>() * 20.0 - 10.0;
             for _ in 0..72 {
-                data.push(55.0 + rng.gen::<f32>() * 2.0); // supply_temp
-                data.push(74.0 + rng.gen::<f32>() * 2.0); // return_temp
-                data.push(outdoor + rng.gen::<f32>() * 1.0); // outdoor_temp
-                data.push(65.0 + rng.gen::<f32>() * 3.0); // mixed_temp
-                data.push(18.0 + rng.gen::<f32>() * 2.0); // fan_amps
-                data.push(3.0 + rng.gen::<f32>() * 2.0); // oa_damper (V)
-                data.push(5.0 + rng.gen::<f32>() * 2.0); // mixed_damper (V)
+                data.push(55.0 + rng.r#gen::<f32>() * 2.0); // supply_temp
+                data.push(74.0 + rng.r#gen::<f32>() * 2.0); // return_temp
+                data.push(outdoor + rng.r#gen::<f32>() * 1.0); // outdoor_temp
+                data.push(65.0 + rng.r#gen::<f32>() * 3.0); // mixed_temp
+                data.push(18.0 + rng.r#gen::<f32>() * 2.0); // fan_amps
+                data.push(3.0 + rng.r#gen::<f32>() * 2.0); // oa_damper (V)
+                data.push(5.0 + rng.r#gen::<f32>() * 2.0); // mixed_damper (V)
             }
         }
         data
@@ -543,7 +543,7 @@ impl SyntheticHvacGenerator {
         fault_id: usize,
     ) {
         let offset = batch_idx * 64 * 7;
-        let severity = rng.gen::<f32>() * 0.5 + 0.5; // 0.5-1.0
+        let severity = rng.r#gen::<f32>() * 0.5 + 0.5; // 0.5-1.0
         for t in 0..64 {
             let idx = offset + t * 7;
             match fault_id {
@@ -568,7 +568,7 @@ impl SyntheticHvacGenerator {
                 _ => {
                     // generic fault: add noise
                     for c in 0..7 {
-                        data[idx + c] += rng.gen::<f32>() * severity * 10.0;
+                        data[idx + c] += rng.r#gen::<f32>() * severity * 10.0;
                     }
                 }
             }
@@ -583,7 +583,7 @@ impl SyntheticHvacGenerator {
         fault_id: usize,
     ) {
         let offset = batch_idx * 80 * 7;
-        let severity = rng.gen::<f32>() * 0.5 + 0.5;
+        let severity = rng.r#gen::<f32>() * 0.5 + 0.5;
         for t in 0..80 {
             let idx = offset + t * 7;
             match fault_id {
@@ -603,7 +603,7 @@ impl SyntheticHvacGenerator {
                 }
                 _ => {
                     for c in 0..7 {
-                        data[idx + c] += rng.gen::<f32>() * severity * 5.0;
+                        data[idx + c] += rng.r#gen::<f32>() * severity * 5.0;
                     }
                 }
             }
@@ -618,7 +618,7 @@ impl SyntheticHvacGenerator {
         fault_id: usize,
     ) {
         let offset = batch_idx * 64 * 7;
-        let severity = rng.gen::<f32>() * 0.5 + 0.5;
+        let severity = rng.r#gen::<f32>() * 0.5 + 0.5;
         for t in 0..64 {
             let idx = offset + t * 7;
             match fault_id {
@@ -631,7 +631,7 @@ impl SyntheticHvacGenerator {
                 3 => data[idx + 4] = if severity > 0.7 { 0.0 } else { 10.0 }, // valve_stuck
                 _ => {
                     for c in 0..7 {
-                        data[idx + c] += rng.gen::<f32>() * severity * 3.0;
+                        data[idx + c] += rng.r#gen::<f32>() * severity * 3.0;
                     }
                 }
             }
@@ -646,7 +646,7 @@ impl SyntheticHvacGenerator {
         fault_id: usize,
     ) {
         let offset = batch_idx * 96 * 7;
-        let severity = rng.gen::<f32>() * 0.5 + 0.5;
+        let severity = rng.r#gen::<f32>() * 0.5 + 0.5;
         for t in 0..96 {
             let idx = offset + t * 7;
             match fault_id {
@@ -669,7 +669,7 @@ impl SyntheticHvacGenerator {
                 }
                 _ => {
                     for c in 0..3 {
-                        data[idx + c] += rng.gen::<f32>() * severity * 2.0;
+                        data[idx + c] += rng.r#gen::<f32>() * severity * 2.0;
                     }
                 }
             }
@@ -684,7 +684,7 @@ impl SyntheticHvacGenerator {
         fault_id: usize,
     ) {
         let offset = batch_idx * 72 * 7;
-        let severity = rng.gen::<f32>() * 0.5 + 0.5;
+        let severity = rng.r#gen::<f32>() * 0.5 + 0.5;
         for t in 0..72 {
             let idx = offset + t * 7;
             match fault_id {
@@ -702,7 +702,7 @@ impl SyntheticHvacGenerator {
                 }
                 _ => {
                     for c in 0..7 {
-                        data[idx + c] += rng.gen::<f32>() * severity * 2.0;
+                        data[idx + c] += rng.r#gen::<f32>() * severity * 2.0;
                     }
                 }
             }
@@ -720,8 +720,8 @@ mod tests {
 
     #[test]
     fn test_generate_normal_shapes() {
-        let gen = SyntheticHvacGenerator::new(42);
-        let (data, labels) = gen.generate_normal(4);
+        let generator = SyntheticHvacGenerator::new(42);
+        let (data, labels) = generator.generate_normal(4);
 
         assert_eq!(data.electrical.shape(), vec![4, 64, 7]);
         assert_eq!(data.refrigeration.shape(), vec![4, 80, 7]);
@@ -735,8 +735,8 @@ mod tests {
 
     #[test]
     fn test_generate_normal_all_zeros_labels() {
-        let gen = SyntheticHvacGenerator::new(42);
-        let (_, labels) = gen.generate_normal(8);
+        let generator = SyntheticHvacGenerator::new(42);
+        let (_, labels) = generator.generate_normal(8);
 
         // Normal data should have all-zero fault labels
         let faults = labels.electrical_fault.data().to_vec();
@@ -745,8 +745,8 @@ mod tests {
 
     #[test]
     fn test_generate_with_faults_shapes() {
-        let gen = SyntheticHvacGenerator::new(42);
-        let (data, labels) = gen.generate_with_faults(16);
+        let generator = SyntheticHvacGenerator::new(42);
+        let (data, labels) = generator.generate_with_faults(16);
 
         assert_eq!(data.electrical.shape(), vec![16, 64, 7]);
         assert_eq!(data.refrigeration.shape(), vec![16, 80, 7]);
@@ -759,8 +759,8 @@ mod tests {
 
     #[test]
     fn test_generate_with_faults_has_faults() {
-        let gen = SyntheticHvacGenerator::new(42);
-        let (_, labels) = gen.generate_with_faults(100);
+        let generator = SyntheticHvacGenerator::new(42);
+        let (_, labels) = generator.generate_with_faults(100);
 
         // With 100 samples and 60% fault rate, we should have some faults
         let diag = labels.diagnosis.data().to_vec();
@@ -774,8 +774,8 @@ mod tests {
 
     #[test]
     fn test_sensor_data_values_reasonable() {
-        let gen = SyntheticHvacGenerator::new(42);
-        let (data, _) = gen.generate_normal(2);
+        let generator = SyntheticHvacGenerator::new(42);
+        let (data, _) = generator.generate_normal(2);
 
         // Check electrical voltages are around 480V
         let elec = data.electrical.data().to_vec();

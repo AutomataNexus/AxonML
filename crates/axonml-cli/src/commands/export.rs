@@ -23,7 +23,7 @@ use super::utils::{
 use crate::cli::ExportArgs;
 use crate::error::{CliError, CliResult};
 
-use axonml_serialize::{load_state_dict, save_state_dict, Format, StateDict};
+use axonml_serialize::{Format, StateDict, load_state_dict, save_state_dict};
 
 // =============================================================================
 // Supported Targets

@@ -62,14 +62,14 @@ fn generate_data(
         for _ in 0..seq_len {
             let token = if label == 0 {
                 // Mostly low-range tokens with some noise
-                if rng.gen::<f32>() < 0.8 {
+                if rng.r#gen::<f32>() < 0.8 {
                     rng.gen_range(0..500)
                 } else {
                     rng.gen_range(500..VOCAB_SIZE as u32)
                 }
             } else {
                 // Mostly high-range tokens with some noise
-                if rng.gen::<f32>() < 0.8 {
+                if rng.r#gen::<f32>() < 0.8 {
                     rng.gen_range(500..VOCAB_SIZE as u32)
                 } else {
                     rng.gen_range(0..500)

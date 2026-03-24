@@ -115,6 +115,24 @@ pub use process_group::{ProcessGroup, World};
 /// Common imports for distributed training.
 pub mod prelude {
     pub use crate::{
+        // Backend
+        Backend,
+        CPUOffload,
+        // FSDP
+        ColumnParallelLinear,
+        // DDP
+        DistributedDataParallel,
+        FullyShardedDataParallel,
+        GradSyncStrategy,
+        GradientBucket,
+        GradientSynchronizer,
+        MockBackend,
+        // Process groups
+        ProcessGroup,
+        ReduceOp,
+        RowParallelLinear,
+        ShardingStrategy,
+        World,
         all_gather,
         all_reduce_max,
         all_reduce_mean,
@@ -134,24 +152,6 @@ pub mod prelude {
         sync_gradient,
         sync_gradients,
         world_size,
-        // Backend
-        Backend,
-        CPUOffload,
-        // FSDP
-        ColumnParallelLinear,
-        // DDP
-        DistributedDataParallel,
-        FullyShardedDataParallel,
-        GradSyncStrategy,
-        GradientBucket,
-        GradientSynchronizer,
-        MockBackend,
-        // Process groups
-        ProcessGroup,
-        ReduceOp,
-        RowParallelLinear,
-        ShardingStrategy,
-        World,
     };
 
     pub use axonml_autograd::Variable;

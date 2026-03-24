@@ -128,11 +128,7 @@ impl GradScaler {
     /// Returns the current scale factor.
     #[must_use]
     pub fn get_scale(&self) -> f32 {
-        if self.enabled {
-            self.scale
-        } else {
-            1.0
-        }
+        if self.enabled { self.scale } else { 1.0 }
     }
 
     /// Sets the scale factor.

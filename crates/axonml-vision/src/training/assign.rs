@@ -167,8 +167,8 @@ pub fn assign_phantom_targets(
 
     for face in gt_faces {
         let (x1, y1, x2, y2) = (face[0], face[1], face[2], face[3]);
-        let face_cx = (x1 + x2) / 2.0;
-        let face_cy = (y1 + y2) / 2.0;
+        let face_cx = f32::midpoint(x1, x2);
+        let face_cy = f32::midpoint(y1, y2);
         let face_w = (x2 - x1).max(1.0);
         let face_h = (y2 - y1).max(1.0);
 

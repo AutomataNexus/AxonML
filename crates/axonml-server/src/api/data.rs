@@ -15,8 +15,8 @@
 //! liable for any damages arising from the use of this software.
 
 use axum::{
-    extract::{Path, Query, State},
     Json,
+    extract::{Path, Query, State},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

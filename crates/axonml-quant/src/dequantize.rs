@@ -18,7 +18,7 @@ use axonml_tensor::Tensor;
 use rayon::prelude::*;
 
 use crate::error::{QuantError, QuantResult};
-use crate::types::{Q4Block, Q4_1Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
+use crate::types::{Q4_1Block, Q4Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
 
 // =============================================================================
 // Public API

@@ -17,13 +17,13 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use axonml_autograd::Variable;
 use axonml_autograd::functions::{
     BatchNorm1dBackward, BatchNorm2dBackward, GroupNormBackward, InstanceNorm2dBackward,
     LayerNormBackward,
 };
 use axonml_autograd::grad_fn::GradFn;
 use axonml_autograd::no_grad::is_grad_enabled;
-use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
 use parking_lot::RwLock;
 

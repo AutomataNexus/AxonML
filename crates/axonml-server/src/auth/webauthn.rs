@@ -15,9 +15,9 @@
 //! liable for any damages arising from the use of this software.
 
 use super::AuthError;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD as BASE64, Engine};
-use rand::rngs::OsRng;
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as BASE64};
 use rand::RngCore;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 
 /// WebAuthn authentication handler

@@ -5,7 +5,7 @@
 # A PyTorch-equivalent machine learning framework written in pure Rust.
 # Provides tensors, automatic differentiation, neural networks, and more.
 #
-# @version 0.4.1
+# @version 0.4.2
 # @author AutomataNexus Development Team
 # @license MIT OR Apache-2.0
 # =============================================================================
@@ -38,9 +38,9 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.1"
-edition = "2021"
-rust-version = "1.75"
+version = "0.4.2"
+edition = "2024"
+rust-version = "1.85"
 authors = ["AutomataNexus Development Team"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/AutomataNexus/AxonML"

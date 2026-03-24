@@ -15,7 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 use axonml::autograd::Variable;
-use axonml::nn::{CrossEntropyLoss, Dropout, LayerNorm, Linear, Module, Parameter, ReLU, GRU};
+use axonml::nn::{CrossEntropyLoss, Dropout, GRU, LayerNorm, Linear, Module, Parameter, ReLU};
 use axonml::optim::{Adam, Optimizer};
 use axonml::tensor::Tensor;
 use std::time::Instant;

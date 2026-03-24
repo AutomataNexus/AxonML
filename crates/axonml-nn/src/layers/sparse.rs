@@ -177,11 +177,7 @@ impl SparseLinear {
                 .map(|(idx, &w)| {
                     let out_idx = idx / self.in_features;
                     let t = t_vec[out_idx];
-                    if w.abs() >= t {
-                        1.0
-                    } else {
-                        0.0
-                    }
+                    if w.abs() >= t { 1.0 } else { 0.0 }
                 })
                 .collect()
         } else {

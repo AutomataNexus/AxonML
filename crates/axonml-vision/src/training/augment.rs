@@ -257,7 +257,7 @@ impl DetRandomHFlip {
     /// Apply to a detection sample.
     pub fn apply(&self, sample: &DetSample) -> DetSample {
         let mut rng = rand::thread_rng();
-        if rng.gen::<f32>() > self.prob {
+        if rng.r#gen::<f32>() > self.prob {
             return sample.clone();
         }
 
@@ -695,7 +695,7 @@ impl DetAugPipeline {
 
         // Step 1: Mosaic
         let mut sample =
-            if self.use_mosaic && others.len() >= 3 && rng.gen::<f32>() < self.mosaic_prob {
+            if self.use_mosaic && others.len() >= 3 && rng.r#gen::<f32>() < self.mosaic_prob {
                 let (th, tw) = self.letterbox.target_size;
                 let mosaic = Mosaic::new(th, tw);
                 let four = vec![
@@ -710,7 +710,7 @@ impl DetAugPipeline {
             };
 
         // Step 2: MixUp
-        if self.use_mixup && rng.gen::<f32>() < self.mixup_prob {
+        if self.use_mixup && rng.r#gen::<f32>() < self.mixup_prob {
             if let Some(partner) = mixup_partner {
                 let mixup = MixUp::new();
                 sample = mixup.apply(&sample, partner);

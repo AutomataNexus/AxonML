@@ -30,8 +30,8 @@ pub mod tools;
 pub mod training;
 
 use crate::auth::{
-    auth_middleware, optional_auth_middleware, require_admin_middleware, require_mfa_middleware,
-    AuthLayer, JwtAuth,
+    AuthLayer, JwtAuth, auth_middleware, optional_auth_middleware, require_admin_middleware,
+    require_mfa_middleware,
 };
 use crate::config::Config;
 use crate::db::Database;
@@ -43,11 +43,11 @@ use crate::training::executor::TrainingExecutor;
 use crate::training::notebook_executor::NotebookExecutor;
 use crate::training::tracker::TrainingTracker;
 use axum::{
+    Json, Router,
     extract::State,
     http::StatusCode,
     middleware,
     routing::{delete, get, post, put},
-    Json, Router,
 };
 use serde::Serialize;
 use std::sync::Arc;

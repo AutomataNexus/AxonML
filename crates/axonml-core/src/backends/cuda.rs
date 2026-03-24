@@ -15,7 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 #[cfg(feature = "cuda")]
-use cudarc::cublas::{sys::cublasOperation_t, CudaBlas, Gemm, GemmConfig};
+use cudarc::cublas::{CudaBlas, Gemm, GemmConfig, sys::cublasOperation_t};
 #[cfg(feature = "cudnn")]
 use cudarc::cudnn::Cudnn;
 #[cfg(feature = "cuda")]
@@ -24,9 +24,9 @@ use cudarc::driver::{
     ValidAsZeroBits,
 };
 
-#[cfg(feature = "cuda")]
-use super::cuda_kernels::{self, CudaKernels, BLOCK_SIZE};
 use super::Backend;
+#[cfg(feature = "cuda")]
+use super::cuda_kernels::{self, BLOCK_SIZE, CudaKernels};
 use crate::device::DeviceCapabilities;
 #[cfg(feature = "cuda")]
 use std::sync::Arc;
@@ -3093,10 +3093,10 @@ mod tests {
         // | a00 a01 a02 |    stored as: [a00, a10, a01, a11, a02, a12]
         // | a10 a11 a12 |
         let a: Vec<f32> = vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]; // column-major 2x3
-                                                              // B in column-major (3x2):
-                                                              // | b00 b01 |    stored as: [b00, b10, b20, b01, b11, b21]
-                                                              // | b10 b11 |
-                                                              // | b20 b21 |
+        // B in column-major (3x2):
+        // | b00 b01 |    stored as: [b00, b10, b20, b01, b11, b21]
+        // | b10 b11 |
+        // | b20 b21 |
         let b: Vec<f32> = vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]; // column-major 3x2
         let c: Vec<f32> = vec![0.0; 4]; // 2x2
 

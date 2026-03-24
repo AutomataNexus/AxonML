@@ -27,8 +27,8 @@ use rand::Rng;
 use rand::SeedableRng;
 
 use super::panoptes::{
-    FacilityConfig, FacilitySnapshot, EQUIP_AHU, EQUIP_BOILER, EQUIP_CHILLER, EQUIP_DOAS,
-    EQUIP_FAN_COIL, EQUIP_PUMP, EQUIP_STEAM_BUNDLE,
+    EQUIP_AHU, EQUIP_BOILER, EQUIP_CHILLER, EQUIP_DOAS, EQUIP_FAN_COIL, EQUIP_PUMP,
+    EQUIP_STEAM_BUNDLE, FacilityConfig, FacilitySnapshot,
 };
 
 // =============================================================================
@@ -214,7 +214,7 @@ impl WarrenSimulator {
             let hour = rng.gen_range(0.0..24.0);
             let occupied = (6.0..=22.0).contains(&hour);
 
-            let (fault, affected) = if rng.gen::<f32>() < fault_ratio {
+            let (fault, affected) = if rng.r#gen::<f32>() < fault_ratio {
                 self.random_fault(&mut rng)
             } else {
                 (FaultType::Normal, vec![])
@@ -464,10 +464,10 @@ impl WarrenSimulator {
             }
 
             // Some sensors occasionally missing
-            if rng.gen::<f32>() < 0.1 {
+            if rng.r#gen::<f32>() < 0.1 {
                 values[1] = None;
             } // space temp sometimes missing
-            if rng.gen::<f32>() < 0.15 {
+            if rng.r#gen::<f32>() < 0.15 {
                 values[3] = None;
             } // mixed temp sometimes missing
 
@@ -560,7 +560,7 @@ impl WarrenSimulator {
             // Cascade failure: boiler drops but pressure stays (impossible)
             if matches!(fault, FaultType::BoilerCascadeFailure) && is_lead {
                 values[0] = Some(75.0); // supply drops
-                                        // but header_psi stays artificially high (sensor stuck)
+                // but header_psi stays artificially high (sensor stuck)
                 header_psi = 90.0;
             }
 
@@ -630,7 +630,7 @@ impl WarrenSimulator {
             let mut values: Vec<Option<f32>> = vec![
                 Some(setpoint),
                 Some(supply_temp),
-                if rng.gen::<f32>() < 0.3 {
+                if rng.r#gen::<f32>() < 0.3 {
                     None
                 } else {
                     Some(return_temp)
@@ -772,7 +772,7 @@ impl WarrenSimulator {
             if matches!(fault, FaultType::ShortCycling { equipment_slot } if *equipment_slot == slot)
             {
                 // Rapidly toggling: show contradictory state
-                values[7] = Some(if rng.gen::<f32>() > 0.5 { 1.0 } else { 0.0 });
+                values[7] = Some(if rng.r#gen::<f32>() > 0.5 { 1.0 } else { 0.0 });
                 values[6] = Some(rng.gen_range(0.0..8.0)); // erratic amps
             }
 
@@ -985,7 +985,7 @@ impl WarrenSimulator {
                 // Sensor drift on random equipment
                 let slot = rng.gen_range(0..59);
                 let sensor = rng.gen_range(0..3);
-                let drift = rng.gen_range(5.0..25.0) * if rng.gen::<bool>() { 1.0 } else { -1.0 };
+                let drift = rng.gen_range(5.0..25.0) * if rng.r#gen::<bool>() { 1.0 } else { -1.0 };
                 (
                     FaultType::SensorDrift {
                         equipment_slot: slot,
@@ -1049,7 +1049,7 @@ impl WarrenSimulator {
             8 => {
                 // Damper stuck on AHU
                 let slot = rng.gen_range(0..6);
-                let pos = if rng.gen::<bool>() { 0.0 } else { 100.0 };
+                let pos = if rng.r#gen::<bool>() { 0.0 } else { 100.0 };
                 (
                     FaultType::DamperStuck {
                         equipment_slot: slot,

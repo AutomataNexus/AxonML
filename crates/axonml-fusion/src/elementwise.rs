@@ -17,8 +17,8 @@
 use axonml_tensor::Tensor;
 use rayon::prelude::*;
 
-use crate::error::{FusionError, FusionResult};
 use crate::FusedOp;
+use crate::error::{FusionError, FusionResult};
 
 // =============================================================================
 // Elementwise Operation Type

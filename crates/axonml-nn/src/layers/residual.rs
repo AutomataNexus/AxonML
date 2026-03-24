@@ -164,7 +164,7 @@ impl Module for ResidualBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activation::{ReLU, GELU};
+    use crate::activation::{GELU, ReLU};
     use crate::layers::{BatchNorm1d, Conv1d, Linear};
     use axonml_tensor::Tensor;
 

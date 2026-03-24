@@ -27,10 +27,10 @@ pub mod inference;
 pub mod quantize;
 pub mod types;
 
-pub use calibration::{calibrate, CalibrationData};
+pub use calibration::{CalibrationData, calibrate};
 pub use dequantize::{dequantize_block, dequantize_tensor};
 pub use error::{QuantError, QuantResult};
-pub use inference::{deserialize_quantized, serialize_quantized, QuantizedLinear, QuantizedModel};
+pub use inference::{QuantizedLinear, QuantizedModel, deserialize_quantized, serialize_quantized};
 pub use quantize::{quantize_model, quantize_tensor};
 pub use types::{QuantType, QuantizedBlock, QuantizedTensor};
 

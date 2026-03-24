@@ -16,13 +16,13 @@
 
 use crate::api::AppState;
 use crate::auth::{
-    hash_password, verify_password, AuthError, AuthUser, RecoveryAuth, TotpAuth, WebAuthnAuth,
+    AuthError, AuthUser, RecoveryAuth, TotpAuth, WebAuthnAuth, hash_password, verify_password,
 };
 use crate::db::users::{NewUser, UpdateUser, UserRepository, UserRole};
 use axum::{
+    Json,
     extract::{ConnectInfo, Path, State},
     http::{HeaderMap, StatusCode},
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;

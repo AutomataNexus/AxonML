@@ -17,11 +17,11 @@
 use std::path::PathBuf;
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Frame,
 };
 
 use crate::theme::AxonmlTheme;
@@ -433,8 +433,12 @@ impl FilesView {
         let preview_text = if let Some(entry) = selected_entry {
             let type_info = match entry.file_type {
                 FileType::Directory => "Directory - Press Enter to expand/collapse",
-                FileType::Model => "Neural Network Model\nSupported: Axonml, ONNX, SafeTensors\nPress Enter to load in Model view",
-                FileType::Dataset => "Dataset File\nSupported: NPZ, CSV, Parquet\nPress Enter to load in Data view",
+                FileType::Model => {
+                    "Neural Network Model\nSupported: Axonml, ONNX, SafeTensors\nPress Enter to load in Model view"
+                }
+                FileType::Dataset => {
+                    "Dataset File\nSupported: NPZ, CSV, Parquet\nPress Enter to load in Data view"
+                }
                 FileType::Config => "Configuration File\nPress Enter to edit",
                 FileType::Other => "Unknown file type",
             };

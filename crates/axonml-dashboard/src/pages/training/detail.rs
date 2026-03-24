@@ -16,8 +16,8 @@
 
 use leptos::*;
 use leptos_router::*;
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 use web_sys::{CloseEvent, MessageEvent, WebSocket};
 
 use crate::api;

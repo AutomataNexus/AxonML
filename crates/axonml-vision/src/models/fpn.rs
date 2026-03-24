@@ -17,7 +17,7 @@
 use axonml_autograd::Variable;
 use axonml_nn::{Conv2d, Module, Parameter};
 
-use crate::ops::{interpolate_var, InterpolateMode};
+use crate::ops::{InterpolateMode, interpolate_var};
 
 // =============================================================================
 // FPN

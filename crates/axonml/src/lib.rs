@@ -156,7 +156,7 @@ pub use monitor::TrainingMonitor;
 pub mod adversarial;
 
 #[cfg(feature = "nn")]
-pub use adversarial::{adversarial_training_step, fgsm_attack, pgd_attack, AdversarialTrainer};
+pub use adversarial::{AdversarialTrainer, adversarial_training_step, fgsm_attack, pgd_attack};
 
 // =============================================================================
 // Training Utilities
@@ -192,7 +192,7 @@ pub use hub::{
 // =============================================================================
 
 pub mod benchmark;
-pub use benchmark::{print_throughput_results, MemorySnapshot, ThroughputConfig, ThroughputResult};
+pub use benchmark::{MemorySnapshot, ThroughputConfig, ThroughputResult, print_throughput_results};
 
 #[cfg(all(feature = "core", feature = "nn"))]
 pub use benchmark::{
@@ -225,20 +225,20 @@ pub mod prelude {
 
     // Autograd
     #[cfg(feature = "core")]
-    pub use axonml_autograd::{no_grad, Variable};
+    pub use axonml_autograd::{Variable, no_grad};
 
     // Neural network modules
     #[cfg(feature = "nn")]
     pub use axonml_nn::{
         AvgPool2d, BCELoss, BatchNorm1d, BatchNorm2d, Conv2d, CrossEntropyLoss, Dropout, Embedding,
-        L1Loss, LayerNorm, LeakyReLU, Linear, MSELoss, MaxPool2d, Module, MultiHeadAttention,
-        Parameter, ReLU, Sequential, SiLU, Sigmoid, Softmax, Tanh, GELU, GRU, LSTM, RNN,
+        GELU, GRU, L1Loss, LSTM, LayerNorm, LeakyReLU, Linear, MSELoss, MaxPool2d, Module,
+        MultiHeadAttention, Parameter, RNN, ReLU, Sequential, SiLU, Sigmoid, Softmax, Tanh,
     };
 
     // Optimizers
     #[cfg(feature = "nn")]
     pub use axonml_optim::{
-        Adam, AdamW, CosineAnnealingLR, ExponentialLR, LRScheduler, Optimizer, RMSprop, StepLR, SGD,
+        Adam, AdamW, CosineAnnealingLR, ExponentialLR, LRScheduler, Optimizer, RMSprop, SGD, StepLR,
     };
 
     // Data loading
@@ -262,15 +262,15 @@ pub mod prelude {
     // Audio
     #[cfg(feature = "audio")]
     pub use axonml_audio::{
-        AddNoise, MelSpectrogram, NormalizeAudio, Resample, SyntheticCommandDataset,
-        SyntheticMusicDataset, MFCC,
+        AddNoise, MFCC, MelSpectrogram, NormalizeAudio, Resample, SyntheticCommandDataset,
+        SyntheticMusicDataset,
     };
 
     // Distributed
     #[cfg(feature = "distributed")]
     pub use axonml_distributed::{
-        all_reduce_mean, all_reduce_sum, barrier, broadcast, DistributedDataParallel, ProcessGroup,
-        World, DDP,
+        DDP, DistributedDataParallel, ProcessGroup, World, all_reduce_mean, all_reduce_sum,
+        barrier, broadcast,
     };
 
     // Profiling
@@ -283,14 +283,14 @@ pub mod prelude {
     // LLM architectures
     #[cfg(feature = "llm")]
     pub use axonml_llm::{
-        Bert, BertConfig, BertForMaskedLM, BertForSequenceClassification, GPT2Config, GPT2LMHead,
-        GenerationConfig, TextGenerator, GPT2,
+        Bert, BertConfig, BertForMaskedLM, BertForSequenceClassification, GPT2, GPT2Config,
+        GPT2LMHead, GenerationConfig, TextGenerator,
     };
 
     // JIT compilation
     #[cfg(feature = "jit")]
     pub use axonml_jit::{
-        trace, CompiledFunction, Graph, JitCompiler, Optimizer as JitOptimizer, TracedValue,
+        CompiledFunction, Graph, JitCompiler, Optimizer as JitOptimizer, TracedValue, trace,
     };
 }
 

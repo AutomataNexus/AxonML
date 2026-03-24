@@ -14,7 +14,7 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use crate::collate::{stack_tensors, Collate};
+use crate::collate::{Collate, stack_tensors};
 use crate::dataset::Dataset;
 use crate::sampler::{RandomSampler, Sampler, SequentialSampler};
 use axonml_core::Device;

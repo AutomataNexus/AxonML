@@ -28,13 +28,13 @@ pub mod trace;
 pub use cache::FunctionCache;
 pub use codegen::{CompiledFunction, JitCompiler};
 pub use compile::{
-    compile_fn, compile_fn_with_config, compile_graph, compile_graph_with_config, Backend,
-    CompileConfig, CompileStats, CompiledModel, LazyCompiled, Mode,
+    Backend, CompileConfig, CompileStats, CompiledModel, LazyCompiled, Mode, compile_fn,
+    compile_fn_with_config, compile_graph, compile_graph_with_config,
 };
 pub use error::{JitError, JitResult};
 pub use ir::{DataType, Graph, Node, NodeId, Op, Shape};
 pub use optimize::{OptimizationPass, Optimizer};
-pub use trace::{trace, TracedValue, Tracer};
+pub use trace::{TracedValue, Tracer, trace};
 
 #[cfg(test)]
 mod tests {

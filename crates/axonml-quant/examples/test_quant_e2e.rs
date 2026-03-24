@@ -2,7 +2,7 @@
 use axonml_autograd::Variable;
 use axonml_nn::{Linear, Module};
 use axonml_quant::{
-    deserialize_quantized, serialize_quantized, QuantType, QuantizedLinear, QuantizedModel,
+    QuantType, QuantizedLinear, QuantizedModel, deserialize_quantized, serialize_quantized,
 };
 use axonml_tensor::Tensor;
 

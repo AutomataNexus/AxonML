@@ -15,8 +15,8 @@
 //! liable for any damages arising from the use of this software.
 
 use leptos::*;
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 
 use crate::state::use_app_state;

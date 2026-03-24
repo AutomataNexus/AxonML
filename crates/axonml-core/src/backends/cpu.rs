@@ -513,9 +513,9 @@ impl CpuBackend {
         if TypeId::of::<T>() == TypeId::of::<f32>() {
             // SAFETY: We verified T is f32, so the casts are safe
             unsafe {
-                let a_f32: &[f32] = &*(a as *const [T] as *const [f32]);
-                let b_f32: &[f32] = &*(b as *const [T] as *const [f32]);
-                let c_f32: &mut [f32] = &mut *(c as *mut [T] as *mut [f32]);
+                let a_f32: &[f32] = &*(std::ptr::from_ref::<[T]>(a) as *const [f32]);
+                let b_f32: &[f32] = &*(std::ptr::from_ref::<[T]>(b) as *const [f32]);
+                let c_f32: &mut [f32] = &mut *(std::ptr::from_mut::<[T]>(c) as *mut [f32]);
                 Self::matmul_f32(c_f32, a_f32, b_f32, m, n, k);
             }
             return;
@@ -524,9 +524,9 @@ impl CpuBackend {
         if TypeId::of::<T>() == TypeId::of::<f64>() {
             // SAFETY: We verified T is f64, so the casts are safe
             unsafe {
-                let a_f64: &[f64] = &*(a as *const [T] as *const [f64]);
-                let b_f64: &[f64] = &*(b as *const [T] as *const [f64]);
-                let c_f64: &mut [f64] = &mut *(c as *mut [T] as *mut [f64]);
+                let a_f64: &[f64] = &*(std::ptr::from_ref::<[T]>(a) as *const [f64]);
+                let b_f64: &[f64] = &*(std::ptr::from_ref::<[T]>(b) as *const [f64]);
+                let c_f64: &mut [f64] = &mut *(std::ptr::from_mut::<[T]>(c) as *mut [f64]);
                 Self::matmul_f64(c_f64, a_f64, b_f64, m, n, k);
             }
             return;

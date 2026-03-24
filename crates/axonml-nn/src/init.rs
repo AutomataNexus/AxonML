@@ -212,7 +212,7 @@ pub fn sparse(rows: usize, cols: usize, sparsity: f32, std: f32) -> Tensor<f32> 
 
         // Set non-zero values
         for &row in indices.iter().take(num_nonzero) {
-            let val: f32 = rng.gen::<f32>() * 2.0 - 1.0; // Approximate normal
+            let val: f32 = rng.r#gen::<f32>() * 2.0 - 1.0; // Approximate normal
             data[row * cols + col] = val * std;
         }
     }

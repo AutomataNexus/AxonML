@@ -15,6 +15,8 @@
 //! liable for any damages arising from the use of this software.
 
 #[cfg(feature = "cuda")]
+use axonml_core::Device;
+#[cfg(feature = "cuda")]
 use axonml_core::backends::cuda::get_cuda_backend;
 #[cfg(feature = "cuda")]
 use axonml_core::backends::cuda_pool::pool_alloc;
@@ -22,11 +24,9 @@ use axonml_core::backends::cuda_pool::pool_alloc;
 use axonml_core::error::Result;
 #[cfg(feature = "cuda")]
 use axonml_core::storage::Storage;
-#[cfg(feature = "cuda")]
-use axonml_core::Device;
 
 #[cfg(feature = "cuda")]
-use crate::shape::{contiguous_strides, Shape};
+use crate::shape::{Shape, contiguous_strides};
 #[cfg(feature = "cuda")]
 use crate::tensor::Tensor;
 

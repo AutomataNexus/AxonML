@@ -26,7 +26,7 @@ use crate::cli::{
 };
 use crate::error::{CliError, CliResult};
 
-use axonml_serialize::{load_state_dict, StateDict};
+use axonml_serialize::{StateDict, load_state_dict};
 
 // =============================================================================
 // Execute Command

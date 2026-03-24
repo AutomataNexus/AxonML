@@ -18,7 +18,7 @@ use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, ConvTranspose2d, Linear, Module, Parameter, ReLU};
 use axonml_tensor::Tensor;
 
-use crate::ops::{interpolate_var, DepthMap, InterpolateMode};
+use crate::ops::{DepthMap, InterpolateMode, interpolate_var};
 
 // =============================================================================
 // DPT (Dense Prediction Transformer)

@@ -14,14 +14,14 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use crate::db::runs::TrainingRun;
 use crate::db::Database;
+use crate::db::runs::TrainingRun;
 use crate::training::tracker::TrainingTracker;
 use axonml_nn::{Linear, Sequential};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 /// Training executor that runs actual training
 pub struct TrainingExecutor {

@@ -26,11 +26,11 @@ pub mod linear;
 pub mod optimizer;
 pub mod patterns;
 
-pub use elementwise::{fuse_elementwise, FusedElementwise};
+pub use elementwise::{FusedElementwise, fuse_elementwise};
 pub use error::{FusionError, FusionResult};
-pub use linear::{fuse_matmul_bias_relu, FusedLinear};
-pub use optimizer::{optimize_graph, FusionOptimizer};
-pub use patterns::{detect_patterns, FusionPattern};
+pub use linear::{FusedLinear, fuse_matmul_bias_relu};
+pub use optimizer::{FusionOptimizer, optimize_graph};
+pub use patterns::{FusionPattern, detect_patterns};
 
 // =============================================================================
 // Fused Operation Trait

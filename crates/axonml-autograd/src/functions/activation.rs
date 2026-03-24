@@ -1085,11 +1085,7 @@ impl GradientFunction for EluBackward {
             .zip(grad_data.iter())
             .map(
                 |(&x, &g)| {
-                    if x > 0.0 {
-                        g
-                    } else {
-                        g * self.alpha * x.exp()
-                    }
+                    if x > 0.0 { g } else { g * self.alpha * x.exp() }
                 },
             )
             .collect();

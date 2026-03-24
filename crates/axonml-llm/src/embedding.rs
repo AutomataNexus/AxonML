@@ -16,8 +16,8 @@
 
 use axonml_autograd::Variable;
 use axonml_nn::{Dropout, Embedding, Module, Parameter};
-use axonml_tensor::creation::{ones, zeros};
 use axonml_tensor::Tensor;
+use axonml_tensor::creation::{ones, zeros};
 
 /// Token embedding layer.
 #[derive(Debug)]

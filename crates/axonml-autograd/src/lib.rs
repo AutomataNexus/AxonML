@@ -93,7 +93,7 @@ pub mod variable;
 // =============================================================================
 
 pub use amp::{
-    autocast, autocast_dtype, disable_autocast, is_autocast_enabled, AutocastGuard, AutocastPolicy,
+    AutocastGuard, AutocastPolicy, autocast, autocast_dtype, disable_autocast, is_autocast_enabled,
 };
 pub use backward::backward;
 pub use checkpoint::{checkpoint, checkpoint_sequential};
@@ -102,8 +102,8 @@ pub use functions::{
 };
 pub use grad_fn::{GradFn, GradientFunction};
 pub use graph::{ComputationGraph, GraphNode};
-pub use inspect::{depth, node_count, to_dot, trace_backward, GraphSnapshot, SnapshotNode};
-pub use no_grad::{no_grad, NoGradGuard};
+pub use inspect::{GraphSnapshot, SnapshotNode, depth, node_count, to_dot, trace_backward};
+pub use no_grad::{NoGradGuard, no_grad};
 pub use variable::Variable;
 
 // =============================================================================
@@ -113,6 +113,6 @@ pub use variable::Variable;
 /// Convenient imports for common autograd usage.
 pub mod prelude {
     pub use crate::backward::backward;
-    pub use crate::no_grad::{no_grad, NoGradGuard};
+    pub use crate::no_grad::{NoGradGuard, no_grad};
     pub use crate::variable::Variable;
 }

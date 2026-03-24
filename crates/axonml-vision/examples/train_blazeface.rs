@@ -75,11 +75,7 @@ fn iou_box_anchor(gt: &[f32; 4], anchor: &[f32; 4]) -> f32 {
     let area_a = aw * ah;
     let union = area_gt + area_a - inter;
 
-    if union > 0.0 {
-        inter / union
-    } else {
-        0.0
-    }
+    if union > 0.0 { inter / union } else { 0.0 }
 }
 
 fn assign_anchors(
@@ -481,11 +477,13 @@ fn main() {
         let images_processed = (samples_ok * BATCH_SIZE).min(num_samples);
         println!(
             "Epoch {}/{}: loss={:.4} (cls={:.4} bbox={:.4}) | pos={} | {:.1}s ({:.1} img/s, batch={})",
-            epoch + 1, NUM_EPOCHS,
+            epoch + 1,
+            NUM_EPOCHS,
             avg_loss,
             epoch_cls_loss / steps,
             epoch_bbox_loss / steps,
-            num_pos_total, elapsed,
+            num_pos_total,
+            elapsed,
             images_processed as f32 / elapsed,
             BATCH_SIZE,
         );

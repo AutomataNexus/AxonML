@@ -30,7 +30,7 @@ use crate::functions::{
     TanhBackward, TransposeBackward, UnsqueezeBackward, VarDimBackward,
 };
 use crate::grad_fn::{AccumulateGrad, GradAccumulator, GradFn};
-use crate::graph::{with_graph, GraphNode};
+use crate::graph::{GraphNode, with_graph};
 use crate::no_grad::is_grad_enabled;
 
 // =============================================================================

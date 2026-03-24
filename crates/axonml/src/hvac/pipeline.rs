@@ -290,8 +290,8 @@ mod tests {
     #[test]
     fn test_pipeline_end_to_end() {
         let pipeline = HvacPipeline::new();
-        let gen = SyntheticHvacGenerator::new(42);
-        let (sensor_data, _labels) = gen.generate_normal(2);
+        let generator = SyntheticHvacGenerator::new(42);
+        let (sensor_data, _labels) = generator.generate_normal(2);
 
         let output = pipeline.diagnose(&sensor_data);
 
@@ -337,8 +337,8 @@ mod tests {
 
     #[test]
     fn test_summarize_sensors() {
-        let gen = SyntheticHvacGenerator::new(42);
-        let (sensor_data, _) = gen.generate_normal(2);
+        let generator = SyntheticHvacGenerator::new(42);
+        let (sensor_data, _) = generator.generate_normal(2);
 
         let summary = summarize_sensors(&sensor_data, 2);
         assert_eq!(summary.shape(), vec![2, 35]);

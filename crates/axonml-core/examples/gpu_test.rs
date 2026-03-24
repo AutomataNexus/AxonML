@@ -15,7 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 use axonml_core::backends::gpu_tests::{
-    detect_gpu_backends, print_gpu_info, GpuTestConfig, GpuTestReport,
+    GpuTestConfig, GpuTestReport, detect_gpu_backends, print_gpu_info,
 };
 
 fn main() {

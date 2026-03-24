@@ -16,7 +16,7 @@
 
 use axonml_autograd::Variable;
 use axonml_nn::{Linear, Module, ReLU, Sequential, Sigmoid, Softmax, Tanh};
-use axonml_serialize::{load_state_dict, StateDict};
+use axonml_serialize::{StateDict, load_state_dict};
 use axonml_tensor::Tensor;
 use std::collections::HashMap;
 use std::path::Path;
@@ -566,7 +566,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_unload_model() {
-        use axonml_serialize::{save_state_dict, Format, StateDict, TensorData};
+        use axonml_serialize::{Format, StateDict, TensorData, save_state_dict};
         use axonml_tensor::Tensor;
 
         // Create a temporary model file

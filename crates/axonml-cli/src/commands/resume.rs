@@ -22,9 +22,9 @@ use axonml_data::{DataLoader, Dataset};
 use axonml_nn::CrossEntropyLoss;
 use axonml_nn::{Linear, Module, ReLU, Sequential};
 use axonml_optim::{Adam, Optimizer};
-use axonml_serialize::{load_checkpoint, load_state_dict, save_state_dict, Format, StateDict};
+use axonml_serialize::{Format, StateDict, load_checkpoint, load_state_dict, save_state_dict};
 use axonml_tensor::Tensor;
-use axonml_vision::{FashionMNIST, CIFAR10, MNIST};
+use axonml_vision::{CIFAR10, FashionMNIST, MNIST};
 
 use super::utils::{
     ensure_dir, epoch_progress_bar, path_exists, print_header, print_info, print_kv, print_success,

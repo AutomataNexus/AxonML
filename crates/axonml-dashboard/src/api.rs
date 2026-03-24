@@ -16,7 +16,7 @@
 
 use gloo_net::http::{Request, RequestBuilder};
 use gloo_storage::Storage;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use web_sys::FormData;
 
 use crate::types::*;

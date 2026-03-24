@@ -15,7 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 use crate::error::FusionResult;
-use crate::patterns::{detect_patterns, FusionPattern, OpType};
+use crate::patterns::{FusionPattern, OpType, detect_patterns};
 
 /// Result of graph optimization: detected patterns with their start/end indices, plus stats.
 pub type OptimizeResult = (Vec<(FusionPattern, usize, usize)>, OptimizationStats);

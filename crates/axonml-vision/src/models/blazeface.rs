@@ -18,7 +18,7 @@ use axonml_autograd::Variable;
 use axonml_nn::{BatchNorm2d, Conv2d, Module, Parameter, ReLU};
 use axonml_tensor::Tensor;
 
-use crate::ops::{nms, FaceDetection};
+use crate::ops::{FaceDetection, nms};
 
 // =============================================================================
 // BlazeBlock

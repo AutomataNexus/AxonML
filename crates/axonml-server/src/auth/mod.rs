@@ -22,16 +22,16 @@ pub mod webauthn;
 
 pub use jwt::{Claims, JwtAuth};
 pub use middleware::{
-    auth_middleware, optional_auth_middleware, require_admin_middleware, require_mfa_middleware,
-    AuthLayer, AuthUser,
+    AuthLayer, AuthUser, auth_middleware, optional_auth_middleware, require_admin_middleware,
+    require_mfa_middleware,
 };
 pub use recovery::RecoveryAuth;
 pub use totp::TotpAuth;
 pub use webauthn::WebAuthnAuth;
 
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use thiserror::Error;
 

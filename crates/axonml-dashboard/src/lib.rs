@@ -27,8 +27,8 @@ pub mod utils;
 
 use auth::mfa_setup::{RecoveryCodesPage, TotpSetupPage, WebAuthnSetupPage};
 use auth::{
-    session::{ProtectedRoute, SessionInitializer},
     LoginPage, RegisterPage,
+    session::{ProtectedRoute, SessionInitializer},
 };
 use components::toast::ToastContainer;
 use pages::{

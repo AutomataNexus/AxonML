@@ -459,8 +459,8 @@ impl Transform for AddNoise {
             .iter()
             .map(|&x| {
                 // Box-Muller transform for Gaussian noise
-                let u1: f32 = rng.gen();
-                let u2: f32 = rng.gen();
+                let u1: f32 = rng.r#gen();
+                let u2: f32 = rng.r#gen();
                 let z = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
                 x + z * noise_std
             })

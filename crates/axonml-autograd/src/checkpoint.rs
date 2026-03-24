@@ -14,9 +14,9 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+use crate::Variable;
 use crate::grad_fn::{GradFn, GradientFunction};
 use crate::no_grad::{enable_grad, no_grad};
-use crate::Variable;
 use axonml_tensor::Tensor;
 use std::any::Any;
 use std::sync::Arc;

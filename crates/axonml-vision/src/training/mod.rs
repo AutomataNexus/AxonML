@@ -25,7 +25,7 @@ pub mod helios_trainer;
 pub mod integration;
 pub mod metrics;
 pub use assign::{
-    assign_fcos_targets, assign_phantom_targets, fcos_targets_to_tensors, FcosTarget,
+    FcosTarget, assign_fcos_targets, assign_phantom_targets, fcos_targets_to_tensors,
 };
 pub use augment::{
     DetAugPipeline, DetRandomAffine, DetRandomHFlip, DetSample, HSVJitter, LetterBox, MixUp, Mosaic,
@@ -33,7 +33,7 @@ pub use augment::{
 pub use coco_bench::evaluate_helios_coco;
 pub use ema::ModelEMA;
 pub use helios_trainer::{HeliosTrainConfig, HeliosTrainer};
-pub use metrics::{compute_ap, compute_coco_map, compute_map, DetectionResult, GroundTruth};
+pub use metrics::{DetectionResult, GroundTruth, compute_ap, compute_coco_map, compute_map};
 
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;

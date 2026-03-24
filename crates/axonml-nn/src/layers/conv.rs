@@ -16,12 +16,12 @@
 
 use std::collections::HashMap;
 
+use axonml_autograd::Variable;
 use axonml_autograd::functions::{
     Conv1dBackward, Conv2dBackward, ConvTranspose2dBackward, GroupedConv2dBackward,
 };
 use axonml_autograd::grad_fn::GradFn;
 use axonml_autograd::no_grad::is_grad_enabled;
-use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
 use rayon::prelude::*;
 

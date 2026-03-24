@@ -15,9 +15,9 @@
 //! liable for any damages arising from the use of this software.
 
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -563,7 +563,7 @@ fn generate_synthetic_weights(model_name: &str) -> Result<Vec<u8>, String> {
         let std_dev = (2.0 / fan_in as f64).sqrt() as f32;
 
         for _ in 0..num_elements {
-            let val: f32 = rng.gen::<f32>() * 2.0 * std_dev - std_dev;
+            let val: f32 = rng.r#gen::<f32>() * 2.0 * std_dev - std_dev;
             data_buffer.extend_from_slice(&val.to_le_bytes());
         }
 

@@ -17,7 +17,7 @@
 use axonml_core::dtype::{Numeric, Scalar};
 use axonml_core::error::{Error, Result};
 
-use crate::shape::{numel, Shape};
+use crate::shape::{Shape, numel};
 use crate::tensor::Tensor;
 
 // =============================================================================
@@ -308,7 +308,7 @@ impl<T: Numeric> Tensor<T> {
         let selected: Vec<T> = data
             .into_iter()
             .zip(mask.iter())
-            .filter(|(_, &m)| m)
+            .filter(|(_, m)| **m)
             .map(|(v, _)| v)
             .collect();
 

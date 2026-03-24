@@ -18,9 +18,9 @@ use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};
 use crate::db::models::{EndpointStatus, ModelRepository, NewEndpoint};
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 

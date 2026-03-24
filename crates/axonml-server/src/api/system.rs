@@ -14,7 +14,7 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use wgpu::{Backends, DeviceType, Instance, InstanceDescriptor, MemoryHints};

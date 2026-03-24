@@ -18,7 +18,7 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::api;
-use crate::components::{icons::*, modal::*, spinner::*, StatusBadge};
+use crate::components::{StatusBadge, icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
