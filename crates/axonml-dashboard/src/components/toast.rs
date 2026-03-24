@@ -15,7 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 use crate::components::icons::*;
-use crate::state::{use_app_state, Toast, ToastType};
+use crate::state::{Toast, ToastType, use_app_state};
 use leptos::*;
 
 /// Toast container component - renders all active toasts

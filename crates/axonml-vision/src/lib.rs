@@ -94,9 +94,9 @@ pub use transforms::{
     RandomVerticalFlip, Resize, ToTensorImage,
 };
 
-pub use datasets::{FashionMNIST, SyntheticCIFAR, SyntheticMNIST, CIFAR10, CIFAR100, MNIST};
+pub use datasets::{CIFAR10, CIFAR100, FashionMNIST, MNIST, SyntheticCIFAR, SyntheticMNIST};
 
-pub use models::{LeNet, SimpleCNN, MLP};
+pub use models::{LeNet, MLP, SimpleCNN};
 
 // Biometric Identity (Aegis Identity)
 pub use models::biometric::{
@@ -107,8 +107,8 @@ pub use models::biometric::{
 };
 
 pub use hub::{
-    cache_dir, download_weights, is_cached, list_models, load_state_dict, model_info,
-    model_registry, HubError, HubResult, PretrainedModel, StateDict,
+    HubError, HubResult, PretrainedModel, StateDict, cache_dir, download_weights, is_cached,
+    list_models, load_state_dict, model_info, model_registry,
 };
 
 // =============================================================================
@@ -118,6 +118,8 @@ pub use hub::{
 /// Common imports for computer vision tasks.
 pub mod prelude {
     pub use crate::{
+        CIFAR10,
+        CIFAR100,
         CenterCrop,
         ColorJitter,
         FashionMNIST,
@@ -125,6 +127,9 @@ pub mod prelude {
         ImageNormalize,
         // Models
         LeNet,
+        MLP,
+        // Datasets
+        MNIST,
         Pad,
         RandomHorizontalFlip,
         RandomRotation,
@@ -135,11 +140,6 @@ pub mod prelude {
         SyntheticCIFAR,
         SyntheticMNIST,
         ToTensorImage,
-        CIFAR10,
-        CIFAR100,
-        MLP,
-        // Datasets
-        MNIST,
     };
 
     // Re-export useful items from dependencies

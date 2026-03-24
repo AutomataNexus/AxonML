@@ -568,17 +568,9 @@ impl<'a> NotebookRepository<'a> {
             })
             .reduce(|a, b| {
                 if minimize {
-                    if a.1 < b.1 {
-                        a
-                    } else {
-                        b
-                    }
+                    if a.1 < b.1 { a } else { b }
                 } else {
-                    if a.1 > b.1 {
-                        a
-                    } else {
-                        b
-                    }
+                    if a.1 > b.1 { a } else { b }
                 }
             })
             .map(|(cp, _)| cp);

@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use axonml_autograd::Variable;
 use axonml_nn::{
-    BatchNorm1d, Dropout, Linear, Module, MultiHeadAttention, Parameter, ReLU, Sequential, GELU,
+    BatchNorm1d, Dropout, GELU, Linear, Module, MultiHeadAttention, Parameter, ReLU, Sequential,
 };
 
 // Model dimensions are defined as constants below

@@ -22,9 +22,9 @@ use crate::db::notebooks::{
 };
 use crate::training::notebook_executor::result_to_cell_output;
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

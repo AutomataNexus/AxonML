@@ -139,7 +139,7 @@ impl Zephyrus {
 
         // --- Conv Branch ---
         let conv_out = self.conv_branch.forward(input); // (batch, 256, 66)
-                                                        // Global avg pool over time: (batch, 256, 66) → (batch, 256)
+        // Global avg pool over time: (batch, 256, 66) → (batch, 256)
         let conv_features = conv_out.mean_dim(2, false);
 
         // --- Fusion ---

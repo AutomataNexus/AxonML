@@ -622,9 +622,11 @@ mod tests {
         let abc = ab.add_var(&c);
         let summary = gradient_flow_summary(&abc);
         // Two AddBackward nodes
-        assert!(summary
-            .iter()
-            .any(|(name, count)| name == "AddBackward" && *count == 2));
+        assert!(
+            summary
+                .iter()
+                .any(|(name, count)| name == "AddBackward" && *count == 2)
+        );
     }
 
     #[test]

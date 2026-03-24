@@ -23,7 +23,7 @@ mod tests {
     use axonml_tensor::Tensor;
 
     use crate::datasets::{SyntheticCIFAR, SyntheticMNIST};
-    use crate::models::lenet::{LeNet, SimpleCNN, MLP};
+    use crate::models::lenet::{LeNet, MLP, SimpleCNN};
     use crate::models::resnet::ResNet;
     use crate::models::transformer::VisionTransformer;
     use crate::transforms::{ImageNormalize, Resize};

@@ -17,7 +17,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use axonml_serialize::{load_state_dict, save_state_dict, Format, StateDict, TensorData};
+use axonml_serialize::{Format, StateDict, TensorData, load_state_dict, save_state_dict};
 
 use super::utils::{path_exists, print_header, print_info, print_kv, print_success, print_warning};
 use crate::cli::{QuantArgs, QuantBenchmarkArgs, QuantConvertArgs, QuantInfoArgs, QuantSubcommand};

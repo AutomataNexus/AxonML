@@ -21,11 +21,11 @@ use axonml_autograd::Variable;
 use axonml_data::{DataLoader, Dataset};
 use axonml_nn::CrossEntropyLoss;
 use axonml_nn::{Linear, Module, ReLU, Sequential};
-use axonml_serialize::{load_checkpoint, load_state_dict, StateDict};
+use axonml_serialize::{StateDict, load_checkpoint, load_state_dict};
+use axonml_tensor::Tensor;
 #[cfg(test)]
 use axonml_tensor::zeros;
-use axonml_tensor::Tensor;
-use axonml_vision::{FashionMNIST, CIFAR10, MNIST};
+use axonml_vision::{CIFAR10, FashionMNIST, MNIST};
 
 use super::utils::{
     detect_model_format, path_exists, print_header, print_info, print_kv, print_success,

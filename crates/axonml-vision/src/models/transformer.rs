@@ -239,7 +239,7 @@ impl Module for TransformerEncoder {
     fn is_training(&self) -> bool {
         self.layers
             .first()
-            .map_or(true, axonml_nn::Module::is_training)
+            .is_none_or(axonml_nn::Module::is_training)
     }
 }
 
@@ -426,7 +426,7 @@ impl Module for TransformerDecoder {
     fn is_training(&self) -> bool {
         self.layers
             .first()
-            .map_or(true, axonml_nn::Module::is_training)
+            .is_none_or(axonml_nn::Module::is_training)
     }
 }
 

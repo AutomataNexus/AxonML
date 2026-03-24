@@ -14,11 +14,11 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use axonml_serialize::{load_state_dict, save_state_dict, Format, StateDict, TensorData};
+use axonml_serialize::{Format, StateDict, TensorData, load_state_dict, save_state_dict};
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

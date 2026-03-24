@@ -19,13 +19,13 @@ use crate::auth::{AuthError, AuthUser};
 use crate::db::runs::{NewTrainingRun, RunConfig, RunRepository, RunStatus};
 use crate::training::websocket::MetricsStreamer;
 use axum::{
+    Json,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Path, Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use chrono::Utc;
 use futures::{SinkExt, StreamExt};

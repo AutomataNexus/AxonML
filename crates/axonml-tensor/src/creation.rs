@@ -14,8 +14,8 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use rand::distributions::{Distribution, Standard};
 use rand::Rng;
+use rand::distributions::{Distribution, Standard};
 use rand_distr::{Normal, StandardNormal, Uniform};
 
 use axonml_core::dtype::{Float, Numeric, Scalar};
@@ -125,7 +125,7 @@ where
 {
     let numel: usize = shape.iter().product();
     let mut rng = rand::thread_rng();
-    let data: Vec<T> = (0..numel).map(|_| rng.gen()).collect();
+    let data: Vec<T> = (0..numel).map(|_| rng.r#gen()).collect();
     Tensor::from_vec(data, shape).unwrap()
 }
 

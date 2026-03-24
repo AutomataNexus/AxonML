@@ -15,12 +15,12 @@
 //! liable for any damages arising from the use of this software.
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     symbols,
     text::{Line, Span},
     widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph},
-    Frame,
 };
 
 use crate::theme::{AxonmlTheme, INFO, TEAL, TERRACOTTA};
@@ -379,12 +379,14 @@ impl GraphsView {
     }
 
     fn render_lr_chart(&self, frame: &mut Frame, area: Rect) {
-        let datasets = vec![Dataset::default()
-            .name("Learning Rate")
-            .marker(symbols::Marker::Braille)
-            .graph_type(GraphType::Line)
-            .style(Style::default().fg(INFO))
-            .data(&self.learning_rate)];
+        let datasets = vec![
+            Dataset::default()
+                .name("Learning Rate")
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(INFO))
+                .data(&self.learning_rate),
+        ];
 
         let chart = Chart::new(datasets)
             .block(

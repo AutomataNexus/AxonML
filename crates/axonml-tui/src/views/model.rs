@@ -17,6 +17,7 @@
 use std::path::Path;
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span},
@@ -24,7 +25,6 @@ use ratatui::{
         Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
         ScrollbarState,
     },
-    Frame,
 };
 
 use crate::theme::AxonmlTheme;

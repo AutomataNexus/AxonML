@@ -82,7 +82,7 @@ pub mod transforms;
 // =============================================================================
 
 pub use transforms::{
-    AddNoise, MelSpectrogram, NormalizeAudio, PitchShift, Resample, TimeStretch, TrimSilence, MFCC,
+    AddNoise, MFCC, MelSpectrogram, NormalizeAudio, PitchShift, Resample, TimeStretch, TrimSilence,
 };
 
 pub use datasets::{
@@ -101,6 +101,7 @@ pub mod prelude {
         // Datasets
         AudioClassificationDataset,
         AudioSeq2SeqDataset,
+        MFCC,
         MelSpectrogram,
         NormalizeAudio,
         PitchShift,
@@ -111,7 +112,6 @@ pub mod prelude {
         SyntheticSpeakerDataset,
         TimeStretch,
         TrimSilence,
-        MFCC,
     };
 
     pub use axonml_data::{DataLoader, Dataset, Transform};

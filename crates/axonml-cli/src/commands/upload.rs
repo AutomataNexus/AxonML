@@ -17,7 +17,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use axonml_serialize::{load_state_dict, StateDict};
+use axonml_serialize::{StateDict, load_state_dict};
 
 use super::utils::{
     detect_model_format, ensure_dir, path_exists, print_header, print_info, print_kv,

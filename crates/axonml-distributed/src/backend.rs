@@ -45,7 +45,7 @@ impl ReduceOp {
             ReduceOp::Product => a * b,
             ReduceOp::Min => a.min(b),
             ReduceOp::Max => a.max(b),
-            ReduceOp::Average => (a + b) / 2.0,
+            ReduceOp::Average => f32::midpoint(a, b),
         }
     }
 

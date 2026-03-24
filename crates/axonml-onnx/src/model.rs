@@ -17,8 +17,8 @@
 use crate::error::{OnnxError, OnnxResult};
 use crate::operators::OnnxOperator;
 use crate::proto::{GraphProto, ModelProto, TensorProto};
-use axonml_tensor::creation::zeros;
 use axonml_tensor::Tensor;
+use axonml_tensor::creation::zeros;
 use std::collections::HashMap;
 
 // =============================================================================

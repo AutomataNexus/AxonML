@@ -18,8 +18,8 @@ use std::collections::HashMap;
 
 use axonml_autograd::Variable;
 use axonml_nn::{
-    BatchNorm1d, Conv1d, Dropout, Linear, Module, MultiHeadAttention, Parameter, ReLU,
-    ResidualBlock, Sequential, LSTM,
+    BatchNorm1d, Conv1d, Dropout, LSTM, Linear, Module, MultiHeadAttention, Parameter, ReLU,
+    ResidualBlock, Sequential,
 };
 #[cfg(test)]
 use axonml_tensor::Tensor;

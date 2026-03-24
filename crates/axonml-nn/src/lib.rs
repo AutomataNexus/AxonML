@@ -99,16 +99,16 @@ pub use sequential::Sequential;
 pub use layers::{
     AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, BatchNorm1d, BatchNorm2d, Conv1d, Conv2d,
     ConvTranspose2d, CrossAttention, DifferentialAttention, Dropout, Embedding, Expert, FFT1d,
-    GATConv, GCNConv, GRUCell, GroupNorm, GroupSparsity, InstanceNorm2d, LSTMCell, LayerNorm,
-    Linear, LotteryTicket, MaxPool1d, MaxPool2d, MoELayer, MoERouter, MultiHeadAttention,
-    PackedTernaryWeights, RNNCell, ResidualBlock, Seq2SeqTransformer, SparseLinear, TernaryLinear,
-    TransformerDecoder, TransformerDecoderLayer, TransformerEncoder, TransformerEncoderLayer, GRU,
-    LSTM, RNN, STFT,
+    GATConv, GCNConv, GRU, GRUCell, GroupNorm, GroupSparsity, InstanceNorm2d, LSTM, LSTMCell,
+    LayerNorm, Linear, LotteryTicket, MaxPool1d, MaxPool2d, MoELayer, MoERouter,
+    MultiHeadAttention, PackedTernaryWeights, RNN, RNNCell, ResidualBlock, STFT,
+    Seq2SeqTransformer, SparseLinear, TernaryLinear, TransformerDecoder, TransformerDecoderLayer,
+    TransformerEncoder, TransformerEncoderLayer,
 };
 
 // Activation re-exports
 pub use activation::{
-    Flatten, Identity, LeakyReLU, LogSoftmax, ReLU, SiLU, Sigmoid, Softmax, Tanh, ELU, GELU,
+    ELU, Flatten, GELU, Identity, LeakyReLU, LogSoftmax, ReLU, SiLU, Sigmoid, Softmax, Tanh,
 };
 
 // Loss re-exports
@@ -118,9 +118,9 @@ pub use loss::{
 
 // Init re-exports
 pub use init::{
-    constant, diag, eye, glorot_normal, glorot_uniform, he_normal, he_uniform, kaiming_normal,
-    kaiming_uniform, normal, ones, orthogonal, randn, sparse, uniform, uniform_range,
-    xavier_normal, xavier_uniform, zeros, InitMode,
+    InitMode, constant, diag, eye, glorot_normal, glorot_uniform, he_normal, he_uniform,
+    kaiming_normal, kaiming_uniform, normal, ones, orthogonal, randn, sparse, uniform,
+    uniform_range, xavier_normal, xavier_uniform, zeros,
 };
 
 // =============================================================================
@@ -130,8 +130,6 @@ pub use init::{
 /// Common imports for neural network development.
 pub mod prelude {
     pub use crate::{
-        // Functional
-        functional,
         AdaptiveAvgPool2d,
         AvgPool1d,
         AvgPool2d,
@@ -143,11 +141,15 @@ pub mod prelude {
         CrossAttention,
         CrossEntropyLoss,
         Dropout,
+        ELU,
         Embedding,
+        GELU,
+        GRU,
         GroupNorm,
         Identity,
         InstanceNorm2d,
         L1Loss,
+        LSTM,
         LayerNorm,
         LeakyReLU,
         // Layers
@@ -161,6 +163,7 @@ pub mod prelude {
         MultiHeadAttention,
         NLLLoss,
         Parameter,
+        RNN,
         // Activations
         ReLU,
         // Loss functions
@@ -175,11 +178,8 @@ pub mod prelude {
         TransformerDecoderLayer,
         TransformerEncoder,
         TransformerEncoderLayer,
-        ELU,
-        GELU,
-        GRU,
-        LSTM,
-        RNN,
+        // Functional
+        functional,
     };
 }
 

@@ -16,11 +16,11 @@
 
 use std::collections::HashMap;
 
+use axonml_autograd::Variable;
 #[cfg(feature = "cuda")]
 use axonml_autograd::functions::FusedAttentionBackward;
 #[cfg(feature = "cuda")]
 use axonml_autograd::grad_fn::GradFn;
-use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
 
 use crate::layers::Linear;

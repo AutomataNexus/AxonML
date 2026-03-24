@@ -20,7 +20,7 @@
 
 use crate::dequantize::dequantize_tensor;
 use crate::quantize::quantize_tensor;
-use crate::types::{Q4Block, Q4_1Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
+use crate::types::{Q4_1Block, Q4Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
 use axonml_tensor::Tensor;
 use half::f16;
 use rayon::prelude::*;

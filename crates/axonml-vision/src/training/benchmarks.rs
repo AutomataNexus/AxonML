@@ -349,7 +349,7 @@ mod tests {
     fn benchmark_param_counts() {
         use crate::models::biometric::MnemosyneIdentity;
         use crate::models::blazeface::BlazeFace;
-        use crate::models::lenet::{LeNet, SimpleCNN, MLP};
+        use crate::models::lenet::{LeNet, MLP, SimpleCNN};
         use crate::models::nanodet::NanoDet;
         use crate::models::resnet::ResNet;
         use crate::models::transformer::VisionTransformer;

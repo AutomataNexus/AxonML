@@ -16,8 +16,8 @@
 
 use axonml_autograd::Variable;
 use axonml_nn::{Dropout, Linear, Module, Parameter};
-use axonml_tensor::creation::{ones, zeros};
 use axonml_tensor::Tensor;
+use axonml_tensor::creation::{ones, zeros};
 
 use crate::attention::{CausalSelfAttention, MultiHeadSelfAttention};
 

@@ -82,7 +82,7 @@ pub mod vocab;
 // Re-exports
 // =============================================================================
 
-pub use vocab::{Vocab, BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN};
+pub use vocab::{BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, Vocab};
 
 pub use tokenizer::{
     BasicBPETokenizer, CharTokenizer, NGramTokenizer, Tokenizer, UnigramTokenizer,
@@ -100,26 +100,26 @@ pub use datasets::{
 /// Common imports for text processing.
 pub mod prelude {
     pub use crate::{
+        BOS_TOKEN,
         BasicBPETokenizer,
         CharTokenizer,
+        EOS_TOKEN,
         LanguageModelDataset,
+        MASK_TOKEN,
         NGramTokenizer,
+        PAD_TOKEN,
         SyntheticSentimentDataset,
         SyntheticSeq2SeqDataset,
         // Datasets
         TextDataset,
         // Tokenizers
         Tokenizer,
+        UNK_TOKEN,
         UnigramTokenizer,
         // Vocabulary
         Vocab,
         WhitespaceTokenizer,
         WordPunctTokenizer,
-        BOS_TOKEN,
-        EOS_TOKEN,
-        MASK_TOKEN,
-        PAD_TOKEN,
-        UNK_TOKEN,
     };
 
     pub use axonml_data::{DataLoader, Dataset};

@@ -21,7 +21,7 @@ use axonml_tensor::Tensor;
 
 use crate::datasets::CocoAnnotation;
 use crate::ops::Detection;
-use crate::training::metrics::{compute_coco_map, compute_map, DetectionResult, GroundTruth};
+use crate::training::metrics::{DetectionResult, GroundTruth, compute_coco_map, compute_map};
 
 // =============================================================================
 // Conversion Helpers

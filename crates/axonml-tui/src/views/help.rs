@@ -15,11 +15,11 @@
 //! liable for any damages arising from the use of this software.
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::Modifier,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use crate::theme::AxonmlTheme;
@@ -80,8 +80,7 @@ impl HelpView {
                     },
                     KeyBinding {
                         key: "1-6",
-                        description:
-                            "Jump to specific view (Model, Data, Training, Graphs, Files, Help)",
+                        description: "Jump to specific view (Model, Data, Training, Graphs, Files, Help)",
                     },
                     KeyBinding {
                         key: "j / Down",

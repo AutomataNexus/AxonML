@@ -20,11 +20,11 @@ use crate::db::models::{
     Endpoint, Model, ModelRepository, ModelVersion, NewEndpoint, NewModel, NewModelVersion,
 };
 use axum::{
+    Json,
     body::Bytes,
     extract::{Multipart, Path, Query, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::IntoResponse,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

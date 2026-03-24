@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_nn::{BatchNorm1d, Dropout, Linear, Module, Parameter, ReLU, Sequential, GELU};
+use axonml_nn::{BatchNorm1d, Dropout, GELU, Linear, Module, Parameter, ReLU, Sequential};
 #[cfg(test)]
 use axonml_tensor::Tensor;
 

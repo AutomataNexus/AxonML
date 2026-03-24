@@ -16,7 +16,7 @@
 
 use axonml_autograd::Variable;
 use axonml_nn::{Dropout, Linear, Module, Parameter};
-use axonml_tensor::{view::cat, Tensor};
+use axonml_tensor::{Tensor, view::cat};
 
 /// Key-value cache entry: (key_tensor, value_tensor).
 pub type KVCacheEntry = (Tensor<f32>, Tensor<f32>);

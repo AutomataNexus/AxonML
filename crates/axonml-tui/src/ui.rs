@@ -15,11 +15,11 @@
 //! liable for any damages arising from the use of this software.
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Modifier,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Tabs},
-    Frame,
 };
 
 use crate::app::{App, StatusLevel, Tab};

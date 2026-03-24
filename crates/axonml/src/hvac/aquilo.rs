@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_nn::{BatchNorm1d, Dropout, FFT1d, Linear, Module, Parameter, ReLU, Sequential, GELU};
+use axonml_nn::{BatchNorm1d, Dropout, FFT1d, GELU, Linear, Module, Parameter, ReLU, Sequential};
 
 // =============================================================================
 // Aquilo Model

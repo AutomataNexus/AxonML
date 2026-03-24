@@ -695,7 +695,7 @@ impl AriadneFingerprint {
 
         // Map from [-1, 1] average cosine to [0, 1] score
         let avg_cos = (consistency_sum / count as f64) as f32;
-        ((avg_cos + 1.0) / 2.0).clamp(0.0, 1.0)
+        f32::midpoint(avg_cos, 1.0).clamp(0.0, 1.0)
     }
 
     /// Full forward pass with embedding and uncertainty output.

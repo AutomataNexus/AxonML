@@ -14,13 +14,13 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+use axonml_autograd::Variable;
 use axonml_autograd::functions::{
     AdaptiveAvgPool2dBackward, AvgPool1dBackward, AvgPool2dBackward, MaxPool1dBackward,
     MaxPool2dBackward,
 };
 use axonml_autograd::grad_fn::GradFn;
 use axonml_autograd::no_grad::is_grad_enabled;
-use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
 
 use crate::module::Module;

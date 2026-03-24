@@ -17,11 +17,11 @@
 use std::path::Path;
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, Paragraph, Sparkline},
-    Frame,
 };
 
 use crate::theme::AxonmlTheme;

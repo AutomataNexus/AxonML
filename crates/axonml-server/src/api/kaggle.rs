@@ -15,8 +15,8 @@
 //! liable for any damages arising from the use of this software.
 
 use axum::{
-    extract::{Query, State},
     Json,
+    extract::{Query, State},
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

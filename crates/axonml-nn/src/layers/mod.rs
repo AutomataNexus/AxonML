@@ -32,7 +32,7 @@ pub mod ternary;
 pub mod transformer;
 
 // Re-exports
-pub use attention::{scaled_dot_product_attention_fused, CrossAttention, MultiHeadAttention};
+pub use attention::{CrossAttention, MultiHeadAttention, scaled_dot_product_attention_fused};
 pub use conv::{Conv1d, Conv2d, ConvTranspose2d};
 pub use diff_attention::DifferentialAttention;
 pub use dropout::Dropout;
@@ -44,7 +44,7 @@ pub use moe::{Expert, MoELayer, MoERouter};
 pub use norm::{BatchNorm1d, BatchNorm2d, GroupNorm, InstanceNorm2d, LayerNorm};
 pub use pooling::{AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, MaxPool1d, MaxPool2d};
 pub use residual::ResidualBlock;
-pub use rnn::{GRUCell, LSTMCell, RNNCell, GRU, LSTM, RNN};
+pub use rnn::{GRU, GRUCell, LSTM, LSTMCell, RNN, RNNCell};
 pub use sparse::{GroupSparsity, LotteryTicket, SparseLinear};
 pub use ternary::{PackedTernaryWeights, TernaryLinear};
 pub use transformer::{

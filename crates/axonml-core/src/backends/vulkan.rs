@@ -25,12 +25,12 @@ use std::ffi::CStr;
 use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(feature = "vulkan")]
-use ash::{vk, Device, Entry, Instance};
+use ash::{Device, Entry, Instance, vk};
 
 #[cfg(feature = "vulkan")]
 use gpu_allocator::{
-    vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc},
     MemoryLocation,
+    vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc},
 };
 
 // =============================================================================
@@ -813,7 +813,7 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
                 supports_f64: false,
                 max_threads_per_block: 0,
                 compute_capability: None,
-            }
+            };
         }
     };
 

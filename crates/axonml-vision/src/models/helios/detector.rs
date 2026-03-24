@@ -22,7 +22,7 @@ use super::backbone::CSPDarknet;
 use super::head::HeliosHead;
 use super::neck::PANet;
 use super::{HeliosConfig, HeliosScaleOutput, HeliosTrainOutput};
-use crate::ops::{nms, Detection};
+use crate::ops::{Detection, nms};
 
 // =============================================================================
 // Helios Detector

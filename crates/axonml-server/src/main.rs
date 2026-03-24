@@ -24,11 +24,11 @@ mod llm;
 mod secrets;
 mod training;
 
-use api::{create_router, AppState};
+use api::{AppState, create_router};
 use auth::JwtAuth;
 use clap::Parser;
 use config::Config;
-use db::{schema::Schema, Database};
+use db::{Database, schema::Schema};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -237,7 +237,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let email = email::EmailService::new(email_api_key);
     if !email.is_configured() {
         tracing::warn!("Email API key not configured - email functionality will be disabled");
-        tracing::warn!("Set via Vault (resend_api_key), AXONML_RESEND_API_KEY env var, or RESEND_API_KEY env var");
+        tracing::warn!(
+            "Set via Vault (resend_api_key), AXONML_RESEND_API_KEY env var, or RESEND_API_KEY env var"
+        );
     }
 
     // Initialize inference server

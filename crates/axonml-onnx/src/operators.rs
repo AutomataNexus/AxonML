@@ -16,10 +16,10 @@
 
 use crate::error::{OnnxError, OnnxResult};
 use crate::proto::NodeProto;
+use axonml_tensor::Tensor;
 use axonml_tensor::creation::zeros;
 use axonml_tensor::ops::{clamp, eq, gelu, gt, leaky_relu, lt, softmax};
 use axonml_tensor::view::cat;
-use axonml_tensor::Tensor;
 use std::fmt::Debug;
 
 // =============================================================================

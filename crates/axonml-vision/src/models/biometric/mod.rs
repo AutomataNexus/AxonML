@@ -788,9 +788,10 @@ mod tests {
         let ev = BiometricEvidence::multi(Some(face), None, Some(voice), None);
         assert_eq!(ev.modality_count(), 2);
         assert!(ev.available_modalities().contains(&BiometricModality::Face));
-        assert!(ev
-            .available_modalities()
-            .contains(&BiometricModality::Voice));
+        assert!(
+            ev.available_modalities()
+                .contains(&BiometricModality::Voice)
+        );
     }
 
     #[test]

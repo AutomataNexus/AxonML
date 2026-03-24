@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_nn::{Dropout, Linear, Module, MultiHeadAttention, Parameter, ReLU, Sequential, GELU};
+use axonml_nn::{Dropout, GELU, Linear, Module, MultiHeadAttention, Parameter, ReLU, Sequential};
 
 // =============================================================================
 // Colossus Model

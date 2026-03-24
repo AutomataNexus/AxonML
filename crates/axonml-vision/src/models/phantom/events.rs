@@ -188,7 +188,7 @@ impl EventEncoder {
         let active_cells: Vec<(usize, usize)> = active_mask
             .iter()
             .enumerate()
-            .filter(|(_, &active)| active)
+            .filter(|&(_, &active)| active)
             .map(|(i, _)| (i / cell_w, i % cell_w))
             .collect();
 

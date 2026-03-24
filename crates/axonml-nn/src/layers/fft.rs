@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use axonml_autograd::Variable;
 use axonml_tensor::Tensor;
-use rustfft::{num_complex::Complex, FftPlanner};
+use rustfft::{FftPlanner, num_complex::Complex};
 
 use crate::module::Module;
 use crate::parameter::Parameter;

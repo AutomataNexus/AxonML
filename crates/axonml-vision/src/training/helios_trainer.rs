@@ -21,7 +21,7 @@ use axonml_tensor::{Device, Tensor};
 
 use super::augment::{DetAugPipeline, DetSample};
 use super::ema::ModelEMA;
-use super::metrics::{compute_map, DetectionResult, GroundTruth};
+use super::metrics::{DetectionResult, GroundTruth, compute_map};
 use crate::models::helios::{Helios, HeliosLoss};
 
 // =============================================================================

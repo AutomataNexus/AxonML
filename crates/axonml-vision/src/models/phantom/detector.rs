@@ -18,10 +18,10 @@ use axonml_autograd::Variable;
 use axonml_nn::{Conv2d, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
 
+use super::PhantomConfig;
 use super::backbone::{EventFeatureExtractor, PhantomBackbone};
 use super::events::EventEncoder;
 use super::tracker::FaceStateTracker;
-use super::PhantomConfig;
 use crate::ops::PhantomFaceDetection;
 
 // =============================================================================

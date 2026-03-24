@@ -17,13 +17,13 @@
 use core::fmt;
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
+use axonml_core::Device;
 use axonml_core::backends::CpuBackend;
 #[cfg(feature = "cuda")]
 use axonml_core::backends::CudaBackend;
 use axonml_core::dtype::{Float, Numeric, Scalar};
 use axonml_core::error::{Error, Result};
 use axonml_core::storage::Storage;
-use axonml_core::Device;
 use num_traits::NumCast;
 
 // =============================================================================
@@ -61,9 +61,9 @@ mod cuda_accel {
 }
 
 use crate::shape::{
-    broadcast_shape, broadcast_strides, contiguous_strides, is_contiguous, linear_index,
-    normalize_dim, numel, reshape, squeeze, transpose_shape, transpose_strides, unsqueeze, Shape,
-    Strides,
+    Shape, Strides, broadcast_shape, broadcast_strides, contiguous_strides, is_contiguous,
+    linear_index, normalize_dim, numel, reshape, squeeze, transpose_shape, transpose_strides,
+    unsqueeze,
 };
 
 // =============================================================================
@@ -466,8 +466,8 @@ impl<T: Scalar> Tensor<T> {
                 .shape
                 .iter()
                 .zip(self.strides.iter())
-                .filter(|(&dim, _)| dim != 1)
-                .map(|(_, &stride)| stride)
+                .filter(|(dim, _)| **dim != 1)
+                .map(|(_, stride)| *stride)
                 .collect(),
         };
 

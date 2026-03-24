@@ -387,7 +387,9 @@ fn main() {
         let fac = fac_score.data().to_vec()[0];
         let max_score = scores.iter().cloned().fold(0.0f32, f32::max);
         let avg_score: f32 = scores.iter().sum::<f32>() / scores.len() as f32;
-        println!("    Sample {i:>3}: facility={fac:.4}, avg_equip={avg_score:.4}, max_equip={max_score:.4}");
+        println!(
+            "    Sample {i:>3}: facility={fac:.4}, avg_equip={avg_score:.4}, max_equip={max_score:.4}"
+        );
     }
 
     // Test on fault data — affected equipment should have higher scores
@@ -468,8 +470,10 @@ fn main() {
             "    Fault {:?} (onset step {onset}/{TEMPORAL_WINDOW}):",
             fault
         );
-        println!("      facility={fac:.4}, affected={affected_avg:.4}, unaffected={unaffected_avg:.4}, alerts={}",
-            output.alerts.len());
+        println!(
+            "      facility={fac:.4}, affected={affected_avg:.4}, unaffected={unaffected_avg:.4}, alerts={}",
+            output.alerts.len()
+        );
     }
 
     println!();

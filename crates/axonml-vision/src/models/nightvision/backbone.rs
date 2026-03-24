@@ -100,11 +100,7 @@ impl Bottleneck {
     /// Forward pass with optional residual connection.
     pub fn forward(&self, x: &Variable) -> Variable {
         let out = self.cv2.forward(&self.cv1.forward(x));
-        if self.shortcut {
-            out.add_var(x)
-        } else {
-            out
-        }
+        if self.shortcut { out.add_var(x) } else { out }
     }
 
     /// Returns all learnable parameters.

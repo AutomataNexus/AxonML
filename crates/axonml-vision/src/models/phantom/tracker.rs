@@ -327,11 +327,7 @@ fn compute_iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
     let area_b = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
     let union = area_a + area_b - inter;
 
-    if union > 0.0 {
-        inter / union
-    } else {
-        0.0
-    }
+    if union > 0.0 { inter / union } else { 0.0 }
 }
 
 /// Extract a single row from a batched Variable, preserving the computational graph.

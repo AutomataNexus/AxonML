@@ -23,7 +23,7 @@ use super::utils::{
 use crate::cli::ConvertArgs;
 use crate::error::{CliError, CliResult};
 
-use axonml_serialize::{convert_from_pytorch, load_state_dict, save_state_dict, Format, StateDict};
+use axonml_serialize::{Format, StateDict, convert_from_pytorch, load_state_dict, save_state_dict};
 
 // =============================================================================
 // Supported Formats

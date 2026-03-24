@@ -326,7 +326,7 @@ impl AegisIdentity {
     fn process_evidence(&self, evidence: &BiometricEvidence) -> Vec<ModalityOutput> {
         let mut outputs = Vec::new();
 
-        if let (Some(ref model), Some(ref face_var)) = (&self.face, &evidence.face) {
+        if let (Some(model), Some(face_var)) = (&self.face, &evidence.face) {
             let encoding = model.encode_face(face_var);
             let identity = model.extract_identity(&encoding);
             outputs.push(ModalityOutput {
@@ -336,7 +336,7 @@ impl AegisIdentity {
             });
         }
 
-        if let (Some(ref model), Some(ref finger_var)) = (&self.finger, &evidence.fingerprint) {
+        if let (Some(model), Some(finger_var)) = (&self.finger, &evidence.fingerprint) {
             let (embedding, logvar) = model.forward_full(finger_var);
             outputs.push(ModalityOutput {
                 embedding: embedding.data().to_vec(),
@@ -345,7 +345,7 @@ impl AegisIdentity {
             });
         }
 
-        if let (Some(ref model), Some(ref voice_var)) = (&self.voice, &evidence.voice) {
+        if let (Some(model), Some(voice_var)) = (&self.voice, &evidence.voice) {
             let (_pred, embedding, logvar) = model.forward_full(voice_var);
             outputs.push(ModalityOutput {
                 embedding: embedding.data().to_vec(),
@@ -354,7 +354,7 @@ impl AegisIdentity {
             });
         }
 
-        if let (Some(ref model), Some(ref iris_var)) = (&self.iris, &evidence.iris) {
+        if let (Some(model), Some(iris_var)) = (&self.iris, &evidence.iris) {
             let (embedding, logvar) = model.forward_full(iris_var);
             outputs.push(ModalityOutput {
                 embedding: embedding.data().to_vec(),
@@ -388,7 +388,7 @@ impl AegisIdentity {
             match output.modality {
                 BiometricModality::Face => {
                     // Face uses crystallization: GRU hidden state evolves with each observation
-                    if let (Some(ref model), Some(ref face_var)) = (&self.face, &evidence.face) {
+                    if let (Some(model), Some(face_var)) = (&self.face, &evidence.face) {
                         let hidden = record.face_hidden.as_ref().map(|h| {
                             Variable::new(
                                 Tensor::from_vec(h.clone(), &[1, model.hidden_dim()]).unwrap(),
@@ -467,7 +467,7 @@ impl AegisIdentity {
                     modality_scores: Vec::new(),
                     confidence: 0.0,
                     threshold: self.config.verify_threshold,
-                }
+                };
             }
         };
 
@@ -838,7 +838,7 @@ impl AegisIdentity {
         let mut issues = Vec::new();
 
         // Face quality: check via Mnemosyne's quality gate
-        if let (Some(ref model), Some(ref face_var)) = (&self.face, &evidence.face) {
+        if let (Some(model), Some(face_var)) = (&self.face, &evidence.face) {
             let quality = model.assess_quality(face_var);
             modality_scores.push((BiometricModality::Face, quality));
             if quality < self.config.quality_threshold {
@@ -854,7 +854,7 @@ impl AegisIdentity {
         }
 
         // Fingerprint quality: encoding magnitude as proxy
-        if let (Some(ref model), Some(ref finger_var)) = (&self.finger, &evidence.fingerprint) {
+        if let (Some(model), Some(finger_var)) = (&self.finger, &evidence.fingerprint) {
             let (emb, logvar) = model.forward_full(finger_var);
             let mag = emb
                 .data()
@@ -880,7 +880,7 @@ impl AegisIdentity {
         }
 
         // Voice quality: via prediction error variance
-        if let (Some(ref model), Some(ref voice_var)) = (&self.voice, &evidence.voice) {
+        if let (Some(model), Some(voice_var)) = (&self.voice, &evidence.voice) {
             let (_pred, _emb, logvar) = model.forward_full(voice_var);
             let lv = logvar.data().to_vec()[0];
             let quality = (-lv).clamp(0.0, 1.0);
@@ -898,7 +898,7 @@ impl AegisIdentity {
         }
 
         // Iris quality: via Argus quality assessment
-        if let (Some(ref model), Some(ref iris_var)) = (&self.iris, &evidence.iris) {
+        if let (Some(model), Some(iris_var)) = (&self.iris, &evidence.iris) {
             let quality = model.assess_quality(iris_var);
             modality_scores.push((BiometricModality::Iris, quality));
             if quality < self.config.quality_threshold {
@@ -952,7 +952,7 @@ impl AegisIdentity {
         let mut modality_liveness = vec![(BiometricModality::Face, liveness.liveness_score)];
 
         // Voice replay detection if available
-        if let (Some(ref voice_model), Some(ref voice_var)) = (&self.voice, &evidence.voice) {
+        if let (Some(voice_model), Some(voice_var)) = (&self.voice, &evidence.voice) {
             let replay_score = voice_model.detect_replay(voice_var);
             // replay_score near 1.0 = likely spoofed, near 0.0 = live
             let voice_liveness = 1.0 - replay_score;
@@ -1151,7 +1151,10 @@ impl AegisIdentity {
         format!(
             "AegisIdentity: {} modalities ({}) | {} params ({:.1}KB f32) | {} enrolled | threshold={:.2}",
             mods.len(),
-            mods.iter().map(|m| format!("{}", m)).collect::<Vec<_>>().join(", "),
+            mods.iter()
+                .map(|m| format!("{}", m))
+                .collect::<Vec<_>>()
+                .join(", "),
             total,
             total as f32 * 4.0 / 1024.0,
             self.bank.len(),
@@ -1337,9 +1340,11 @@ mod tests {
 
         assert!(result.success);
         assert_eq!(result.subject_id, 1);
-        assert!(result
-            .modalities_enrolled
-            .contains(&BiometricModality::Face));
+        assert!(
+            result
+                .modalities_enrolled
+                .contains(&BiometricModality::Face)
+        );
         assert_eq!(result.observation_count, 1);
         assert!(system.bank.contains(1));
     }

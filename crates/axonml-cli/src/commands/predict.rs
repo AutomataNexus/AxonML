@@ -19,10 +19,10 @@ use std::time::Instant;
 
 use axonml_autograd::Variable;
 use axonml_nn::{Linear, Module, ReLU, Sequential};
-use axonml_serialize::{load_checkpoint, load_state_dict, StateDict};
+use axonml_serialize::{StateDict, load_checkpoint, load_state_dict};
+use axonml_tensor::Tensor;
 #[cfg(test)]
 use axonml_tensor::zeros;
-use axonml_tensor::Tensor;
 
 use super::utils::{
     detect_model_format, is_file, path_exists, print_header, print_info, print_kv, print_success,

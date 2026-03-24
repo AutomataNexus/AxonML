@@ -162,8 +162,8 @@ impl Transform for RandomNoise {
             .iter()
             .map(|&x| {
                 // Box-Muller transform for Gaussian noise
-                let u1: f32 = rng.gen();
-                let u2: f32 = rng.gen();
+                let u1: f32 = rng.r#gen();
+                let u2: f32 = rng.r#gen();
                 let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
                 x + z * self.std
             })
@@ -330,7 +330,7 @@ impl RandomFlip {
 impl Transform for RandomFlip {
     fn apply(&self, input: &Tensor<f32>) -> Tensor<f32> {
         let mut rng = rand::thread_rng();
-        if rng.gen::<f32>() > self.probability {
+        if rng.r#gen::<f32>() > self.probability {
             return input.clone();
         }
 
@@ -527,7 +527,7 @@ impl Transform for DropoutTransform {
         let dropped: Vec<f32> = data
             .iter()
             .map(|&x| {
-                if rng.gen::<f32>() < self.probability {
+                if rng.r#gen::<f32>() < self.probability {
                     0.0
                 } else {
                     x * scale

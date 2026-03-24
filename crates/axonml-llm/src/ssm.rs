@@ -336,7 +336,7 @@ impl SelectiveScan {
 
                     for s in 0..d_state {
                         let a_val = a_exp[d * d_state + s]; // exp(a_log) which is negative
-                                                            // Clamp dt*A to prevent extreme values
+                        // Clamp dt*A to prevent extreme values
                         let dt_a = (dt_val * a_val).clamp(-20.0, 0.0);
                         let a_bar = dt_a.exp(); // discretized A: exp(dt * A)
                         let b_val = b_vec[bc_offset + s];

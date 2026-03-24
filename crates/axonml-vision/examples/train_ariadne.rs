@@ -16,7 +16,7 @@ use axonml_autograd::Variable;
 use axonml_core::Device;
 use axonml_optim::{AdamW, Optimizer};
 use axonml_serialize::{
-    load_checkpoint, save_checkpoint, save_model, Checkpoint, StateDict, TrainingState,
+    Checkpoint, StateDict, TrainingState, load_checkpoint, save_checkpoint, save_model,
 };
 use axonml_tensor::Tensor;
 
@@ -231,11 +231,7 @@ fn find_checkpoint(output_dir: &Path, mode: &str) -> Option<PathBuf> {
                     Some(b)
                 } else {
                     let m = output_dir.join("best_model.axonml");
-                    if m.exists() {
-                        Some(m)
-                    } else {
-                        None
-                    }
+                    if m.exists() { Some(m) } else { None }
                 }
             }
         }
@@ -245,20 +241,12 @@ fn find_checkpoint(output_dir: &Path, mode: &str) -> Option<PathBuf> {
                 Some(p)
             } else {
                 let b = output_dir.join("best_model.axonml");
-                if b.exists() {
-                    Some(b)
-                } else {
-                    None
-                }
+                if b.exists() { Some(b) } else { None }
             }
         }
         path => {
             let p = PathBuf::from(path);
-            if p.exists() {
-                Some(p)
-            } else {
-                None
-            }
+            if p.exists() { Some(p) } else { None }
         }
     }
 }

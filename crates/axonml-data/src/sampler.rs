@@ -14,8 +14,8 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use rand::seq::SliceRandom;
 use rand::Rng;
+use rand::seq::SliceRandom;
 
 // =============================================================================
 // Sampler Trait
@@ -199,7 +199,7 @@ impl WeightedRandomSampler {
     fn sample_index(&self) -> usize {
         let total: f64 = self.weights.iter().sum();
         let mut cumulative = 0.0;
-        let threshold: f64 = rand::thread_rng().gen::<f64>() * total;
+        let threshold: f64 = rand::thread_rng().r#gen::<f64>() * total;
 
         for (i, &weight) in self.weights.iter().enumerate() {
             cumulative += weight;
@@ -231,7 +231,7 @@ impl Sampler for WeightedRandomSampler {
                     break;
                 }
 
-                let threshold: f64 = rand::thread_rng().gen::<f64>() * total;
+                let threshold: f64 = rand::thread_rng().r#gen::<f64>() * total;
                 let mut cumulative = 0.0;
                 let mut selected = 0;
 

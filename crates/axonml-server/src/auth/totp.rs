@@ -15,9 +15,9 @@
 //! liable for any damages arising from the use of this software.
 
 use super::AuthError;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use qrcode::render::svg;
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use qrcode::QrCode;
+use qrcode::render::svg;
 use totp_rs::{Algorithm, Secret, TOTP};
 
 /// TOTP authentication handler
@@ -140,9 +140,11 @@ mod tests {
         assert!(!setup.secret.is_empty());
         // Base32 encoded secrets are typically 32 chars
         assert!(setup.secret.len() >= 16);
-        assert!(setup
-            .qr_code_data_url
-            .starts_with("data:image/svg+xml;base64,"));
+        assert!(
+            setup
+                .qr_code_data_url
+                .starts_with("data:image/svg+xml;base64,")
+        );
         assert!(setup.otpauth_url.contains("otpauth://totp/"));
         assert!(setup.otpauth_url.contains("AxonML"));
     }

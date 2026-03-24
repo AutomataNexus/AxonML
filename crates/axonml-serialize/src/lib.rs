@@ -89,10 +89,10 @@ mod state_dict;
 
 pub use checkpoint::{Checkpoint, CheckpointBuilder, TrainingState};
 pub use convert::{
-    convert_from_pytorch, from_onnx_shape, from_pytorch_key, pytorch_layer_mapping, to_onnx_shape,
-    to_pytorch_key, transpose_linear_weights, OnnxOpType,
+    OnnxOpType, convert_from_pytorch, from_onnx_shape, from_pytorch_key, pytorch_layer_mapping,
+    to_onnx_shape, to_pytorch_key, transpose_linear_weights,
 };
-pub use format::{detect_format, detect_format_from_bytes, Format};
+pub use format::{Format, detect_format, detect_format_from_bytes};
 pub use state_dict::{StateDict, StateDictEntry, TensorData};
 
 // =============================================================================

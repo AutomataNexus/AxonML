@@ -313,7 +313,7 @@ fn create_synthetic_weights(model_name: &str, path: &PathBuf) -> Result<(), Stri
 
         // Data
         for _ in 0..64 {
-            let val: f32 = rng.gen::<f32>() * 0.1;
+            let val: f32 = rng.r#gen::<f32>() * 0.1;
             file.write_all(&val.to_le_bytes())
                 .map_err(|e| e.to_string())?;
         }

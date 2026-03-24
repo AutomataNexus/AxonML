@@ -15,7 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 use axonml::autograd::Variable;
-use axonml::nn::{Dropout, LayerNorm, Linear, Module, Parameter, ReLU, Softmax, GRU};
+use axonml::nn::{Dropout, GRU, LayerNorm, Linear, Module, Parameter, ReLU, Softmax};
 use axonml::tensor::Tensor;
 
 // =============================================================================
@@ -400,7 +400,7 @@ fn main() {
             // Temperatures (normalized)
             input_data[base + 6] = 0.83; // HW supply ~180F
             input_data[base + 7] = 0.375; // CW supply ~55F
-                                          // VFD speeds ~60%
+            // VFD speeds ~60%
             for i in 16..22 {
                 input_data[base + i] = 0.6;
             }

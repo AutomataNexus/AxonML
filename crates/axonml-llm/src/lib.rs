@@ -38,8 +38,8 @@ pub mod transformer;
 pub mod trident;
 
 pub use attention::{
-    scaled_dot_product_attention, CausalSelfAttention, FlashAttention, FlashAttentionConfig,
-    KVCache, LayerKVCache, MultiHeadSelfAttention,
+    CausalSelfAttention, FlashAttention, FlashAttentionConfig, KVCache, LayerKVCache,
+    MultiHeadSelfAttention, scaled_dot_product_attention,
 };
 pub use bert::{Bert, BertForMaskedLM, BertForSequenceClassification};
 pub use chimera::{ChimeraConfig, ChimeraModel};
@@ -47,9 +47,9 @@ pub use config::{BertConfig, GPT2Config, TransformerConfig};
 pub use embedding::{BertEmbedding, GPT2Embedding, PositionalEmbedding, TokenEmbedding};
 pub use error::{LLMError, LLMResult};
 pub use generation::{GenerationConfig, TextGenerator};
-pub use gpt2::{GPT2LMHead, GPT2};
-pub use hf_loader::{load_llama_from_hf, load_mistral_from_hf, HFLoader};
-pub use hub::{download_weights as download_llm_weights, llm_registry, PretrainedLLM};
+pub use gpt2::{GPT2, GPT2LMHead};
+pub use hf_loader::{HFLoader, load_llama_from_hf, load_mistral_from_hf};
+pub use hub::{PretrainedLLM, download_weights as download_llm_weights, llm_registry};
 pub use hydra::{HydraConfig, HydraModel};
 pub use llama::{LLaMA, LLaMAConfig, LLaMAForCausalLM};
 pub use mistral::{Mistral, MistralConfig, MistralForCausalLM};

@@ -284,7 +284,9 @@ impl<T: Scalar> Storage<T> {
             StorageData::Cpu(cpu_data) => cpu_data[self.offset..self.offset + self.len].to_vec(),
             #[cfg(feature = "cuda")]
             StorageData::Cuda(_) => {
-                panic!("Cannot call to_vec() on GPU storage for generic T. Use to_vec_f32() on Storage<f32>.");
+                panic!(
+                    "Cannot call to_vec() on GPU storage for generic T. Use to_vec_f32() on Storage<f32>."
+                );
             }
         }
     }
@@ -364,7 +366,10 @@ impl Storage<f32> {
                     // but handle gracefully: copy what we have, zero-pad the rest
                     eprintln!(
                         "[storage] WARNING: CudaSlice len={} < Storage offset+len={} (offset={}, len={})",
-                        full_vec.len(), end, self.offset, self.len
+                        full_vec.len(),
+                        end,
+                        self.offset,
+                        self.len
                     );
                     let available = if self.offset < full_vec.len() {
                         full_vec.len() - self.offset

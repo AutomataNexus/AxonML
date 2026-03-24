@@ -21,7 +21,7 @@ pub mod renderer;
 
 pub use implicit::{FourierFeatures, GlobalSDF, LocalSDF};
 pub use mesh::{MarchingCubes, Mesh, Triangle, Vertex};
-pub use octree::{AdaptiveOctree, OctreeNode, AABB};
+pub use octree::{AABB, AdaptiveOctree, OctreeNode};
 pub use renderer::{Camera, DifferentiableRenderer, RayHit, RenderOutput, SphereTracingConfig};
 
 use axonml_nn::Parameter;
@@ -306,11 +306,7 @@ fn compute_depth_loss(rendered: &[f32], observed: &[f32], mask: &[f32]) -> f32 {
         }
     }
 
-    if count > 0.0 {
-        loss / count
-    } else {
-        0.0
-    }
+    if count > 0.0 { loss / count } else { 0.0 }
 }
 
 // =============================================================================

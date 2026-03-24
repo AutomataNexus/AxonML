@@ -18,13 +18,13 @@ use axonml_autograd::Variable;
 use axonml_nn::Parameter;
 use axonml_tensor::Tensor;
 
+use super::NexusConfig;
 use super::backbone::{DorsalPathway, SharedStem, VentralPathway};
 use super::fusion::MultiScaleFusion;
 use super::heads::{ClassHead, ProposalHead, UncertaintyBBoxHead};
 use super::memory::ObjectMemoryBank;
 use super::predictive::MultiScalePredictiveCoding;
-use super::NexusConfig;
-use crate::ops::{nms, NexusDetection};
+use crate::ops::{NexusDetection, nms};
 
 // =============================================================================
 // Nexus Detector

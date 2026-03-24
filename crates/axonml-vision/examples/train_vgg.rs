@@ -15,7 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 use axonml::monitor::TrainingMonitor;
-use axonml_autograd::{no_grad, Variable};
+use axonml_autograd::{Variable, no_grad};
 use axonml_core::Device;
 use axonml_data::DataLoader;
 use axonml_nn::{CrossEntropyLoss, Module, Parameter};

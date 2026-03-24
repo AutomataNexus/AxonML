@@ -53,7 +53,9 @@ impl DefaultAllocator {
     /// # Safety
     /// The pointer must have been allocated by this allocator.
     pub unsafe fn deallocate<T: Scalar>(&self, ptr: *mut T, count: usize) {
-        drop(Vec::from_raw_parts(ptr, 0, count));
+        unsafe {
+            drop(Vec::from_raw_parts(ptr, 0, count));
+        }
     }
 
     /// Copies memory from one location to another.
@@ -61,7 +63,9 @@ impl DefaultAllocator {
     /// # Safety
     /// Both pointers must be valid for `count` elements.
     pub unsafe fn copy<T: Scalar>(&self, dst: *mut T, src: *const T, count: usize) {
-        core::ptr::copy_nonoverlapping(src, dst, count);
+        unsafe {
+            core::ptr::copy_nonoverlapping(src, dst, count);
+        }
     }
 
     /// Fills memory with zeros.
@@ -69,7 +73,9 @@ impl DefaultAllocator {
     /// # Safety
     /// The pointer must be valid for `count` elements.
     pub unsafe fn zero<T: Scalar>(&self, ptr: *mut T, count: usize) {
-        core::ptr::write_bytes(ptr, 0, count);
+        unsafe {
+            core::ptr::write_bytes(ptr, 0, count);
+        }
     }
 
     /// Returns the total memory available on the device.

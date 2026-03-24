@@ -19,12 +19,12 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+use crate::SUPPORTED_OPSET_VERSION;
 use crate::error::{OnnxError, OnnxResult};
 use crate::proto::{
     AttributeProto, Dimension, GraphProto, ModelProto, NodeProto, OperatorSetIdProto,
     TensorDataType, TensorProto, TensorShape, TensorType, TypeProto, ValueInfo,
 };
-use crate::SUPPORTED_OPSET_VERSION;
 use axonml_tensor::Tensor;
 
 // =============================================================================

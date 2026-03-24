@@ -9,7 +9,7 @@ use axonml_autograd::Variable;
 use axonml_nn::Parameter;
 
 use super::backbone::ConvBNSiLU;
-use crate::ops::{interpolate_var, InterpolateMode};
+use crate::ops::{InterpolateMode, interpolate_var};
 
 // =============================================================================
 // ThermalFPN — Feature Pyramid Network for IR

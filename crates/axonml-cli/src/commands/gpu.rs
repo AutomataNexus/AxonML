@@ -618,7 +618,9 @@ fn execute_memory() -> CliResult<()> {
     print_kv("Total GPU Memory", &format_size(total_memory));
 
     // Note about memory reporting
-    print_info("Note: wgpu reports total device memory. For real-time usage, use nvidia-smi or similar tools.");
+    print_info(
+        "Note: wgpu reports total device memory. For real-time usage, use nvidia-smi or similar tools.",
+    );
 
     Ok(())
 }

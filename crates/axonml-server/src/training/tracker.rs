@@ -14,12 +14,12 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use crate::db::runs::{RunRepository, RunStatus, TrainingMetrics};
 use crate::db::Database;
+use crate::db::runs::{RunRepository, RunStatus, TrainingMetrics};
 use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 
 /// Training run tracker
 pub struct TrainingTracker {

@@ -14,14 +14,14 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use super::{jwt::JwtAuth, AuthError, Claims};
+use super::{AuthError, Claims, jwt::JwtAuth};
 use axum::{
+    Json,
     body::Body,
     extract::{FromRequestParts, State},
-    http::{header::AUTHORIZATION, request::Parts, Request, StatusCode},
+    http::{Request, StatusCode, header::AUTHORIZATION, request::Parts},
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

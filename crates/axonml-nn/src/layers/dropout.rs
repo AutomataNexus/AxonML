@@ -126,7 +126,7 @@ impl Module for Dropout {
         // Build mask on CPU: 0.0 for dropped, scale for kept
         let mask: Vec<f32> = (0..numel)
             .map(|_| {
-                if rng.gen::<f32>() < self.p {
+                if rng.r#gen::<f32>() < self.p {
                     0.0
                 } else {
                     scale
@@ -228,7 +228,7 @@ impl Module for Dropout2d {
 
         for b in 0..batch_size {
             for c in 0..channels {
-                let keep = rng.gen::<f32>() >= self.p;
+                let keep = rng.r#gen::<f32>() >= self.p;
                 let start = b * channels * spatial_size + c * spatial_size;
                 if keep {
                     for i in 0..spatial_size {
@@ -321,7 +321,7 @@ impl Module for AlphaDropout {
         // Build mask on CPU: 'a' where kept, 0.0 where dropped
         let dropped_val = a * alpha_p + b;
         let mask_raw: Vec<f32> = (0..numel)
-            .map(|_| if rng.gen::<f32>() < self.p { 0.0 } else { a })
+            .map(|_| if rng.r#gen::<f32>() < self.p { 0.0 } else { a })
             .collect();
 
         // Build bias tensor: dropped_val where dropped, b where kept

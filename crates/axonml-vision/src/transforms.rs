@@ -289,7 +289,7 @@ impl Default for RandomHorizontalFlip {
 impl Transform for RandomHorizontalFlip {
     fn apply(&self, input: &Tensor<f32>) -> Tensor<f32> {
         let mut rng = rand::thread_rng();
-        if rng.gen::<f32>() > self.probability {
+        if rng.r#gen::<f32>() > self.probability {
             return input.clone();
         }
 
@@ -358,7 +358,7 @@ impl Default for RandomVerticalFlip {
 impl Transform for RandomVerticalFlip {
     fn apply(&self, input: &Tensor<f32>) -> Tensor<f32> {
         let mut rng = rand::thread_rng();
-        if rng.gen::<f32>() > self.probability {
+        if rng.r#gen::<f32>() > self.probability {
             return input.clone();
         }
 

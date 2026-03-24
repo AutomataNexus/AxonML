@@ -243,7 +243,7 @@ impl TextGenerator {
 
         // Sample
         let mut cumsum = 0.0f32;
-        let sample: f32 = rng.gen();
+        let sample: f32 = rng.r#gen();
 
         for (i, &p) in probs.iter().enumerate() {
             cumsum += p;

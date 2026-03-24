@@ -19,8 +19,8 @@
 use axonml_autograd::Variable;
 use axonml_nn::Parameter;
 
-use super::backbone::{C2f, CBS};
 use super::HeliosConfig;
+use super::backbone::{C2f, CBS};
 use crate::ops::InterpolateMode;
 
 // =============================================================================

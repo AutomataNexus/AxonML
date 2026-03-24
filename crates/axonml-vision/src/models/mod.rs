@@ -34,13 +34,13 @@ pub mod vgg;
 pub mod vqa;
 
 // Classification
-pub use lenet::{LeNet, SimpleCNN, MLP};
-pub use resnet::{resnet18, resnet34, BasicBlock, Bottleneck, ResNet};
+pub use lenet::{LeNet, MLP, SimpleCNN};
+pub use resnet::{BasicBlock, Bottleneck, ResNet, resnet18, resnet34};
 pub use transformer::{
-    vit_base, vit_large, PositionalEncoding, Transformer, TransformerDecoder,
-    TransformerDecoderLayer, TransformerEncoder, TransformerEncoderLayer, VisionTransformer,
+    PositionalEncoding, Transformer, TransformerDecoder, TransformerDecoderLayer,
+    TransformerEncoder, TransformerEncoderLayer, VisionTransformer, vit_base, vit_large,
 };
-pub use vgg::{vgg11, vgg13, vgg16, vgg19, VggClassifier, VggFeatures, VGG};
+pub use vgg::{VGG, VggClassifier, VggFeatures, vgg11, vgg13, vgg16, vgg19};
 
 // Infrastructure
 pub use fpn::FPN;
@@ -56,7 +56,7 @@ pub use retinaface::RetinaFace;
 pub use anomaly::{PatchCore, StudentTeacher};
 
 // Depth Estimation
-pub use depth::{FastDepth, DPT};
+pub use depth::{DPT, FastDepth};
 
 // Visual Question Answering
 pub use vqa::VQAModel;

@@ -134,7 +134,7 @@ impl TridentConfig {
         // 2 bits per weight, packed 4 per byte, + scale factors
         let packed_bytes = total_ternary_weights.div_ceil(4);
         let scale_bytes = self.num_layers * 6 * 4; // 6 TernaryLinear layers per block, 4 bytes per scale
-                                                   // Add fp32 embeddings + lm_head + norms
+        // Add fp32 embeddings + lm_head + norms
         let fp32_bytes = (self.vocab_size * self.d_model
             + self.d_model * self.vocab_size
             + self.num_layers * 2 * self.d_model)
@@ -609,11 +609,7 @@ impl TridentModel {
             .iter()
             .map(|&l| {
                 let label = l as usize;
-                if label < vocab_size {
-                    l as f32
-                } else {
-                    0.0f32
-                }
+                if label < vocab_size { l as f32 } else { 0.0f32 }
             })
             .collect();
         let target_var = Variable::new(
