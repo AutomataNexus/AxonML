@@ -92,8 +92,8 @@ checkpoints/
 # Dataset archives
 *.zip
 
-# Internal training scripts and benchmarks
-train_*.rs
+# Internal training scripts (root-level only, not examples/)
+/train_*.rs
 release-artifacts/coa/
 
 # Jupyter notebooks checkpoints

@@ -42,6 +42,7 @@ pub use attention::{
     KVCache, LayerKVCache, MultiHeadSelfAttention,
 };
 pub use bert::{Bert, BertForMaskedLM, BertForSequenceClassification};
+pub use chimera::{ChimeraConfig, ChimeraModel};
 pub use config::{BertConfig, GPT2Config, TransformerConfig};
 pub use embedding::{BertEmbedding, GPT2Embedding, PositionalEmbedding, TokenEmbedding};
 pub use error::{LLMError, LLMResult};
@@ -49,16 +50,15 @@ pub use generation::{GenerationConfig, TextGenerator};
 pub use gpt2::{GPT2LMHead, GPT2};
 pub use hf_loader::{load_llama_from_hf, load_mistral_from_hf, HFLoader};
 pub use hub::{download_weights as download_llm_weights, llm_registry, PretrainedLLM};
+pub use hydra::{HydraConfig, HydraModel};
 pub use llama::{LLaMA, LLaMAConfig, LLaMAForCausalLM};
 pub use mistral::{Mistral, MistralConfig, MistralForCausalLM};
 pub use phi::{Phi, PhiConfig, PhiForCausalLM};
+pub use ssm::{SSMBlock, SSMConfig};
 pub use state_dict::{LoadResult, LoadStateDict};
 pub use tokenizer::{HFTokenizer, SpecialTokens};
-pub use chimera::{ChimeraConfig, ChimeraModel};
-pub use hydra::{HydraConfig, HydraModel};
-pub use ssm::{SSMBlock, SSMConfig};
-pub use trident::{TridentConfig, TridentModel};
 pub use transformer::{TransformerBlock, TransformerDecoder, TransformerEncoder};
+pub use trident::{TridentConfig, TridentModel};
 
 // =============================================================================
 // Tests

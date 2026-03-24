@@ -25,6 +25,7 @@ pub mod helios;
 pub mod lenet;
 pub mod nanodet;
 pub mod nexus;
+pub mod nightvision;
 pub mod phantom;
 pub mod resnet;
 pub mod retinaface;
@@ -65,6 +66,7 @@ pub use aegis3d::Aegis3D;
 
 // Novel Detection Architectures
 pub use nexus::Nexus;
+pub use nightvision::{NightVision, NightVisionConfig, ThermalDomain};
 pub use phantom::Phantom;
 
 // Biometric Identity (Aegis Identity)
