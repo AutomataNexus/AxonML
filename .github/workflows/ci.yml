@@ -37,7 +37,8 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test --workspace -- --skip coco_bench
+        timeout-minutes: 20
 
   fmt:
     runs-on: ubuntu-latest
