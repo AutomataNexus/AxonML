@@ -49,6 +49,12 @@ pub struct Vulcan {
     training: bool,
 }
 
+impl Default for Vulcan {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Vulcan {
     /// Creates a new Vulcan model.
     pub fn new() -> Self {

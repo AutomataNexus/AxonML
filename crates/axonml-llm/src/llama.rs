@@ -144,6 +144,7 @@ pub struct RMSNorm {
     /// Epsilon for numerical stability
     eps: f32,
     /// Hidden size
+    #[allow(dead_code)]
     hidden_size: usize,
 }
 
@@ -171,7 +172,7 @@ impl RMSNorm {
         let mut rms_vals = vec![0.0f32; batch_elements];
         let weight_vec = self.weight.to_vec();
 
-        for b in 0..batch_elements {
+        for (b, rms_val) in rms_vals.iter_mut().enumerate() {
             let offset = b * last_dim;
 
             // Compute mean of squares
@@ -180,7 +181,7 @@ impl RMSNorm {
                 sum_sq += x_vec[offset + i] * x_vec[offset + i];
             }
             let rms = (sum_sq / last_dim as f32 + self.eps).sqrt();
-            rms_vals[b] = rms;
+            *rms_val = rms;
 
             // Normalize and scale
             for i in 0..last_dim {
@@ -290,8 +291,10 @@ pub struct RotaryEmbedding {
     /// Dimension of the embedding
     dim: usize,
     /// Maximum sequence length
+    #[allow(dead_code)]
     max_seq_len: usize,
     /// Base theta
+    #[allow(dead_code)]
     theta: f32,
     /// Precomputed cosine values
     cos_cached: Tensor<f32>,
@@ -305,8 +308,8 @@ impl RotaryEmbedding {
         // Compute inverse frequencies
         let half_dim = dim / 2;
         let mut inv_freq = vec![0.0f32; half_dim];
-        for i in 0..half_dim {
-            inv_freq[i] = 1.0 / theta.powf(2.0 * i as f32 / dim as f32);
+        for (i, freq) in inv_freq.iter_mut().enumerate() {
+            *freq = 1.0 / theta.powf(2.0 * i as f32 / dim as f32);
         }
 
         // Precompute cos and sin for all positions

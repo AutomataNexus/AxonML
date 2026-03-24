@@ -105,7 +105,7 @@ impl MemoryProfiler {
 
         self.allocations
             .entry(name.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(record);
 
         self.current_usage += bytes;

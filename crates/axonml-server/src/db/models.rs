@@ -78,18 +78,15 @@ pub struct NewModelVersion {
 /// Inference endpoint status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum EndpointStatus {
     Starting,
     Running,
+    #[default]
     Stopped,
     Error,
 }
 
-impl Default for EndpointStatus {
-    fn default() -> Self {
-        EndpointStatus::Stopped
-    }
-}
 
 /// Inference endpoint data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]

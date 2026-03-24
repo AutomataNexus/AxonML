@@ -243,7 +243,7 @@ impl CompiledFunction {
 
             Op::Gelu { input } => {
                 let a = get(*input)?;
-                const SQRT_2_OVER_PI: f32 = 0.7978845608;
+                const SQRT_2_OVER_PI: f32 = 0.797_884_6;
                 Ok(a.iter()
                     .map(|x| 0.5 * x * (1.0 + (SQRT_2_OVER_PI * (x + 0.044715 * x.powi(3))).tanh()))
                     .collect())
@@ -415,13 +415,13 @@ fn reduce_axis(
     let mut result = vec![init; output_numel];
 
     // Reduce
-    for i in 0..data.len() {
+    for (i, &val) in data.iter().enumerate() {
         // Convert linear index to multi-index
         let mut multi_idx = vec![0usize; shape.len()];
         let mut idx = i;
-        for d in 0..shape.len() {
-            multi_idx[d] = idx / strides[d];
-            idx %= strides[d];
+        for (d, &st) in strides.iter().enumerate() {
+            multi_idx[d] = idx / st;
+            idx %= st;
         }
 
         // Compute output index
@@ -445,12 +445,12 @@ fn reduce_axis(
                 }
             }
             let mut out_d = 0;
-            for d in 0..shape.len() {
+            for (d, &mi) in multi_idx.iter().enumerate().take(shape.len()) {
                 if d == axis {
                     continue;
                 }
                 if out_d < temp_strides.len() {
-                    out_idx += multi_idx[d] * temp_strides[out_d];
+                    out_idx += mi * temp_strides[out_d];
                 }
                 out_d += 1;
             }
@@ -458,7 +458,7 @@ fn reduce_axis(
         };
 
         if out_idx < result.len() {
-            result[out_idx] = op(result[out_idx], data[i]);
+            result[out_idx] = op(result[out_idx], val);
         }
     }
 
@@ -643,7 +643,7 @@ impl JitCompiler {
         Ok(CompiledFunction {
             graph: Arc::new(graph.clone()),
             kind: CompiledKind::Native {
-                code_ptr: code_ptr as *const u8,
+                code_ptr,
                 code_size,
             },
         })

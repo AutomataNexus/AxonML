@@ -291,7 +291,7 @@ pub async fn start_endpoint(
         .model_pool
         .add(&id, &model.id, &version.id, endpoint.replicas)
         .await
-        .map_err(|e| AuthError::Internal(e))?;
+        .map_err(AuthError::Internal)?;
 
     // Initialize metrics tracking for this endpoint
     state.inference_metrics.init(&id).await;
@@ -429,7 +429,7 @@ pub async fn predict(
         .model_pool
         .acquire(&endpoint.id)
         .await
-        .map_err(|e| AuthError::Internal(e))?;
+        .map_err(AuthError::Internal)?;
 
     // Start timing the request using InferenceMetrics timer
     let timer = state.inference_metrics.time_request(endpoint.id.clone());

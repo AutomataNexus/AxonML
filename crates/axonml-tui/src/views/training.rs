@@ -288,30 +288,30 @@ impl TrainingView {
             // Try to parse as JSON
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
                 // Extract epoch info
-                if let Some(epoch) = json.get("epoch").and_then(|v| v.as_u64()) {
+                if let Some(epoch) = json.get("epoch").and_then(serde_json::Value::as_u64) {
                     let train_loss = json
                         .get("train_loss")
-                        .and_then(|v| v.as_f64())
+                        .and_then(serde_json::Value::as_f64)
                         .unwrap_or(0.0) as f32;
                     let val_loss = json
                         .get("val_loss")
-                        .and_then(|v| v.as_f64())
+                        .and_then(serde_json::Value::as_f64)
                         .map(|v| v as f32);
                     let train_acc = json
                         .get("train_acc")
-                        .and_then(|v| v.as_f64())
+                        .and_then(serde_json::Value::as_f64)
                         .map(|v| v as f32);
                     let val_acc = json
                         .get("val_acc")
-                        .and_then(|v| v.as_f64())
+                        .and_then(serde_json::Value::as_f64)
                         .map(|v| v as f32);
                     let learning_rate = json
                         .get("learning_rate")
-                        .and_then(|v| v.as_f64())
+                        .and_then(serde_json::Value::as_f64)
                         .unwrap_or(0.001);
                     let duration = json
                         .get("duration_secs")
-                        .and_then(|v| v.as_f64())
+                        .and_then(serde_json::Value::as_f64)
                         .unwrap_or(0.0) as f32;
 
                     metrics_history.push(EpochMetrics {
@@ -326,10 +326,10 @@ impl TrainingView {
                 }
 
                 // Extract config info
-                if let Some(total) = json.get("total_epochs").and_then(|v| v.as_u64()) {
+                if let Some(total) = json.get("total_epochs").and_then(serde_json::Value::as_u64) {
                     config.total_epochs = total as usize;
                 }
-                if let Some(bs) = json.get("batch_size").and_then(|v| v.as_u64()) {
+                if let Some(bs) = json.get("batch_size").and_then(serde_json::Value::as_u64) {
                     config.batch_size = bs as usize;
                 }
                 if let Some(opt) = json.get("optimizer").and_then(|v| v.as_str()) {
@@ -365,7 +365,7 @@ impl TrainingView {
         let avg_epoch_time = total_duration / metrics_history.len() as f32;
         let total_epochs = config.total_epochs;
         let remaining_epochs = total_epochs.saturating_sub(current_epoch);
-        let eta = (remaining_epochs as f32 * avg_epoch_time) as f64;
+        let eta = f64::from(remaining_epochs as f32 * avg_epoch_time);
 
         Ok(TrainingSession {
             config,
@@ -381,7 +381,7 @@ impl TrainingView {
             loss_history,
             best_val_loss: Some(best_val_loss),
             best_epoch: Some(best_epoch),
-            elapsed_secs: total_duration as f64,
+            elapsed_secs: f64::from(total_duration),
             eta_secs: if eta > 0.0 { Some(eta) } else { None },
         })
     }

@@ -311,11 +311,11 @@ impl TrainingMonitor {
         let dead_threshold = self.config.dead_neuron_threshold;
         let mut new_dead_alerts: Vec<(String, usize)> = Vec::new();
         for (name, norm) in grad_norms {
-            let count = self.zero_grad_counts.entry(name.to_string()).or_insert(0);
+            let count = self.zero_grad_counts.entry((*name).to_string()).or_insert(0);
             if *norm == 0.0 {
                 *count += 1;
                 if *count == dead_threshold {
-                    new_dead_alerts.push((name.to_string(), *count));
+                    new_dead_alerts.push(((*name).to_string(), *count));
                 }
             } else {
                 *count = 0;

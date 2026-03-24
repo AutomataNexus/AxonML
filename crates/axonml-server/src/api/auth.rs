@@ -211,10 +211,11 @@ pub async fn register(
     let password_hash = hash_password(&req.password)?;
 
     // Check if email already exists
-    if let Some(_) = repo
+    if repo
         .find_by_email(&req.email)
         .await
         .map_err(|e| AuthError::Internal(e.to_string()))?
+        .is_some()
     {
         return Err(AuthError::Forbidden(
             "Email address is already registered".to_string(),
@@ -913,7 +914,7 @@ pub async fn verify_email(
 ) -> Result<axum::response::Redirect, AuthError> {
     // Extract client IP for admin notification
     let client_ip = extract_client_ip(&headers, conn_info.as_ref().map(|c| &c.0));
-    let token = params.get("token").ok_or_else(|| AuthError::InvalidToken)?;
+    let token = params.get("token").ok_or(AuthError::InvalidToken)?;
 
     let repo = UserRepository::new(&state.db);
 

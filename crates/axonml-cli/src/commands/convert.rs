@@ -291,7 +291,7 @@ fn convert_axonml_to_onnx(input: &PathBuf, output: &str, _optimize: bool) -> Res
         // Add weights as initializers
         let tensor = axonml_tensor::Tensor::from_vec(entry.data.values.clone(), &shape)
             .map_err(|e| format!("Failed to create tensor: {:?}", e))?;
-        exporter.add_initializer(&name, &tensor);
+        exporter.add_initializer(name, &tensor);
     }
 
     // Set default sizes if not found

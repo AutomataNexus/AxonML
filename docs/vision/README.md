@@ -438,6 +438,96 @@ for epoch in 0..50 {
 
 See the [Object Detection Training Guide](../detection.md) for Nexus + COCO examples, loss details, target assignment, and mAP evaluation.
 
+### models/nightvision/
+
+Multi-domain infrared object detection for thermal imagery (~200K-500K params depending on config):
+
+```rust
+use axonml_vision::models::nightvision::{NightVision, NightVisionConfig, ThermalDomain};
+
+// Wildlife detection — single-channel thermal, animal species classes
+let model = NightVision::new(NightVisionConfig::wildlife(20));
+
+// Human detection — search & rescue, perimeter security
+let model = NightVision::new(NightVisionConfig::human());
+
+// Interstellar — multi-band IR, astronomical thermal sources
+let model = NightVision::new(NightVisionConfig::interstellar(3, 3));
+
+// Vehicle detection — engine heat, tire friction
+let model = NightVision::new(NightVisionConfig::multi_domain(50));
+
+// Edge deployment — compact model
+let model = NightVision::new(NightVisionConfig::edge(10));
+
+// Forward pass — returns per-scale (cls, bbox, obj, domain) tuples
+let outputs = model.forward_detection(&ir_image);
+
+// Flattened forward — concatenates across FPN scales
+let (cls, bbox, obj) = model.forward_flat(&ir_image);
+```
+
+Key innovations:
+- **Thermal-adaptive stem** — handles single-channel (1-ch) or multi-band (3-ch) IR input
+- **CSP backbone** — Cross-Stage Partial blocks for efficient thermal feature extraction
+- **Thermal FPN** — Feature Pyramid Network with top-down + lateral connections (P3/P4/P5)
+- **Decoupled heads** — YOLOX-style separate classification, bbox, and objectness branches
+- **Domain tagging** — optional domain classification head (wildlife/human/interstellar/vehicle/general)
+
+Five thermal domains: `Wildlife`, `Human`, `Interstellar`, `Vehicle`, `General`.
+
+---
+
+## Biometric Training Pipelines
+
+The Aegis Biometric Suite includes GPU-accelerated training pipelines with checkpoint/resume support for all models.
+
+### Mnemosyne — Face Verification on LFW
+
+Train the temporal crystallization face model on Labeled Faces in the Wild:
+
+```bash
+# Training
+cargo run --example train_mnemosyne --release -p axonml-vision -- \
+  --data-dir /opt/datasets/lfw/processed \
+  --epochs 100 --lr 0.001 --batch-size 8
+
+# Benchmarking (verification pairs, ROC-AUC, EER)
+cargo run --example bench_mnemosyne --release -p axonml-vision -- \
+  --model /opt/AxonML/checkpoints/mnemosyne/best_model.axonml \
+  --pairs 3000 --seq-len 5
+```
+
+The `bench_mnemosyne` example evaluates face verification accuracy on same-identity vs different-identity pairs. Reports: accuracy at multiple thresholds, ROC-AUC, EER, FAR/FRR, and F1.
+
+### Argus — Iris Recognition on CASIA
+
+Train the polar-native radial/angular iris model on CASIA-Iris:
+
+```bash
+cargo run --example train_argus --release -p axonml-vision -- \
+  --data-dir /opt/datasets/casia-iris/processed \
+  --epochs 80 --lr 0.0005
+```
+
+### Ariadne — Fingerprint Verification on FVC2000
+
+Train the ridge event field fingerprint model on FVC2000:
+
+```bash
+cargo run --example train_ariadne --release -p axonml-vision -- \
+  --data-dir /opt/datasets/fvc2000/processed \
+  --epochs 60 --lr 0.001
+```
+
+All biometric training pipelines support:
+- **GPU acceleration** — automatic device placement (CPU/CUDA)
+- **Checkpoint/resume** — saves best model + periodic checkpoints
+- **Training monitor** — live loss/accuracy tracking
+- **State dict serialization** — load/save via `axonml-serialize`
+
+---
+
 ## Feature Flags
 
 - `image` - Enable image I/O using the `image` crate

@@ -130,7 +130,7 @@ impl ComputeProfiler {
 
         self.active
             .entry(name.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(op);
     }
 
@@ -145,7 +145,7 @@ impl ComputeProfiler {
 
         self.active
             .entry(name.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(op);
     }
 
@@ -160,7 +160,7 @@ impl ComputeProfiler {
 
         self.active
             .entry(name.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(op);
     }
 

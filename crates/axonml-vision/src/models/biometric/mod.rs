@@ -226,7 +226,7 @@ impl BiometricEvidence {
 
     /// Whether this evidence has temporal face data.
     pub fn has_face_sequence(&self) -> bool {
-        self.face_sequence.as_ref().map_or(false, |s| s.len() > 1)
+        self.face_sequence.as_ref().is_some_and(|s| s.len() > 1)
     }
 }
 

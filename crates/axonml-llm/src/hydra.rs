@@ -148,6 +148,7 @@ pub struct WindowedAttention {
     /// Window size for local attention
     window_size: usize,
     /// Attention dropout
+    #[allow(dead_code)]
     attn_dropout: Dropout,
 }
 
@@ -307,12 +308,19 @@ impl WindowedAttention {
 #[derive(Debug)]
 struct WindowedAttnBackward {
     next_fns: Vec<Option<GradFn>>,
+    #[allow(dead_code)]
     saved_q: Tensor<f32>,
+    #[allow(dead_code)]
     saved_k: Tensor<f32>,
+    #[allow(dead_code)]
     saved_v: Tensor<f32>,
+    #[allow(dead_code)]
     num_heads: usize,
+    #[allow(dead_code)]
     head_dim: usize,
+    #[allow(dead_code)]
     window_size: usize,
+    #[allow(dead_code)]
     scale: f32,
 }
 
@@ -320,16 +328,6 @@ impl GradientFunction for WindowedAttnBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         // grad_output: [batch, num_heads, seq_len, head_dim]
         let shape = grad_output.shape();
-        let batch_size = shape[0];
-        let num_heads = shape[1];
-        let seq_len = shape[2];
-        let head_dim = shape[3];
-        let w = self.window_size;
-
-        let g_vec = grad_output.to_vec();
-        let _q_vec = self.saved_q.to_vec();
-        let _k_vec = self.saved_k.to_vec();
-        let _v_vec = self.saved_v.to_vec();
 
         // We need grad w.r.t. the pre-projection input x
         // For simplicity, pass gradients through as identity-like (the projection
@@ -342,13 +340,8 @@ impl GradientFunction for WindowedAttnBackward {
         // which connects to x before q/k/v projections.
         // Since attention is: softmax(QK^T/sqrt(d)) * V, the gradient is complex.
         // We use a pass-through approximation scaled by attention density.
-        let total = batch_size * num_heads * seq_len * head_dim;
-        let mut grad_input = vec![0.0f32; total];
-
         // Simple pass-through: each position gets its gradient back
-        for i in 0..total {
-            grad_input[i] = g_vec[i];
-        }
+        let grad_input = grad_output.to_vec();
 
         let gi = Tensor::from_vec(grad_input, shape).unwrap();
         vec![Some(gi)]
@@ -418,6 +411,7 @@ impl HydraMLP {
 ///
 /// Both variants include pre-norm (RMSNorm) + residual connection + MLP.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum HydraBlock {
     /// SSM (Mamba-style) block
     SSM {
@@ -451,7 +445,7 @@ impl HydraBlock {
             d_state: config.d_state,
             d_inner: config.d_inner(),
             d_conv: config.d_conv,
-            dt_rank: (config.d_model + 15) / 16,
+            dt_rank: config.d_model.div_ceil(16),
         };
         HydraBlock::SSM {
             norm: RMSNorm::new(config.d_model, config.rms_norm_eps),
@@ -632,7 +626,7 @@ impl HydraModel {
         let shape = logits_data.shape().to_vec();
         let batch_size = shape[0];
         let seq_len = shape[1];
-        let vocab_size = shape[2];
+        let _vocab_size = shape[2];
         drop(logits_data);
 
         if seq_len > 1 {

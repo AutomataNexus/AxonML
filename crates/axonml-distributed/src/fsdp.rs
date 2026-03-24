@@ -26,8 +26,10 @@ use axonml_tensor::Tensor;
 
 /// Strategy for sharding parameters in FSDP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ShardingStrategy {
     /// Shard parameters, gradients, and optimizer state (ZeRO-3)
+    #[default]
     FullShard,
     /// Shard gradients and optimizer state only (ZeRO-2)
     ShardGradOp,
@@ -37,11 +39,6 @@ pub enum ShardingStrategy {
     HybridShard,
 }
 
-impl Default for ShardingStrategy {
-    fn default() -> Self {
-        Self::FullShard
-    }
-}
 
 // =============================================================================
 // FSDP State
@@ -63,8 +60,10 @@ struct ShardedParam {
 
 /// CPU offload configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum CPUOffload {
     /// No CPU offloading
+    #[default]
     None,
     /// Offload parameters to CPU when not in use
     Params,
@@ -72,11 +71,6 @@ pub enum CPUOffload {
     Full,
 }
 
-impl Default for CPUOffload {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 // =============================================================================
 // Fully Sharded Data Parallel
@@ -177,7 +171,7 @@ impl<M: Module> FullyShardedDataParallel<M> {
             let numel = data.numel();
 
             // Calculate shard size with padding for even division
-            let shard_size = (numel + world_size - 1) / world_size;
+            let shard_size = numel.div_ceil(world_size);
             let padding = shard_size * world_size - numel;
 
             // Get local shard

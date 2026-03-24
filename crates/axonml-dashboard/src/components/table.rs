@@ -158,7 +158,7 @@ pub fn DataTable<T: Clone + 'static>(
                             let row_clone = row.clone();
                             let row_for_click = row.clone();
                             let clickable = on_row_click.is_some();
-                            let on_click = on_row_click.clone();
+                            let on_click = on_row_click;
 
                             view! {
                                 <tr

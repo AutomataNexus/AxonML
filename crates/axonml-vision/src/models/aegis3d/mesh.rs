@@ -97,6 +97,12 @@ pub struct Mesh {
     pub normals: Vec<Vertex>,
 }
 
+impl Default for Mesh {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Mesh {
     pub fn new() -> Self {
         Self {
@@ -166,7 +172,9 @@ impl Mesh {
         s.push('\n');
         for tri in &self.triangles {
             // OBJ uses 1-based indexing
-            if !self.normals.is_empty() {
+            if self.normals.is_empty() {
+                s.push_str(&format!("f {} {} {}\n", tri.v0 + 1, tri.v1 + 1, tri.v2 + 1,));
+            } else {
                 s.push_str(&format!(
                     "f {}//{} {}//{} {}//{}\n",
                     tri.v0 + 1,
@@ -176,8 +184,6 @@ impl Mesh {
                     tri.v2 + 1,
                     tri.v2 + 1,
                 ));
-            } else {
-                s.push_str(&format!("f {} {} {}\n", tri.v0 + 1, tri.v1 + 1, tri.v2 + 1,));
             }
         }
 

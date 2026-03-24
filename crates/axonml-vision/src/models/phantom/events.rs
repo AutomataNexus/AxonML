@@ -109,7 +109,7 @@ impl EventEncoder {
             for y in 0..h {
                 for x in 0..w {
                     let r = data[b * 3 * h * w + 0 * h * w + y * w + x];
-                    let g = data[b * 3 * h * w + 1 * h * w + y * w + x];
+                    let g = data[b * 3 * h * w + h * w + y * w + x];
                     let b_val = data[b * 3 * h * w + 2 * h * w + y * w + x];
                     // Approximate: normalized values centered around 0, scale ~[-2, 2]
                     gray[b * h * w + y * w + x] = 0.299 * r + 0.587 * g + 0.114 * b_val;
@@ -134,8 +134,8 @@ impl EventEncoder {
 
         // Compute cell-level density
         let cell = self.config.cell_size;
-        let cell_h = (h + cell - 1) / cell;
-        let cell_w = (w + cell - 1) / cell;
+        let cell_h = h.div_ceil(cell);
+        let cell_w = w.div_ceil(cell);
         let mut density = vec![0.0f32; batch * cell_h * cell_w];
 
         for b in 0..batch {

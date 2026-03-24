@@ -37,13 +37,11 @@ pub fn DatasetUploadPage() -> impl IntoView {
     let (upload_progress, set_upload_progress) = create_signal(0.0f64);
     let error = create_rw_signal::<Option<String>>(None);
 
-    let dataset_types = vec![
-        ("tabular".to_string(), "Tabular (CSV, TSV)".to_string()),
+    let dataset_types = [("tabular".to_string(), "Tabular (CSV, TSV)".to_string()),
         ("image".to_string(), "Image".to_string()),
         ("text".to_string(), "Text".to_string()),
         ("audio".to_string(), "Audio".to_string()),
-        ("custom".to_string(), "Custom".to_string()),
-    ];
+        ("custom".to_string(), "Custom".to_string())];
 
     let on_file_select = move |files: FileList| {
         if files.length() > 0 {

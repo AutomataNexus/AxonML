@@ -30,13 +30,11 @@ use crate::error::{CliError, CliResult};
 
 /// Get the AxonML data directory
 fn get_data_dir() -> PathBuf {
-    std::env::var("AXONML_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+    std::env::var("AXONML_HOME").map_or_else(|_| {
             dirs::data_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("axonml")
-        })
+        }, PathBuf::from)
 }
 
 /// Get the PID file path for a service
@@ -520,8 +518,8 @@ pub fn execute_status(args: StatusArgs) -> CliResult<()> {
     let server_pid = read_pid("server");
     let dashboard_pid = read_pid("dashboard");
 
-    let server_running = server_pid.map(is_process_running).unwrap_or(false);
-    let dashboard_running = dashboard_pid.map(is_process_running).unwrap_or(false);
+    let server_running = server_pid.is_some_and(is_process_running);
+    let dashboard_running = dashboard_pid.is_some_and(is_process_running);
 
     if args.format == "json" {
         let status = serde_json::json!({
@@ -636,7 +634,7 @@ fn show_log(
     let file = fs::File::open(log_file)?;
     let reader = BufReader::new(file);
 
-    let all_lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+    let all_lines: Vec<String> = reader.lines().map_while(std::result::Result::ok).collect();
     let start = all_lines.len().saturating_sub(lines);
 
     for line in &all_lines[start..] {

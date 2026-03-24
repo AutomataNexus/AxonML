@@ -180,8 +180,8 @@ fn MfaVerificationForm(
 
     let mfa_token_clone = mfa_token.clone();
     let mfa_token_for_complete = mfa_token.clone();
-    let on_success_for_click = on_success.clone();
-    let on_success_for_complete = on_success.clone();
+    let on_success_for_click = on_success;
+    let on_success_for_complete = on_success;
 
     let do_verify = move |on_success: Callback<TokenPair>, token: String| {
         let code_val = code.get();
@@ -221,14 +221,14 @@ fn MfaVerificationForm(
     let on_click_verify = {
         let token = mfa_token_clone.clone();
         move |_: web_sys::MouseEvent| {
-            do_verify(on_success_for_click.clone(), token.clone());
+            do_verify(on_success_for_click, token.clone());
         }
     };
 
     let on_complete_verify = Callback::new({
         let token = mfa_token_for_complete.clone();
         move |_: String| {
-            do_verify(on_success_for_complete.clone(), token.clone());
+            do_verify(on_success_for_complete, token.clone());
         }
     });
 

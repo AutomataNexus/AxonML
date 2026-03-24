@@ -132,7 +132,7 @@ impl TridentConfig {
         };
         let total_ternary_weights = self.num_layers * per_layer;
         // 2 bits per weight, packed 4 per byte, + scale factors
-        let packed_bytes = (total_ternary_weights + 3) / 4;
+        let packed_bytes = total_ternary_weights.div_ceil(4);
         let scale_bytes = self.num_layers * 6 * 4; // 6 TernaryLinear layers per block, 4 bytes per scale
                                                    // Add fp32 embeddings + lm_head + norms
         let fp32_bytes = (self.vocab_size * self.d_model
@@ -181,14 +181,14 @@ impl TridentRMSNorm {
         let mut rms_vals = vec![0.0f32; batch_elements];
         let weight_vec = self.weight.to_vec();
 
-        for b in 0..batch_elements {
+        for (b, rms_val) in rms_vals.iter_mut().enumerate() {
             let offset = b * last_dim;
             let mut sum_sq = 0.0f32;
             for i in 0..last_dim {
                 sum_sq += x_vec[offset + i] * x_vec[offset + i];
             }
             let rms = (sum_sq / last_dim as f32 + self.eps).sqrt();
-            rms_vals[b] = rms;
+            *rms_val = rms;
 
             for i in 0..last_dim {
                 output[offset + i] = (x_vec[offset + i] / rms) * weight_vec[i];
@@ -568,7 +568,7 @@ impl TridentModel {
         let shape = logits_data.shape();
         let batch_size = shape[0];
         let seq_len = shape[1];
-        let vocab_size = shape[2];
+        let _vocab_size = shape[2];
 
         if seq_len > 1 {
             // Shift for next-token prediction: logits[..., :-1, :] predicts labels[..., 1:]

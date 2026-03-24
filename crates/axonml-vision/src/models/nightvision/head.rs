@@ -37,11 +37,14 @@ pub struct DecoupledHead {
     // Optional domain branch
     domain_pred: Option<Conv2d>, // → [B, num_domains, H, W]
 
+    #[allow(dead_code)]
     num_classes: usize,
+    #[allow(dead_code)]
     num_domains: usize,
 }
 
 impl DecoupledHead {
+    /// Create a new decoupled detection head.
     pub fn new(in_ch: usize, num_classes: usize, num_domains: usize) -> Self {
         let hidden = in_ch;
 
@@ -102,6 +105,7 @@ impl DecoupledHead {
         (cls_out, reg_out, obj_out, domain_out)
     }
 
+    /// Returns all learnable parameters.
     pub fn parameters(&self) -> Vec<Parameter> {
         let mut p = self.stem.parameters();
         p.extend(self.cls_conv.parameters());
@@ -115,6 +119,7 @@ impl DecoupledHead {
         p
     }
 
+    /// Returns named parameters with the given prefix.
     pub fn named_parameters(&self, prefix: &str) -> HashMap<String, Parameter> {
         let mut p = self.stem.named_parameters(&format!("{}.stem", prefix));
         p.extend(self.cls_conv.named_parameters(&format!("{}.cls_conv", prefix)));
@@ -136,6 +141,7 @@ impl DecoupledHead {
         p
     }
 
+    /// Set training/eval mode.
     pub fn set_training(&mut self, training: bool) {
         self.stem.set_training(training);
         self.cls_conv.set_training(training);

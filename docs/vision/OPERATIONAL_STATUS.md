@@ -1,6 +1,6 @@
 # AxonML Vision Crate — Operational Status
 
-> Last updated: 2026-03-06
+> Last updated: 2026-03-24
 
 ## Overview
 
@@ -65,6 +65,16 @@ All models compile, have `forward()` methods, support train/eval mode, and have 
 | Polar | `biometric/polar.rs` | — | 26 | Polar coordinate iris processing |
 
 **Total biometric**: ~362K params, <2MB f32, <400KB INT8, Pi-deployable
+
+**GPU training pipelines**: All biometric models have GPU-accelerated training with checkpoint/resume support. Training examples: `train_mnemosyne` (LFW face data), `train_argus` (CASIA iris), `train_ariadne` (FVC2000 fingerprint). Benchmark example: `bench_mnemosyne` (verification pairs, ROC-AUC, EER, FAR/FRR).
+
+### Infrared Detection (Novel)
+
+| Model | Directory | Params | Tests | Notes |
+|-------|-----------|--------|-------|-------|
+| NightVision | `models/nightvision/` | ~200K-500K | 5 | Multi-domain IR: wildlife, human, interstellar, vehicle; CSP backbone + Thermal FPN + decoupled heads |
+
+**NightVision components**: backbone (thermal-adaptive stem + CSP), detector, head (decoupled cls/bbox/obj/domain), neck (Thermal FPN)
 
 ### Other Models
 

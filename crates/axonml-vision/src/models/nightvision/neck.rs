@@ -38,6 +38,7 @@ pub struct ThermalFPN {
 }
 
 impl ThermalFPN {
+    /// Create a new ThermalFPN with the given input and output channel sizes.
     pub fn new(p3_ch: usize, p4_ch: usize, p5_ch: usize, out_ch: usize) -> Self {
         Self {
             // Laterals: reduce each level to out_ch
@@ -62,6 +63,7 @@ impl ThermalFPN {
         Self::new(64, 128, 256, 128)
     }
 
+    /// Returns the output channel count for all FPN levels.
     pub fn out_channels(&self) -> usize {
         self.out_channels
     }
@@ -97,6 +99,7 @@ impl ThermalFPN {
         (td3, bu4, bu5)
     }
 
+    /// Returns all learnable parameters.
     pub fn parameters(&self) -> Vec<Parameter> {
         let mut p = Vec::new();
         p.extend(self.lateral_p5.parameters());
@@ -109,6 +112,7 @@ impl ThermalFPN {
         p
     }
 
+    /// Returns named parameters.
     pub fn named_parameters(&self) -> HashMap<String, Parameter> {
         let mut p = HashMap::new();
         p.extend(self.lateral_p5.named_parameters("lat_p5"));
@@ -121,6 +125,7 @@ impl ThermalFPN {
         p
     }
 
+    /// Set training/eval mode.
     pub fn set_training(&mut self, training: bool) {
         self.lateral_p5.set_training(training);
         self.lateral_p4.set_training(training);

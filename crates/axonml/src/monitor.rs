@@ -78,6 +78,7 @@ pub struct TrainingMonitor {
 
 impl TrainingMonitor {
     /// Create a new monitor builder.
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(model_name: &str, param_count: usize) -> MonitorBuilder {
         MonitorBuilder {
             model_name: model_name.to_string(),
@@ -335,9 +336,8 @@ fn extract_json_value(json: &str, key: &str) -> Option<String> {
     let pattern = format!("\"{key}\":");
     let start = json.find(&pattern)? + pattern.len();
     let rest = json[start..].trim_start();
-    if rest.starts_with('"') {
+    if let Some(inner) = rest.strip_prefix('"') {
         // String value
-        let inner = &rest[1..];
         let end = inner.find('"')?;
         Some(inner[..end].to_string())
     } else if rest.starts_with("null") {

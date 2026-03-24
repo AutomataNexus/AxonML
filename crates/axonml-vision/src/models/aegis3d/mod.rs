@@ -95,6 +95,12 @@ pub struct Aegis3D {
     views: Vec<StoredView>,
 }
 
+impl Default for Aegis3D {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Aegis3D {
     /// Create a new Aegis3D pipeline with default configuration.
     pub fn new() -> Self {
@@ -127,9 +133,6 @@ impl Aegis3D {
     /// # Returns
     /// Reconstructed triangle mesh
     pub fn reconstruct_from_depth(&mut self, depth_map: &[f32], camera: &Camera) -> Mesh {
-        let _w = camera.width;
-        let _h = camera.height;
-
         // Back-project depth map to 3D points
         let points = self.backproject_depth(depth_map, camera);
 

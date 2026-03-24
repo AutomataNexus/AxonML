@@ -149,6 +149,12 @@ pub struct MnemosyneIdentity {
     encoding_dim: usize,
 }
 
+impl Default for MnemosyneIdentity {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MnemosyneIdentity {
     /// Create a new Mnemosyne face identity model with default dimensions.
     ///

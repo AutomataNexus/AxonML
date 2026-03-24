@@ -742,7 +742,7 @@ impl AngularMarginLoss {
         let scaled: Vec<f32> = modified_logits.iter().map(|c| self.scale * c).collect();
 
         // Compute log-softmax for target class
-        let max_val = scaled.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let max_val = scaled.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let sum_exp: f32 = scaled.iter().map(|s| (s - max_val).exp()).sum();
         let log_sum_exp = max_val + sum_exp.ln();
         let nll = log_sum_exp - scaled[target_class];
@@ -752,9 +752,9 @@ impl AngularMarginLoss {
         let scaled_var = cos_similarities.mul_scalar(self.scale);
         // Use the difference between graph-tracked and margin-adjusted as the
         // gradient signal, anchored at the computed NLL value
-        let target_cos_var = scaled_var.mul_scalar(0.0).add_scalar(nll);
+        
 
-        target_cos_var
+        scaled_var.mul_scalar(0.0).add_scalar(nll)
     }
 }
 

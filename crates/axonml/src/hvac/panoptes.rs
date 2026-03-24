@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_nn::layers::*;
+use axonml_nn::layers::{Linear, LayerNorm, Embedding, TransformerEncoder, LSTM};
 use axonml_nn::parameter::Parameter;
 use axonml_nn::Module;
 use axonml_tensor::Tensor;
@@ -190,7 +190,7 @@ impl FacilityConfig {
             "warren-ahu-5",
             "warren-ahu-7",
         ] {
-            equipment.push((id.to_string(), EQUIP_AHU));
+            equipment.push(((*id).to_string(), EQUIP_AHU));
         }
 
         // DOAS (1)
@@ -198,7 +198,7 @@ impl FacilityConfig {
 
         // Steam Boilers (3)
         for id in &["warren-boiler-1", "warren-boiler-2", "warren-boiler-3"] {
-            equipment.push((id.to_string(), EQUIP_BOILER));
+            equipment.push(((*id).to_string(), EQUIP_BOILER));
         }
 
         // Steam Bundles (9)
@@ -213,7 +213,7 @@ impl FacilityConfig {
             "warren-steambundle-8",
             "warren-steambundle-2",
         ] {
-            equipment.push((id.to_string(), EQUIP_STEAM_BUNDLE));
+            equipment.push(((*id).to_string(), EQUIP_STEAM_BUNDLE));
         }
 
         // Fan Coils (18)
@@ -244,12 +244,12 @@ impl FacilityConfig {
             "warren-hwpump-3",
             "warren-hwpump-4",
         ] {
-            equipment.push((id.to_string(), EQUIP_PUMP));
+            equipment.push(((*id).to_string(), EQUIP_PUMP));
         }
 
         // Chillers (2)
         for id in &["warren-chiller-2", "warren-chiller-1"] {
-            equipment.push((id.to_string(), EQUIP_CHILLER));
+            equipment.push(((*id).to_string(), EQUIP_CHILLER));
         }
 
         Self::new(equipment)

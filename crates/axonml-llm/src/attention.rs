@@ -18,6 +18,9 @@ use axonml_autograd::Variable;
 use axonml_nn::{Dropout, Linear, Module, Parameter};
 use axonml_tensor::{view::cat, Tensor};
 
+/// Key-value cache entry: (key_tensor, value_tensor).
+pub type KVCacheEntry = (Tensor<f32>, Tensor<f32>);
+
 // =============================================================================
 // KV Cache
 // =============================================================================
@@ -343,7 +346,7 @@ impl CausalSelfAttention {
         &self,
         x: &Variable,
         kv_cache: Option<&mut KVCache>,
-    ) -> (Variable, Option<(Tensor<f32>, Tensor<f32>)>) {
+    ) -> (Variable, Option<KVCacheEntry>) {
         let x_data = x.data();
         let shape = x_data.shape();
         let batch_size = shape[0];
@@ -853,7 +856,7 @@ impl FlashAttention {
 
         let mut output = vec![0.0f32; batch_size * num_heads * seq_len * head_dim];
         let block_size = self.block_size;
-        let num_blocks = (seq_len + block_size - 1) / block_size;
+        let num_blocks = seq_len.div_ceil(block_size);
 
         for b in 0..batch_size {
             for h in 0..num_heads {
@@ -907,8 +910,8 @@ impl FlashAttention {
                             // Rescale previous sum and output
                             let scale_prev = (prev_max - new_max).exp();
                             row_sum[i] *= scale_prev;
-                            for d in 0..head_dim {
-                                row_out[i][d] *= scale_prev;
+                            for val in row_out[i].iter_mut().take(head_dim) {
+                                *val *= scale_prev;
                             }
 
                             // Add new block contribution
@@ -918,10 +921,10 @@ impl FlashAttention {
                                     let p = (score - new_max).exp();
                                     row_sum[i] += p;
 
-                                    for d in 0..head_dim {
+                                    for (d, val) in row_out[i].iter_mut().enumerate().take(head_dim) {
                                         let v_idx =
                                             ((b * num_heads + h) * seq_len + j) * head_dim + d;
-                                        row_out[i][d] += p * v_data[v_idx];
+                                        *val += p * v_data[v_idx];
                                     }
                                 }
                             }
@@ -934,9 +937,9 @@ impl FlashAttention {
                 // Normalize output
                 for i in 0..seq_len {
                     let sum = row_sum[i].max(1e-9);
-                    for d in 0..head_dim {
+                    for (d, &val) in row_out[i].iter().enumerate().take(head_dim) {
                         let out_idx = ((b * num_heads + h) * seq_len + i) * head_dim + d;
-                        output[out_idx] = row_out[i][d] / sum;
+                        output[out_idx] = val / sum;
                     }
                 }
             }

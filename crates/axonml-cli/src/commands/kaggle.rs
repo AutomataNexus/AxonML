@@ -285,9 +285,7 @@ pub fn execute_download(dataset_ref: &str, output: Option<&str>) -> Result<(), S
     let client = KaggleClient::from_stored()
         .ok_or_else(|| "Kaggle not configured. Run: axonml kaggle login".to_string())?;
 
-    let output_dir = output
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("./data"));
+    let output_dir = output.map_or_else(|| PathBuf::from("./data"), PathBuf::from);
 
     println!("{} Downloading {}...", "⬇".cyan(), dataset_ref);
 

@@ -59,7 +59,7 @@ fn channel_shuffle(x: &Variable, groups: usize) -> Variable {
             next_fns: vec![x.grad_fn().cloned()],
             groups,
             channels_per_group,
-            shape: shape.to_vec(),
+            shape: shape.clone(),
         });
         Variable::from_operation(output_tensor, grad_fn, true)
     } else {
@@ -277,7 +277,7 @@ impl ShuffleNetBackbone {
         let mut stages = Vec::new();
         let mut in_ch = 24;
 
-        for (_i, (&out_ch, &repeats)) in stage_channels.iter().zip(stage_repeats.iter()).enumerate()
+        for (&out_ch, &repeats) in stage_channels.iter().zip(stage_repeats.iter())
         {
             let mut blocks = Vec::new();
             // First block with stride 2
@@ -641,7 +641,7 @@ impl NanoDet {
 
                     // Decode bbox (center offset + size)
                     let dx = bbox_data[0 * h * w + y * w + x];
-                    let dy = bbox_data[1 * h * w + y * w + x];
+                    let dy = bbox_data[h * w + y * w + x];
                     let dw = bbox_data[2 * h * w + y * w + x];
                     let dh = bbox_data[3 * h * w + y * w + x];
 

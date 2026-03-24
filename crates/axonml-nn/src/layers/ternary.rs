@@ -56,7 +56,7 @@ impl PackedTernaryWeights {
     /// Pack ternary values {-1, 0, +1} into 2-bit representation.
     pub fn pack(ternary_values: &[i8], scale: f32) -> Self {
         let num_weights = ternary_values.len();
-        let num_bytes = (num_weights + 3) / 4;
+        let num_bytes = num_weights.div_ceil(4);
         let mut data = vec![0u8; num_bytes];
 
         for (i, &val) in ternary_values.iter().enumerate() {
@@ -255,7 +255,7 @@ impl TernaryLinear {
     /// Get compression ratio vs fp32.
     pub fn compression_ratio(&self) -> f32 {
         let fp32_bytes = self.in_features * self.out_features * 4;
-        let ternary_bytes = (self.in_features * self.out_features + 3) / 4 + 4; // +4 for scale
+        let ternary_bytes = (self.in_features * self.out_features).div_ceil(4) + 4; // +4 for scale
         fp32_bytes as f32 / ternary_bytes as f32
     }
 

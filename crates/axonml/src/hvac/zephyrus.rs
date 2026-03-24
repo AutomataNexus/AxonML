@@ -52,6 +52,12 @@ pub struct Zephyrus {
     training: bool,
 }
 
+impl Default for Zephyrus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Zephyrus {
     /// Creates a new Zephyrus model.
     pub fn new() -> Self {

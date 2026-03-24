@@ -7,7 +7,6 @@ use std::collections::HashMap;
 
 use axonml_autograd::Variable;
 use axonml_nn::{Module, Parameter};
-use axonml_tensor::Tensor;
 
 use super::backbone::ThermalBackbone;
 use super::head::DecoupledHead;
@@ -40,6 +39,7 @@ pub enum ThermalDomain {
 }
 
 impl ThermalDomain {
+    /// Returns the integer index for this domain.
     pub fn index(&self) -> usize {
         match self {
             Self::Wildlife => 0,
@@ -50,6 +50,7 @@ impl ThermalDomain {
         }
     }
 
+    /// Creates a domain from an integer index.
     pub fn from_index(i: usize) -> Self {
         match i {
             0 => Self::Wildlife,
@@ -60,6 +61,7 @@ impl ThermalDomain {
         }
     }
 
+    /// Returns the string name of this domain.
     pub fn name(&self) -> &'static str {
         match self {
             Self::Wildlife => "wildlife",
@@ -70,6 +72,7 @@ impl ThermalDomain {
         }
     }
 
+    /// Returns the total number of thermal domains.
     pub fn count() -> usize {
         5
     }
@@ -334,9 +337,13 @@ impl Module for NightVision {
 /// - Objectness: BCE with logits (foreground/background)
 /// - Domain: CrossEntropy (optional, multi-domain mode)
 pub struct NightVisionLoss {
+    /// Classification loss weight.
     pub cls_weight: f32,
+    /// Bounding box regression loss weight.
     pub bbox_weight: f32,
+    /// Objectness loss weight.
     pub obj_weight: f32,
+    /// Domain classification loss weight.
     pub domain_weight: f32,
 }
 

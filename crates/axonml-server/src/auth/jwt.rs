@@ -239,11 +239,7 @@ impl JwtAuth {
 
     /// Extract token from Authorization header
     pub fn extract_from_header(header: &str) -> Option<&str> {
-        if header.starts_with("Bearer ") {
-            Some(&header[7..])
-        } else {
-            None
-        }
+        header.strip_prefix("Bearer ")
     }
 }
 

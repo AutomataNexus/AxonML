@@ -177,6 +177,12 @@ pub struct RetinaFace {
     num_anchors: usize,
 }
 
+impl Default for RetinaFace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RetinaFace {
     /// Create RetinaFace with ResNet34 backbone.
     pub fn new() -> Self {

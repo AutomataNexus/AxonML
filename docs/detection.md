@@ -20,14 +20,15 @@ description: "Training object detection and face detection models with AxonML"
 
 AxonML provides end-to-end training infrastructure for anchor-free object detection models. The system includes image loading, dataset parsers (COCO, WIDER FACE), detection-specific losses (Focal, GIoU, Uncertainty), FCOS-style target assignment, complete training loops, and AP/mAP evaluation metrics.
 
-Two built-in detector architectures are trainable out of the box:
+Three built-in detector architectures are trainable out of the box:
 
 | Model | Task | Architecture | Params | Target Size |
 |:------|:-----|:-------------|:-------|:------------|
 | **Nexus** | General object detection | Dual-pathway + predictive coding + object memory | ~430K | 320x320 |
 | **Phantom** | Face detection | Event-driven + sparse processing + face tracking | ~126K | 128x128 |
+| **NightVision** | Multi-domain IR detection | CSP backbone + Thermal FPN + decoupled heads | ~200K-500K | 320x320 |
 
-Both models use FCOS-style anchor-free detection heads and are designed for edge deployment.
+Nexus and Phantom use FCOS-style anchor-free detection heads. NightVision uses YOLOX-style decoupled heads. All are designed for edge deployment.
 
 ---
 
@@ -517,6 +518,41 @@ let train_output = model.forward_train(&frame_variable);
 | 5 | ~30% | Sparse event processing |
 | 30 | ~5% | Predictions accurate, minimal correction |
 | Static | ~0% | Cached backbone, no events |
+
+### NightVision — Multi-Domain Infrared Detector
+
+A YOLOX-inspired detector adapted for thermal imagery across multiple domains:
+
+1. **Thermal-adaptive stem** — handles single-channel (1-ch) or multi-band (3-ch) IR input with thermal normalization
+2. **CSP backbone** — Cross-Stage Partial blocks for efficient multi-scale thermal feature extraction
+3. **Thermal FPN** — Feature Pyramid Network with top-down + lateral connections (P3/P4/P5)
+4. **Decoupled heads** — Separate classification, bbox regression, and objectness branches per scale
+5. **Domain tagging** — Optional domain classification head for multi-domain operation
+
+```rust
+use axonml_vision::models::nightvision::{NightVision, NightVisionConfig, ThermalDomain};
+
+// Preset configurations for each domain
+let model = NightVision::new(NightVisionConfig::wildlife(20));    // 20 animal species
+let model = NightVision::new(NightVisionConfig::human());         // search & rescue
+let model = NightVision::new(NightVisionConfig::interstellar(3, 3)); // 3-band IR, 3 classes
+let model = NightVision::new(NightVisionConfig::multi_domain(50));   // all domains, domain tags
+let model = NightVision::new(NightVisionConfig::edge(10));           // compact for edge
+
+// Detection forward pass — per-scale outputs
+let outputs = model.forward_detection(&ir_image);
+// outputs: Vec<(cls, bbox, obj, Option<domain>)> — one per FPN level
+
+// Flattened forward — concatenated across scales
+let (cls, bbox, obj) = model.forward_flat(&ir_image);
+// cls: [B, total_anchors, num_classes]
+// bbox: [B, total_anchors, 4]
+// obj: [B, total_anchors, 1]
+```
+
+~200K-500K parameters (config-dependent), designed for edge/embedded thermal camera deployments.
+
+**Thermal domains:** Wildlife (warm-blooded animals), Human (body heat / SAR), Interstellar (astronomical thermal sources), Vehicle (engine heat / friction), General (domain-agnostic).
 
 ---
 

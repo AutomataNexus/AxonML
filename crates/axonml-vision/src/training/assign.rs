@@ -183,7 +183,7 @@ pub fn assign_phantom_targets(
         cls[idx] = 1.0;
 
         // Regression targets: offset + log-space size
-        bbox[idx * 4 + 0] = (face_cx - cell_cx) / stride;
+        bbox[idx * 4] = (face_cx - cell_cx) / stride;
         bbox[idx * 4 + 1] = (face_cy - cell_cy) / stride;
         bbox[idx * 4 + 2] = (face_w / stride).ln();
         bbox[idx * 4 + 3] = (face_h / stride).ln();

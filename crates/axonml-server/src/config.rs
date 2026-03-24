@@ -30,6 +30,7 @@ pub enum ConfigError {
 
 /// Main server configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Default)]
 pub struct Config {
     pub server: ServerConfig,
     pub aegis: AegisConfig,
@@ -161,18 +162,6 @@ fn default_hub_cache_dir() -> String {
     "~/.axonml/hub_cache".to_string()
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            aegis: AegisConfig::default(),
-            auth: AuthConfig::default(),
-            inference: InferenceConfig::default(),
-            dashboard: DashboardConfig::default(),
-            hub: HubConfig::default(),
-        }
-    }
-}
 
 impl Default for ServerConfig {
     fn default() -> Self {

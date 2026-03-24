@@ -23,12 +23,14 @@ fn silu(x: &Variable) -> Variable {
 // ConvBNSiLU — Conv2d + BatchNorm + SiLU
 // =============================================================================
 
+/// Convolution + BatchNorm + SiLU activation block.
 pub struct ConvBNSiLU {
     conv: Conv2d,
     bn: BatchNorm2d,
 }
 
 impl ConvBNSiLU {
+    /// Create a new ConvBNSiLU block.
     pub fn new(
         in_ch: usize,
         out_ch: usize,
@@ -48,16 +50,19 @@ impl ConvBNSiLU {
         }
     }
 
+    /// Forward pass through conv, batchnorm, and SiLU activation.
     pub fn forward(&self, x: &Variable) -> Variable {
         silu(&self.bn.forward(&self.conv.forward(x)))
     }
 
+    /// Returns all learnable parameters.
     pub fn parameters(&self) -> Vec<Parameter> {
         let mut p = self.conv.parameters();
         p.extend(self.bn.parameters());
         p
     }
 
+    /// Returns named parameters with the given prefix.
     pub fn named_parameters(&self, prefix: &str) -> HashMap<String, Parameter> {
         let mut p = HashMap::new();
         for (k, v) in self.conv.named_parameters() {
@@ -69,6 +74,7 @@ impl ConvBNSiLU {
         p
     }
 
+    /// Set training/eval mode.
     pub fn set_training(&mut self, training: bool) {
         self.bn.set_training(training);
     }
@@ -78,6 +84,7 @@ impl ConvBNSiLU {
 // Bottleneck — Residual bottleneck block
 // =============================================================================
 
+/// Residual bottleneck block with optional skip connection.
 pub struct Bottleneck {
     cv1: ConvBNSiLU,
     cv2: ConvBNSiLU,
@@ -85,6 +92,7 @@ pub struct Bottleneck {
 }
 
 impl Bottleneck {
+    /// Create a new bottleneck block.
     pub fn new(in_ch: usize, out_ch: usize, shortcut: bool) -> Self {
         let hidden = out_ch; // No expansion for simplicity
         Self {
@@ -94,6 +102,7 @@ impl Bottleneck {
         }
     }
 
+    /// Forward pass with optional residual connection.
     pub fn forward(&self, x: &Variable) -> Variable {
         let out = self.cv2.forward(&self.cv1.forward(x));
         if self.shortcut {
@@ -103,18 +112,21 @@ impl Bottleneck {
         }
     }
 
+    /// Returns all learnable parameters.
     pub fn parameters(&self) -> Vec<Parameter> {
         let mut p = self.cv1.parameters();
         p.extend(self.cv2.parameters());
         p
     }
 
+    /// Returns named parameters with the given prefix.
     pub fn named_parameters(&self, prefix: &str) -> HashMap<String, Parameter> {
         let mut p = self.cv1.named_parameters(&format!("{}.cv1", prefix));
         p.extend(self.cv2.named_parameters(&format!("{}.cv2", prefix)));
         p
     }
 
+    /// Set training/eval mode.
     pub fn set_training(&mut self, training: bool) {
         self.cv1.set_training(training);
         self.cv2.set_training(training);
@@ -142,6 +154,7 @@ pub struct CSPBlock {
 }
 
 impl CSPBlock {
+    /// Create a new CSP block with the given channel sizes and bottleneck count.
     pub fn new(in_ch: usize, out_ch: usize, n_bottlenecks: usize) -> Self {
         let half = out_ch / 2;
         Self {
@@ -174,10 +187,12 @@ impl CSPBlock {
         self.cv3.forward(&cat)
     }
 
+    /// Returns the output channel count.
     pub fn out_channels(&self) -> usize {
         self.out_ch
     }
 
+    /// Returns all learnable parameters.
     pub fn parameters(&self) -> Vec<Parameter> {
         let mut p = self.downsample.parameters();
         p.extend(self.cv1.parameters());
@@ -189,6 +204,7 @@ impl CSPBlock {
         p
     }
 
+    /// Returns named parameters with the given prefix.
     pub fn named_parameters(&self, prefix: &str) -> HashMap<String, Parameter> {
         let mut p = self.downsample.named_parameters(&format!("{}.down", prefix));
         p.extend(self.cv1.named_parameters(&format!("{}.cv1", prefix)));
@@ -200,6 +216,7 @@ impl CSPBlock {
         p
     }
 
+    /// Set training/eval mode.
     pub fn set_training(&mut self, training: bool) {
         self.downsample.set_training(training);
         self.cv1.set_training(training);
@@ -267,6 +284,7 @@ impl ThermalBackbone {
         (p3, p4, p5)
     }
 
+    /// Returns all learnable parameters.
     pub fn parameters(&self) -> Vec<Parameter> {
         let mut p = Vec::new();
         if let Some(ref adapter) = self.ch_adapter {
@@ -279,6 +297,7 @@ impl ThermalBackbone {
         p
     }
 
+    /// Returns named parameters.
     pub fn named_parameters(&self) -> HashMap<String, Parameter> {
         let mut p = HashMap::new();
         if let Some(ref adapter) = self.ch_adapter {
@@ -291,6 +310,7 @@ impl ThermalBackbone {
         p
     }
 
+    /// Set training/eval mode.
     pub fn set_training(&mut self, training: bool) {
         if let Some(ref mut adapter) = self.ch_adapter {
             adapter.set_training(training);

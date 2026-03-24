@@ -328,9 +328,9 @@ let (image, label) = train.get(0).unwrap();
 println!("Image shape: {{:?}}", image.shape());
 println!("Label shape: {{:?}}", label.shape());
 "#,
-        ds.id.replace("-", "_").to_uppercase(),
-        ds.id.replace("-", "_").to_uppercase(),
-        ds.id.replace("-", "_").to_uppercase()
+        ds.id.replace('-', "_").to_uppercase(),
+        ds.id.replace('-', "_").to_uppercase(),
+        ds.id.replace('-', "_").to_uppercase()
     );
 
     Ok(())
@@ -383,9 +383,7 @@ pub fn execute_search(query: &str, source: Option<&str>, limit: usize) -> Result
 
 /// Execute dataset download command.
 pub fn execute_download(dataset_id: &str, output: Option<&str>) -> Result<(), String> {
-    let output_dir = output
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("./data"));
+    let output_dir = output.map_or_else(|| PathBuf::from("./data"), PathBuf::from);
 
     fs::create_dir_all(&output_dir).map_err(|e| e.to_string())?;
 
@@ -397,7 +395,7 @@ pub fn execute_download(dataset_id: &str, output: Option<&str>) -> Result<(), St
         println!("Dataset: {} ({:.1} MB)", ds.name, ds.size_mb);
 
         // For built-in datasets, generate loading code instead of downloading
-        let code_path = output_dir.join(format!("{}_loader.rs", dataset_id.replace("-", "_")));
+        let code_path = output_dir.join(format!("{}_loader.rs", dataset_id.replace('-', "_")));
 
         let code = generate_loader_code(ds);
         let mut file = File::create(&code_path).map_err(|e| e.to_string())?;
@@ -417,7 +415,7 @@ pub fn execute_download(dataset_id: &str, output: Option<&str>) -> Result<(), St
 
 /// Generate loader code for a dataset.
 fn generate_loader_code(ds: &BuiltinDataset) -> String {
-    let struct_name = ds.id.replace("-", "_").to_uppercase();
+    let struct_name = ds.id.replace('-', "_").to_uppercase();
 
     format!(
         r#"//! {} Dataset Loader

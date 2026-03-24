@@ -147,7 +147,7 @@ where
         return input.clone();
     }
 
-    let segment_size = (num_layers + segments - 1) / segments;
+    let segment_size = num_layers.div_ceil(segments);
     let mut x = input.clone();
 
     for seg in 0..segments {
@@ -234,7 +234,7 @@ pub fn suggest_segments(
     }
 
     // Number of segments = ceil(num_layers / storable_layers)
-    (num_layers + storable_layers - 1) / storable_layers
+    num_layers.div_ceil(storable_layers)
 }
 
 // =============================================================================

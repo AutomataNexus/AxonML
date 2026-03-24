@@ -89,6 +89,12 @@ pub struct ThemisFusion {
     reliability_scores: HashMap<BiometricModality, f32>,
 }
 
+impl Default for ThemisFusion {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ThemisFusion {
     /// Create a new Themis fusion model with default dimensions.
     pub fn new() -> Self {

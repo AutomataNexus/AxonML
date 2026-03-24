@@ -101,7 +101,7 @@ pub fn StandaloneToast(
     let (exiting, set_exiting) = create_signal(false);
 
     // Auto-close timer
-    let on_close_clone = on_close.clone();
+    let on_close_clone = on_close;
     set_timeout(
         move || {
             set_exiting.set(true);

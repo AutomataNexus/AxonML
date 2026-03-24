@@ -95,7 +95,8 @@ fn inspect_model(path: &PathBuf, format: &str) -> CliResult<ModelInfo> {
     let mut total_params: u64 = 0;
 
     // Group parameters by layer prefix
-    let mut layer_params: std::collections::BTreeMap<String, Vec<(String, Vec<usize>, u64, bool)>> =
+    type ParamEntry = (String, Vec<usize>, u64, bool);
+    let mut layer_params: std::collections::BTreeMap<String, Vec<ParamEntry>> =
         std::collections::BTreeMap::new();
 
     for (param_name, entry) in state_dict.entries() {
@@ -124,10 +125,10 @@ fn inspect_model(path: &PathBuf, format: &str) -> CliResult<ModelInfo> {
         let trainable = params.iter().any(|(_, _, _, t)| *t);
 
         // Infer layer type from parameter names
-        let layer_type = infer_layer_type(&params);
+        let layer_type = infer_layer_type(params);
 
         // Get shape from weight parameter if available
-        let (input_shape, output_shape) = infer_shapes(&params);
+        let (input_shape, output_shape) = infer_shapes(params);
 
         layers.push(LayerInfo {
             index,
@@ -149,7 +150,7 @@ fn inspect_model(path: &PathBuf, format: &str) -> CliResult<ModelInfo> {
     // Add common metadata keys if present
     for key in &["version", "model_type", "dtype", "created"] {
         if let Some(value) = state_dict.get_metadata(key) {
-            metadata.push((key.to_string(), value.clone()));
+            metadata.push(((*key).to_string(), value.clone()));
         }
     }
 

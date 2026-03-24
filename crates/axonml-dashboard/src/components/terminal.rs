@@ -76,8 +76,8 @@ pub fn Terminal() -> impl IntoView {
                 socket.set_binary_type(web_sys::BinaryType::Arraybuffer);
 
                 // On open
-                let set_connected_clone = set_connected.clone();
-                let set_output_clone = set_output.clone();
+                let set_connected_clone = set_connected;
+                let set_output_clone = set_output;
                 let onopen = Closure::wrap(Box::new(move |_| {
                     set_connected_clone.set(true);
                     set_output_clone.update(|o| o.push("Connected to terminal.\r\n".to_string()));
@@ -86,7 +86,7 @@ pub fn Terminal() -> impl IntoView {
                 onopen.forget();
 
                 // On message
-                let set_output_clone = set_output.clone();
+                let set_output_clone = set_output;
                 let onmessage = Closure::wrap(Box::new(move |e: MessageEvent| {
                     if let Ok(text) = e.data().dyn_into::<js_sys::JsString>() {
                         let text: String = text.into();
@@ -97,8 +97,8 @@ pub fn Terminal() -> impl IntoView {
                 onmessage.forget();
 
                 // On close
-                let set_connected_clone = set_connected.clone();
-                let set_output_clone = set_output.clone();
+                let set_connected_clone = set_connected;
+                let set_output_clone = set_output;
                 let onclose = Closure::wrap(Box::new(move |_: CloseEvent| {
                     set_connected_clone.set(false);
                     set_output_clone.update(|o| o.push("\r\nConnection closed.\r\n".to_string()));
@@ -107,7 +107,7 @@ pub fn Terminal() -> impl IntoView {
                 onclose.forget();
 
                 // On error
-                let set_output_clone = set_output.clone();
+                let set_output_clone = set_output;
                 let onerror = Closure::wrap(Box::new(move |_: ErrorEvent| {
                     set_output_clone.update(|o| o.push("\r\nConnection error.\r\n".to_string()));
                 }) as Box<dyn FnMut(ErrorEvent)>);

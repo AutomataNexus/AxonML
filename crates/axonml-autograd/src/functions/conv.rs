@@ -671,7 +671,7 @@ impl GradientFunction for BatchNorm2dBackward {
             }
         }
 
-        let grad_input_tensor = Tensor::from_vec(grad_input, &shape.to_vec()).unwrap();
+        let grad_input_tensor = Tensor::from_vec(grad_input, shape).unwrap();
         let grad_weight_tensor = Tensor::from_vec(grad_weight, &[channels]).unwrap();
         let grad_bias_tensor = Tensor::from_vec(grad_bias, &[channels]).unwrap();
 
@@ -795,7 +795,7 @@ impl GradientFunction for BatchNorm1dBackward {
             }
         }
 
-        let grad_input_tensor = Tensor::from_vec(grad_input, &shape.to_vec()).unwrap();
+        let grad_input_tensor = Tensor::from_vec(grad_input, shape).unwrap();
         let grad_weight_tensor = Tensor::from_vec(grad_weight, &[channels]).unwrap();
         let grad_bias_tensor = Tensor::from_vec(grad_bias, &[channels]).unwrap();
 
@@ -1385,11 +1385,7 @@ impl GradientFunction for AvgPool1dBackward {
                     let il_begin = in_start.max(self.padding) - self.padding;
                     let il_end = ((in_start + self.kernel_size).min(in_length + self.padding))
                         - self.padding;
-                    let count = if il_end > il_begin {
-                        il_end - il_begin
-                    } else {
-                        0
-                    };
+                    let count = il_end.saturating_sub(il_begin);
 
                     let go_idx = b * channels * out_length + c * out_length + ol;
                     let go_val = grad_out_vec[go_idx];

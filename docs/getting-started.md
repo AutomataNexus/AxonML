@@ -47,7 +47,7 @@ AxonML uses feature flags to control what gets compiled:
 | `full` | All features enabled | Yes |
 | `core` | Core tensor operations | Yes |
 | `nn` | Neural network modules | Yes |
-| `vision` | Computer vision (MNIST, CIFAR, ResNet) | Yes |
+| `vision` | Computer vision (MNIST, CIFAR, ResNet, NightVision, Biometrics) | Yes |
 | `audio` | Audio processing (MelSpectrogram, MFCC) | Yes |
 | `text` | Text processing (Tokenizers, BPE) | Yes |
 | `llm` | Large language models (BERT, GPT-2) | Yes |
@@ -275,6 +275,7 @@ let x = Tensor::randn(&[1000, 1000]).to(device);
 
 - [Tensor Operations]({% link tensors.md %}) - Deep dive into tensor API
 - [Neural Networks]({% link neural-networks.md %}) - Building complex models
-- [Training]({% link training.md %}) - Optimizers, schedulers, mixed precision
+- [Training]({% link training.md %}) - Optimizers, schedulers, mixed precision, biometric training
+- [Vision Models]({% link vision/README.md %}) - Detection (Helios, NightVision), biometrics (Argus, Echo, Mnemosyne)
 - [Distributed]({% link distributed.md %}) - Multi-GPU training
 - [ONNX]({% link onnx.md %}) - Import/export models

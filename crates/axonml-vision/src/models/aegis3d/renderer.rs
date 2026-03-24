@@ -129,6 +129,12 @@ pub struct DifferentiableRenderer {
     pub config: SphereTracingConfig,
 }
 
+impl Default for DifferentiableRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DifferentiableRenderer {
     pub fn new() -> Self {
         Self {

@@ -307,6 +307,12 @@ struct AnchorConfig {
     anchor_sizes: Vec<f32>,
 }
 
+impl Default for BlazeFace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlazeFace {
     /// Create a BlazeFace model.
     ///

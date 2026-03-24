@@ -92,6 +92,8 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **1,988 pass
     - Evaluation: `compute_ap`, `compute_map`, `compute_coco_map` (AP/mAP at IoU thresholds)
   - **Nexus** *(novel)* — Dual-pathway object detector (~430K params) with predictive coding, persistent GRU object memory, uncertainty quantification, and 3-scale anchor-free heads
   - **Phantom** *(novel)* — Event-driven face detector (~126K params) with sparse processing, GRU face tracking, and confidence accumulation. Compute drops to ~5% in steady state
+  - **NightVision** *(novel)* — Multi-domain thermal IR detector (~2.6M params) with CSP backbone, Thermal FPN with domain-adaptive feature modulation, and YOLOX decoupled heads. Supports 5 domains: Wildlife, Human, Interstellar, Vehicle, and General
+  - **Biometric GPU Training Pipelines** — Full GPU-accelerated training for Mnemosyne (face), Argus (iris), and Ariadne (gait) with checkpoint/resume support, trained on LFW, CASIA-Iris, and FVC2000 datasets
 
 - **Audio Processing** (`axonml-audio`)
   - MelSpectrogram, MFCC transforms

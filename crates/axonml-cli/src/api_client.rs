@@ -33,6 +33,7 @@ pub enum ApiError {
     #[error("Invalid credentials")]
     InvalidCredentials,
     #[error("Not connected to server")]
+    #[allow(dead_code)]
     NotConnected,
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -51,7 +52,9 @@ pub struct LoginRequest {
 #[derive(Debug, Deserialize)]
 pub struct LoginResponse {
     pub access_token: Option<String>,
+    #[allow(dead_code)]
     pub refresh_token: Option<String>,
+    #[allow(dead_code)]
     pub expires_in: Option<i64>,
     pub requires_mfa: bool,
     pub user: Option<User>,
@@ -191,6 +194,7 @@ impl ApiClient {
     }
 
     /// Check if connected and authenticated
+    #[allow(dead_code)]
     pub fn is_authenticated(&self) -> bool {
         self.access_token.is_some()
     }
@@ -277,6 +281,7 @@ impl ApiClient {
     }
 
     /// Create a training run
+    #[allow(dead_code)]
     pub async fn create_training_run(
         &self,
         name: &str,
@@ -306,6 +311,7 @@ impl ApiClient {
     }
 
     /// Update training run metrics
+    #[allow(dead_code)]
     pub async fn update_training_metrics(
         &self,
         run_id: &str,
@@ -355,6 +361,7 @@ impl ApiClient {
     }
 
     /// Upload a model
+    #[allow(dead_code)]
     pub async fn upload_model(
         &self,
         name: &str,
@@ -413,6 +420,7 @@ impl ApiClient {
 }
 
 /// Check if we should sync with server (server available + authenticated)
+#[allow(dead_code)]
 pub async fn should_sync() -> bool {
     if let Ok(client) = ApiClient::load_credentials() {
         client.is_server_available().await

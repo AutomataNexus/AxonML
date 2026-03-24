@@ -407,14 +407,13 @@ impl HFTokenizer {
 
         for &id in ids {
             // Skip special tokens if requested
-            if skip_special {
-                if Some(id) == self.special_tokens.bos_token_id
+            if skip_special
+                && (Some(id) == self.special_tokens.bos_token_id
                     || Some(id) == self.special_tokens.eos_token_id
-                    || Some(id) == self.special_tokens.pad_token_id
+                    || Some(id) == self.special_tokens.pad_token_id)
                 {
                     continue;
                 }
-            }
 
             if let Some(token) = self.id_to_token.get(&id) {
                 // Handle byte tokens

@@ -45,6 +45,12 @@ pub struct Aquilo {
     training: bool,
 }
 
+impl Default for Aquilo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Aquilo {
     /// Creates a new Aquilo model.
     pub fn new() -> Self {

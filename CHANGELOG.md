@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-03-24
+
+### Added
+
+#### NightVision — Multi-Domain Thermal IR Detector (`axonml-vision`)
+- **NightVision** (~2.6M params) — CSP backbone + Thermal FPN + YOLOX decoupled heads for infrared object detection
+- 5 detection domains: Wildlife, Human, Interstellar, Vehicle, General — each with domain-specific class sets
+- Thermal FPN with domain-adaptive feature modulation (learned scale/bias per domain)
+- YOLOX-style decoupled heads (separate cls/reg/obj branches) with anchor-free detection
+- Full model documentation in `crates/axonml-vision/src/models/nightvision/`
+
+#### Biometric GPU Training Pipelines (`axonml-vision`)
+- **Mnemosyne** face verification training — GPU-accelerated with ArcFace loss, checkpoint/resume, LFW dataset support
+- **Argus** iris recognition training — GPU-accelerated with phase consistency loss, CASIA-Iris dataset support
+- **Ariadne** gait recognition training — GPU-accelerated with triplet loss, FVC2000 dataset support
+- Pre-computed polar coordinate cache for Argus iris training (eliminates per-epoch recomputation)
+- `bench_mnemosyne` benchmark example for face verification evaluation
+- Biometric model documentation: 6 READMEs covering Argus, Ariadne, Echo, Mnemosyne, Themis, and suite overview
+
+### Changed
+- CUDA enabled by default in `axonml-vision` Cargo.toml
+- Default trait implementations added for 20 types across the workspace
+- All clippy warnings fixed (0 warnings with `-D warnings`)
+
+### Security
+- `rustls-webpki` updated to 0.103.10 (security patch)
+
 ## [0.4.1] - 2026-03-08
 
 ### Performance: Framework-Wide Optimization Pass
@@ -300,11 +327,15 @@ predictors) deployed via cross-compiled ARM binaries, each running at ~2-3 MB RS
 
 ## Version History
 
+- **0.4.2**: NightVision multi-domain IR detector, biometric GPU training pipelines with checkpoint/resume
+- **0.4.1**: Framework-wide performance optimization pass (conv backward 12x faster, fused optimizer loops)
 - **0.4.0**: Novel capabilities beyond PyTorch — Aegis Identity biometric framework, graph inspection, lazy tensors, differentiable sparsity, training health monitor
 - **0.3.0**: Production edge inference — 12 models deployed across 6 controllers
 - **0.1.0**: Initial release with complete ML framework
 
-[Unreleased]: https://github.com/AutomataNexus/AxonML/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/AutomataNexus/AxonML/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/AutomataNexus/AxonML/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/AutomataNexus/AxonML/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/AutomataNexus/AxonML/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/AutomataNexus/AxonML/compare/v0.1.0...v0.3.0
 [0.1.0]: https://github.com/AutomataNexus/AxonML/releases/tag/v0.1.0

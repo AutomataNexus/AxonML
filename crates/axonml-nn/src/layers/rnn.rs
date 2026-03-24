@@ -233,7 +233,7 @@ impl Module for RNN {
         }
 
         // Stack outputs using graph-tracked cat (unsqueeze + cat along time dim)
-        let time_dim = if self.batch_first { 1 } else { 0 };
+        let time_dim = usize::from(self.batch_first);
         let unsqueezed: Vec<Variable> = outputs.iter().map(|o| o.unsqueeze(time_dim)).collect();
         let refs: Vec<&Variable> = unsqueezed.iter().collect();
         Variable::cat(&refs, time_dim)
@@ -450,7 +450,7 @@ impl LSTM {
 impl Module for LSTM {
     fn forward(&self, input: &Variable) -> Variable {
         let shape = input.shape();
-        let (batch_size, seq_len, _input_features) = if self.batch_first {
+        let (batch_size, seq_len, input_features) = if self.batch_first {
             (shape[0], shape[1], shape[2])
         } else {
             (shape[1], shape[0], shape[2])
@@ -476,7 +476,7 @@ impl Module for LSTM {
         // ih_all: [batch*seq, 4*hidden] = input_2d @ W_ih^T + bias_ih
         // Note: matmul auto-dispatches to cuBLAS GEMM when tensors are on GPU
         let cell0 = &self.cells[0];
-        let input_2d = input.reshape(&[batch_size * seq_len, _input_features]);
+        let input_2d = input.reshape(&[batch_size * seq_len, input_features]);
         let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
         let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
         // ih_all_3d: [batch, seq, 4*hidden]
@@ -563,7 +563,7 @@ impl Module for LSTM {
         }
 
         // Stack outputs along the time dimension
-        let time_dim = if self.batch_first { 1 } else { 0 };
+        let time_dim = usize::from(self.batch_first);
         let unsqueezed: Vec<Variable> = outputs.iter().map(|o| o.unsqueeze(time_dim)).collect();
         let refs: Vec<&Variable> = unsqueezed.iter().collect();
         Variable::cat(&refs, time_dim)

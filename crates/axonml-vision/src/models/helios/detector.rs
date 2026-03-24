@@ -157,7 +157,7 @@ impl Helios {
                         // ltrb distances
                         let base = b * 4 * h * w;
                         let l = bbox_data[base + 0 * h * w + yi * w + xi];
-                        let t = bbox_data[base + 1 * h * w + yi * w + xi];
+                        let t = bbox_data[base + h * w + yi * w + xi];
                         let r = bbox_data[base + 2 * h * w + yi * w + xi];
                         let bt = bbox_data[base + 3 * h * w + yi * w + xi];
 

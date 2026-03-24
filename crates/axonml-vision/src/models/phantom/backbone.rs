@@ -121,6 +121,12 @@ pub struct EventFeatureExtractor {
     relu: ReLU,
 }
 
+impl Default for EventFeatureExtractor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventFeatureExtractor {
     /// Create event feature extractor: 4ch input → 32-dim output.
     pub fn new() -> Self {

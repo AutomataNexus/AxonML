@@ -113,7 +113,7 @@ impl CocoDataset {
         // Build category ID remapping (COCO IDs are non-contiguous)
         let mut cat_remap: HashMap<u64, usize> = HashMap::new();
         let mut sorted_cats: Vec<u64> = coco.categories.iter().map(|c| c.id).collect();
-        sorted_cats.sort();
+        sorted_cats.sort_unstable();
         for (new_id, &old_id) in sorted_cats.iter().enumerate() {
             cat_remap.insert(old_id, new_id);
         }

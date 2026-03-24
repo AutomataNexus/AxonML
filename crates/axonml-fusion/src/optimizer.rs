@@ -17,6 +17,9 @@
 use crate::error::FusionResult;
 use crate::patterns::{detect_patterns, FusionPattern, OpType};
 
+/// Result of graph optimization: detected patterns with their start/end indices, plus stats.
+pub type OptimizeResult = (Vec<(FusionPattern, usize, usize)>, OptimizationStats);
+
 // =============================================================================
 // Optimizer Configuration
 // =============================================================================
@@ -201,7 +204,7 @@ impl Default for FusionOptimizer {
 pub fn optimize_graph(
     ops: &[OpType],
     config: Option<FusionConfig>,
-) -> FusionResult<(Vec<(FusionPattern, usize, usize)>, OptimizationStats)> {
+) -> FusionResult<OptimizeResult> {
     let mut optimizer = FusionOptimizer::with_config(config.unwrap_or_default());
 
     let patterns = optimizer.analyze(ops);

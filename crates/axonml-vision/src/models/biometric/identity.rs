@@ -138,6 +138,12 @@ pub struct IdentityBank {
     records: HashMap<u64, IdentityRecord>,
 }
 
+impl Default for IdentityBank {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IdentityBank {
     /// Create a new empty identity bank.
     pub fn new() -> Self {

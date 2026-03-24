@@ -28,7 +28,7 @@ flate2 = "1.0"
 dirs.workspace = true
 
 [features]
-default = ["download", "cuda"]
+default = ["download"]
 download = ["reqwest"]
 cuda = ["axonml-tensor/cuda", "axonml-nn/cuda", "axonml-autograd/cuda", "axonml-core/cuda"]
 

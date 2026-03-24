@@ -770,7 +770,7 @@ async fn build_notebook_context(
     if let Some(desc) = &notebook.description {
         context.push_str(&format!("# Description: {}\n", desc));
     }
-    context.push_str("\n");
+    context.push('\n');
 
     // Model info if linked
     if let Some(model_id) = &notebook.model_id {
@@ -784,7 +784,7 @@ async fn build_notebook_context(
             if let Some(desc) = &model.description {
                 context.push_str(&format!("# Description: {}\n", desc));
             }
-            context.push_str("\n");
+            context.push('\n');
         }
     }
 
@@ -800,7 +800,7 @@ async fn build_notebook_context(
             if let Some(desc) = &dataset.description {
                 context.push_str(&format!("# Description: {}\n", desc));
             }
-            context.push_str("\n");
+            context.push('\n');
         }
     }
 

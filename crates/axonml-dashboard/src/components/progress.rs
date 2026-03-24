@@ -199,10 +199,10 @@ pub fn TrainingProgress(
     #[prop(into)] total_steps: MaybeSignal<u32>,
     #[prop(optional, into)] class: String,
 ) -> impl IntoView {
-    let epoch_for_progress = epoch.clone();
-    let total_epochs_for_progress = total_epochs.clone();
-    let step_for_progress = step.clone();
-    let total_steps_for_progress = total_steps.clone();
+    let epoch_for_progress = epoch;
+    let total_epochs_for_progress = total_epochs;
+    let step_for_progress = step;
+    let total_steps_for_progress = total_steps;
 
     let epoch_progress = Signal::derive(move || {
         let t = total_epochs_for_progress.get();

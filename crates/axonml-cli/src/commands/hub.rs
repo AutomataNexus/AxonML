@@ -139,7 +139,7 @@ pub fn execute_list() -> Result<(), String> {
         let cached = if is_cached(&model.name) {
             "✓".green().to_string()
         } else {
-            "".to_string()
+            String::new()
         };
 
         println!(
@@ -334,18 +334,16 @@ pub fn execute_clear(model_name: Option<&str>) -> Result<(), String> {
         } else {
             println!("Model '{}' is not cached.", name);
         }
-    } else {
-        if cache.exists() {
-            let count = fs::read_dir(&cache)
-                .map_err(|e| e.to_string())?
-                .filter(|e| e.is_ok())
-                .count();
+    } else if cache.exists() {
+        let count = fs::read_dir(&cache)
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .count();
 
-            fs::remove_dir_all(&cache).map_err(|e| e.to_string())?;
-            println!("{} Cleared {} cached model(s)", "✓".green(), count);
-        } else {
-            println!("Cache is empty.");
-        }
+        fs::remove_dir_all(&cache).map_err(|e| e.to_string())?;
+        println!("{} Cleared {} cached model(s)", "✓".green(), count);
+    } else {
+        println!("Cache is empty.");
     }
 
     Ok(())

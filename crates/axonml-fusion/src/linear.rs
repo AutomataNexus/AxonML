@@ -49,7 +49,7 @@ impl Activation {
             Activation::None => x,
             Activation::Relu => x.max(0.0),
             Activation::Gelu => {
-                let sqrt_2_over_pi = 0.7978845608028654f32;
+                let sqrt_2_over_pi = 0.797_884_6_f32;
                 let coeff = 0.044715f32;
                 let inner = sqrt_2_over_pi * (x + coeff * x * x * x);
                 x * 0.5 * (1.0 + inner.tanh())

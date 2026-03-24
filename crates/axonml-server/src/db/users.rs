@@ -25,17 +25,14 @@ const COLLECTION: &str = "axonml_users";
 /// User role enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum UserRole {
     Admin,
+    #[default]
     User,
     Viewer,
 }
 
-impl Default for UserRole {
-    fn default() -> Self {
-        UserRole::User
-    }
-}
 
 /// User data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]

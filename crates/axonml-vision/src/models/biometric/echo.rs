@@ -78,6 +78,12 @@ pub struct EchoSpeaker {
     embed_dim: usize,
 }
 
+impl Default for EchoSpeaker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EchoSpeaker {
     /// Create a new Echo speaker model with default configuration.
     ///
@@ -177,9 +183,6 @@ impl EchoSpeaker {
     /// Input: residuals [B, n_mels, T]
     /// Returns: (L2-normalized embedding [B, embed_dim], log_variance [B, 1])
     pub fn encode_residuals(&self, residuals: &Variable) -> (Variable, Variable) {
-        let shape = residuals.shape();
-        let _batch = shape[0];
-
         // Conv encode residuals
         let x = self.res_conv1.forward(residuals).relu();
         let x = self.res_conv2.forward(&x).relu();
@@ -546,8 +549,8 @@ impl EchoSpeaker {
             return 0.0;
         }
 
-        let rate = frames_per_second / best_lag as f32;
-        rate
+        
+        frames_per_second / best_lag as f32
     }
 
     /// Collect all learnable parameters.

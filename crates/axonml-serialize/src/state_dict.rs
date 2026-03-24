@@ -126,19 +126,19 @@ impl StateDict {
         let mut state_dict = Self::new();
 
         let named = module.named_parameters();
-        if !named.is_empty() {
-            for (name, param) in named {
-                let tensor_data = TensorData::from_tensor(&param.data());
-                let entry = StateDictEntry::new(tensor_data, param.requires_grad());
-                state_dict.entries.insert(name, entry);
-            }
-        } else {
+        if named.is_empty() {
             // Fallback for modules that don't implement named_parameters.
             // Always use indexed keys (param_0, param_1, ...) to avoid HashMap
             // collisions when multiple sub-modules share parameter names like
             // "weight" and "bias".
             for (i, param) in module.parameters().iter().enumerate() {
                 let name = format!("param_{i}");
+                let tensor_data = TensorData::from_tensor(&param.data());
+                let entry = StateDictEntry::new(tensor_data, param.requires_grad());
+                state_dict.entries.insert(name, entry);
+            }
+        } else {
+            for (name, param) in named {
                 let tensor_data = TensorData::from_tensor(&param.data());
                 let entry = StateDictEntry::new(tensor_data, param.requires_grad());
                 state_dict.entries.insert(name, entry);

@@ -135,10 +135,10 @@ pub fn polar_unwrap(image: &Variable, config: &PolarUnwrapConfig) -> Variable {
         false,
     );
     // Ensure output lives on the same device as the input (GPU-ready)
-    if image.device() != result.device() {
-        result.to_device(image.device())
-    } else {
+    if image.device() == result.device() {
         result
+    } else {
+        result.to_device(image.device())
     }
 }
 
@@ -203,10 +203,10 @@ pub fn circular_shift(strip: &Variable, shift: isize) -> Variable {
         false,
     );
     // Ensure output lives on the same device as the input (GPU-ready)
-    if strip.device() != result.device() {
-        result.to_device(strip.device())
-    } else {
+    if strip.device() == result.device() {
         result
+    } else {
+        result.to_device(strip.device())
     }
 }
 
@@ -245,10 +245,10 @@ pub fn normalized_polar_unwrap(image: &Variable, config: &PolarUnwrapConfig) -> 
 
     let result = Variable::new(Tensor::from_vec(data, &[batch, 1, rb, ab]).unwrap(), false);
     // Ensure output lives on the same device as the input (GPU-ready)
-    if image.device() != result.device() {
-        result.to_device(image.device())
-    } else {
+    if image.device() == result.device() {
         result
+    } else {
+        result.to_device(image.device())
     }
 }
 
@@ -358,13 +358,13 @@ pub fn assess_polar_quality(strip: &Variable) -> f32 {
         // 1. Radial contrast score (0-1)
         let base = b * rb * ab;
         let slice = &data[base..base + rb * ab];
-        let min = slice.iter().cloned().fold(f32::INFINITY, f32::min);
-        let max = slice.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let min = slice.iter().copied().fold(f32::INFINITY, f32::min);
+        let max = slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let range = (max - min).max(1e-8);
         let contrast_score = (range / 2.0).min(1.0);
 
         // 2. Angular coverage score: detect if large angular sectors are missing (occlusion)
-        let mut sector_means = vec![0.0f32; 8]; // 8 sectors
+        let mut sector_means = [0.0f32; 8]; // 8 sectors
         let sector_size = ab / 8;
         for si in 0..8 {
             let mut sum = 0.0f32;
@@ -377,7 +377,7 @@ pub fn assess_polar_quality(strip: &Variable) -> f32 {
             sector_means[si] = sum / (rb * sector_size) as f32;
         }
         let sector_mean: f32 = sector_means.iter().sum::<f32>() / 8.0;
-        let min_sector = sector_means.iter().cloned().fold(f32::INFINITY, f32::min);
+        let min_sector = sector_means.iter().copied().fold(f32::INFINITY, f32::min);
         // If any sector is much lower than mean, probably occluded
         let coverage_score = if sector_mean > 1e-8 {
             (min_sector / sector_mean).min(1.0)

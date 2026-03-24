@@ -76,7 +76,7 @@ async fn fetch_json<T: DeserializeOwned>(request: RequestBuilder) -> ApiResult<T
     let response = request.send().await?;
     let status = response.status();
 
-    if status >= 200 && status < 300 {
+    if (200..300).contains(&status) {
         response.json::<T>().await.map_err(|e| ApiClientError {
             status,
             message: format!("Failed to parse response: {}", e),
@@ -109,7 +109,7 @@ async fn fetch_json_with_body<T: DeserializeOwned, B: Serialize>(
     let response = request.send().await?;
     let status = response.status();
 
-    if status >= 200 && status < 300 {
+    if (200..300).contains(&status) {
         response.json::<T>().await.map_err(|e| ApiClientError {
             status,
             message: format!("Failed to parse response: {}", e),
@@ -131,7 +131,7 @@ async fn fetch_empty(request: RequestBuilder) -> ApiResult<()> {
     let response = request.send().await?;
     let status = response.status();
 
-    if status >= 200 && status < 300 {
+    if (200..300).contains(&status) {
         Ok(())
     } else {
         let error_text = response
@@ -158,7 +158,7 @@ async fn fetch_empty_with_body<B: Serialize>(builder: RequestBuilder, body: &B) 
     let response = request.send().await?;
     let status = response.status();
 
-    if status >= 200 && status < 300 {
+    if (200..300).contains(&status) {
         Ok(())
     } else {
         let error_text = response
@@ -492,7 +492,7 @@ pub mod models {
         let response = request.send().await?;
         let status = response.status();
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             response
                 .json::<ModelVersion>()
                 .await
@@ -711,7 +711,7 @@ pub mod datasets {
         let response = request.send().await?;
         let status = response.status();
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             response
                 .json::<Dataset>()
                 .await

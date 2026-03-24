@@ -471,7 +471,7 @@ impl GroupSparsity {
         let total = w_vec.len();
 
         // Number of complete groups
-        let num_groups = (total + self.group_size - 1) / self.group_size;
+        let num_groups = total.div_ceil(self.group_size);
 
         // Compute L2 norm per group, then sum (L1 of group norms)
         let mut group_norm_sum = 0.0f32;

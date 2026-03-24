@@ -1,0 +1,6 @@
+# Local machine config — enables CUDA by default for all builds
+# This file is gitignored so CI doesn't pick it up
+
+[build]
+# Uncomment to always enable CUDA features for axonml-vision
+# rustflags = []

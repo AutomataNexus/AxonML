@@ -240,7 +240,7 @@ impl DFLLoss {
                 }
 
                 // Log-softmax
-                let max_val = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let max_val = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 let exp_sum: f32 = logits.iter().map(|&v| (v - max_val).exp()).sum();
                 let log_sum = max_val + exp_sum.ln();
 
@@ -702,22 +702,12 @@ impl HeliosLoss {
 
         // Normalize L2 by image scale so gradient magnitude is stable.
         // anchor_points max ≈ image_size; normalizing by max_coord² puts L2 in ~[0,1] range.
-        let max_coord = all_anchor_points.iter().cloned().fold(1.0f32, f32::max);
+        let max_coord = all_anchor_points.iter().copied().fold(1.0f32, f32::max);
         let box_norm = max_coord * max_coord;
         let box_loss = masked_sq
             .sum()
             .mul_scalar(1.0 / (total_positives as f32 * 4.0 * box_norm));
 
-        // Compute CIoU for monitoring (not used for gradient)
-        let bbox_all_data = bbox_pred_all.data().to_vec();
-        let mut ciou_sum = 0.0f32;
-        for (i, &idx) in pos_anchor_indices.iter().enumerate() {
-            let pb = &bbox_all_data[idx * 4..idx * 4 + 4];
-            let tb = &pos_target_boxes[i * 4..i * 4 + 4];
-            let ciou = CIoULoss::ciou_values(pb, tb, 1)[0];
-            ciou_sum += 1.0 - ciou;
-        }
-        let _ciou_loss_val = ciou_sum / total_positives as f32;
         let box_loss_val = box_loss.data().to_vec()[0];
 
         // DFL loss: box loss already flows gradients through DFL softmax decode
@@ -889,7 +879,7 @@ fn decode_dfl_boxes(
                     }
 
                     // Softmax + weighted sum
-                    let max_val = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                    let max_val = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                     let exp: Vec<f32> = logits.iter().map(|&v| (v - max_val).exp()).collect();
                     let exp_sum: f32 = exp.iter().sum();
                     let mut val = 0.0f32;

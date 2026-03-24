@@ -203,6 +203,12 @@ pub struct AriadneFingerprint {
     embed_dim: usize,
 }
 
+impl Default for AriadneFingerprint {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AriadneFingerprint {
     /// Create a new Ariadne fingerprint model with defaults.
     ///
@@ -314,10 +320,10 @@ impl AriadneFingerprint {
             fingerprint.requires_grad(),
         );
         // Ensure output lives on the same device as the input (GPU-ready)
-        if fingerprint.device() != result.device() {
-            result.to_device(fingerprint.device())
-        } else {
+        if fingerprint.device() == result.device() {
             result
+        } else {
+            result.to_device(fingerprint.device())
         }
     }
 
@@ -434,10 +440,10 @@ impl AriadneFingerprint {
             false,
         );
         // Ensure output lives on the same device as the input (GPU-ready)
-        if fingerprint.device() != result.device() {
-            result.to_device(fingerprint.device())
-        } else {
+        if fingerprint.device() == result.device() {
             result
+        } else {
+            result.to_device(fingerprint.device())
         }
     }
 

@@ -26,7 +26,7 @@
 use rand::Rng;
 use rand::SeedableRng;
 
-use super::panoptes::*;
+use super::panoptes::{FacilityConfig, FacilitySnapshot, EQUIP_AHU, EQUIP_DOAS, EQUIP_BOILER, EQUIP_STEAM_BUNDLE, EQUIP_FAN_COIL, EQUIP_PUMP, EQUIP_CHILLER};
 
 // =============================================================================
 // Operating Mode
@@ -97,30 +97,49 @@ pub enum FaultType {
     Normal,
     /// Valve stuck at a fixed position despite demand change.
     StuckValve {
+        /// Which equipment has the stuck valve.
         equipment_slot: usize,
+        /// Fixed valve position (0.0-1.0).
         position: f32,
     },
     /// Sensor reading drifting from true value.
     SensorDrift {
+        /// Which equipment has the drifting sensor.
         equipment_slot: usize,
+        /// Index of the drifting sensor within the equipment.
         sensor_idx: usize,
+        /// Magnitude of the drift applied to readings.
         drift: f32,
     },
     /// Pump failure — amps drop to 0 while status shows running.
-    PumpFailure { equipment_slot: usize },
+    PumpFailure {
+        /// Which equipment has the failed pump.
+        equipment_slot: usize,
+    },
     /// Freeze protection not activating despite low temps.
-    FreezeProtectFailure { equipment_slot: usize },
+    FreezeProtectFailure {
+        /// Which equipment has the freeze protection failure.
+        equipment_slot: usize,
+    },
     /// Short cycling — rapid on/off toggling.
-    ShortCycling { equipment_slot: usize },
+    ShortCycling {
+        /// Which equipment is short cycling.
+        equipment_slot: usize,
+    },
     /// Cross-equipment: boiler drops but bundles don't respond.
     BoilerCascadeFailure,
     /// Cross-equipment: chiller supply rises but CW pump doesn't speed up.
     ChillerPumpMismatch,
     /// Coil fouling — low delta-T despite high demand.
-    CoilFouling { equipment_slot: usize },
+    CoilFouling {
+        /// Which equipment has the fouled coil.
+        equipment_slot: usize,
+    },
     /// Damper stuck — position doesn't match command.
     DamperStuck {
+        /// Which equipment has the stuck damper.
         equipment_slot: usize,
+        /// Fixed damper position (0.0-1.0).
         position: f32,
     },
 }
@@ -167,7 +186,7 @@ impl WarrenSimulator {
 
             // Time of day affects occupancy (0-23)
             let hour = (i % 24) as f32;
-            let occupied = hour >= 6.0 && hour <= 22.0;
+            let occupied = (6.0..=22.0).contains(&hour);
 
             let snap = self.simulate_snapshot(&mut rng, oat, occupied, &FaultType::Normal);
             snapshots.push(snap);
@@ -187,10 +206,10 @@ impl WarrenSimulator {
         let mut rng = rand::rngs::StdRng::seed_from_u64(self.rng_seed + 1000);
         let mut samples = Vec::with_capacity(count);
 
-        for i in 0..count {
+        for _i in 0..count {
             let oat = -10.0 + rng.gen_range(0.0..110.0);
             let hour = rng.gen_range(0.0..24.0);
-            let occupied = hour >= 6.0 && hour <= 22.0;
+            let occupied = (6.0..=22.0).contains(&hour);
 
             let (fault, affected) = if rng.gen::<f32>() < fault_ratio {
                 self.random_fault(&mut rng)
@@ -220,7 +239,7 @@ impl WarrenSimulator {
 
         for step in 0..length {
             let hour = ((step % 288) as f32 / 12.0) % 24.0; // 5-min intervals
-            let occupied = hour >= 6.0 && hour <= 22.0;
+            let occupied = (6.0..=22.0).contains(&hour);
 
             let snap = self.simulate_snapshot(&mut rng, oat, occupied, &FaultType::Normal);
             snapshots.push(snap);
@@ -256,7 +275,7 @@ impl WarrenSimulator {
 
         for step in 0..length {
             let hour = ((step % 288) as f32 / 12.0) % 24.0;
-            let occupied = hour >= 6.0 && hour <= 22.0;
+            let occupied = (6.0..=22.0).contains(&hour);
 
             let current_fault = if step >= fault_onset {
                 &fault
@@ -486,7 +505,7 @@ impl WarrenSimulator {
         &self,
         rng: &mut impl Rng,
         snap: &mut FacilitySnapshot,
-        oat: f32,
+        _oat: f32,
         mode: HvacMode,
         fault: &FaultType,
     ) {
@@ -643,7 +662,7 @@ impl WarrenSimulator {
         &self,
         rng: &mut impl Rng,
         snap: &mut FacilitySnapshot,
-        oat: f32,
+        _oat: f32,
         mode: HvacMode,
         occupied: bool,
         fault: &FaultType,
@@ -774,7 +793,7 @@ impl WarrenSimulator {
         &self,
         rng: &mut impl Rng,
         snap: &mut FacilitySnapshot,
-        oat: f32,
+        _oat: f32,
         mode: HvacMode,
         fault: &FaultType,
     ) {

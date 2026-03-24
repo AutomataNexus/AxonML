@@ -84,6 +84,12 @@ pub struct ArgusIris {
     embed_dim: usize,
 }
 
+impl Default for ArgusIris {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArgusIris {
     /// Create a new Argus iris model with default configuration.
     pub fn new() -> Self {
@@ -250,10 +256,10 @@ impl ArgusIris {
             false,
         );
         // Ensure gradient variable lives on the same device as the input (GPU-ready)
-        let grad_var = if polar_strip.device() != grad_var.device() {
-            grad_var.to_device(polar_strip.device())
-        } else {
+        let grad_var = if polar_strip.device() == grad_var.device() {
             grad_var
+        } else {
+            grad_var.to_device(polar_strip.device())
         };
         let phase_out = self.phase_conv.forward(&grad_var).relu();
         // [B*R', 32, A']
@@ -405,10 +411,10 @@ impl ArgusIris {
             false,
         );
         // Ensure output lives on the same device as the input (GPU-ready)
-        if strip.device() != result.device() {
-            result.to_device(strip.device())
-        } else {
+        if strip.device() == result.device() {
             result
+        } else {
+            result.to_device(strip.device())
         }
     }
 

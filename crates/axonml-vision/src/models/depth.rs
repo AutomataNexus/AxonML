@@ -354,6 +354,12 @@ pub struct FastDepth {
     relu: ReLU,
 }
 
+impl Default for FastDepth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FastDepth {
     /// Create FastDepth for 224x224 input.
     pub fn new() -> Self {

@@ -136,6 +136,7 @@ impl SecretsManager {
     }
 
     /// Check if any backends are configured
+    #[allow(dead_code)]
     pub fn has_backends(&self) -> bool {
         !self.backends.is_empty()
     }

@@ -153,7 +153,7 @@ impl Phantom {
                     let cy = (fy as f32 + 0.5) * stride;
 
                     let dx = bbox_data[0 * fh * fw + fy * fw + fx];
-                    let dy = bbox_data[1 * fh * fw + fy * fw + fx];
+                    let dy = bbox_data[fh * fw + fy * fw + fx];
                     let dw = bbox_data[2 * fh * fw + fy * fw + fx];
                     let dh = bbox_data[3 * fh * fw + fy * fw + fx];
 

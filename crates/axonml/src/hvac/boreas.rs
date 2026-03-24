@@ -60,6 +60,12 @@ pub struct Boreas {
     training: bool,
 }
 
+impl Default for Boreas {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Boreas {
     /// Creates a new Boreas model.
     pub fn new() -> Self {

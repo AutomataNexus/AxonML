@@ -35,6 +35,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **1076+ pass
 | **Optimizers** | SGD, Adam, AdamW, RMSprop, LAMB with LR schedulers |
 | **Distributed Training** | DDP, FSDP (ZeRO-2/3), Pipeline Parallelism |
 | **Model Formats** | ONNX import/export (40+ operators), SafeTensors |
+| **Vision Models** | ResNet, ViT, Helios, NightVision (IR detection), Biometric Suite (Argus, Echo, Mnemosyne) |
 | **GPU Backends** | CUDA, Vulkan, Metal, WebGPU |
 
 ## Architecture

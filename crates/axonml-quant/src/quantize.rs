@@ -90,7 +90,7 @@ pub fn quantize_model(
 /// Quantizes data to Q8_0 format (8-bit with per-block scale).
 fn quantize_q8_0(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor> {
     let block_size = DEFAULT_BLOCK_SIZE;
-    let n_blocks = (data.len() + block_size - 1) / block_size;
+    let n_blocks = data.len().div_ceil(block_size);
 
     let blocks: Vec<QuantizedBlock> = (0..n_blocks)
         .into_par_iter()
@@ -129,7 +129,7 @@ fn quantize_q8_0(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor
 /// Quantizes data to Q4_0 format (4-bit with per-block scale).
 fn quantize_q4_0(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor> {
     let block_size = DEFAULT_BLOCK_SIZE;
-    let n_blocks = (data.len() + block_size - 1) / block_size;
+    let n_blocks = data.len().div_ceil(block_size);
 
     let blocks: Vec<QuantizedBlock> = (0..n_blocks)
         .into_par_iter()
@@ -171,7 +171,7 @@ fn quantize_q4_0(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor
 /// Quantizes data to Q4_1 format (4-bit with per-block scale and min).
 fn quantize_q4_1(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor> {
     let block_size = DEFAULT_BLOCK_SIZE;
-    let n_blocks = (data.len() + block_size - 1) / block_size;
+    let n_blocks = data.len().div_ceil(block_size);
 
     let blocks: Vec<QuantizedBlock> = (0..n_blocks)
         .into_par_iter()
