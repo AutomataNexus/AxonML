@@ -30,11 +30,14 @@ use crate::error::{CliError, CliResult};
 
 /// Get the AxonML data directory
 fn get_data_dir() -> PathBuf {
-    std::env::var("AXONML_HOME").map_or_else(|_| {
+    std::env::var("AXONML_HOME").map_or_else(
+        |_| {
             dirs::data_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("axonml")
-        }, PathBuf::from)
+        },
+        PathBuf::from,
+    )
 }
 
 /// Get the PID file path for a service

@@ -28,8 +28,7 @@ impl NodeId {
 }
 
 /// Data type for tensor elements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum DataType {
     /// 32-bit floating point.
     #[default]
@@ -54,7 +53,6 @@ impl DataType {
         }
     }
 }
-
 
 /// Shape of a tensor (dimensions).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

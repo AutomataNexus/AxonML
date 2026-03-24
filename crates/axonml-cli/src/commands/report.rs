@@ -107,13 +107,22 @@ impl TrainingHistory {
                 if let Some(loss) = record.get("val_loss").and_then(serde_json::Value::as_f64) {
                     history.val_loss.push(loss);
                 }
-                if let Some(acc) = record.get("train_accuracy").and_then(serde_json::Value::as_f64) {
+                if let Some(acc) = record
+                    .get("train_accuracy")
+                    .and_then(serde_json::Value::as_f64)
+                {
                     history.train_accuracy.push(acc);
                 }
-                if let Some(acc) = record.get("val_accuracy").and_then(serde_json::Value::as_f64) {
+                if let Some(acc) = record
+                    .get("val_accuracy")
+                    .and_then(serde_json::Value::as_f64)
+                {
                     history.val_accuracy.push(acc);
                 }
-                if let Some(lr) = record.get("learning_rate").and_then(serde_json::Value::as_f64) {
+                if let Some(lr) = record
+                    .get("learning_rate")
+                    .and_then(serde_json::Value::as_f64)
+                {
                     history.learning_rates.push(lr);
                 }
             }
@@ -124,23 +133,37 @@ impl TrainingHistory {
                     if let Some(epoch) = record.get("epoch").and_then(serde_json::Value::as_u64) {
                         history.epochs.push(epoch as usize);
                     }
-                    if let Some(loss) = record.get("train_loss").and_then(serde_json::Value::as_f64) {
+                    if let Some(loss) = record.get("train_loss").and_then(serde_json::Value::as_f64)
+                    {
                         history.train_loss.push(loss);
-                    } else if let Some(loss) = record.get("loss").and_then(serde_json::Value::as_f64) {
+                    } else if let Some(loss) =
+                        record.get("loss").and_then(serde_json::Value::as_f64)
+                    {
                         history.train_loss.push(loss);
                     }
                     if let Some(loss) = record.get("val_loss").and_then(serde_json::Value::as_f64) {
                         history.val_loss.push(loss);
                     }
-                    if let Some(acc) = record.get("train_accuracy").and_then(serde_json::Value::as_f64) {
+                    if let Some(acc) = record
+                        .get("train_accuracy")
+                        .and_then(serde_json::Value::as_f64)
+                    {
                         history.train_accuracy.push(acc);
-                    } else if let Some(acc) = record.get("accuracy").and_then(serde_json::Value::as_f64) {
+                    } else if let Some(acc) =
+                        record.get("accuracy").and_then(serde_json::Value::as_f64)
+                    {
                         history.train_accuracy.push(acc);
                     }
-                    if let Some(acc) = record.get("val_accuracy").and_then(serde_json::Value::as_f64) {
+                    if let Some(acc) = record
+                        .get("val_accuracy")
+                        .and_then(serde_json::Value::as_f64)
+                    {
                         history.val_accuracy.push(acc);
                     }
-                    if let Some(lr) = record.get("learning_rate").and_then(serde_json::Value::as_f64) {
+                    if let Some(lr) = record
+                        .get("learning_rate")
+                        .and_then(serde_json::Value::as_f64)
+                    {
                         history.learning_rates.push(lr);
                     } else if let Some(lr) = record.get("lr").and_then(serde_json::Value::as_f64) {
                         history.learning_rates.push(lr);

@@ -87,7 +87,6 @@ pub enum EndpointStatus {
     Error,
 }
 
-
 /// Inference endpoint data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Endpoint {

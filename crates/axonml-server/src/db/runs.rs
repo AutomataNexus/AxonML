@@ -36,7 +36,6 @@ pub enum RunStatus {
     Stopped,
 }
 
-
 /// Training run configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunConfig {

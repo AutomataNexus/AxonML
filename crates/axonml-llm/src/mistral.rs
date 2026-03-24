@@ -325,9 +325,7 @@ impl MistralAttention {
             let pos = offset + i;
             for j in 0..kv_len {
                 // Can't attend to future positions or beyond sliding window
-                if j > pos
-                    || (pos >= self.sliding_window && j < pos - self.sliding_window + 1)
-                {
+                if j > pos || (pos >= self.sliding_window && j < pos - self.sliding_window + 1) {
                     mask_data[i * kv_len + j] = f32::NEG_INFINITY;
                 }
             }

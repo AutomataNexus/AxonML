@@ -25,8 +25,7 @@ use axonml_tensor::Tensor;
 // =============================================================================
 
 /// Strategy for sharding parameters in FSDP.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ShardingStrategy {
     /// Shard parameters, gradients, and optimizer state (ZeRO-3)
     #[default]
@@ -38,7 +37,6 @@ pub enum ShardingStrategy {
     /// Hybrid sharding within node, replicate across nodes
     HybridShard,
 }
-
 
 // =============================================================================
 // FSDP State
@@ -59,8 +57,7 @@ struct ShardedParam {
 }
 
 /// CPU offload configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CPUOffload {
     /// No CPU offloading
     #[default]
@@ -70,7 +67,6 @@ pub enum CPUOffload {
     /// Offload both parameters and gradients
     Full,
 }
-
 
 // =============================================================================
 // Fully Sharded Data Parallel

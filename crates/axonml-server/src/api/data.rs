@@ -44,7 +44,6 @@ pub enum DatasetType {
     Unknown,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataStatistics {
     pub total_size_bytes: u64,

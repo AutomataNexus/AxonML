@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 
 use axonml_autograd::Variable;
-use axonml_nn::layers::{Linear, LayerNorm, Embedding, TransformerEncoder, LSTM};
+use axonml_nn::layers::{Embedding, LayerNorm, Linear, TransformerEncoder, LSTM};
 use axonml_nn::parameter::Parameter;
 use axonml_nn::Module;
 use axonml_tensor::Tensor;

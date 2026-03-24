@@ -128,10 +128,7 @@ impl ComputeProfiler {
             bytes: None,
         };
 
-        self.active
-            .entry(name.to_string())
-            .or_default()
-            .push(op);
+        self.active.entry(name.to_string()).or_default().push(op);
     }
 
     /// Starts profiling an operation with FLOPS count.
@@ -143,10 +140,7 @@ impl ComputeProfiler {
             bytes: None,
         };
 
-        self.active
-            .entry(name.to_string())
-            .or_default()
-            .push(op);
+        self.active.entry(name.to_string()).or_default().push(op);
     }
 
     /// Starts profiling an operation with bytes processed.
@@ -158,10 +152,7 @@ impl ComputeProfiler {
             bytes: Some(bytes),
         };
 
-        self.active
-            .entry(name.to_string())
-            .or_default()
-            .push(op);
+        self.active.entry(name.to_string()).or_default().push(op);
     }
 
     /// Stops profiling an operation and records its duration.

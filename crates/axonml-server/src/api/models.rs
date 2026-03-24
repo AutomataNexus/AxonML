@@ -620,8 +620,9 @@ pub async fn download_version(
     let mut file_path: Option<PathBuf> = None;
 
     if version_dir.exists() {
-        for entry in
-            std::fs::read_dir(&version_dir).map_err(|e| AuthError::Internal(e.to_string()))?.flatten()
+        for entry in std::fs::read_dir(&version_dir)
+            .map_err(|e| AuthError::Internal(e.to_string()))?
+            .flatten()
         {
             let path = entry.path();
             if path.is_file() {
