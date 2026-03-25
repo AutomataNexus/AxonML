@@ -300,15 +300,16 @@ fn run_gpu_benchmark(gpu_id: usize, iterations: usize) -> CliResult<BenchmarkRes
     // Use all backends to support WSL2, native Windows, and native Linux
     let backends = Backends::all();
 
-    let instance = Instance::new(InstanceDescriptor {
-        backends,
-        ..Default::default()
+    let instance = Instance::new({
+        let mut desc = InstanceDescriptor::new_without_display_handle();
+        desc.backends = backends;
+        desc
     });
 
     // Get only NVIDIA (CUDA) adapters
     // Check both vendor ID and name (for WSL2/D3D12 passthrough)
-    let adapters: Vec<_> = instance
-        .enumerate_adapters(backends)
+    let all_adapters = pollster::block_on(instance.enumerate_adapters(backends));
+    let adapters: Vec<_> = all_adapters
         .into_iter()
         .filter(|a| {
             let info = a.get_info();
@@ -332,15 +333,14 @@ fn run_gpu_benchmark(gpu_id: usize, iterations: usize) -> CliResult<BenchmarkRes
     // Request device
     let (device, queue) = pollster::block_on(async {
         adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("Benchmark Device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    memory_hints: MemoryHints::Performance,
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("Benchmark Device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: MemoryHints::Performance,
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+                trace: wgpu::Trace::Off,
+            })
             .await
     })
     .map_err(|e| CliError::Gpu(format!("Failed to create device: {e}")))?;
@@ -395,7 +395,12 @@ fn benchmark_buffer_copy(
         });
         encoder.copy_buffer_to_buffer(&src_buffer, 0, &dst_buffer, 0, size);
         queue.submit(std::iter::once(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .unwrap();
     }
 
     // Benchmark
@@ -406,7 +411,12 @@ fn benchmark_buffer_copy(
         });
         encoder.copy_buffer_to_buffer(&src_buffer, 0, &dst_buffer, 0, size);
         queue.submit(std::iter::once(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .unwrap();
     }
     let elapsed = start.elapsed();
 
@@ -509,8 +519,8 @@ fn benchmark_compute_dispatch(
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Pipeline Layout"),
-        bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
     });
 
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -558,7 +568,12 @@ fn benchmark_compute_dispatch(
             compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
         }
         queue.submit(std::iter::once(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .unwrap();
     }
 
     // Benchmark
@@ -577,7 +592,12 @@ fn benchmark_compute_dispatch(
             compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
         }
         queue.submit(std::iter::once(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .unwrap();
     }
     let elapsed = start.elapsed();
 
@@ -646,12 +666,13 @@ fn execute_status() -> CliResult<()> {
     print_header("All Detected Adapters (Diagnostics)");
     println!();
 
-    let instance = Instance::new(InstanceDescriptor {
-        backends: Backends::all(),
-        ..Default::default()
+    let instance = Instance::new({
+        let mut desc = InstanceDescriptor::new_without_display_handle();
+        desc.backends = Backends::all();
+        desc
     });
 
-    let all_adapters = instance.enumerate_adapters(Backends::all());
+    let all_adapters = pollster::block_on(instance.enumerate_adapters(Backends::all()));
 
     if all_adapters.is_empty() {
         print_warning("No GPU adapters detected by wgpu.");
@@ -769,12 +790,13 @@ fn detect_gpus() -> CliResult<Vec<GpuInfo>> {
     // WSL2 exposes GPUs through various backends depending on driver setup
     let backends = Backends::all();
 
-    let instance = Instance::new(InstanceDescriptor {
-        backends,
-        ..Default::default()
+    let instance = Instance::new({
+        let mut desc = InstanceDescriptor::new_without_display_handle();
+        desc.backends = backends;
+        desc
     });
 
-    let adapters = instance.enumerate_adapters(backends);
+    let adapters = pollster::block_on(instance.enumerate_adapters(backends));
 
     let mut gpus = Vec::new();
     let mut gpu_id = 0;
@@ -808,13 +830,14 @@ fn detect_gpus() -> CliResult<Vec<GpuInfo>> {
 
         // Get the actual backend being used
         // For NVIDIA GPUs, all backends can use CUDA compute
+        #[allow(clippy::match_wildcard_for_single_variants)]
         let backend = match info.backend {
             wgpu::Backend::Vulkan => "Vulkan/CUDA",
             wgpu::Backend::Dx12 => "DX12/CUDA",
             wgpu::Backend::Metal => "Metal",
             wgpu::Backend::Gl => "GL/CUDA", // WSL2 passthrough
             wgpu::Backend::BrowserWebGpu => "WebGPU",
-            wgpu::Backend::Empty => "None",
+            _ => "Unknown",
         };
 
         // Get memory limits
