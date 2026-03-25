@@ -5,7 +5,7 @@
 # A PyTorch-equivalent machine learning framework written in pure Rust.
 # Provides tensors, automatic differentiation, neural networks, and more.
 #
-# @version 0.4.2
+# @version 0.4.3
 # @author AutomataNexus Development Team
 # @license MIT OR Apache-2.0
 # =============================================================================
@@ -38,7 +38,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 rust-version = "1.85"
 authors = ["AutomataNexus Development Team"]
@@ -87,7 +87,7 @@ rustc-hash = "2.1"
 
 # GPU backends
 cudarc = { version = "0.19", features = ["std", "driver", "cublas", "curand", "cudnn", "nvrtc", "cuda-12060"] }
-wgpu = "23.0"
+wgpu = "29.0"
 ash = "0.38"
 gpu-allocator = "0.27"
 

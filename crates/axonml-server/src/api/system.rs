@@ -425,12 +425,13 @@ fn detect_gpus() -> Vec<GpuInfo> {
 }
 
 fn detect_gpus_wgpu() -> Vec<GpuInfo> {
-    let instance = Instance::new(InstanceDescriptor {
-        backends: Backends::all(),
-        ..Default::default()
+    let instance = Instance::new({
+        let mut desc = InstanceDescriptor::new_without_display_handle();
+        desc.backends = Backends::all();
+        desc
     });
 
-    let adapters = instance.enumerate_adapters(Backends::all());
+    let adapters = pollster::block_on(instance.enumerate_adapters(Backends::all()));
     let mut gpus = Vec::new();
     let mut gpu_id = 0;
 
@@ -488,7 +489,7 @@ fn detect_gpus_wgpu() -> Vec<GpuInfo> {
             wgpu::Backend::Metal => "Metal",
             wgpu::Backend::Gl => "OpenGL",
             wgpu::Backend::BrowserWebGpu => "WebGPU",
-            wgpu::Backend::Empty => "None",
+            _ => "Unknown",
         };
 
         let limits = adapter.limits();
@@ -582,14 +583,15 @@ fn detect_gpus_nvidia_smi() -> Vec<GpuInfo> {
 // ============================================================================
 
 fn run_gpu_benchmark(gpu_id: usize) -> Result<BenchmarkResult, String> {
-    let instance = Instance::new(InstanceDescriptor {
-        backends: Backends::all(),
-        ..Default::default()
+    let instance = Instance::new({
+        let mut desc = InstanceDescriptor::new_without_display_handle();
+        desc.backends = Backends::all();
+        desc
     });
 
     // Filter to only real GPUs (not CPU software renderers)
-    let adapters: Vec<_> = instance
-        .enumerate_adapters(Backends::all())
+    let all_adapters = pollster::block_on(instance.enumerate_adapters(Backends::all()));
+    let adapters: Vec<_> = all_adapters
         .into_iter()
         .filter(|a| {
             let info = a.get_info();
@@ -606,15 +608,14 @@ fn run_gpu_benchmark(gpu_id: usize) -> Result<BenchmarkResult, String> {
 
     let (device, queue) = pollster::block_on(async {
         adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("Benchmark Device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    memory_hints: MemoryHints::Performance,
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("Benchmark Device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: MemoryHints::Performance,
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+                trace: wgpu::Trace::Off,
+            })
             .await
     })
     .map_err(|e| format!("Failed to create device: {}", e))?;
@@ -670,7 +671,12 @@ fn benchmark_buffer_copy(
         });
         encoder.copy_buffer_to_buffer(&src_buffer, 0, &dst_buffer, 0, size);
         queue.submit(std::iter::once(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .unwrap();
     }
 
     // Benchmark
@@ -681,7 +687,12 @@ fn benchmark_buffer_copy(
         });
         encoder.copy_buffer_to_buffer(&src_buffer, 0, &dst_buffer, 0, size);
         queue.submit(std::iter::once(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .unwrap();
     }
     let elapsed = start.elapsed();
 
@@ -779,8 +790,8 @@ fn benchmark_compute_dispatch(
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Pipeline Layout"),
-        bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
     });
 
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -828,7 +839,12 @@ fn benchmark_compute_dispatch(
             compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
         }
         queue.submit(std::iter::once(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .unwrap();
     }
 
     // Benchmark
@@ -847,7 +863,12 @@ fn benchmark_compute_dispatch(
             compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
         }
         queue.submit(std::iter::once(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .unwrap();
     }
     let elapsed = start.elapsed();
 
