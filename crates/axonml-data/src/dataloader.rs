@@ -280,33 +280,75 @@ pub struct GpuPrefetchIter {
 }
 
 impl GpuPrefetchIter {
-    /// Creates a new GPU prefetch iterator from a batch source and target device.
+    /// Creates a GPU prefetch iterator that streams batches lazily.
     ///
-    /// Spawns a background thread that pulls batches from `batches`, transfers
-    /// them to `device`, and sends them through a single-slot channel.
-    fn new(batches: Vec<Batch>, device: Device) -> Self {
-        // Use a bounded channel with capacity 1 (single-slot buffer).
-        // This ensures at most one batch is prefetched ahead, providing
-        // overlap without excessive GPU memory usage.
-        let (tx, rx) = mpsc::sync_channel(1);
+    /// Spawns a background thread that produces batches one at a time from the
+    /// dataset, transfers them to `device`, and sends through a bounded channel.
+    /// Only 2 batches are buffered at any time — no eager materialization.
+    fn new_streaming<D>(
+        dataset: D,
+        indices: Vec<usize>,
+        batch_size: usize,
+        drop_last: bool,
+        num_workers: usize,
+        device: Device,
+    ) -> Self
+    where
+        D: Dataset<Item = (Tensor<f32>, Tensor<f32>)> + 'static,
+    {
+        // Bounded channel: at most 2 batches buffered (current + next).
+        let (tx, rx) = mpsc::sync_channel(2);
 
         let worker = thread::spawn(move || {
-            for batch in batches {
-                // Transfer data and targets to the GPU device
-                let gpu_data = match batch.data.to_device(device) {
-                    Ok(t) => t,
-                    Err(_) => batch.data, // Fall back to CPU if transfer fails
-                };
-                let gpu_targets = match batch.targets.to_device(device) {
-                    Ok(t) => t,
-                    Err(_) => batch.targets,
-                };
+            let mut position = 0;
+            while position < indices.len() {
+                let end = (position + batch_size).min(indices.len());
+                let batch_indices = &indices[position..end];
 
-                let gpu_batch = Batch::new(gpu_data, gpu_targets);
-                // If the receiver is dropped (iterator abandoned), stop prefetching
-                if tx.send(gpu_batch).is_err() {
+                if batch_indices.len() < batch_size && drop_last {
                     break;
                 }
+
+                // Collect samples for this batch
+                let samples: Vec<(Tensor<f32>, Tensor<f32>)> = if num_workers > 0 {
+                    batch_indices
+                        .par_iter()
+                        .filter_map(|&idx| dataset.get(idx))
+                        .collect()
+                } else {
+                    batch_indices
+                        .iter()
+                        .filter_map(|&idx| dataset.get(idx))
+                        .collect()
+                };
+
+                if samples.is_empty() {
+                    break;
+                }
+
+                let data_samples: Vec<Tensor<f32>> =
+                    samples.iter().map(|(x, _)| x.clone()).collect();
+                let target_samples: Vec<Tensor<f32>> =
+                    samples.iter().map(|(_, y)| y.clone()).collect();
+
+                let data = stack_tensors(&data_samples);
+                let targets = stack_tensors(&target_samples);
+
+                // Transfer to GPU
+                let gpu_data = match data.to_device(device) {
+                    Ok(t) => t,
+                    Err(_) => data,
+                };
+                let gpu_targets = match targets.to_device(device) {
+                    Ok(t) => t,
+                    Err(_) => targets,
+                };
+
+                if tx.send(Batch::new(gpu_data, gpu_targets)).is_err() {
+                    break;
+                }
+
+                position = end;
             }
         });
 
@@ -332,11 +374,9 @@ where
     /// Returns an iterator that prefetches batches onto the target GPU device
     /// in a background thread.
     ///
-    /// This overlaps CPU data loading and collation with GPU computation:
-    /// while the training loop processes the current GPU-resident batch,
-    /// the background thread loads and transfers the next batch.
-    ///
-    /// Typically provides 10-30% speedup on GPU training workloads.
+    /// Batches are produced lazily — only 2 are buffered at any time, avoiding
+    /// the O(dataset_size) memory spike of eager collection. The background
+    /// thread overlaps CPU data loading with GPU computation.
     ///
     /// # Arguments
     /// * `device` - Target GPU device (e.g., `Device::Cuda(0)`)
@@ -348,10 +388,25 @@ where
     ///     // batch.data and batch.targets are already on GPU
     /// }
     /// ```
-    pub fn prefetch_to_gpu(&self, device: Device) -> GpuPrefetchIter {
-        // Collect all batches from the CPU iterator first
-        let batches: Vec<Batch> = self.iter().collect();
-        GpuPrefetchIter::new(batches, device)
+    pub fn prefetch_to_gpu(&self, device: Device) -> GpuPrefetchIter
+    where
+        D: Clone + 'static,
+    {
+        let indices: Vec<usize> = if self.shuffle {
+            let sampler = RandomSampler::new(self.dataset.len());
+            sampler.iter().collect()
+        } else {
+            (0..self.dataset.len()).collect()
+        };
+
+        GpuPrefetchIter::new_streaming(
+            self.dataset.clone(),
+            indices,
+            self.batch_size,
+            self.drop_last,
+            self.num_workers,
+            device,
+        )
     }
 }
 

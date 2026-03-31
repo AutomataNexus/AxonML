@@ -83,6 +83,17 @@ fn dot_block(block: &QuantizedBlock, activations: &[f32]) -> f32 {
         QuantizedBlock::Q8(b) => dot_q8_block(b, activations),
         QuantizedBlock::Q4(b) => dot_q4_block(b, activations),
         QuantizedBlock::Q4_1(b) => dot_q4_1_block(b, activations),
+        QuantizedBlock::Q5(b) => {
+            let scale = b.scale.to_f32();
+            let values = b.unpack();
+            values.iter().zip(activations).map(|(&v, &a)| v as f32 * scale * a).sum()
+        }
+        QuantizedBlock::Q5_1(b) => {
+            let scale = b.scale.to_f32();
+            let min = b.min.to_f32();
+            let values = b.unpack();
+            values.iter().zip(activations).map(|(&v, &a)| (v as f32 * scale + min) * a).sum()
+        }
         QuantizedBlock::F16(data) => dot_f16_block(data, activations),
         QuantizedBlock::F32(data) => {
             let mut sum = 0.0f32;
@@ -422,6 +433,12 @@ pub fn serialize_quantized(model: &QuantizedModel) -> Vec<u8> {
                     buf.extend_from_slice(&b.to_bytes());
                 }
                 QuantizedBlock::Q4_1(b) => {
+                    buf.extend_from_slice(&b.to_bytes());
+                }
+                QuantizedBlock::Q5(b) => {
+                    buf.extend_from_slice(&b.to_bytes());
+                }
+                QuantizedBlock::Q5_1(b) => {
                     buf.extend_from_slice(&b.to_bytes());
                 }
                 QuantizedBlock::F16(data) => {

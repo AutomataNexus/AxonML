@@ -47,9 +47,9 @@ impl From<gloo_net::Error> for ApiClientError {
 
 pub type ApiResult<T> = Result<T, ApiClientError>;
 
-/// Get the stored access token from localStorage
+/// Get the stored access token from sessionStorage
 fn get_token() -> Option<String> {
-    gloo_storage::LocalStorage::get("access_token").ok()
+    gloo_storage::SessionStorage::get(crate::constants::ACCESS_TOKEN_KEY).ok()
 }
 
 /// Build a request with optional authentication

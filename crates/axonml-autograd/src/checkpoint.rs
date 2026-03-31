@@ -19,7 +19,26 @@ use crate::grad_fn::{GradFn, GradientFunction};
 use crate::no_grad::{enable_grad, no_grad};
 use axonml_tensor::Tensor;
 use std::any::Any;
+use std::cell::Cell;
 use std::sync::Arc;
+
+// Thread-local deterministic RNG seed for checkpoint recomputation.
+// When set (non-zero), dropout and other stochastic ops should use this
+// seed instead of thread_rng() to ensure reproducible recomputation.
+thread_local! {
+    static CHECKPOINT_RNG_SEED: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Returns the checkpoint RNG seed if one is active (non-zero).
+/// Stochastic operations (dropout) should check this and use a
+/// deterministic RNG when it's set, ensuring checkpoint recomputation
+/// produces identical results to the original forward pass.
+pub fn checkpoint_rng_seed() -> Option<u64> {
+    CHECKPOINT_RNG_SEED.with(|s| {
+        let v = s.get();
+        if v != 0 { Some(v) } else { None }
+    })
+}
 
 // =============================================================================
 // CheckpointBackward
@@ -38,6 +57,9 @@ struct CheckpointBackward {
     saved_input: Variable,
     /// next_functions pointing to the input's grad_fn
     next_fns: Vec<Option<GradFn>>,
+    /// RNG seed captured before forward pass, restored before recomputation
+    /// so stochastic ops (dropout) produce identical results
+    rng_seed: u64,
 }
 
 impl std::fmt::Debug for CheckpointBackward {
@@ -50,10 +72,18 @@ impl std::fmt::Debug for CheckpointBackward {
 
 impl GradientFunction for CheckpointBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        // Set the checkpoint RNG seed so stochastic ops (dropout) use a
+        // deterministic RNG during recomputation, producing identical results
+        // to the original forward pass.
+        CHECKPOINT_RNG_SEED.with(|s| s.set(self.rng_seed));
+
         // Re-run the forward pass with gradients enabled
         let input_for_recompute = Variable::new(self.saved_input.data(), true);
 
         let recomputed_output = enable_grad(|| (self.func)(&input_for_recompute));
+
+        // Clear the checkpoint seed
+        CHECKPOINT_RNG_SEED.with(|s| s.set(0));
 
         // Now run backward on the recomputed output to get gradients
         recomputed_output.backward_with_grad(grad_output);
@@ -102,8 +132,29 @@ pub fn checkpoint<F>(func: F, input: &Variable) -> Variable
 where
     F: Fn(&Variable) -> Variable + Send + Sync + 'static,
 {
+    // Capture a deterministic RNG seed before the forward pass.
+    // This seed will be used during backward recomputation so stochastic
+    // ops (dropout) produce identical results.
+    let rng_seed = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .hash(&mut hasher);
+        hasher.finish()
+    };
+
+    // Set the seed for the forward pass too, so dropout uses the same seed
+    CHECKPOINT_RNG_SEED.with(|s| s.set(rng_seed));
+
     // Run forward pass without gradient tracking to avoid storing activations
     let output = no_grad(|| func(input));
+
+    // Clear the seed after forward
+    CHECKPOINT_RNG_SEED.with(|s| s.set(0));
 
     // If input doesn't require gradients, just return the output
     if !input.requires_grad() {
@@ -119,6 +170,7 @@ where
         func: func_arc,
         saved_input: Variable::new(input.data(), false), // detached copy
         next_fns,
+        rng_seed,
     });
 
     Variable::from_operation(output.data(), grad_fn, true)

@@ -100,15 +100,33 @@ impl Transform for ToTensor {
 // =============================================================================
 
 /// Normalizes a tensor with mean and standard deviation.
+///
+/// Supports both scalar normalization (applied uniformly) and per-channel
+/// normalization (PyTorch-style `transforms.Normalize(mean=[...], std=[...])`).
+/// For per-channel mode, the tensor is expected to have shape `[C, H, W]` or
+/// `[N, C, H, W]`.
 pub struct Normalize {
-    mean: f32,
-    std: f32,
+    mean: Vec<f32>,
+    std: Vec<f32>,
 }
 
 impl Normalize {
-    /// Creates a new Normalize transform.
+    /// Creates a new scalar Normalize transform (applied uniformly to all elements).
     #[must_use]
     pub fn new(mean: f32, std: f32) -> Self {
+        Self {
+            mean: vec![mean],
+            std: vec![std],
+        }
+    }
+
+    /// Creates a per-channel Normalize transform (PyTorch-compatible).
+    ///
+    /// For a `[C, H, W]` tensor, `mean` and `std` must have length `C`.
+    /// Each channel is normalized independently: `output[c] = (input[c] - mean[c]) / std[c]`.
+    #[must_use]
+    pub fn per_channel(mean: Vec<f32>, std: Vec<f32>) -> Self {
+        assert_eq!(mean.len(), std.len(), "mean and std must have same length");
         Self { mean, std }
     }
 
@@ -123,13 +141,69 @@ impl Normalize {
     pub fn zero_centered() -> Self {
         Self::new(0.5, 0.5)
     }
+
+    /// Creates a Normalize for ImageNet (3-channel RGB).
+    #[must_use]
+    pub fn imagenet() -> Self {
+        Self::per_channel(
+            vec![0.485, 0.456, 0.406],
+            vec![0.229, 0.224, 0.225],
+        )
+    }
 }
 
 impl Transform for Normalize {
     fn apply(&self, input: &Tensor<f32>) -> Tensor<f32> {
-        let data = input.to_vec();
-        let normalized: Vec<f32> = data.iter().map(|&x| (x - self.mean) / self.std).collect();
-        Tensor::from_vec(normalized, input.shape()).unwrap()
+        let shape = input.shape();
+        let mut data = input.to_vec();
+
+        if self.mean.len() == 1 {
+            // Scalar normalization — apply uniformly
+            let m = self.mean[0];
+            let s = self.std[0];
+            for x in &mut data {
+                *x = (*x - m) / s;
+            }
+        } else {
+            // Per-channel normalization
+            let num_channels = self.mean.len();
+
+            if shape.len() == 3 && shape[0] == num_channels {
+                // [C, H, W]
+                let spatial = shape[1] * shape[2];
+                for c in 0..num_channels {
+                    let offset = c * spatial;
+                    let m = self.mean[c];
+                    let s = self.std[c];
+                    for i in 0..spatial {
+                        data[offset + i] = (data[offset + i] - m) / s;
+                    }
+                }
+            } else if shape.len() == 4 && shape[1] == num_channels {
+                // [N, C, H, W]
+                let spatial = shape[2] * shape[3];
+                let sample_size = num_channels * spatial;
+                for n in 0..shape[0] {
+                    for c in 0..num_channels {
+                        let offset = n * sample_size + c * spatial;
+                        let m = self.mean[c];
+                        let s = self.std[c];
+                        for i in 0..spatial {
+                            data[offset + i] = (data[offset + i] - m) / s;
+                        }
+                    }
+                }
+            } else {
+                // Fallback: apply first channel's mean/std uniformly
+                let m = self.mean[0];
+                let s = self.std[0];
+                for x in &mut data {
+                    *x = (*x - m) / s;
+                }
+            }
+        }
+
+        Tensor::from_vec(data, shape).unwrap()
     }
 }
 
@@ -339,39 +413,35 @@ impl Transform for RandomFlip {
             return input.clone();
         }
 
-        // Simple 1D flip implementation
-        if shape.len() == 1 {
-            let mut data = input.to_vec();
-            data.reverse();
-            return Tensor::from_vec(data, shape).unwrap();
+        let data = input.to_vec();
+        let ndim = shape.len();
+
+        // Generic N-dimensional flip along self.dim:
+        // Compute strides, then for each element map the flipped index.
+        let total = data.len();
+        let mut flipped = vec![0.0f32; total];
+
+        // Compute strides (row-major)
+        let mut strides = vec![1usize; ndim];
+        for i in (0..ndim - 1).rev() {
+            strides[i] = strides[i + 1] * shape[i + 1];
         }
 
-        // For 2D, flip along the specified dimension
-        if shape.len() == 2 {
-            let data = input.to_vec();
-            let (rows, cols) = (shape[0], shape[1]);
-            let mut flipped = vec![0.0; data.len()];
+        let dim = self.dim;
+        let dim_size = shape[dim];
+        let dim_stride = strides[dim];
 
-            if self.dim == 0 {
-                // Vertical flip
-                for r in 0..rows {
-                    for c in 0..cols {
-                        flipped[r * cols + c] = data[(rows - 1 - r) * cols + c];
-                    }
-                }
-            } else {
-                // Horizontal flip
-                for r in 0..rows {
-                    for c in 0..cols {
-                        flipped[r * cols + c] = data[r * cols + (cols - 1 - c)];
-                    }
-                }
-            }
-
-            return Tensor::from_vec(flipped, shape).unwrap();
+        for i in 0..total {
+            // Extract the coordinate along the flip dimension
+            let coord_in_dim = (i / dim_stride) % dim_size;
+            let flipped_coord = dim_size - 1 - coord_in_dim;
+            // Compute the source index with the flipped coordinate
+            let diff = flipped_coord as isize - coord_in_dim as isize;
+            let src = (i as isize + diff * dim_stride as isize) as usize;
+            flipped[i] = data[src];
         }
 
-        input.clone()
+        Tensor::from_vec(flipped, shape).unwrap()
     }
 }
 
@@ -500,23 +570,39 @@ impl Transform for Reshape {
 // =============================================================================
 
 /// Applies dropout by randomly zeroing elements during training.
+///
+/// Respects train/eval mode: dropout is only applied when `training` is true.
+/// Use `set_training(false)` to disable dropout during evaluation.
 pub struct DropoutTransform {
     probability: f32,
+    training: std::sync::atomic::AtomicBool,
 }
 
 impl DropoutTransform {
-    /// Creates a new `DropoutTransform`.
+    /// Creates a new `DropoutTransform` in training mode.
     #[must_use]
     pub fn new(probability: f32) -> Self {
         Self {
             probability: probability.clamp(0.0, 1.0),
+            training: std::sync::atomic::AtomicBool::new(true),
         }
+    }
+
+    /// Sets whether this transform is in training mode.
+    pub fn set_training(&self, training: bool) {
+        self.training.store(training, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Returns whether this transform is in training mode.
+    pub fn is_training(&self) -> bool {
+        self.training.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
 impl Transform for DropoutTransform {
     fn apply(&self, input: &Tensor<f32>) -> Tensor<f32> {
-        if self.probability == 0.0 {
+        // No dropout in eval mode or with p=0
+        if !self.is_training() || self.probability == 0.0 {
             return input.clone();
         }
 
@@ -590,6 +676,26 @@ mod tests {
         for (a, b) in result.iter().zip(expected.iter()) {
             assert!((a - b).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn test_normalize_per_channel() {
+        // 2 channels, 2x2 spatial => [2, 2, 2]
+        let input = Tensor::from_vec(
+            vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0],
+            &[2, 2, 2],
+        )
+        .unwrap();
+        let normalize = Normalize::per_channel(vec![0.0, 10.0], vec![1.0, 10.0]);
+
+        let output = normalize.apply(&input);
+        let result = output.to_vec();
+        // Channel 0: (x - 0) / 1 = x
+        assert!((result[0] - 1.0).abs() < 1e-6);
+        assert!((result[3] - 4.0).abs() < 1e-6);
+        // Channel 1: (x - 10) / 10
+        assert!((result[4] - 0.0).abs() < 1e-6); // (10-10)/10
+        assert!((result[5] - 1.0).abs() < 1e-6); // (20-10)/10
     }
 
     #[test]
@@ -695,6 +801,46 @@ mod tests {
     }
 
     #[test]
+    fn test_random_flip_3d() {
+        // C=1, H=2, W=2 — flip along dim=2 (horizontal in spatial)
+        let input = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 2, 2]).unwrap();
+        let flip = RandomFlip::new(2, 1.0); // Always flip along W
+
+        let output = flip.apply(&input);
+        // [[1,2],[3,4]] → [[2,1],[4,3]]
+        assert_eq!(output.to_vec(), vec![2.0, 1.0, 4.0, 3.0]);
+        assert_eq!(output.shape(), &[1, 2, 2]);
+    }
+
+    #[test]
+    fn test_random_flip_4d() {
+        // N=1, C=1, H=2, W=2 — flip along dim=2 (vertical flip of H)
+        let input = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 1, 2, 2]).unwrap();
+        let flip = RandomFlip::new(2, 1.0); // Flip along H
+
+        let output = flip.apply(&input);
+        // Rows flipped: [[1,2],[3,4]] → [[3,4],[1,2]]
+        assert_eq!(output.to_vec(), vec![3.0, 4.0, 1.0, 2.0]);
+        assert_eq!(output.shape(), &[1, 1, 2, 2]);
+    }
+
+    #[test]
+    fn test_dropout_eval_mode() {
+        let input = Tensor::from_vec(vec![1.0; 100], &[100]).unwrap();
+        let dropout = DropoutTransform::new(0.5);
+
+        // In training mode, should drop elements
+        let output_train = dropout.apply(&input);
+        let zeros_train = output_train.to_vec().iter().filter(|&&x| x == 0.0).count();
+        assert!(zeros_train > 0, "Training mode should drop elements");
+
+        // Switch to eval mode — should be identity
+        dropout.set_training(false);
+        let output_eval = dropout.apply(&input);
+        assert_eq!(output_eval.to_vec(), vec![1.0; 100]);
+    }
+
+    #[test]
     fn test_dropout_transform() {
         let input = Tensor::from_vec(vec![1.0; 1000], &[1000]).unwrap();
         let dropout = DropoutTransform::new(0.5);
@@ -738,12 +884,12 @@ mod tests {
     #[test]
     fn test_normalize_variants() {
         let standard = Normalize::standard();
-        assert_eq!(standard.mean, 0.0);
-        assert_eq!(standard.std, 1.0);
+        assert_eq!(standard.mean, vec![0.0]);
+        assert_eq!(standard.std, vec![1.0]);
 
         let zero_centered = Normalize::zero_centered();
-        assert_eq!(zero_centered.mean, 0.5);
-        assert_eq!(zero_centered.std, 0.5);
+        assert_eq!(zero_centered.mean, vec![0.5]);
+        assert_eq!(zero_centered.std, vec![0.5]);
     }
 
     #[test]

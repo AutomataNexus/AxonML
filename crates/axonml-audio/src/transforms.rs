@@ -17,6 +17,7 @@
 use axonml_data::Transform;
 use axonml_tensor::Tensor;
 use rand::Rng;
+use rustfft::{FftPlanner, num_complex::Complex};
 use std::f32::consts::PI;
 
 // =============================================================================
@@ -167,26 +168,27 @@ impl MelSpectrogram {
             .collect()
     }
 
-    /// Simple DFT (not FFT, but works for demonstration).
-    fn dft(signal: &[f32]) -> Vec<f32> {
+    /// Computes magnitude spectrum using FFT (O(n log n) via rustfft).
+    fn fft_magnitude(signal: &[f32]) -> Vec<f32> {
         let n = signal.len();
         let n_out = n / 2 + 1;
-        let mut magnitude = vec![0.0f32; n_out];
 
-        for k in 0..n_out {
-            let mut real = 0.0;
-            let mut imag = 0.0;
+        // Convert real signal to complex
+        let mut buffer: Vec<Complex<f32>> = signal
+            .iter()
+            .map(|&x| Complex::new(x, 0.0))
+            .collect();
 
-            for (t, &x) in signal.iter().enumerate() {
-                let angle = 2.0 * PI * k as f32 * t as f32 / n as f32;
-                real += x * angle.cos();
-                imag -= x * angle.sin();
-            }
+        // Run FFT in-place
+        let mut planner = FftPlanner::new();
+        let fft = planner.plan_fft_forward(n);
+        fft.process(&mut buffer);
 
-            magnitude[k] = (real * real + imag * imag).sqrt();
-        }
-
-        magnitude
+        // Extract magnitudes of the first n/2+1 bins (positive frequencies)
+        buffer[..n_out]
+            .iter()
+            .map(|c| c.norm())
+            .collect()
     }
 }
 
@@ -221,8 +223,8 @@ impl Transform for MelSpectrogram {
                 frame[i] *= w;
             }
 
-            // Compute magnitude spectrum
-            let spectrum = Self::dft(&frame);
+            // Compute magnitude spectrum via FFT
+            let spectrum = Self::fft_magnitude(&frame);
 
             // Apply mel filterbank
             for (m, filter) in filterbank.iter().enumerate() {

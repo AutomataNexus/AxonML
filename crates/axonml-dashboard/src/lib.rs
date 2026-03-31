@@ -20,6 +20,7 @@ use leptos_router::*;
 pub mod api;
 pub mod auth;
 pub mod components;
+pub mod constants;
 pub mod pages;
 pub mod state;
 pub mod types;
@@ -30,6 +31,7 @@ use auth::{
     LoginPage, RegisterPage,
     session::{ProtectedRoute, SessionInitializer},
 };
+use components::error_boundary::PageErrorBoundary;
 use components::toast::ToastContainer;
 use pages::{
     admin::{SystemStatsPage, UserManagementPage},
@@ -61,6 +63,7 @@ pub fn App() -> impl IntoView {
     view! {
         <Router>
             <SessionInitializer />
+            <PageErrorBoundary>
             <Routes>
                 // Public routes
                 <Route path="/" view=|| view! {
@@ -316,6 +319,7 @@ pub fn App() -> impl IntoView {
                 // 404
                 <Route path="/*any" view=NotFound />
             </Routes>
+            </PageErrorBoundary>
             <ToastContainer />
         </Router>
     }

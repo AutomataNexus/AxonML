@@ -183,6 +183,37 @@ impl GradScaler {
         !self.found_inf
     }
 
+    /// Unscales gradients on all optimizer parameters in place.
+    ///
+    /// Equivalent to PyTorch's `GradScaler.unscale_(optimizer)`.
+    /// Returns true if all gradients are finite.
+    pub fn unscale_optimizer<O: crate::Optimizer>(&mut self, optimizer: &O) -> bool {
+        if !self.enabled {
+            self.found_inf = false;
+            return true;
+        }
+
+        let inv_scale = 1.0 / self.scale;
+        self.found_inf = false;
+
+        for param in optimizer.parameters() {
+            if let Some(grad) = param.grad() {
+                let mut grad_vec = grad.to_vec();
+                for g in &mut grad_vec {
+                    if g.is_infinite() || g.is_nan() {
+                        self.found_inf = true;
+                    }
+                    *g *= inv_scale;
+                }
+                let unscaled = axonml_tensor::Tensor::from_vec(grad_vec, grad.shape())
+                    .expect("grad_scaler: tensor creation failed");
+                param.set_grad(unscaled);
+            }
+        }
+
+        !self.found_inf
+    }
+
     /// Checks a slice of gradients for inf/nan without modifying them.
     #[must_use]
     pub fn check_grads(&self, grads: &[f32]) -> bool {

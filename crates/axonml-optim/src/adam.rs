@@ -65,6 +65,8 @@ struct AdamState {
     exp_avg: Tensor<f32>,
     /// Second moment (variance of gradients) — on same device as param.
     exp_avg_sq: Tensor<f32>,
+    /// Maximum of all past exp_avg_sq values (for AMSGrad).
+    max_exp_avg_sq: Option<Tensor<f32>>,
     /// Step count for bias correction.
     step: usize,
 }
@@ -72,15 +74,16 @@ struct AdamState {
 impl AdamState {
     fn new(shape: &[usize], device: axonml_core::Device) -> Self {
         let size: usize = shape.iter().product();
-        let mut exp_avg = Tensor::from_vec(vec![0.0f32; size], shape).unwrap();
-        let mut exp_avg_sq = Tensor::from_vec(vec![0.0f32; size], shape).unwrap();
+        let mut exp_avg = Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
+        let mut exp_avg_sq = Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
         if device.is_gpu() {
-            exp_avg = exp_avg.to_device(device).unwrap();
-            exp_avg_sq = exp_avg_sq.to_device(device).unwrap();
+            exp_avg = exp_avg.to_device(device).expect("device transfer failed");
+            exp_avg_sq = exp_avg_sq.to_device(device).expect("device transfer failed");
         }
         Self {
             exp_avg,
             exp_avg_sq,
+            max_exp_avg_sq: None, // Initialized on first use if amsgrad=true
             step: 0,
         }
     }
@@ -195,6 +198,14 @@ impl Optimizer for Adam {
             // GPU path: fused CUDA kernel — single launch per parameter, zero CPU copies
             #[cfg(feature = "cuda")]
             if param_data.device().is_gpu() {
+                // Auto-migrate gradient to GPU if backward produced CPU gradients
+                // (happens when backward functions use CPU fallback computation)
+                let grad = if !grad.device().is_gpu() {
+                    grad.to_device(param_data.device())
+                        .expect("Adam: failed to migrate CPU gradient to GPU")
+                } else {
+                    grad
+                };
                 let bias_correction1 = 1.0 - self.beta1.powi(state.step as i32);
                 let bias_correction2 = 1.0 - self.beta2.powi(state.step as i32);
 
@@ -231,6 +242,17 @@ impl Optimizer for Adam {
             let eps = self.eps;
             let wd = self.weight_decay;
 
+            // AMSGrad: track max of all past exp_avg_sq values
+            let mut max_sq_vec = if self.amsgrad {
+                state
+                    .max_exp_avg_sq
+                    .as_ref()
+                    .map(|t| t.to_vec())
+                    .unwrap_or_else(|| vec![0.0f32; param_vec.len()])
+            } else {
+                Vec::new()
+            };
+
             for i in 0..param_vec.len() {
                 let g = if wd == 0.0 {
                     grad_vec[i]
@@ -239,13 +261,24 @@ impl Optimizer for Adam {
                 };
                 exp_avg_vec[i] = beta1 * exp_avg_vec[i] + one_minus_beta1 * g;
                 exp_avg_sq_vec[i] = beta2 * exp_avg_sq_vec[i] + one_minus_beta2 * g * g;
-                let denom = (exp_avg_sq_vec[i] / bias_correction2).sqrt() + eps;
+
+                let v_hat = if self.amsgrad {
+                    max_sq_vec[i] = max_sq_vec[i].max(exp_avg_sq_vec[i]);
+                    max_sq_vec[i] / bias_correction2
+                } else {
+                    exp_avg_sq_vec[i] / bias_correction2
+                };
+
+                let denom = v_hat.sqrt() + eps;
                 param_vec[i] -= step_size * exp_avg_vec[i] / denom;
             }
 
-            state.exp_avg = Tensor::from_vec(exp_avg_vec, param_data.shape()).unwrap();
-            state.exp_avg_sq = Tensor::from_vec(exp_avg_sq_vec, param_data.shape()).unwrap();
-            param.update_data(Tensor::from_vec(param_vec, param_data.shape()).unwrap());
+            state.exp_avg = Tensor::from_vec(exp_avg_vec, param_data.shape()).expect("tensor creation failed");
+            state.exp_avg_sq = Tensor::from_vec(exp_avg_sq_vec, param_data.shape()).expect("tensor creation failed");
+            if self.amsgrad {
+                state.max_exp_avg_sq = Some(Tensor::from_vec(max_sq_vec, param_data.shape()).expect("tensor creation failed"));
+            }
+            param.update_data(Tensor::from_vec(param_vec, param_data.shape()).expect("tensor creation failed"));
         }
     }
 
@@ -410,16 +443,33 @@ impl Optimizer for AdamW {
 
             let param_data = param.data();
 
-            // GPU path: fused CUDA kernel
-            // Note: AdamW decoupled weight decay is different from Adam's L2.
-            // The kernel applies weight_decay as L2 (grad += wd*param).
-            // For true decoupled AdamW, we'd need a separate kernel.
-            // For now, use the same kernel — the difference is negligible for small wd.
+            // GPU path: decoupled weight decay + fused Adam step
             #[cfg(feature = "cuda")]
             if param_data.device().is_gpu() {
+                // Auto-migrate gradient to GPU if backward produced CPU gradients
+                let grad = if !grad.device().is_gpu() {
+                    grad.to_device(param_data.device())
+                        .expect("AdamW: failed to migrate CPU gradient to GPU")
+                } else {
+                    grad
+                };
+
+                // DECOUPLED weight decay: param *= (1 - lr * wd)
+                // This is the key difference from Adam's L2 regularization.
+                // Applied BEFORE the Adam update, directly to parameters.
+                if self.weight_decay > 0.0 {
+                    let decay_factor = 1.0 - self.lr * self.weight_decay;
+                    let decayed = param_data.mul_scalar(decay_factor);
+                    param.update_data(decayed);
+                }
+
+                // Re-read param_data after potential decay update
+                let param_data = param.data();
+
                 let bias_correction1 = 1.0 - self.beta1.powi(state.step as i32);
                 let bias_correction2 = 1.0 - self.beta2.powi(state.step as i32);
 
+                // Adam step with wd=0 (decay already applied above)
                 param_data.adam_step_inplace(
                     &grad,
                     &state.exp_avg,
@@ -428,7 +478,7 @@ impl Optimizer for AdamW {
                     self.beta1,
                     self.beta2,
                     self.eps,
-                    self.weight_decay,
+                    0.0, // wd=0: decoupled decay already applied
                     bias_correction1,
                     bias_correction2,
                 );
@@ -500,7 +550,7 @@ mod tests {
 
     #[test]
     fn test_adam_creation() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
+        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
         let param = Parameter::from_variable(var);
         let optimizer = Adam::new(vec![param], 0.001);
 
@@ -511,13 +561,13 @@ mod tests {
 
     #[test]
     fn test_adam_step() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
+        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
         let param = Parameter::from_variable(var);
 
         // Set gradient
         param
             .variable()
-            .set_grad(Tensor::from_vec(vec![0.1, 0.2, 0.3], &[3]).unwrap());
+            .set_grad(Tensor::from_vec(vec![0.1, 0.2, 0.3], &[3]).expect("tensor creation failed"));
 
         let mut optimizer = Adam::new(vec![param.clone()], 0.1);
         optimizer.step();
@@ -529,7 +579,7 @@ mod tests {
 
     #[test]
     fn test_adamw_creation() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
+        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
         let param = Parameter::from_variable(var);
         let optimizer = AdamW::new(vec![param], 0.001);
 
@@ -538,7 +588,7 @@ mod tests {
 
     #[test]
     fn test_adam_builder_pattern() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
+        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
         let param = Parameter::from_variable(var);
 
         let optimizer = Adam::new(vec![param], 0.001)

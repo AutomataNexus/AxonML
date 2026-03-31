@@ -30,12 +30,31 @@ pub struct TextDataset {
     vocab: Vocab,
     max_length: usize,
     num_classes: usize,
+    /// Tokenizer used for encoding text (must match how vocab was built).
+    tokenizer: Box<dyn Tokenizer>,
 }
 
 impl TextDataset {
-    /// Creates a new `TextDataset`.
+    /// Creates a new `TextDataset` with a whitespace tokenizer.
     #[must_use]
     pub fn new(texts: Vec<String>, labels: Vec<usize>, vocab: Vocab, max_length: usize) -> Self {
+        Self::with_tokenizer(
+            texts,
+            labels,
+            vocab,
+            max_length,
+            crate::tokenizer::WhitespaceTokenizer::new(),
+        )
+    }
+
+    /// Creates a new `TextDataset` with a specified tokenizer.
+    pub fn with_tokenizer<T: Tokenizer + 'static>(
+        texts: Vec<String>,
+        labels: Vec<usize>,
+        vocab: Vocab,
+        max_length: usize,
+        tokenizer: T,
+    ) -> Self {
         let num_classes = labels.iter().max().map_or(0, |&m| m + 1);
         Self {
             texts,
@@ -43,11 +62,15 @@ impl TextDataset {
             vocab,
             max_length,
             num_classes,
+            tokenizer: Box::new(tokenizer),
         }
     }
 
     /// Creates a `TextDataset` from raw text samples with a tokenizer.
-    pub fn from_samples<T: Tokenizer>(
+    ///
+    /// The same tokenizer is stored and used for both vocabulary building
+    /// and encoding at access time.
+    pub fn from_samples<T: Tokenizer + Clone + 'static>(
         samples: &[(String, usize)],
         tokenizer: &T,
         min_freq: usize,
@@ -77,7 +100,7 @@ impl TextDataset {
         let texts: Vec<String> = samples.iter().map(|(t, _)| t.clone()).collect();
         let labels: Vec<usize> = samples.iter().map(|(_, l)| *l).collect();
 
-        Self::new(texts, labels, vocab, max_length)
+        Self::with_tokenizer(texts, labels, vocab, max_length, tokenizer.clone())
     }
 
     /// Returns the vocabulary.
@@ -98,9 +121,9 @@ impl TextDataset {
         self.max_length
     }
 
-    /// Encodes text to padded tensor.
+    /// Encodes text to padded tensor using the stored tokenizer.
     fn encode_text(&self, text: &str) -> Tensor<f32> {
-        let tokens: Vec<&str> = text.split_whitespace().collect();
+        let tokens = self.tokenizer.tokenize(text);
         let mut indices: Vec<f32> = tokens
             .iter()
             .take(self.max_length)
@@ -131,10 +154,8 @@ impl Dataset for TextDataset {
 
         let text = self.encode_text(&self.texts[index]);
 
-        // One-hot encode label
-        let mut label_vec = vec![0.0f32; self.num_classes];
-        label_vec[self.labels[index]] = 1.0;
-        let label = Tensor::from_vec(label_vec, &[self.num_classes]).unwrap();
+        // Class index label (compatible with CrossEntropyLoss)
+        let label = Tensor::from_vec(vec![self.labels[index] as f32], &[1]).unwrap();
 
         Some((text, label))
     }
@@ -288,10 +309,8 @@ impl Dataset for SyntheticSentimentDataset {
 
         let text_tensor = Tensor::from_vec(text, &[self.max_length]).unwrap();
 
-        // One-hot label
-        let mut label_vec = vec![0.0f32; 2];
-        label_vec[label] = 1.0;
-        let label_tensor = Tensor::from_vec(label_vec, &[2]).unwrap();
+        // Class index label (compatible with CrossEntropyLoss)
+        let label_tensor = Tensor::from_vec(vec![label as f32], &[1]).unwrap();
 
         Some((text_tensor, label_tensor))
     }
@@ -381,7 +400,9 @@ mod tests {
 
         let (text, label) = dataset.get(0).unwrap();
         assert_eq!(text.shape(), &[10]);
-        assert_eq!(label.shape(), &[2]);
+        // Class index label (scalar [1])
+        assert_eq!(label.shape(), &[1]);
+        assert_eq!(label.to_vec()[0], 0.0);
     }
 
     #[test]
@@ -404,12 +425,10 @@ mod tests {
 
         let (text, label) = dataset.get(0).unwrap();
         assert_eq!(text.shape(), &[32]);
-        assert_eq!(label.shape(), &[2]);
-
-        // Check label is one-hot
-        let label_vec = label.to_vec();
-        let sum: f32 = label_vec.iter().sum();
-        assert!((sum - 1.0).abs() < 0.001);
+        // Class index label
+        assert_eq!(label.shape(), &[1]);
+        let label_val = label.to_vec()[0];
+        assert!(label_val == 0.0 || label_val == 1.0);
     }
 
     #[test]
@@ -421,6 +440,8 @@ mod tests {
 
         assert_eq!(text1.to_vec(), text2.to_vec());
         assert_eq!(label1.to_vec(), label2.to_vec());
+        // Label should be class index
+        assert_eq!(label1.shape(), &[1]);
     }
 
     #[test]

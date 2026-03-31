@@ -115,13 +115,34 @@ impl Collate<Tensor<f32>> for StackCollate {
     type Output = Tensor<f32>;
 
     fn collate(&self, batch: Vec<Tensor<f32>>) -> Self::Output {
-        if self.dim == 0 {
-            stack_tensors(&batch)
-        } else {
-            // For non-zero dimensions, we'd need more complex logic
-            // For now, always stack at dim 0
-            stack_tensors(&batch)
+        if batch.is_empty() {
+            return Tensor::from_vec(vec![], &[0]).unwrap();
         }
+
+        if self.dim == 0 {
+            return stack_tensors(&batch);
+        }
+
+        // Stack along non-zero dimension:
+        // Insert a new dimension at self.dim, then concatenate.
+        // First, unsqueeze each tensor at self.dim.
+        let first_shape = batch[0].shape();
+        let ndim = first_shape.len();
+        let dim = self.dim.min(ndim); // clamp to valid range
+
+        // Build the shape with new dim inserted
+        let mut item_shape_expanded = Vec::with_capacity(ndim + 1);
+        item_shape_expanded.extend_from_slice(&first_shape[..dim]);
+        item_shape_expanded.push(1);
+        item_shape_expanded.extend_from_slice(&first_shape[dim..]);
+
+        // Reshape each tensor to have size-1 at self.dim, then concat along self.dim
+        let reshaped: Vec<Tensor<f32>> = batch
+            .iter()
+            .map(|t| Tensor::from_vec(t.to_vec(), &item_shape_expanded).unwrap())
+            .collect();
+
+        concat_tensors(&reshaped, dim)
     }
 }
 
@@ -182,6 +203,7 @@ pub fn concat_tensors(tensors: &[Tensor<f32>], dim: usize) -> Tensor<f32> {
     }
 
     let first_shape = tensors[0].shape();
+    let ndim = first_shape.len();
 
     // Calculate new shape
     let mut new_shape = first_shape.to_vec();
@@ -197,13 +219,33 @@ pub fn concat_tensors(tensors: &[Tensor<f32>], dim: usize) -> Tensor<f32> {
         return Tensor::from_vec(all_data, &new_shape).unwrap();
     }
 
-    // For other dimensions, more complex interleaving is needed
-    // This is a simplified version that handles common cases
-    let mut all_data = Vec::new();
-    for tensor in tensors {
-        all_data.extend(tensor.to_vec());
+    // For non-zero dims, properly interleave data.
+    // outer_size = product of dims before `dim`
+    // inner_size = product of dims after `dim`
+    let outer_size: usize = first_shape[..dim].iter().product();
+    let inner_size: usize = if dim + 1 < ndim {
+        first_shape[dim + 1..].iter().product()
+    } else {
+        1
+    };
+
+    let total_elements: usize = new_shape.iter().product();
+    let mut result = Vec::with_capacity(total_elements);
+
+    // Precompute all tensor data
+    let all_vecs: Vec<Vec<f32>> = tensors.iter().map(|t| t.to_vec()).collect();
+
+    for o in 0..outer_size {
+        // For each tensor, copy its slice along the concat dimension
+        for (t_idx, tensor_data) in all_vecs.iter().enumerate() {
+            let t_dim_size = tensors[t_idx].shape()[dim];
+            let t_inner_stride = t_dim_size * inner_size;
+            let src_offset = o * t_inner_stride;
+            result.extend_from_slice(&tensor_data[src_offset..src_offset + t_inner_stride]);
+        }
     }
-    Tensor::from_vec(all_data, &new_shape).unwrap()
+
+    Tensor::from_vec(result, &new_shape).unwrap()
 }
 
 // =============================================================================
@@ -277,12 +319,27 @@ mod tests {
     }
 
     #[test]
-    fn test_concat_tensors() {
+    fn test_concat_tensors_dim0() {
         let t1 = Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap();
         let t2 = Tensor::from_vec(vec![3.0, 4.0, 5.0], &[3]).unwrap();
 
         let concat = concat_tensors(&[t1, t2], 0);
         assert_eq!(concat.shape(), &[5]);
         assert_eq!(concat.to_vec(), vec![1.0, 2.0, 3.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn test_concat_tensors_dim1() {
+        // Two [2, 2] tensors → [2, 4]
+        let t1 = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap();
+        let t2 = Tensor::from_vec(vec![5.0, 6.0, 7.0, 8.0], &[2, 2]).unwrap();
+
+        let concat = concat_tensors(&[t1, t2], 1);
+        assert_eq!(concat.shape(), &[2, 4]);
+        // Row 0: [1,2,5,6], Row 1: [3,4,7,8]
+        assert_eq!(
+            concat.to_vec(),
+            vec![1.0, 2.0, 5.0, 6.0, 3.0, 4.0, 7.0, 8.0]
+        );
     }
 }

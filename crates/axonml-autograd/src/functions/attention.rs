@@ -170,7 +170,7 @@ impl FusedAttentionBackward {
             }
         }
 
-        let gq = Tensor::from_vec(grad_q, q_shape).unwrap();
+        let gq = Tensor::from_vec(grad_q, q_shape).expect("backward: tensor creation failed");
         let gk = Tensor::from_vec(grad_k, self.saved_k.shape()).unwrap();
         let gv = Tensor::from_vec(grad_v, self.saved_v.shape()).unwrap();
 
@@ -217,5 +217,110 @@ impl GradientFunction for FusedAttentionBackward {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_attention_backward_shapes() {
+        let batch = 1;
+        let heads = 2;
+        let tgt_len = 3;
+        let src_len = 3;
+        let head_dim = 4;
+        let scale = 1.0 / (head_dim as f32).sqrt();
+
+        let shape_q = [batch, heads, tgt_len, head_dim];
+        let shape_kv = [batch, heads, src_len, head_dim];
+        let n_q = batch * heads * tgt_len * head_dim;
+        let n_kv = batch * heads * src_len * head_dim;
+
+        let q = Tensor::from_vec(vec![0.5f32; n_q], &shape_q).expect("backward: tensor creation failed");
+        let k = Tensor::from_vec(vec![0.3f32; n_kv], &shape_kv).expect("backward: tensor creation failed");
+        let v = Tensor::from_vec(vec![0.1f32; n_kv], &shape_kv).expect("backward: tensor creation failed");
+        let output = Tensor::from_vec(vec![0.1f32; n_q], &shape_q).expect("backward: tensor creation failed");
+
+        let backward = FusedAttentionBackward::new(
+            None, None, None, q, k, v, output, scale, false,
+        );
+
+        let grad_output = Tensor::from_vec(vec![1.0f32; n_q], &shape_q).expect("backward: tensor creation failed");
+        let grads = backward.apply(&grad_output);
+
+        assert_eq!(grads.len(), 3);
+        assert_eq!(grads[0].as_ref().unwrap().shape(), &shape_q);
+        assert_eq!(grads[1].as_ref().unwrap().shape(), &shape_kv);
+        assert_eq!(grads[2].as_ref().unwrap().shape(), &shape_kv);
+    }
+
+    #[test]
+    fn test_attention_backward_finite_nonzero() {
+        let batch = 1;
+        let heads = 1;
+        let seq_len = 2;
+        let head_dim = 2;
+        let scale = 1.0 / (head_dim as f32).sqrt();
+        let shape = [batch, heads, seq_len, head_dim];
+        let n = batch * heads * seq_len * head_dim;
+
+        let q = Tensor::from_vec(vec![1.0, 0.0, 0.0, 1.0], &shape).expect("backward: tensor creation failed");
+        let k = Tensor::from_vec(vec![1.0, 0.0, 0.0, 1.0], &shape).expect("backward: tensor creation failed");
+        let v = Tensor::from_vec(vec![0.5, 0.3, 0.2, 0.8], &shape).expect("backward: tensor creation failed");
+        let output = Tensor::from_vec(vec![0.35, 0.55, 0.35, 0.55], &shape).expect("backward: tensor creation failed");
+
+        let backward = FusedAttentionBackward::new(
+            None, None, None, q, k, v, output, scale, false,
+        );
+
+        let grad = Tensor::from_vec(vec![1.0; n], &shape).expect("backward: tensor creation failed");
+        let grads = backward.apply(&grad);
+
+        for (name, g) in [("Q", &grads[0]), ("K", &grads[1]), ("V", &grads[2])] {
+            let data = g.as_ref().unwrap().to_vec();
+            for &val in &data {
+                assert!(val.is_finite(), "grad_{name} not finite: {val}");
+            }
+        }
+
+        // At least V gradient should be nonzero
+        let v_nonzero = grads[2].as_ref().unwrap().to_vec().iter().filter(|v| v.abs() > 1e-10).count();
+        assert!(v_nonzero > 0, "Expected nonzero V gradients");
+    }
+
+    #[test]
+    fn test_attention_backward_causal() {
+        let batch = 1;
+        let heads = 1;
+        let seq_len = 3;
+        let head_dim = 2;
+        let scale = 1.0 / (head_dim as f32).sqrt();
+        let shape = [batch, heads, seq_len, head_dim];
+        let n = batch * heads * seq_len * head_dim;
+
+        let q = Tensor::from_vec(vec![0.5f32; n], &shape).expect("backward: tensor creation failed");
+        let k = Tensor::from_vec(vec![0.3f32; n], &shape).expect("backward: tensor creation failed");
+        let v = Tensor::from_vec(vec![0.1f32; n], &shape).expect("backward: tensor creation failed");
+        let output = Tensor::from_vec(vec![0.1f32; n], &shape).expect("backward: tensor creation failed");
+
+        let backward = FusedAttentionBackward::new(
+            None, None, None, q, k, v, output, scale, true, // causal=true
+        );
+
+        let grad = Tensor::from_vec(vec![1.0f32; n], &shape).expect("backward: tensor creation failed");
+        let grads = backward.apply(&grad);
+
+        assert_eq!(grads.len(), 3);
+        for g in &grads {
+            for &val in &g.as_ref().unwrap().to_vec() {
+                assert!(val.is_finite(), "Causal attention grad not finite: {val}");
+            }
+        }
     }
 }

@@ -16,3 +16,4 @@ axonml-core.workspace = true
 axonml-tensor.workspace = true
 axonml-data.workspace = true
 rand = "0.8"
+rustfft = "6.2"

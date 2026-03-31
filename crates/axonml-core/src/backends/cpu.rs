@@ -68,8 +68,11 @@ impl Backend for CpuBackend {
         if size == 0 {
             return std::ptr::null_mut();
         }
+        // Round size up to alignment to satisfy Layout's invariant:
+        // size must be a multiple of align when using from_size_align_unchecked.
+        let aligned_size = (size + 63) & !63; // Round up to next multiple of 64
         unsafe {
-            let layout = std::alloc::Layout::from_size_align_unchecked(size, 64);
+            let layout = std::alloc::Layout::from_size_align_unchecked(aligned_size, 64);
             std::alloc::alloc(layout)
         }
     }
@@ -78,8 +81,10 @@ impl Backend for CpuBackend {
         if ptr.is_null() || size == 0 {
             return;
         }
+        // Must use the same aligned size as allocate() for a matching Layout.
+        let aligned_size = (size + 63) & !63;
         unsafe {
-            let layout = std::alloc::Layout::from_size_align_unchecked(size, 64);
+            let layout = std::alloc::Layout::from_size_align_unchecked(aligned_size, 64);
             std::alloc::dealloc(ptr, layout);
         }
     }

@@ -108,7 +108,7 @@ impl DifferentialAttention {
         let scale = (half_head_dim as f32).sqrt().recip();
 
         // Lambda is a learnable scalar initialized to lambda_init
-        let lambda_tensor = Tensor::from_vec(vec![lambda_init], &[1]).unwrap();
+        let lambda_tensor = Tensor::from_vec(vec![lambda_init], &[1]).expect("tensor creation failed");
 
         Self {
             q_proj: Linear::new(embed_dim, embed_dim),
@@ -219,7 +219,7 @@ impl DifferentialAttention {
         // and track it through mul_var by creating a ones-like tensor scaled by lambda
         let attn_shape = attn.shape();
         let total = attn_shape.iter().product::<usize>();
-        let lambda_expanded = Tensor::from_vec(vec![lambda_val; total], &attn_shape).unwrap();
+        let lambda_expanded = Tensor::from_vec(vec![lambda_val; total], &attn_shape).expect("tensor creation failed");
         let lambda_var = Variable::new(lambda_expanded, false);
         attn.mul_var(&lambda_var)
     }
@@ -313,7 +313,7 @@ mod tests {
     fn test_diff_attention_forward() {
         let attn = DifferentialAttention::new(64, 4);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let output = attn.forward(&input);
@@ -324,11 +324,11 @@ mod tests {
     fn test_diff_attention_cross() {
         let attn = DifferentialAttention::new(64, 4);
         let query = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 5 * 64], &[2, 5, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 5 * 64], &[2, 5, 64]).expect("tensor creation failed"),
             false,
         );
         let kv = Variable::new(
-            Tensor::from_vec(vec![0.2; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![0.2; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let output = attn.attention(&query, &kv, &kv, None);
@@ -358,14 +358,14 @@ mod tests {
 
         let attn = DifferentialAttention::new(32, 2);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 4 * 32], &[2, 4, 32]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 4 * 32], &[2, 4, 32]).expect("tensor creation failed"),
             true,
         );
         let output = attn.forward(&input);
         assert_eq!(output.shape(), vec![2, 4, 32]);
 
         let loss = output.sum();
-        let ones = Tensor::from_vec(vec![1.0f32], &[1]).unwrap();
+        let ones = Tensor::from_vec(vec![1.0f32], &[1]).expect("tensor creation failed");
         backward(&loss, &ones);
 
         let grad = input.grad();

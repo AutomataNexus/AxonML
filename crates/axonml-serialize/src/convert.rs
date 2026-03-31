@@ -43,11 +43,17 @@ pub fn from_pytorch_key(key: &str) -> String {
     result
 }
 
-/// Convert a Axonml key to `PyTorch` format.
+/// Convert an AxonML key to PyTorch format.
+///
+/// Adds "module." prefix for DDP (DistributedDataParallel) compatibility.
+/// PyTorch DDP wraps models in a "module." namespace.
 #[must_use]
 pub fn to_pytorch_key(key: &str) -> String {
-    // Add "module." prefix if not present (for DDP models)
-    key.to_string()
+    if key.starts_with("module.") {
+        key.to_string()
+    } else {
+        format!("module.{key}")
+    }
 }
 
 /// Map of `PyTorch` layer names to Axonml equivalents.
@@ -170,10 +176,18 @@ pub enum OnnxOpType {
     Unknown,
 }
 
+impl std::str::FromStr for OnnxOpType {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(Self::parse_op(s))
+    }
+}
+
 impl OnnxOpType {
     /// Parse ONNX operator type from string.
     #[must_use]
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse_op(s: &str) -> Self {
         match s {
             "Add" => Self::Add,
             "Sub" => Self::Sub,
@@ -324,9 +338,9 @@ mod tests {
 
     #[test]
     fn test_onnx_op_type() {
-        assert_eq!(OnnxOpType::from_str("Relu"), OnnxOpType::Relu);
-        assert_eq!(OnnxOpType::from_str("MatMul"), OnnxOpType::MatMul);
-        assert_eq!(OnnxOpType::from_str("Unknown"), OnnxOpType::Unknown);
+        assert_eq!(OnnxOpType::parse_op("Relu"), OnnxOpType::Relu);
+        assert_eq!(OnnxOpType::parse_op("MatMul"), OnnxOpType::MatMul);
+        assert_eq!(OnnxOpType::parse_op("Unknown"), OnnxOpType::Unknown);
 
         assert_eq!(OnnxOpType::Relu.as_str(), "Relu");
     }

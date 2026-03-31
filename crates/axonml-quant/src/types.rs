@@ -100,8 +100,7 @@ impl QuantType {
     }
 
     /// Parses a quantization type from a string.
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_type(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "Q8_0" | "Q8" | "INT8" => Some(QuantType::Q8_0),
             "Q4_0" | "Q4" | "INT4" => Some(QuantType::Q4_0),
@@ -112,6 +111,14 @@ impl QuantType {
             "F32" | "FLOAT32" | "FLOAT" => Some(QuantType::F32),
             _ => None,
         }
+    }
+}
+
+impl std::str::FromStr for QuantType {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Self::parse_type(s).ok_or_else(|| format!("Unknown quant type: '{s}'"))
     }
 }
 
@@ -266,6 +273,138 @@ impl Q4_1Block {
 }
 
 // =============================================================================
+// Q5_0 Block (5-bit symmetric)
+// =============================================================================
+
+/// A block of Q5_0 quantized data (5-bit with per-block scale).
+///
+/// 32 values × 5 bits = 160 bits = 20 bytes of packed data + f16 scale.
+#[derive(Debug, Clone)]
+pub struct Q5Block {
+    /// Scale factor (stored as f16).
+    pub scale: f16,
+    /// Packed quantized values (20 bytes = 32 × 5-bit).
+    pub data: [u8; 20],
+}
+
+impl Q5Block {
+    /// Creates a new Q5_0 block.
+    pub fn new(scale: f16, data: [u8; 20]) -> Self {
+        Self { scale, data }
+    }
+
+    /// Packs 32 signed 5-bit values (range -16 to 15) into 20 bytes.
+    pub fn pack(values: &[i8; 32]) -> [u8; 20] {
+        let mut packed = [0u8; 20];
+        // Pack 32 × 5-bit values: 8 groups of 4 values → 20 bits each → 2.5 bytes
+        // Simpler: treat as 160-bit bitstream
+        for i in 0..32 {
+            let v = (values[i] as u8) & 0x1F; // 5-bit unsigned representation
+            let bit_offset = i * 5;
+            let byte_offset = bit_offset / 8;
+            let bit_shift = bit_offset % 8;
+            packed[byte_offset] |= v << bit_shift;
+            if bit_shift + 5 > 8 && byte_offset + 1 < 20 {
+                packed[byte_offset + 1] |= v >> (8 - bit_shift);
+            }
+        }
+        packed
+    }
+
+    /// Unpacks 20 bytes into 32 signed 5-bit values.
+    pub fn unpack(&self) -> [i8; 32] {
+        let mut result = [0i8; 32];
+        for i in 0..32 {
+            let bit_offset = i * 5;
+            let byte_offset = bit_offset / 8;
+            let bit_shift = bit_offset % 8;
+            let mut v = (self.data[byte_offset] >> bit_shift) & 0x1F;
+            if bit_shift + 5 > 8 && byte_offset + 1 < 20 {
+                v |= (self.data[byte_offset + 1] << (8 - bit_shift)) & 0x1F;
+            }
+            // Sign extend: if bit 4 is set, value is negative
+            if v & 0x10 != 0 {
+                result[i] = (v | 0xE0) as i8; // sign extend to i8
+            } else {
+                result[i] = v as i8;
+            }
+        }
+        result
+    }
+
+    /// Returns byte representation.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(22);
+        bytes.extend_from_slice(&self.scale.to_le_bytes());
+        bytes.extend_from_slice(&self.data);
+        bytes
+    }
+}
+
+// =============================================================================
+// Q5_1 Block (5-bit asymmetric)
+// =============================================================================
+
+/// A block of Q5_1 quantized data (5-bit with per-block scale and min).
+#[derive(Debug, Clone)]
+pub struct Q5_1Block {
+    /// Scale factor (stored as f16).
+    pub scale: f16,
+    /// Minimum value (stored as f16).
+    pub min: f16,
+    /// Packed quantized values (20 bytes = 32 × 5-bit unsigned).
+    pub data: [u8; 20],
+}
+
+impl Q5_1Block {
+    /// Creates a new Q5_1 block.
+    pub fn new(scale: f16, min: f16, data: [u8; 20]) -> Self {
+        Self { scale, min, data }
+    }
+
+    /// Packs 32 unsigned 5-bit values (range 0 to 31) into 20 bytes.
+    pub fn pack(values: &[u8; 32]) -> [u8; 20] {
+        let mut packed = [0u8; 20];
+        for i in 0..32 {
+            let v = values[i] & 0x1F;
+            let bit_offset = i * 5;
+            let byte_offset = bit_offset / 8;
+            let bit_shift = bit_offset % 8;
+            packed[byte_offset] |= v << bit_shift;
+            if bit_shift + 5 > 8 && byte_offset + 1 < 20 {
+                packed[byte_offset + 1] |= v >> (8 - bit_shift);
+            }
+        }
+        packed
+    }
+
+    /// Unpacks 20 bytes into 32 unsigned 5-bit values.
+    pub fn unpack(&self) -> [u8; 32] {
+        let mut result = [0u8; 32];
+        for i in 0..32 {
+            let bit_offset = i * 5;
+            let byte_offset = bit_offset / 8;
+            let bit_shift = bit_offset % 8;
+            let mut v = (self.data[byte_offset] >> bit_shift) & 0x1F;
+            if bit_shift + 5 > 8 && byte_offset + 1 < 20 {
+                v |= (self.data[byte_offset + 1] << (8 - bit_shift)) & 0x1F;
+            }
+            result[i] = v;
+        }
+        result
+    }
+
+    /// Returns byte representation.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(24);
+        bytes.extend_from_slice(&self.scale.to_le_bytes());
+        bytes.extend_from_slice(&self.min.to_le_bytes());
+        bytes.extend_from_slice(&self.data);
+        bytes
+    }
+}
+
+// =============================================================================
 // Generic Quantized Block
 // =============================================================================
 
@@ -278,6 +417,10 @@ pub enum QuantizedBlock {
     Q4(Q4Block),
     /// Q4_1 block.
     Q4_1(Q4_1Block),
+    /// Q5_0 block (5-bit symmetric).
+    Q5(Q5Block),
+    /// Q5_1 block (5-bit asymmetric).
+    Q5_1(Q5_1Block),
     /// F16 values (block size 1).
     F16(Vec<f16>),
     /// F32 values (original).
@@ -291,6 +434,8 @@ impl QuantizedBlock {
             QuantizedBlock::Q8(_) => QuantType::Q8_0,
             QuantizedBlock::Q4(_) => QuantType::Q4_0,
             QuantizedBlock::Q4_1(_) => QuantType::Q4_1,
+            QuantizedBlock::Q5(_) => QuantType::Q5_0,
+            QuantizedBlock::Q5_1(_) => QuantType::Q5_1,
             QuantizedBlock::F16(_) => QuantType::F16,
             QuantizedBlock::F32(_) => QuantType::F32,
         }
@@ -366,11 +511,11 @@ mod tests {
 
     #[test]
     fn test_quant_type_from_str() {
-        assert_eq!(QuantType::from_str("Q8_0"), Some(QuantType::Q8_0));
-        assert_eq!(QuantType::from_str("INT8"), Some(QuantType::Q8_0));
-        assert_eq!(QuantType::from_str("Q4"), Some(QuantType::Q4_0));
-        assert_eq!(QuantType::from_str("F16"), Some(QuantType::F16));
-        assert_eq!(QuantType::from_str("invalid"), None);
+        assert_eq!(QuantType::parse_type("Q8_0"), Some(QuantType::Q8_0));
+        assert_eq!(QuantType::parse_type("INT8"), Some(QuantType::Q8_0));
+        assert_eq!(QuantType::parse_type("Q4"), Some(QuantType::Q4_0));
+        assert_eq!(QuantType::parse_type("F16"), Some(QuantType::F16));
+        assert_eq!(QuantType::parse_type("invalid"), None);
     }
 
     #[test]

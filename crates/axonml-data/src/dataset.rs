@@ -46,11 +46,21 @@ pub trait Dataset: Send + Sync {
 /// A dataset wrapping tensors.
 ///
 /// Each item is a tuple of (input, target) tensors.
+/// Data is cached as flat vectors to avoid per-access O(N) copies.
+#[derive(Clone)]
 pub struct TensorDataset {
-    /// Input data tensor.
-    data: Tensor<f32>,
-    /// Target tensor.
-    targets: Tensor<f32>,
+    /// Cached flat data (extracted once at construction).
+    data_vec: Vec<f32>,
+    /// Cached flat targets (extracted once at construction).
+    target_vec: Vec<f32>,
+    /// Shape of the data tensor (first dim is sample count).
+    data_shape: Vec<usize>,
+    /// Shape of the targets tensor (first dim is sample count).
+    target_shape: Vec<usize>,
+    /// Number of elements per data sample (product of shape[1..]).
+    row_size: usize,
+    /// Number of elements per target sample.
+    target_row_size: usize,
     /// Number of samples.
     len: usize,
 }
@@ -61,13 +71,31 @@ impl TensorDataset {
     /// The first dimension of both tensors must match.
     #[must_use]
     pub fn new(data: Tensor<f32>, targets: Tensor<f32>) -> Self {
-        let len = data.shape()[0];
+        let data_shape = data.shape().to_vec();
+        let target_shape = targets.shape().to_vec();
+        let len = data_shape[0];
         assert_eq!(
             len,
-            targets.shape()[0],
+            target_shape[0],
             "Data and targets must have same first dimension"
         );
-        Self { data, targets, len }
+
+        let row_size: usize = data_shape[1..].iter().product();
+        let target_row_size: usize = if target_shape.len() > 1 {
+            target_shape[1..].iter().product()
+        } else {
+            1
+        };
+
+        Self {
+            data_vec: data.to_vec(),
+            target_vec: targets.to_vec(),
+            data_shape,
+            target_shape,
+            row_size,
+            target_row_size,
+            len,
+        }
     }
 
     /// Creates a `TensorDataset` from just input data (no targets).
@@ -75,7 +103,7 @@ impl TensorDataset {
     pub fn from_data(data: Tensor<f32>) -> Self {
         let len = data.shape()[0];
         let targets = Tensor::from_vec(vec![0.0; len], &[len]).unwrap();
-        Self { data, targets, len }
+        Self::new(data, targets)
     }
 }
 
@@ -91,29 +119,18 @@ impl Dataset for TensorDataset {
             return None;
         }
 
-        // Extract row from data tensor
-        let data_shape = self.data.shape();
-        let row_size: usize = data_shape[1..].iter().product();
-        let data_vec = self.data.to_vec();
-        let start = index * row_size;
-        let end = start + row_size;
-        let item_data = data_vec[start..end].to_vec();
-        let item_shape: Vec<usize> = data_shape[1..].to_vec();
+        // Slice directly from cached vec — O(row_size) not O(dataset_size)
+        let start = index * self.row_size;
+        let end = start + self.row_size;
+        let item_data = self.data_vec[start..end].to_vec();
+        let item_shape: Vec<usize> = self.data_shape[1..].to_vec();
         let x = Tensor::from_vec(item_data, &item_shape).unwrap();
 
-        // Extract target
-        let target_shape = self.targets.shape();
-        let target_row_size: usize = if target_shape.len() > 1 {
-            target_shape[1..].iter().product()
-        } else {
-            1
-        };
-        let target_vec = self.targets.to_vec();
-        let target_start = index * target_row_size;
-        let target_end = target_start + target_row_size;
-        let item_target = target_vec[target_start..target_end].to_vec();
-        let target_item_shape: Vec<usize> = if target_shape.len() > 1 {
-            target_shape[1..].to_vec()
+        let target_start = index * self.target_row_size;
+        let target_end = target_start + self.target_row_size;
+        let item_target = self.target_vec[target_start..target_end].to_vec();
+        let target_item_shape: Vec<usize> = if self.target_shape.len() > 1 {
+            self.target_shape[1..].to_vec()
         } else {
             vec![1]
         };

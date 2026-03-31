@@ -301,6 +301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             gpu_utilization: Vec::new(),
         })),
         ollama: Arc::new(ollama),
+        auth_rate_limiter: Arc::new(crate::auth::RateLimiter::auth_default()),
     };
 
     // Spawn background task to collect system metrics

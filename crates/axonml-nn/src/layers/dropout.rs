@@ -18,9 +18,10 @@ use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axonml_autograd::no_grad::is_grad_enabled;
-use axonml_autograd::{GradFn, GradientFunction, Variable};
+use axonml_autograd::{GradFn, GradientFunction, Variable, checkpoint_rng_seed};
 use axonml_tensor::Tensor;
-use rand::Rng;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 use crate::module::Module;
 
@@ -41,7 +42,7 @@ struct DropoutBackward {
 
 impl GradientFunction for DropoutBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let result = grad_output.mul(&self.mask_tensor).unwrap();
+        let result = grad_output.mul(&self.mask_tensor).expect("tensor mul failed");
         vec![Some(result)]
     }
 
@@ -118,7 +119,12 @@ impl Module for Dropout {
         let input_data = input.data();
         let shape = input_data.shape().to_vec();
         let numel = input_data.numel();
-        let mut rng = rand::thread_rng();
+        // Use deterministic RNG during checkpoint recomputation
+        let mut rng = if let Some(seed) = checkpoint_rng_seed() {
+            StdRng::seed_from_u64(seed)
+        } else {
+            StdRng::from_rng(rand::thread_rng()).unwrap()
+        };
 
         // Scale factor for inverted dropout
         let scale = 1.0 / (1.0 - self.p);
@@ -135,11 +141,11 @@ impl Module for Dropout {
             .collect();
 
         // Create mask tensor and move to input device
-        let mut mask_tensor = Tensor::from_vec(mask, &shape).unwrap();
+        let mut mask_tensor = Tensor::from_vec(mask, &shape).expect("tensor creation failed");
         if input_data.device().is_gpu() {
             mask_tensor = mask_tensor.to_device(input_data.device()).unwrap();
         }
-        let output = input_data.mul(&mask_tensor).unwrap();
+        let output = input_data.mul(&mask_tensor).expect("tensor mul failed");
 
         let requires_grad = input.requires_grad() && is_grad_enabled();
 
@@ -223,7 +229,12 @@ impl Module for Dropout2d {
         let input_vec = input_data.to_vec();
         let total = input_vec.len();
         let mut mask = vec![0.0f32; total];
-        let mut rng = rand::thread_rng();
+        // Use deterministic RNG during checkpoint recomputation
+        let mut rng = if let Some(seed) = checkpoint_rng_seed() {
+            StdRng::seed_from_u64(seed)
+        } else {
+            StdRng::from_rng(rand::thread_rng()).unwrap()
+        };
         let scale = 1.0 / (1.0 - self.p);
 
         for b in 0..batch_size {
@@ -238,11 +249,11 @@ impl Module for Dropout2d {
             }
         }
 
-        let mut mask_tensor = Tensor::from_vec(mask, &shape).unwrap();
+        let mut mask_tensor = Tensor::from_vec(mask, &shape).expect("tensor creation failed");
         if input_data.device().is_gpu() {
             mask_tensor = mask_tensor.to_device(input_data.device()).unwrap();
         }
-        let output = input_data.mul(&mask_tensor).unwrap();
+        let output = input_data.mul(&mask_tensor).expect("tensor mul failed");
         let requires_grad = input.requires_grad() && is_grad_enabled();
 
         if requires_grad {
@@ -316,7 +327,12 @@ impl Module for AlphaDropout {
         let input_data = input.data();
         let shape = input_data.shape().to_vec();
         let numel = input_data.numel();
-        let mut rng = rand::thread_rng();
+        // Use deterministic RNG during checkpoint recomputation
+        let mut rng = if let Some(seed) = checkpoint_rng_seed() {
+            StdRng::seed_from_u64(seed)
+        } else {
+            StdRng::from_rng(rand::thread_rng()).unwrap()
+        };
 
         // Build mask on CPU: 'a' where kept, 0.0 where dropped
         let dropped_val = a * alpha_p + b;
@@ -330,8 +346,8 @@ impl Module for AlphaDropout {
             .map(|&m| if m == 0.0 { dropped_val } else { b })
             .collect();
 
-        let mut mask_tensor = Tensor::from_vec(mask_raw, &shape).unwrap();
-        let mut bias_tensor = Tensor::from_vec(bias_raw, &shape).unwrap();
+        let mut mask_tensor = Tensor::from_vec(mask_raw, &shape).expect("tensor creation failed");
+        let mut bias_tensor = Tensor::from_vec(bias_raw, &shape).expect("tensor creation failed");
         if input_data.device().is_gpu() {
             mask_tensor = mask_tensor.to_device(input_data.device()).unwrap();
             bias_tensor = bias_tensor.to_device(input_data.device()).unwrap();
@@ -380,7 +396,7 @@ mod tests {
     #[test]
     fn test_dropout_training() {
         let dropout = Dropout::new(0.5);
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 1000], &[1000]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 1000], &[1000]).expect("tensor creation failed"), false);
         let output = dropout.forward(&input);
 
         // Some values should be zero, some should be scaled
@@ -396,7 +412,7 @@ mod tests {
         let mut dropout = Dropout::new(0.5);
         dropout.eval();
 
-        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), false);
         let output = dropout.forward(&input);
 
         // In eval mode, output should equal input
@@ -406,7 +422,7 @@ mod tests {
     #[test]
     fn test_dropout_zero_probability() {
         let dropout = Dropout::new(0.0);
-        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), false);
         let output = dropout.forward(&input);
 
         assert_eq!(output.data().to_vec(), vec![1.0, 2.0, 3.0]);

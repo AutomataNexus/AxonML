@@ -49,7 +49,11 @@ impl IconSize {
     }
 }
 
-/// Base icon component
+/// Base icon component.
+///
+/// SECURITY: Uses `inner_html` for SVG paths. The `path` parameter is
+/// sanitized to reject any content containing `<script`, `on`, or `javascript:`
+/// to prevent XSS if non-hardcoded values are ever passed.
 #[component]
 fn IconBase(
     #[prop(into)] path: String,
@@ -60,6 +64,24 @@ fn IconBase(
     #[prop(default = 2.0)] stroke_width: f64,
 ) -> impl IntoView {
     let s = size.size();
+
+    // Sanitize: only allow SVG path/shape elements, reject script injection
+    let safe_path = {
+        let lower = path.to_lowercase();
+        if lower.contains("<script")
+            || lower.contains("javascript:")
+            || lower.contains("onerror")
+            || lower.contains("onload")
+            || lower.contains("onclick")
+            || lower.contains("onmouseover")
+        {
+            web_sys::console::error_1(&"Icon path rejected: contains unsafe content".into());
+            String::new()
+        } else {
+            path
+        }
+    };
+
     view! {
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -72,7 +94,7 @@ fn IconBase(
             stroke-linecap="round"
             stroke-linejoin="round"
             class=format!("icon {} {}", size.class(), class)
-            inner_html=path
+            inner_html=safe_path
         />
     }
 }

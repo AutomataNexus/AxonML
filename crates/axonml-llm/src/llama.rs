@@ -143,9 +143,8 @@ pub struct RMSNorm {
     weight: Tensor<f32>,
     /// Epsilon for numerical stability
     eps: f32,
-    /// Hidden size
-    #[allow(dead_code)]
-    hidden_size: usize,
+    /// Hidden size (used for serialization/debug)
+    pub hidden_size: usize,
 }
 
 impl RMSNorm {
@@ -291,11 +290,9 @@ pub struct RotaryEmbedding {
     /// Dimension of the embedding
     dim: usize,
     /// Maximum sequence length
-    #[allow(dead_code)]
-    max_seq_len: usize,
+    pub max_seq_len: usize,
     /// Base theta
-    #[allow(dead_code)]
-    theta: f32,
+    pub theta: f32,
     /// Precomputed cosine values
     cos_cached: Tensor<f32>,
     /// Precomputed sine values
@@ -1279,12 +1276,22 @@ impl LLaMAForCausalLM {
                 .map(|(i, v)| (*i, (v - max_logit).exp() / exp_sum))
                 .collect();
 
-            // Sample (greedy for now - TODO: add proper sampling)
-            let next_token = probs
-                .iter()
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                .map(|(i, _)| *i as u32)
-                .unwrap_or(0);
+            // Sample from the distribution
+            let next_token = {
+                use rand::Rng;
+                let mut rng = rand::thread_rng();
+                let sample: f32 = rng.r#gen();
+                let mut cumsum = 0.0f32;
+                let mut selected = probs[0].0 as u32;
+                for &(idx, p) in &probs {
+                    cumsum += p;
+                    if sample < cumsum {
+                        selected = idx as u32;
+                        break;
+                    }
+                }
+                selected
+            };
 
             next_tokens.push(next_token);
         }

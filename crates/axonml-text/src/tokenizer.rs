@@ -236,6 +236,8 @@ impl Tokenizer for NGramTokenizer {
 #[derive(Debug, Clone)]
 pub struct BasicBPETokenizer {
     merges: HashMap<(String, String), String>,
+    /// Merge priority: lower value = higher priority (learned first = most frequent).
+    merge_priority: HashMap<(String, String), usize>,
     vocab: Vec<String>,
 }
 
@@ -245,6 +247,7 @@ impl BasicBPETokenizer {
     pub fn new() -> Self {
         Self {
             merges: HashMap::new(),
+            merge_priority: HashMap::new(),
             vocab: Vec::new(),
         }
     }
@@ -261,7 +264,7 @@ impl BasicBPETokenizer {
             *vocab.entry(chars.join(" ")).or_insert(0) += 1;
         }
 
-        for _ in 0..num_merges {
+        for merge_idx in 0..num_merges {
             // Count pairs
             let mut pairs: HashMap<(String, String), usize> = HashMap::new();
             for (word, count) in &vocab {
@@ -284,7 +287,10 @@ impl BasicBPETokenizer {
 
             if let Some((a, b)) = best_pair {
                 let merged = format!("{a}{b}");
-                self.merges.insert((a.clone(), b.clone()), merged.clone());
+                let pair_key = (a.clone(), b.clone());
+                self.merges.insert(pair_key.clone(), merged.clone());
+                // Record priority: lower index = higher priority (most frequent)
+                self.merge_priority.insert(pair_key, merge_idx);
 
                 // Update vocabulary
                 let pattern = format!("{a} {b}");
@@ -314,24 +320,31 @@ impl BasicBPETokenizer {
         &self.vocab
     }
 
-    /// Applies BPE merges to a word.
+    /// Applies BPE merges to a word in priority order.
+    ///
+    /// Scans all adjacent pairs, selects the one with highest priority
+    /// (lowest merge index = most frequent), and applies it. Repeats until
+    /// no more merges are applicable.
     fn apply_bpe(&self, word: &str) -> Vec<String> {
         let word_with_end = format!("{word}</w>");
         let mut symbols: Vec<String> = word_with_end.chars().map(|c| c.to_string()).collect();
 
         loop {
-            let mut best_pair: Option<(usize, &str)> = None;
+            // Find the pair with highest priority (lowest priority index)
+            let mut best: Option<(usize, usize, &str)> = None; // (position, priority, merged)
 
             for i in 0..symbols.len().saturating_sub(1) {
                 let pair = (symbols[i].clone(), symbols[i + 1].clone());
                 if let Some(merged) = self.merges.get(&pair) {
-                    best_pair = Some((i, merged));
-                    break;
+                    let priority = self.merge_priority.get(&pair).copied().unwrap_or(usize::MAX);
+                    if best.is_none() || priority < best.unwrap().1 {
+                        best = Some((i, priority, merged));
+                    }
                 }
             }
 
-            match best_pair {
-                Some((i, merged)) => {
+            match best {
+                Some((i, _, merged)) => {
                     symbols[i] = merged.to_string();
                     symbols.remove(i + 1);
                 }
@@ -395,40 +408,64 @@ impl UnigramTokenizer {
         Self::new(vocab)
     }
 
-    /// Tokenizes using a greedy longest-match approach.
-    fn greedy_tokenize(&self, text: &str) -> Vec<String> {
-        let mut tokens = Vec::new();
+    /// Tokenizes using the Viterbi algorithm for optimal segmentation.
+    ///
+    /// Finds the segmentation that maximizes the sum of log-probabilities
+    /// (unigram scores). Falls back to single characters for OOV spans.
+    fn viterbi_tokenize(&self, text: &str) -> Vec<String> {
         let chars: Vec<char> = text.chars().collect();
-        let mut i = 0;
-
-        while i < chars.len() {
-            let mut best_len = 1;
-            let mut best_token = chars[i].to_string();
-
-            // Try to find the longest matching token
-            for len in 1..=self.max_token_length.min(chars.len() - i) {
-                let candidate: String = chars[i..i + len].iter().collect();
-                if self.vocab.contains_key(&candidate) {
-                    best_len = len;
-                    best_token = candidate;
-                }
-            }
-
-            tokens.push(best_token);
-            i += best_len;
+        let n = chars.len();
+        if n == 0 {
+            return Vec::new();
         }
 
+        // dp[i] = best log-prob score to segment chars[0..i]
+        // back[i] = length of the last token in the best segmentation ending at i
+        let mut dp = vec![f32::NEG_INFINITY; n + 1];
+        let mut back = vec![1usize; n + 1];
+        dp[0] = 0.0;
+
+        for i in 1..=n {
+            for len in 1..=self.max_token_length.min(i) {
+                let start = i - len;
+                let candidate: String = chars[start..i].iter().collect();
+                if let Some(&score) = self.vocab.get(&candidate) {
+                    let log_score = score.ln();
+                    let total = dp[start] + log_score;
+                    if total > dp[i] {
+                        dp[i] = total;
+                        back[i] = len;
+                    }
+                }
+            }
+            // If no vocab entry covers this position, use single character fallback
+            if dp[i] == f32::NEG_INFINITY {
+                dp[i] = dp[i - 1] + (-10.0); // penalty for OOV character
+                back[i] = 1;
+            }
+        }
+
+        // Backtrack to recover tokens
+        let mut tokens = Vec::new();
+        let mut pos = n;
+        while pos > 0 {
+            let len = back[pos];
+            let token: String = chars[pos - len..pos].iter().collect();
+            tokens.push(token);
+            pos -= len;
+        }
+        tokens.reverse();
         tokens
     }
 }
 
 impl Tokenizer for UnigramTokenizer {
     fn tokenize(&self, text: &str) -> Vec<String> {
-        // Split by whitespace first, then tokenize each word
+        // Split by whitespace first, then tokenize each word with Viterbi
         let mut all_tokens = Vec::new();
 
         for word in text.split_whitespace() {
-            let word_tokens = self.greedy_tokenize(word);
+            let word_tokens = self.viterbi_tokenize(word);
             all_tokens.extend(word_tokens);
         }
 

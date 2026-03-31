@@ -178,8 +178,13 @@ impl Sampler for SubsetRandomSampler {
 // =============================================================================
 
 /// Samples elements with specified weights.
+///
+/// Uses precomputed cumulative sums with binary search for O(log n) per sample
+/// instead of O(n) linear scan.
 pub struct WeightedRandomSampler {
     weights: Vec<f64>,
+    /// Precomputed cumulative sum for O(log n) sampling.
+    cumulative: Vec<f64>,
     num_samples: usize,
     replacement: bool,
 }
@@ -188,26 +193,36 @@ impl WeightedRandomSampler {
     /// Creates a new `WeightedRandomSampler`.
     #[must_use]
     pub fn new(weights: Vec<f64>, num_samples: usize, replacement: bool) -> Self {
+        let cumulative = Self::build_cumulative(&weights);
         Self {
             weights,
+            cumulative,
             num_samples,
             replacement,
         }
     }
 
-    /// Samples an index based on weights.
+    /// Builds cumulative sum array from weights.
+    fn build_cumulative(weights: &[f64]) -> Vec<f64> {
+        let mut cum = Vec::with_capacity(weights.len());
+        let mut total = 0.0;
+        for &w in weights {
+            total += w;
+            cum.push(total);
+        }
+        cum
+    }
+
+    /// Samples an index based on weights using binary search on cumulative sums.
     fn sample_index(&self) -> usize {
-        let total: f64 = self.weights.iter().sum();
-        let mut cumulative = 0.0;
+        let total = *self.cumulative.last().unwrap_or(&1.0);
         let threshold: f64 = rand::thread_rng().r#gen::<f64>() * total;
 
-        for (i, &weight) in self.weights.iter().enumerate() {
-            cumulative += weight;
-            if cumulative > threshold {
-                return i;
-            }
+        // Binary search: find first index where cumulative > threshold
+        match self.cumulative.binary_search_by(|c| c.partial_cmp(&threshold).unwrap()) {
+            Ok(i) => i,
+            Err(i) => i.min(self.cumulative.len() - 1),
         }
-        self.weights.len() - 1
     }
 }
 
@@ -220,32 +235,34 @@ impl Sampler for WeightedRandomSampler {
         if self.replacement {
             Box::new(WeightedIter::new(self))
         } else {
-            // Without replacement: sample all unique indices
+            // Without replacement: use swap-remove for O(1) removal instead of O(n)
             let mut indices = Vec::with_capacity(self.num_samples);
             let mut available: Vec<usize> = (0..self.weights.len()).collect();
             let mut weights = self.weights.clone();
+            let mut cumulative = self.cumulative.clone();
 
             while indices.len() < self.num_samples && !available.is_empty() {
-                let total: f64 = weights.iter().sum();
+                let total = *cumulative.last().unwrap_or(&0.0);
                 if total <= 0.0 {
                     break;
                 }
 
                 let threshold: f64 = rand::thread_rng().r#gen::<f64>() * total;
-                let mut cumulative = 0.0;
-                let mut selected = 0;
-
-                for (i, &weight) in weights.iter().enumerate() {
-                    cumulative += weight;
-                    if cumulative > threshold {
-                        selected = i;
-                        break;
-                    }
-                }
+                let selected = match cumulative.binary_search_by(|c| {
+                    c.partial_cmp(&threshold).unwrap()
+                }) {
+                    Ok(i) => i,
+                    Err(i) => i.min(cumulative.len() - 1),
+                };
 
                 indices.push(available[selected]);
-                available.remove(selected);
-                weights.remove(selected);
+
+                // O(1) swap-remove instead of O(n) remove
+                available.swap_remove(selected);
+                weights.swap_remove(selected);
+
+                // Rebuild cumulative (needed after swap_remove reorders)
+                cumulative = Self::build_cumulative(&weights);
             }
 
             Box::new(indices.into_iter())

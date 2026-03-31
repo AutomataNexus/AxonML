@@ -288,3 +288,113 @@ pub fn gpu_count() -> usize {
 
     count
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gpu_memory_creation() {
+        let mem = GpuMemory::new(std::ptr::null_mut(), 1024, 0, BackendType::Cpu);
+        assert_eq!(mem.size(), 1024);
+        assert_eq!(mem.device_index(), 0);
+        assert_eq!(mem.backend_type(), BackendType::Cpu);
+        assert!(mem.ptr().is_null());
+    }
+
+    #[test]
+    fn test_gpu_memory_nonzero_ptr() {
+        let mut data = vec![0u8; 256];
+        let ptr = data.as_mut_ptr();
+        let mem = GpuMemory::new(ptr, 256, 0, BackendType::Cpu);
+        assert_eq!(mem.ptr(), ptr);
+        assert_eq!(mem.size(), 256);
+    }
+
+    #[test]
+    fn test_gpu_stream_creation() {
+        let stream = GpuStream::new(42, 0, BackendType::Cpu);
+        assert_eq!(stream.handle(), 42);
+        assert_eq!(stream.device_index(), 0);
+    }
+
+    #[test]
+    fn test_gpu_stream_cpu_sync() {
+        let stream = GpuStream::new(0, 0, BackendType::Cpu);
+        // CPU sync is a no-op — should not panic
+        stream.synchronize();
+    }
+
+    #[test]
+    fn test_backend_type_equality() {
+        assert_eq!(BackendType::Cpu, BackendType::Cpu);
+        #[cfg(feature = "cuda")]
+        assert_ne!(BackendType::Cpu, BackendType::Cuda);
+    }
+
+    #[test]
+    fn test_best_available_backend() {
+        let best = best_available_backend();
+        // Should always return something (at minimum CPU)
+        // Just verify it doesn't panic
+        let _ = best;
+    }
+
+    #[test]
+    fn test_gpu_count() {
+        let count = gpu_count();
+        // On a machine with a GPU this should be >= 1
+        // On CI without GPU it's 0 — both are valid
+        assert!(count < 1000, "Sanity check: unreasonable GPU count");
+    }
+
+    #[test]
+    fn test_cpu_backend_is_available() {
+        let cpu = CpuBackend::new();
+        assert!(cpu.is_available());
+        assert_eq!(cpu.name(), "cpu");
+    }
+
+    #[test]
+    fn test_cpu_backend_allocate_deallocate() {
+        let cpu = CpuBackend::new();
+        let ptr = cpu.allocate(256);
+        assert!(!ptr.is_null());
+        cpu.deallocate(ptr, 256);
+    }
+
+    #[test]
+    fn test_cpu_backend_zero_alloc() {
+        let cpu = CpuBackend::new();
+        let ptr = cpu.allocate(0);
+        assert!(ptr.is_null());
+    }
+
+    #[test]
+    fn test_cpu_backend_copy_round_trip() {
+        let cpu = CpuBackend::new();
+        let src: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
+        let dst_ptr = cpu.allocate(16); // 4 f32s
+
+        cpu.copy_to_device(dst_ptr, src.as_ptr() as *const u8, 16);
+
+        let mut result = [0.0f32; 4];
+        cpu.copy_to_host(result.as_mut_ptr() as *mut u8, dst_ptr as *const u8, 16);
+
+        assert_eq!(result, [1.0, 2.0, 3.0, 4.0]);
+        cpu.deallocate(dst_ptr, 16);
+    }
+
+    #[test]
+    fn test_cpu_backend_capabilities() {
+        let cpu = CpuBackend::new();
+        let caps = cpu.capabilities();
+        assert!(caps.supports_f16);
+        assert!(caps.supports_f64);
+        assert!(caps.total_memory > 0);
+    }
+}

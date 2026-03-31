@@ -39,7 +39,8 @@ pub struct WsAuthQuery {
 }
 
 /// WebSocket handler for terminal
-/// Authenticates via query param since WebSocket can't use Authorization header
+/// Authenticates via query param since WebSocket can't use Authorization header.
+/// SECURITY: Only admin users may open a terminal session.
 pub async fn terminal_ws(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -52,10 +53,24 @@ pub async fn terminal_ws(
     ))?;
 
     // Verify the JWT token
-    let _claims = state
+    let claims = state
         .jwt
         .validate_access_token(&token)
         .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e)))?;
+
+    // SECURITY: Only admin role may access the terminal
+    if claims.role != "admin" {
+        warn!(
+            "Terminal access denied for user {} with role '{}'",
+            claims.sub, claims.role
+        );
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Terminal access requires admin privileges".to_string(),
+        ));
+    }
+
+    info!("Terminal session authorized for admin user: {}", claims.sub);
 
     Ok(ws.on_upgrade(handle_terminal))
 }
@@ -261,7 +276,7 @@ fn parse_resize_sequence(s: &str) -> Option<PtySize> {
     })
 }
 
-/// Get terminal info
+/// Get terminal info (admin only)
 pub async fn terminal_info(
     State(state): State<AppState>,
     Query(query): Query<WsAuthQuery>,
@@ -273,10 +288,18 @@ pub async fn terminal_info(
     ))?;
 
     // Verify the JWT token
-    let _claims = state
+    let claims = state
         .jwt
         .validate_access_token(&token)
         .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e)))?;
+
+    // SECURITY: Only admin role may access terminal info
+    if claims.role != "admin" {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Terminal access requires admin privileges".to_string(),
+        ));
+    }
 
     let shell = if cfg!(target_os = "windows") {
         "powershell.exe".to_string()

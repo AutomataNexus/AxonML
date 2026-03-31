@@ -436,17 +436,17 @@ impl LazyTensor {
             LazyOp::Add(a, b) => {
                 let ta = self.eval_op(a);
                 let tb = self.eval_op(b);
-                ta.add(&tb).unwrap()
+                ta.add(&tb).expect("tensor add failed")
             }
             LazyOp::Sub(a, b) => {
                 let ta = self.eval_op(a);
                 let tb = self.eval_op(b);
-                ta.sub(&tb).unwrap()
+                ta.sub(&tb).expect("tensor sub failed")
             }
             LazyOp::Mul(a, b) => {
                 let ta = self.eval_op(a);
                 let tb = self.eval_op(b);
-                ta.mul(&tb).unwrap()
+                ta.mul(&tb).expect("tensor mul failed")
             }
             LazyOp::Div(a, b) => {
                 let ta = self.eval_op(a);
@@ -462,7 +462,7 @@ impl LazyTensor {
             LazyOp::Reshape(a, shape) => {
                 let t = self.eval_op(a);
                 let isize_shape: Vec<isize> = shape.iter().map(|&s| s as isize).collect();
-                t.reshape(&isize_shape).unwrap()
+                t.reshape(&isize_shape).expect("reshape failed")
             }
             LazyOp::Transpose(a, d0, d1) => {
                 let t = self.eval_op(a);

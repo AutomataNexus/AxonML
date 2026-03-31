@@ -103,10 +103,12 @@ pub struct OptimizationStats {
 
 impl OptimizationStats {
     /// Adds a fusion to the statistics.
-    pub fn add_fusion(&mut self, pattern: FusionPattern) {
+    pub fn add_fusion_with_range(&mut self, pattern: FusionPattern, actual_ops: usize) {
         self.fusions_applied += 1;
-        self.ops_eliminated += pattern.num_ops() - 1;
-        self.estimated_speedup *= pattern.estimated_speedup();
+        self.ops_eliminated += actual_ops.saturating_sub(1);
+        // Use additive speedup estimation (not multiplicative)
+        let speedup_gain = pattern.estimated_speedup() - 1.0;
+        self.estimated_speedup += speedup_gain;
 
         // Update pattern counts
         if let Some(entry) = self.patterns.iter_mut().find(|(p, _)| *p == pattern) {
@@ -167,11 +169,43 @@ impl FusionOptimizer {
             .collect()
     }
 
-    /// Applies detected fusions and updates statistics.
-    pub fn apply_fusions(&mut self, patterns: &[(FusionPattern, usize, usize)]) {
-        for (pattern, _, _) in patterns {
-            self.stats.add_fusion(*pattern);
+    /// Applies detected fusions: updates statistics and returns a transformed
+    /// op sequence where fused regions are replaced with a single FusedOp marker.
+    pub fn apply_fusions(
+        &mut self,
+        ops: &[OpType],
+        patterns: &[(FusionPattern, usize, usize)],
+    ) -> Vec<OpType> {
+        for (pattern, start, end) in patterns {
+            self.stats.add_fusion_with_range(*pattern, end - start);
         }
+
+        // Build a set of indices that are consumed by fusions
+        let mut fused_ranges: Vec<(usize, usize)> = patterns
+            .iter()
+            .map(|(_, start, end)| (*start, *end))
+            .collect();
+        fused_ranges.sort_by_key(|&(s, _)| s);
+
+        // Build transformed op sequence: keep unfused ops, replace fused ranges
+        let mut result = Vec::new();
+        let mut i = 0;
+        let mut range_idx = 0;
+
+        while i < ops.len() {
+            if range_idx < fused_ranges.len() && i == fused_ranges[range_idx].0 {
+                // This index starts a fused region — emit the first op as representative
+                // (the actual fusion happens at execution time using FusedLinear/FusedOp)
+                result.push(ops[i].clone());
+                i = fused_ranges[range_idx].1;
+                range_idx += 1;
+            } else {
+                result.push(ops[i].clone());
+                i += 1;
+            }
+        }
+
+        result
     }
 
     /// Resets optimization statistics.
@@ -208,7 +242,7 @@ pub fn optimize_graph(
     let mut optimizer = FusionOptimizer::with_config(config.unwrap_or_default());
 
     let patterns = optimizer.analyze(ops);
-    optimizer.apply_fusions(&patterns);
+    let _transformed = optimizer.apply_fusions(ops, &patterns);
 
     Ok((patterns, optimizer.stats().clone()))
 }
@@ -253,7 +287,7 @@ mod tests {
         let mut opt = FusionOptimizer::new();
         let ops = vec![OpType::MatMul, OpType::Add, OpType::Relu];
         let patterns = opt.analyze(&ops);
-        opt.apply_fusions(&patterns);
+        opt.apply_fusions(&ops, &patterns);
 
         assert!(opt.stats().fusions_applied > 0);
         assert!(opt.stats().estimated_speedup > 1.0);

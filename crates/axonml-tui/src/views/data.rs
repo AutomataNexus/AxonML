@@ -220,11 +220,149 @@ impl DataView {
         }
     }
 
-    /// Load a dataset from a file path
-    pub fn load_dataset(&mut self, _path: &Path) -> Result<(), String> {
-        // For now, just load demo data
-        // In real implementation, would parse actual dataset files
-        self.load_demo_data();
+    /// Load a dataset from a file path.
+    ///
+    /// Reads file metadata and attempts to extract basic statistics.
+    /// Supports CSV files (parses header + row count), and shows file
+    /// metadata for other formats (.npz, .parquet, etc.).
+    pub fn load_dataset(&mut self, path: &Path) -> Result<(), String> {
+        if !path.exists() {
+            return Err(format!("File not found: {}", path.display()));
+        }
+
+        let metadata = std::fs::metadata(path)
+            .map_err(|e| format!("Cannot read file metadata: {}", e))?;
+        let file_size = metadata.len();
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+
+        // Try to parse CSV files for real statistics
+        if ext == "csv" || ext == "tsv" {
+            return self.load_csv_dataset(path, &file_name, file_size);
+        }
+
+        // For binary formats, show file metadata without parsing internals
+        let dataset = DatasetInfo {
+            name: file_name,
+            total_samples: 0, // Unknown without parsing
+            num_classes: 0,
+            feature_dim: "unknown".to_string(),
+            classes: Vec::new(),
+            splits: Vec::new(),
+            features: vec![FeatureInfo {
+                name: "data".to_string(),
+                dtype: ext.clone(),
+                shape: "unknown".to_string(),
+                min: None,
+                max: None,
+                mean: None,
+            }],
+            file_path: path.display().to_string(),
+            file_size,
+        };
+
+        self.dataset = Some(dataset);
+        self.selected_class = 0;
+        self.list_state.select(Some(0));
+        Ok(())
+    }
+
+    /// Load and parse a CSV dataset.
+    fn load_csv_dataset(
+        &mut self,
+        path: &Path,
+        file_name: &str,
+        file_size: u64,
+    ) -> Result<(), String> {
+        let content =
+            std::fs::read_to_string(path).map_err(|e| format!("Cannot read file: {}", e))?;
+        let mut lines = content.lines();
+
+        // Parse header
+        let header = lines.next().ok_or("CSV file is empty")?;
+        let sep = if header.contains('\t') { '\t' } else { ',' };
+        let columns: Vec<&str> = header.split(sep).map(|s| s.trim()).collect();
+
+        // Count rows and gather basic stats per numeric column
+        let mut row_count = 0usize;
+        let num_cols = columns.len();
+        let mut col_sums = vec![0.0f64; num_cols];
+        let mut col_mins = vec![f64::INFINITY; num_cols];
+        let mut col_maxs = vec![f64::NEG_INFINITY; num_cols];
+        let mut col_is_numeric = vec![true; num_cols];
+
+        for line in lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let fields: Vec<&str> = line.split(sep).map(|s| s.trim()).collect();
+            row_count += 1;
+
+            for (i, field) in fields.iter().enumerate().take(num_cols) {
+                if col_is_numeric[i] {
+                    if let Ok(v) = field.parse::<f64>() {
+                        col_sums[i] += v;
+                        if v < col_mins[i] {
+                            col_mins[i] = v;
+                        }
+                        if v > col_maxs[i] {
+                            col_maxs[i] = v;
+                        }
+                    } else {
+                        col_is_numeric[i] = false;
+                    }
+                }
+            }
+        }
+
+        let features: Vec<FeatureInfo> = columns
+            .iter()
+            .enumerate()
+            .map(|(i, &col_name)| {
+                if col_is_numeric[i] && row_count > 0 {
+                    FeatureInfo {
+                        name: col_name.to_string(),
+                        dtype: "f32".to_string(),
+                        shape: "[1]".to_string(),
+                        min: Some(col_mins[i] as f32),
+                        max: Some(col_maxs[i] as f32),
+                        mean: Some((col_sums[i] / row_count as f64) as f32),
+                    }
+                } else {
+                    FeatureInfo {
+                        name: col_name.to_string(),
+                        dtype: "str".to_string(),
+                        shape: "[1]".to_string(),
+                        min: None,
+                        max: None,
+                        mean: None,
+                    }
+                }
+            })
+            .collect();
+
+        let dataset = DatasetInfo {
+            name: file_name.to_string(),
+            total_samples: row_count,
+            num_classes: 0,
+            feature_dim: format!("[{}]", num_cols),
+            classes: Vec::new(),
+            splits: Vec::new(),
+            features,
+            file_path: path.display().to_string(),
+            file_size,
+        };
+
+        self.dataset = Some(dataset);
+        self.selected_class = 0;
+        self.list_state.select(Some(0));
         Ok(())
     }
 

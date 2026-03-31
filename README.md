@@ -9,7 +9,7 @@
   [![Docs.rs](https://docs.rs/axonml/badge.svg)](https://docs.rs/axonml)
   [![Downloads](https://img.shields.io/crates/d/axonml.svg)](https://crates.io/crates/axonml)
   [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-  [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+  [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 </div>
 
@@ -19,11 +19,11 @@ Axonml (named after axons - the nerve fibers that transmit signals between neuro
 
 ## PyTorch Parity: ~92-95% (and beyond)
 
-AxonML provides comprehensive PyTorch-equivalent functionality with **1,988 passing tests**. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
+AxonML provides comprehensive PyTorch-equivalent functionality with **2,141 passing tests**. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
 
 ## Features
 
-### Core (v0.4.1)
+### Core (v0.5.0)
 
 - **Tensor Operations** (`axonml-tensor`)
   - N-dimensional tensors with arbitrary shapes

@@ -52,6 +52,19 @@ pub struct LoginRequest {
     pub password: String,
 }
 
+impl LoginRequest {
+    /// Validates the login request before submission.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.email.trim().is_empty() {
+            return Err("Email is required".to_string());
+        }
+        if self.password.is_empty() {
+            return Err("Password is required".to_string());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginResponse {
     pub requires_mfa: bool,
@@ -70,6 +83,53 @@ pub struct RegisterRequest {
     pub email: String,
     pub name: String,
     pub password: String,
+}
+
+impl RegisterRequest {
+    /// Validates the registration request before submission.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("Name is required".to_string());
+        }
+        if self.name.trim().len() < 2 {
+            return Err("Name must be at least 2 characters".to_string());
+        }
+        if self.email.trim().is_empty() {
+            return Err("Email is required".to_string());
+        }
+        if !self.email.contains('@') || !self.email.contains('.') {
+            return Err("Please enter a valid email address".to_string());
+        }
+        if self.password.len() < crate::constants::MIN_PASSWORD_LENGTH {
+            return Err(format!(
+                "Password must be at least {} characters",
+                crate::constants::MIN_PASSWORD_LENGTH
+            ));
+        }
+        if self.password.len() > crate::constants::MAX_PASSWORD_LENGTH {
+            return Err(format!(
+                "Password must be at most {} characters",
+                crate::constants::MAX_PASSWORD_LENGTH
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl MfaVerifyRequest {
+    /// Validates the MFA verification request.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.mfa_token.trim().is_empty() {
+            return Err("MFA token is required".to_string());
+        }
+        if self.code.trim().is_empty() {
+            return Err("Verification code is required".to_string());
+        }
+        if self.code.len() != 6 || !self.code.chars().all(|c| c.is_ascii_digit()) {
+            return Err("Code must be 6 digits".to_string());
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

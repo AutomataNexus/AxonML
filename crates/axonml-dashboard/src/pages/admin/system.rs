@@ -333,7 +333,7 @@ fn RadarChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
             if let Some(ctx) = ctx {
                 // Create radar chart using Chart.js
                 let config = js_sys::Object::new();
-                js_sys::Reflect::set(&config, &"type".into(), &"radar".into()).unwrap();
+                js_sys::Reflect::set(&config, &"type".into(), &"radar".into()).ok();
 
                 let data = js_sys::Object::new();
                 let labels = js_sys::Array::new();
@@ -342,11 +342,11 @@ fn RadarChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
                 labels.push(&"Disk".into());
                 labels.push(&"Network".into());
                 labels.push(&"Load".into());
-                js_sys::Reflect::set(&data, &"labels".into(), &labels).unwrap();
+                js_sys::Reflect::set(&data, &"labels".into(), &labels).ok();
 
                 let datasets = js_sys::Array::new();
                 let dataset = js_sys::Object::new();
-                js_sys::Reflect::set(&dataset, &"label".into(), &"Resource Usage".into()).unwrap();
+                js_sys::Reflect::set(&dataset, &"label".into(), &"Resource Usage".into()).ok();
 
                 let values = js_sys::Array::new();
                 values.push(&JsValue::from_f64(m.cpu_usage_percent));
@@ -356,80 +356,80 @@ fn RadarChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
                     ((m.network_rx_bytes + m.network_tx_bytes) as f64 / 1_000_000.0).min(100.0);
                 values.push(&JsValue::from_f64(net_usage));
                 values.push(&JsValue::from_f64(m.load_avg_1m * 10.0));
-                js_sys::Reflect::set(&dataset, &"data".into(), &values).unwrap();
+                js_sys::Reflect::set(&dataset, &"data".into(), &values).ok();
 
                 js_sys::Reflect::set(
                     &dataset,
                     &"backgroundColor".into(),
                     &"rgba(20, 184, 166, 0.2)".into(),
                 )
-                .unwrap();
+                .ok();
                 js_sys::Reflect::set(
                     &dataset,
                     &"borderColor".into(),
                     &"rgba(20, 184, 166, 1)".into(),
                 )
-                .unwrap();
+                .ok();
                 js_sys::Reflect::set(
                     &dataset,
                     &"pointBackgroundColor".into(),
                     &"rgba(20, 184, 166, 1)".into(),
                 )
-                .unwrap();
+                .ok();
 
                 datasets.push(&dataset);
-                js_sys::Reflect::set(&data, &"datasets".into(), &datasets).unwrap();
-                js_sys::Reflect::set(&config, &"data".into(), &data).unwrap();
+                js_sys::Reflect::set(&data, &"datasets".into(), &datasets).ok();
+                js_sys::Reflect::set(&config, &"data".into(), &data).ok();
 
                 let options = js_sys::Object::new();
                 js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into())
-                    .unwrap();
-                js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).unwrap();
+                    .ok();
+                js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).ok();
 
                 // Scales with light theme
                 let scales = js_sys::Object::new();
                 let r = js_sys::Object::new();
-                js_sys::Reflect::set(&r, &"beginAtZero".into(), &true.into()).unwrap();
-                js_sys::Reflect::set(&r, &"max".into(), &JsValue::from_f64(100.0)).unwrap();
+                js_sys::Reflect::set(&r, &"beginAtZero".into(), &true.into()).ok();
+                js_sys::Reflect::set(&r, &"max".into(), &JsValue::from_f64(100.0)).ok();
 
                 // Grid styling for light theme
                 let grid = js_sys::Object::new();
-                js_sys::Reflect::set(&grid, &"color".into(), &"rgba(0, 0, 0, 0.1)".into()).unwrap();
-                js_sys::Reflect::set(&r, &"grid".into(), &grid).unwrap();
+                js_sys::Reflect::set(&grid, &"color".into(), &"rgba(0, 0, 0, 0.1)".into()).ok();
+                js_sys::Reflect::set(&r, &"grid".into(), &grid).ok();
 
                 // Angle lines
                 let angleLines = js_sys::Object::new();
                 js_sys::Reflect::set(&angleLines, &"color".into(), &"rgba(0, 0, 0, 0.1)".into())
-                    .unwrap();
-                js_sys::Reflect::set(&r, &"angleLines".into(), &angleLines).unwrap();
+                    .ok();
+                js_sys::Reflect::set(&r, &"angleLines".into(), &angleLines).ok();
 
                 // Point labels (light theme - dark text)
                 let pointLabels = js_sys::Object::new();
-                js_sys::Reflect::set(&pointLabels, &"color".into(), &"#374151".into()).unwrap();
+                js_sys::Reflect::set(&pointLabels, &"color".into(), &"#374151".into()).ok();
                 let font = js_sys::Object::new();
-                js_sys::Reflect::set(&font, &"size".into(), &JsValue::from_f64(12.0)).unwrap();
-                js_sys::Reflect::set(&font, &"weight".into(), &"500".into()).unwrap();
-                js_sys::Reflect::set(&pointLabels, &"font".into(), &font).unwrap();
-                js_sys::Reflect::set(&r, &"pointLabels".into(), &pointLabels).unwrap();
+                js_sys::Reflect::set(&font, &"size".into(), &JsValue::from_f64(12.0)).ok();
+                js_sys::Reflect::set(&font, &"weight".into(), &"500".into()).ok();
+                js_sys::Reflect::set(&pointLabels, &"font".into(), &font).ok();
+                js_sys::Reflect::set(&r, &"pointLabels".into(), &pointLabels).ok();
 
                 // Ticks (light theme)
                 let ticks = js_sys::Object::new();
-                js_sys::Reflect::set(&ticks, &"color".into(), &"#6b7280".into()).unwrap();
+                js_sys::Reflect::set(&ticks, &"color".into(), &"#6b7280".into()).ok();
                 js_sys::Reflect::set(&ticks, &"backdropColor".into(), &"transparent".into())
-                    .unwrap();
-                js_sys::Reflect::set(&r, &"ticks".into(), &ticks).unwrap();
+                    .ok();
+                js_sys::Reflect::set(&r, &"ticks".into(), &ticks).ok();
 
-                js_sys::Reflect::set(&scales, &"r".into(), &r).unwrap();
-                js_sys::Reflect::set(&options, &"scales".into(), &scales).unwrap();
+                js_sys::Reflect::set(&scales, &"r".into(), &r).ok();
+                js_sys::Reflect::set(&options, &"scales".into(), &scales).ok();
 
                 // Plugins
                 let plugins = js_sys::Object::new();
                 let legend = js_sys::Object::new();
-                js_sys::Reflect::set(&legend, &"display".into(), &false.into()).unwrap();
-                js_sys::Reflect::set(&plugins, &"legend".into(), &legend).unwrap();
-                js_sys::Reflect::set(&options, &"plugins".into(), &plugins).unwrap();
+                js_sys::Reflect::set(&legend, &"display".into(), &false.into()).ok();
+                js_sys::Reflect::set(&plugins, &"legend".into(), &legend).ok();
+                js_sys::Reflect::set(&options, &"plugins".into(), &plugins).ok();
 
-                js_sys::Reflect::set(&config, &"options".into(), &options).unwrap();
+                js_sys::Reflect::set(&config, &"options".into(), &options).ok();
 
                 let _ = ChartJs::new(&ctx, &config);
             }
@@ -471,12 +471,12 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
             let ctx = canvas.get_context("2d").ok().flatten();
             if let Some(ctx) = ctx {
                 let config = js_sys::Object::new();
-                js_sys::Reflect::set(&config, &"type".into(), &"line".into()).unwrap();
+                js_sys::Reflect::set(&config, &"type".into(), &"line".into()).ok();
 
                 let data = js_sys::Object::new();
                 let labels =
                     js_sys::Array::from_iter(h.timestamps.iter().map(|s| JsValue::from_str(s)));
-                js_sys::Reflect::set(&data, &"labels".into(), &labels).unwrap();
+                js_sys::Reflect::set(&data, &"labels".into(), &labels).ok();
 
                 let datasets = js_sys::Array::new();
 
@@ -498,65 +498,65 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
                 );
                 datasets.push(&mem_dataset);
 
-                js_sys::Reflect::set(&data, &"datasets".into(), &datasets).unwrap();
-                js_sys::Reflect::set(&config, &"data".into(), &data).unwrap();
+                js_sys::Reflect::set(&data, &"datasets".into(), &datasets).ok();
+                js_sys::Reflect::set(&config, &"data".into(), &data).ok();
 
                 let options = js_sys::Object::new();
                 js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into())
-                    .unwrap();
-                js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).unwrap();
+                    .ok();
+                js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).ok();
 
                 // Scales with light theme
                 let scales = js_sys::Object::new();
 
                 // Y axis
                 let y = js_sys::Object::new();
-                js_sys::Reflect::set(&y, &"beginAtZero".into(), &true.into()).unwrap();
-                js_sys::Reflect::set(&y, &"max".into(), &JsValue::from_f64(100.0)).unwrap();
+                js_sys::Reflect::set(&y, &"beginAtZero".into(), &true.into()).ok();
+                js_sys::Reflect::set(&y, &"max".into(), &JsValue::from_f64(100.0)).ok();
                 let y_grid = js_sys::Object::new();
                 js_sys::Reflect::set(&y_grid, &"color".into(), &"rgba(0, 0, 0, 0.06)".into())
-                    .unwrap();
-                js_sys::Reflect::set(&y, &"grid".into(), &y_grid).unwrap();
+                    .ok();
+                js_sys::Reflect::set(&y, &"grid".into(), &y_grid).ok();
                 let y_ticks = js_sys::Object::new();
-                js_sys::Reflect::set(&y_ticks, &"color".into(), &"#6b7280".into()).unwrap();
-                js_sys::Reflect::set(&y, &"ticks".into(), &y_ticks).unwrap();
-                js_sys::Reflect::set(&scales, &"y".into(), &y).unwrap();
+                js_sys::Reflect::set(&y_ticks, &"color".into(), &"#6b7280".into()).ok();
+                js_sys::Reflect::set(&y, &"ticks".into(), &y_ticks).ok();
+                js_sys::Reflect::set(&scales, &"y".into(), &y).ok();
 
                 // X axis
                 let x = js_sys::Object::new();
                 let x_grid = js_sys::Object::new();
-                js_sys::Reflect::set(&x_grid, &"display".into(), &false.into()).unwrap();
-                js_sys::Reflect::set(&x, &"grid".into(), &x_grid).unwrap();
+                js_sys::Reflect::set(&x_grid, &"display".into(), &false.into()).ok();
+                js_sys::Reflect::set(&x, &"grid".into(), &x_grid).ok();
                 let x_ticks = js_sys::Object::new();
-                js_sys::Reflect::set(&x_ticks, &"color".into(), &"#6b7280".into()).unwrap();
+                js_sys::Reflect::set(&x_ticks, &"color".into(), &"#6b7280".into()).ok();
                 js_sys::Reflect::set(&x_ticks, &"maxRotation".into(), &JsValue::from_f64(0.0))
-                    .unwrap();
-                js_sys::Reflect::set(&x, &"ticks".into(), &x_ticks).unwrap();
-                js_sys::Reflect::set(&scales, &"x".into(), &x).unwrap();
+                    .ok();
+                js_sys::Reflect::set(&x, &"ticks".into(), &x_ticks).ok();
+                js_sys::Reflect::set(&scales, &"x".into(), &x).ok();
 
-                js_sys::Reflect::set(&options, &"scales".into(), &scales).unwrap();
+                js_sys::Reflect::set(&options, &"scales".into(), &scales).ok();
 
                 // Plugins
                 let plugins = js_sys::Object::new();
                 let legend = js_sys::Object::new();
-                js_sys::Reflect::set(&legend, &"position".into(), &"top".into()).unwrap();
+                js_sys::Reflect::set(&legend, &"position".into(), &"top".into()).ok();
                 let legend_labels = js_sys::Object::new();
-                js_sys::Reflect::set(&legend_labels, &"color".into(), &"#374151".into()).unwrap();
+                js_sys::Reflect::set(&legend_labels, &"color".into(), &"#374151".into()).ok();
                 js_sys::Reflect::set(&legend_labels, &"usePointStyle".into(), &true.into())
-                    .unwrap();
+                    .ok();
                 js_sys::Reflect::set(&legend_labels, &"padding".into(), &JsValue::from_f64(16.0))
-                    .unwrap();
-                js_sys::Reflect::set(&legend, &"labels".into(), &legend_labels).unwrap();
-                js_sys::Reflect::set(&plugins, &"legend".into(), &legend).unwrap();
-                js_sys::Reflect::set(&options, &"plugins".into(), &plugins).unwrap();
+                    .ok();
+                js_sys::Reflect::set(&legend, &"labels".into(), &legend_labels).ok();
+                js_sys::Reflect::set(&plugins, &"legend".into(), &legend).ok();
+                js_sys::Reflect::set(&options, &"plugins".into(), &plugins).ok();
 
                 // Interaction
                 let interaction = js_sys::Object::new();
-                js_sys::Reflect::set(&interaction, &"intersect".into(), &false.into()).unwrap();
-                js_sys::Reflect::set(&interaction, &"mode".into(), &"index".into()).unwrap();
-                js_sys::Reflect::set(&options, &"interaction".into(), &interaction).unwrap();
+                js_sys::Reflect::set(&interaction, &"intersect".into(), &false.into()).ok();
+                js_sys::Reflect::set(&interaction, &"mode".into(), &"index".into()).ok();
+                js_sys::Reflect::set(&options, &"interaction".into(), &interaction).ok();
 
-                js_sys::Reflect::set(&config, &"options".into(), &options).unwrap();
+                js_sys::Reflect::set(&config, &"options".into(), &options).ok();
 
                 let _ = ChartJs::new(&ctx, &config);
             }
@@ -570,14 +570,14 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
 
 fn create_line_dataset(label: &str, data: &[f64], border_color: &str, bg_color: &str) -> JsValue {
     let dataset = js_sys::Object::new();
-    js_sys::Reflect::set(&dataset, &"label".into(), &label.into()).unwrap();
+    js_sys::Reflect::set(&dataset, &"label".into(), &label.into()).ok();
     let values = js_sys::Array::from_iter(data.iter().map(|&v| JsValue::from_f64(v)));
-    js_sys::Reflect::set(&dataset, &"data".into(), &values).unwrap();
-    js_sys::Reflect::set(&dataset, &"borderColor".into(), &border_color.into()).unwrap();
-    js_sys::Reflect::set(&dataset, &"backgroundColor".into(), &bg_color.into()).unwrap();
-    js_sys::Reflect::set(&dataset, &"fill".into(), &true.into()).unwrap();
-    js_sys::Reflect::set(&dataset, &"tension".into(), &JsValue::from_f64(0.4)).unwrap();
-    js_sys::Reflect::set(&dataset, &"pointRadius".into(), &JsValue::from_f64(0.0)).unwrap();
+    js_sys::Reflect::set(&dataset, &"data".into(), &values).ok();
+    js_sys::Reflect::set(&dataset, &"borderColor".into(), &border_color.into()).ok();
+    js_sys::Reflect::set(&dataset, &"backgroundColor".into(), &bg_color.into()).ok();
+    js_sys::Reflect::set(&dataset, &"fill".into(), &true.into()).ok();
+    js_sys::Reflect::set(&dataset, &"tension".into(), &JsValue::from_f64(0.4)).ok();
+    js_sys::Reflect::set(&dataset, &"pointRadius".into(), &JsValue::from_f64(0.0)).ok();
     dataset.into()
 }
 
@@ -818,12 +818,12 @@ fn NetworkChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoV
             let ctx = canvas.get_context("2d").ok().flatten();
             if let Some(ctx) = ctx {
                 let config = js_sys::Object::new();
-                js_sys::Reflect::set(&config, &"type".into(), &"line".into()).unwrap();
+                js_sys::Reflect::set(&config, &"type".into(), &"line".into()).ok();
 
                 let data = js_sys::Object::new();
                 let labels =
                     js_sys::Array::from_iter(h.timestamps.iter().map(|s| JsValue::from_str(s)));
-                js_sys::Reflect::set(&data, &"labels".into(), &labels).unwrap();
+                js_sys::Reflect::set(&data, &"labels".into(), &labels).ok();
 
                 let datasets = js_sys::Array::new();
 
@@ -843,52 +843,52 @@ fn NetworkChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoV
                 );
                 datasets.push(&tx_dataset);
 
-                js_sys::Reflect::set(&data, &"datasets".into(), &datasets).unwrap();
-                js_sys::Reflect::set(&config, &"data".into(), &data).unwrap();
+                js_sys::Reflect::set(&data, &"datasets".into(), &datasets).ok();
+                js_sys::Reflect::set(&config, &"data".into(), &data).ok();
 
                 let options = js_sys::Object::new();
                 js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into())
-                    .unwrap();
-                js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).unwrap();
+                    .ok();
+                js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).ok();
 
                 // Scales with light theme
                 let scales = js_sys::Object::new();
 
                 let y = js_sys::Object::new();
-                js_sys::Reflect::set(&y, &"beginAtZero".into(), &true.into()).unwrap();
+                js_sys::Reflect::set(&y, &"beginAtZero".into(), &true.into()).ok();
                 let y_grid = js_sys::Object::new();
                 js_sys::Reflect::set(&y_grid, &"color".into(), &"rgba(0, 0, 0, 0.06)".into())
-                    .unwrap();
-                js_sys::Reflect::set(&y, &"grid".into(), &y_grid).unwrap();
+                    .ok();
+                js_sys::Reflect::set(&y, &"grid".into(), &y_grid).ok();
                 let y_ticks = js_sys::Object::new();
-                js_sys::Reflect::set(&y_ticks, &"color".into(), &"#6b7280".into()).unwrap();
-                js_sys::Reflect::set(&y, &"ticks".into(), &y_ticks).unwrap();
-                js_sys::Reflect::set(&scales, &"y".into(), &y).unwrap();
+                js_sys::Reflect::set(&y_ticks, &"color".into(), &"#6b7280".into()).ok();
+                js_sys::Reflect::set(&y, &"ticks".into(), &y_ticks).ok();
+                js_sys::Reflect::set(&scales, &"y".into(), &y).ok();
 
                 let x = js_sys::Object::new();
                 let x_grid = js_sys::Object::new();
-                js_sys::Reflect::set(&x_grid, &"display".into(), &false.into()).unwrap();
-                js_sys::Reflect::set(&x, &"grid".into(), &x_grid).unwrap();
+                js_sys::Reflect::set(&x_grid, &"display".into(), &false.into()).ok();
+                js_sys::Reflect::set(&x, &"grid".into(), &x_grid).ok();
                 let x_ticks = js_sys::Object::new();
-                js_sys::Reflect::set(&x_ticks, &"color".into(), &"#6b7280".into()).unwrap();
-                js_sys::Reflect::set(&x, &"ticks".into(), &x_ticks).unwrap();
-                js_sys::Reflect::set(&scales, &"x".into(), &x).unwrap();
+                js_sys::Reflect::set(&x_ticks, &"color".into(), &"#6b7280".into()).ok();
+                js_sys::Reflect::set(&x, &"ticks".into(), &x_ticks).ok();
+                js_sys::Reflect::set(&scales, &"x".into(), &x).ok();
 
-                js_sys::Reflect::set(&options, &"scales".into(), &scales).unwrap();
+                js_sys::Reflect::set(&options, &"scales".into(), &scales).ok();
 
                 // Plugins
                 let plugins = js_sys::Object::new();
                 let legend = js_sys::Object::new();
-                js_sys::Reflect::set(&legend, &"position".into(), &"top".into()).unwrap();
+                js_sys::Reflect::set(&legend, &"position".into(), &"top".into()).ok();
                 let legend_labels = js_sys::Object::new();
-                js_sys::Reflect::set(&legend_labels, &"color".into(), &"#374151".into()).unwrap();
+                js_sys::Reflect::set(&legend_labels, &"color".into(), &"#374151".into()).ok();
                 js_sys::Reflect::set(&legend_labels, &"usePointStyle".into(), &true.into())
-                    .unwrap();
-                js_sys::Reflect::set(&legend, &"labels".into(), &legend_labels).unwrap();
-                js_sys::Reflect::set(&plugins, &"legend".into(), &legend).unwrap();
-                js_sys::Reflect::set(&options, &"plugins".into(), &plugins).unwrap();
+                    .ok();
+                js_sys::Reflect::set(&legend, &"labels".into(), &legend_labels).ok();
+                js_sys::Reflect::set(&plugins, &"legend".into(), &legend).ok();
+                js_sys::Reflect::set(&options, &"plugins".into(), &plugins).ok();
 
-                js_sys::Reflect::set(&config, &"options".into(), &options).unwrap();
+                js_sys::Reflect::set(&config, &"options".into(), &options).ok();
 
                 let _ = ChartJs::new(&ctx, &config);
             }

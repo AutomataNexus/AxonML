@@ -15,11 +15,19 @@
 //! liable for any damages arising from the use of this software.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use axonml_tensor::Tensor;
 
 use crate::grad_fn::{GradFn, GradFnId};
 use crate::variable::Variable;
+
+/// Cached check for backward profiling (avoid env var read every call).
+static PROFILE_BACKWARD: OnceLock<bool> = OnceLock::new();
+
+fn is_profile_enabled() -> bool {
+    *PROFILE_BACKWARD.get_or_init(|| std::env::var("AXONML_PROFILE_BACKWARD").is_ok())
+}
 
 // =============================================================================
 // Backward Function
@@ -58,7 +66,7 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
 
     // Process nodes in reverse topological order
     // Profile: track time per backward op type
-    let profile_enabled = std::env::var("AXONML_PROFILE_BACKWARD").is_ok();
+    let profile_enabled = is_profile_enabled();
     let mut op_times: HashMap<&str, (u128, usize)> = HashMap::new();
 
     for node in topo_order.iter().rev() {
@@ -80,18 +88,41 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
             entry.1 += 1;
         }
 
+        // Device of the incoming gradient — output grads should match
+        let target_device = grad.device();
+
         // Propagate gradients to input nodes
         let next_fns = node.next_functions();
         for (i, maybe_next) in next_fns.iter().enumerate() {
             if let Some(next_fn) = maybe_next {
-                if let Some(input_grad) = input_grads.get(i).and_then(std::clone::Clone::clone) {
+                if let Some(mut input_grad) = input_grads.get(i).and_then(std::clone::Clone::clone) {
+                    // Auto-migrate gradient to match the propagation device.
+                    // This handles backward functions that compute on CPU even
+                    // when the forward was on GPU (e.g., Conv1d/Conv2d backward).
+                    if input_grad.device() != target_device {
+                        input_grad = input_grad
+                            .to_device(target_device.clone())
+                            .expect("backward: failed to migrate gradient to target device");
+                    }
                     let next_id = next_fn.id();
 
-                    // Accumulate gradient
+                    // Accumulate gradient (device-safe)
                     grad_map
                         .entry(next_id)
                         .and_modify(|existing| {
-                            *existing = existing.add(&input_grad).unwrap();
+                            // Ensure both tensors are on the same device before add
+                            let ig = if existing.device() != input_grad.device() {
+                                input_grad.to_device(existing.device()).unwrap_or_else(|_| {
+                                    // If migration fails, move existing to match input_grad
+                                    let moved = existing.to_device(input_grad.device())
+                                        .expect("backward: cannot reconcile devices for gradient accumulation");
+                                    *existing = moved;
+                                    input_grad.clone()
+                                })
+                            } else {
+                                input_grad.clone()
+                            };
+                            *existing = existing.add(&ig).expect("tensor add failed");
                         })
                         .or_insert(input_grad);
                 }
@@ -226,7 +257,7 @@ mod tests {
     #[test]
     fn test_simple_backward() {
         // y = x^2, dy/dx = 2x
-        let x = Variable::new(Tensor::from_vec(vec![3.0], &[1]).unwrap(), true);
+        let x = Variable::new(Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"), true);
         let y = x.pow(2.0);
 
         y.backward();
@@ -239,7 +270,7 @@ mod tests {
     #[test]
     fn test_chain_backward() {
         // y = (x^2)^2 = x^4, dy/dx = 4x^3
-        let x = Variable::new(Tensor::from_vec(vec![2.0], &[1]).unwrap(), true);
+        let x = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
         let y = x.pow(2.0).pow(2.0);
 
         y.backward();
@@ -251,8 +282,8 @@ mod tests {
 
     #[test]
     fn test_add_backward() {
-        let a = Variable::new(Tensor::from_vec(vec![2.0], &[1]).unwrap(), true);
-        let b = Variable::new(Tensor::from_vec(vec![3.0], &[1]).unwrap(), true);
+        let a = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let b = Variable::new(Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"), true);
         let c = &a + &b;
         let loss = c.sum();
 
@@ -265,8 +296,8 @@ mod tests {
 
     #[test]
     fn test_mul_backward() {
-        let a = Variable::new(Tensor::from_vec(vec![2.0], &[1]).unwrap(), true);
-        let b = Variable::new(Tensor::from_vec(vec![3.0], &[1]).unwrap(), true);
+        let a = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let b = Variable::new(Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"), true);
         let c = &a * &b;
         let loss = c.sum();
 
@@ -279,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_numerical_gradient() {
-        let x = Variable::new(Tensor::from_vec(vec![2.0, 3.0], &[2]).unwrap(), false);
+        let x = Variable::new(Tensor::from_vec(vec![2.0, 3.0], &[2]).expect("tensor creation failed"), false);
 
         let numerical = numerical_gradient(|v| v.pow(2.0).sum(), &x, 1e-5);
 
@@ -298,8 +329,8 @@ mod tests {
 
     #[test]
     fn test_gradcheck() {
-        let a = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap();
-        let b = Tensor::from_vec(vec![1.001, 2.001, 3.001], &[3]).unwrap();
+        let a = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed");
+        let b = Tensor::from_vec(vec![1.001, 2.001, 3.001], &[3]).expect("tensor creation failed");
 
         assert!(gradcheck(&a, &b, 0.01, 0.01));
         assert!(!gradcheck(&a, &b, 0.0001, 0.0001));

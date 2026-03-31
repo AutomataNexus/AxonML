@@ -44,7 +44,6 @@ pub enum ShardingStrategy {
 
 /// State for a sharded parameter.
 #[derive(Debug)]
-#[allow(dead_code)]
 struct ShardedParam {
     /// Local shard of the parameter
     local_shard: Tensor<f32>,
@@ -52,8 +51,9 @@ struct ShardedParam {
     original_shape: Vec<usize>,
     /// Number of elements in original parameter
     numel: usize,
-    /// Padding added for even sharding (for uneven divisions)
-    padding: usize,
+    /// Padding added for even sharding (for uneven divisions).
+    /// Used for debugging/diagnostics.
+    pub padding: usize,
 }
 
 /// CPU offload configuration.
@@ -203,7 +203,6 @@ impl<M: Module> FullyShardedDataParallel<M> {
             return;
         }
 
-        let _world_size = self.process_group.world_size();
         let params = self.module.parameters();
 
         for (param, sharded) in params.iter().zip(self.sharded_params.iter()) {
@@ -230,6 +229,10 @@ impl<M: Module> FullyShardedDataParallel<M> {
     }
 
     /// Synchronizes gradients across all ranks.
+    ///
+    /// For NoShard/HybridShard: all-reduces gradients so every rank has the
+    /// averaged gradient. For ShardGradOp/FullShard: reduce-scatters to produce
+    /// sharded gradient slices (each rank gets its shard of the averaged gradient).
     pub fn sync_gradients(&self) {
         match self.sharding_strategy {
             ShardingStrategy::NoShard => {
@@ -239,17 +242,19 @@ impl<M: Module> FullyShardedDataParallel<M> {
                         let mut grad_tensor = grad.clone();
                         self.process_group
                             .all_reduce_tensor(&mut grad_tensor, ReduceOp::Average);
+                        param.set_grad(grad_tensor);
                     }
                 }
             }
             ShardingStrategy::ShardGradOp | ShardingStrategy::FullShard => {
-                // Reduce-scatter gradients to get sharded gradients
+                // Reduce-scatter gradients to get sharded gradient slices
                 for param in self.module.parameters() {
                     if let Some(grad) = param.grad() {
-                        let _reduced = self
+                        let reduced = self
                             .process_group
                             .reduce_scatter_tensor(&grad, ReduceOp::Average);
-                        // In full implementation, would update parameter's gradient shard
+                        // Write the reduce-scattered gradient shard back
+                        param.set_grad(reduced);
                     }
                 }
             }
@@ -260,6 +265,7 @@ impl<M: Module> FullyShardedDataParallel<M> {
                         let mut grad_tensor = grad.clone();
                         self.process_group
                             .all_reduce_tensor(&mut grad_tensor, ReduceOp::Average);
+                        param.set_grad(grad_tensor);
                     }
                 }
             }
@@ -396,7 +402,6 @@ impl FSDPMemoryStats {
 ///
 /// Splits the weight matrix along the column dimension across ranks.
 /// Each rank computes a portion of the output features.
-#[allow(dead_code)]
 pub struct ColumnParallelLinear {
     /// Local weight shard
     weight: Parameter,
@@ -481,7 +486,6 @@ impl Module for ColumnParallelLinear {
 ///
 /// Splits the weight matrix along the row dimension across ranks.
 /// Each rank has a portion of the input features.
-#[allow(dead_code)]
 pub struct RowParallelLinear {
     /// Local weight shard
     weight: Parameter,

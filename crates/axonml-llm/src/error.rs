@@ -78,4 +78,14 @@ pub enum LLMError {
     /// Tensor error
     #[error("Tensor error: {0}")]
     TensorError(String),
+
+    /// Hub error
+    #[error("Hub error: {0}")]
+    HubError(String),
+}
+
+impl From<crate::hub::HubError> for LLMError {
+    fn from(e: crate::hub::HubError) -> Self {
+        LLMError::HubError(e.to_string())
+    }
 }

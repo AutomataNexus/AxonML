@@ -42,7 +42,6 @@ pub enum FileType {
 
 impl FileType {
     /// Get icon for file type
-    #[allow(dead_code)]
     pub fn icon(&self) -> &'static str {
         match self {
             FileType::Directory => "\u{1F4C1}", // Folder
@@ -54,7 +53,6 @@ impl FileType {
     }
 
     /// Determine file type from extension
-    #[allow(dead_code)]
     pub fn from_extension(ext: &str) -> Self {
         match ext.to_lowercase().as_str() {
             "axonml" | "onnx" | "pt" | "pth" | "safetensors" | "h5" | "keras" => FileType::Model,
@@ -78,7 +76,6 @@ pub struct FileEntry {
 
 impl FileEntry {
     /// Create a new file entry
-    #[allow(dead_code)]
     pub fn new(name: String, path: PathBuf, file_type: FileType, depth: usize) -> Self {
         Self {
             name,
@@ -120,10 +117,14 @@ pub struct FilesView {
 }
 
 impl FilesView {
-    /// Create a new files view with demo data
+    /// Create a new files view.
+    ///
+    /// Loads the actual current working directory. Falls back to demo
+    /// entries if the directory cannot be read.
     pub fn new() -> Self {
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let mut view = Self {
-            current_dir: PathBuf::from("/home/user/ml-projects"),
+            current_dir,
             entries: Vec::new(),
             selected: 0,
             list_state: ListState::default(),
@@ -132,7 +133,10 @@ impl FilesView {
             preview: None,
         };
 
-        view.load_demo_entries();
+        view.load_current_dir();
+        if view.entries.is_empty() {
+            view.load_demo_entries();
+        }
         view.list_state.select(Some(0));
         view
     }
@@ -239,6 +243,75 @@ impl FilesView {
         ];
     }
 
+    /// Load entries from the filesystem for the current directory.
+    pub fn load_current_dir(&mut self) {
+        let mut entries = Vec::new();
+
+        // Parent directory entry
+        if let Some(parent) = self.current_dir.parent() {
+            entries.push(FileEntry::new(
+                "..".to_string(),
+                parent.to_path_buf(),
+                FileType::Directory,
+                0,
+            ));
+        }
+
+        // Read directory contents
+        if let Ok(read_dir) = std::fs::read_dir(&self.current_dir) {
+            let mut dir_entries: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
+            dir_entries.sort_by(|a, b| {
+                let a_is_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                let b_is_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                // Directories first, then alphabetical
+                b_is_dir.cmp(&a_is_dir).then_with(|| {
+                    a.file_name()
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .cmp(&b.file_name().to_string_lossy().to_lowercase())
+                })
+            });
+
+            for entry in dir_entries {
+                let name = entry.file_name().to_string_lossy().to_string();
+
+                // Skip hidden files unless show_hidden is set
+                if !self.show_hidden && name.starts_with('.') {
+                    continue;
+                }
+
+                let path = entry.path();
+                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+
+                let file_type = if is_dir {
+                    FileType::Directory
+                } else {
+                    path.extension()
+                        .map(|e| FileType::from_extension(&e.to_string_lossy()))
+                        .unwrap_or(FileType::Other)
+                };
+
+                let size = if is_dir {
+                    None
+                } else {
+                    entry.metadata().ok().map(|m| m.len())
+                };
+
+                let mut fe = FileEntry::new(name, path, file_type, 0);
+                fe.size = size;
+                entries.push(fe);
+            }
+        }
+
+        self.entries = entries;
+        self.selected = 0;
+        self.list_state.select(if self.entries.is_empty() {
+            None
+        } else {
+            Some(0)
+        });
+    }
+
     /// Move selection up
     pub fn select_prev(&mut self) {
         if self.selected > 0 {
@@ -272,7 +345,7 @@ impl FilesView {
     pub fn go_parent(&mut self) {
         if let Some(parent) = self.current_dir.parent() {
             self.current_dir = parent.to_path_buf();
-            // In real implementation, would reload entries
+            self.load_current_dir();
         }
     }
 
@@ -285,7 +358,7 @@ impl FilesView {
     pub fn go_home(&mut self) {
         if let Some(home) = dirs::home_dir() {
             self.current_dir = home;
-            // In real implementation, would reload entries
+            self.load_current_dir();
         }
     }
 
@@ -305,7 +378,7 @@ impl FilesView {
     /// Toggle hidden files
     pub fn toggle_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
-        // In real implementation, would reload entries
+        self.load_current_dir();
     }
 
     /// Update preview for selected file
@@ -404,9 +477,12 @@ impl FilesView {
                     .map(|s| format!("{:>10}", format_size(s)))
                     .unwrap_or_else(|| "         -".to_string());
 
+                let icon = entry.file_type.icon();
+
                 let content = Line::from(vec![
                     Span::raw(indent),
                     Span::styled(expand_char, AxonmlTheme::muted()),
+                    Span::raw(format!("{icon} ")),
                     Span::styled(&entry.name, name_style),
                     Span::styled(format!("  {}", size_str), AxonmlTheme::muted()),
                 ]);

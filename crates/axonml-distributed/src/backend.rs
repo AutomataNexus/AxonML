@@ -57,20 +57,10 @@ impl ReduceOp {
         }
 
         let len = slices[0].len();
-        let mut result = slices[0].clone();
 
-        for slice in slices.iter().skip(1) {
-            for (i, &val) in slice.iter().enumerate() {
-                if i < len {
-                    result[i] = self.apply_f32(result[i], val);
-                }
-            }
-        }
-
-        // For average, we need to divide by count (already averaged pairwise above)
-        if *self == ReduceOp::Average && slices.len() > 1 {
-            // Re-compute as actual average
-            result = vec![0.0; len];
+        // Average gets its own path to avoid incorrect pairwise midpoint
+        if *self == ReduceOp::Average {
+            let mut result = vec![0.0f32; len];
             for slice in slices {
                 for (i, &val) in slice.iter().enumerate() {
                     if i < len {
@@ -81,6 +71,17 @@ impl ReduceOp {
             let count = slices.len() as f32;
             for val in &mut result {
                 *val /= count;
+            }
+            return result;
+        }
+
+        // All other ops: pairwise reduction
+        let mut result = slices[0].clone();
+        for slice in slices.iter().skip(1) {
+            for (i, &val) in slice.iter().enumerate() {
+                if i < len {
+                    result[i] = self.apply_f32(result[i], val);
+                }
             }
         }
 

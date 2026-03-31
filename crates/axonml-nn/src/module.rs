@@ -74,14 +74,21 @@ pub trait Module: Send + Sync {
     }
 
     /// Sets the training mode.
+    /// Sets the training mode.
+    ///
+    /// Modules with training-dependent behavior (Dropout, BatchNorm) MUST
+    /// override this AND `is_training()` to track the mode in an internal field.
     fn set_training(&mut self, _training: bool) {
-        // Default implementation does nothing
-        // Submodules override this if they have training-specific behavior
+        // Default: no-op. Stateless modules (Linear, Conv, activations)
+        // don't need training mode tracking.
     }
 
     /// Returns whether the module is in training mode.
+    ///
+    /// Default returns `true`. Modules that override `set_training()` should
+    /// also override this to return their tracked state.
     fn is_training(&self) -> bool {
-        true // Default to training mode
+        true
     }
 
     /// Zeros all gradients of parameters.
@@ -92,6 +99,10 @@ pub trait Module: Send + Sync {
     }
 
     /// Moves all parameters to the specified device.
+    ///
+    /// **Note:** This only moves `Parameter` tensors. Modules with non-parameter
+    /// state (e.g., BatchNorm running_mean/running_var) should override this
+    /// method to also move their buffers.
     fn to_device(&self, device: Device) {
         for param in self.parameters() {
             param.to_device(device);

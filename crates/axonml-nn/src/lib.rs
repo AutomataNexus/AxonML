@@ -200,7 +200,7 @@ mod tests {
             .add(ReLU)
             .add(Linear::new(5, 2));
 
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 20], &[2, 10]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 20], &[2, 10]).expect("tensor creation failed"), false);
         let output = model.forward(&input);
         assert_eq!(output.shape(), vec![2, 2]);
     }
@@ -224,7 +224,7 @@ mod tests {
             .add(MaxPool2d::new(2));
 
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 784], &[1, 1, 28, 28]).unwrap(),
+            Tensor::from_vec(vec![1.0; 784], &[1, 1, 28, 28]).expect("tensor creation failed"),
             false,
         );
         let output = model.forward(&input);
@@ -235,10 +235,10 @@ mod tests {
     #[test]
     fn test_loss_computation() {
         let pred = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).unwrap(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).expect("tensor creation failed"),
             true,
         );
-        let target = Variable::new(Tensor::from_vec(vec![0.0, 2.0], &[2]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![0.0, 2.0], &[2]).expect("tensor creation failed"), false);
 
         let loss_fn = CrossEntropyLoss::new();
         let loss = loss_fn.compute(&pred, &target);
@@ -249,7 +249,7 @@ mod tests {
     fn test_embedding_model() {
         let emb = Embedding::new(100, 32);
         let indices = Variable::new(
-            Tensor::from_vec(vec![0.0, 5.0, 10.0, 15.0], &[2, 2]).unwrap(),
+            Tensor::from_vec(vec![0.0, 5.0, 10.0, 15.0], &[2, 2]).expect("tensor creation failed"),
             false,
         );
         let output = emb.forward(&indices);
@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn test_rnn_model() {
         let rnn = LSTM::new(10, 20, 1);
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 60], &[2, 3, 10]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 60], &[2, 3, 10]).expect("tensor creation failed"), false);
         let output = rnn.forward(&input);
         assert_eq!(output.shape(), vec![2, 3, 20]);
     }
@@ -268,7 +268,7 @@ mod tests {
     fn test_attention_model() {
         let attn = MultiHeadAttention::new(64, 4);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 640], &[2, 5, 64]).unwrap(),
+            Tensor::from_vec(vec![1.0; 640], &[2, 5, 64]).expect("tensor creation failed"),
             false,
         );
         let output = attn.forward(&input);

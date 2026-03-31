@@ -39,5 +39,8 @@ thiserror = { workspace = true }
 # Parallel processing
 rayon = { workspace = true }
 
+# BLAS-accelerated matrix operations
+matrixmultiply.workspace = true
+
 [dev-dependencies]
 approx = { workspace = true }

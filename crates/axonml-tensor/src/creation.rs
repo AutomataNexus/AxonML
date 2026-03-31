@@ -40,7 +40,7 @@ use crate::tensor::Tensor;
 pub fn zeros<T: Scalar>(shape: &[usize]) -> Tensor<T> {
     let numel: usize = shape.iter().product();
     let data = vec![T::zeroed(); numel];
-    Tensor::from_vec(data, shape).unwrap()
+    Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
 /// Creates a tensor filled with ones.
@@ -60,7 +60,7 @@ pub fn ones<T: Numeric>(shape: &[usize]) -> Tensor<T> {
 pub fn full<T: Scalar>(shape: &[usize], value: T) -> Tensor<T> {
     let numel: usize = shape.iter().product();
     let data = vec![value; numel];
-    Tensor::from_vec(data, shape).unwrap()
+    Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
 /// Creates a tensor with the same shape as another, filled with zeros.
@@ -94,7 +94,7 @@ pub fn eye<T: Numeric>(n: usize) -> Tensor<T> {
     for i in 0..n {
         data[i * n + i] = T::one();
     }
-    Tensor::from_vec(data, &[n, n]).unwrap()
+    Tensor::from_vec(data, &[n, n]).expect("tensor creation failed")
 }
 
 /// Creates a 2D tensor with the given diagonal values.
@@ -107,7 +107,7 @@ pub fn diag<T: Numeric>(diag: &[T]) -> Tensor<T> {
     for (i, &val) in diag.iter().enumerate() {
         data[i * n + i] = val;
     }
-    Tensor::from_vec(data, &[n, n]).unwrap()
+    Tensor::from_vec(data, &[n, n]).expect("tensor creation failed")
 }
 
 // =============================================================================
@@ -126,7 +126,7 @@ where
     let numel: usize = shape.iter().product();
     let mut rng = rand::thread_rng();
     let data: Vec<T> = (0..numel).map(|_| rng.r#gen()).collect();
-    Tensor::from_vec(data, shape).unwrap()
+    Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
 /// Creates a tensor with normally distributed random values (mean=0, std=1).
@@ -142,7 +142,7 @@ where
     let mut rng = rand::thread_rng();
     let normal = StandardNormal;
     let data: Vec<T> = (0..numel).map(|_| normal.sample(&mut rng)).collect();
-    Tensor::from_vec(data, shape).unwrap()
+    Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
 /// Creates a tensor with uniformly distributed random values in [low, high).
@@ -159,7 +159,7 @@ where
     let mut rng = rand::thread_rng();
     let dist = Uniform::new(low, high);
     let data: Vec<T> = (0..numel).map(|_| dist.sample(&mut rng)).collect();
-    Tensor::from_vec(data, shape).unwrap()
+    Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
 /// Creates a tensor with normally distributed random values.
@@ -177,7 +177,7 @@ where
     let mut rng = rand::thread_rng();
     let dist = Normal::new(mean, std).unwrap();
     let data: Vec<T> = (0..numel).map(|_| dist.sample(&mut rng)).collect();
-    Tensor::from_vec(data, shape).unwrap()
+    Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
 /// Creates a tensor with random integers in [low, high).
@@ -197,7 +197,7 @@ where
     let data: Vec<T> = (0..numel)
         .map(|_| T::from(dist.sample(&mut rng)).unwrap())
         .collect();
-    Tensor::from_vec(data, shape).unwrap()
+    Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
 // =============================================================================
@@ -230,7 +230,7 @@ where
     }
 
     let len = data.len();
-    Tensor::from_vec(data, &[len]).unwrap()
+    Tensor::from_vec(data, &[len]).expect("tensor creation failed")
 }
 
 /// Creates a 1D tensor with `num` evenly spaced values from start to end.
@@ -241,11 +241,11 @@ where
 /// * `num` - Number of values
 pub fn linspace<T: Float>(start: T, end: T, num: usize) -> Tensor<T> {
     if num == 0 {
-        return Tensor::from_vec(vec![], &[0]).unwrap();
+        return Tensor::from_vec(vec![], &[0]).expect("tensor creation failed");
     }
 
     if num == 1 {
-        return Tensor::from_vec(vec![start], &[1]).unwrap();
+        return Tensor::from_vec(vec![start], &[1]).expect("tensor creation failed");
     }
 
     let step = (end - start) / T::from(num - 1).unwrap();
@@ -253,7 +253,7 @@ pub fn linspace<T: Float>(start: T, end: T, num: usize) -> Tensor<T> {
         .map(|i| start + step * T::from(i).unwrap())
         .collect();
 
-    Tensor::from_vec(data, &[num]).unwrap()
+    Tensor::from_vec(data, &[num]).expect("tensor creation failed")
 }
 
 /// Creates a 1D tensor with `num` logarithmically spaced values.
@@ -265,13 +265,13 @@ pub fn linspace<T: Float>(start: T, end: T, num: usize) -> Tensor<T> {
 /// * `base` - Base of the logarithm
 pub fn logspace<T: Float>(start: T, end: T, num: usize, base: T) -> Tensor<T> {
     if num == 0 {
-        return Tensor::from_vec(vec![], &[0]).unwrap();
+        return Tensor::from_vec(vec![], &[0]).expect("tensor creation failed");
     }
 
     let lin = linspace(start, end, num);
     let data: Vec<T> = lin.to_vec().iter().map(|&x| base.pow_value(x)).collect();
 
-    Tensor::from_vec(data, &[num]).unwrap()
+    Tensor::from_vec(data, &[num]).expect("tensor creation failed")
 }
 
 // =============================================================================

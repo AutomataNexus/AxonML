@@ -70,6 +70,8 @@ pub struct AppState {
     pub inference_metrics: Arc<InferenceMetrics>,
     pub metrics_history: Arc<Mutex<system::SystemMetricsHistory>>,
     pub ollama: Arc<OllamaClient>,
+    /// Rate limiter for auth endpoints (login, register, MFA)
+    pub auth_rate_limiter: Arc<crate::auth::RateLimiter>,
 }
 
 /// Create the main API router

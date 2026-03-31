@@ -71,14 +71,14 @@ impl GCNConv {
 
         let weight = Parameter::named(
             "weight",
-            Tensor::from_vec(weight_data, &[in_features, out_features]).unwrap(),
+            Tensor::from_vec(weight_data, &[in_features, out_features]).expect("tensor creation failed"),
             true,
         );
 
         let bias_data = vec![0.0; out_features];
         let bias = Some(Parameter::named(
             "bias",
-            Tensor::from_vec(bias_data, &[out_features]).unwrap(),
+            Tensor::from_vec(bias_data, &[out_features]).expect("tensor creation failed"),
             true,
         ));
 
@@ -102,7 +102,7 @@ impl GCNConv {
 
         let weight = Parameter::named(
             "weight",
-            Tensor::from_vec(weight_data, &[in_features, out_features]).unwrap(),
+            Tensor::from_vec(weight_data, &[in_features, out_features]).expect("tensor creation failed"),
             true,
         );
 
@@ -185,8 +185,20 @@ impl GCNConv {
 }
 
 impl Module for GCNConv {
-    fn forward(&self, _input: &Variable) -> Variable {
-        panic!("GCNConv requires an adjacency matrix. Use forward_graph(x, adj) instead.")
+    /// Forward with identity adjacency (self-loops only).
+    /// For proper graph convolution, use `forward_graph(x, adj)`.
+    fn forward(&self, input: &Variable) -> Variable {
+        // Use identity adjacency: each node only aggregates from itself
+        let n = input.shape()[0];
+        let mut eye_data = vec![0.0f32; n * n];
+        for i in 0..n {
+            eye_data[i * n + i] = 1.0;
+        }
+        let adj = Variable::new(
+            axonml_tensor::Tensor::from_vec(eye_data, &[n, n]).expect("identity matrix creation failed"),
+            false,
+        );
+        self.forward_graph(input, &adj)
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -261,7 +273,7 @@ impl GATConv {
 
         let w = Parameter::named(
             "w",
-            Tensor::from_vec(w_data, &[in_features, total_out]).unwrap(),
+            Tensor::from_vec(w_data, &[in_features, total_out]).expect("tensor creation failed"),
             true,
         );
 
@@ -282,20 +294,20 @@ impl GATConv {
 
         let attn_src = Parameter::named(
             "attn_src",
-            Tensor::from_vec(attn_src_data, &[num_heads, out_features]).unwrap(),
+            Tensor::from_vec(attn_src_data, &[num_heads, out_features]).expect("tensor creation failed"),
             true,
         );
 
         let attn_dst = Parameter::named(
             "attn_dst",
-            Tensor::from_vec(attn_dst_data, &[num_heads, out_features]).unwrap(),
+            Tensor::from_vec(attn_dst_data, &[num_heads, out_features]).expect("tensor creation failed"),
             true,
         );
 
         let bias_data = vec![0.0; total_out];
         let bias = Some(Parameter::named(
             "bias",
-            Tensor::from_vec(bias_data, &[total_out]).unwrap(),
+            Tensor::from_vec(bias_data, &[total_out]).expect("tensor creation failed"),
             true,
         ));
 
@@ -447,7 +459,7 @@ impl GATConv {
         }
 
         Variable::new(
-            Tensor::from_vec(output, &[batch, nodes, total_out]).unwrap(),
+            Tensor::from_vec(output, &[batch, nodes, total_out]).expect("tensor creation failed"),
             x.requires_grad(),
         )
     }
@@ -459,8 +471,18 @@ impl GATConv {
 }
 
 impl Module for GATConv {
-    fn forward(&self, _input: &Variable) -> Variable {
-        panic!("GATConv requires an adjacency matrix. Use forward_graph(x, adj) instead.")
+    fn forward(&self, input: &Variable) -> Variable {
+        // Use identity adjacency: each node only attends to itself
+        let n = input.shape()[0];
+        let mut eye_data = vec![0.0f32; n * n];
+        for i in 0..n {
+            eye_data[i * n + i] = 1.0;
+        }
+        let adj = Variable::new(
+            axonml_tensor::Tensor::from_vec(eye_data, &[n, n]).expect("identity matrix creation failed"),
+            false,
+        );
+        self.forward_graph(input, &adj)
     }
 
     fn parameters(&self) -> Vec<Parameter> {
@@ -499,10 +521,10 @@ mod tests {
     fn test_gcn_conv_shape() {
         let gcn = GCNConv::new(72, 128);
         let x = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * 7 * 72], &[2, 7, 72]).unwrap(),
+            Tensor::from_vec(vec![1.0; 2 * 7 * 72], &[2, 7, 72]).expect("tensor creation failed"),
             false,
         );
-        let adj = Variable::new(Tensor::from_vec(vec![1.0; 7 * 7], &[7, 7]).unwrap(), false);
+        let adj = Variable::new(Tensor::from_vec(vec![1.0; 7 * 7], &[7, 7]).expect("tensor creation failed"), false);
         let output = gcn.forward_graph(&x, &adj);
         assert_eq!(output.shape(), vec![2, 7, 128]);
     }
@@ -512,7 +534,7 @@ mod tests {
         // With identity adjacency, each node only sees itself
         let gcn = GCNConv::new(4, 8);
         let x = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 3 * 4], &[1, 3, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0; 1 * 3 * 4], &[1, 3, 4]).expect("tensor creation failed"),
             false,
         );
 
@@ -521,7 +543,7 @@ mod tests {
         adj_data[0] = 1.0; // (0,0)
         adj_data[4] = 1.0; // (1,1)
         adj_data[8] = 1.0; // (2,2)
-        let adj = Variable::new(Tensor::from_vec(adj_data, &[3, 3]).unwrap(), false);
+        let adj = Variable::new(Tensor::from_vec(adj_data, &[3, 3]).expect("tensor creation failed"), false);
 
         let output = gcn.forward_graph(&x, &adj);
         assert_eq!(output.shape(), vec![1, 3, 8]);
@@ -567,10 +589,10 @@ mod tests {
     fn test_gat_conv_shape() {
         let gat = GATConv::new(72, 32, 4); // 4 heads
         let x = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * 7 * 72], &[2, 7, 72]).unwrap(),
+            Tensor::from_vec(vec![1.0; 2 * 7 * 72], &[2, 7, 72]).expect("tensor creation failed"),
             false,
         );
-        let adj = Variable::new(Tensor::from_vec(vec![1.0; 7 * 7], &[7, 7]).unwrap(), false);
+        let adj = Variable::new(Tensor::from_vec(vec![1.0; 7 * 7], &[7, 7]).expect("tensor creation failed"), false);
         let output = gat.forward_graph(&x, &adj);
         assert_eq!(output.shape(), vec![2, 7, 128]); // 32 * 4 = 128
     }
@@ -579,10 +601,10 @@ mod tests {
     fn test_gat_conv_single_head() {
         let gat = GATConv::new(16, 8, 1);
         let x = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 5 * 16], &[1, 5, 16]).unwrap(),
+            Tensor::from_vec(vec![1.0; 1 * 5 * 16], &[1, 5, 16]).expect("tensor creation failed"),
             false,
         );
-        let adj = Variable::new(Tensor::from_vec(vec![1.0; 5 * 5], &[5, 5]).unwrap(), false);
+        let adj = Variable::new(Tensor::from_vec(vec![1.0; 5 * 5], &[5, 5]).expect("tensor creation failed"), false);
         let output = gat.forward_graph(&x, &adj);
         assert_eq!(output.shape(), vec![1, 5, 8]);
     }
@@ -611,10 +633,10 @@ mod tests {
         // Zero adjacency should produce only bias in output
         let gcn = GCNConv::new(4, 4);
         let x = Variable::new(
-            Tensor::from_vec(vec![99.0; 1 * 3 * 4], &[1, 3, 4]).unwrap(),
+            Tensor::from_vec(vec![99.0; 1 * 3 * 4], &[1, 3, 4]).expect("tensor creation failed"),
             false,
         );
-        let adj = Variable::new(Tensor::from_vec(vec![0.0; 9], &[3, 3]).unwrap(), false);
+        let adj = Variable::new(Tensor::from_vec(vec![0.0; 9], &[3, 3]).expect("tensor creation failed"), false);
         let output = gcn.forward_graph(&x, &adj);
 
         // With zero adjacency, output should be just bias (all zeros initially)

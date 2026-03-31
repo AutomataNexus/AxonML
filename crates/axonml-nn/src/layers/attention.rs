@@ -101,23 +101,46 @@ impl MultiHeadAttention {
         }
     }
 
-    /// Try to expand attention mask on GPU via CUDA kernels.
-    /// Returns None to fall through to CPU expansion.
-    #[allow(unused_variables)]
-    #[allow(dead_code)]
-    fn try_gpu_mask_expand(
-        mask_data: &Tensor<f32>,
-        mask_shape: &[usize],
-        scores_shape: &[usize],
-        device: axonml_core::Device,
-        total: usize,
+    /// Expand attention mask to match scores shape via broadcast.
+    ///
+    /// Handles common mask shapes:
+    /// - [T, S] → [B, H, T, S] (same mask for all batches/heads)
+    /// - [B, 1, T, S] → [B, H, T, S] (per-batch, shared across heads)
+    /// - [B, H, T, S] → no expansion needed
+    ///
+    /// Works on both CPU and GPU — uses Variable::expand which preserves device.
+    fn expand_mask(
+        mask: &Variable,
         batch_size: usize,
         num_heads: usize,
         tgt_len: usize,
         src_len: usize,
-    ) -> Option<Variable> {
-        // TODO: CUDA kernel for mask broadcast expansion
-        None
+    ) -> Variable {
+        let mask_shape = mask.shape();
+        let target = [batch_size, num_heads, tgt_len, src_len];
+
+        if mask_shape == target {
+            return mask.clone();
+        }
+
+        // [T, S] → [1, 1, T, S] → expand to [B, H, T, S]
+        if mask_shape.len() == 2 {
+            let reshaped = mask.reshape(&[1, 1, tgt_len, src_len]);
+            return reshaped.expand(&target);
+        }
+
+        // [B, 1, T, S] → expand heads dim
+        if mask_shape.len() == 4 && mask_shape[1] == 1 {
+            return mask.expand(&target);
+        }
+
+        // [1, 1, T, S] → expand both
+        if mask_shape.len() == 4 && mask_shape[0] == 1 && mask_shape[1] == 1 {
+            return mask.expand(&target);
+        }
+
+        // Fallback: just clone
+        mask.clone()
     }
 
     /// Computes attention using batched matmul (BLAS-accelerated).
@@ -294,10 +317,10 @@ impl MultiHeadAttention {
                 }
             }
 
-            let mut additive_tensor = Tensor::from_vec(expanded, &scores_shape).unwrap();
+            let mut additive_tensor = Tensor::from_vec(expanded, &scores_shape).expect("tensor creation failed");
             let scores_device = scores.data().device();
             if scores_device.is_gpu() {
-                additive_tensor = additive_tensor.to_device(scores_device).unwrap();
+                additive_tensor = additive_tensor.to_device(scores_device).expect("device transfer failed");
             }
             let additive_mask = Variable::new(additive_tensor, false);
             scores.add_var(&additive_mask)
@@ -567,7 +590,7 @@ pub fn scaled_dot_product_attention_fused(
         }
     }
 
-    Tensor::from_vec(output, &[batch_size, num_heads, tgt_len, head_dim]).unwrap()
+    Tensor::from_vec(output, &[batch_size, num_heads, tgt_len, head_dim]).expect("tensor creation failed")
 }
 
 // =============================================================================
@@ -590,7 +613,7 @@ mod tests {
     fn test_multihead_attention_forward() {
         let mha = MultiHeadAttention::new(64, 4);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![1.0; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let output = mha.forward(&input);
@@ -601,11 +624,11 @@ mod tests {
     fn test_cross_attention() {
         let mha = MultiHeadAttention::new(64, 4);
         let query = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * 5 * 64], &[2, 5, 64]).unwrap(),
+            Tensor::from_vec(vec![1.0; 2 * 5 * 64], &[2, 5, 64]).expect("tensor creation failed"),
             false,
         );
         let key_value = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![1.0; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let output = mha.attention(&query, &key_value, &key_value, None);
@@ -632,12 +655,12 @@ mod tests {
         let ca = CrossAttention::new(64, 4);
         // Decoder query: (batch=2, tgt_len=5, embed=64)
         let query = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 5 * 64], &[2, 5, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 5 * 64], &[2, 5, 64]).expect("tensor creation failed"),
             false,
         );
         // Encoder memory: (batch=2, src_len=10, embed=64)
         let memory = Variable::new(
-            Tensor::from_vec(vec![0.2; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![0.2; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let output = ca.cross_attention(&query, &memory, None);
@@ -648,7 +671,7 @@ mod tests {
     fn test_cross_attention_self_attention_fallback() {
         let ca = CrossAttention::new(64, 4);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * 8 * 64], &[2, 8, 64]).unwrap(),
+            Tensor::from_vec(vec![1.0; 2 * 8 * 64], &[2, 8, 64]).expect("tensor creation failed"),
             false,
         );
         // Module::forward does self-attention
@@ -747,7 +770,7 @@ mod tests {
 
         let mha = MultiHeadAttention::new(32, 4);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 4 * 32], &[2, 4, 32]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 4 * 32], &[2, 4, 32]).expect("tensor creation failed"),
             true,
         );
         let output = mha.forward(&input);
@@ -755,7 +778,7 @@ mod tests {
 
         // Sum the output and backward
         let loss = output.sum();
-        let ones = Tensor::from_vec(vec![1.0f32], &[1]).unwrap();
+        let ones = Tensor::from_vec(vec![1.0f32], &[1]).expect("tensor creation failed");
         backward(&loss, &ones);
 
         // Input should have gradients
@@ -793,9 +816,9 @@ mod tests {
             .map(|i| ((i as f32) * 0.03).sin() + 0.5)
             .collect();
 
-        let q = Tensor::from_vec(q_data, &[batch, heads, seq, dim]).unwrap();
-        let k = Tensor::from_vec(k_data, &[batch, heads, seq, dim]).unwrap();
-        let v = Tensor::from_vec(v_data, &[batch, heads, seq, dim]).unwrap();
+        let q = Tensor::from_vec(q_data, &[batch, heads, seq, dim]).expect("tensor creation failed");
+        let k = Tensor::from_vec(k_data, &[batch, heads, seq, dim]).expect("tensor creation failed");
+        let v = Tensor::from_vec(v_data, &[batch, heads, seq, dim]).expect("tensor creation failed");
 
         // Compute forward output using the fused CPU path
         let output = scaled_dot_product_attention_fused(&q, &k, &v, scale, false);

@@ -119,7 +119,10 @@ impl Variable {
         }
     }
 
-    /// Returns a reference to the underlying tensor data.
+    /// Returns a clone of the underlying tensor data.
+    ///
+    /// Tensor uses Arc-backed storage, so this is a cheap reference count
+    /// bump (not a deep copy). The data is shared until mutated.
     #[must_use]
     pub fn data(&self) -> Tensor<f32> {
         self.data.read().clone()
@@ -190,6 +193,14 @@ impl Variable {
         self.grad_fn.as_ref()
     }
 
+    /// Updates the underlying tensor data without breaking the gradient accumulator.
+    ///
+    /// Unlike creating a new Variable, this preserves the grad accumulator Arc
+    /// so that backward passes continue to write gradients to the right place.
+    pub fn set_data(&mut self, new_data: Tensor<f32>) {
+        *self.data.write() = new_data;
+    }
+
     /// Sets the gradient (used during backward pass).
     pub fn set_grad(&self, grad: Tensor<f32>) {
         *self.grad.write() = Some(grad);
@@ -256,7 +267,7 @@ impl Variable {
         let mut grad_output = Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap();
         let device = self.data.read().device();
         if device.is_gpu() {
-            grad_output = grad_output.to_device(device).unwrap();
+            grad_output = grad_output.to_device(device).expect("device transfer failed");
         }
         crate::backward::backward(self, &grad_output);
     }
@@ -271,7 +282,7 @@ impl Variable {
         }
         let device = self.data.read().device();
         let grad = if grad_output.device() != device && device.is_gpu() {
-            grad_output.to_device(device).unwrap()
+            grad_output.to_device(device).expect("device transfer failed")
         } else {
             grad_output.clone()
         };
@@ -381,7 +392,15 @@ impl Variable {
     pub fn matmul(&self, other: &Variable) -> Variable {
         let self_data = self.data.read().clone();
         let other_data = other.data.read().clone();
-        let result = self_data.matmul(&other_data).unwrap();
+
+        // AMP: cast inputs to f16 precision for faster matmul, result stays f32
+        let (compute_a, compute_b) = if crate::amp::is_autocast_enabled() {
+            (self_data.to_f16_precision(), other_data.to_f16_precision())
+        } else {
+            (self_data.clone(), other_data.clone())
+        };
+
+        let result = compute_a.matmul(&compute_b).expect("matmul failed");
         let requires_grad = (self.requires_grad || other.requires_grad) && is_grad_enabled();
 
         if requires_grad {
@@ -443,7 +462,7 @@ impl Variable {
             .collect();
         let mut result = Tensor::from_vec(result_vec, self_data.shape()).unwrap();
         if device.is_gpu() {
-            result = result.to_device(device).unwrap();
+            result = result.to_device(device).expect("device transfer failed");
         }
         let requires_grad = self.requires_grad && is_grad_enabled();
 
@@ -471,7 +490,7 @@ impl Variable {
             .collect();
         let mut result = Tensor::from_vec(result_vec, self_data.shape()).unwrap();
         if device.is_gpu() {
-            result = result.to_device(device).unwrap();
+            result = result.to_device(device).expect("device transfer failed");
         }
         let requires_grad = self.requires_grad && is_grad_enabled();
 
@@ -553,7 +572,7 @@ impl Variable {
             .collect();
         let mut result = Tensor::from_vec(result_data, self_data.shape()).unwrap();
         if device.is_gpu() {
-            result = result.to_device(device).unwrap();
+            result = result.to_device(device).expect("device transfer failed");
         }
         let requires_grad = self.requires_grad && is_grad_enabled();
 
@@ -1145,8 +1164,8 @@ mod tests {
 
     #[test]
     fn test_variable_add() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
-        let b = Variable::new(Tensor::from_vec(vec![4.0, 5.0, 6.0], &[3]).unwrap(), true);
+        let a = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let b = Variable::new(Tensor::from_vec(vec![4.0, 5.0, 6.0], &[3]).expect("tensor creation failed"), true);
         let c = &a + &b;
         assert_eq!(c.data().to_vec(), vec![5.0, 7.0, 9.0]);
         assert!(c.requires_grad());
@@ -1155,7 +1174,7 @@ mod tests {
 
     #[test]
     fn test_variable_detach() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
+        let a = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
         let b = a.detach();
         assert!(!b.requires_grad());
         assert!(b.is_leaf());
@@ -1163,8 +1182,8 @@ mod tests {
 
     #[test]
     fn test_mse_loss() {
-        let pred = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
-        let target = Variable::from_tensor(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
+        let pred = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let target = Variable::from_tensor(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"));
         let loss = pred.mse_loss(&target);
         assert_eq!(loss.numel(), 1);
         assert!((loss.data().to_vec()[0] - 0.0).abs() < 1e-6);
@@ -1172,7 +1191,7 @@ mod tests {
 
     #[test]
     fn test_exp() {
-        let a = Variable::new(Tensor::from_vec(vec![0.0, 1.0, 2.0], &[3]).unwrap(), true);
+        let a = Variable::new(Tensor::from_vec(vec![0.0, 1.0, 2.0], &[3]).expect("tensor creation failed"), true);
         let b = a.exp();
         assert!((b.data().to_vec()[0] - 1.0).abs() < 1e-5);
         assert!((b.data().to_vec()[1] - std::f32::consts::E).abs() < 1e-4);
@@ -1187,7 +1206,7 @@ mod tests {
     #[test]
     fn test_log() {
         let a = Variable::new(
-            Tensor::from_vec(vec![1.0, std::f32::consts::E, 10.0], &[3]).unwrap(),
+            Tensor::from_vec(vec![1.0, std::f32::consts::E, 10.0], &[3]).expect("tensor creation failed"),
             true,
         );
         let b = a.log();
@@ -1203,7 +1222,7 @@ mod tests {
 
     #[test]
     fn test_clamp() {
-        let a = Variable::new(Tensor::from_vec(vec![-1.0, 0.5, 2.0], &[3]).unwrap(), true);
+        let a = Variable::new(Tensor::from_vec(vec![-1.0, 0.5, 2.0], &[3]).expect("tensor creation failed"), true);
         let b = a.clamp(0.0, 1.0);
         assert_eq!(b.data().to_vec(), vec![0.0, 0.5, 1.0]);
 

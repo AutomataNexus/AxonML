@@ -34,8 +34,7 @@ pub struct CompiledFunction {
 enum CompiledKind {
     /// Interpreted execution (fallback).
     Interpreted,
-    /// Native code (future: Cranelift JIT).
-    #[allow(dead_code)]
+    /// Native code via Cranelift JIT (enabled via `JitCompiler::enable_native(true)`).
     Native {
         /// Pointer to compiled code.
         code_ptr: *const u8,
@@ -76,7 +75,11 @@ impl CompiledFunction {
                     let func: extern "C" fn(*const f32, *mut f32) = std::mem::transmute(code_ptr);
                     let flat_inputs: Vec<f32> =
                         inputs.iter().flat_map(|(_, d)| d.iter().copied()).collect();
-                    let mut output = vec![0.0f32; self.graph.outputs().len() * 1024]; // Max output size
+                    // Allocate exact output size from graph shapes
+                    let output_size: usize = self.graph.outputs().values()
+                        .map(|id| self.graph.node(*id).shape.numel())
+                        .sum();
+                    let mut output = vec![0.0f32; output_size];
                     func(flat_inputs.as_ptr(), output.as_mut_ptr());
                     let _ = code_size; // Used for memory management
                     Ok(output)
@@ -305,13 +308,57 @@ impl CompiledFunction {
                 reduce_axis(a, input_shape, *axis, *keepdim, f32::max, f32::NEG_INFINITY)
             }
 
-            // Shape ops - for interpreter, just pass through
+            // Shape ops
             Op::Reshape { input, .. }
-            | Op::Transpose { input, .. }
             | Op::Squeeze { input, .. }
             | Op::Unsqueeze { input, .. }
             | Op::Broadcast { input, .. }
             | Op::Contiguous { input } => Ok(get(*input)?.clone()),
+
+            // Transpose actually reorders data
+            Op::Transpose { input, dim0, dim1 } => {
+                let a = get(*input)?;
+                let input_shape = &self.graph.node(*input).shape;
+                let ndim = input_shape.dims().len();
+                if ndim < 2 || *dim0 >= ndim || *dim1 >= ndim || dim0 == dim1 {
+                    return Ok(a.clone());
+                }
+                // Build transposed strides and reindex
+                let dims = input_shape.dims();
+                let mut perm: Vec<usize> = (0..ndim).collect();
+                perm.swap(*dim0, *dim1);
+                let mut new_shape: Vec<usize> = perm.iter().map(|&d| dims[d]).collect();
+                let numel: usize = dims.iter().product();
+                let mut result = vec![0.0f32; numel];
+
+                // Compute strides for input
+                let mut in_strides = vec![1usize; ndim];
+                for d in (0..ndim - 1).rev() {
+                    in_strides[d] = in_strides[d + 1] * dims[d + 1];
+                }
+                // Compute strides for output
+                let mut out_strides = vec![1usize; ndim];
+                for d in (0..ndim - 1).rev() {
+                    out_strides[d] = out_strides[d + 1] * new_shape[d + 1];
+                }
+
+                for flat in 0..numel {
+                    // Convert flat index to multi-dim in output space
+                    let mut remaining = flat;
+                    let mut out_idx = vec![0usize; ndim];
+                    for d in 0..ndim {
+                        out_idx[d] = remaining / out_strides[d];
+                        remaining %= out_strides[d];
+                    }
+                    // Map to input space via inverse permutation
+                    let mut in_flat = 0;
+                    for d in 0..ndim {
+                        in_flat += out_idx[d] * in_strides[perm[d]];
+                    }
+                    result[flat] = a[in_flat];
+                }
+                Ok(result)
+            }
 
             // Matrix multiplication
             Op::MatMul { lhs, rhs } => {
@@ -523,6 +570,14 @@ impl JitCompiler {
             cache: FunctionCache::default_size(),
             use_native: false,
         }
+    }
+
+    /// Enable native code generation via Cranelift.
+    ///
+    /// When enabled, the compiler will attempt to generate machine code
+    /// for supported operations. Unsupported ops fall back to the interpreter.
+    pub fn enable_native(&mut self, enable: bool) {
+        self.use_native = enable;
     }
 
     /// Compiles a graph into an executable function.
@@ -737,7 +792,10 @@ impl JitCompiler {
     }
 
     fn get_input_offset(&self, _name: &str) -> i32 {
-        // Simple offset calculation - in practice would use a mapping
+        // Input offset calculation for native codegen.
+        // Currently only supports single-input graphs (offset=0).
+        // Multi-input support requires storing the graph in JitCompiler
+        // or passing input layout info to compile_native().
         0
     }
 

@@ -14,18 +14,16 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use gloo_storage::{LocalStorage, Storage};
+use gloo_storage::{LocalStorage, SessionStorage, Storage};
 use gloo_timers::callback::Interval;
 use leptos::*;
 use wasm_bindgen::JsCast;
 
 use crate::api;
+use crate::constants::{ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, USER_KEY};
 use crate::state::use_app_state;
 use crate::types::User;
 
-const ACCESS_TOKEN_KEY: &str = "access_token";
-const REFRESH_TOKEN_KEY: &str = "refresh_token";
-const USER_KEY: &str = "user";
 const TOKEN_REFRESH_INTERVAL_MS: u32 = 5 * 60 * 1000; // 5 minutes
 
 /// Session manager that handles token refresh and session validation
@@ -64,41 +62,63 @@ impl Default for SessionManager {
 
 /// Check if we have a stored session
 pub fn has_stored_session() -> bool {
-    LocalStorage::get::<String>(ACCESS_TOKEN_KEY).is_ok()
+    // Check sessionStorage first (current tab), then localStorage refresh token
+    SessionStorage::get::<String>(ACCESS_TOKEN_KEY).is_ok()
+        || LocalStorage::get::<String>(REFRESH_TOKEN_KEY).is_ok()
 }
 
-/// Get stored access token
+/// Get stored access token (sessionStorage — cleared on browser close)
 pub fn get_access_token() -> Option<String> {
-    LocalStorage::get(ACCESS_TOKEN_KEY).ok()
+    SessionStorage::get(ACCESS_TOKEN_KEY).ok()
 }
 
-/// Get stored refresh token
+/// Get stored refresh token (localStorage — persists across sessions)
 pub fn get_refresh_token() -> Option<String> {
     LocalStorage::get(REFRESH_TOKEN_KEY).ok()
 }
 
-/// Get stored user
+/// Get stored user (sessionStorage)
 pub fn get_stored_user() -> Option<User> {
-    LocalStorage::get(USER_KEY).ok()
+    SessionStorage::get(USER_KEY).ok()
 }
 
-/// Store session data
+/// Store session data.
+///
+/// Access token and user go to sessionStorage (cleared on browser close).
+/// Refresh token goes to localStorage (persists for session resumption).
+/// Logs warnings if storage writes fail.
 pub fn store_session(access_token: &str, refresh_token: &str, user: &User) {
-    let _ = LocalStorage::set(ACCESS_TOKEN_KEY, access_token);
-    let _ = LocalStorage::set(REFRESH_TOKEN_KEY, refresh_token);
-    let _ = LocalStorage::set(USER_KEY, user);
+    if let Err(e) = SessionStorage::set(ACCESS_TOKEN_KEY, access_token) {
+        web_sys::console::warn_1(
+            &format!("Failed to store access token: {e}").into(),
+        );
+    }
+    if let Err(e) = LocalStorage::set(REFRESH_TOKEN_KEY, refresh_token) {
+        web_sys::console::warn_1(
+            &format!("Failed to store refresh token: {e}").into(),
+        );
+    }
+    if let Err(e) = SessionStorage::set(USER_KEY, user) {
+        web_sys::console::warn_1(
+            &format!("Failed to store user data: {e}").into(),
+        );
+    }
 }
 
-/// Clear session data
+/// Clear session data from both storage types
 pub fn clear_session() {
-    LocalStorage::delete(ACCESS_TOKEN_KEY);
+    SessionStorage::delete(ACCESS_TOKEN_KEY);
     LocalStorage::delete(REFRESH_TOKEN_KEY);
-    LocalStorage::delete(USER_KEY);
+    SessionStorage::delete(USER_KEY);
 }
 
-/// Update access token only
+/// Update access token only (sessionStorage)
 pub fn update_access_token(token: &str) {
-    let _ = LocalStorage::set(ACCESS_TOKEN_KEY, token);
+    if let Err(e) = SessionStorage::set(ACCESS_TOKEN_KEY, token) {
+        web_sys::console::warn_1(
+            &format!("Failed to update access token: {e}").into(),
+        );
+    }
 }
 
 /// Refresh the access token if we have a refresh token

@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "axonml"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-audio",
  "axonml-autograd",
@@ -352,17 +352,18 @@ dependencies = [
 
 [[package]]
 name = "axonml-audio"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-core",
  "axonml-data",
  "axonml-tensor",
  "rand 0.8.5",
+ "rustfft",
 ]
 
 [[package]]
 name = "axonml-autograd"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -373,7 +374,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-cli"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -383,6 +384,7 @@ dependencies = [
  "axonml-nn",
  "axonml-onnx",
  "axonml-optim",
+ "axonml-quant",
  "axonml-serialize",
  "axonml-tensor",
  "axonml-tui",
@@ -416,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-core"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "approx",
  "ash",
@@ -439,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-dashboard"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "base64 0.21.7",
  "chrono",
@@ -469,7 +471,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-data"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -479,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-distributed"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -490,18 +492,19 @@ dependencies = [
 
 [[package]]
 name = "axonml-fusion"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "approx",
  "axonml-core",
  "axonml-tensor",
+ "matrixmultiply",
  "rayon",
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "axonml-jit"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -516,7 +519,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-llm"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "approx",
  "axonml",
@@ -539,7 +542,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-nn"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -553,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-onnx"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -571,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-optim"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -581,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-profile"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "approx",
  "axonml-core",
@@ -594,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-quant"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "approx",
  "axonml-autograd",
@@ -609,7 +612,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-serialize"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -623,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-server"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -677,10 +680,11 @@ dependencies = [
 
 [[package]]
 name = "axonml-tensor"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "approx",
  "axonml-core",
+ "half",
  "num-traits",
  "rand 0.8.5",
  "rand_distr",
@@ -689,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-text"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -697,11 +701,13 @@ dependencies = [
  "axonml-nn",
  "axonml-tensor",
  "rand 0.8.5",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "axonml-tui"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -719,7 +725,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-vision"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axonml",
  "axonml-autograd",

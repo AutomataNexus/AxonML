@@ -196,8 +196,17 @@ pub struct UpdateUserRequest {
 /// Register a new user
 pub async fn register(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<RegisterResponse>), AuthError> {
+    // Rate limit: prevent registration spam
+    let client_ip = extract_client_ip(&headers, None).unwrap_or_else(|| "unknown".to_string());
+    if !state.auth_rate_limiter.check(&format!("register:{client_ip}")) {
+        return Err(AuthError::Forbidden(
+            "Too many registration attempts. Please try again later.".to_string(),
+        ));
+    }
+
     // Check if public registration is allowed
     if !state.config.auth.allow_public_registration {
         return Err(AuthError::Forbidden(
@@ -274,8 +283,17 @@ pub async fn register(
 /// Login user
 pub async fn login(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, AuthError> {
+    // Rate limit: prevent brute-force attacks
+    let client_ip = extract_client_ip(&headers, None).unwrap_or_else(|| "unknown".to_string());
+    if !state.auth_rate_limiter.check(&format!("login:{client_ip}")) {
+        return Err(AuthError::Forbidden(
+            "Too many login attempts. Please try again later.".to_string(),
+        ));
+    }
+
     let repo = UserRepository::new(&state.db);
 
     // Find user by email or username (name field)
@@ -372,8 +390,17 @@ pub async fn login(
 /// Verify TOTP code
 pub async fn verify_totp(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<VerifyTotpRequest>,
 ) -> Result<Json<TokenResponse>, AuthError> {
+    // Rate limit: prevent MFA brute-force
+    let client_ip = extract_client_ip(&headers, None).unwrap_or_else(|| "unknown".to_string());
+    if !state.auth_rate_limiter.check(&format!("mfa:{client_ip}")) {
+        return Err(AuthError::Forbidden(
+            "Too many MFA attempts. Please try again later.".to_string(),
+        ));
+    }
+
     // Validate MFA token
     let claims = state.jwt.validate_mfa_token(&req.mfa_token)?;
 

@@ -34,7 +34,7 @@ static NODE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Generates a new unique node ID.
 fn new_node_id() -> NodeId {
-    NODE_ID_COUNTER.fetch_add(1, Ordering::SeqCst)
+    NODE_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
 /// A node in the computational graph.
@@ -50,6 +50,8 @@ pub struct GraphNode {
     pub is_leaf: bool,
     /// Topological order for efficient backward traversal.
     pub topo_order: u64,
+    /// Thread ID where this node was created (for cross-thread detection).
+    pub(crate) origin_thread: std::thread::ThreadId,
 }
 
 impl GraphNode {
@@ -62,6 +64,7 @@ impl GraphNode {
             requires_grad,
             is_leaf: true,
             topo_order: 0,
+            origin_thread: std::thread::current().id(),
         }
     }
 
@@ -74,7 +77,14 @@ impl GraphNode {
             requires_grad,
             is_leaf: false,
             topo_order,
+            origin_thread: std::thread::current().id(),
         }
+    }
+
+    /// Returns true if this node was created on the current thread.
+    #[must_use]
+    pub fn is_same_thread(&self) -> bool {
+        self.origin_thread == std::thread::current().id()
     }
 }
 
@@ -113,7 +123,7 @@ impl ComputationGraph {
 
     /// Registers a new intermediate node resulting from an operation.
     pub fn register_operation(&self, grad_fn: GradFn, requires_grad: bool) -> Arc<GraphNode> {
-        let topo_order = self.max_topo_order.fetch_add(1, Ordering::SeqCst) + 1;
+        let topo_order = self.max_topo_order.fetch_add(1, Ordering::Relaxed) + 1;
         let node = Arc::new(GraphNode::intermediate(grad_fn, requires_grad, topo_order));
         self.nodes.write().insert(node.id, Arc::clone(&node));
         node
@@ -137,12 +147,12 @@ impl ComputationGraph {
     /// Clears all nodes from the graph.
     pub fn clear(&self) {
         self.nodes.write().clear();
-        self.max_topo_order.store(0, Ordering::SeqCst);
+        self.max_topo_order.store(0, Ordering::Relaxed);
     }
 
     /// Resets the node ID counter (use with caution, mainly for testing).
     pub fn reset_id_counter() {
-        NODE_ID_COUNTER.store(0, Ordering::SeqCst);
+        NODE_ID_COUNTER.store(0, Ordering::Relaxed);
     }
 }
 

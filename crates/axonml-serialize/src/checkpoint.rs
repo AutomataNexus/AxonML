@@ -52,31 +52,37 @@ impl TrainingState {
         Self::default()
     }
 
-    /// Record a training loss value.
+    /// Record a training loss value (capped at last 1000).
     pub fn record_loss(&mut self, loss: f32) {
         self.loss_history.push(loss);
-        // Keep last 1000 values
         if self.loss_history.len() > 1000 {
-            self.loss_history.remove(0);
+            self.loss_history.drain(..self.loss_history.len() - 1000);
         }
     }
 
-    /// Record a validation loss value.
+    /// Record a validation loss value (capped at last 1000).
     pub fn record_val_loss(&mut self, loss: f32) {
         self.val_loss_history.push(loss);
+        if self.val_loss_history.len() > 1000 {
+            self.val_loss_history.drain(..self.val_loss_history.len() - 1000);
+        }
     }
 
-    /// Record learning rate.
+    /// Record learning rate (capped at last 1000).
     pub fn record_lr(&mut self, lr: f32) {
         self.lr_history.push(lr);
+        if self.lr_history.len() > 1000 {
+            self.lr_history.drain(..self.lr_history.len() - 1000);
+        }
     }
 
-    /// Record a custom metric.
+    /// Record a custom metric (capped at last 1000 per metric).
     pub fn record_metric(&mut self, name: &str, value: f32) {
-        self.custom_metrics
-            .entry(name.to_string())
-            .or_default()
-            .push(value);
+        let history = self.custom_metrics.entry(name.to_string()).or_default();
+        history.push(value);
+        if history.len() > 1000 {
+            history.drain(..history.len() - 1000);
+        }
     }
 
     /// Update best metric if improved.
@@ -274,12 +280,45 @@ impl Default for CheckpointBuilder {
 // =============================================================================
 
 fn chrono_timestamp() -> String {
-    // Simple timestamp without chrono dependency
+    // ISO 8601-ish timestamp without chrono dependency
     use std::time::{SystemTime, UNIX_EPOCH};
-    let duration = SystemTime::now()
+    let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}", duration.as_secs())
+        .unwrap_or_default()
+        .as_secs();
+
+    // Convert unix timestamp to UTC date-time string
+    let days = secs / 86400;
+    let time_secs = secs % 86400;
+    let hours = time_secs / 3600;
+    let minutes = (time_secs % 3600) / 60;
+    let seconds = time_secs % 60;
+
+    // Days since 1970-01-01
+    let mut y = 1970i64;
+    let mut remaining_days = days as i64;
+    loop {
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        if remaining_days < days_in_year {
+            break;
+        }
+        remaining_days -= days_in_year;
+        y += 1;
+    }
+
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut m = 0;
+    for (i, &md) in month_days.iter().enumerate() {
+        if remaining_days < md as i64 {
+            m = i + 1;
+            break;
+        }
+        remaining_days -= md as i64;
+    }
+    let d = remaining_days + 1;
+
+    format!("{y:04}-{m:02}-{d:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
 }
 
 // =============================================================================

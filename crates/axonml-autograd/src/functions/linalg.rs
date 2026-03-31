@@ -115,23 +115,23 @@ impl GradientFunction for MatMulBackward {
         let go = if grad_output.device() == target {
             grad_output.clone()
         } else {
-            grad_output.to_device(target).unwrap()
+            grad_output.to_device(target).expect("backward: device transfer failed")
         };
         let rt = if rhs_t.device() == target {
             rhs_t
         } else {
-            rhs_t.to_device(target).unwrap()
+            rhs_t.to_device(target).expect("backward: device transfer failed")
         };
         let lt = if lhs_t.device() == target {
             lhs_t
         } else {
-            lhs_t.to_device(target).unwrap()
+            lhs_t.to_device(target).expect("backward: device transfer failed")
         };
 
         // grad_lhs = grad_output @ rhs^T
-        let grad_lhs_raw = go.matmul(&rt).unwrap();
+        let grad_lhs_raw = go.matmul(&rt).expect("backward: matmul failed");
         // grad_rhs = lhs^T @ grad_output
-        let grad_rhs_raw = lt.matmul(&go).unwrap();
+        let grad_rhs_raw = lt.matmul(&go).expect("backward: matmul failed");
 
         // When one operand was broadcast from lower dims (e.g., 2D weight used
         // in 3D batched matmul), reduce the gradient back to the original shape
@@ -230,7 +230,7 @@ impl ReshapeBackward {
 impl GradientFunction for ReshapeBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         let shape_isize: Vec<isize> = self.original_shape.iter().map(|&x| x as isize).collect();
-        let grad = grad_output.reshape(&shape_isize).unwrap();
+        let grad = grad_output.reshape(&shape_isize).expect("backward: reshape failed");
         vec![Some(grad)]
     }
 
@@ -272,7 +272,7 @@ impl SqueezeBackward {
 impl GradientFunction for SqueezeBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         let shape_isize: Vec<isize> = self.original_shape.iter().map(|&x| x as isize).collect();
-        let grad = grad_output.reshape(&shape_isize).unwrap();
+        let grad = grad_output.reshape(&shape_isize).expect("backward: reshape failed");
         vec![Some(grad)]
     }
 
@@ -355,7 +355,7 @@ impl ViewBackward {
 impl GradientFunction for ViewBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         let shape_isize: Vec<isize> = self.original_shape.iter().map(|&x| x as isize).collect();
-        let grad = grad_output.reshape(&shape_isize).unwrap();
+        let grad = grad_output.reshape(&shape_isize).expect("backward: reshape failed");
         vec![Some(grad)]
     }
 
@@ -494,7 +494,7 @@ impl GradientFunction for SelectBackward {
             let mut unsqueezed_shape: Vec<isize> =
                 grad_output.shape().iter().map(|&x| x as isize).collect();
             unsqueezed_shape.insert(self.dim, 1);
-            let unsqueezed = grad_output.reshape(&unsqueezed_shape).unwrap();
+            let unsqueezed = grad_output.reshape(&unsqueezed_shape).expect("backward: reshape failed");
             let grad = unsqueezed.narrow_backward_cuda(&self.input_shape, self.dim, self.index);
             return vec![Some(grad)];
         }
@@ -536,7 +536,7 @@ impl GradientFunction for SelectBackward {
             grad_data[in_linear] = grad_out_data[out_idx];
         }
 
-        let grad = Tensor::from_vec(grad_data, &self.input_shape).unwrap();
+        let grad = Tensor::from_vec(grad_data, &self.input_shape).expect("backward: tensor creation failed");
         vec![Some(grad)]
     }
 
@@ -644,7 +644,7 @@ impl GradientFunction for SumDimBackward {
             let mut unsqueezed_shape: Vec<isize> =
                 grad_output.shape().iter().map(|&x| x as isize).collect();
             unsqueezed_shape.insert(self.dim, 1);
-            let reshaped = grad_output.reshape(&unsqueezed_shape).unwrap();
+            let reshaped = grad_output.reshape(&unsqueezed_shape).expect("backward: reshape failed");
             let expanded = reshaped.broadcast_to(&self.input_shape);
             return vec![Some(expanded.contiguous())];
         }
@@ -670,7 +670,7 @@ impl GradientFunction for SumDimBackward {
             }
         }
 
-        let grad = Tensor::from_vec(result, &self.input_shape).unwrap();
+        let grad = Tensor::from_vec(result, &self.input_shape).expect("backward: tensor creation failed");
         vec![Some(grad)]
     }
 
@@ -698,11 +698,11 @@ mod tests {
     #[test]
     fn test_matmul_backward() {
         // A: 2x3, B: 3x4, C: 2x4
-        let a = Tensor::from_vec(vec![1.0; 6], &[2, 3]).unwrap();
-        let b = Tensor::from_vec(vec![1.0; 12], &[3, 4]).unwrap();
+        let a = Tensor::from_vec(vec![1.0; 6], &[2, 3]).expect("backward: tensor creation failed");
+        let b = Tensor::from_vec(vec![1.0; 12], &[3, 4]).expect("backward: tensor creation failed");
         let grad_fn = MatMulBackward::new(None, None, a, b);
 
-        let grad_output = Tensor::from_vec(vec![1.0; 8], &[2, 4]).unwrap();
+        let grad_output = Tensor::from_vec(vec![1.0; 8], &[2, 4]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         // grad_lhs should be 2x3
@@ -715,7 +715,7 @@ mod tests {
     fn test_transpose_backward() {
         let grad_fn = TransposeBackward::new(None, 0, 1);
 
-        let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2]).unwrap();
+        let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         // Transposing back should give 2x3
@@ -726,7 +726,7 @@ mod tests {
     fn test_reshape_backward() {
         let grad_fn = ReshapeBackward::new(None, vec![2, 3]);
 
-        let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[6]).unwrap();
+        let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[6]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         assert_eq!(grads[0].as_ref().unwrap().shape(), &[2, 3]);
@@ -736,7 +736,7 @@ mod tests {
     fn test_expand_backward() {
         // Input (2, 1, 3) expanded to (2, 4, 3) — dim 1 broadcast from 1 to 4
         let grad_fn = ExpandBackward::new(None, vec![2, 1, 3]);
-        let grad_output = Tensor::from_vec(vec![1.0; 24], &[2, 4, 3]).unwrap();
+        let grad_output = Tensor::from_vec(vec![1.0; 24], &[2, 4, 3]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
         let grad = grads[0].as_ref().unwrap();
         assert_eq!(grad.shape(), &[2, 1, 3]);
@@ -748,7 +748,7 @@ mod tests {
     fn test_select_backward() {
         // Input (3, 4), select dim=0, index=1 → output (4,)
         let grad_fn = SelectBackward::new(None, vec![3, 4], 0, 1);
-        let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[4]).unwrap();
+        let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[4]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
         let grad = grads[0].as_ref().unwrap();
         assert_eq!(grad.shape(), &[3, 4]);
@@ -765,7 +765,7 @@ mod tests {
     fn test_unsqueeze_backward() {
         // unsqueeze(dim=1): (2, 3) → (2, 1, 3), backward squeezes dim 1
         let grad_fn = UnsqueezeBackward::new(None, 1);
-        let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 1, 3]).unwrap();
+        let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 1, 3]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
         assert_eq!(grads[0].as_ref().unwrap().shape(), &[2, 3]);
     }

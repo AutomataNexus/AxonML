@@ -7,7 +7,7 @@
 //! Andrew Jewell Sr - AutomataNexus
 //!
 //! # Updated
-//! March 8, 2026
+//! March 25, 2026
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -23,9 +23,6 @@ use std::cell::Cell;
 thread_local! {
     /// Whether gradient computation is enabled for this thread.
     static GRAD_ENABLED: Cell<bool> = const { Cell::new(true) };
-
-    /// Stack depth for nested no_grad contexts.
-    static NO_GRAD_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
 /// Returns whether gradient computation is currently enabled.
@@ -46,19 +43,8 @@ fn set_grad_enabled(enabled: bool) {
 /// RAII guard that disables gradient computation within its scope.
 ///
 /// When the guard is dropped, gradient computation is restored to its
-/// previous state. Guards can be nested safely.
-///
-/// # Example
-/// ```rust,ignore
-/// use axonml_autograd::NoGradGuard;
-///
-/// {
-///     let _guard = NoGradGuard::new();
-///     // Gradient computation is disabled here
-///     let y = x.relu();  // No gradient tracking
-/// }
-/// // Gradient computation is re-enabled here
-/// ```
+/// previous state. Guards nest correctly — each guard saves and restores
+/// independently, so `NoGrad { EnableGrad { NoGrad { } } }` works as expected.
 pub struct NoGradGuard {
     prev_state: bool,
 }
@@ -69,18 +55,13 @@ impl NoGradGuard {
     pub fn new() -> Self {
         let prev_state = is_grad_enabled();
         set_grad_enabled(false);
-        NO_GRAD_DEPTH.with(|d| d.set(d.get() + 1));
         Self { prev_state }
     }
 }
 
 impl Drop for NoGradGuard {
     fn drop(&mut self) {
-        NO_GRAD_DEPTH.with(|d| d.set(d.get() - 1));
-        // Only restore if we're at the outermost guard
-        if NO_GRAD_DEPTH.with(std::cell::Cell::get) == 0 {
-            set_grad_enabled(self.prev_state);
-        }
+        set_grad_enabled(self.prev_state);
     }
 }
 
@@ -97,6 +78,7 @@ impl Default for NoGradGuard {
 /// RAII guard that enables gradient computation within its scope.
 ///
 /// Useful for temporarily enabling gradients inside a `no_grad` context.
+/// Nests correctly with `NoGradGuard`.
 pub struct EnableGradGuard {
     prev_state: bool,
 }
@@ -128,15 +110,6 @@ impl Default for EnableGradGuard {
 // =============================================================================
 
 /// Executes a closure with gradient computation disabled.
-///
-/// # Example
-/// ```rust,ignore
-/// use axonml_autograd::no_grad;
-///
-/// let output = no_grad(|| {
-///     model.forward(&input)
-/// });
-/// ```
 pub fn no_grad<F, R>(f: F) -> R
 where
     F: FnOnce() -> R,
@@ -242,7 +215,6 @@ mod tests {
 
     #[test]
     fn test_grad_enabled_default() {
-        // Reset state
         set_grad_enabled(true);
         assert!(is_grad_enabled());
     }
@@ -273,6 +245,7 @@ mod tests {
                 assert!(!is_grad_enabled());
             }
 
+            // Still disabled — outer guard hasn't dropped yet
             assert!(!is_grad_enabled());
         }
 
@@ -303,8 +276,55 @@ mod tests {
                 assert!(is_grad_enabled());
             });
 
+            // Restored to disabled after EnableGradGuard drops
             assert!(!is_grad_enabled());
         });
+
+        // Restored to enabled after NoGradGuard drops
+        assert!(is_grad_enabled());
+    }
+
+    #[test]
+    fn test_nested_mixed_guards() {
+        // Verify complex nesting: enable { no_grad { enable_grad { } } }
+        set_grad_enabled(true);
+
+        no_grad(|| {
+            assert!(!is_grad_enabled());
+
+            enable_grad(|| {
+                assert!(is_grad_enabled());
+
+                no_grad(|| {
+                    assert!(!is_grad_enabled());
+                });
+
+                // Back to enabled
+                assert!(is_grad_enabled());
+            });
+
+            // Back to disabled
+            assert!(!is_grad_enabled());
+        });
+
+        // Back to enabled
+        assert!(is_grad_enabled());
+    }
+
+    #[test]
+    fn test_no_grad_when_already_disabled() {
+        set_grad_enabled(false);
+
+        {
+            let _guard = NoGradGuard::new();
+            assert!(!is_grad_enabled());
+        }
+
+        // Restored to false (was already disabled)
+        assert!(!is_grad_enabled());
+
+        // Restore for other tests
+        set_grad_enabled(true);
     }
 
     #[test]

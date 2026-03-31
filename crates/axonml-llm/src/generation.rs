@@ -267,6 +267,9 @@ impl TextGenerator {
     }
 
     /// Processes logits and returns next token.
+    ///
+    /// If `num_beams > 1` in the config, use `generate_beam_search` instead
+    /// for proper beam search decoding.
     pub fn get_next_token(&self, logits: &[f32], generated_tokens: &[u32]) -> u32 {
         let mut logits = logits.to_vec();
 
@@ -278,6 +281,61 @@ impl TextGenerator {
 
         // Sample
         self.sample(&logits)
+    }
+
+    /// Generates a sequence using beam search.
+    ///
+    /// `get_logits_fn` takes a token sequence and returns logits [vocab_size].
+    /// Returns the best sequence found by beam search.
+    pub fn generate_beam_search<F>(
+        &self,
+        initial_tokens: &[u32],
+        get_logits_fn: &mut F,
+    ) -> Vec<u32>
+    where
+        F: FnMut(&[u32]) -> Vec<f32>,
+    {
+        let beam_search = BeamSearch::new(
+            self.config.num_beams,
+            self.config.length_penalty,
+            self.config.early_stopping,
+            self.config.eos_token_ids.clone(),
+        );
+
+        let mut beams = vec![Beam::new(initial_tokens.to_vec())];
+
+        for _ in 0..self.config.max_new_tokens {
+            if beam_search.should_stop(&beams) {
+                break;
+            }
+
+            // Get logits for each active beam
+            let mut all_logits = Vec::with_capacity(beams.len());
+            for beam in &beams {
+                if beam.finished {
+                    // Finished beams don't need logits, provide zeros
+                    all_logits.push(vec![0.0f32; 1]);
+                } else {
+                    let logits = get_logits_fn(&beam.tokens);
+                    all_logits.push(logits);
+                }
+            }
+
+            // Convert logits to log-probs for beam scoring
+            let log_prob_beams: Vec<Vec<f32>> = all_logits
+                .iter()
+                .map(|logits| {
+                    let max_l = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                    let exp_sum: f32 = logits.iter().map(|x| (x - max_l).exp()).sum();
+                    let log_sum = max_l + exp_sum.ln();
+                    logits.iter().map(|x| x - log_sum).collect()
+                })
+                .collect();
+
+            beams = beam_search.expand_beams(&beams, &log_prob_beams);
+        }
+
+        beam_search.best_sequence(&beams).unwrap_or_else(|| initial_tokens.to_vec())
     }
 
     /// Checks if generation should stop.
@@ -487,5 +545,41 @@ mod tests {
 
         assert_eq!(beams.len(), 1);
         assert_eq!(beams[0].tokens, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_beam_search_expand() {
+        let beam_search = BeamSearch::new(2, 1.0, false, vec![99]);
+
+        let initial = vec![Beam::new(vec![1, 2])];
+        // 5-token vocab, strongly favor token 3
+        let logits = vec![vec![-10.0, -10.0, -10.0, 5.0, -10.0]];
+        let expanded = beam_search.expand_beams(&initial, &logits);
+
+        assert_eq!(expanded.len(), 2);
+        // Best beam should end with token 3
+        assert_eq!(*expanded[0].tokens.last().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_generate_beam_search() {
+        let config = GenerationConfig::beam_search(3).with_max_tokens(5).with_eos_token(4);
+        let generator = TextGenerator::new(config);
+
+        let mut step = 0;
+        let result = generator.generate_beam_search(&[1, 2], &mut |_tokens| {
+            step += 1;
+            // Always strongly prefer token 3, except at step 3 produce EOS
+            if step >= 3 {
+                vec![-10.0, -10.0, -10.0, -10.0, 10.0] // token 4 = EOS
+            } else {
+                vec![-10.0, -10.0, -10.0, 10.0, -10.0] // token 3
+            }
+        });
+
+        // Should have initial tokens + generated ones
+        assert!(result.len() > 2);
+        assert_eq!(result[0], 1);
+        assert_eq!(result[1], 2);
     }
 }

@@ -35,7 +35,7 @@ pub mod transformer;
 pub use attention::{CrossAttention, MultiHeadAttention, scaled_dot_product_attention_fused};
 pub use conv::{Conv1d, Conv2d, ConvTranspose2d};
 pub use diff_attention::DifferentialAttention;
-pub use dropout::Dropout;
+pub use dropout::{AlphaDropout, Dropout, Dropout2d};
 pub use embedding::Embedding;
 pub use fft::{FFT1d, STFT};
 pub use graph::{GATConv, GCNConv};

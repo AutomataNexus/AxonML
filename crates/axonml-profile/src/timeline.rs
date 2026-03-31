@@ -134,7 +134,9 @@ impl TimelineProfiler {
     fn add_event(&mut self, event: Event) {
         if let Some(max) = self.max_events {
             if self.events.len() >= max {
-                self.events.remove(0);
+                // Drop oldest events to make room
+                let excess = self.events.len() - max + 1;
+                self.events.drain(..excess);
             }
         }
         self.events.push(event);
@@ -169,18 +171,29 @@ impl TimelineProfiler {
             .collect()
     }
 
-    /// Calculates duration between start and end events for a given name.
+    /// Calculates cumulative duration for all matched start/end pairs of a given name.
+    ///
+    /// For operations called multiple times, returns the sum of all individual durations
+    /// (not the wall time from first start to last end).
     pub fn duration(&self, name: &str) -> Option<Duration> {
         let events: Vec<_> = self.events_by_name(name);
+        let starts: Vec<_> = events.iter().filter(|e| e.event_type == EventType::Start).collect();
+        let ends: Vec<_> = events.iter().filter(|e| e.event_type == EventType::End).collect();
 
-        let start = events.iter().find(|e| e.event_type == EventType::Start)?;
-        let end = events
-            .iter()
-            .rev()
-            .find(|e| e.event_type == EventType::End)?;
+        if starts.is_empty() || ends.is_empty() {
+            return None;
+        }
 
-        if end.timestamp_ns >= start.timestamp_ns {
-            Some(Duration::from_nanos(end.timestamp_ns - start.timestamp_ns))
+        // Sum matched pairs (start[i], end[i])
+        let mut total_ns = 0u64;
+        for (s, e) in starts.iter().zip(ends.iter()) {
+            if e.timestamp_ns >= s.timestamp_ns {
+                total_ns += e.timestamp_ns - s.timestamp_ns;
+            }
+        }
+
+        if total_ns > 0 {
+            Some(Duration::from_nanos(total_ns))
         } else {
             None
         }

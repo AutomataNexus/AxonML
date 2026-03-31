@@ -7,6 +7,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-31
+
+### Summary
+Full-crate audit and fix sweep across all 22 crates. 121 files changed, ~5,000 lines added, ~1,700 removed. **2,141 tests passing** (up from 1,988). Every crate audited for correctness, performance, security, and completeness.
+
+### Critical Fixes
+
+#### GPU Training Correctness (`axonml-distributed`)
+- **DDP gradient sync was a no-op** --- `sync_gradients()` computed all-reduced gradients but discarded them. Every DDP training run produced unsynchronized models. Now writes back via `param.set_grad()`.
+- **FSDP gradient sync was a no-op** --- Same issue for ZeRO-2/ZeRO-3 strategies. Fixed for all sharding modes (NoShard, ShardGradOp, FullShard, HybridShard).
+- Implemented real **1F1B pipeline schedule** (was falling back to GPipe). Memory-efficient 3-phase warmup/steady/cooldown.
+
+#### Security (`axonml-server`, `axonml-dashboard`)
+- **Terminal endpoint now requires admin role** --- Any authenticated user previously got unrestricted shell access. Added role check + audit logging.
+- **Rate limiting on login/register/MFA** --- Added IP-based sliding-window rate limiter (10 req/60s) to prevent brute-force.
+- **JWT tokens moved from localStorage to sessionStorage** --- Access tokens cleared on browser close, reducing XSS exposure window.
+- **SVG icon sanitization** --- `inner_html` paths now reject `<script>`, `javascript:`, and event handlers.
+- **Error boundary** --- Wraps all dashboard routes; component errors show fallback UI instead of crashing WASM.
+
+#### ONNX Interoperability (`axonml-onnx`)
+- **Export now produces real protobuf binary** --- Was outputting JSON. Models are now compatible with ONNX Runtime, TensorRT, OpenVINO. Added prost Message structs with correct field tags.
+
+#### Audio Performance (`axonml-audio`)
+- **O(n^2) DFT replaced with O(n log n) FFT** via rustfft --- ~100x speedup for MelSpectrogram/MFCC on real audio.
+
+### Fixed
+
+#### `axonml-core`
+- `from_size_align_unchecked` potential UB --- round allocation size to alignment multiple
+- 20 new tests for GPU memory pool and backend traits
+
+#### `axonml-data`
+- `TensorDataset::get()` copied entire dataset per access --- cache flat vecs at construction, O(row) per get
+- `prefetch_to_gpu` eagerly materialized all batches --- streaming via bounded channel, 2-batch buffer
+- `Normalize` per-channel support (ImageNet preset)
+- `RandomFlip` generic N-dimensional (was 2D only)
+- `WeightedRandomSampler` binary search (was O(n) linear scan)
+- `DropoutTransform` train/eval mode
+- `concat_tensors` non-dim-0 interleaving
+- `StackCollate` non-zero dim
+
+#### `axonml-llm`
+- **WindowedAttnBackward** real gradient computation (was identity pass-through with 7 dead fields)
+- LLaMA `generate()` proper sampling (was greedy-only)
+- Beam search execution loop (config existed but no logic)
+- TridentRMSNorm deduplication (3 copies -> 1 shared)
+- `From<HubError> for LLMError` error composition
+- Attention dropout now applied in Hydra
+
+#### `axonml-text`
+- `TextDataset` stores tokenizer (was hardcoding whitespace split)
+- BPE priority-based merges (was greedy left-to-right)
+- Unigram Viterbi segmentation (was greedy longest-match)
+- `Vocab::from_tokens()` auto-adds UNK/PAD
+- Serde serialization for `Vocab` (save/load)
+
+#### `axonml-cli`
+- `--seed` flag now applied (was printed and discarded)
+- Quant command delegates to `axonml-quant` (removed 400 lines of duplicate code)
+
+#### `axonml-tui`
+- Dataset loading reads real CSV files (was always demo data)
+- Training view reads log files for live updates (was simulating fake counters)
+- File browser loads real filesystem (was hardcoded demo entries)
+- Zoom toggle implemented for graphs view
+
+#### `axonml-vision`
+- 15 new NightVision backbone/neck/head tests
+- Octree affected node tracking (was TODO)
+
+#### `axonml-audio`
+- All 4 dataset types return class index labels (were one-hot, incompatible with CrossEntropyLoss)
+
+#### `axonml-text`
+- All dataset types return class index labels
+
+#### `axonml-dashboard`
+- 94 panicking `unwrap()` calls in system.rs -> `.ok()` (graceful degradation)
+- Consolidated 3 duplicate token key definitions into `constants.rs`
+- Storage errors logged instead of silently discarded
+- Client-side validation for login/register/MFA forms
+
+### Changed
+- Version bump to 0.5.0 across all 22 crates
+- `ReduceOp::Average` clean sum+divide path (was redundant pairwise+recompute)
+- Dead code cleanup: removed `#[allow(dead_code)]` from 30+ fields across distributed, llm, vision crates
+
+### Added
+- `axonml-server`: `RateLimiter` module with sliding-window IP rate limiting
+- `axonml-dashboard`: `PageErrorBoundary` component, `constants.rs` module, `js_helpers.rs` utilities
+- `axonml-text`: `Vocab::save()`/`Vocab::load()` JSON persistence
+- `axonml-data`: `Normalize::per_channel()`, `Normalize::imagenet()`
+- `axonml-llm`: `TextGenerator::generate_beam_search()`
+- `axonml-onnx`: Prost binary encoding structs, 3 roundtrip tests
+
 ## [0.4.2] - 2026-03-24
 
 ### Added
