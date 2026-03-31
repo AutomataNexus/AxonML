@@ -62,9 +62,23 @@ impl OperationStats {
         Duration::from_nanos(self.max_time_ns)
     }
 
-    /// Returns GFLOPS if FLOPS is set.
+    /// Returns total GFLOPS (accumulated across all calls).
     pub fn gflops(&self) -> Option<f64> {
         self.flops.map(|f| f / 1e9)
+    }
+
+    /// Returns GFLOPS/sec throughput (total GFLOPS / total time).
+    pub fn gflops_per_sec(&self) -> Option<f64> {
+        if let Some(flops) = self.flops {
+            if self.total_time_ns > 0 {
+                let seconds = self.total_time_ns as f64 / 1e9;
+                Some(flops / seconds / 1e9)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     /// Returns bandwidth in GB/s if bytes_processed is set.

@@ -392,6 +392,41 @@ impl AdaptiveOctree {
         }
     }
 
+    /// Returns indices of leaf nodes that contain any of the given points.
+    ///
+    /// Used to track which octree regions are affected by a given view.
+    pub fn find_affected_leaf_indices(&self, points: &[[f32; 3]]) -> Vec<usize> {
+        let mut affected = Vec::new();
+        Self::collect_affected_leaves(&self.root, points, &mut 0, &mut affected);
+        affected
+    }
+
+    fn collect_affected_leaves(
+        node: &OctreeNode,
+        points: &[[f32; 3]],
+        index: &mut usize,
+        affected: &mut Vec<usize>,
+    ) {
+        match node {
+            OctreeNode::Leaf { bounds, .. } => {
+                let current_idx = *index;
+                *index += 1;
+                if points.iter().any(|p| bounds.contains(*p)) {
+                    affected.push(current_idx);
+                }
+            }
+            OctreeNode::Internal { children, .. } => {
+                *index += 1;
+                for child in children.iter() {
+                    Self::collect_affected_leaves(child, points, index, affected);
+                }
+            }
+            OctreeNode::Empty { .. } => {
+                *index += 1;
+            }
+        }
+    }
+
     /// Extract a mesh from the octree SDF using marching cubes.
     pub fn extract_mesh(&self, resolution: usize) -> Mesh {
         let bounds = self.root.bounds();

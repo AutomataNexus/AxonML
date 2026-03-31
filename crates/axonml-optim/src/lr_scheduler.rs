@@ -22,8 +22,16 @@ use crate::optimizer::Optimizer;
 
 /// Trait for learning rate schedulers.
 pub trait LRScheduler {
-    /// Updates the learning rate.
+    /// Updates the learning rate (epoch-based schedulers).
     fn step<O: Optimizer>(&mut self, optimizer: &mut O);
+
+    /// Updates the learning rate based on a metric value.
+    ///
+    /// Default implementation delegates to `step()`, ignoring the metric.
+    /// Override for metric-based schedulers like `ReduceLROnPlateau`.
+    fn step_with_metric<O: Optimizer>(&mut self, optimizer: &mut O, _metric: f32) {
+        self.step(optimizer);
+    }
 
     /// Returns the current learning rate.
     fn get_last_lr(&self) -> f32;
@@ -290,8 +298,8 @@ impl ReduceLROnPlateau {
         }
     }
 
-    /// Steps the scheduler based on a metric value.
-    pub fn step_with_metric<O: Optimizer>(&mut self, optimizer: &mut O, metric: f32) {
+    /// Internal: steps the scheduler based on a metric value.
+    fn step_metric_impl<O: Optimizer>(&mut self, optimizer: &mut O, metric: f32) {
         self.current_step += 1;
 
         // Check if we're in cooldown
@@ -328,9 +336,12 @@ impl ReduceLROnPlateau {
 
 impl LRScheduler for ReduceLROnPlateau {
     fn step<O: Optimizer>(&mut self, _optimizer: &mut O) {
-        // This scheduler requires a metric value
-        // Use step_with_metric instead
+        // No-op: this scheduler requires a metric. Use step_with_metric().
         self.current_step += 1;
+    }
+
+    fn step_with_metric<O: Optimizer>(&mut self, optimizer: &mut O, metric: f32) {
+        self.step_metric_impl(optimizer, metric);
     }
 
     fn get_last_lr(&self) -> f32 {

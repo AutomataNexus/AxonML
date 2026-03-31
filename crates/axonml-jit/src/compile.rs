@@ -235,8 +235,33 @@ impl CompiledModel {
             }
         }
 
-        // Fall back to interpreted execution (compiled function API may differ)
-        self.interpret(inputs)
+        // Use compiled function if available, otherwise interpret
+        if let Some(ref compiled) = self.compiled_fn {
+            let input_pairs: Vec<(String, Vec<f32>)> = self
+                .input_names
+                .iter()
+                .map(|name| (name.clone(), inputs[name].clone()))
+                .collect();
+            let input_refs: Vec<(&str, &[f32])> = input_pairs
+                .iter()
+                .map(|(name, data)| (name.as_str(), data.as_slice()))
+                .collect();
+            let flat_result = compiled.run(&input_refs)?;
+
+            // Split flat result into named outputs
+            let mut outputs = HashMap::new();
+            let mut offset = 0;
+            for name in &self.output_names {
+                // Estimate output size from graph (use remaining data for last output)
+                let remaining = flat_result.len() - offset;
+                let size = remaining / (self.output_names.len() - outputs.len()).max(1);
+                outputs.insert(name.clone(), flat_result[offset..offset + size].to_vec());
+                offset += size;
+            }
+            Ok(outputs)
+        } else {
+            self.interpret(inputs)
+        }
     }
 
     /// Interprets the graph (fallback when not compiled).
@@ -337,10 +362,11 @@ impl CompiledModel {
                 let a = self.get_node_value(*input, values)?;
                 Ok(a.iter().map(|x| x.tanh()).collect())
             }
-            _ => {
-                // For unsupported ops, return zeros with same shape
-                let numel = node.shape.numel();
-                Ok(vec![0.0; numel])
+            other => {
+                Err(crate::error::JitError::UnsupportedOp(format!(
+                    "CompiledModel::execute_node: operation {:?} not implemented",
+                    other
+                )))
             }
         }
     }

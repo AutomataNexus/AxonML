@@ -14,17 +14,11 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use gloo_storage::{LocalStorage, Storage};
+use gloo_storage::{LocalStorage, SessionStorage, Storage};
 use leptos::*;
 
+use crate::constants::{ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, USER_KEY};
 use crate::types::*;
-
-/// Key for storing access token in localStorage
-const ACCESS_TOKEN_KEY: &str = "access_token";
-/// Key for storing refresh token in localStorage
-const REFRESH_TOKEN_KEY: &str = "refresh_token";
-/// Key for storing user data in localStorage
-const USER_KEY: &str = "user";
 
 /// Toast notification type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,8 +79,8 @@ pub struct AppState {
 impl AppState {
     /// Create new app state
     pub fn new() -> Self {
-        // Try to restore user from localStorage
-        let stored_user: Option<User> = LocalStorage::get(USER_KEY).ok();
+        // Try to restore user from sessionStorage
+        let stored_user: Option<User> = SessionStorage::get(USER_KEY).ok();
 
         Self {
             user: RwSignal::new(stored_user),
@@ -116,35 +110,44 @@ impl AppState {
             .unwrap_or(false)
     }
 
-    /// Store authentication tokens and user
+    /// Store authentication tokens and user.
+    /// Access token + user → sessionStorage; refresh token → localStorage.
     pub fn set_auth(&self, access_token: &str, refresh_token: &str, user: User) {
-        let _ = LocalStorage::set(ACCESS_TOKEN_KEY, access_token);
-        let _ = LocalStorage::set(REFRESH_TOKEN_KEY, refresh_token);
-        let _ = LocalStorage::set(USER_KEY, &user);
+        if let Err(e) = SessionStorage::set(ACCESS_TOKEN_KEY, access_token) {
+            web_sys::console::warn_1(&format!("Failed to store access token: {e}").into());
+        }
+        if let Err(e) = LocalStorage::set(REFRESH_TOKEN_KEY, refresh_token) {
+            web_sys::console::warn_1(&format!("Failed to store refresh token: {e}").into());
+        }
+        if let Err(e) = SessionStorage::set(USER_KEY, &user) {
+            web_sys::console::warn_1(&format!("Failed to store user data: {e}").into());
+        }
         self.user.set(Some(user));
     }
 
     /// Clear authentication state
     pub fn clear_auth(&self) {
-        LocalStorage::delete(ACCESS_TOKEN_KEY);
+        SessionStorage::delete(ACCESS_TOKEN_KEY);
         LocalStorage::delete(REFRESH_TOKEN_KEY);
-        LocalStorage::delete(USER_KEY);
+        SessionStorage::delete(USER_KEY);
         self.user.set(None);
     }
 
-    /// Get stored access token
+    /// Get stored access token (sessionStorage)
     pub fn get_access_token(&self) -> Option<String> {
-        LocalStorage::get(ACCESS_TOKEN_KEY).ok()
+        SessionStorage::get(ACCESS_TOKEN_KEY).ok()
     }
 
-    /// Get stored refresh token
+    /// Get stored refresh token (localStorage)
     pub fn get_refresh_token(&self) -> Option<String> {
         LocalStorage::get(REFRESH_TOKEN_KEY).ok()
     }
 
-    /// Update stored access token
+    /// Update stored access token (sessionStorage)
     pub fn update_access_token(&self, token: &str) {
-        let _ = LocalStorage::set(ACCESS_TOKEN_KEY, token);
+        if let Err(e) = SessionStorage::set(ACCESS_TOKEN_KEY, token) {
+            web_sys::console::warn_1(&format!("Failed to update access token: {e}").into());
+        }
     }
 
     /// Toggle sidebar collapsed state

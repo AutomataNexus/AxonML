@@ -31,13 +31,12 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use std::any::Any;
-
-use axonml_autograd::no_grad::is_grad_enabled;
-use axonml_autograd::{GradFn, GradientFunction, Variable};
+use axonml_autograd::Variable;
 use axonml_nn::layers::ternary::TernaryLinear;
 use axonml_nn::{Embedding, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
+
+use crate::llama::RMSNorm;
 
 // =============================================================================
 // Trident Configuration
@@ -145,128 +144,6 @@ impl TridentConfig {
     /// Estimate fp32 storage in bytes (for comparison).
     pub fn fp32_storage_bytes(&self) -> usize {
         self.estimated_params() * 4
-    }
-}
-
-// =============================================================================
-// RMSNorm (local copy to avoid LLM crate circular dep)
-// =============================================================================
-
-/// Root Mean Square Layer Normalization for Trident.
-#[derive(Debug)]
-struct TridentRMSNorm {
-    weight: Tensor<f32>,
-    eps: f32,
-    #[allow(dead_code)]
-    hidden_size: usize,
-}
-
-impl TridentRMSNorm {
-    fn new(hidden_size: usize, eps: f32) -> Self {
-        Self {
-            weight: Tensor::ones(&[hidden_size]),
-            eps,
-            hidden_size,
-        }
-    }
-
-    fn forward(&self, x: &Variable) -> Variable {
-        let x_data = x.data();
-        let shape = x_data.shape();
-        let last_dim = shape[shape.len() - 1];
-        let x_vec = x_data.to_vec();
-        let batch_elements: usize = shape.iter().take(shape.len() - 1).product();
-
-        let mut output = vec![0.0f32; x_vec.len()];
-        let mut rms_vals = vec![0.0f32; batch_elements];
-        let weight_vec = self.weight.to_vec();
-
-        for (b, rms_val) in rms_vals.iter_mut().enumerate() {
-            let offset = b * last_dim;
-            let mut sum_sq = 0.0f32;
-            for i in 0..last_dim {
-                sum_sq += x_vec[offset + i] * x_vec[offset + i];
-            }
-            let rms = (sum_sq / last_dim as f32 + self.eps).sqrt();
-            *rms_val = rms;
-
-            for i in 0..last_dim {
-                output[offset + i] = (x_vec[offset + i] / rms) * weight_vec[i];
-            }
-        }
-
-        let output_tensor = Tensor::from_vec(output, shape).unwrap();
-        let requires_grad = x.requires_grad() && is_grad_enabled();
-        if requires_grad {
-            let grad_fn = GradFn::new(TridentRMSNormBackward {
-                next_fns: vec![x.grad_fn().cloned()],
-                saved_input: x_data.clone(),
-                weight: self.weight.clone(),
-                rms_vals,
-                last_dim,
-            });
-            Variable::from_operation(output_tensor, grad_fn, true)
-        } else {
-            Variable::new(output_tensor, false)
-        }
-    }
-
-    fn parameters(&self) -> Vec<Parameter> {
-        vec![Parameter::named("weight", self.weight.clone(), true)]
-    }
-}
-
-/// RMSNorm backward for Trident.
-#[derive(Debug)]
-struct TridentRMSNormBackward {
-    next_fns: Vec<Option<GradFn>>,
-    saved_input: Tensor<f32>,
-    weight: Tensor<f32>,
-    rms_vals: Vec<f32>,
-    last_dim: usize,
-}
-
-impl GradientFunction for TridentRMSNormBackward {
-    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let x_vec = self.saved_input.to_vec();
-        let w_vec = self.weight.to_vec();
-        let g_vec = grad_output.to_vec();
-        let d = self.last_dim;
-        let batch_elements = self.rms_vals.len();
-
-        let mut grad_input = vec![0.0f32; x_vec.len()];
-
-        for b in 0..batch_elements {
-            let off = b * d;
-            let rms = self.rms_vals[b];
-            let rms_inv = 1.0 / rms;
-            let rms3_inv = rms_inv * rms_inv * rms_inv;
-
-            let mut dot = 0.0f32;
-            for i in 0..d {
-                dot += x_vec[off + i] * w_vec[i] * g_vec[off + i];
-            }
-
-            for i in 0..d {
-                grad_input[off + i] = w_vec[i] * g_vec[off + i] * rms_inv
-                    - x_vec[off + i] * dot * rms3_inv / d as f32;
-            }
-        }
-
-        let gi = Tensor::from_vec(grad_input, self.saved_input.shape()).unwrap();
-        vec![Some(gi)]
-    }
-
-    fn name(&self) -> &'static str {
-        "TridentRMSNormBackward"
-    }
-
-    fn next_functions(&self) -> &[Option<GradFn>] {
-        &self.next_fns
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 
@@ -437,11 +314,11 @@ impl TridentMLP {
 #[derive(Debug)]
 struct TridentBlock {
     /// Pre-attention normalization
-    attn_norm: TridentRMSNorm,
+    attn_norm: RMSNorm,
     /// Multi-head self-attention (ternary projections)
     attention: TridentAttention,
     /// Pre-MLP normalization
-    mlp_norm: TridentRMSNorm,
+    mlp_norm: RMSNorm,
     /// Feed-forward MLP (ternary projections)
     mlp: TridentMLP,
 }
@@ -449,9 +326,9 @@ struct TridentBlock {
 impl TridentBlock {
     fn new(config: &TridentConfig) -> Self {
         Self {
-            attn_norm: TridentRMSNorm::new(config.d_model, config.rms_norm_eps),
+            attn_norm: RMSNorm::new(config.d_model, config.rms_norm_eps),
             attention: TridentAttention::new(config),
-            mlp_norm: TridentRMSNorm::new(config.d_model, config.rms_norm_eps),
+            mlp_norm: RMSNorm::new(config.d_model, config.rms_norm_eps),
             mlp: TridentMLP::new(config),
         }
     }
@@ -509,7 +386,7 @@ pub struct TridentModel {
     /// Transformer blocks with ternary weights
     blocks: Vec<TridentBlock>,
     /// Final RMSNorm
-    final_norm: TridentRMSNorm,
+    final_norm: RMSNorm,
     /// Language model head (fp32)
     lm_head: Linear,
     /// Model configuration
@@ -526,7 +403,7 @@ impl TridentModel {
         Self {
             embed_tokens: Embedding::new(config.vocab_size, config.d_model),
             blocks,
-            final_norm: TridentRMSNorm::new(config.d_model, config.rms_norm_eps),
+            final_norm: RMSNorm::new(config.d_model, config.rms_norm_eps),
             lm_head: Linear::with_bias(config.d_model, config.vocab_size, false),
             config: config.clone(),
         }

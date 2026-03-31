@@ -37,10 +37,10 @@ pub struct DecoupledHead {
     // Optional domain branch
     domain_pred: Option<Conv2d>, // → [B, num_domains, H, W]
 
-    #[allow(dead_code)]
-    num_classes: usize,
-    #[allow(dead_code)]
-    num_domains: usize,
+    /// Number of object classes.
+    pub num_classes: usize,
+    /// Number of domain labels (0 = no domain head).
+    pub num_domains: usize,
 }
 
 impl DecoupledHead {
@@ -149,5 +149,62 @@ impl DecoupledHead {
         self.stem.set_training(training);
         self.cls_conv.set_training(training);
         self.reg_conv.set_training(training);
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axonml_autograd::Variable;
+    use axonml_tensor::Tensor;
+
+    #[test]
+    fn test_decoupled_head_shapes() {
+        let head = DecoupledHead::new(128, 10, 0);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1; 1 * 128 * 8 * 8], &[1, 128, 8, 8]).unwrap(),
+            false,
+        );
+
+        let (cls, reg, obj, domain) = head.forward(&x);
+
+        assert_eq!(cls.data().shape(), &[1, 10, 8, 8]); // num_classes=10
+        assert_eq!(reg.data().shape(), &[1, 4, 8, 8]); // bbox: x,y,w,h
+        assert_eq!(obj.data().shape(), &[1, 1, 8, 8]); // objectness
+        assert!(domain.is_none()); // num_domains=0
+    }
+
+    #[test]
+    fn test_decoupled_head_with_domain() {
+        let head = DecoupledHead::new(64, 5, 3);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1; 2 * 64 * 4 * 4], &[2, 64, 4, 4]).unwrap(),
+            false,
+        );
+
+        let (cls, reg, obj, domain) = head.forward(&x);
+
+        assert_eq!(cls.data().shape(), &[2, 5, 4, 4]);
+        assert_eq!(reg.data().shape(), &[2, 4, 4, 4]);
+        assert_eq!(obj.data().shape(), &[2, 1, 4, 4]);
+        assert!(domain.is_some());
+        assert_eq!(domain.unwrap().data().shape(), &[2, 3, 4, 4]); // 3 domains
+    }
+
+    #[test]
+    fn test_decoupled_head_config_fields() {
+        let head = DecoupledHead::new(128, 20, 4);
+        assert_eq!(head.num_classes, 20);
+        assert_eq!(head.num_domains, 4);
+    }
+
+    #[test]
+    fn test_decoupled_head_params() {
+        let head = DecoupledHead::new(64, 5, 0);
+        assert!(!head.parameters().is_empty());
     }
 }

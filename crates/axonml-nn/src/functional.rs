@@ -84,19 +84,35 @@ pub fn linear(input: &Variable, weight: &Variable, bias: Option<&Variable>) -> V
 // Normalization
 // =============================================================================
 
-/// Layer normalization.
+/// Layer normalization (matches `torch.nn.functional.layer_norm`).
+///
+/// Normalizes over the last N dimensions specified by `normalized_shape`,
+/// then applies `output = weight * normalized + bias` if provided.
 pub fn layer_norm(
     input: &Variable,
     normalized_shape: &[usize],
-    _weight: Option<&Variable>,
-    _bias: Option<&Variable>,
+    weight: Option<&Variable>,
+    bias: Option<&Variable>,
     eps: f32,
 ) -> Variable {
-    // Delegate to LayerNorm module which has proper backward pass
+    // Compute mean and variance over normalized dimensions
     use crate::layers::LayerNorm;
     use crate::module::Module;
     let ln = LayerNorm::with_eps(normalized_shape.to_vec(), eps);
-    ln.forward(input)
+    let normalized = ln.forward(input);
+
+    // Apply caller's weight and bias if provided (overriding LayerNorm's defaults)
+    let result = if let Some(w) = weight {
+        normalized.mul_var(w)
+    } else {
+        normalized
+    };
+
+    if let Some(b) = bias {
+        result.add_var(b)
+    } else {
+        result
+    }
 }
 
 // =============================================================================

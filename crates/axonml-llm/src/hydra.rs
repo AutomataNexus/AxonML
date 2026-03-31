@@ -18,8 +18,9 @@ use std::any::Any;
 
 use axonml_autograd::no_grad::is_grad_enabled;
 use axonml_autograd::{GradFn, GradientFunction, Variable};
-use axonml_nn::{Dropout, Embedding, Linear, Module, Parameter};
+use axonml_nn::{Embedding, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
+use rand::Rng;
 
 use crate::llama::RMSNorm;
 use crate::ssm::{SSMBlock, SSMConfig};
@@ -147,9 +148,8 @@ pub struct WindowedAttention {
     head_dim: usize,
     /// Window size for local attention
     window_size: usize,
-    /// Attention dropout
-    #[allow(dead_code)]
-    attn_dropout: Dropout,
+    /// Attention dropout probability
+    attn_drop_p: f32,
 }
 
 impl WindowedAttention {
@@ -164,7 +164,7 @@ impl WindowedAttention {
             num_heads: config.num_heads,
             head_dim,
             window_size: config.window_size,
-            attn_dropout: Dropout::new(config.dropout),
+            attn_drop_p: config.dropout,
         }
     }
 
@@ -239,6 +239,19 @@ impl WindowedAttention {
                         }
                     }
 
+                    // Apply attention dropout (training only)
+                    if self.attn_drop_p > 0.0 && is_grad_enabled() {
+                        let mut rng = rand::thread_rng();
+                        let keep_scale = 1.0 / (1.0 - self.attn_drop_p);
+                        for s in &mut scores {
+                            if rng.r#gen::<f32>() < self.attn_drop_p {
+                                *s = 0.0;
+                            } else {
+                                *s *= keep_scale;
+                            }
+                        }
+                    }
+
                     // Weighted sum of values
                     let o_off = ((b * self.num_heads + h) * seq_len + i) * self.head_dim;
                     for (wi, j) in (win_start..win_end).enumerate() {
@@ -303,45 +316,144 @@ impl WindowedAttention {
 
 /// Gradient for windowed attention.
 ///
-/// Passes gradients back through the attention computation.
-/// Uses stored Q, K, V to recompute attention weights and distribute gradients.
+/// Recomputes attention weights from saved Q, K, V and distributes gradients
+/// correctly through the softmax(QK^T/sqrt(d)) * V computation.
+///
+/// Given output = softmax(scores) @ V where scores = Q @ K^T * scale:
+///   dV = attn_weights^T @ dO
+///   d_attn = dO @ V^T
+///   d_scores = d_attn * attn_weights - attn_weights * sum(d_attn * attn_weights, dim=-1)
+///   dQ = d_scores @ K * scale
+///   dK = d_scores^T @ Q * scale
+///
+/// The gradient w.r.t. x is then dQ + dK + dV (summed since x feeds all three projections
+/// through the same input path before this backward node).
 #[derive(Debug)]
 struct WindowedAttnBackward {
     next_fns: Vec<Option<GradFn>>,
-    #[allow(dead_code)]
     saved_q: Tensor<f32>,
-    #[allow(dead_code)]
     saved_k: Tensor<f32>,
-    #[allow(dead_code)]
     saved_v: Tensor<f32>,
-    #[allow(dead_code)]
     num_heads: usize,
-    #[allow(dead_code)]
     head_dim: usize,
-    #[allow(dead_code)]
     window_size: usize,
-    #[allow(dead_code)]
     scale: f32,
 }
 
 impl GradientFunction for WindowedAttnBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // grad_output: [batch, num_heads, seq_len, head_dim]
+        // grad_output shape: [batch, num_heads, seq_len, head_dim]
         let shape = grad_output.shape();
+        let batch_size = shape[0];
+        let num_heads = self.num_heads;
+        let seq_len = shape[2];
+        let head_dim = self.head_dim;
+        let w = self.window_size;
+        let scale = self.scale;
 
-        // We need grad w.r.t. the pre-projection input x
-        // For simplicity, pass gradients through as identity-like (the projection
-        // layers handle the actual chain rule via their own backward)
-        // The grad_output here is w.r.t. the attention output before o_proj.
-        // We approximate: grad_x ≈ sum over heads of grad_output reshaped
-        // This is a simplification — the projection backward handles the rest.
+        let q_vec = self.saved_q.to_vec();
+        let k_vec = self.saved_k.to_vec();
+        let v_vec = self.saved_v.to_vec();
+        let go_vec = grad_output.to_vec();
 
-        // Actually, we need to pass grad through to the input of this backward node,
-        // which connects to x before q/k/v projections.
-        // Since attention is: softmax(QK^T/sqrt(d)) * V, the gradient is complex.
-        // We use a pass-through approximation scaled by attention density.
-        // Simple pass-through: each position gets its gradient back
-        let grad_input = grad_output.to_vec();
+        // Accumulate grad_q, grad_k, grad_v in same layout as saved tensors
+        let total = batch_size * num_heads * seq_len * head_dim;
+        let mut grad_q = vec![0.0f32; total];
+        let mut grad_k = vec![0.0f32; total];
+        let mut grad_v = vec![0.0f32; total];
+
+        for b in 0..batch_size {
+            for h in 0..num_heads {
+                for i in 0..seq_len {
+                    let win_start = if i >= w { i - w + 1 } else { 0 };
+                    let win_end = i + 1;
+                    let win_len = win_end - win_start;
+
+                    let q_off = ((b * num_heads + h) * seq_len + i) * head_dim;
+
+                    // Recompute attention scores and weights for this query position
+                    let mut scores = vec![0.0f32; win_len];
+                    for (wi, j) in (win_start..win_end).enumerate() {
+                        let k_off = ((b * num_heads + h) * seq_len + j) * head_dim;
+                        let mut dot = 0.0f32;
+                        for d in 0..head_dim {
+                            dot += q_vec[q_off + d] * k_vec[k_off + d];
+                        }
+                        scores[wi] = dot * scale;
+                    }
+
+                    // Softmax
+                    let max_s = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                    let mut attn_w = vec![0.0f32; win_len];
+                    let mut exp_sum = 0.0f32;
+                    for (wi, &s) in scores.iter().enumerate() {
+                        attn_w[wi] = (s - max_s).exp();
+                        exp_sum += attn_w[wi];
+                    }
+                    if exp_sum > 0.0 {
+                        for a in &mut attn_w {
+                            *a /= exp_sum;
+                        }
+                    }
+
+                    // grad_output for position i
+                    let go_off = ((b * num_heads + h) * seq_len + i) * head_dim;
+
+                    // dV: for each j in window, grad_v[j] += attn_w[j] * grad_output[i]
+                    for (wi, j) in (win_start..win_end).enumerate() {
+                        let v_off = ((b * num_heads + h) * seq_len + j) * head_dim;
+                        for d in 0..head_dim {
+                            grad_v[v_off + d] += attn_w[wi] * go_vec[go_off + d];
+                        }
+                    }
+
+                    // d_attn: dO @ V^T for each (i, j) in window
+                    let mut d_attn = vec![0.0f32; win_len];
+                    for (wi, j) in (win_start..win_end).enumerate() {
+                        let v_off = ((b * num_heads + h) * seq_len + j) * head_dim;
+                        for d in 0..head_dim {
+                            d_attn[wi] += go_vec[go_off + d] * v_vec[v_off + d];
+                        }
+                    }
+
+                    // d_scores = softmax_backward(d_attn, attn_w)
+                    // = attn_w * (d_attn - sum(d_attn * attn_w))
+                    let sum_da_aw: f32 = d_attn
+                        .iter()
+                        .zip(attn_w.iter())
+                        .map(|(da, aw)| da * aw)
+                        .sum();
+                    let mut d_scores = vec![0.0f32; win_len];
+                    for wi in 0..win_len {
+                        d_scores[wi] = attn_w[wi] * (d_attn[wi] - sum_da_aw);
+                    }
+
+                    // dQ: d_scores @ K * scale (for query position i)
+                    for (wi, j) in (win_start..win_end).enumerate() {
+                        let k_off = ((b * num_heads + h) * seq_len + j) * head_dim;
+                        for d in 0..head_dim {
+                            grad_q[q_off + d] += d_scores[wi] * k_vec[k_off + d] * scale;
+                        }
+                    }
+
+                    // dK: d_scores^T @ Q * scale (for each key position j)
+                    for (wi, j) in (win_start..win_end).enumerate() {
+                        let k_off = ((b * num_heads + h) * seq_len + j) * head_dim;
+                        for d in 0..head_dim {
+                            grad_k[k_off + d] += d_scores[wi] * q_vec[q_off + d] * scale;
+                        }
+                    }
+                }
+            }
+        }
+
+        // The input x feeds into q_proj, k_proj, v_proj independently.
+        // This backward node sits before all three projections, so we sum gradients.
+        // Each projection's backward will further distribute through its own weights.
+        let mut grad_input = vec![0.0f32; total];
+        for i in 0..total {
+            grad_input[i] = grad_q[i] + grad_k[i] + grad_v[i];
+        }
 
         let gi = Tensor::from_vec(grad_input, shape).unwrap();
         vec![Some(gi)]

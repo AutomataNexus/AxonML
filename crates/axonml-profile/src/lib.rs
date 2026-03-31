@@ -47,8 +47,8 @@ pub struct Profiler {
     pub compute: Arc<RwLock<ComputeProfiler>>,
     /// Timeline profiler instance
     pub timeline: Arc<RwLock<TimelineProfiler>>,
-    /// Whether profiling is enabled
-    enabled: bool,
+    /// Whether profiling is enabled (atomic for global profiler access via &self)
+    enabled: std::sync::atomic::AtomicBool,
 }
 
 impl Default for Profiler {
@@ -64,23 +64,25 @@ impl Profiler {
             memory: Arc::new(RwLock::new(MemoryProfiler::new())),
             compute: Arc::new(RwLock::new(ComputeProfiler::new())),
             timeline: Arc::new(RwLock::new(TimelineProfiler::new())),
-            enabled: true,
+            enabled: std::sync::atomic::AtomicBool::new(true),
         }
     }
 
     /// Enables or disables profiling.
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
+    ///
+    /// Works on both owned and global (&self) profiler instances.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Returns whether profiling is enabled.
     pub fn is_enabled(&self) -> bool {
-        self.enabled
+        self.enabled.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Starts profiling an operation.
     pub fn start(&self, name: &str) {
-        if self.enabled {
+        if self.is_enabled() {
             self.compute.write().start(name);
             self.timeline.write().record(name, EventType::Start);
         }
@@ -88,7 +90,7 @@ impl Profiler {
 
     /// Stops profiling an operation.
     pub fn stop(&self, name: &str) {
-        if self.enabled {
+        if self.is_enabled() {
             self.compute.write().stop(name);
             self.timeline.write().record(name, EventType::End);
         }
@@ -96,14 +98,14 @@ impl Profiler {
 
     /// Records a memory allocation.
     pub fn record_alloc(&self, name: &str, bytes: usize) {
-        if self.enabled {
+        if self.is_enabled() {
             self.memory.write().record_alloc(name, bytes);
         }
     }
 
     /// Records a memory deallocation.
     pub fn record_free(&self, name: &str, bytes: usize) {
-        if self.enabled {
+        if self.is_enabled() {
             self.memory.write().record_free(name, bytes);
         }
     }

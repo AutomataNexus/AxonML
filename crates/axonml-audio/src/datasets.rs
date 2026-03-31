@@ -75,10 +75,8 @@ impl Dataset for AudioClassificationDataset {
 
         let waveform = self.waveforms[index].clone();
 
-        // One-hot encode label
-        let mut label_vec = vec![0.0f32; self.num_classes];
-        label_vec[self.labels[index]] = 1.0;
-        let label = Tensor::from_vec(label_vec, &[self.num_classes]).unwrap();
+        // Class index label (compatible with CrossEntropyLoss)
+        let label = Tensor::from_vec(vec![self.labels[index] as f32], &[1]).unwrap();
 
         Some((waveform, label))
     }
@@ -194,10 +192,8 @@ impl Dataset for SyntheticCommandDataset {
         let class = index % self.num_classes;
         let waveform = self.generate_waveform(class, index as u64);
 
-        // One-hot encode label
-        let mut label_vec = vec![0.0f32; self.num_classes];
-        label_vec[class] = 1.0;
-        let label = Tensor::from_vec(label_vec, &[self.num_classes]).unwrap();
+        // Class index label (compatible with CrossEntropyLoss)
+        let label = Tensor::from_vec(vec![class as f32], &[1]).unwrap();
 
         Some((waveform, label))
     }
@@ -323,10 +319,8 @@ impl Dataset for SyntheticMusicDataset {
         let genre = index % self.num_genres;
         let waveform = self.generate_waveform(genre, index as u64);
 
-        // One-hot encode label
-        let mut label_vec = vec![0.0f32; self.num_genres];
-        label_vec[genre] = 1.0;
-        let label = Tensor::from_vec(label_vec, &[self.num_genres]).unwrap();
+        // Class index label (compatible with CrossEntropyLoss)
+        let label = Tensor::from_vec(vec![genre as f32], &[1]).unwrap();
 
         Some((waveform, label))
     }
@@ -443,10 +437,8 @@ impl Dataset for SyntheticSpeakerDataset {
         let speaker = index % self.num_speakers;
         let waveform = self.generate_waveform(speaker, index as u64);
 
-        // One-hot encode label
-        let mut label_vec = vec![0.0f32; self.num_speakers];
-        label_vec[speaker] = 1.0;
-        let label = Tensor::from_vec(label_vec, &[self.num_speakers]).unwrap();
+        // Class index label (compatible with CrossEntropyLoss)
+        let label = Tensor::from_vec(vec![speaker as f32], &[1]).unwrap();
 
         Some((waveform, label))
     }
@@ -542,7 +534,7 @@ mod tests {
 
         let (wave, label) = dataset.get(0).unwrap();
         assert_eq!(wave.shape(), &[16000]);
-        assert_eq!(label.shape(), &[2]);
+        assert_eq!(label.shape(), &[1]);
     }
 
     #[test]
@@ -555,11 +547,10 @@ mod tests {
 
         let (wave, label) = dataset.get(0).unwrap();
         assert_eq!(wave.shape()[0], 8000); // 0.5s at 16000Hz
-        assert_eq!(label.shape(), &[10]);
-
-        // Check label is one-hot
-        let label_sum: f32 = label.to_vec().iter().sum();
-        assert!((label_sum - 1.0).abs() < 0.001);
+        // Class index label
+        assert_eq!(label.shape(), &[1]);
+        let class_idx = label.to_vec()[0] as usize;
+        assert!(class_idx < 10);
     }
 
     #[test]
@@ -570,11 +561,12 @@ mod tests {
         let (_, label0) = dataset.get(0).unwrap();
         let (_, label1) = dataset.get(1).unwrap();
 
-        let label0_vec = label0.to_vec();
-        let label1_vec = label1.to_vec();
+        // Labels are class indices [1]
+        assert_eq!(label0.shape(), &[1]);
+        assert_eq!(label1.shape(), &[1]);
 
-        let class0 = label0_vec.iter().position(|&x| x > 0.5).unwrap();
-        let class1 = label1_vec.iter().position(|&x| x > 0.5).unwrap();
+        let class0 = label0.to_vec()[0] as usize;
+        let class1 = label1.to_vec()[0] as usize;
 
         assert_eq!(class0, 0);
         assert_eq!(class1, 1);
@@ -590,7 +582,7 @@ mod tests {
 
         let (wave, label) = dataset.get(0).unwrap();
         assert_eq!(wave.shape()[0], 22050); // 1.0s at 22050Hz
-        assert_eq!(label.shape(), &[5]);
+        assert_eq!(label.shape(), &[1]);
     }
 
     #[test]
@@ -603,7 +595,7 @@ mod tests {
 
         let (wave, label) = dataset.get(0).unwrap();
         assert_eq!(wave.shape()[0], 8000); // 0.5s at 16000Hz
-        assert_eq!(label.shape(), &[5]);
+        assert_eq!(label.shape(), &[1]);
     }
 
     #[test]

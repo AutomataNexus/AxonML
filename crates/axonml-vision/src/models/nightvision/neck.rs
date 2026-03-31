@@ -136,3 +136,57 @@ impl ThermalFPN {
         self.bu_p5.set_training(training);
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axonml_autograd::Variable;
+    use axonml_tensor::Tensor;
+
+    #[test]
+    fn test_thermal_fpn_output_shapes() {
+        let fpn = ThermalFPN::default_config(); // 64/128/256 → 128
+
+        let p3 = Variable::new(
+            Tensor::from_vec(vec![0.1; 1 * 64 * 16 * 16], &[1, 64, 16, 16]).unwrap(),
+            false,
+        );
+        let p4 = Variable::new(
+            Tensor::from_vec(vec![0.1; 1 * 128 * 8 * 8], &[1, 128, 8, 8]).unwrap(),
+            false,
+        );
+        let p5 = Variable::new(
+            Tensor::from_vec(vec![0.1; 1 * 256 * 4 * 4], &[1, 256, 4, 4]).unwrap(),
+            false,
+        );
+
+        let (fpn3, fpn4, fpn5) = fpn.forward(&p3, &p4, &p5);
+
+        // All FPN outputs should have 128 channels
+        assert_eq!(fpn3.data().shape()[1], 128);
+        assert_eq!(fpn4.data().shape()[1], 128);
+        assert_eq!(fpn5.data().shape()[1], 128);
+
+        // Spatial dims should match input levels
+        assert_eq!(fpn3.data().shape()[2], 16);
+        assert_eq!(fpn4.data().shape()[2], 8);
+        assert_eq!(fpn5.data().shape()[2], 4);
+    }
+
+    #[test]
+    fn test_thermal_fpn_out_channels() {
+        let fpn = ThermalFPN::default_config();
+        assert_eq!(fpn.out_channels(), 128);
+    }
+
+    #[test]
+    fn test_thermal_fpn_params() {
+        let fpn = ThermalFPN::default_config();
+        assert!(!fpn.parameters().is_empty());
+        assert!(!fpn.named_parameters().is_empty());
+    }
+}

@@ -20,7 +20,7 @@ use rayon::prelude::*;
 
 use crate::DEFAULT_BLOCK_SIZE;
 use crate::error::QuantResult;
-use crate::types::{Q4_1Block, Q4Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
+use crate::types::{Q4_1Block, Q4Block, Q5Block, Q5_1Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
 
 // =============================================================================
 // Public API
@@ -53,10 +53,8 @@ pub fn quantize_tensor(
         QuantType::Q8_0 => quantize_q8_0(&data, shape),
         QuantType::Q4_0 => quantize_q4_0(&data, shape),
         QuantType::Q4_1 => quantize_q4_1(&data, shape),
-        QuantType::Q5_0 | QuantType::Q5_1 => {
-            // Fall back to Q4 for now
-            quantize_q4_0(&data, shape)
-        }
+        QuantType::Q5_0 => quantize_q5_0(&data, shape),
+        QuantType::Q5_1 => quantize_q5_1(&data, shape),
         QuantType::F16 => quantize_f16(&data, shape),
         QuantType::F32 => quantize_f32(&data, shape),
     }
@@ -211,6 +209,80 @@ fn quantize_q4_1(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor
         .collect();
 
     Ok(QuantizedTensor::new(shape, QuantType::Q4_1, blocks))
+}
+
+// =============================================================================
+// Q5_0 Quantization (5-bit symmetric)
+// =============================================================================
+
+/// Quantizes data to Q5_0 format (5-bit signed with per-block scale).
+fn quantize_q5_0(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor> {
+    let block_size = DEFAULT_BLOCK_SIZE;
+    let n_blocks = data.len().div_ceil(block_size);
+
+    let blocks: Vec<QuantizedBlock> = (0..n_blocks)
+        .into_par_iter()
+        .map(|block_idx| {
+            let start = block_idx * block_size;
+            let end = (start + block_size).min(data.len());
+            let block_data = &data[start..end];
+
+            let max_abs = block_data
+                .iter()
+                .map(|x| x.abs())
+                .fold(0.0f32, |a, b| a.max(b));
+
+            // 5-bit signed range: -16 to 15
+            let scale = if max_abs > 0.0 { max_abs / 15.0 } else { 1.0 };
+
+            let mut quantized = [0i8; 32];
+            for (i, &val) in block_data.iter().enumerate() {
+                let q = (val / scale).round().clamp(-16.0, 15.0) as i8;
+                quantized[i] = q;
+            }
+
+            let packed = Q5Block::pack(&quantized);
+            QuantizedBlock::Q5(Q5Block::new(f16::from_f32(scale), packed))
+        })
+        .collect();
+
+    Ok(QuantizedTensor::new(shape, QuantType::Q5_0, blocks))
+}
+
+// =============================================================================
+// Q5_1 Quantization (5-bit asymmetric)
+// =============================================================================
+
+/// Quantizes data to Q5_1 format (5-bit unsigned with per-block scale and min).
+fn quantize_q5_1(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor> {
+    let block_size = DEFAULT_BLOCK_SIZE;
+    let n_blocks = data.len().div_ceil(block_size);
+
+    let blocks: Vec<QuantizedBlock> = (0..n_blocks)
+        .into_par_iter()
+        .map(|block_idx| {
+            let start = block_idx * block_size;
+            let end = (start + block_size).min(data.len());
+            let block_data = &data[start..end];
+
+            let min = block_data.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+            let max = block_data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+
+            // 5-bit unsigned range: 0 to 31
+            let scale = if max > min { (max - min) / 31.0 } else { 1.0 };
+
+            let mut quantized = [0u8; 32];
+            for (i, &val) in block_data.iter().enumerate() {
+                let q = ((val - min) / scale).round().clamp(0.0, 31.0) as u8;
+                quantized[i] = q;
+            }
+
+            let packed = Q5_1Block::pack(&quantized);
+            QuantizedBlock::Q5_1(Q5_1Block::new(f16::from_f32(scale), f16::from_f32(min), packed))
+        })
+        .collect();
+
+    Ok(QuantizedTensor::new(shape, QuantType::Q5_1, blocks))
 }
 
 // =============================================================================

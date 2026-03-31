@@ -314,3 +314,97 @@ impl ThermalBackbone {
         self.stage3.set_training(training);
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axonml_tensor::Tensor;
+
+    #[test]
+    fn test_conv_bn_silu_shape() {
+        let block = ConvBNSiLU::new(3, 32, 3, 1, 1);
+        let x = Variable::new(Tensor::from_vec(vec![0.1; 2 * 3 * 8 * 8], &[2, 3, 8, 8]).unwrap(), false);
+        let y = block.forward(&x);
+        assert_eq!(y.data().shape(), &[2, 32, 8, 8]);
+    }
+
+    #[test]
+    fn test_conv_bn_silu_params() {
+        let block = ConvBNSiLU::new(3, 32, 3, 1, 1);
+        assert!(!block.parameters().is_empty());
+    }
+
+    #[test]
+    fn test_bottleneck_shortcut() {
+        let block = Bottleneck::new(16, 16, true);
+        let x = Variable::new(Tensor::from_vec(vec![0.1; 1 * 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(), false);
+        let y = block.forward(&x);
+        assert_eq!(y.data().shape(), &[1, 16, 4, 4]);
+    }
+
+    #[test]
+    fn test_bottleneck_no_shortcut() {
+        let block = Bottleneck::new(16, 32, false);
+        let x = Variable::new(Tensor::from_vec(vec![0.1; 1 * 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(), false);
+        let y = block.forward(&x);
+        assert_eq!(y.data().shape(), &[1, 32, 4, 4]);
+    }
+
+    #[test]
+    fn test_csp_block_shape() {
+        let block = CSPBlock::new(32, 64, 1);
+        let x = Variable::new(Tensor::from_vec(vec![0.1; 1 * 32 * 8 * 8], &[1, 32, 8, 8]).unwrap(), false);
+        let y = block.forward(&x);
+        // CSP with stride-2 downsample: spatial dims halved
+        assert_eq!(y.data().shape()[0], 1);
+        assert_eq!(y.data().shape()[1], 64);
+        assert_eq!(y.data().shape()[2], 4);
+        assert_eq!(y.data().shape()[3], 4);
+    }
+
+    #[test]
+    fn test_thermal_backbone_3ch() {
+        let backbone = ThermalBackbone::new(3);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1; 1 * 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
+            false,
+        );
+        let (p3, p4, p5) = backbone.forward(&x);
+        // P3: 64ch, H/4, W/4
+        assert_eq!(p3.data().shape()[1], 64);
+        assert_eq!(p3.data().shape()[2], 16);
+        // P4: 128ch, H/8, W/8
+        assert_eq!(p4.data().shape()[1], 128);
+        assert_eq!(p4.data().shape()[2], 8);
+        // P5: 256ch, H/16, W/16
+        assert_eq!(p5.data().shape()[1], 256);
+        assert_eq!(p5.data().shape()[2], 4);
+    }
+
+    #[test]
+    fn test_thermal_backbone_1ch() {
+        let backbone = ThermalBackbone::new(1);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1; 1 * 1 * 32 * 32], &[1, 1, 32, 32]).unwrap(),
+            false,
+        );
+        let (p3, p4, p5) = backbone.forward(&x);
+        assert_eq!(p3.data().shape()[1], 64);
+        assert_eq!(p4.data().shape()[1], 128);
+        assert_eq!(p5.data().shape()[1], 256);
+    }
+
+    #[test]
+    fn test_thermal_backbone_params() {
+        let backbone = ThermalBackbone::new(1);
+        let params = backbone.parameters();
+        assert!(!params.is_empty());
+        // 1-ch backbone should have more params (channel adapter)
+        let backbone3 = ThermalBackbone::new(3);
+        assert!(backbone.parameters().len() > backbone3.parameters().len());
+    }
+}

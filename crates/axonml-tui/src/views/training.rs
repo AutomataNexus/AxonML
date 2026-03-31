@@ -111,6 +111,9 @@ pub struct TrainingView {
 
     /// Show detailed metrics
     pub show_details: bool,
+
+    /// Path to training log file (for live updates via tick/refresh)
+    pub log_file_path: Option<String>,
 }
 
 impl TrainingView {
@@ -119,6 +122,7 @@ impl TrainingView {
         let mut view = Self {
             session: None,
             show_details: false,
+            log_file_path: None,
         };
 
         // Load demo data
@@ -248,8 +252,11 @@ impl TrainingView {
         }
     }
 
-    /// Watch a training log file
+    /// Watch a training log file. Stores the path so tick() can re-read it
+    /// for live updates as new metrics are appended during training.
     pub fn watch_log(&mut self, path: &Path) -> Result<(), String> {
+        self.log_file_path = Some(path.display().to_string());
+
         // Try to parse the training log file
         match self.parse_training_log(path) {
             Ok(session) => {
@@ -396,29 +403,26 @@ impl TrainingView {
         // Reserved for scrolling through history
     }
 
-    /// Refresh training data
+    /// Refresh training data by re-reading the log file if one was loaded.
     pub fn refresh(&mut self) {
-        // Reload demo data for now
+        if let Some(ref path) = self.log_file_path.clone() {
+            if let Ok(session) = self.parse_training_log(Path::new(path)) {
+                self.session = Some(session);
+                return;
+            }
+        }
+        // Fall back to demo data if no log file is set
         self.load_demo_session();
     }
 
-    /// Tick update for real-time animation
+    /// Tick update — re-reads log file for live training updates.
+    ///
+    /// If a log file path is set, re-reads the file to pick up new epoch
+    /// metrics appended by the training process.
     pub fn tick(&mut self) {
-        // In real implementation, would update metrics from training process
-        // For demo, we simulate small progress updates
-        if let Some(session) = &mut self.session {
-            if session.status == TrainingStatus::Running {
-                // Simulate batch progress
-                if session.current_batch < session.total_batches {
-                    session.current_batch += 1;
-                } else {
-                    // Next epoch
-                    session.current_batch = 0;
-                    if session.current_epoch < session.config.total_epochs {
-                        session.current_epoch += 1;
-                    }
-                }
-                session.elapsed_secs += 0.1;
+        if let Some(ref path) = self.log_file_path.clone() {
+            if let Ok(session) = self.parse_training_log(Path::new(path)) {
+                self.session = Some(session);
             }
         }
     }

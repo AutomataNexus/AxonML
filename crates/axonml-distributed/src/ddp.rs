@@ -74,26 +74,28 @@ impl<M: Module> DistributedDataParallel<M> {
     }
 
     /// Synchronizes model parameters across all processes.
-    /// Should be called once at the start of training.
+    /// Should be called once at the start of training to ensure all
+    /// ranks start from identical parameters (broadcast from rank 0).
     pub fn sync_parameters(&mut self) {
-        // Broadcast parameters from rank 0
         for param in self.module.parameters() {
             let mut tensor = param.data().clone();
             self.process_group.broadcast_tensor(&mut tensor, 0);
-            // In a real implementation, we'd update the parameter
+            // Write the broadcast result back to the parameter
+            param.update_data(tensor);
         }
     }
 
     /// Synchronizes gradients across all processes.
-    /// Should be called after the backward pass.
+    /// Should be called after the backward pass. All-reduces gradients
+    /// so every rank gets the average gradient across all ranks.
     pub fn sync_gradients(&self) {
-        // Get all gradients and all-reduce them
         for param in self.module.parameters() {
             if let Some(grad) = param.grad() {
                 let mut grad_tensor = grad.clone();
                 self.process_group
                     .all_reduce_tensor(&mut grad_tensor, ReduceOp::Average);
-                // In a real implementation, we'd update the gradient
+                // Write the all-reduced gradient back to the parameter
+                param.set_grad(grad_tensor);
             }
         }
     }

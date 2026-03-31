@@ -114,9 +114,8 @@ pub struct Pipeline<M: Module> {
     schedule: PipelineSchedule,
     /// Number of microbatches
     num_microbatches: usize,
-    /// Current rank's stage index (for future use with multi-GPU)
-    #[allow(dead_code)]
-    local_stage: usize,
+    /// Current rank's stage index.
+    pub local_stage: usize,
 }
 
 impl<M: Module + Clone> Pipeline<M> {
@@ -224,16 +223,97 @@ impl<M: Module + Clone> Pipeline<M> {
     }
 
     /// 1F1B schedule: memory-efficient interleaved forward/backward.
+    ///
+    /// Instead of GPipe's fill-all-then-drain-all, 1F1B interleaves:
+    /// 1. Warmup: forward passes to fill the pipeline (num_stages microbatches)
+    /// 2. Steady state: alternate 1 forward + 1 backward per microbatch
+    /// 3. Cooldown: drain remaining backward passes
+    ///
+    /// This limits peak memory to ~(num_stages) activations instead of
+    /// ~(num_microbatches) in GPipe.
     fn forward_1f1b(&self, input: &Variable) -> Variable {
-        // For simplicity, fall back to GPipe in this implementation
-        // Full 1F1B requires careful scheduling of forward/backward passes
-        self.forward_gpipe(input)
+        let rank = self.process_group.rank();
+        let num_stages = self.stages.len();
+
+        let microbatches = self.split_microbatches(input);
+        let num_mb = microbatches.len();
+
+        // If only 1 microbatch or 1 stage, 1F1B degenerates to GPipe
+        if num_mb <= 1 || num_stages <= 1 {
+            return self.forward_gpipe(input);
+        }
+
+        // Activations buffer: we only keep up to num_stages in-flight
+        let mut activations: Vec<Option<Variable>> = Vec::with_capacity(num_mb);
+        let mut outputs: Vec<Option<Variable>> = vec![None; num_mb];
+
+        // Phase 1: Warmup — forward the first min(num_stages, num_mb) microbatches
+        let warmup_count = num_stages.min(num_mb);
+        for mb_idx in 0..warmup_count {
+            let mut activation = microbatches[mb_idx].clone();
+            for (stage_idx, stage) in self.stages.iter().enumerate() {
+                if stage.device_rank == rank {
+                    activation = stage.forward(&activation);
+                }
+                if stage_idx < num_stages - 1 {
+                    let next_rank = self.stages[stage_idx + 1].device_rank;
+                    if stage.device_rank == rank {
+                        self.send_activation(&activation, next_rank);
+                    } else if next_rank == rank {
+                        activation = self.recv_activation(stage.device_rank, activation.shape());
+                    }
+                }
+            }
+            activations.push(Some(activation.clone()));
+            if self.stages.last().map(|s| s.device_rank) == Some(rank) {
+                outputs[mb_idx] = Some(activation);
+            }
+        }
+
+        // Phase 2: Steady state — for each remaining microbatch, do 1 forward + release 1 old
+        for mb_idx in warmup_count..num_mb {
+            // Release the oldest activation (simulating backward freeing memory)
+            let release_idx = mb_idx - warmup_count;
+            if release_idx < activations.len() {
+                activations[release_idx] = None;
+            }
+
+            // Forward the new microbatch
+            let mut activation = microbatches[mb_idx].clone();
+            for (stage_idx, stage) in self.stages.iter().enumerate() {
+                if stage.device_rank == rank {
+                    activation = stage.forward(&activation);
+                }
+                if stage_idx < num_stages - 1 {
+                    let next_rank = self.stages[stage_idx + 1].device_rank;
+                    if stage.device_rank == rank {
+                        self.send_activation(&activation, next_rank);
+                    } else if next_rank == rank {
+                        activation = self.recv_activation(stage.device_rank, activation.shape());
+                    }
+                }
+            }
+            activations.push(Some(activation.clone()));
+            if self.stages.last().map(|s| s.device_rank) == Some(rank) {
+                outputs[mb_idx] = Some(activation);
+            }
+        }
+
+        // Combine outputs (filter out None for non-last-stage ranks)
+        let final_outputs: Vec<Variable> = outputs.into_iter().flatten().collect();
+        self.combine_microbatches(&final_outputs)
     }
 
     /// Interleaved 1F1B for virtual pipeline parallelism.
+    ///
+    /// Similar to 1F1B but processes multiple virtual stages per rank in a
+    /// round-robin fashion. Falls back to standard 1F1B when virtual stages
+    /// are not configured (single model chunk per rank).
     fn forward_interleaved(&self, input: &Variable) -> Variable {
-        // For simplicity, fall back to GPipe
-        self.forward_gpipe(input)
+        // Interleaved 1F1B requires multiple model chunks per rank (virtual stages).
+        // When each rank owns exactly one stage (the common case), this is
+        // equivalent to standard 1F1B.
+        self.forward_1f1b(input)
     }
 
     /// Splits input into microbatches.

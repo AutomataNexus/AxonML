@@ -83,6 +83,27 @@ pub fn gt<T: Numeric>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Vec<bool>> {
         .collect())
 }
 
+/// Element-wise equality → Tensor<f32> mask (1.0 where equal, 0.0 where not).
+pub fn eq_mask<T: Numeric + PartialEq>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<f32>> {
+    let bools = eq(a, b)?;
+    let data: Vec<f32> = bools.iter().map(|&v| if v { 1.0 } else { 0.0 }).collect();
+    Tensor::from_vec(data, a.shape())
+}
+
+/// Element-wise less-than → Tensor<f32> mask.
+pub fn lt_mask<T: Numeric>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<f32>> {
+    let bools = lt(a, b)?;
+    let data: Vec<f32> = bools.iter().map(|&v| if v { 1.0 } else { 0.0 }).collect();
+    Tensor::from_vec(data, a.shape())
+}
+
+/// Element-wise greater-than → Tensor<f32> mask.
+pub fn gt_mask<T: Numeric>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<f32>> {
+    let bools = gt(a, b)?;
+    let data: Vec<f32> = bools.iter().map(|&v| if v { 1.0 } else { 0.0 }).collect();
+    Tensor::from_vec(data, a.shape())
+}
+
 // =============================================================================
 // Advanced Activation Functions
 // =============================================================================
@@ -170,7 +191,7 @@ pub fn elu<T: Float>(x: &Tensor<T>, alpha: T) -> Tensor<T> {
 #[must_use]
 pub fn silu<T: Float>(x: &Tensor<T>) -> Tensor<T> {
     let sig = x.sigmoid();
-    x.mul(&sig).unwrap()
+    x.mul(&sig).expect("tensor mul failed")
 }
 
 // =============================================================================
@@ -658,14 +679,14 @@ pub fn unique<T: Numeric>(
     let n = unique_vals.len();
 
     UniqueResult {
-        values: Tensor::from_vec(unique_vals, &[n]).unwrap(),
+        values: Tensor::from_vec(unique_vals, &[n]).expect("tensor creation failed"),
         inverse_indices: if return_inverse {
             Some(Tensor::from_vec(final_inverse, x.shape()).unwrap())
         } else {
             None
         },
         counts: if return_counts {
-            Some(Tensor::from_vec(final_counts, &[n]).unwrap())
+            Some(Tensor::from_vec(final_counts, &[n]).expect("tensor creation failed"))
         } else {
             None
         },
@@ -954,8 +975,8 @@ mod tests {
     #[test]
     fn test_scatter() {
         let dst = Tensor::<f32>::zeros(&[3]);
-        let index = Tensor::from_vec(vec![0_i64, 2], &[2]).unwrap();
-        let src = Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap();
+        let index = Tensor::from_vec(vec![0_i64, 2], &[2]).expect("tensor creation failed");
+        let src = Tensor::from_vec(vec![1.0, 2.0], &[2]).expect("tensor creation failed");
 
         let result = scatter(&dst, 0, &index, &src).unwrap();
         assert_eq!(result.to_vec(), vec![1.0, 0.0, 2.0]);

@@ -32,14 +32,34 @@ use crate::theme::{AxonmlTheme, INFO, TEAL, TERRACOTTA};
 /// Chart data point
 pub type DataPoint = (f64, f64);
 
-/// Chart data series (reserved for future use)
+/// Chart data series for custom metrics.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct DataSeries {
+    /// Series display name
     pub name: String,
+    /// Data points (x, y)
     pub data: Vec<DataPoint>,
+    /// Line color
     pub color: ratatui::style::Color,
+    /// Point marker style
     pub marker: symbols::Marker,
+}
+
+impl DataSeries {
+    /// Creates a new data series.
+    pub fn new(name: &str, color: ratatui::style::Color) -> Self {
+        Self {
+            name: name.to_string(),
+            data: Vec::new(),
+            color,
+            marker: symbols::Marker::Braille,
+        }
+    }
+
+    /// Adds a data point.
+    pub fn push(&mut self, x: f64, y: f64) {
+        self.data.push((x, y));
+    }
 }
 
 /// Chart type selection
@@ -87,11 +107,17 @@ pub struct GraphsView {
     /// X-axis bounds
     pub x_bounds: [f64; 2],
 
+    /// Full (unzoomed) X-axis bounds
+    pub x_bounds_full: [f64; 2],
+
     /// Y-axis bounds for loss
     pub loss_bounds: [f64; 2],
 
     /// Y-axis bounds for accuracy
     pub acc_bounds: [f64; 2],
+
+    /// Whether zoom is active (show last 50% of data)
+    pub zoomed: bool,
 }
 
 impl GraphsView {
@@ -105,8 +131,10 @@ impl GraphsView {
             learning_rate: Vec::new(),
             active_chart: ChartType::Loss,
             x_bounds: [0.0, 20.0],
+            x_bounds_full: [0.0, 20.0],
             loss_bounds: [0.0, 2.5],
             acc_bounds: [0.0, 100.0],
+            zoomed: false,
         };
 
         view.load_demo_data();
@@ -207,6 +235,8 @@ impl GraphsView {
         ];
 
         self.x_bounds = [0.0, 16.0];
+        self.x_bounds_full = [0.0, 16.0];
+        self.zoomed = false;
     }
 
     /// Switch to next chart type
@@ -227,9 +257,16 @@ impl GraphsView {
         };
     }
 
-    /// Toggle zoom mode (placeholder for future enhancement)
+    /// Toggle zoom mode: zooms into the last 50% of the x-axis range
+    /// to see recent training detail, or zooms back out to full range.
     pub fn toggle_zoom(&mut self) {
-        // Reserved for future zoom functionality
+        self.zoomed = !self.zoomed;
+        if self.zoomed {
+            let mid = (self.x_bounds_full[0] + self.x_bounds_full[1]) / 2.0;
+            self.x_bounds = [mid, self.x_bounds_full[1]];
+        } else {
+            self.x_bounds = self.x_bounds_full;
+        }
     }
 
     /// Render the graphs view

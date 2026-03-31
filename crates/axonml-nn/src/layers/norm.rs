@@ -164,8 +164,8 @@ impl Module for BatchNorm1d {
                         .zip(vars.iter())
                         .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
                         .collect();
-                    *running_mean = Tensor::from_vec(new_mean, &[num_features]).unwrap();
-                    *running_var = Tensor::from_vec(new_var, &[num_features]).unwrap();
+                    *running_mean = Tensor::from_vec(new_mean, &[num_features]).expect("tensor creation failed");
+                    *running_var = Tensor::from_vec(new_var, &[num_features]).expect("tensor creation failed");
                 }
 
                 let weight_vec = gamma_gpu.to_vec();
@@ -239,8 +239,8 @@ impl Module for BatchNorm1d {
                     .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
                     .collect();
 
-                *running_mean = Tensor::from_vec(new_mean, &[num_features]).unwrap();
-                *running_var = Tensor::from_vec(new_var, &[num_features]).unwrap();
+                *running_mean = Tensor::from_vec(new_mean, &[num_features]).expect("tensor creation failed");
+                *running_var = Tensor::from_vec(new_var, &[num_features]).expect("tensor creation failed");
             }
         } else {
             // Use running statistics for inference
@@ -260,7 +260,7 @@ impl Module for BatchNorm1d {
             }
         }
 
-        let output = Tensor::from_vec(output_vec, &shape).unwrap();
+        let output = Tensor::from_vec(output_vec, &shape).expect("tensor creation failed");
 
         let requires_grad =
             (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
@@ -306,6 +306,24 @@ impl Module for BatchNorm1d {
 
     fn name(&self) -> &'static str {
         "BatchNorm1d"
+    }
+
+    fn to_device(&self, device: axonml_core::Device) {
+        // Move parameters
+        for param in self.parameters() {
+            param.to_device(device);
+        }
+        // Move running statistics (non-parameter buffers)
+        if self.track_running_stats {
+            let mut rm = self.running_mean.write();
+            if let Ok(moved) = rm.to_device(device) {
+                *rm = moved;
+            }
+            let mut rv = self.running_var.write();
+            if let Ok(moved) = rv.to_device(device) {
+                *rv = moved;
+            }
+        }
     }
 }
 
@@ -422,8 +440,8 @@ impl Module for BatchNorm2d {
                     .zip(vars.iter())
                     .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
                     .collect();
-                *running_mean = Tensor::from_vec(new_mean, &[channels]).unwrap();
-                *running_var = Tensor::from_vec(new_var, &[channels]).unwrap();
+                *running_mean = Tensor::from_vec(new_mean, &[channels]).expect("tensor creation failed");
+                *running_var = Tensor::from_vec(new_var, &[channels]).expect("tensor creation failed");
 
                 let weight_vec = gamma_gpu.to_vec();
                 let requires_grad =
@@ -490,8 +508,8 @@ impl Module for BatchNorm2d {
                 .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
                 .collect();
 
-            *running_mean = Tensor::from_vec(new_mean, &[channels]).unwrap();
-            *running_var = Tensor::from_vec(new_var, &[channels]).unwrap();
+            *running_mean = Tensor::from_vec(new_mean, &[channels]).expect("tensor creation failed");
+            *running_var = Tensor::from_vec(new_var, &[channels]).expect("tensor creation failed");
         } else {
             means = self.running_mean.read().to_vec();
             vars = self.running_var.read().to_vec();
@@ -509,7 +527,7 @@ impl Module for BatchNorm2d {
             output_vec[i] = (input_vec[i] - means[c]) * inv_stds[c] * weight_vec[c] + bias_vec[c];
         }
 
-        let output = Tensor::from_vec(output_vec, &shape).unwrap();
+        let output = Tensor::from_vec(output_vec, &shape).expect("tensor creation failed");
 
         let requires_grad =
             (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
@@ -555,6 +573,21 @@ impl Module for BatchNorm2d {
 
     fn name(&self) -> &'static str {
         "BatchNorm2d"
+    }
+
+    fn to_device(&self, device: axonml_core::Device) {
+        for param in self.parameters() {
+            param.to_device(device);
+        }
+        // Move running statistics (non-parameter buffers)
+        let mut rm = self.running_mean.write();
+        if let Ok(moved) = rm.to_device(device) {
+            *rm = moved;
+        }
+        let mut rv = self.running_var.write();
+        if let Ok(moved) = rv.to_device(device) {
+            *rv = moved;
+        }
     }
 }
 
@@ -668,7 +701,7 @@ impl Module for LayerNorm {
             }
         }
 
-        let output = Tensor::from_vec(output_vec, &shape).unwrap();
+        let output = Tensor::from_vec(output_vec, &shape).expect("tensor creation failed");
         let requires_grad = input.requires_grad() && is_grad_enabled();
 
         if requires_grad {
@@ -829,7 +862,7 @@ impl Module for GroupNorm {
             }
         }
 
-        let output = Tensor::from_vec(output_vec, &shape).unwrap();
+        let output = Tensor::from_vec(output_vec, &shape).expect("tensor creation failed");
         let requires_grad = input.requires_grad() && is_grad_enabled();
 
         if requires_grad && self.affine {
@@ -985,7 +1018,7 @@ impl Module for InstanceNorm2d {
             }
         }
 
-        let output = Tensor::from_vec(output_vec, &shape).unwrap();
+        let output = Tensor::from_vec(output_vec, &shape).expect("tensor creation failed");
         let requires_grad = input.requires_grad() && is_grad_enabled();
 
         if requires_grad {
@@ -1048,7 +1081,7 @@ mod tests {
     fn test_batchnorm1d() {
         let bn = BatchNorm1d::new(3);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).unwrap(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).expect("tensor creation failed"),
             false,
         );
         let output = bn.forward(&input);
@@ -1059,7 +1092,7 @@ mod tests {
     fn test_batchnorm2d() {
         let bn = BatchNorm2d::new(2);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 32], &[2, 2, 2, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0; 32], &[2, 2, 2, 4]).expect("tensor creation failed"),
             false,
         );
         let output = bn.forward(&input);
@@ -1070,7 +1103,7 @@ mod tests {
     fn test_layernorm() {
         let ln = LayerNorm::single(4);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[2, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[2, 4]).expect("tensor creation failed"),
             false,
         );
         let output = ln.forward(&input);
@@ -1088,7 +1121,7 @@ mod tests {
     fn test_groupnorm() {
         let gn = GroupNorm::new(2, 4); // 2 groups, 4 channels
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 32], &[2, 4, 2, 2]).unwrap(),
+            Tensor::from_vec(vec![1.0; 32], &[2, 4, 2, 2]).expect("tensor creation failed"),
             false,
         );
         let output = gn.forward(&input);
@@ -1099,7 +1132,7 @@ mod tests {
     fn test_groupnorm_normalization() {
         let gn = GroupNorm::with_options(2, 4, 1e-5, false); // No affine
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[1, 4, 1, 2]).unwrap(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[1, 4, 1, 2]).expect("tensor creation failed"),
             false,
         );
         let output = gn.forward(&input);
@@ -1116,7 +1149,7 @@ mod tests {
     fn test_instancenorm2d() {
         let inn = InstanceNorm2d::new(2);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 32], &[2, 2, 2, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0; 32], &[2, 2, 2, 4]).expect("tensor creation failed"),
             false,
         );
         let output = inn.forward(&input);
@@ -1127,7 +1160,7 @@ mod tests {
     fn test_instancenorm2d_with_affine() {
         let inn = InstanceNorm2d::with_affine(4);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 64], &[1, 4, 4, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0; 64], &[1, 4, 4, 4]).expect("tensor creation failed"),
             false,
         );
         let output = inn.forward(&input);

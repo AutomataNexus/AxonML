@@ -45,7 +45,8 @@ pub fn dequantize_tensor(quantized: &QuantizedTensor) -> QuantResult<Tensor<f32>
         QuantType::Q8_0 => dequantize_q8_0(quantized),
         QuantType::Q4_0 => dequantize_q4_0(quantized),
         QuantType::Q4_1 => dequantize_q4_1(quantized),
-        QuantType::Q5_0 | QuantType::Q5_1 => dequantize_q4_0(quantized), // Fallback
+        QuantType::Q5_0 => dequantize_q5_0(quantized),
+        QuantType::Q5_1 => dequantize_q5_1(quantized),
         QuantType::F16 => dequantize_f16(quantized),
         QuantType::F32 => dequantize_f32(quantized),
     }?;
@@ -68,6 +69,15 @@ pub fn dequantize_block(block: &QuantizedBlock) -> Vec<f32> {
         QuantizedBlock::Q8(b) => dequantize_q8_block(b),
         QuantizedBlock::Q4(b) => dequantize_q4_block(b),
         QuantizedBlock::Q4_1(b) => dequantize_q4_1_block(b),
+        QuantizedBlock::Q5(b) => {
+            let scale = b.scale.to_f32();
+            b.unpack().iter().map(|&v| v as f32 * scale).collect()
+        }
+        QuantizedBlock::Q5_1(b) => {
+            let scale = b.scale.to_f32();
+            let min = b.min.to_f32();
+            b.unpack().iter().map(|&v| v as f32 * scale + min).collect()
+        }
         QuantizedBlock::F16(data) => data.iter().map(|x| x.to_f32()).collect(),
         QuantizedBlock::F32(data) => data.clone(),
     }
@@ -157,6 +167,45 @@ fn dequantize_q4_1_block(block: &Q4_1Block) -> Vec<f32> {
     let unpacked = block.unpack();
 
     unpacked.iter().map(|&q| q as f32 * scale + min).collect()
+}
+
+// =============================================================================
+// Q5_0 Dequantization
+// =============================================================================
+
+/// Dequantizes Q5_0 data (5-bit signed with per-block scale).
+fn dequantize_q5_0(quantized: &QuantizedTensor) -> QuantResult<Vec<f32>> {
+    let mut result = Vec::new();
+    for block in &quantized.blocks {
+        if let QuantizedBlock::Q5(q5) = block {
+            let scale = q5.scale.to_f32();
+            let values = q5.unpack();
+            for &v in &values {
+                result.push(v as f32 * scale);
+            }
+        }
+    }
+    Ok(result)
+}
+
+// =============================================================================
+// Q5_1 Dequantization
+// =============================================================================
+
+/// Dequantizes Q5_1 data (5-bit unsigned with per-block scale and min).
+fn dequantize_q5_1(quantized: &QuantizedTensor) -> QuantResult<Vec<f32>> {
+    let mut result = Vec::new();
+    for block in &quantized.blocks {
+        if let QuantizedBlock::Q5_1(q5) = block {
+            let scale = q5.scale.to_f32();
+            let min = q5.min.to_f32();
+            let values = q5.unpack();
+            for &v in &values {
+                result.push(v as f32 * scale + min);
+            }
+        }
+    }
+    Ok(result)
 }
 
 // =============================================================================

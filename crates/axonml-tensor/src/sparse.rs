@@ -35,10 +35,11 @@ pub enum SparseFormat {
 // COO Sparse Tensor
 // =============================================================================
 
-/// Sparse tensor in COO (Coordinate) format.
+/// Sparse tensor in COO (Coordinate) format (f32 only).
 ///
 /// Stores non-zero elements as a list of (index, value) pairs.
 /// Efficient for construction but less efficient for arithmetic.
+/// Currently hardcoded to f32 values — sufficient for all ML workloads.
 #[derive(Debug, Clone)]
 pub struct SparseCOO {
     /// Row indices of non-zero elements
@@ -178,7 +179,7 @@ impl SparseCOO {
             data[flat_idx] += self.values[i];
         }
 
-        Tensor::from_vec(data, &self.shape).unwrap()
+        Tensor::from_vec(data, &self.shape).expect("tensor creation failed")
     }
 
     /// Converts to CSR format (for 2D matrices).
@@ -343,7 +344,7 @@ impl SparseCSR {
             }
         }
 
-        Tensor::from_vec(result, &[m, n]).unwrap()
+        Tensor::from_vec(result, &[m, n]).expect("tensor creation failed")
     }
 
     /// Converts to dense tensor.
@@ -356,7 +357,7 @@ impl SparseCSR {
             }
         }
 
-        Tensor::from_vec(data, &self.shape).unwrap()
+        Tensor::from_vec(data, &self.shape).expect("tensor creation failed")
     }
 
     /// Converts to COO format.
@@ -631,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_sparse_tensor_from_dense() {
-        let dense = Tensor::from_vec(vec![0.0, 1.0, 0.0, 2.0], &[2, 2]).unwrap();
+        let dense = Tensor::from_vec(vec![0.0, 1.0, 0.0, 2.0], &[2, 2]).expect("tensor creation failed");
         let sparse = SparseTensor::from_dense(&dense, 0.0);
 
         assert_eq!(sparse.nnz(), 2);
@@ -689,7 +690,7 @@ mod tests {
         let sparse = SparseTensor::from_coords(&coords, &values, &[2, 2]);
 
         // Dense: [[1, 2], [3, 4]]
-        let dense = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap();
+        let dense = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).expect("tensor creation failed");
 
         let result = sparse.matmul(&dense);
         let data = result.to_vec();

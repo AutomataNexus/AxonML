@@ -15,6 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 pub mod charts;
+pub mod error_boundary;
 pub mod forms;
 pub mod icons;
 pub mod modal;
@@ -27,6 +28,7 @@ pub mod terminal;
 pub mod toast;
 
 pub use charts::*;
+pub use error_boundary::*;
 pub use forms::*;
 pub use icons::*;
 pub use modal::*;

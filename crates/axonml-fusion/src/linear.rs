@@ -15,8 +15,6 @@
 //! liable for any damages arising from the use of this software.
 
 use axonml_tensor::Tensor;
-use rayon::prelude::*;
-
 use crate::FusedOp;
 use crate::error::{FusionError, FusionResult};
 
@@ -139,38 +137,29 @@ impl FusedLinear {
             });
         }
 
-        let input_data = input.to_vec();
-        let weight_data = self.weight.to_vec();
+        // Use Tensor::matmul for BLAS-accelerated computation
+        // input [batch, in] @ weight^T [in, out] → [batch, out]
+        let input_2d = if input_shape.len() == 1 {
+            input.reshape(&[1, self.in_features as isize]).expect("reshape failed")
+        } else {
+            input.clone()
+        };
+        let weight_t = self.weight.transpose(0, 1).expect("transpose failed"); // [out, in] → [in, out]
+        let matmul_result = input_2d.matmul(&weight_t).expect("matmul failed");
+        let mut result = matmul_result.to_vec();
+
         let bias_data = self.bias.as_ref().map(|b| b.to_vec());
 
-        // Fused matrix multiply + bias + activation
-        let result: Vec<f32> = (0..batch_size)
-            .into_par_iter()
-            .flat_map(|b| {
-                let input_row = &input_data[b * self.in_features..(b + 1) * self.in_features];
-
-                (0..self.out_features)
-                    .map(|o| {
-                        // Dot product
-                        let weight_row =
-                            &weight_data[o * self.in_features..(o + 1) * self.in_features];
-                        let mut sum: f32 = input_row
-                            .iter()
-                            .zip(weight_row.iter())
-                            .map(|(&a, &b)| a * b)
-                            .sum();
-
-                        // Add bias
-                        if let Some(ref bias) = bias_data {
-                            sum += bias[o];
-                        }
-
-                        // Apply activation
-                        self.activation.apply(sum)
-                    })
-                    .collect::<Vec<f32>>()
-            })
-            .collect();
+        // Fused bias + activation (single pass, no extra allocation)
+        for b in 0..batch_size {
+            for o in 0..self.out_features {
+                let idx = b * self.out_features + o;
+                if let Some(ref bias) = bias_data {
+                    result[idx] += bias[o];
+                }
+                result[idx] = self.activation.apply(result[idx]);
+            }
+        }
 
         let output_shape = if input_shape.len() == 1 {
             vec![self.out_features]

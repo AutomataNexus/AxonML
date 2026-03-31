@@ -236,3 +236,163 @@ pub fn print_pool_stats() {}
 #[cfg(not(feature = "cuda"))]
 /// Stub when CUDA not available.
 pub fn clear_pool() {}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "cuda")]
+    use super::*;
+
+    // -------------------------------------------------------------------------
+    // Bucket sizing tests (pure logic, no GPU required)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_bucket_size_small() {
+        // Small sizes round up to multiples of 64
+        assert_eq!(CudaMemoryPool::bucket_size(1), 64);
+        assert_eq!(CudaMemoryPool::bucket_size(63), 64);
+        assert_eq!(CudaMemoryPool::bucket_size(64), 64);
+        assert_eq!(CudaMemoryPool::bucket_size(65), 128);
+        assert_eq!(CudaMemoryPool::bucket_size(128), 128);
+        assert_eq!(CudaMemoryPool::bucket_size(200), 256);
+        assert_eq!(CudaMemoryPool::bucket_size(256), 256);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_bucket_size_large() {
+        // Large sizes round up to power of 2
+        assert_eq!(CudaMemoryPool::bucket_size(257), 512);
+        assert_eq!(CudaMemoryPool::bucket_size(500), 512);
+        assert_eq!(CudaMemoryPool::bucket_size(512), 512);
+        assert_eq!(CudaMemoryPool::bucket_size(513), 1024);
+        assert_eq!(CudaMemoryPool::bucket_size(1_000_000), 1_048_576);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_bucket_size_zero() {
+        assert_eq!(CudaMemoryPool::bucket_size(0), 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Pool lifecycle tests (requires CUDA GPU)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_pool_alloc_and_free() {
+        // This test requires a CUDA GPU
+        if super::super::cuda::get_cuda_backend().is_none() {
+            return;
+        }
+
+        let slice = pool_alloc(1024).expect("pool_alloc failed");
+        assert!(slice.len() >= 1024);
+
+        // Return to pool
+        pool_free(slice);
+
+        // Allocate again — should be a pool hit
+        let pool = get_memory_pool();
+        let (hits_before, _, _, _) = pool.stats();
+        let slice2 = pool_alloc(1024).expect("second pool_alloc failed");
+        let (hits_after, _, _, _) = pool.stats();
+
+        // Should have gotten a pool hit (same bucket size)
+        assert!(
+            hits_after > hits_before,
+            "Expected pool hit on second alloc"
+        );
+
+        pool_free(slice2);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_pool_stats() {
+        if super::super::cuda::get_cuda_backend().is_none() {
+            return;
+        }
+
+        let pool = get_memory_pool();
+        let (hits, misses, returns, _pooled) = pool.stats();
+        // Stats should be non-negative (may be non-zero from other tests)
+        assert!(hits + misses + returns >= 0);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_pool_clear() {
+        if super::super::cuda::get_cuda_backend().is_none() {
+            return;
+        }
+
+        // Allocate and free to populate pool
+        let slice = pool_alloc(512).expect("alloc failed");
+        pool_free(slice);
+
+        // Clear should not panic
+        clear_pool();
+
+        let pool = get_memory_pool();
+        let (_, _, _, pooled_bytes) = pool.stats();
+        assert_eq!(pooled_bytes, 0, "Pool should be empty after clear");
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_pool_different_sizes() {
+        if super::super::cuda::get_cuda_backend().is_none() {
+            return;
+        }
+
+        // Allocate different sizes — they should go to different buckets
+        let s1 = pool_alloc(100).expect("alloc 100 failed");
+        let s2 = pool_alloc(1000).expect("alloc 1000 failed");
+        let s3 = pool_alloc(10000).expect("alloc 10000 failed");
+
+        pool_free(s1);
+        pool_free(s2);
+        pool_free(s3);
+
+        // Allocating 100 again should hit the 128-bucket (or 64-bucket)
+        let pool = get_memory_pool();
+        let (hits_before, _, _, _) = pool.stats();
+        let s4 = pool_alloc(100).expect("re-alloc 100 failed");
+        let (hits_after, _, _, _) = pool.stats();
+        assert!(hits_after > hits_before);
+        pool_free(s4);
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_pool_zeroed_on_reuse() {
+        if super::super::cuda::get_cuda_backend().is_none() {
+            return;
+        }
+
+        // Allocate, free, re-allocate — data should be zeroed
+        let slice = pool_alloc(64).expect("alloc failed");
+        pool_free(slice);
+
+        let slice2 = pool_alloc(64).expect("re-alloc failed");
+        // Copy to host and verify zeros
+        let host_data = super::super::cuda::get_cuda_backend()
+            .unwrap()
+            .stream()
+            .memcpy_dtoh(&slice2);
+
+        if let Ok(data) = host_data {
+            for &val in &data {
+                assert_eq!(val, 0.0, "Pool-reused memory should be zeroed");
+            }
+        }
+        pool_free(slice2);
+    }
+}

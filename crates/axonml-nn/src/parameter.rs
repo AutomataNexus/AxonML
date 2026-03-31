@@ -120,11 +120,12 @@ impl Parameter {
 
     /// Updates the parameter data in-place.
     ///
-    /// Used by optimizers to update weights.
+    /// Preserves the gradient accumulator so backward passes continue
+    /// to write gradients to the correct storage. This is critical for
+    /// GPU training where `to_device` + optimizer `step` both call this.
     pub fn update_data(&self, new_data: Tensor<f32>) {
         let mut guard = self.data.write();
-        let requires_grad = guard.requires_grad();
-        *guard = Variable::new(new_data, requires_grad);
+        guard.set_data(new_data);
     }
 
     /// Applies a function to the parameter data.

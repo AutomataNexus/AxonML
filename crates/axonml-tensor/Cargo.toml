@@ -36,6 +36,7 @@ num-traits.workspace = true
 rand.workspace = true
 rand_distr.workspace = true
 smallvec.workspace = true
+half.workspace = true
 
 [dev-dependencies]
 approx.workspace = true

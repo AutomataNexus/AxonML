@@ -75,7 +75,7 @@ impl CalibrationData {
         }
     }
 
-    /// Updates calibration data with more samples.
+    /// Updates calibration data with more samples (streaming Welford algorithm).
     pub fn update(&mut self, tensor: &Tensor<f32>) {
         let data = tensor.to_vec();
         let new_min = data.iter().fold(f32::INFINITY, |a, &b| a.min(b));
@@ -85,15 +85,44 @@ impl CalibrationData {
         self.min = self.min.min(new_min);
         self.max = self.max.max(new_max);
 
-        // Update running mean
-        let old_count = self.num_samples as f32;
-        let new_count = data.len() as f32;
-        let new_mean = data.iter().sum::<f32>() / new_count;
-        self.mean = (self.mean * old_count + new_mean * new_count) / (old_count + new_count);
+        // Welford's online algorithm for mean and variance
+        let old_mean = self.mean;
+        let old_count = self.num_samples;
+        for &val in &data {
+            self.num_samples += 1;
+            let delta = val - self.mean;
+            self.mean += delta / self.num_samples as f32;
+        }
 
-        // Update histogram (rebuild with new range)
-        self.num_samples += data.len();
-        // Note: For proper histogram update, we'd need to keep all data or use streaming algorithms
+        // Update std_dev from running variance
+        // Use combined variance formula: Var(A∪B) from count, mean, var of each
+        if old_count > 0 && !data.is_empty() {
+            let new_mean_batch: f32 = data.iter().sum::<f32>() / data.len() as f32;
+            let new_var_batch: f32 = data.iter().map(|&v| (v - new_mean_batch).powi(2)).sum::<f32>()
+                / data.len() as f32;
+            let old_var = self.std_dev * self.std_dev;
+            let n1 = old_count as f32;
+            let n2 = data.len() as f32;
+            let combined_var = (n1 * old_var + n2 * new_var_batch
+                + n1 * n2 / (n1 + n2) * (old_mean - new_mean_batch).powi(2))
+                / (n1 + n2);
+            self.std_dev = combined_var.sqrt();
+        } else if !data.is_empty() {
+            let m: f32 = data.iter().sum::<f32>() / data.len() as f32;
+            self.std_dev = (data.iter().map(|&v| (v - m).powi(2)).sum::<f32>() / data.len() as f32).sqrt();
+            self.num_samples = data.len();
+        }
+
+        // Update histogram bins with new data
+        if !self.histogram.is_empty() && self.max > self.min {
+            let n_bins = self.histogram.len();
+            let bin_width = (self.max - self.min) / n_bins as f32;
+            for &val in &data {
+                let bin = ((val - self.min) / bin_width).floor() as usize;
+                let bin = bin.min(n_bins - 1);
+                self.histogram[bin] += 1;
+            }
+        }
     }
 
     /// Returns the dynamic range.
@@ -196,9 +225,84 @@ pub fn calibrate(tensor: &Tensor<f32>, method: CalibrationMethod) -> QuantResult
             data.max = data.mean + k_factor * data.std_dev;
         }
         CalibrationMethod::Entropy => {
-            // Simplified entropy calibration - use 99.99th percentile
-            data.min = data.percentile(0.01);
-            data.max = data.percentile(99.99);
+            // KL-divergence calibration (TensorRT-style):
+            // Find the clipping threshold that minimizes KL divergence
+            // between the reference distribution and quantized distribution.
+            let n_bins = data.histogram.len();
+            if n_bins < 4 {
+                // Fallback if histogram is too small
+                data.min = data.percentile(0.01);
+                data.max = data.percentile(99.99);
+            } else {
+                let total: usize = data.histogram.iter().sum();
+                if total == 0 {
+                    data.min = data.percentile(0.01);
+                    data.max = data.percentile(99.99);
+                } else {
+                    // Normalize histogram to probability distribution
+                    let ref_dist: Vec<f64> = data.histogram.iter()
+                        .map(|&c| c as f64 / total as f64 + 1e-12)
+                        .collect();
+
+                    let quant_bins = 128usize; // INT8 bins
+                    let mut best_kl = f64::MAX;
+                    let mut best_threshold = n_bins;
+
+                    // Try different thresholds (from half to full range)
+                    for threshold in (n_bins / 2)..n_bins {
+                        // Clip reference distribution at threshold
+                        let mut clipped = ref_dist[..threshold].to_vec();
+                        // Add outlier mass to last bin
+                        let outlier_mass: f64 = ref_dist[threshold..].iter().sum();
+                        if let Some(last) = clipped.last_mut() {
+                            *last += outlier_mass;
+                        }
+
+                        // Quantize: merge bins
+                        let bins_per_quant = (threshold + quant_bins - 1) / quant_bins;
+                        let mut quant_dist = vec![0.0f64; quant_bins.min(threshold)];
+                        for (i, &p) in clipped.iter().enumerate() {
+                            let qi = (i / bins_per_quant).min(quant_dist.len() - 1);
+                            quant_dist[qi] += p;
+                        }
+
+                        // Expand back to original bins
+                        let mut expanded = vec![0.0f64; threshold];
+                        for qi in 0..quant_dist.len() {
+                            let start = qi * bins_per_quant;
+                            let end = ((qi + 1) * bins_per_quant).min(threshold);
+                            let count = (end - start) as f64;
+                            if count > 0.0 {
+                                let val = quant_dist[qi] / count;
+                                for j in start..end {
+                                    expanded[j] = val + 1e-12;
+                                }
+                            }
+                        }
+
+                        // KL divergence: sum(P * log(P/Q))
+                        let kl: f64 = clipped.iter().zip(expanded.iter())
+                            .map(|(&p, &q)| if p > 1e-12 { p * (p / q).ln() } else { 0.0 })
+                            .sum();
+
+                        if kl < best_kl {
+                            best_kl = kl;
+                            best_threshold = threshold;
+                        }
+                    }
+
+                    // Convert threshold back to value range
+                    let bin_width = (data.max - data.min) / n_bins as f32;
+                    let clip_max = data.min + best_threshold as f32 * bin_width;
+                    data.max = clip_max;
+                    // Symmetric: clip min symmetrically if data spans zero
+                    if data.min < 0.0 && data.max > 0.0 {
+                        let abs_max = data.max.abs().max(data.min.abs());
+                        data.min = -abs_max;
+                        data.max = abs_max;
+                    }
+                }
+            }
         }
     }
 

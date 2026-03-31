@@ -178,7 +178,7 @@ mod tests {
 
         let block = ResidualBlock::new(main);
 
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 64], &[2, 32]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 64], &[2, 32]).expect("tensor creation failed"), false);
         let output = block.forward(&input);
 
         // Output shape should match input
@@ -198,7 +198,7 @@ mod tests {
 
         let block = ResidualBlock::new(main).with_downsample(downsample);
 
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 64], &[2, 32]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 64], &[2, 32]).expect("tensor creation failed"), false);
         let output = block.forward(&input);
         assert_eq!(output.shape(), vec![2, 64]);
     }
@@ -209,7 +209,7 @@ mod tests {
 
         let block = ResidualBlock::new(main).with_activation(GELU);
 
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 32], &[2, 16]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 32], &[2, 16]).expect("tensor creation failed"), false);
         let output = block.forward(&input);
         assert_eq!(output.shape(), vec![2, 16]);
     }
@@ -220,7 +220,7 @@ mod tests {
 
         let block = ResidualBlock::new(main).without_activation();
 
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 32], &[2, 16]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 32], &[2, 16]).expect("tensor creation failed"), false);
         let output = block.forward(&input);
         assert_eq!(output.shape(), vec![2, 16]);
     }
@@ -289,7 +289,7 @@ mod tests {
 
         // Input: (batch=2, channels=64, time=20)
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 2 * 64 * 20], &[2, 64, 20]).unwrap(),
+            Tensor::from_vec(vec![1.0; 2 * 64 * 20], &[2, 64, 20]).expect("tensor creation failed"),
             false,
         );
         let output = block.forward(&input);
@@ -306,7 +306,7 @@ mod tests {
         let block = ResidualBlock::new(main);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 4]).expect("tensor creation failed"),
             true,
         );
         let output = block.forward(&input);

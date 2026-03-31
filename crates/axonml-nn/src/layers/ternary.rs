@@ -332,7 +332,7 @@ impl TernaryLinear {
         // Build output tensor
         let mut out_shape = batch_dims.clone();
         out_shape.push(self.out_features);
-        let output_tensor = Tensor::from_vec(output_vec, &out_shape).unwrap();
+        let output_tensor = Tensor::from_vec(output_vec, &out_shape).expect("tensor creation failed");
 
         // Add bias
         let output_tensor = if let Some(ref bias) = self.bias {
@@ -343,7 +343,7 @@ impl TernaryLinear {
                     out[b * self.out_features + o] += bias_vec[o];
                 }
             }
-            Tensor::from_vec(out, &out_shape).unwrap()
+            Tensor::from_vec(out, &out_shape).expect("tensor creation failed")
         } else {
             output_tensor
         };
@@ -413,7 +413,7 @@ impl TernaryLinear {
 
         let mut out_shape = batch_dims;
         out_shape.push(self.out_features);
-        let mut output_tensor = Tensor::from_vec(output_vec, &out_shape).unwrap();
+        let mut output_tensor = Tensor::from_vec(output_vec, &out_shape).expect("tensor creation failed");
 
         // Add bias
         if let Some(ref bias) = self.bias {
@@ -424,7 +424,7 @@ impl TernaryLinear {
                     out[b * self.out_features + o] += bias_vec[o];
                 }
             }
-            output_tensor = Tensor::from_vec(out, &out_shape).unwrap();
+            output_tensor = Tensor::from_vec(out, &out_shape).expect("tensor creation failed");
         }
 
         Variable::new(output_tensor, false)
@@ -544,7 +544,7 @@ impl GradientFunction for TernaryLinearBackward {
             }
         }
         let gw_tensor =
-            Tensor::from_vec(grad_weight, &[self.out_features, self.in_features]).unwrap();
+            Tensor::from_vec(grad_weight, &[self.out_features, self.in_features]).expect("tensor creation failed");
 
         let mut results: Vec<Option<Tensor<f32>>> = vec![Some(gi_tensor), Some(gw_tensor)];
 
@@ -556,7 +556,7 @@ impl GradientFunction for TernaryLinearBackward {
                     grad_bias[o] += g_vec[b * self.out_features + o];
                 }
             }
-            let gb_tensor = Tensor::from_vec(grad_bias, &[self.out_features]).unwrap();
+            let gb_tensor = Tensor::from_vec(grad_bias, &[self.out_features]).expect("tensor creation failed");
             results.push(Some(gb_tensor));
         }
 
@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn test_ternary_linear_forward() {
         let layer = TernaryLinear::new(8, 4);
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 16], &[2, 8]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 16], &[2, 8]).expect("tensor creation failed"), false);
         let output = layer.forward(&input);
         assert_eq!(output.shape(), vec![2, 4]);
     }
@@ -660,7 +660,7 @@ mod tests {
     fn test_ternary_linear_inference_mode() {
         let mut layer = TernaryLinear::new(8, 4);
 
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 8], &[1, 8]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 8], &[1, 8]).expect("tensor creation failed"), false);
 
         // Training forward
         let train_out = layer.forward(&input);
@@ -708,7 +708,7 @@ mod tests {
         let layer = TernaryLinear::new(4, 2);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 4]).expect("tensor creation failed"),
             true,
         );
         let output = layer.forward(&input);

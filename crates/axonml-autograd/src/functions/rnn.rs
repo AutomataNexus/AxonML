@@ -163,8 +163,8 @@ impl GradientFunction for LstmGatesBackward {
         }
 
         vec![
-            Some(Tensor::from_vec(grad_gates_data, &[batch_size, 4 * hs]).unwrap()),
-            Some(Tensor::from_vec(grad_c_prev_data, &[batch_size, hs]).unwrap()),
+            Some(Tensor::from_vec(grad_gates_data, &[batch_size, 4 * hs]).expect("backward: tensor creation failed")),
+            Some(Tensor::from_vec(grad_c_prev_data, &[batch_size, hs]).expect("backward: tensor creation failed")),
         ]
     }
 
@@ -316,9 +316,9 @@ impl GradientFunction for GruGatesBackward {
         }
 
         vec![
-            Some(Tensor::from_vec(grad_ih_data, &[batch_size, 3 * hs]).unwrap()),
-            Some(Tensor::from_vec(grad_hh_data, &[batch_size, 3 * hs]).unwrap()),
-            Some(Tensor::from_vec(grad_h_prev_data, &[batch_size, hs]).unwrap()),
+            Some(Tensor::from_vec(grad_ih_data, &[batch_size, 3 * hs]).expect("backward: tensor creation failed")),
+            Some(Tensor::from_vec(grad_hh_data, &[batch_size, 3 * hs]).expect("backward: tensor creation failed")),
+            Some(Tensor::from_vec(grad_h_prev_data, &[batch_size, hs]).expect("backward: tensor creation failed")),
         ]
     }
 
@@ -336,13 +336,14 @@ impl GradientFunction for GruGatesBackward {
 }
 
 // =============================================================================
-// Identity Backward (used as placeholder for GPU paths that need basic passthrough)
+// Identity Backward — Gradient Passthrough
 // =============================================================================
 
 /// Identity gradient function that passes grad_output through unchanged.
 ///
-/// Used as a simple passthrough when a gradient function is required but the
-/// backward computation is handled elsewhere.
+/// Used when the forward operation doesn't transform the gradient (e.g.,
+/// reshape, view, or when the backward is fused into a parent operation's
+/// CUDA kernel and the autograd graph needs a node to maintain connectivity).
 #[derive(Debug)]
 pub struct IdentityBackward;
 
@@ -361,5 +362,99 @@ impl GradientFunction for IdentityBackward {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sigmoid(x: f32) -> f32 {
+        1.0 / (1.0 + (-x).exp())
+    }
+
+    #[test]
+    fn test_lstm_backward_shapes() {
+        let batch = 2;
+        let hidden = 3;
+        let gates = Tensor::from_vec(vec![0.5f32; batch * 4 * hidden], &[batch, 4 * hidden]).expect("backward: tensor creation failed");
+        let c_prev = Tensor::from_vec(vec![0.1f32; batch * hidden], &[batch, hidden]).expect("backward: tensor creation failed");
+        let c_new = Tensor::from_vec(vec![0.3f32; batch * hidden], &[batch, hidden]).expect("backward: tensor creation failed");
+        let backward = LstmGatesBackward::new(None, None, gates, c_prev, c_new, hidden);
+        let grad_h = Tensor::from_vec(vec![1.0f32; batch * hidden], &[batch, hidden]).expect("backward: tensor creation failed");
+        let grads = backward.apply(&grad_h);
+        assert_eq!(grads.len(), 2);
+        assert_eq!(grads[0].as_ref().unwrap().shape(), &[batch, 4 * hidden]);
+        assert_eq!(grads[1].as_ref().unwrap().shape(), &[batch, hidden]);
+    }
+
+    #[test]
+    fn test_lstm_backward_finite_nonzero() {
+        let batch = 1;
+        let hidden = 2;
+        let gates = Tensor::from_vec(vec![0.5, -0.3, 0.8, 0.1, 0.2, 0.4, -0.5, 0.6], &[1, 8]).expect("backward: tensor creation failed");
+        let c_prev = Tensor::from_vec(vec![0.1, -0.2], &[1, 2]).expect("backward: tensor creation failed");
+        let i = [sigmoid(0.5), sigmoid(-0.3)];
+        let f = [sigmoid(0.8), sigmoid(0.1)];
+        let g = [0.2f32.tanh(), 0.4f32.tanh()];
+        let c_new = Tensor::from_vec(vec![f[0] * 0.1 + i[0] * g[0], f[1] * (-0.2) + i[1] * g[1]], &[1, 2]).unwrap();
+        let backward = LstmGatesBackward::new(None, None, gates, c_prev, c_new, hidden);
+        let grad_h = Tensor::from_vec(vec![1.0, 1.0], &[1, 2]).expect("backward: tensor creation failed");
+        let grads = backward.apply(&grad_h);
+        for &v in &grads[0].as_ref().unwrap().to_vec() {
+            assert!(v.is_finite(), "LSTM gate grad not finite: {v}");
+        }
+        for &v in &grads[1].as_ref().unwrap().to_vec() {
+            assert!(v.is_finite(), "LSTM c_prev grad not finite: {v}");
+        }
+        let nonzero = grads[0].as_ref().unwrap().to_vec().iter().filter(|v| v.abs() > 1e-10).count();
+        assert!(nonzero >= 4, "Expected most LSTM gate grads nonzero, got {nonzero}/8");
+    }
+
+    #[test]
+    fn test_gru_backward_shapes() {
+        let batch = 2;
+        let hidden = 4;
+        let gates = Tensor::from_vec(vec![0.5f32; batch * 3 * hidden], &[batch, 3 * hidden]).expect("backward: tensor creation failed");
+        let h_prev = Tensor::from_vec(vec![0.1f32; batch * hidden], &[batch, hidden]).expect("backward: tensor creation failed");
+        let gates_hh = gates.clone();
+        let backward = GruGatesBackward::new(None, None, None, gates, gates_hh, h_prev, hidden);
+        let grad_h = Tensor::from_vec(vec![1.0f32; batch * hidden], &[batch, hidden]).expect("backward: tensor creation failed");
+        let grads = backward.apply(&grad_h);
+        assert_eq!(grads.len(), 3); // grad_ih, grad_hh, grad_h_prev
+        assert_eq!(grads[0].as_ref().unwrap().shape(), &[batch, 3 * hidden]);
+        assert_eq!(grads[1].as_ref().unwrap().shape(), &[batch, 3 * hidden]);
+        assert_eq!(grads[2].as_ref().unwrap().shape(), &[batch, hidden]);
+    }
+
+    #[test]
+    fn test_gru_backward_finite_nonzero() {
+        let batch = 1;
+        let hidden = 3;
+        let gates = Tensor::from_vec(vec![0.5, -0.3, 0.8, 0.1, 0.2, 0.4, -0.5, 0.6, 0.3], &[1, 9]).expect("backward: tensor creation failed");
+        let h_prev = Tensor::from_vec(vec![0.1, -0.2, 0.3], &[1, 3]).expect("backward: tensor creation failed");
+        let gates_hh = gates.clone();
+        let backward = GruGatesBackward::new(None, None, None, gates, gates_hh, h_prev, hidden);
+        let grad_h = Tensor::from_vec(vec![1.0, 1.0, 1.0], &[1, 3]).expect("backward: tensor creation failed");
+        let grads = backward.apply(&grad_h);
+        for (i, g) in grads.iter().enumerate() {
+            for &v in &g.as_ref().unwrap().to_vec() {
+                assert!(v.is_finite(), "GRU grad[{i}] not finite: {v}");
+            }
+        }
+        let nonzero = grads[0].as_ref().unwrap().to_vec().iter().filter(|v| v.abs() > 1e-10).count();
+        assert!(nonzero >= 3, "Expected most GRU ih grads nonzero, got {nonzero}/9");
+    }
+
+    #[test]
+    fn test_identity_backward() {
+        let grad = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("backward: tensor creation failed");
+        let result = IdentityBackward.apply(&grad);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].as_ref().unwrap().to_vec(), vec![1.0, 2.0, 3.0]);
     }
 }

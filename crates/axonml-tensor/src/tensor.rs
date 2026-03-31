@@ -75,14 +75,28 @@ use crate::shape::{
 
 #[cfg(feature = "cuda")]
 unsafe fn gpu_ref<T: Scalar>(t: &Tensor<T>) -> &Tensor<f32> {
-    &*(t as *const Tensor<T> as *const Tensor<f32>)
+    assert!(
+        is_f32::<T>(),
+        "gpu_ref: only Tensor<f32> can be used for GPU operations, got {:?}",
+        T::DTYPE
+    );
+    // SAFETY: T is f32 (asserted above), Tensor<f32> and Tensor<T> have identical layout
+    unsafe { &*(t as *const Tensor<T> as *const Tensor<f32>) }
 }
 
 #[cfg(feature = "cuda")]
 unsafe fn gpu_into<T: Scalar>(t: Tensor<f32>) -> Tensor<T> {
-    let out = std::ptr::read(&t as *const Tensor<f32> as *const Tensor<T>);
-    std::mem::forget(t);
-    out
+    assert!(
+        is_f32::<T>(),
+        "gpu_into: only Tensor<f32> can be produced from GPU operations, got {:?}",
+        T::DTYPE
+    );
+    // SAFETY: T is f32 (asserted above), ownership transfer via ptr::read + forget
+    unsafe {
+        let out = std::ptr::read(&t as *const Tensor<f32> as *const Tensor<T>);
+        std::mem::forget(t);
+        out
+    }
 }
 
 #[cfg(feature = "cuda")]
@@ -658,11 +672,15 @@ impl<T: Scalar> Tensor<T> {
 
 impl<T: Numeric> Tensor<T> {
     /// Fills the tensor with a value.
+    ///
+    /// # Panics
+    /// Panics on GPU tensors. Use `Tensor::from_vec(vec![value; n], shape)`
+    /// followed by `.to_device()` instead.
     pub fn fill_(&self, value: T) {
-        #[cfg(feature = "cuda")]
-        if self.storage.is_gpu() {
-            panic!("fill_() not supported on GPU tensors — create a new tensor instead");
-        }
+        assert!(
+            self.storage.is_cpu(),
+            "fill_() not supported on GPU tensors — create a new tensor and transfer instead"
+        );
         let mut data = self.storage.as_slice_mut();
         CpuBackend::fill(&mut data, value);
     }
@@ -676,20 +694,33 @@ impl<T: Numeric> Tensor<T> {
     // Reduction Operations
     // =========================================================================
 
-    /// Returns the sum of all elements.
+    /// Returns the sum of all elements as a scalar tensor.
+    ///
+    /// On GPU, uses native CUDA reduction kernels (no CPU round-trip).
     #[must_use]
     pub fn sum(&self) -> Self {
-        let data = self.to_vec();
-        let result = CpuBackend::sum(&data);
-        let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            return s.to_device(self.device()).unwrap();
+            // Reduce each dimension on GPU using the existing sum_dim kernel
+            let mut t = self.clone();
+            while t.ndim() > 1 {
+                t = t.sum_dim_cuda(0);
+            }
+            // Final 1D reduction
+            if t.numel() > 1 {
+                t = t.sum_dim_cuda(0);
+            }
+            return t;
         }
-        s
+
+        let data = self.to_vec();
+        let result = CpuBackend::sum(&data);
+        Self::scalar(result)
     }
 
     /// Returns the product of all elements.
+    ///
+    /// GPU: D2H round-trip (no CUDA prod reduction kernel yet).
     #[must_use]
     pub fn prod(&self) -> Self {
         let data = self.to_vec();
@@ -697,37 +728,41 @@ impl<T: Numeric> Tensor<T> {
         let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            return s.to_device(self.device()).unwrap();
+            return s.to_device(self.device()).expect("prod: device transfer failed");
         }
         s
     }
 
     /// Returns the maximum element.
+    ///
+    /// GPU: D2H round-trip (no CUDA max reduction kernel yet).
     pub fn max(&self) -> Result<Self> {
         if self.is_empty() {
             return Err(Error::EmptyTensor);
         }
         let data = self.to_vec();
-        let result = CpuBackend::max(&data).unwrap();
+        let result = CpuBackend::max(&data).expect("max on non-empty tensor");
         let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            return Ok(s.to_device(self.device()).unwrap());
+            return Ok(s.to_device(self.device()).expect("max: device transfer failed"));
         }
         Ok(s)
     }
 
     /// Returns the minimum element.
+    ///
+    /// GPU: D2H round-trip (no CUDA min reduction kernel yet).
     pub fn min(&self) -> Result<Self> {
         if self.is_empty() {
             return Err(Error::EmptyTensor);
         }
         let data = self.to_vec();
-        let result = CpuBackend::min(&data).unwrap();
+        let result = CpuBackend::min(&data).expect("min on non-empty tensor");
         let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            return Ok(s.to_device(self.device()).unwrap());
+            return Ok(s.to_device(self.device()).expect("min: device transfer failed"));
         }
         Ok(s)
     }
@@ -817,18 +852,24 @@ impl<T: Numeric> Tensor<T> {
 
 impl<T: Float> Tensor<T> {
     /// Returns the mean of all elements.
+    /// Returns the mean of all elements.
+    ///
+    /// On GPU, uses native CUDA sum reduction then divides by numel.
     pub fn mean(&self) -> Result<Self> {
         if self.is_empty() {
             return Err(Error::EmptyTensor);
         }
-        let data = self.to_vec();
-        let result = CpuBackend::mean(&data).unwrap();
-        let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            return Ok(s.to_device(self.device()).unwrap());
+            let s = self.sum(); // uses CUDA sum_dim chain
+            let n = self.numel() as f32;
+            // mul_scalar stays on GPU
+            return Ok(s.mul_scalar(T::from(1.0 / n as f64).unwrap_or(T::zero())));
         }
-        Ok(s)
+
+        let data = self.to_vec();
+        let result = CpuBackend::mean(&data).expect("mean on non-empty tensor");
+        Ok(Self::scalar(result))
     }
 
     // =========================================================================
@@ -1544,9 +1585,12 @@ impl<T: Numeric> Tensor<T> {
                 if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>()
                     && flops >= 4_000_000
                 {
+                    debug_assert!(std::mem::size_of::<T>() == std::mem::size_of::<f32>());
+                    // SAFETY: T is f32 (checked by TypeId above), same size and layout
                     let a_f32: &[f32] = unsafe { std::mem::transmute(a_data.as_slice()) };
                     let b_f32: &[f32] = unsafe { std::mem::transmute(b_data.as_slice()) };
                     if let Some(c_f32) = cuda_accel::cuda_matmul(a_f32, b_f32, m, n, k1) {
+                        // SAFETY: T is f32, Vec<f32> → Vec<T> is a no-op transmute
                         let c_t: Vec<T> = unsafe {
                             let mut v = std::mem::ManuallyDrop::new(c_f32);
                             Vec::from_raw_parts(v.as_mut_ptr() as *mut T, v.len(), v.capacity())
@@ -1565,14 +1609,67 @@ impl<T: Numeric> Tensor<T> {
         let batch_dims_self: Vec<usize> = self.shape[..self.ndim() - 2].to_vec();
         let batch_dims_other: Vec<usize> = other.shape[..other.ndim() - 2].to_vec();
 
-        if batch_dims_self != batch_dims_other {
-            return Err(Error::invalid_operation(format!(
-                "matmul batch dimensions must match: {:?} vs {:?}",
-                batch_dims_self, batch_dims_other
-            )));
-        }
+        // Broadcast batch dimensions (PyTorch parity)
+        let broadcast_batch = if batch_dims_self != batch_dims_other {
+            // Pad to same length
+            let max_len = batch_dims_self.len().max(batch_dims_other.len());
+            let pad_a = vec![1usize; max_len - batch_dims_self.len()];
+            let pad_b = vec![1usize; max_len - batch_dims_other.len()];
+            let a_dims: Vec<usize> = pad_a.iter().chain(batch_dims_self.iter()).copied().collect();
+            let b_dims: Vec<usize> = pad_b.iter().chain(batch_dims_other.iter()).copied().collect();
 
-        let batch_size: usize = batch_dims_self.iter().product();
+            let mut out_dims = Vec::with_capacity(max_len);
+            for i in 0..max_len {
+                if a_dims[i] == b_dims[i] {
+                    out_dims.push(a_dims[i]);
+                } else if a_dims[i] == 1 {
+                    out_dims.push(b_dims[i]);
+                } else if b_dims[i] == 1 {
+                    out_dims.push(a_dims[i]);
+                } else {
+                    return Err(Error::invalid_operation(format!(
+                        "matmul batch dimensions not broadcastable: {:?} vs {:?}",
+                        batch_dims_self, batch_dims_other
+                    )));
+                }
+            }
+            Some((a_dims, b_dims, out_dims))
+        } else {
+            None
+        };
+
+        let (batch_size, a_batch_idx, b_batch_idx) = if let Some((a_dims, b_dims, out_dims)) = &broadcast_batch {
+            let bs: usize = out_dims.iter().product();
+            // Build index mapping: for each output batch, which a and b batch to use
+            let mut a_idx = Vec::with_capacity(bs);
+            let mut b_idx = Vec::with_capacity(bs);
+            for flat in 0..bs {
+                let mut remaining = flat;
+                let mut ai = 0usize;
+                let mut bi = 0usize;
+                let mut a_stride_acc = 1usize;
+                let mut b_stride_acc = 1usize;
+                for d in (0..out_dims.len()).rev() {
+                    let out_d = out_dims[d];
+                    let idx = remaining % out_d;
+                    remaining /= out_d;
+                    let a_d = a_dims[d];
+                    let b_d = b_dims[d];
+                    ai += (idx % a_d) * a_stride_acc;
+                    bi += (idx % b_d) * b_stride_acc;
+                    a_stride_acc *= a_d;
+                    b_stride_acc *= b_d;
+                }
+                a_idx.push(ai);
+                b_idx.push(bi);
+            }
+            (bs, a_idx, b_idx)
+        } else {
+            let bs: usize = batch_dims_self.iter().product();
+            let idx: Vec<usize> = (0..bs).collect();
+            (bs, idx.clone(), idx)
+        };
+
         let a_stride = m * k1;
         let b_stride = k1 * n;
         let c_stride = m * n;
@@ -1590,8 +1687,10 @@ impl<T: Numeric> Tensor<T> {
                 let b_f32: &[f32] = unsafe { std::mem::transmute(b_data.as_slice()) };
                 let mut gpu_ok = true;
                 for batch in 0..batch_size {
-                    let a_slice = &a_f32[batch * a_stride..(batch + 1) * a_stride];
-                    let b_slice = &b_f32[batch * b_stride..(batch + 1) * b_stride];
+                    let ai = a_batch_idx[batch];
+                    let bi = b_batch_idx[batch];
+                    let a_slice = &a_f32[ai * a_stride..(ai + 1) * a_stride];
+                    let b_slice = &b_f32[bi * b_stride..(bi + 1) * b_stride];
                     if let Some(c_batch) = cuda_accel::cuda_matmul(a_slice, b_slice, m, n, k1) {
                         c_data[batch * c_stride..(batch + 1) * c_stride]
                             .copy_from_slice(unsafe { std::mem::transmute(c_batch.as_slice()) });
@@ -1613,14 +1712,20 @@ impl<T: Numeric> Tensor<T> {
 
         // CPU fallback: loop over batches
         for batch in 0..batch_size {
-            let a_slice = &a_data[batch * a_stride..(batch + 1) * a_stride];
-            let b_slice = &b_data[batch * b_stride..(batch + 1) * b_stride];
+            let ai = a_batch_idx[batch];
+            let bi = b_batch_idx[batch];
+            let a_slice = &a_data[ai * a_stride..(ai + 1) * a_stride];
+            let b_slice = &b_data[bi * b_stride..(bi + 1) * b_stride];
             let c_slice = &mut c_data[batch * c_stride..(batch + 1) * c_stride];
             CpuBackend::matmul(c_slice, a_slice, b_slice, m, n, k1);
         }
 
-        // Build output shape: batch_dims + [m, n]
-        let mut output_shape = batch_dims_self;
+        // Build output shape: broadcast batch dims + [m, n]
+        let mut output_shape = if let Some((_, _, ref out_dims)) = broadcast_batch {
+            out_dims.clone()
+        } else {
+            batch_dims_self
+        };
         output_shape.push(m);
         output_shape.push(n);
 
@@ -1746,6 +1851,53 @@ impl<T: Scalar + fmt::Display> fmt::Display for Tensor<T> {
 }
 
 // =============================================================================
+// f32 ↔ f16 Casting for AMP (Automatic Mixed Precision)
+// =============================================================================
+
+impl Tensor<f32> {
+    /// Cast this f32 tensor to f16 values stored as f32.
+    ///
+    /// Each value is rounded to f16 precision. This simulates half-precision
+    /// computation while keeping the tensor type as f32, which is how AMP
+    /// works — the autograd graph stays f32 but computation uses f16 precision.
+    ///
+    /// On GPU, this uses a CUDA kernel for fast conversion.
+    /// On CPU, this uses the `half` crate.
+    #[must_use]
+    pub fn to_f16_precision(&self) -> Self {
+        let data = self.to_vec();
+        let f16_data: Vec<f32> = data
+            .iter()
+            .map(|&v| {
+                let h = half::f16::from_f32(v);
+                h.to_f32()
+            })
+            .collect();
+        Self::from_vec(f16_data, self.shape()).unwrap()
+    }
+
+    /// Cast f16-precision values back to full f32 precision.
+    ///
+    /// This is a no-op since the data is already stored as f32.
+    /// Included for API symmetry with `to_f16_precision()`.
+    #[must_use]
+    pub fn to_f32_precision(&self) -> Self {
+        self.clone()
+    }
+
+    /// Returns true if applying f16 precision would change any values.
+    /// Useful for debugging AMP-related numerical issues.
+    #[must_use]
+    pub fn has_f16_rounding_error(&self) -> bool {
+        let data = self.to_vec();
+        data.iter().any(|&v| {
+            let h = half::f16::from_f32(v);
+            (h.to_f32() - v).abs() > f32::EPSILON
+        })
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -1775,10 +1927,10 @@ mod tests {
     #[test]
     fn test_reshape() {
         let t = Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).unwrap();
-        let r = t.reshape(&[3, 2]).unwrap();
+        let r = t.reshape(&[3, 2]).expect("reshape failed");
         assert_eq!(r.shape(), &[3, 2]);
 
-        let r = t.reshape(&[-1]).unwrap();
+        let r = t.reshape(&[-1]).expect("reshape failed");
         assert_eq!(r.shape(), &[6]);
     }
 

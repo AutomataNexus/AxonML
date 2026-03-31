@@ -80,7 +80,7 @@ impl RMSpropState {
         let square_avg = {
             let t = Tensor::zeros(shape);
             if device.is_gpu() {
-                t.to_device(device).unwrap()
+                t.to_device(device).expect("device transfer failed")
             } else {
                 t
             }
@@ -88,7 +88,7 @@ impl RMSpropState {
         let momentum_buffer = if momentum {
             let t = Tensor::zeros(shape);
             Some(if device.is_gpu() {
-                t.to_device(device).unwrap()
+                t.to_device(device).expect("device transfer failed")
             } else {
                 t
             })
@@ -98,7 +98,7 @@ impl RMSpropState {
         let grad_avg = if centered {
             let t = Tensor::zeros(shape);
             Some(if device.is_gpu() {
-                t.to_device(device).unwrap()
+                t.to_device(device).expect("device transfer failed")
             } else {
                 t
             })
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_rmsprop_creation() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
+        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
         let param = Parameter::from_variable(var);
         let optimizer = RMSprop::new(vec![param], 0.01);
 
@@ -339,13 +339,13 @@ mod tests {
 
     #[test]
     fn test_rmsprop_step() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
+        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
         let param = Parameter::from_variable(var);
 
         // Set gradient
         param
             .variable()
-            .set_grad(Tensor::from_vec(vec![0.1, 0.2, 0.3], &[3]).unwrap());
+            .set_grad(Tensor::from_vec(vec![0.1, 0.2, 0.3], &[3]).expect("tensor creation failed"));
 
         let mut optimizer = RMSprop::new(vec![param.clone()], 0.01);
         optimizer.step();
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn test_rmsprop_with_momentum() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
+        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
         let param = Parameter::from_variable(var);
 
         let optimizer = RMSprop::new(vec![param], 0.01).momentum(0.9);
@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn test_rmsprop_centered() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
+        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
         let param = Parameter::from_variable(var);
 
         let optimizer = RMSprop::new(vec![param], 0.01).centered(true);
@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_rmsprop_builder_pattern() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap(), true);
+        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
         let param = Parameter::from_variable(var);
 
         let optimizer = RMSprop::new(vec![param], 0.01)

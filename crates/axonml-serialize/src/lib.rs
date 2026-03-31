@@ -120,6 +120,51 @@ pub fn save_model<M: Module, P: AsRef<Path>>(model: &M, path: P) -> Result<()> {
     save_state_dict(&state_dict, path, format)
 }
 
+/// Load a model's parameters from a saved state dictionary file.
+///
+/// Matches parameters by name. Returns the number of parameters loaded.
+/// Parameters not found in the state dict are left unchanged.
+///
+/// # Example
+/// ```rust,ignore
+/// let mut model = MyModel::new();
+/// let loaded = load_model(&model, "model.axonml")?;
+/// println!("Loaded {loaded} parameters");
+/// ```
+pub fn load_model<M: Module, P: AsRef<Path>>(model: &M, path: P) -> Result<usize> {
+    let state_dict = load_state_dict(path)?;
+    let named_params = model.named_parameters();
+    let mut loaded = 0;
+
+    for (name, param) in &named_params {
+        if let Some(entry) = state_dict.get(name) {
+            if let Ok(tensor) = entry.data.to_tensor() {
+                if tensor.shape() == param.data().shape() {
+                    param.update_data(tensor);
+                    loaded += 1;
+                }
+            }
+        }
+    }
+
+    // If named_parameters returned empty (model doesn't implement it),
+    // fall back to positional parameter matching
+    if named_params.is_empty() {
+        let params = model.parameters();
+        let entries: Vec<_> = state_dict.entries().collect();
+        for ((_name, entry), param) in entries.iter().zip(params.iter()) {
+            if let Ok(tensor) = entry.data.to_tensor() {
+                if tensor.shape() == param.data().shape() {
+                    param.update_data(tensor);
+                    loaded += 1;
+                }
+            }
+        }
+    }
+
+    Ok(loaded)
+}
+
 /// Save a state dictionary to a file with specified format.
 pub fn save_state_dict<P: AsRef<Path>>(
     state_dict: &StateDict,
@@ -231,11 +276,12 @@ pub fn load_checkpoint<P: AsRef<Path>>(path: P) -> Result<Checkpoint> {
 
 #[cfg(feature = "safetensors")]
 fn save_safetensors<P: AsRef<Path>>(state_dict: &StateDict, path: P) -> Result<()> {
-    use safetensors::tensor::SafeTensors;
+    use safetensors::tensor::{Dtype, TensorView};
     use std::collections::HashMap;
 
-    let mut tensors: HashMap<String, Vec<u8>> = HashMap::new();
-    let mut metadata: HashMap<String, String> = HashMap::new();
+    // Build TensorView data for each parameter
+    let mut tensor_data: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut tensor_shapes: HashMap<String, Vec<usize>> = HashMap::new();
 
     for (name, entry) in state_dict.entries() {
         let data_bytes: Vec<u8> = entry
@@ -244,14 +290,30 @@ fn save_safetensors<P: AsRef<Path>>(state_dict: &StateDict, path: P) -> Result<(
             .iter()
             .flat_map(|f| f.to_le_bytes())
             .collect();
-        tensors.insert(name.clone(), data_bytes);
-        metadata.insert(format!("{}.shape", name), format!("{:?}", entry.data.shape));
+        tensor_data.insert(name.clone(), data_bytes);
+        tensor_shapes.insert(name.clone(), entry.data.shape.clone());
     }
 
-    // Write using safetensors
-    let bytes =
-        safetensors::serialize(&tensors, &Some(metadata)).map_err(|e| Error::InvalidOperation {
-            message: e.to_string(),
+    // Create TensorViews referencing the data
+    let views: Vec<(String, TensorView<'_>)> = tensor_data
+        .iter()
+        .map(|(name, data)| {
+            let shape = tensor_shapes.get(name).expect("shape missing");
+            (
+                name.clone(),
+                TensorView::new(Dtype::F32, shape.clone(), data).expect("invalid tensor view"),
+            )
+        })
+        .collect();
+
+    let view_refs: Vec<(&str, TensorView<'_>)> = views
+        .iter()
+        .map(|(name, view)| (name.as_str(), view.clone()))
+        .collect();
+
+    let bytes = safetensors::tensor::serialize(&view_refs, &None)
+        .map_err(|e| Error::InvalidOperation {
+            message: format!("SafeTensors serialize failed: {e}"),
         })?;
 
     std::fs::write(path, bytes).map_err(|e| Error::InvalidOperation {
@@ -276,14 +338,44 @@ fn load_safetensors<P: AsRef<Path>>(path: P) -> Result<StateDict> {
         let data = tensor.data();
         let shape: Vec<usize> = tensor.shape().to_vec();
 
-        // Convert bytes to f32
-        let values: Vec<f32> = data
-            .chunks(4)
-            .map(|chunk| {
-                let bytes: [u8; 4] = chunk.try_into().unwrap_or([0; 4]);
-                f32::from_le_bytes(bytes)
-            })
-            .collect();
+        // Convert bytes to f32 based on dtype
+        let dtype = tensor.dtype();
+        let values: Vec<f32> = match dtype {
+            safetensors::Dtype::F32 => {
+                data.chunks_exact(4)
+                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect()
+            }
+            safetensors::Dtype::F16 => {
+                data.chunks_exact(2)
+                    .map(|c| {
+                        let h = half::f16::from_le_bytes([c[0], c[1]]);
+                        h.to_f32()
+                    })
+                    .collect()
+            }
+            safetensors::Dtype::BF16 => {
+                data.chunks_exact(2)
+                    .map(|c| {
+                        let h = half::bf16::from_le_bytes([c[0], c[1]]);
+                        h.to_f32()
+                    })
+                    .collect()
+            }
+            safetensors::Dtype::F64 => {
+                data.chunks_exact(8)
+                    .map(|c| {
+                        let v = f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]);
+                        v as f32
+                    })
+                    .collect()
+            }
+            other => {
+                return Err(Error::InvalidOperation {
+                    message: format!("Unsupported safetensors dtype: {:?} for tensor '{}'", other, name),
+                });
+            }
+        };
 
         state_dict.insert(name.to_string(), TensorData { shape, values });
     }
@@ -341,5 +433,89 @@ mod tests {
         let tensor = data.to_tensor().unwrap();
         assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(tensor.to_vec(), vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_state_dict_file_roundtrip_axonml() {
+        let mut sd = StateDict::new();
+        sd.insert(
+            "layer.weight".to_string(),
+            TensorData {
+                shape: vec![3, 2],
+                values: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            },
+        );
+        sd.insert(
+            "layer.bias".to_string(),
+            TensorData {
+                shape: vec![3],
+                values: vec![0.1, 0.2, 0.3],
+            },
+        );
+
+        let path = std::env::temp_dir().join("axonml_test_roundtrip.axonml");
+        save_state_dict(&sd, &path, Format::Axonml).expect("save failed");
+
+        let loaded = load_state_dict(&path).expect("load failed");
+        assert_eq!(loaded.len(), 2);
+        assert!(loaded.contains("layer.weight"));
+        assert!(loaded.contains("layer.bias"));
+
+        let w = loaded.get("layer.weight").unwrap();
+        assert_eq!(w.data.shape, vec![3, 2]);
+        assert_eq!(w.data.values, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_state_dict_file_roundtrip_json() {
+        let mut sd = StateDict::new();
+        sd.insert(
+            "fc.weight".to_string(),
+            TensorData {
+                shape: vec![2, 2],
+                values: vec![1.5, -2.5, 3.5, -4.5],
+            },
+        );
+
+        let path = std::env::temp_dir().join("axonml_test_roundtrip.json");
+        save_state_dict(&sd, &path, Format::Json).expect("save failed");
+
+        let loaded = load_state_dict(&path).expect("load failed");
+        assert_eq!(loaded.len(), 1);
+        let w = loaded.get("fc.weight").unwrap();
+        assert_eq!(w.data.values, vec![1.5, -2.5, 3.5, -4.5]);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_checkpoint_file_roundtrip() {
+        let mut state = TrainingState::new();
+        state.epoch = 10;
+        state.global_step = 5000;
+        state.record_loss(0.5);
+        state.record_loss(0.3);
+        state.update_best("loss", 0.3, false);
+
+        let checkpoint = Checkpoint::builder()
+            .training_state(state)
+            .epoch(10)
+            .global_step(5000)
+            .config("lr", "0.001")
+            .build();
+
+        let path = std::env::temp_dir().join("axonml_test_checkpoint.axonml");
+        save_checkpoint(&checkpoint, &path).expect("save failed");
+
+        let loaded = load_checkpoint(&path).expect("load failed");
+        assert_eq!(loaded.epoch(), 10);
+        assert_eq!(loaded.global_step(), 5000);
+        assert_eq!(loaded.best_metric(), Some(0.3));
+        assert!(loaded.config.contains_key("lr"));
+        assert!(loaded.timestamp.contains('T')); // ISO 8601 format
+
+        std::fs::remove_file(&path).ok();
     }
 }

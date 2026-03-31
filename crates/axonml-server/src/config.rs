@@ -372,7 +372,7 @@ host = "db.example.com"
 port = 5432
 
 [auth]
-jwt_secret = "test_secret"
+jwt_secret = "test_secret_that_is_at_least_32_characters_long_for_security"
 require_mfa = true
 
 [inference]

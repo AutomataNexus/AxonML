@@ -97,7 +97,10 @@ pub use sampler::{
     BatchSampler, RandomSampler, Sampler, SequentialSampler, SubsetRandomSampler,
     WeightedRandomSampler,
 };
-pub use transforms::{Compose, Normalize, RandomNoise, ToTensor, Transform};
+pub use transforms::{
+    Clamp, Compose, DropoutTransform, Flatten, Lambda, Normalize, RandomCrop, RandomFlip,
+    RandomNoise, Reshape, Scale, ToTensor, Transform,
+};
 
 // =============================================================================
 // Prelude

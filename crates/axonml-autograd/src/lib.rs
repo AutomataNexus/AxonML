@@ -96,7 +96,7 @@ pub use amp::{
     AutocastGuard, AutocastPolicy, autocast, autocast_dtype, disable_autocast, is_autocast_enabled,
 };
 pub use backward::backward;
-pub use checkpoint::{checkpoint, checkpoint_sequential};
+pub use checkpoint::{checkpoint, checkpoint_rng_seed, checkpoint_sequential};
 pub use functions::{
     FusedAttentionBackward, GruGatesBackward, IdentityBackward, LstmGatesBackward,
 };

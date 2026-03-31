@@ -17,6 +17,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use axonml_quant::QuantType;
 use axonml_serialize::{Format, StateDict, TensorData, load_state_dict, save_state_dict};
 
 use super::utils::{path_exists, print_header, print_info, print_kv, print_success, print_warning};
@@ -24,76 +25,32 @@ use crate::cli::{QuantArgs, QuantBenchmarkArgs, QuantConvertArgs, QuantInfoArgs,
 use crate::error::{CliError, CliResult};
 
 // =============================================================================
-// Quantization Types
+// QuantType CLI helpers (delegates to axonml_quant::QuantType)
 // =============================================================================
 
-/// Supported quantization formats
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuantType {
-    /// 4-bit quantization (basic)
-    Q4_0,
-    /// 4-bit quantization (with scales)
-    Q4_1,
-    /// 5-bit quantization (basic)
-    Q5_0,
-    /// 5-bit quantization (with scales)
-    Q5_1,
-    /// 8-bit quantization
-    Q8_0,
-    /// 16-bit floating point
-    F16,
-    /// 32-bit floating point (no quantization)
-    F32,
+/// CLI-facing bits per weight (including overhead for scales).
+fn bits_per_weight(qt: QuantType) -> f64 {
+    match qt {
+        QuantType::Q4_0 => 4.5,
+        QuantType::Q4_1 => 5.0,
+        QuantType::Q5_0 => 5.5,
+        QuantType::Q5_1 => 6.0,
+        QuantType::Q8_0 => 8.5,
+        QuantType::F16 => 16.0,
+        QuantType::F32 => 32.0,
+    }
 }
 
-impl QuantType {
-    fn from_str(s: &str) -> Option<Self> {
-        match s.to_uppercase().as_str() {
-            "Q4_0" | "Q4" | "INT4" => Some(QuantType::Q4_0),
-            "Q4_1" => Some(QuantType::Q4_1),
-            "Q5_0" | "Q5" => Some(QuantType::Q5_0),
-            "Q5_1" => Some(QuantType::Q5_1),
-            "Q8_0" | "Q8" | "INT8" => Some(QuantType::Q8_0),
-            "F16" | "FP16" | "HALF" => Some(QuantType::F16),
-            "F32" | "FP32" | "FLOAT" | "FULL" => Some(QuantType::F32),
-            _ => None,
-        }
-    }
-
-    fn bits_per_weight(&self) -> f64 {
-        match self {
-            QuantType::Q4_0 => 4.5, // 4 bits + some overhead for scales
-            QuantType::Q4_1 => 5.0,
-            QuantType::Q5_0 => 5.5,
-            QuantType::Q5_1 => 6.0,
-            QuantType::Q8_0 => 8.5,
-            QuantType::F16 => 16.0,
-            QuantType::F32 => 32.0,
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        match self {
-            QuantType::Q4_0 => "Q4_0",
-            QuantType::Q4_1 => "Q4_1",
-            QuantType::Q5_0 => "Q5_0",
-            QuantType::Q5_1 => "Q5_1",
-            QuantType::Q8_0 => "Q8_0",
-            QuantType::F16 => "F16",
-            QuantType::F32 => "F32",
-        }
-    }
-
-    fn description(&self) -> &'static str {
-        match self {
-            QuantType::Q4_0 => "4-bit quantization, fastest, lowest quality",
-            QuantType::Q4_1 => "4-bit with better scales, good balance",
-            QuantType::Q5_0 => "5-bit quantization, moderate speed/quality",
-            QuantType::Q5_1 => "5-bit with scales, better quality",
-            QuantType::Q8_0 => "8-bit quantization, near-lossless",
-            QuantType::F16 => "16-bit float, high quality, 2x smaller than F32",
-            QuantType::F32 => "32-bit float, full precision, no quantization",
-        }
+/// CLI-facing description strings.
+fn quant_description(qt: QuantType) -> &'static str {
+    match qt {
+        QuantType::Q4_0 => "4-bit quantization, fastest, lowest quality",
+        QuantType::Q4_1 => "4-bit with better scales, good balance",
+        QuantType::Q5_0 => "5-bit quantization, moderate speed/quality",
+        QuantType::Q5_1 => "5-bit with scales, better quality",
+        QuantType::Q8_0 => "8-bit quantization, near-lossless",
+        QuantType::F16 => "16-bit float, high quality, 2x smaller than F32",
+        QuantType::F32 => "32-bit float, full precision, no quantization",
     }
 }
 
@@ -125,7 +82,7 @@ fn execute_convert(args: QuantConvertArgs) -> CliResult<()> {
     }
 
     // Parse target quantization type
-    let target_quant = QuantType::from_str(&args.target).ok_or_else(|| {
+    let target_quant = QuantType::parse_type(&args.target).ok_or_else(|| {
         CliError::InvalidArgument(format!(
             "Unknown quantization type: {}. Use 'axonml quant list' to see available types.",
             args.target
@@ -137,7 +94,7 @@ fn execute_convert(args: QuantConvertArgs) -> CliResult<()> {
 
     print_kv("Input", &args.input);
     print_kv("Source format", &source_format);
-    print_kv("Target quantization", target_quant.name());
+    print_kv("Target quantization", &target_quant.to_string());
     print_kv("Output", &args.output);
 
     // Get input file size
@@ -164,7 +121,7 @@ fn execute_convert(args: QuantConvertArgs) -> CliResult<()> {
     println!();
 
     // Perform quantization
-    print_info(&format!("Quantizing to {}...", target_quant.name()));
+    print_info(&format!("Quantizing to {}...", target_quant.to_string()));
     let quantized_dict = quantize_state_dict(&state_dict, target_quant)?;
 
     // Ensure output directory exists
@@ -242,153 +199,49 @@ fn count_parameters(state_dict: &StateDict) -> usize {
 }
 
 fn estimate_quantized_size(num_params: usize, quant_type: QuantType) -> u64 {
-    let bits = quant_type.bits_per_weight();
+    let bits = bits_per_weight(quant_type);
     let bytes = (num_params as f64 * bits / 8.0) as u64;
     // Add overhead for metadata (~1%)
     bytes + bytes / 100
 }
 
 fn quantize_state_dict(state_dict: &StateDict, quant_type: QuantType) -> CliResult<StateDict> {
-    // For now, we'll create a copy of the state dict
-    // In a real implementation, this would perform actual quantization
+    use axonml_tensor::Tensor;
 
     let mut quantized = StateDict::new();
 
     for (name, entry) in state_dict.entries() {
-        // Clone the tensor data - in a real impl, quantize here
-        let quantized_data = match quant_type {
-            QuantType::F32 => {
-                // No quantization needed
-                entry.data.clone()
-            }
-            QuantType::F16 => {
-                // Convert to F16 and back (lossy conversion)
-                quantize_tensor_f16(&entry.data)
-            }
-            QuantType::Q8_0 => {
-                // 8-bit quantization
-                quantize_tensor_q8(&entry.data)
-            }
-            QuantType::Q4_0 | QuantType::Q4_1 => {
-                // 4-bit quantization
-                quantize_tensor_q4(&entry.data)
-            }
-            QuantType::Q5_0 | QuantType::Q5_1 => {
-                // 5-bit quantization
-                quantize_tensor_q5(&entry.data)
-            }
+        if quant_type == QuantType::F32 {
+            quantized.insert(name.clone(), entry.data.clone());
+            continue;
+        }
+
+        // Convert TensorData to Tensor for axonml_quant
+        let tensor =
+            Tensor::from_vec(entry.data.values.clone(), &entry.data.shape).map_err(|e| {
+                CliError::Model(format!("Failed to create tensor for {name}: {e}"))
+            })?;
+
+        // Quantize using the real axonml_quant implementation
+        let quantized_tensor =
+            axonml_quant::quantize_tensor(&tensor, quant_type).map_err(|e| {
+                CliError::Model(format!("Quantization failed for {name}: {e}"))
+            })?;
+
+        // Dequantize back to f32 for saving in the state dict format
+        let dequantized = axonml_quant::dequantize_tensor(&quantized_tensor).map_err(|e| {
+            CliError::Model(format!("Dequantization failed for {name}: {e}"))
+        })?;
+
+        let dequant_data = TensorData {
+            shape: entry.data.shape.clone(),
+            values: dequantized.to_vec(),
         };
 
-        quantized.insert(name.clone(), quantized_data);
+        quantized.insert(name.clone(), dequant_data);
     }
 
     Ok(quantized)
-}
-
-fn quantize_tensor_f16(data: &TensorData) -> TensorData {
-    // Convert F32 to F16 and back (simulating precision loss)
-    let values = &data.values;
-
-    // Use half crate's conversion if available, otherwise simulate
-    let quantized: Vec<f32> = values
-        .iter()
-        .map(|&v| {
-            // Convert to half precision and back
-            let h = half::f16::from_f32(v);
-            h.to_f32()
-        })
-        .collect();
-
-    TensorData {
-        shape: data.shape.clone(),
-        values: quantized,
-    }
-}
-
-fn quantize_tensor_q8(data: &TensorData) -> TensorData {
-    // Simulate Q8 quantization by scaling values
-    let values = &data.values;
-
-    // Find min/max for scaling
-    let (min, max) = values.iter().fold((f32::MAX, f32::MIN), |(min, max), &v| {
-        (min.min(v), max.max(v))
-    });
-
-    let scale = if max - min > 0.0 {
-        255.0 / (max - min)
-    } else {
-        1.0
-    };
-
-    // Quantize and dequantize (simulating the process)
-    let quantized: Vec<f32> = values
-        .iter()
-        .map(|&v| {
-            let q = ((v - min) * scale).round().clamp(0.0, 255.0) as u8;
-            (f32::from(q) / scale) + min
-        })
-        .collect();
-
-    TensorData {
-        shape: data.shape.clone(),
-        values: quantized,
-    }
-}
-
-fn quantize_tensor_q4(data: &TensorData) -> TensorData {
-    // Simulate Q4 quantization
-    let values = &data.values;
-
-    let (min, max) = values.iter().fold((f32::MAX, f32::MIN), |(min, max), &v| {
-        (min.min(v), max.max(v))
-    });
-
-    let scale = if max - min > 0.0 {
-        15.0 / (max - min)
-    } else {
-        1.0
-    };
-
-    let quantized: Vec<f32> = values
-        .iter()
-        .map(|&v| {
-            let q = ((v - min) * scale).round().clamp(0.0, 15.0) as u8;
-            (f32::from(q) / scale) + min
-        })
-        .collect();
-
-    TensorData {
-        shape: data.shape.clone(),
-        values: quantized,
-    }
-}
-
-fn quantize_tensor_q5(data: &TensorData) -> TensorData {
-    // Simulate Q5 quantization
-    let values = &data.values;
-
-    let (min, max) = values.iter().fold((f32::MAX, f32::MIN), |(min, max), &v| {
-        (min.min(v), max.max(v))
-    });
-
-    let scale = if max - min > 0.0 {
-        31.0 / (max - min)
-    } else {
-        1.0
-    };
-
-    let quantized: Vec<f32> = values
-        .iter()
-        .map(|&v| {
-            let q = ((v - min) * scale).round().clamp(0.0, 31.0) as u8;
-            (f32::from(q) / scale) + min
-        })
-        .collect();
-
-    TensorData {
-        shape: data.shape.clone(),
-        values: quantized,
-    }
 }
 
 // =============================================================================
@@ -456,7 +309,7 @@ fn execute_info(args: QuantInfoArgs) -> CliResult<()> {
     for qt in quant_types {
         let est_size = estimate_quantized_size(num_params, qt);
         let ratio = file_size as f64 / est_size as f64;
-        println!("  {}: {} ({:.1}x)", qt.name(), format_size(est_size), ratio);
+        println!("  {}: {} ({:.1}x)", qt.to_string(), format_size(est_size), ratio);
     }
 
     if args.detailed {
@@ -536,7 +389,7 @@ fn execute_benchmark(args: QuantBenchmarkArgs) -> CliResult<()> {
 
         println!(
             "{:<10} {:>12} {:>10.1} ms {:>10.1} ms {:>9.2}x",
-            qt.name(),
+            qt.to_string(),
             format_size(est_size),
             load_time,
             quant_time,
@@ -596,9 +449,9 @@ fn execute_list() -> CliResult<()> {
     for qt in quant_types {
         println!(
             "{:<10} {:>8.1} {}",
-            qt.name(),
-            qt.bits_per_weight(),
-            qt.description()
+            qt.to_string(),
+            bits_per_weight(qt),
+            quant_description(qt)
         );
     }
 
@@ -668,17 +521,17 @@ mod tests {
 
     #[test]
     fn test_quant_type_from_str() {
-        assert_eq!(QuantType::from_str("Q4_0"), Some(QuantType::Q4_0));
-        assert_eq!(QuantType::from_str("q8"), Some(QuantType::Q8_0));
-        assert_eq!(QuantType::from_str("F16"), Some(QuantType::F16));
-        assert_eq!(QuantType::from_str("invalid"), None);
+        assert_eq!(QuantType::parse_type("Q4_0"), Some(QuantType::Q4_0));
+        assert_eq!(QuantType::parse_type("q8"), Some(QuantType::Q8_0));
+        assert_eq!(QuantType::parse_type("F16"), Some(QuantType::F16));
+        assert_eq!(QuantType::parse_type("invalid"), None);
     }
 
     #[test]
     fn test_bits_per_weight() {
-        assert!(QuantType::Q4_0.bits_per_weight() < QuantType::Q8_0.bits_per_weight());
-        assert!(QuantType::Q8_0.bits_per_weight() < QuantType::F16.bits_per_weight());
-        assert!(QuantType::F16.bits_per_weight() < QuantType::F32.bits_per_weight());
+        assert!(bits_per_weight(QuantType::Q4_0) < bits_per_weight(QuantType::Q8_0));
+        assert!(bits_per_weight(QuantType::Q8_0) < bits_per_weight(QuantType::F16));
+        assert!(bits_per_weight(QuantType::F16) < bits_per_weight(QuantType::F32));
     }
 
     #[test]

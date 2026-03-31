@@ -372,25 +372,48 @@ fn load_model(model_path: &Path) -> MnemosyneIdentity {
     let model = MnemosyneIdentity::new();
 
     if model_path.exists() {
-        let state_dict = load_state_dict(model_path).expect("Failed to load model");
-        let params = model.named_parameters();
-        let mut loaded = 0;
-        for (name, param) in &params {
-            if let Some(entry) = state_dict.get(name) {
-                if let Ok(tensor) = entry.data.to_tensor() {
-                    if tensor.shape() == param.data().shape() {
-                        param.update_data(tensor);
+        // Load state dict (from checkpoint or standalone)
+        let state_dict = if let Ok(checkpoint) = axonml_serialize::load_checkpoint(model_path) {
+            println!("  Checkpoint epoch: {}", checkpoint.epoch());
+            Some(checkpoint.model_state)
+        } else if let Ok(sd) = load_state_dict(model_path) {
+            Some(sd)
+        } else {
+            None
+        };
+
+        if let Some(state_dict) = state_dict {
+            // Collect all saved tensors sorted by shape for deterministic matching
+            let mut saved_tensors: Vec<_> = state_dict
+                .entries()
+                .filter_map(|(_, entry)| entry.data.to_tensor().ok())
+                .collect();
+
+            // Match model parameters to saved tensors by shape, in order
+            let params = model.parameters();
+            let mut loaded = 0;
+            let mut used = vec![false; saved_tensors.len()];
+
+            for param in &params {
+                let param_data = param.data();
+                let param_shape = param_data.shape();
+                // Find first unused saved tensor with matching shape
+                for (i, saved) in saved_tensors.iter().enumerate() {
+                    if !used[i] && saved.shape() == param_shape {
+                        param.update_data(saved.clone());
+                        used[i] = true;
                         loaded += 1;
+                        break;
                     }
                 }
             }
+            println!(
+                "  Loaded {}/{} parameters from {}",
+                loaded,
+                params.len(),
+                model_path.display()
+            );
         }
-        println!(
-            "  Loaded {}/{} parameters from {}",
-            loaded,
-            params.len(),
-            model_path.display()
-        );
     } else {
         println!(
             "  WARNING: No model found at {} — using random weights!",
@@ -418,7 +441,7 @@ fn main() {
         .iter()
         .position(|a| a == "--model")
         .map(|i| PathBuf::from(&args[i + 1]))
-        .unwrap_or_else(|| PathBuf::from("/opt/AxonML/checkpoints/mnemosyne/best_model.axonml"));
+        .unwrap_or_else(|| PathBuf::from("/opt/AxonML/checkpoints/mnemosyne/checkpoint_best.axonml"));
 
     let num_pairs: usize = args
         .iter()

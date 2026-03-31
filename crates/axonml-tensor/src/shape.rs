@@ -250,7 +250,7 @@ pub fn reshape(old_shape: &[usize], new_shape: &[isize]) -> Result<Shape> {
                 return Err(Error::invalid_operation("Can only have one -1 in reshape"));
             }
             infer_idx = Some(i);
-            result.push(0); // Placeholder
+            result.push(0); // Will be inferred on line 269
         } else if dim < 0 {
             return Err(Error::invalid_operation("Invalid dimension in reshape"));
         } else {

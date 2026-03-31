@@ -16,7 +16,23 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::time::Instant;
+
+/// Global seed value, set by --seed flag.
+static GLOBAL_SEED: AtomicU64 = AtomicU64::new(0);
+/// Whether a global seed has been set.
+static SEED_SET: AtomicBool = AtomicBool::new(false);
+
+/// Returns the global seed if one was set, for downstream RNG initialization.
+pub fn global_seed() -> Option<u64> {
+    if SEED_SET.load(std::sync::atomic::Ordering::Relaxed) {
+        Some(GLOBAL_SEED.load(std::sync::atomic::Ordering::Relaxed))
+    } else {
+        None
+    }
+}
 
 use axonml_autograd::Variable;
 use axonml_data::{DataLoader, Dataset};
@@ -60,8 +76,13 @@ pub fn execute(args: TrainArgs) -> CliResult<()> {
     // Set random seed if provided
     if let Some(seed) = args.seed.or(config.seed) {
         print_info(&format!("Random seed: {seed}"));
-        // Set random seed for reproducibility
-        // In a full implementation, this would seed all RNGs
+        // Store the seed globally so downstream components can use it.
+        // Also set the AXONML_SEED env var so child processes inherit it.
+        GLOBAL_SEED.store(seed, std::sync::atomic::Ordering::Relaxed);
+        SEED_SET.store(true, std::sync::atomic::Ordering::Relaxed);
+        // SAFETY: set_var is called once during single-threaded CLI initialization,
+        // before any worker threads are spawned.
+        unsafe { std::env::set_var("AXONML_SEED", seed.to_string()) };
     }
 
     // Parse device

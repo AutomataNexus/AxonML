@@ -152,10 +152,13 @@ impl Aegis3D {
         // Initialize octree near these surface points
         self.octree.init_from_depth(&points, self.config.init_depth);
 
+        // Track which leaf nodes are affected by this view
+        let affected = self.octree.find_affected_leaf_indices(&points);
+
         self.views.push(StoredView {
             depth_map: depth_map.to_vec(),
             camera,
-            _affected_nodes: Vec::new(), // TODO: track affected nodes
+            _affected_nodes: affected,
         });
     }
 

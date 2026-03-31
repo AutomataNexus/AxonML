@@ -14,6 +14,7 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // =============================================================================
@@ -36,7 +37,7 @@ pub const MASK_TOKEN: &str = "<mask>";
 // =============================================================================
 
 /// A vocabulary that maps tokens to indices and vice versa.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vocab {
     /// Token to index mapping.
     token_to_idx: HashMap<String, usize>,
@@ -79,11 +80,29 @@ impl Vocab {
     }
 
     /// Creates a vocabulary from a list of tokens.
+    ///
+    /// Automatically adds `<unk>` and `<pad>` tokens if not already present
+    /// so that unknown token lookup always returns a valid UNK index.
     #[must_use]
     pub fn from_tokens(tokens: &[&str]) -> Self {
         let mut vocab = Self::new();
+        // Ensure UNK and PAD exist so token_to_index never silently maps unknowns to 0
+        if !tokens.contains(&UNK_TOKEN) {
+            vocab.add_token(UNK_TOKEN);
+            vocab.unk_token = Some(UNK_TOKEN.to_string());
+        }
+        if !tokens.contains(&PAD_TOKEN) {
+            vocab.add_token(PAD_TOKEN);
+            vocab.pad_token = Some(PAD_TOKEN.to_string());
+        }
         for token in tokens {
             vocab.add_token(token);
+            if *token == UNK_TOKEN {
+                vocab.unk_token = Some(UNK_TOKEN.to_string());
+            }
+            if *token == PAD_TOKEN {
+                vocab.pad_token = Some(PAD_TOKEN.to_string());
+            }
         }
         vocab
     }
@@ -242,6 +261,22 @@ impl Vocab {
     }
 }
 
+impl Vocab {
+    /// Saves the vocabulary to a JSON file.
+    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, json)
+    }
+
+    /// Loads a vocabulary from a JSON file.
+    pub fn load(path: &std::path::Path) -> std::io::Result<Self> {
+        let json = std::fs::read_to_string(path)?;
+        serde_json::from_str(&json)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+}
+
 impl Default for Vocab {
     fn default() -> Self {
         Self::new()
@@ -339,10 +374,16 @@ mod tests {
     fn test_vocab_from_tokens() {
         let vocab = Vocab::from_tokens(&["a", "b", "c"]);
 
-        assert_eq!(vocab.len(), 3);
-        assert_eq!(vocab.token_to_index("a"), 0);
-        assert_eq!(vocab.token_to_index("b"), 1);
-        assert_eq!(vocab.token_to_index("c"), 2);
+        // Now includes auto-added <unk> and <pad> plus 3 user tokens
+        assert_eq!(vocab.len(), 5);
+        // UNK and PAD are at indices 0, 1; user tokens at 2, 3, 4
+        assert!(vocab.unk_index().is_some());
+        assert!(vocab.pad_index().is_some());
+        assert!(vocab.contains("a"));
+        assert!(vocab.contains("b"));
+        assert!(vocab.contains("c"));
+        // Unknown token maps to UNK index, not 0
+        assert_eq!(vocab.token_to_index("unknown"), vocab.unk_index().unwrap());
     }
 
     #[test]

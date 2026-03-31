@@ -16,6 +16,7 @@
 
 pub mod jwt;
 pub mod middleware;
+pub mod rate_limit;
 pub mod recovery;
 pub mod totp;
 pub mod webauthn;
@@ -25,6 +26,7 @@ pub use middleware::{
     AuthLayer, AuthUser, auth_middleware, optional_auth_middleware, require_admin_middleware,
     require_mfa_middleware,
 };
+pub use rate_limit::RateLimiter;
 pub use recovery::RecoveryAuth;
 pub use totp::TotpAuth;
 pub use webauthn::WebAuthnAuth;

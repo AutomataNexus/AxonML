@@ -737,7 +737,7 @@ impl Seq2SeqTransformer {
             }
         }
         Variable::new(
-            Tensor::from_vec(mask_data, &[seq_len, seq_len]).unwrap(),
+            Tensor::from_vec(mask_data, &[seq_len, seq_len]).expect("tensor creation failed"),
             false,
         )
     }
@@ -764,8 +764,11 @@ impl Seq2SeqTransformer {
 }
 
 impl Module for Seq2SeqTransformer {
+    /// Encode-only forward (Module trait requires single input).
+    ///
+    /// **Important:** This only runs the encoder. For full encode+decode,
+    /// use `forward_seq2seq(src, tgt)` which takes both source and target.
     fn forward(&self, input: &Variable) -> Variable {
-        // Single-input forward: encode only (use forward_seq2seq for full pipeline)
         self.encoder.forward(input)
     }
 
@@ -809,7 +812,7 @@ mod tests {
     fn test_encoder_layer_forward() {
         let layer = TransformerEncoderLayer::new(64, 4, 256);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let output = layer.forward(&input);
@@ -820,11 +823,11 @@ mod tests {
     fn test_decoder_layer_with_memory() {
         let layer = TransformerDecoderLayer::new(64, 4, 256);
         let tgt = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 5 * 64], &[2, 5, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 5 * 64], &[2, 5, 64]).expect("tensor creation failed"),
             false,
         );
         let memory = Variable::new(
-            Tensor::from_vec(vec![0.2; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![0.2; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let output = layer.forward_with_memory(&tgt, &memory, None, None);
@@ -837,7 +840,7 @@ mod tests {
         assert_eq!(encoder.num_layers(), 3);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 8 * 64], &[2, 8, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 8 * 64], &[2, 8, 64]).expect("tensor creation failed"),
             false,
         );
         let output = encoder.forward(&input);
@@ -850,11 +853,11 @@ mod tests {
         assert_eq!(decoder.num_layers(), 3);
 
         let tgt = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 5 * 64], &[2, 5, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 5 * 64], &[2, 5, 64]).expect("tensor creation failed"),
             false,
         );
         let memory = Variable::new(
-            Tensor::from_vec(vec![0.2; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![0.2; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let output = decoder.forward_with_memory(&tgt, &memory, None, None);
@@ -868,11 +871,11 @@ mod tests {
         assert_eq!(transformer.nhead(), 4);
 
         let src = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let tgt = Variable::new(
-            Tensor::from_vec(vec![0.2; 2 * 5 * 64], &[2, 5, 64]).unwrap(),
+            Tensor::from_vec(vec![0.2; 2 * 5 * 64], &[2, 5, 64]).expect("tensor creation failed"),
             false,
         );
         let output = transformer.forward_seq2seq(&src, &tgt, None, None, None);
@@ -884,11 +887,11 @@ mod tests {
         let transformer = Seq2SeqTransformer::new(64, 4, 2, 2, 256);
 
         let src = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let tgt = Variable::new(
-            Tensor::from_vec(vec![0.2; 2 * 5 * 64], &[2, 5, 64]).unwrap(),
+            Tensor::from_vec(vec![0.2; 2 * 5 * 64], &[2, 5, 64]).expect("tensor creation failed"),
             false,
         );
 
@@ -958,11 +961,11 @@ mod tests {
     fn test_seq2seq_with_causal_mask() {
         let transformer = Seq2SeqTransformer::new(64, 4, 2, 2, 256);
         let src = Variable::new(
-            Tensor::from_vec(vec![0.1; 2 * 10 * 64], &[2, 10, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
         );
         let tgt = Variable::new(
-            Tensor::from_vec(vec![0.2; 2 * 5 * 64], &[2, 5, 64]).unwrap(),
+            Tensor::from_vec(vec![0.2; 2 * 5 * 64], &[2, 5, 64]).expect("tensor creation failed"),
             false,
         );
         let tgt_mask = Seq2SeqTransformer::generate_square_subsequent_mask(5);

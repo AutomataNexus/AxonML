@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AxonML is a PyTorch-equivalent machine learning framework written in pure Rust (~92-95% PyTorch parity). It's a monorepo workspace with 22 crates organized in layered architecture. The test suite includes 1076+ passing tests.
+AxonML is a PyTorch-equivalent machine learning framework written in pure Rust (~92-95% PyTorch parity). It's a monorepo workspace with 22 crates organized in layered architecture. The test suite includes 2,141+ passing tests.
 
 ## Build Commands
 
