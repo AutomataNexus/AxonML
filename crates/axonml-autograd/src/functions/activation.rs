@@ -368,7 +368,9 @@ impl GradientFunction for SoftmaxBackward {
             }
         }
 
-        vec![Some(Tensor::from_vec(result, shape).expect("backward: tensor creation failed"))]
+        vec![Some(
+            Tensor::from_vec(result, shape).expect("backward: tensor creation failed"),
+        )]
     }
 
     fn name(&self) -> &'static str {
@@ -428,7 +430,9 @@ impl GradientFunction for LeakyReluBackward {
             //        = pos_grad * (1 - negative_slope) + grad * negative_slope
             let neg_part = grad_gpu.mul_scalar(self.negative_slope);
             let pos_part = pos_grad.mul_scalar(1.0 - self.negative_slope);
-            let result = neg_part.add(&pos_part).expect("backward: tensor add failed");
+            let result = neg_part
+                .add(&pos_part)
+                .expect("backward: tensor add failed");
             return vec![Some(result)];
         }
 
@@ -509,7 +513,9 @@ impl GradientFunction for GeluBackward {
             // tanh via tensor ops
             let tanh_inner = inner.tanh();
             // sech^2 = 1 - tanh^2
-            let tanh2 = tanh_inner.mul(&tanh_inner).expect("backward: tensor mul failed");
+            let tanh2 = tanh_inner
+                .mul(&tanh_inner)
+                .expect("backward: tensor mul failed");
             let ones = Tensor::ones(x.shape());
             let ones_gpu = ones.to_device(x.device()).unwrap();
             let sech2 = ones_gpu.sub(&tanh2).expect("backward: tensor sub failed");
@@ -519,7 +525,10 @@ impl GradientFunction for GeluBackward {
                 .unwrap()
                 .mul_scalar(sqrt_2_pi);
             // 0.5*(1+tanh) + 0.5*x*sech2*d_inner
-            let term1 = ones_gpu.add(&tanh_inner).expect("backward: tensor add failed").mul_scalar(0.5);
+            let term1 = ones_gpu
+                .add(&tanh_inner)
+                .expect("backward: tensor add failed")
+                .mul_scalar(0.5);
             let term2 = x
                 .mul(&sech2)
                 .unwrap()
@@ -527,7 +536,9 @@ impl GradientFunction for GeluBackward {
                 .unwrap()
                 .mul_scalar(0.5);
             let deriv = term1.add(&term2).expect("backward: tensor add failed");
-            return vec![Some(grad_gpu.mul(&deriv).expect("backward: tensor mul failed"))];
+            return vec![Some(
+                grad_gpu.mul(&deriv).expect("backward: tensor mul failed"),
+            )];
         }
 
         let input_data = self.saved_input.to_vec();
@@ -600,7 +611,11 @@ impl ExpBackward {
 impl GradientFunction for ExpBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         // d/dx(exp(x)) = exp(x) = output → element-wise multiply (GPU-native)
-        vec![Some(grad_output.mul(&self.saved_output).expect("backward: tensor mul failed"))]
+        vec![Some(
+            grad_output
+                .mul(&self.saved_output)
+                .expect("backward: tensor mul failed"),
+        )]
     }
 
     fn name(&self) -> &'static str {
@@ -889,7 +904,9 @@ impl GradientFunction for LogSoftmaxBackward {
             }
         }
 
-        vec![Some(Tensor::from_vec(result, shape).expect("backward: tensor creation failed"))]
+        vec![Some(
+            Tensor::from_vec(result, shape).expect("backward: tensor creation failed"),
+        )]
     }
 
     fn name(&self) -> &'static str {
@@ -949,7 +966,9 @@ impl GradientFunction for SiluBackward {
             let x_term = x.mul(&one_minus_sig).expect("backward: tensor mul failed");
             let bracket = ones.add(&x_term).expect("backward: tensor add failed");
             let deriv = sig.mul(&bracket).expect("backward: tensor mul failed");
-            return vec![Some(grad_gpu.mul(&deriv).expect("backward: tensor mul failed"))];
+            return vec![Some(
+                grad_gpu.mul(&deriv).expect("backward: tensor mul failed"),
+            )];
         }
 
         let input_data = self.saved_input.to_vec();
@@ -1070,10 +1089,17 @@ impl GradientFunction for EluBackward {
             let pos_grad = grad_gpu.relu_backward_cuda(&self.saved_input);
             // neg_part = alpha * exp(x) * grad where input <= 0
             // = (grad - pos_grad) * alpha * exp(x)
-            let neg_grad = grad_gpu.sub(&pos_grad).expect("backward: tensor sub failed");
+            let neg_grad = grad_gpu
+                .sub(&pos_grad)
+                .expect("backward: tensor sub failed");
             let exp_x = self.saved_input.exp();
-            let neg_result = neg_grad.mul(&exp_x).expect("backward: tensor mul failed").mul_scalar(self.alpha);
-            let result = pos_grad.add(&neg_result).expect("backward: tensor add failed");
+            let neg_result = neg_grad
+                .mul(&exp_x)
+                .expect("backward: tensor mul failed")
+                .mul_scalar(self.alpha);
+            let result = pos_grad
+                .add(&neg_result)
+                .expect("backward: tensor add failed");
             return vec![Some(result)];
         }
 
@@ -1118,10 +1144,12 @@ mod tests {
 
     #[test]
     fn test_relu_backward() {
-        let input = Tensor::from_vec(vec![-1.0, 0.0, 1.0, 2.0], &[4]).expect("backward: tensor creation failed");
+        let input = Tensor::from_vec(vec![-1.0, 0.0, 1.0, 2.0], &[4])
+            .expect("backward: tensor creation failed");
         let grad_fn = ReluBackward::new(None, input);
 
-        let grad_output = Tensor::from_vec(vec![1.0, 1.0, 1.0, 1.0], &[4]).expect("backward: tensor creation failed");
+        let grad_output = Tensor::from_vec(vec![1.0, 1.0, 1.0, 1.0], &[4])
+            .expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         // Gradient is 0 where input <= 0, 1 where input > 0
@@ -1137,7 +1165,8 @@ mod tests {
         let output = Tensor::from_vec(vec![0.5], &[1]).expect("backward: tensor creation failed");
         let grad_fn = SigmoidBackward::new(None, output);
 
-        let grad_output = Tensor::from_vec(vec![1.0], &[1]).expect("backward: tensor creation failed");
+        let grad_output =
+            Tensor::from_vec(vec![1.0], &[1]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         assert!((grads[0].as_ref().unwrap().to_vec()[0] - 0.25).abs() < 1e-6);
@@ -1149,7 +1178,8 @@ mod tests {
         let output = Tensor::from_vec(vec![0.0], &[1]).expect("backward: tensor creation failed");
         let grad_fn = TanhBackward::new(None, output);
 
-        let grad_output = Tensor::from_vec(vec![1.0], &[1]).expect("backward: tensor creation failed");
+        let grad_output =
+            Tensor::from_vec(vec![1.0], &[1]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         assert!((grads[0].as_ref().unwrap().to_vec()[0] - 1.0).abs() < 1e-6);
@@ -1157,10 +1187,12 @@ mod tests {
 
     #[test]
     fn test_leaky_relu_backward() {
-        let input = Tensor::from_vec(vec![-1.0, 1.0], &[2]).expect("backward: tensor creation failed");
+        let input =
+            Tensor::from_vec(vec![-1.0, 1.0], &[2]).expect("backward: tensor creation failed");
         let grad_fn = LeakyReluBackward::new(None, input, 0.01);
 
-        let grad_output = Tensor::from_vec(vec![1.0, 1.0], &[2]).expect("backward: tensor creation failed");
+        let grad_output =
+            Tensor::from_vec(vec![1.0, 1.0], &[2]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         let result = grads[0].as_ref().unwrap().to_vec();
@@ -1182,7 +1214,8 @@ mod tests {
         .unwrap();
         let grad_fn = ExpBackward::new(None, output);
 
-        let grad_output = Tensor::from_vec(vec![1.0, 1.0, 1.0], &[3]).expect("backward: tensor creation failed");
+        let grad_output =
+            Tensor::from_vec(vec![1.0, 1.0, 1.0], &[3]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         let result = grads[0].as_ref().unwrap().to_vec();
@@ -1193,10 +1226,12 @@ mod tests {
 
     #[test]
     fn test_log_backward() {
-        let input = Tensor::from_vec(vec![1.0, 2.0, 4.0], &[3]).expect("backward: tensor creation failed");
+        let input =
+            Tensor::from_vec(vec![1.0, 2.0, 4.0], &[3]).expect("backward: tensor creation failed");
         let grad_fn = LogBackward::new(None, input);
 
-        let grad_output = Tensor::from_vec(vec![1.0, 1.0, 1.0], &[3]).expect("backward: tensor creation failed");
+        let grad_output =
+            Tensor::from_vec(vec![1.0, 1.0, 1.0], &[3]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         let result = grads[0].as_ref().unwrap().to_vec();
@@ -1208,10 +1243,12 @@ mod tests {
 
     #[test]
     fn test_clamp_backward() {
-        let input = Tensor::from_vec(vec![-1.0, 0.5, 2.0], &[3]).expect("backward: tensor creation failed");
+        let input =
+            Tensor::from_vec(vec![-1.0, 0.5, 2.0], &[3]).expect("backward: tensor creation failed");
         let grad_fn = ClampBackward::new(None, input, 0.0, 1.0);
 
-        let grad_output = Tensor::from_vec(vec![1.0, 1.0, 1.0], &[3]).expect("backward: tensor creation failed");
+        let grad_output =
+            Tensor::from_vec(vec![1.0, 1.0, 1.0], &[3]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         let result = grads[0].as_ref().unwrap().to_vec();

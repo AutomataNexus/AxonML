@@ -336,7 +336,11 @@ impl BasicBPETokenizer {
             for i in 0..symbols.len().saturating_sub(1) {
                 let pair = (symbols[i].clone(), symbols[i + 1].clone());
                 if let Some(merged) = self.merges.get(&pair) {
-                    let priority = self.merge_priority.get(&pair).copied().unwrap_or(usize::MAX);
+                    let priority = self
+                        .merge_priority
+                        .get(&pair)
+                        .copied()
+                        .unwrap_or(usize::MAX);
                     if best.is_none() || priority < best.unwrap().1 {
                         best = Some((i, priority, merged));
                     }

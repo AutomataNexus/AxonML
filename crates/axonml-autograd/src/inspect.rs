@@ -349,7 +349,10 @@ mod tests {
 
     #[test]
     fn test_trace_leaf_no_grad() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         let snap = trace_backward(&x);
         assert_eq!(snap.nodes.len(), 1);
         assert_eq!(snap.edges.len(), 0);
@@ -360,7 +363,10 @@ mod tests {
 
     #[test]
     fn test_trace_leaf_with_grad() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2]).expect("tensor creation failed"), true);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0], &[2]).expect("tensor creation failed"),
+            true,
+        );
         let snap = trace_backward(&x);
         // A leaf with requires_grad has an AccumulateGrad grad_fn
         assert_eq!(snap.nodes.len(), 1);
@@ -370,8 +376,14 @@ mod tests {
 
     #[test]
     fn test_trace_simple_add() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let c = a.add_var(&b);
         let snap = trace_backward(&c);
 
@@ -387,7 +399,10 @@ mod tests {
 
     #[test]
     fn test_trace_chain_relu_sigmoid() {
-        let a = Variable::new(Tensor::from_vec(vec![0.5], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![0.5], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.relu();
         let c = b.sigmoid();
         let snap = trace_backward(&c);
@@ -403,7 +418,10 @@ mod tests {
     #[test]
     fn test_trace_diamond_topology() {
         // Diamond: a -> b, a -> c, b + c -> d
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.relu();
         let c = a.sigmoid();
         let d = b.add_var(&c);
@@ -431,21 +449,33 @@ mod tests {
 
     #[test]
     fn test_node_count_leaf() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         assert_eq!(node_count(&x), 1);
     }
 
     #[test]
     fn test_node_count_leaf_with_grad() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         // AccumulateGrad node
         assert_eq!(node_count(&x), 1);
     }
 
     #[test]
     fn test_node_count_simple() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let c = a.add_var(&b);
         // AddBackward + 2 AccumulateGrad
         assert_eq!(node_count(&c), 3);
@@ -453,7 +483,10 @@ mod tests {
 
     #[test]
     fn test_node_count_chain() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.relu().sigmoid().tanh();
         // TanhBackward -> SigmoidBackward -> ReluBackward -> AccumulateGrad
         assert_eq!(node_count(&b), 4);
@@ -461,7 +494,10 @@ mod tests {
 
     #[test]
     fn test_node_count_diamond() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.relu();
         let c = a.sigmoid();
         let d = b.add_var(&c);
@@ -475,13 +511,19 @@ mod tests {
 
     #[test]
     fn test_depth_leaf() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         assert_eq!(depth(&x), 0);
     }
 
     #[test]
     fn test_depth_single_op() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.relu();
         // ReluBackward -> AccumulateGrad  =>  depth 2
         assert_eq!(depth(&b), 2);
@@ -489,7 +531,10 @@ mod tests {
 
     #[test]
     fn test_depth_chain() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.relu().sigmoid().tanh();
         // Tanh -> Sigmoid -> Relu -> Accum  =>  depth 4
         assert_eq!(depth(&b), 4);
@@ -498,8 +543,14 @@ mod tests {
     #[test]
     fn test_depth_branching() {
         // Two branches of different length merging
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let left = a.relu().sigmoid(); // depth 3 from leaf
         let right = b.relu(); // depth 2 from leaf
         let merged = left.add_var(&right);
@@ -513,27 +564,42 @@ mod tests {
 
     #[test]
     fn test_leaf_count_leaf_no_grad() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         assert_eq!(leaf_count(&x), 0);
     }
 
     #[test]
     fn test_leaf_count_leaf_with_grad() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         assert_eq!(leaf_count(&x), 1);
     }
 
     #[test]
     fn test_leaf_count_two_inputs() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let c = a.add_var(&b);
         assert_eq!(leaf_count(&c), 2);
     }
 
     #[test]
     fn test_leaf_count_shared_input() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.relu();
         let c = a.sigmoid();
         let d = b.add_var(&c);
@@ -543,9 +609,18 @@ mod tests {
 
     #[test]
     fn test_leaf_count_three_inputs() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
-        let c = Variable::new(Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let c = Variable::new(
+            Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let ab = a.add_var(&b);
         let abc = ab.add_var(&c);
         assert_eq!(leaf_count(&abc), 3);
@@ -557,7 +632,10 @@ mod tests {
 
     #[test]
     fn test_operation_names_leaf() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let names = operation_names(&x);
         // AccumulateGrad is excluded
         assert!(names.is_empty());
@@ -565,7 +643,10 @@ mod tests {
 
     #[test]
     fn test_operation_names_chain() {
-        let a = Variable::new(Tensor::from_vec(vec![0.5], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![0.5], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.relu().sigmoid().tanh();
         let names = operation_names(&b);
         assert_eq!(names.len(), 3);
@@ -576,7 +657,10 @@ mod tests {
 
     #[test]
     fn test_operation_names_sorted() {
-        let a = Variable::new(Tensor::from_vec(vec![0.5], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![0.5], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.tanh().relu().sigmoid();
         let names = operation_names(&b);
         // Should be alphabetically sorted
@@ -587,7 +671,10 @@ mod tests {
 
     #[test]
     fn test_operation_names_no_grad() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         let names = operation_names(&x);
         assert!(names.is_empty());
     }
@@ -598,15 +685,24 @@ mod tests {
 
     #[test]
     fn test_summary_leaf() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let summary = gradient_flow_summary(&x);
         assert!(summary.is_empty());
     }
 
     #[test]
     fn test_summary_simple() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let c = a.add_var(&b);
         let summary = gradient_flow_summary(&c);
         assert_eq!(summary.len(), 1);
@@ -615,9 +711,18 @@ mod tests {
 
     #[test]
     fn test_summary_multiple_adds() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
-        let c = Variable::new(Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let c = Variable::new(
+            Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let ab = a.add_var(&b);
         let abc = ab.add_var(&c);
         let summary = gradient_flow_summary(&abc);
@@ -631,8 +736,14 @@ mod tests {
 
     #[test]
     fn test_summary_sorted_by_count() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         // a.relu() + b => AddBackward(1), ReluBackward(1)
         let c = a.relu().add_var(&b);
         let summary = gradient_flow_summary(&c);
@@ -644,7 +755,10 @@ mod tests {
 
     #[test]
     fn test_summary_no_grad() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         let summary = gradient_flow_summary(&x);
         assert!(summary.is_empty());
     }
@@ -655,7 +769,10 @@ mod tests {
 
     #[test]
     fn test_to_dot_contains_digraph() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         let snap = trace_backward(&x);
         let dot = to_dot(&snap);
         assert!(dot.contains("digraph"));
@@ -663,8 +780,14 @@ mod tests {
 
     #[test]
     fn test_to_dot_contains_edges() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let c = a.add_var(&b);
         let snap = trace_backward(&c);
         let dot = to_dot(&snap);
@@ -673,7 +796,10 @@ mod tests {
 
     #[test]
     fn test_to_dot_leaf_box_shape() {
-        let x = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         let snap = trace_backward(&x);
         let dot = to_dot(&snap);
         assert!(dot.contains("shape=box"));
@@ -681,7 +807,10 @@ mod tests {
 
     #[test]
     fn test_to_dot_operation_ellipse() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.relu();
         let snap = trace_backward(&b);
         let dot = to_dot(&snap);
@@ -691,7 +820,10 @@ mod tests {
 
     #[test]
     fn test_to_dot_node_labels() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.sigmoid();
         let snap = trace_backward(&b);
         let dot = to_dot(&snap);
@@ -716,8 +848,14 @@ mod tests {
 
     #[test]
     fn test_trace_mul_has_correct_structure() {
-        let a = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let c = a.mul_var(&b);
         let snap = trace_backward(&c);
 
@@ -728,7 +866,10 @@ mod tests {
 
     #[test]
     fn test_trace_sum_mean_chain() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.sum();
         let snap = trace_backward(&b);
         assert_eq!(snap.nodes.len(), 2); // SumBackward + AccumulateGrad
@@ -737,8 +878,14 @@ mod tests {
 
     #[test]
     fn test_node_count_matches_snapshot() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let c = a.relu().add_var(&b.sigmoid());
         assert_eq!(node_count(&c), trace_backward(&c).nodes.len());
     }

@@ -74,11 +74,15 @@ struct AdamState {
 impl AdamState {
     fn new(shape: &[usize], device: axonml_core::Device) -> Self {
         let size: usize = shape.iter().product();
-        let mut exp_avg = Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
-        let mut exp_avg_sq = Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
+        let mut exp_avg =
+            Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
+        let mut exp_avg_sq =
+            Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
         if device.is_gpu() {
             exp_avg = exp_avg.to_device(device).expect("device transfer failed");
-            exp_avg_sq = exp_avg_sq.to_device(device).expect("device transfer failed");
+            exp_avg_sq = exp_avg_sq
+                .to_device(device)
+                .expect("device transfer failed");
         }
         Self {
             exp_avg,
@@ -273,12 +277,19 @@ impl Optimizer for Adam {
                 param_vec[i] -= step_size * exp_avg_vec[i] / denom;
             }
 
-            state.exp_avg = Tensor::from_vec(exp_avg_vec, param_data.shape()).expect("tensor creation failed");
-            state.exp_avg_sq = Tensor::from_vec(exp_avg_sq_vec, param_data.shape()).expect("tensor creation failed");
+            state.exp_avg =
+                Tensor::from_vec(exp_avg_vec, param_data.shape()).expect("tensor creation failed");
+            state.exp_avg_sq = Tensor::from_vec(exp_avg_sq_vec, param_data.shape())
+                .expect("tensor creation failed");
             if self.amsgrad {
-                state.max_exp_avg_sq = Some(Tensor::from_vec(max_sq_vec, param_data.shape()).expect("tensor creation failed"));
+                state.max_exp_avg_sq = Some(
+                    Tensor::from_vec(max_sq_vec, param_data.shape())
+                        .expect("tensor creation failed"),
+                );
             }
-            param.update_data(Tensor::from_vec(param_vec, param_data.shape()).expect("tensor creation failed"));
+            param.update_data(
+                Tensor::from_vec(param_vec, param_data.shape()).expect("tensor creation failed"),
+            );
         }
     }
 
@@ -550,7 +561,10 @@ mod tests {
 
     #[test]
     fn test_adam_creation() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
         let optimizer = Adam::new(vec![param], 0.001);
 
@@ -561,7 +575,10 @@ mod tests {
 
     #[test]
     fn test_adam_step() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         // Set gradient
@@ -579,7 +596,10 @@ mod tests {
 
     #[test]
     fn test_adamw_creation() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
         let optimizer = AdamW::new(vec![param], 0.001);
 
@@ -588,7 +608,10 @@ mod tests {
 
     #[test]
     fn test_adam_builder_pattern() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         let optimizer = Adam::new(vec![param], 0.001)

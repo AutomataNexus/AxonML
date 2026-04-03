@@ -144,13 +144,17 @@ mod tests {
 
         // Set a test environment variable
         // SAFETY: test runs single-threaded, no concurrent env access
-        unsafe { std::env::set_var("TEST_SECRETS_JWT_SECRET", "test_value"); }
+        unsafe {
+            std::env::set_var("TEST_SECRETS_JWT_SECRET", "test_value");
+        }
 
         let result = backend.get_secret(SecretKey::JWT_SECRET).await.unwrap();
         assert_eq!(result, Some("test_value".to_string()));
 
         // Clean up
-        unsafe { std::env::remove_var("TEST_SECRETS_JWT_SECRET"); }
+        unsafe {
+            std::env::remove_var("TEST_SECRETS_JWT_SECRET");
+        }
     }
 
     #[tokio::test]
@@ -166,11 +170,15 @@ mod tests {
         let backend = EnvBackend::new("TEST_EMPTY");
 
         // SAFETY: test runs single-threaded, no concurrent env access
-        unsafe { std::env::set_var("TEST_EMPTY_JWT_SECRET", ""); }
+        unsafe {
+            std::env::set_var("TEST_EMPTY_JWT_SECRET", "");
+        }
 
         let result = backend.get_secret(SecretKey::JWT_SECRET).await.unwrap();
         assert_eq!(result, None);
 
-        unsafe { std::env::remove_var("TEST_EMPTY_JWT_SECRET"); }
+        unsafe {
+            std::env::remove_var("TEST_EMPTY_JWT_SECRET");
+        }
     }
 }

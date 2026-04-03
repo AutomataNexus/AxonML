@@ -189,7 +189,8 @@ impl SparseLinear {
                 .collect()
         };
 
-        Tensor::from_vec(mask_vec, &[self.out_features, self.in_features]).expect("tensor creation failed")
+        Tensor::from_vec(mask_vec, &[self.out_features, self.in_features])
+            .expect("tensor creation failed")
     }
 
     /// Returns the fraction of weights that are active (above threshold).
@@ -234,7 +235,8 @@ impl SparseLinear {
             .map(|(&w, &m)| w * m)
             .collect();
 
-        let new_weight = Tensor::from_vec(pruned, &[self.out_features, self.in_features]).expect("tensor creation failed");
+        let new_weight = Tensor::from_vec(pruned, &[self.out_features, self.in_features])
+            .expect("tensor creation failed");
         self.weight.update_data(new_weight);
 
         // Reset thresholds to zero so forward pass doesn't re-prune
@@ -275,7 +277,8 @@ impl SparseLinear {
             .map(|(&w, &m)| w * m)
             .collect();
 
-        Tensor::from_vec(effective, &[self.out_features, self.in_features]).expect("tensor creation failed")
+        Tensor::from_vec(effective, &[self.out_features, self.in_features])
+            .expect("tensor creation failed")
     }
 
     /// Computes the soft mask using differentiable sigmoid thresholding.
@@ -316,8 +319,8 @@ impl SparseLinear {
                 .collect()
         };
 
-        let mask_tensor =
-            Tensor::from_vec(mask_vec, &[self.out_features, self.in_features]).expect("tensor creation failed");
+        let mask_tensor = Tensor::from_vec(mask_vec, &[self.out_features, self.in_features])
+            .expect("tensor creation failed");
 
         // Create as a variable that participates in the graph
         // The mask depends on both weight and threshold, but since we compute
@@ -481,7 +484,8 @@ impl GroupSparsity {
         }
 
         let penalty_val = self.lambda * group_norm_sum;
-        let penalty_tensor = Tensor::from_vec(vec![penalty_val], &[1]).expect("tensor creation failed");
+        let penalty_tensor =
+            Tensor::from_vec(vec![penalty_val], &[1]).expect("tensor creation failed");
 
         // Create as a variable. The penalty is computed from raw tensor values
         // for simplicity. For full autograd integration, one would implement a
@@ -675,7 +679,10 @@ mod tests {
     #[test]
     fn test_sparse_linear_forward_batch() {
         let layer = SparseLinear::new(4, 3);
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 12], &[3, 4]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 12], &[3, 4]).expect("tensor creation failed"),
+            false,
+        );
         let output = layer.forward(&input);
         assert_eq!(output.shape(), vec![3, 3]);
     }
@@ -683,7 +690,10 @@ mod tests {
     #[test]
     fn test_sparse_linear_forward_no_bias() {
         let layer = SparseLinear::with_bias(4, 3, false);
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 8], &[2, 4]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 8], &[2, 4]).expect("tensor creation failed"),
+            false,
+        );
         let output = layer.forward(&input);
         assert_eq!(output.shape(), vec![2, 3]);
     }
@@ -888,7 +898,8 @@ mod tests {
     fn test_sparse_linear_unstructured_forward() {
         let layer = SparseLinear::unstructured(4, 3);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[2, 4]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[2, 4])
+                .expect("tensor creation failed"),
             false,
         );
         let output = layer.forward(&input);
@@ -910,7 +921,8 @@ mod tests {
     fn test_group_sparsity_penalty_non_negative() {
         let reg = GroupSparsity::new(0.01, 4);
         let weight = Variable::new(
-            Tensor::from_vec(vec![1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0], &[2, 4]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0], &[2, 4])
+                .expect("tensor creation failed"),
             true,
         );
         let penalty = reg.penalty(&weight);
@@ -925,7 +937,10 @@ mod tests {
     #[test]
     fn test_group_sparsity_zero_weights_zero_penalty() {
         let reg = GroupSparsity::new(0.01, 4);
-        let weight = Variable::new(Tensor::from_vec(vec![0.0; 8], &[2, 4]).expect("tensor creation failed"), true);
+        let weight = Variable::new(
+            Tensor::from_vec(vec![0.0; 8], &[2, 4]).expect("tensor creation failed"),
+            true,
+        );
         let penalty = reg.penalty(&weight);
         let penalty_val = penalty.data().to_vec()[0];
         assert!(
@@ -1033,18 +1048,21 @@ mod tests {
 
     #[test]
     fn test_lottery_ticket_rewind_with_mask() {
-        let data = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).expect("tensor creation failed");
+        let data =
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).expect("tensor creation failed");
         let param = Parameter::named("weight", data, true);
         let params = vec![param];
 
         let ticket = LotteryTicket::snapshot(&params);
 
         // Modify the parameter
-        let new_data = Tensor::from_vec(vec![10.0, 20.0, 30.0, 40.0], &[2, 2]).expect("tensor creation failed");
+        let new_data = Tensor::from_vec(vec![10.0, 20.0, 30.0, 40.0], &[2, 2])
+            .expect("tensor creation failed");
         params[0].update_data(new_data);
 
         // Mask: keep first two, prune last two
-        let mask = Tensor::from_vec(vec![1.0, 1.0, 0.0, 0.0], &[2, 2]).expect("tensor creation failed");
+        let mask =
+            Tensor::from_vec(vec![1.0, 1.0, 0.0, 0.0], &[2, 2]).expect("tensor creation failed");
         ticket.rewind_with_mask(&params, &[mask]);
 
         let result = params[0].data().to_vec();
@@ -1074,7 +1092,10 @@ mod tests {
         let layer = SparseLinear::new(8, 4);
 
         // Forward pass
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 16], &[2, 8]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 16], &[2, 8]).expect("tensor creation failed"),
+            false,
+        );
         let output = layer.forward(&input);
         assert_eq!(output.shape(), vec![2, 4]);
 

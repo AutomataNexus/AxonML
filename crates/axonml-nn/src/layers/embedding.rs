@@ -70,8 +70,8 @@ impl GradientFunction for EmbeddingBackward {
             }
         }
 
-        let grad_tensor =
-            Tensor::from_vec(weight_grad, &[self.num_embeddings, self.embedding_dim]).expect("tensor creation failed");
+        let grad_tensor = Tensor::from_vec(weight_grad, &[self.num_embeddings, self.embedding_dim])
+            .expect("tensor creation failed");
         vec![Some(grad_tensor)]
     }
 
@@ -132,7 +132,8 @@ impl Embedding {
             for i in 0..embedding_dim {
                 data[pad_idx * embedding_dim + i] = 0.0;
             }
-            weight_data = Tensor::from_vec(data, &[num_embeddings, embedding_dim]).expect("tensor creation failed");
+            weight_data = Tensor::from_vec(data, &[num_embeddings, embedding_dim])
+                .expect("tensor creation failed");
         }
 
         Self {
@@ -296,7 +297,10 @@ mod tests {
     #[test]
     fn test_embedding_lookup() {
         let emb = Embedding::new(10, 4);
-        let indices = Variable::new(Tensor::from_vec(vec![0.0, 1.0, 2.0], &[3]).expect("tensor creation failed"), false);
+        let indices = Variable::new(
+            Tensor::from_vec(vec![0.0, 1.0, 2.0], &[3]).expect("tensor creation failed"),
+            false,
+        );
         let output = emb.forward(&indices);
         assert_eq!(output.shape(), vec![3, 4]);
     }
@@ -305,7 +309,8 @@ mod tests {
     fn test_embedding_batch() {
         let emb = Embedding::new(10, 4);
         let indices = Variable::new(
-            Tensor::from_vec(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0], &[2, 3]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0], &[2, 3])
+                .expect("tensor creation failed"),
             false,
         );
         let output = emb.forward(&indices);
@@ -323,7 +328,10 @@ mod tests {
     fn test_embedding_with_padding() {
         let emb = Embedding::with_options(10, 4, Some(0));
         // Padding index 0 should be all zeros
-        let indices = Variable::new(Tensor::from_vec(vec![0.0], &[1]).expect("tensor creation failed"), false);
+        let indices = Variable::new(
+            Tensor::from_vec(vec![0.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         let output = emb.forward(&indices);
         let output_vec = output.data().to_vec();
         assert!(output_vec.iter().all(|&x| x == 0.0));

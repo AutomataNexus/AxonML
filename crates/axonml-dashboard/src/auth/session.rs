@@ -89,19 +89,13 @@ pub fn get_stored_user() -> Option<User> {
 /// Logs warnings if storage writes fail.
 pub fn store_session(access_token: &str, refresh_token: &str, user: &User) {
     if let Err(e) = SessionStorage::set(ACCESS_TOKEN_KEY, access_token) {
-        web_sys::console::warn_1(
-            &format!("Failed to store access token: {e}").into(),
-        );
+        web_sys::console::warn_1(&format!("Failed to store access token: {e}").into());
     }
     if let Err(e) = LocalStorage::set(REFRESH_TOKEN_KEY, refresh_token) {
-        web_sys::console::warn_1(
-            &format!("Failed to store refresh token: {e}").into(),
-        );
+        web_sys::console::warn_1(&format!("Failed to store refresh token: {e}").into());
     }
     if let Err(e) = SessionStorage::set(USER_KEY, user) {
-        web_sys::console::warn_1(
-            &format!("Failed to store user data: {e}").into(),
-        );
+        web_sys::console::warn_1(&format!("Failed to store user data: {e}").into());
     }
 }
 
@@ -115,9 +109,7 @@ pub fn clear_session() {
 /// Update access token only (sessionStorage)
 pub fn update_access_token(token: &str) {
     if let Err(e) = SessionStorage::set(ACCESS_TOKEN_KEY, token) {
-        web_sys::console::warn_1(
-            &format!("Failed to update access token: {e}").into(),
-        );
+        web_sys::console::warn_1(&format!("Failed to update access token: {e}").into());
     }
 }
 

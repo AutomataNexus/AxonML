@@ -329,7 +329,10 @@ mod tests {
 
     #[test]
     fn test_rmsprop_creation() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
         let optimizer = RMSprop::new(vec![param], 0.01);
 
@@ -339,7 +342,10 @@ mod tests {
 
     #[test]
     fn test_rmsprop_step() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         // Set gradient
@@ -357,7 +363,10 @@ mod tests {
 
     #[test]
     fn test_rmsprop_with_momentum() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         let optimizer = RMSprop::new(vec![param], 0.01).momentum(0.9);
@@ -367,7 +376,10 @@ mod tests {
 
     #[test]
     fn test_rmsprop_centered() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         let optimizer = RMSprop::new(vec![param], 0.01).centered(true);
@@ -377,7 +389,10 @@ mod tests {
 
     #[test]
     fn test_rmsprop_builder_pattern() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         let optimizer = RMSprop::new(vec![param], 0.01)

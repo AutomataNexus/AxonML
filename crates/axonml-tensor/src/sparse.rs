@@ -632,7 +632,8 @@ mod tests {
 
     #[test]
     fn test_sparse_tensor_from_dense() {
-        let dense = Tensor::from_vec(vec![0.0, 1.0, 0.0, 2.0], &[2, 2]).expect("tensor creation failed");
+        let dense =
+            Tensor::from_vec(vec![0.0, 1.0, 0.0, 2.0], &[2, 2]).expect("tensor creation failed");
         let sparse = SparseTensor::from_dense(&dense, 0.0);
 
         assert_eq!(sparse.nnz(), 2);
@@ -690,7 +691,8 @@ mod tests {
         let sparse = SparseTensor::from_coords(&coords, &values, &[2, 2]);
 
         // Dense: [[1, 2], [3, 4]]
-        let dense = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).expect("tensor creation failed");
+        let dense =
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).expect("tensor creation failed");
 
         let result = sparse.matmul(&dense);
         let data = result.to_vec();

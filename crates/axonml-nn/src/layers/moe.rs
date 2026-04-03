@@ -305,7 +305,10 @@ impl MoELayer {
     pub fn load_balancing_loss(&self) -> Variable {
         let gate_probs_opt = self.last_gate_probs.read().unwrap();
         if gate_probs_opt.is_none() {
-            return Variable::new(Tensor::from_vec(vec![0.0f32], &[1]).expect("tensor creation failed"), false);
+            return Variable::new(
+                Tensor::from_vec(vec![0.0f32], &[1]).expect("tensor creation failed"),
+                false,
+            );
         }
 
         let gate_probs = gate_probs_opt.as_ref().unwrap();
@@ -316,7 +319,10 @@ impl MoELayer {
         let num_experts = shape[1];
 
         if num_tokens == 0 {
-            return Variable::new(Tensor::from_vec(vec![0.0f32], &[1]).expect("tensor creation failed"), false);
+            return Variable::new(
+                Tensor::from_vec(vec![0.0f32], &[1]).expect("tensor creation failed"),
+                false,
+            );
         }
 
         let expert_counts = self.last_expert_counts.read().unwrap();
@@ -345,7 +351,10 @@ impl MoELayer {
         }
         loss_val *= num_experts as f32;
 
-        Variable::new(Tensor::from_vec(vec![loss_val], &[1]).expect("tensor creation failed"), false)
+        Variable::new(
+            Tensor::from_vec(vec![loss_val], &[1]).expect("tensor creation failed"),
+            false,
+        )
     }
 
     /// Returns expert utilization counts from the last forward pass.
@@ -444,7 +453,8 @@ impl Module for MoELayer {
             }
         }
 
-        let output_tensor = Tensor::from_vec(output_data, &[num_tokens, d_model]).expect("tensor creation failed");
+        let output_tensor =
+            Tensor::from_vec(output_data, &[num_tokens, d_model]).expect("tensor creation failed");
         let output = Variable::new(output_tensor, true);
 
         // Reshape back to [batch, seq_len, d_model]

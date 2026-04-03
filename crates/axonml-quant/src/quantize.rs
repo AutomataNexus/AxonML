@@ -20,7 +20,9 @@ use rayon::prelude::*;
 
 use crate::DEFAULT_BLOCK_SIZE;
 use crate::error::QuantResult;
-use crate::types::{Q4_1Block, Q4Block, Q5Block, Q5_1Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor};
+use crate::types::{
+    Q4_1Block, Q4Block, Q5_1Block, Q5Block, Q8Block, QuantType, QuantizedBlock, QuantizedTensor,
+};
 
 // =============================================================================
 // Public API
@@ -278,7 +280,11 @@ fn quantize_q5_1(data: &[f32], shape: Vec<usize>) -> QuantResult<QuantizedTensor
             }
 
             let packed = Q5_1Block::pack(&quantized);
-            QuantizedBlock::Q5_1(Q5_1Block::new(f16::from_f32(scale), f16::from_f32(min), packed))
+            QuantizedBlock::Q5_1(Q5_1Block::new(
+                f16::from_f32(scale),
+                f16::from_f32(min),
+                packed,
+            ))
         })
         .collect();
 

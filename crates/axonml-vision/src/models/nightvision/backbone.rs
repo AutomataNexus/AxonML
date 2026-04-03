@@ -327,7 +327,10 @@ mod tests {
     #[test]
     fn test_conv_bn_silu_shape() {
         let block = ConvBNSiLU::new(3, 32, 3, 1, 1);
-        let x = Variable::new(Tensor::from_vec(vec![0.1; 2 * 3 * 8 * 8], &[2, 3, 8, 8]).unwrap(), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1; 2 * 3 * 8 * 8], &[2, 3, 8, 8]).unwrap(),
+            false,
+        );
         let y = block.forward(&x);
         assert_eq!(y.data().shape(), &[2, 32, 8, 8]);
     }
@@ -341,7 +344,10 @@ mod tests {
     #[test]
     fn test_bottleneck_shortcut() {
         let block = Bottleneck::new(16, 16, true);
-        let x = Variable::new(Tensor::from_vec(vec![0.1; 1 * 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1; 1 * 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(),
+            false,
+        );
         let y = block.forward(&x);
         assert_eq!(y.data().shape(), &[1, 16, 4, 4]);
     }
@@ -349,7 +355,10 @@ mod tests {
     #[test]
     fn test_bottleneck_no_shortcut() {
         let block = Bottleneck::new(16, 32, false);
-        let x = Variable::new(Tensor::from_vec(vec![0.1; 1 * 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1; 1 * 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(),
+            false,
+        );
         let y = block.forward(&x);
         assert_eq!(y.data().shape(), &[1, 32, 4, 4]);
     }
@@ -357,7 +366,10 @@ mod tests {
     #[test]
     fn test_csp_block_shape() {
         let block = CSPBlock::new(32, 64, 1);
-        let x = Variable::new(Tensor::from_vec(vec![0.1; 1 * 32 * 8 * 8], &[1, 32, 8, 8]).unwrap(), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![0.1; 1 * 32 * 8 * 8], &[1, 32, 8, 8]).unwrap(),
+            false,
+        );
         let y = block.forward(&x);
         // CSP with stride-2 downsample: spatial dims halved
         assert_eq!(y.data().shape()[0], 1);

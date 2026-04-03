@@ -153,11 +153,15 @@ impl MulBackward {
 impl GradientFunction for MulBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         // grad_lhs = grad_output * rhs
-        let grad_lhs = grad_output.mul(&self.saved_rhs).expect("backward: tensor mul failed");
+        let grad_lhs = grad_output
+            .mul(&self.saved_rhs)
+            .expect("backward: tensor mul failed");
         let grad_lhs = reduce_grad_for_broadcast(&grad_lhs, self.saved_lhs.shape());
 
         // grad_rhs = grad_output * lhs
-        let grad_rhs = grad_output.mul(&self.saved_lhs).expect("backward: tensor mul failed");
+        let grad_rhs = grad_output
+            .mul(&self.saved_lhs)
+            .expect("backward: tensor mul failed");
         let grad_rhs = reduce_grad_for_broadcast(&grad_rhs, self.saved_rhs.shape());
 
         vec![Some(grad_lhs), Some(grad_rhs)]
@@ -214,8 +218,13 @@ impl GradientFunction for DivBackward {
         let grad_lhs = reduce_grad_for_broadcast(&grad_lhs, self.saved_lhs.shape());
 
         // grad_rhs = -grad_output * lhs / rhs^2
-        let rhs_sq = self.saved_rhs.mul(&self.saved_rhs).expect("backward: tensor mul failed");
-        let grad_rhs = grad_output.mul(&self.saved_lhs).expect("backward: tensor mul failed");
+        let rhs_sq = self
+            .saved_rhs
+            .mul(&self.saved_rhs)
+            .expect("backward: tensor mul failed");
+        let grad_rhs = grad_output
+            .mul(&self.saved_lhs)
+            .expect("backward: tensor mul failed");
         let grad_rhs = grad_rhs.div(&rhs_sq).unwrap().neg();
         let grad_rhs = reduce_grad_for_broadcast(&grad_rhs, self.saved_rhs.shape());
 
@@ -466,7 +475,9 @@ impl GradientFunction for MeanDimBackward {
                 expanded_shape.insert(self.dim, 1);
                 let reshaped_dims: Vec<isize> =
                     expanded_shape.iter().map(|&x| x as isize).collect();
-                let reshaped = scaled.reshape(&reshaped_dims).expect("backward: reshape failed");
+                let reshaped = scaled
+                    .reshape(&reshaped_dims)
+                    .expect("backward: reshape failed");
                 reshaped.broadcast_to(&self.input_shape)
             };
             return vec![Some(expanded.contiguous())];
@@ -523,7 +534,8 @@ impl GradientFunction for MeanDimBackward {
             grad_input[flat_idx] = grad_vec[out_flat] * scale;
         }
 
-        let grad = Tensor::from_vec(grad_input, &self.input_shape).expect("backward: tensor creation failed");
+        let grad = Tensor::from_vec(grad_input, &self.input_shape)
+            .expect("backward: tensor creation failed");
         vec![Some(grad)]
     }
 
@@ -583,7 +595,10 @@ impl GradientFunction for VarDimBackward {
             // mean along dim (keepdim=true for broadcasting)
             let mean = self.saved_input.mean_dim(dim, true);
             // x - mean (broadcasts)
-            let diff = self.saved_input.sub(&mean).expect("backward: tensor sub failed");
+            let diff = self
+                .saved_input
+                .sub(&mean)
+                .expect("backward: tensor sub failed");
             // 2 * (x - mean) / N
             let scale = 2.0 / dim_size as f32;
             let scaled_diff = diff.mul_scalar(scale);
@@ -596,10 +611,14 @@ impl GradientFunction for VarDimBackward {
                 expanded_shape.insert(self.dim, 1);
                 let reshaped_dims: Vec<isize> =
                     expanded_shape.iter().map(|&x| x as isize).collect();
-                let reshaped = grad_output.reshape(&reshaped_dims).expect("backward: reshape failed");
+                let reshaped = grad_output
+                    .reshape(&reshaped_dims)
+                    .expect("backward: reshape failed");
                 reshaped.broadcast_to(self.saved_input.shape())
             };
-            let result = scaled_diff.mul(&grad_expanded).expect("backward: tensor mul failed");
+            let result = scaled_diff
+                .mul(&grad_expanded)
+                .expect("backward: tensor mul failed");
             return vec![Some(result)];
         }
 
@@ -685,7 +704,8 @@ impl GradientFunction for VarDimBackward {
                 2.0 * (input_vec[flat_idx] - means[out_idx]) / n * grad_vec[out_idx];
         }
 
-        let mut grad = Tensor::from_vec(grad_input, input_shape).expect("backward: tensor creation failed");
+        let mut grad =
+            Tensor::from_vec(grad_input, input_shape).expect("backward: tensor creation failed");
         // Preserve device
         if self.saved_input.device().is_gpu() {
             grad = grad.to_device(self.saved_input.device()).unwrap();
@@ -779,7 +799,8 @@ impl GradientFunction for NarrowBackward {
             grad_data[in_idx] = grad_out_data[out_idx];
         }
 
-        let grad = Tensor::from_vec(grad_data, &self.input_shape).expect("backward: tensor creation failed");
+        let grad = Tensor::from_vec(grad_data, &self.input_shape)
+            .expect("backward: tensor creation failed");
         vec![Some(grad)]
     }
 
@@ -847,7 +868,9 @@ fn reduce_grad_for_broadcast(grad: &Tensor<f32>, target_shape: &[usize]) -> Tens
                     .unwrap();
                 let result_2d = ones.matmul(grad).expect("backward: matmul failed");
                 let target_isize: Vec<isize> = target_shape.iter().map(|&x| x as isize).collect();
-                return result_2d.reshape(&target_isize).expect("backward: reshape failed");
+                return result_2d
+                    .reshape(&target_isize)
+                    .expect("backward: reshape failed");
             }
             // General case: iteratively sum_dim(0)
             let mut result = grad.clone();
@@ -975,7 +998,8 @@ mod tests {
         let grad_fn = AddBackward::new(None, None, vec![2, 3], vec![2, 3]);
         assert_eq!(grad_fn.name(), "AddBackward");
 
-        let grad_output = Tensor::from_vec(vec![1.0; 6], &[2, 3]).expect("backward: tensor creation failed");
+        let grad_output =
+            Tensor::from_vec(vec![1.0; 6], &[2, 3]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
         assert_eq!(grads.len(), 2);
         assert!(grads[0].is_some());
@@ -984,11 +1008,14 @@ mod tests {
 
     #[test]
     fn test_mul_backward() {
-        let lhs = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("backward: tensor creation failed");
-        let rhs = Tensor::from_vec(vec![4.0, 5.0, 6.0], &[3]).expect("backward: tensor creation failed");
+        let lhs =
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("backward: tensor creation failed");
+        let rhs =
+            Tensor::from_vec(vec![4.0, 5.0, 6.0], &[3]).expect("backward: tensor creation failed");
         let grad_fn = MulBackward::new(None, None, lhs, rhs);
 
-        let grad_output = Tensor::from_vec(vec![1.0, 1.0, 1.0], &[3]).expect("backward: tensor creation failed");
+        let grad_output =
+            Tensor::from_vec(vec![1.0, 1.0, 1.0], &[3]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         // grad_lhs should be rhs: [4, 5, 6]
@@ -999,10 +1026,12 @@ mod tests {
 
     #[test]
     fn test_pow_backward() {
-        let input = Tensor::from_vec(vec![2.0, 3.0], &[2]).expect("backward: tensor creation failed");
+        let input =
+            Tensor::from_vec(vec![2.0, 3.0], &[2]).expect("backward: tensor creation failed");
         let grad_fn = PowBackward::new(None, input, 2.0);
 
-        let grad_output = Tensor::from_vec(vec![1.0, 1.0], &[2]).expect("backward: tensor creation failed");
+        let grad_output =
+            Tensor::from_vec(vec![1.0, 1.0], &[2]).expect("backward: tensor creation failed");
         let grads = grad_fn.apply(&grad_output);
 
         // d/dx(x^2) = 2x, so [4.0, 6.0]

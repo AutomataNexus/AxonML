@@ -182,7 +182,10 @@ impl GradientFunction for L1LossBackward {
             eps_tensor
         };
         // |diff| approximated as sqrt(diff^2 + eps)  — but simpler: diff * diff then sqrt
-        let diff_sq = self.diff_tensor.mul(&self.diff_tensor).expect("tensor mul failed");
+        let diff_sq = self
+            .diff_tensor
+            .mul(&self.diff_tensor)
+            .expect("tensor mul failed");
         let diff_sq_eps = diff_sq.add(&eps_on_device).expect("tensor add failed");
         // sqrt via exp(0.5 * ln(x))
         let abs_diff = diff_sq_eps.ln().mul_scalar(0.5).exp();
@@ -264,8 +267,8 @@ impl GradientFunction for CrossEntropyBackward {
             }
         }
 
-        let mut grad_tensor =
-            Tensor::from_vec(grad_input, &[self.batch_size, self.num_classes]).expect("tensor creation failed");
+        let mut grad_tensor = Tensor::from_vec(grad_input, &[self.batch_size, self.num_classes])
+            .expect("tensor creation failed");
         if grad_output.device().is_gpu() {
             grad_tensor = grad_tensor.to_device(grad_output.device()).unwrap();
         }
@@ -393,10 +396,11 @@ impl CrossEntropyLoss {
         }
 
         let loss_tensor = Tensor::from_vec(losses, &[batch_size]).expect("tensor creation failed");
-        let softmax_tensor =
-            Tensor::from_vec(softmax_probs_vec, &[batch_size, num_classes]).expect("tensor creation failed");
+        let softmax_tensor = Tensor::from_vec(softmax_probs_vec, &[batch_size, num_classes])
+            .expect("tensor creation failed");
         let targets_f32: Vec<f32> = target_classes.iter().map(|&tc| tc as f32).collect();
-        let targets_tensor = Tensor::from_vec(targets_f32, &[batch_size]).expect("tensor creation failed");
+        let targets_tensor =
+            Tensor::from_vec(targets_f32, &[batch_size]).expect("tensor creation failed");
 
         let loss_var = if input.requires_grad() {
             let grad_fn = GradFn::new(CrossEntropyBackward {
@@ -469,7 +473,8 @@ impl NLLLoss {
             losses[b] = -input_vec[b * num_classes + tc];
         }
 
-        let mut loss_tensor = Tensor::from_vec(losses, &[batch_size]).expect("tensor creation failed");
+        let mut loss_tensor =
+            Tensor::from_vec(losses, &[batch_size]).expect("tensor creation failed");
         if input_data.device().is_gpu() {
             loss_tensor = loss_tensor.to_device(input_data.device()).unwrap();
         }
@@ -536,7 +541,8 @@ impl GradientFunction for NLLLossBackward {
             grad_input[b * self.num_classes + tc] = -g;
         }
 
-        let mut gi = Tensor::from_vec(grad_input, &[self.batch_size, self.num_classes]).expect("tensor creation failed");
+        let mut gi = Tensor::from_vec(grad_input, &[self.batch_size, self.num_classes])
+            .expect("tensor creation failed");
         if grad_output.device().is_gpu() {
             gi = gi.to_device(grad_output.device()).unwrap();
         }
@@ -651,7 +657,9 @@ impl GradientFunction for BCELossBackward {
         // p_clamped = clamp(input, eps, 1-eps)
         let p_clamped = axonml_tensor::ops::clamp(&self.input_tensor, eps, 1.0 - eps);
         // (p - y)
-        let p_minus_y = p_clamped.sub(&self.target_tensor).expect("tensor sub failed");
+        let p_minus_y = p_clamped
+            .sub(&self.target_tensor)
+            .expect("tensor sub failed");
         // p * (1 - p)
         let one_minus_p = p_clamped.neg().add_scalar(1.0);
         let denom = p_clamped.mul(&one_minus_p).expect("tensor mul failed");
@@ -756,7 +764,11 @@ impl BCEWithLogitsLoss {
         // log(1 + exp(-|x|))
         let log_term = exp_neg_abs.add_scalar(1.0).ln();
         // loss = relu(x) - x*t + log(1 + exp(-|x|))
-        let loss_tensor = relu_x.sub(&x_times_t).expect("tensor sub failed").add(&log_term).expect("tensor add failed");
+        let loss_tensor = relu_x
+            .sub(&x_times_t)
+            .expect("tensor sub failed")
+            .add(&log_term)
+            .expect("tensor add failed");
 
         let loss_var = if input.requires_grad() {
             let grad_fn = GradFn::new(BCEWithLogitsBackward {
@@ -805,7 +817,10 @@ impl GradientFunction for SmoothL1Backward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         // Compute |diff| = sqrt(diff^2 + eps) to stay differentiable and device-agnostic
         let eps = 1e-12f32;
-        let diff_sq = self.diff_tensor.mul(&self.diff_tensor).expect("tensor mul failed");
+        let diff_sq = self
+            .diff_tensor
+            .mul(&self.diff_tensor)
+            .expect("tensor mul failed");
         let diff_sq_eps = diff_sq.add_scalar(eps);
         let abs_diff = diff_sq_eps.ln().mul_scalar(0.5).exp();
 
@@ -971,8 +986,14 @@ mod tests {
     #[test]
     fn test_mse_loss() {
         let loss_fn = MSELoss::new();
-        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), false);
-        let target = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            false,
+        );
+        let target = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            false,
+        );
         let loss = loss_fn.compute(&input, &target);
         assert!((loss.data().to_vec()[0] - 0.0).abs() < 1e-6);
     }
@@ -980,8 +1001,14 @@ mod tests {
     #[test]
     fn test_mse_loss_nonzero() {
         let loss_fn = MSELoss::new();
-        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), false);
-        let target = Variable::new(Tensor::from_vec(vec![2.0, 3.0, 4.0], &[3]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            false,
+        );
+        let target = Variable::new(
+            Tensor::from_vec(vec![2.0, 3.0, 4.0], &[3]).expect("tensor creation failed"),
+            false,
+        );
         let loss = loss_fn.compute(&input, &target);
         // Each diff is 1.0, squared is 1.0, mean is 1.0
         assert!((loss.data().to_vec()[0] - 1.0).abs() < 1e-6);
@@ -991,10 +1018,14 @@ mod tests {
     fn test_cross_entropy_loss() {
         let loss_fn = CrossEntropyLoss::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0], &[2, 3]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0], &[2, 3])
+                .expect("tensor creation failed"),
             false,
         );
-        let target = Variable::new(Tensor::from_vec(vec![2.0, 0.0], &[2]).expect("tensor creation failed"), false);
+        let target = Variable::new(
+            Tensor::from_vec(vec![2.0, 0.0], &[2]).expect("tensor creation failed"),
+            false,
+        );
         let loss = loss_fn.compute(&input, &target);
         assert!(loss.data().to_vec()[0] > 0.0);
     }
@@ -1002,8 +1033,14 @@ mod tests {
     #[test]
     fn test_bce_loss() {
         let loss_fn = BCELoss::new();
-        let input = Variable::new(Tensor::from_vec(vec![0.5, 0.5], &[2]).expect("tensor creation failed"), false);
-        let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[2]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.5, 0.5], &[2]).expect("tensor creation failed"),
+            false,
+        );
+        let target = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0], &[2]).expect("tensor creation failed"),
+            false,
+        );
         let loss = loss_fn.compute(&input, &target);
         // -[1*ln(0.5) + 0*ln(0.5)] - [0*ln(0.5) + 1*ln(0.5)] = -2*ln(0.5) / 2 = -ln(0.5) = 0.693
         assert!((loss.data().to_vec()[0] - 0.693).abs() < 0.01);
@@ -1015,10 +1052,14 @@ mod tests {
 
         // Create input logits with requires_grad=true
         let input = Variable::new(
-            Tensor::from_vec(vec![2.0, 1.0, 0.1, 0.5, 2.5, 0.3], &[2, 3]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![2.0, 1.0, 0.1, 0.5, 2.5, 0.3], &[2, 3])
+                .expect("tensor creation failed"),
             true,
         );
-        let target = Variable::new(Tensor::from_vec(vec![0.0, 1.0], &[2]).expect("tensor creation failed"), false);
+        let target = Variable::new(
+            Tensor::from_vec(vec![0.0, 1.0], &[2]).expect("tensor creation failed"),
+            false,
+        );
 
         let loss_fn = CrossEntropyLoss::new();
         let loss = loss_fn.compute(&input, &target);
@@ -1079,7 +1120,10 @@ mod tests {
             Tensor::from_vec(vec![10.0, -10.0, -10.0], &[1, 3]).expect("tensor creation failed"),
             false,
         );
-        let target = Variable::new(Tensor::from_vec(vec![0.0], &[1]).expect("tensor creation failed"), false);
+        let target = Variable::new(
+            Tensor::from_vec(vec![0.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         let loss = loss_fn.compute(&input, &target);
         assert!(
             loss.data().to_vec()[0] < 0.001,
@@ -1093,10 +1137,14 @@ mod tests {
         let loss_fn = CrossEntropyLoss::new();
         let num_classes = 16;
         let input = Variable::new(
-            Tensor::from_vec(vec![0.0; num_classes], &[1, num_classes]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![0.0; num_classes], &[1, num_classes])
+                .expect("tensor creation failed"),
             false,
         );
-        let target = Variable::new(Tensor::from_vec(vec![0.0], &[1]).expect("tensor creation failed"), false);
+        let target = Variable::new(
+            Tensor::from_vec(vec![0.0], &[1]).expect("tensor creation failed"),
+            false,
+        );
         let loss = loss_fn.compute(&input, &target);
         let expected = (num_classes as f32).ln(); // ln(16) ≈ 2.77
         let actual = loss.data().to_vec()[0];
@@ -1142,8 +1190,14 @@ mod tests {
     fn test_smooth_l1_gradient_flow() {
         use axonml_autograd::backward;
 
-        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 5.0], &[3]).expect("tensor creation failed"), true);
-        let target = Variable::new(Tensor::from_vec(vec![1.5, 1.5, 1.5], &[3]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 5.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
+        let target = Variable::new(
+            Tensor::from_vec(vec![1.5, 1.5, 1.5], &[3]).expect("tensor creation failed"),
+            false,
+        );
 
         let loss_fn = SmoothL1Loss::new();
         let loss = loss_fn.compute(&input, &target);

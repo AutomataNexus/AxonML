@@ -96,10 +96,7 @@ pub async fn rate_limit_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     // Extract rate limiter from extensions
-    let limiter = request
-        .extensions()
-        .get::<RateLimiter>()
-        .cloned();
+    let limiter = request.extensions().get::<RateLimiter>().cloned();
 
     let ip = request
         .headers()

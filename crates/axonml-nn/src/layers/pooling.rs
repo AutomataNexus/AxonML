@@ -99,7 +99,8 @@ impl Module for MaxPool1d {
             }
         }
 
-        let output = Tensor::from_vec(output_data, &[batch, channels, out_length]).expect("tensor creation failed");
+        let output = Tensor::from_vec(output_data, &[batch, channels, out_length])
+            .expect("tensor creation failed");
 
         let requires_grad = input.requires_grad() && is_grad_enabled();
         if requires_grad {
@@ -241,7 +242,8 @@ impl Module for MaxPool2d {
             }
         }
 
-        let output = Tensor::from_vec(output_data, &[batch, channels, out_h, out_w]).expect("tensor creation failed");
+        let output = Tensor::from_vec(output_data, &[batch, channels, out_h, out_w])
+            .expect("tensor creation failed");
 
         let requires_grad = input.requires_grad() && is_grad_enabled();
         if requires_grad {
@@ -330,7 +332,8 @@ impl Module for AvgPool1d {
             }
         }
 
-        let output = Tensor::from_vec(output_data, &[batch, channels, out_length]).expect("tensor creation failed");
+        let output = Tensor::from_vec(output_data, &[batch, channels, out_length])
+            .expect("tensor creation failed");
 
         let requires_grad = input.requires_grad() && is_grad_enabled();
         if requires_grad {
@@ -464,7 +467,8 @@ impl Module for AvgPool2d {
             }
         }
 
-        let output = Tensor::from_vec(output_data, &[batch, channels, out_h, out_w]).expect("tensor creation failed");
+        let output = Tensor::from_vec(output_data, &[batch, channels, out_h, out_w])
+            .expect("tensor creation failed");
 
         let requires_grad = input.requires_grad() && is_grad_enabled();
         if requires_grad {
@@ -550,7 +554,8 @@ impl Module for AdaptiveAvgPool2d {
             }
         }
 
-        let output = Tensor::from_vec(output_data, &[batch, channels, out_h, out_w]).expect("tensor creation failed");
+        let output = Tensor::from_vec(output_data, &[batch, channels, out_h, out_w])
+            .expect("tensor creation failed");
 
         let requires_grad = input.requires_grad() && is_grad_enabled();
         if requires_grad {
@@ -669,7 +674,8 @@ mod tests {
     fn test_adaptive_avgpool2d() {
         let pool = AdaptiveAvgPool2d::new((1, 1));
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 1, 2, 2]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 1, 2, 2])
+                .expect("tensor creation failed"),
             false,
         );
         let output = pool.forward(&input);
@@ -681,7 +687,8 @@ mod tests {
     fn test_adaptive_avgpool2d_backward() {
         let pool = AdaptiveAvgPool2d::new((1, 1));
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 1, 2, 2]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 1, 2, 2])
+                .expect("tensor creation failed"),
             true,
         );
         let output = pool.forward(&input);

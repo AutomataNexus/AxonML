@@ -441,7 +441,9 @@ fn main() {
         .iter()
         .position(|a| a == "--model")
         .map(|i| PathBuf::from(&args[i + 1]))
-        .unwrap_or_else(|| PathBuf::from("/opt/AxonML/checkpoints/mnemosyne/checkpoint_best.axonml"));
+        .unwrap_or_else(|| {
+            PathBuf::from("/opt/AxonML/checkpoints/mnemosyne/checkpoint_best.axonml")
+        });
 
     let num_pairs: usize = args
         .iter()

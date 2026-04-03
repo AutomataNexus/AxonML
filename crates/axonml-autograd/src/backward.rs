@@ -95,7 +95,8 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
         let next_fns = node.next_functions();
         for (i, maybe_next) in next_fns.iter().enumerate() {
             if let Some(next_fn) = maybe_next {
-                if let Some(mut input_grad) = input_grads.get(i).and_then(std::clone::Clone::clone) {
+                if let Some(mut input_grad) = input_grads.get(i).and_then(std::clone::Clone::clone)
+                {
                     // Auto-migrate gradient to match the propagation device.
                     // This handles backward functions that compute on CPU even
                     // when the forward was on GPU (e.g., Conv1d/Conv2d backward).
@@ -257,7 +258,10 @@ mod tests {
     #[test]
     fn test_simple_backward() {
         // y = x^2, dy/dx = 2x
-        let x = Variable::new(Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"), true);
+        let x = Variable::new(
+            Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let y = x.pow(2.0);
 
         y.backward();
@@ -270,7 +274,10 @@ mod tests {
     #[test]
     fn test_chain_backward() {
         // y = (x^2)^2 = x^4, dy/dx = 4x^3
-        let x = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
+        let x = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let y = x.pow(2.0).pow(2.0);
 
         y.backward();
@@ -282,8 +289,14 @@ mod tests {
 
     #[test]
     fn test_add_backward() {
-        let a = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let c = &a + &b;
         let loss = c.sum();
 
@@ -296,8 +309,14 @@ mod tests {
 
     #[test]
     fn test_mul_backward() {
-        let a = Variable::new(Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"),
+            true,
+        );
         let c = &a * &b;
         let loss = c.sum();
 
@@ -310,7 +329,10 @@ mod tests {
 
     #[test]
     fn test_numerical_gradient() {
-        let x = Variable::new(Tensor::from_vec(vec![2.0, 3.0], &[2]).expect("tensor creation failed"), false);
+        let x = Variable::new(
+            Tensor::from_vec(vec![2.0, 3.0], &[2]).expect("tensor creation failed"),
+            false,
+        );
 
         let numerical = numerical_gradient(|v| v.pow(2.0).sum(), &x, 1e-5);
 

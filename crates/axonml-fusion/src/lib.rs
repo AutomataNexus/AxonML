@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_detect_elementwise_chain() {
-        use crate::patterns::{detect_patterns, OpType};
+        use crate::patterns::{OpType, detect_patterns};
 
         let ops = vec![OpType::Add, OpType::Mul, OpType::Relu];
         let patterns = detect_patterns(&ops);
@@ -74,12 +74,14 @@ mod tests {
 
     #[test]
     fn test_detect_add_relu() {
-        use crate::patterns::{detect_patterns, FusionPattern, OpType};
+        use crate::patterns::{FusionPattern, OpType, detect_patterns};
 
         let ops = vec![OpType::Add, OpType::Relu];
         let patterns = detect_patterns(&ops);
         assert!(
-            patterns.iter().any(|(p, _, _)| *p == FusionPattern::AddRelu),
+            patterns
+                .iter()
+                .any(|(p, _, _)| *p == FusionPattern::AddRelu),
             "Should detect AddRelu, got: {:?}",
             patterns
         );
@@ -105,8 +107,7 @@ mod tests {
         let bias = Tensor::from_vec(vec![0.1, 0.2], &[2]).expect("tensor creation failed");
         let input = Tensor::from_vec(vec![3.0, 4.0], &[1, 2]).expect("tensor creation failed");
 
-        let fl =
-            FusedLinear::new(weight, Some(bias), Activation::Relu).expect("new failed");
+        let fl = FusedLinear::new(weight, Some(bias), Activation::Relu).expect("new failed");
         let output = fl.forward(&input).expect("forward failed");
         let out = output.to_vec();
         assert!((out[0] - 3.1).abs() < 1e-4, "got {}", out[0]);

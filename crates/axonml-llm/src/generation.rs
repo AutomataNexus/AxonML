@@ -287,11 +287,7 @@ impl TextGenerator {
     ///
     /// `get_logits_fn` takes a token sequence and returns logits [vocab_size].
     /// Returns the best sequence found by beam search.
-    pub fn generate_beam_search<F>(
-        &self,
-        initial_tokens: &[u32],
-        get_logits_fn: &mut F,
-    ) -> Vec<u32>
+    pub fn generate_beam_search<F>(&self, initial_tokens: &[u32], get_logits_fn: &mut F) -> Vec<u32>
     where
         F: FnMut(&[u32]) -> Vec<f32>,
     {
@@ -335,7 +331,9 @@ impl TextGenerator {
             beams = beam_search.expand_beams(&beams, &log_prob_beams);
         }
 
-        beam_search.best_sequence(&beams).unwrap_or_else(|| initial_tokens.to_vec())
+        beam_search
+            .best_sequence(&beams)
+            .unwrap_or_else(|| initial_tokens.to_vec())
     }
 
     /// Checks if generation should stop.
@@ -563,7 +561,9 @@ mod tests {
 
     #[test]
     fn test_generate_beam_search() {
-        let config = GenerationConfig::beam_search(3).with_max_tokens(5).with_eos_token(4);
+        let config = GenerationConfig::beam_search(3)
+            .with_max_tokens(5)
+            .with_eos_token(4);
         let generator = TextGenerator::new(config);
 
         let mut step = 0;

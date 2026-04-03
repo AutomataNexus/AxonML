@@ -788,9 +788,16 @@ mod tests {
         let bytes = serialize_model(&proto).unwrap();
 
         // Protobuf binary should NOT start with '{' (that would be JSON)
-        assert_ne!(bytes.first(), Some(&b'{'), "Output should be protobuf binary, not JSON");
+        assert_ne!(
+            bytes.first(),
+            Some(&b'{'),
+            "Output should be protobuf binary, not JSON"
+        );
         // Should be non-empty
-        assert!(bytes.len() > 10, "Protobuf output should have substantial content");
+        assert!(
+            bytes.len() > 10,
+            "Protobuf output should have substantial content"
+        );
     }
 
     #[test]
