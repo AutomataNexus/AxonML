@@ -509,6 +509,9 @@ pub fn stream_synchronize(_handle: usize) {
 #[cfg(feature = "cuda")]
 impl CudaBackend {
     /// Performs matrix multiplication using cuBLAS: C = alpha * A @ B + beta * C
+    ///
+    /// Uses raw cublasSgemm_v2 FFI to avoid GemmConfig abstraction issues
+    /// with cuBLAS 12.9+ on Blackwell GPUs.
     pub fn gemm_f32(
         &self,
         transa: bool,
@@ -525,28 +528,44 @@ impl CudaBackend {
         c: &mut CudaSlice<f32>,
         ldc: usize,
     ) -> Result<(), CudaError> {
-        let cfg = GemmConfig {
-            transa: if transa {
-                cublasOperation_t::CUBLAS_OP_T
-            } else {
-                cublasOperation_t::CUBLAS_OP_N
-            },
-            transb: if transb {
-                cublasOperation_t::CUBLAS_OP_T
-            } else {
-                cublasOperation_t::CUBLAS_OP_N
-            },
-            m: m as i32,
-            n: n as i32,
-            k: k as i32,
-            alpha,
-            lda: lda as i32,
-            ldb: ldb as i32,
-            beta,
-            ldc: ldc as i32,
+        use cudarc::cublas::result::sgemm;
+        use cudarc::driver::DevicePtr as _;
+        use cudarc::driver::DevicePtrMut as _;
+
+        let op_a = if transa {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+        let op_b = if transb {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
         };
 
-        unsafe { self.blas.gemm(cfg, a, b, c).map_err(CudaError::from) }
+        let (a_ptr, _ga) = a.device_ptr(&self.stream);
+        let (b_ptr, _gb) = b.device_ptr(&self.stream);
+        let (c_ptr, _gc) = c.device_ptr_mut(&self.stream);
+
+        unsafe {
+            sgemm(
+                *self.blas.handle(),
+                op_a,
+                op_b,
+                m as i32,
+                n as i32,
+                k as i32,
+                &alpha as *const f32,
+                a_ptr as *const f32,
+                lda as i32,
+                b_ptr as *const f32,
+                ldb as i32,
+                &beta as *const f32,
+                c_ptr as *mut f32,
+                ldc as i32,
+            )
+            .map_err(CudaError::from)
+        }
     }
 
     /// Performs batched matrix multiplication.
