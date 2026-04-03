@@ -5,6 +5,7 @@
 
   <p><strong>A complete, PyTorch-equivalent machine learning framework written in pure Rust.</strong></p>
 
+  [![CI](https://github.com/AutomataNexus/AxonML/actions/workflows/ci.yml/badge.svg)](https://github.com/AutomataNexus/AxonML/actions/workflows/ci.yml)
   [![Crates.io](https://img.shields.io/crates/v/axonml.svg)](https://crates.io/crates/axonml)
   [![Docs.rs](https://docs.rs/axonml/badge.svg)](https://docs.rs/axonml)
   [![Downloads](https://img.shields.io/crates/d/axonml.svg)](https://crates.io/crates/axonml)
