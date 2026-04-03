@@ -1616,7 +1616,9 @@ impl<T: Numeric> Tensor<T> {
         let batch_dims_other: Vec<usize> = other.shape[..other.ndim() - 2].to_vec();
 
         // Broadcast batch dimensions (PyTorch parity)
-        let broadcast_batch = if batch_dims_self != batch_dims_other {
+        let broadcast_batch = if batch_dims_self == batch_dims_other {
+            None
+        } else {
             // Pad to same length
             let max_len = batch_dims_self.len().max(batch_dims_other.len());
             let pad_a = vec![1usize; max_len - batch_dims_self.len()];
@@ -1648,8 +1650,6 @@ impl<T: Numeric> Tensor<T> {
                 }
             }
             Some((a_dims, b_dims, out_dims))
-        } else {
-            None
         };
 
         let (batch_size, a_batch_idx, b_batch_idx) =

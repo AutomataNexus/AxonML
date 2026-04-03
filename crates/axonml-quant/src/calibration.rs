@@ -266,7 +266,7 @@ pub fn calibrate(tensor: &Tensor<f32>, method: CalibrationMethod) -> QuantResult
                         }
 
                         // Quantize: merge bins
-                        let bins_per_quant = (threshold + quant_bins - 1) / quant_bins;
+                        let bins_per_quant = threshold.div_ceil(quant_bins);
                         let mut quant_dist = vec![0.0f64; quant_bins.min(threshold)];
                         for (i, &p) in clipped.iter().enumerate() {
                             let qi = (i / bins_per_quant).min(quant_dist.len() - 1);
@@ -275,14 +275,14 @@ pub fn calibrate(tensor: &Tensor<f32>, method: CalibrationMethod) -> QuantResult
 
                         // Expand back to original bins
                         let mut expanded = vec![0.0f64; threshold];
-                        for qi in 0..quant_dist.len() {
+                        for (qi, &qval) in quant_dist.iter().enumerate() {
                             let start = qi * bins_per_quant;
                             let end = ((qi + 1) * bins_per_quant).min(threshold);
                             let count = (end - start) as f64;
                             if count > 0.0 {
-                                let val = quant_dist[qi] / count;
-                                for j in start..end {
-                                    expanded[j] = val + 1e-12;
+                                let val = qval / count;
+                                for slot in expanded.iter_mut().take(end).skip(start) {
+                                    *slot = val + 1e-12;
                                 }
                             }
                         }

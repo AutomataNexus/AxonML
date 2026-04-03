@@ -330,7 +330,7 @@ impl CompiledFunction {
                 let dims = input_shape.dims();
                 let mut perm: Vec<usize> = (0..ndim).collect();
                 perm.swap(*dim0, *dim1);
-                let mut new_shape: Vec<usize> = perm.iter().map(|&d| dims[d]).collect();
+                let new_shape: Vec<usize> = perm.iter().map(|&d| dims[d]).collect();
                 let numel: usize = dims.iter().product();
                 let mut result = vec![0.0f32; numel];
 
@@ -345,6 +345,7 @@ impl CompiledFunction {
                     out_strides[d] = out_strides[d + 1] * new_shape[d + 1];
                 }
 
+                #[allow(clippy::needless_range_loop)]
                 for flat in 0..numel {
                     // Convert flat index to multi-dim in output space
                     let mut remaining = flat;

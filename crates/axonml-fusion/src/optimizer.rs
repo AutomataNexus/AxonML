@@ -196,11 +196,11 @@ impl FusionOptimizer {
             if range_idx < fused_ranges.len() && i == fused_ranges[range_idx].0 {
                 // This index starts a fused region — emit the first op as representative
                 // (the actual fusion happens at execution time using FusedLinear/FusedOp)
-                result.push(ops[i].clone());
+                result.push(ops[i]);
                 i = fused_ranges[range_idx].1;
                 range_idx += 1;
             } else {
-                result.push(ops[i].clone());
+                result.push(ops[i]);
                 i += 1;
             }
         }

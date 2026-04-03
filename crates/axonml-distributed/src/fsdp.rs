@@ -53,6 +53,7 @@ struct ShardedParam {
     numel: usize,
     /// Padding added for even sharding (for uneven divisions).
     /// Used for debugging/diagnostics.
+    #[allow(dead_code)]
     pub padding: usize,
 }
 
@@ -410,8 +411,10 @@ pub struct ColumnParallelLinear {
     /// Process group
     process_group: ProcessGroup,
     /// Input features
+    #[allow(dead_code)]
     in_features: usize,
     /// Output features (total across all ranks)
+    #[allow(dead_code)]
     out_features: usize,
     /// Whether to gather output
     gather_output: bool,
@@ -494,8 +497,10 @@ pub struct RowParallelLinear {
     /// Process group
     process_group: ProcessGroup,
     /// Input features (total across all ranks)
+    #[allow(dead_code)]
     in_features: usize,
     /// Output features
+    #[allow(dead_code)]
     out_features: usize,
     /// Whether input is already split
     input_is_parallel: bool,
