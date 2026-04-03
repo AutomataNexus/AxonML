@@ -64,7 +64,8 @@ impl TrainingState {
     pub fn record_val_loss(&mut self, loss: f32) {
         self.val_loss_history.push(loss);
         if self.val_loss_history.len() > 1000 {
-            self.val_loss_history.drain(..self.val_loss_history.len() - 1000);
+            self.val_loss_history
+                .drain(..self.val_loss_history.len() - 1000);
         }
     }
 
@@ -298,7 +299,11 @@ fn chrono_timestamp() -> String {
     let mut y = 1970i64;
     let mut remaining_days = days as i64;
     loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
         if remaining_days < days_in_year {
             break;
         }
@@ -307,7 +312,20 @@ fn chrono_timestamp() -> String {
     }
 
     let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut m = 0;
     for (i, &md) in month_days.iter().enumerate() {
         if remaining_days < md as i64 {

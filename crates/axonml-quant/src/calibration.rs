@@ -98,18 +98,23 @@ impl CalibrationData {
         // Use combined variance formula: Var(A∪B) from count, mean, var of each
         if old_count > 0 && !data.is_empty() {
             let new_mean_batch: f32 = data.iter().sum::<f32>() / data.len() as f32;
-            let new_var_batch: f32 = data.iter().map(|&v| (v - new_mean_batch).powi(2)).sum::<f32>()
+            let new_var_batch: f32 = data
+                .iter()
+                .map(|&v| (v - new_mean_batch).powi(2))
+                .sum::<f32>()
                 / data.len() as f32;
             let old_var = self.std_dev * self.std_dev;
             let n1 = old_count as f32;
             let n2 = data.len() as f32;
-            let combined_var = (n1 * old_var + n2 * new_var_batch
+            let combined_var = (n1 * old_var
+                + n2 * new_var_batch
                 + n1 * n2 / (n1 + n2) * (old_mean - new_mean_batch).powi(2))
                 / (n1 + n2);
             self.std_dev = combined_var.sqrt();
         } else if !data.is_empty() {
             let m: f32 = data.iter().sum::<f32>() / data.len() as f32;
-            self.std_dev = (data.iter().map(|&v| (v - m).powi(2)).sum::<f32>() / data.len() as f32).sqrt();
+            self.std_dev =
+                (data.iter().map(|&v| (v - m).powi(2)).sum::<f32>() / data.len() as f32).sqrt();
             self.num_samples = data.len();
         }
 
@@ -240,7 +245,9 @@ pub fn calibrate(tensor: &Tensor<f32>, method: CalibrationMethod) -> QuantResult
                     data.max = data.percentile(99.99);
                 } else {
                     // Normalize histogram to probability distribution
-                    let ref_dist: Vec<f64> = data.histogram.iter()
+                    let ref_dist: Vec<f64> = data
+                        .histogram
+                        .iter()
                         .map(|&c| c as f64 / total as f64 + 1e-12)
                         .collect();
 
@@ -281,7 +288,9 @@ pub fn calibrate(tensor: &Tensor<f32>, method: CalibrationMethod) -> QuantResult
                         }
 
                         // KL divergence: sum(P * log(P/Q))
-                        let kl: f64 = clipped.iter().zip(expanded.iter())
+                        let kl: f64 = clipped
+                            .iter()
+                            .zip(expanded.iter())
                             .map(|(&p, &q)| if p > 1e-12 { p * (p / q).ln() } else { 0.0 })
                             .sum();
 

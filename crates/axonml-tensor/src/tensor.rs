@@ -728,7 +728,9 @@ impl<T: Numeric> Tensor<T> {
         let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            return s.to_device(self.device()).expect("prod: device transfer failed");
+            return s
+                .to_device(self.device())
+                .expect("prod: device transfer failed");
         }
         s
     }
@@ -745,7 +747,9 @@ impl<T: Numeric> Tensor<T> {
         let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            return Ok(s.to_device(self.device()).expect("max: device transfer failed"));
+            return Ok(s
+                .to_device(self.device())
+                .expect("max: device transfer failed"));
         }
         Ok(s)
     }
@@ -762,7 +766,9 @@ impl<T: Numeric> Tensor<T> {
         let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            return Ok(s.to_device(self.device()).expect("min: device transfer failed"));
+            return Ok(s
+                .to_device(self.device())
+                .expect("min: device transfer failed"));
         }
         Ok(s)
     }
@@ -1615,8 +1621,16 @@ impl<T: Numeric> Tensor<T> {
             let max_len = batch_dims_self.len().max(batch_dims_other.len());
             let pad_a = vec![1usize; max_len - batch_dims_self.len()];
             let pad_b = vec![1usize; max_len - batch_dims_other.len()];
-            let a_dims: Vec<usize> = pad_a.iter().chain(batch_dims_self.iter()).copied().collect();
-            let b_dims: Vec<usize> = pad_b.iter().chain(batch_dims_other.iter()).copied().collect();
+            let a_dims: Vec<usize> = pad_a
+                .iter()
+                .chain(batch_dims_self.iter())
+                .copied()
+                .collect();
+            let b_dims: Vec<usize> = pad_b
+                .iter()
+                .chain(batch_dims_other.iter())
+                .copied()
+                .collect();
 
             let mut out_dims = Vec::with_capacity(max_len);
             for i in 0..max_len {
@@ -1638,37 +1652,38 @@ impl<T: Numeric> Tensor<T> {
             None
         };
 
-        let (batch_size, a_batch_idx, b_batch_idx) = if let Some((a_dims, b_dims, out_dims)) = &broadcast_batch {
-            let bs: usize = out_dims.iter().product();
-            // Build index mapping: for each output batch, which a and b batch to use
-            let mut a_idx = Vec::with_capacity(bs);
-            let mut b_idx = Vec::with_capacity(bs);
-            for flat in 0..bs {
-                let mut remaining = flat;
-                let mut ai = 0usize;
-                let mut bi = 0usize;
-                let mut a_stride_acc = 1usize;
-                let mut b_stride_acc = 1usize;
-                for d in (0..out_dims.len()).rev() {
-                    let out_d = out_dims[d];
-                    let idx = remaining % out_d;
-                    remaining /= out_d;
-                    let a_d = a_dims[d];
-                    let b_d = b_dims[d];
-                    ai += (idx % a_d) * a_stride_acc;
-                    bi += (idx % b_d) * b_stride_acc;
-                    a_stride_acc *= a_d;
-                    b_stride_acc *= b_d;
+        let (batch_size, a_batch_idx, b_batch_idx) =
+            if let Some((a_dims, b_dims, out_dims)) = &broadcast_batch {
+                let bs: usize = out_dims.iter().product();
+                // Build index mapping: for each output batch, which a and b batch to use
+                let mut a_idx = Vec::with_capacity(bs);
+                let mut b_idx = Vec::with_capacity(bs);
+                for flat in 0..bs {
+                    let mut remaining = flat;
+                    let mut ai = 0usize;
+                    let mut bi = 0usize;
+                    let mut a_stride_acc = 1usize;
+                    let mut b_stride_acc = 1usize;
+                    for d in (0..out_dims.len()).rev() {
+                        let out_d = out_dims[d];
+                        let idx = remaining % out_d;
+                        remaining /= out_d;
+                        let a_d = a_dims[d];
+                        let b_d = b_dims[d];
+                        ai += (idx % a_d) * a_stride_acc;
+                        bi += (idx % b_d) * b_stride_acc;
+                        a_stride_acc *= a_d;
+                        b_stride_acc *= b_d;
+                    }
+                    a_idx.push(ai);
+                    b_idx.push(bi);
                 }
-                a_idx.push(ai);
-                b_idx.push(bi);
-            }
-            (bs, a_idx, b_idx)
-        } else {
-            let bs: usize = batch_dims_self.iter().product();
-            let idx: Vec<usize> = (0..bs).collect();
-            (bs, idx.clone(), idx)
-        };
+                (bs, a_idx, b_idx)
+            } else {
+                let bs: usize = batch_dims_self.iter().product();
+                let idx: Vec<usize> = (0..bs).collect();
+                (bs, idx.clone(), idx)
+            };
 
         let a_stride = m * k1;
         let b_stride = k1 * n;

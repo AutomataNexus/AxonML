@@ -41,11 +41,15 @@ struct LambState {
 impl LambState {
     fn new(shape: &[usize], device: axonml_core::Device) -> Self {
         let size: usize = shape.iter().product();
-        let mut exp_avg = Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
-        let mut exp_avg_sq = Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
+        let mut exp_avg =
+            Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
+        let mut exp_avg_sq =
+            Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
         if device.is_gpu() {
             exp_avg = exp_avg.to_device(device).expect("device transfer failed");
-            exp_avg_sq = exp_avg_sq.to_device(device).expect("device transfer failed");
+            exp_avg_sq = exp_avg_sq
+                .to_device(device)
+                .expect("device transfer failed");
         }
         Self {
             exp_avg,
@@ -312,7 +316,10 @@ mod tests {
 
     #[test]
     fn test_lamb_creation() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
         let optimizer = LAMB::new(vec![param], 0.001);
 
@@ -323,7 +330,10 @@ mod tests {
 
     #[test]
     fn test_lamb_step() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         // Set gradient
@@ -341,7 +351,10 @@ mod tests {
 
     #[test]
     fn test_lamb_with_weight_decay() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         param
@@ -357,7 +370,10 @@ mod tests {
 
     #[test]
     fn test_lamb_builder_pattern() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         let optimizer = LAMB::new(vec![param], 0.001)
@@ -374,7 +390,10 @@ mod tests {
     #[test]
     fn test_lamb_trust_ratio() {
         // Test that trust ratio is computed correctly
-        let var = Variable::new(Tensor::from_vec(vec![3.0, 4.0], &[2]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![3.0, 4.0], &[2]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         // Weight norm = sqrt(9 + 16) = 5
@@ -396,7 +415,10 @@ mod tests {
 
     #[test]
     fn test_lamb_zero_grad() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         param

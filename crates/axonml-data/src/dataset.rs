@@ -75,8 +75,7 @@ impl TensorDataset {
         let target_shape = targets.shape().to_vec();
         let len = data_shape[0];
         assert_eq!(
-            len,
-            target_shape[0],
+            len, target_shape[0],
             "Data and targets must have same first dimension"
         );
 

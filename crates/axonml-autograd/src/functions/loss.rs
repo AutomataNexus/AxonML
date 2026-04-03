@@ -67,7 +67,10 @@ impl MseLossBackward {
 
 impl GradientFunction for MseLossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let diff = self.saved_pred.sub(&self.saved_target).expect("backward: tensor sub failed");
+        let diff = self
+            .saved_pred
+            .sub(&self.saved_target)
+            .expect("backward: tensor sub failed");
         let numel = diff.numel() as f32;
 
         let grad = match self.reduction {
@@ -76,7 +79,10 @@ impl GradientFunction for MseLossBackward {
                 diff.mul_scalar(scale * grad_output.to_vec()[0])
             }
             Reduction::Sum => diff.mul_scalar(2.0 * grad_output.to_vec()[0]),
-            Reduction::None => diff.mul_scalar(2.0).mul(grad_output).expect("backward: tensor mul failed"),
+            Reduction::None => diff
+                .mul_scalar(2.0)
+                .mul(grad_output)
+                .expect("backward: tensor mul failed"),
         };
 
         vec![Some(grad)]
@@ -149,9 +155,13 @@ impl GradientFunction for CrossEntropyLossBackward {
             let one_hot_gpu = one_hot_tensor
                 .to_device(self.saved_softmax.device())
                 .unwrap();
-            self.saved_softmax.add(&one_hot_gpu).expect("backward: tensor add failed")
+            self.saved_softmax
+                .add(&one_hot_gpu)
+                .expect("backward: tensor add failed")
         } else {
-            self.saved_softmax.add(&one_hot_tensor).expect("backward: tensor add failed")
+            self.saved_softmax
+                .add(&one_hot_tensor)
+                .expect("backward: tensor add failed")
         };
 
         // Scale by grad_output / batch_size (scalar)
@@ -233,7 +243,8 @@ impl GradientFunction for NllLossBackward {
             grad_data[i * num_classes + target_class] = scale;
         }
 
-        let mut grad = Tensor::from_vec(grad_data, input_shape).expect("backward: tensor creation failed");
+        let mut grad =
+            Tensor::from_vec(grad_data, input_shape).expect("backward: tensor creation failed");
         // Preserve device: input was on GPU, gradient should be too
         if self.saved_input.device().is_gpu() {
             grad = grad.to_device(self.saved_input.device()).unwrap();
@@ -501,8 +512,10 @@ mod tests {
 
     #[test]
     fn test_mse_loss_backward() {
-        let pred = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("backward: tensor creation failed");
-        let target = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("backward: tensor creation failed");
+        let pred =
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("backward: tensor creation failed");
+        let target =
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("backward: tensor creation failed");
         let grad_fn = MseLossBackward::new(None, pred, target, Reduction::Mean);
 
         let grad_output = Tensor::scalar(1.0);
@@ -517,8 +530,10 @@ mod tests {
 
     #[test]
     fn test_l1_loss_backward() {
-        let pred = Tensor::from_vec(vec![2.0, 1.0, 3.0], &[3]).expect("backward: tensor creation failed");
-        let target = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("backward: tensor creation failed");
+        let pred =
+            Tensor::from_vec(vec![2.0, 1.0, 3.0], &[3]).expect("backward: tensor creation failed");
+        let target =
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("backward: tensor creation failed");
         let grad_fn = L1LossBackward::new(None, pred, target, Reduction::Mean);
 
         let grad_output = Tensor::scalar(1.0);

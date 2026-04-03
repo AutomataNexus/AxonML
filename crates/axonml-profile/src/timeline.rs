@@ -177,8 +177,14 @@ impl TimelineProfiler {
     /// (not the wall time from first start to last end).
     pub fn duration(&self, name: &str) -> Option<Duration> {
         let events: Vec<_> = self.events_by_name(name);
-        let starts: Vec<_> = events.iter().filter(|e| e.event_type == EventType::Start).collect();
-        let ends: Vec<_> = events.iter().filter(|e| e.event_type == EventType::End).collect();
+        let starts: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::Start)
+            .collect();
+        let ends: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::End)
+            .collect();
 
         if starts.is_empty() || ends.is_empty() {
             return None;

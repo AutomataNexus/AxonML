@@ -233,7 +233,8 @@ impl Module for Conv1d {
         }
 
         let output_tensor =
-            Tensor::from_vec(output_data, &[batch_size, self.out_channels, out_length]).expect("tensor creation failed");
+            Tensor::from_vec(output_data, &[batch_size, self.out_channels, out_length])
+                .expect("tensor creation failed");
 
         let requires_grad =
             (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
@@ -472,11 +473,18 @@ fn im2col(
                 if w_in >= 0 && w_in < w_signed {
                     let col_idx = col_row_base + ow;
                     let inp_idx = input_row + w_in as usize;
-                    debug_assert!(col_idx < col.len(), "im2col fwd col OOB: {col_idx} >= {}", col.len());
-                    debug_assert!(inp_idx < input.len(), "im2col fwd input OOB: {inp_idx} >= {}", input.len());
+                    debug_assert!(
+                        col_idx < col.len(),
+                        "im2col fwd col OOB: {col_idx} >= {}",
+                        col.len()
+                    );
+                    debug_assert!(
+                        inp_idx < input.len(),
+                        "im2col fwd input OOB: {inp_idx} >= {}",
+                        input.len()
+                    );
                     unsafe {
-                        *col.get_unchecked_mut(col_idx) =
-                            *input.get_unchecked(inp_idx);
+                        *col.get_unchecked_mut(col_idx) = *input.get_unchecked(inp_idx);
                     }
                 }
             }
@@ -553,7 +561,8 @@ fn conv2d_im2col(
                 let w_tensor =
                     Tensor::from_vec(weight_slice.to_vec(), &[out_channels_per_group, col_h])
                         .unwrap();
-                let col_tensor = Tensor::from_vec(col, &[col_h, col_w]).expect("tensor creation failed");
+                let col_tensor =
+                    Tensor::from_vec(col, &[col_h, col_w]).expect("tensor creation failed");
                 let result = w_tensor.matmul(&col_tensor).expect("matmul failed");
                 let result_vec = result.to_vec();
 
@@ -1007,7 +1016,8 @@ impl Module for ConvTranspose2d {
         }
 
         let output_tensor =
-            Tensor::from_vec(output_data, &[batch_size, self.out_channels, out_h, out_w]).expect("tensor creation failed");
+            Tensor::from_vec(output_data, &[batch_size, self.out_channels, out_h, out_w])
+                .expect("tensor creation failed");
 
         let requires_grad =
             (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
@@ -1079,7 +1089,8 @@ mod tests {
     fn test_conv1d_forward() {
         let conv = Conv1d::with_options(1, 1, 3, 1, 1, false);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0], &[1, 1, 5]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0], &[1, 1, 5])
+                .expect("tensor creation failed"),
             false,
         );
         let output = conv.forward(&input);
@@ -1090,7 +1101,8 @@ mod tests {
     fn test_conv1d_backward() {
         let conv = Conv1d::with_options(1, 1, 3, 1, 1, false);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0], &[1, 1, 5]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0], &[1, 1, 5])
+                .expect("tensor creation failed"),
             true,
         );
         let output = conv.forward(&input);
@@ -1189,7 +1201,10 @@ mod tests {
     #[test]
     fn test_conv_transpose2d_backward() {
         let conv_t = ConvTranspose2d::new(1, 1, 3);
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3]).expect("tensor creation failed"), true);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3]).expect("tensor creation failed"),
+            true,
+        );
         let output = conv_t.forward(&input);
         let loss = output.sum();
         loss.backward();

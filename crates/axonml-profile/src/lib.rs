@@ -72,7 +72,8 @@ impl Profiler {
     ///
     /// Works on both owned and global (&self) profiler instances.
     pub fn set_enabled(&self, enabled: bool) {
-        self.enabled.store(enabled, std::sync::atomic::Ordering::Relaxed);
+        self.enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Returns whether profiling is enabled.

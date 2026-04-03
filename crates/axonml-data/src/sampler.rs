@@ -219,7 +219,10 @@ impl WeightedRandomSampler {
         let threshold: f64 = rand::thread_rng().r#gen::<f64>() * total;
 
         // Binary search: find first index where cumulative > threshold
-        match self.cumulative.binary_search_by(|c| c.partial_cmp(&threshold).unwrap()) {
+        match self
+            .cumulative
+            .binary_search_by(|c| c.partial_cmp(&threshold).unwrap())
+        {
             Ok(i) => i,
             Err(i) => i.min(self.cumulative.len() - 1),
         }
@@ -248,12 +251,11 @@ impl Sampler for WeightedRandomSampler {
                 }
 
                 let threshold: f64 = rand::thread_rng().r#gen::<f64>() * total;
-                let selected = match cumulative.binary_search_by(|c| {
-                    c.partial_cmp(&threshold).unwrap()
-                }) {
-                    Ok(i) => i,
-                    Err(i) => i.min(cumulative.len() - 1),
-                };
+                let selected =
+                    match cumulative.binary_search_by(|c| c.partial_cmp(&threshold).unwrap()) {
+                        Ok(i) => i,
+                        Err(i) => i.min(cumulative.len() - 1),
+                    };
 
                 indices.push(available[selected]);
 

@@ -217,21 +217,16 @@ fn quantize_state_dict(state_dict: &StateDict, quant_type: QuantType) -> CliResu
         }
 
         // Convert TensorData to Tensor for axonml_quant
-        let tensor =
-            Tensor::from_vec(entry.data.values.clone(), &entry.data.shape).map_err(|e| {
-                CliError::Model(format!("Failed to create tensor for {name}: {e}"))
-            })?;
+        let tensor = Tensor::from_vec(entry.data.values.clone(), &entry.data.shape)
+            .map_err(|e| CliError::Model(format!("Failed to create tensor for {name}: {e}")))?;
 
         // Quantize using the real axonml_quant implementation
-        let quantized_tensor =
-            axonml_quant::quantize_tensor(&tensor, quant_type).map_err(|e| {
-                CliError::Model(format!("Quantization failed for {name}: {e}"))
-            })?;
+        let quantized_tensor = axonml_quant::quantize_tensor(&tensor, quant_type)
+            .map_err(|e| CliError::Model(format!("Quantization failed for {name}: {e}")))?;
 
         // Dequantize back to f32 for saving in the state dict format
-        let dequantized = axonml_quant::dequantize_tensor(&quantized_tensor).map_err(|e| {
-            CliError::Model(format!("Dequantization failed for {name}: {e}"))
-        })?;
+        let dequantized = axonml_quant::dequantize_tensor(&quantized_tensor)
+            .map_err(|e| CliError::Model(format!("Dequantization failed for {name}: {e}")))?;
 
         let dequant_data = TensorData {
             shape: entry.data.shape.clone(),
@@ -309,7 +304,12 @@ fn execute_info(args: QuantInfoArgs) -> CliResult<()> {
     for qt in quant_types {
         let est_size = estimate_quantized_size(num_params, qt);
         let ratio = file_size as f64 / est_size as f64;
-        println!("  {}: {} ({:.1}x)", qt.to_string(), format_size(est_size), ratio);
+        println!(
+            "  {}: {} ({:.1}x)",
+            qt.to_string(),
+            format_size(est_size),
+            ratio
+        );
     }
 
     if args.detailed {

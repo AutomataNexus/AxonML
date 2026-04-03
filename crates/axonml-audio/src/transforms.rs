@@ -174,10 +174,7 @@ impl MelSpectrogram {
         let n_out = n / 2 + 1;
 
         // Convert real signal to complex
-        let mut buffer: Vec<Complex<f32>> = signal
-            .iter()
-            .map(|&x| Complex::new(x, 0.0))
-            .collect();
+        let mut buffer: Vec<Complex<f32>> = signal.iter().map(|&x| Complex::new(x, 0.0)).collect();
 
         // Run FFT in-place
         let mut planner = FftPlanner::new();
@@ -185,10 +182,7 @@ impl MelSpectrogram {
         fft.process(&mut buffer);
 
         // Extract magnitudes of the first n/2+1 bins (positive frequencies)
-        buffer[..n_out]
-            .iter()
-            .map(|c| c.norm())
-            .collect()
+        buffer[..n_out].iter().map(|c| c.norm()).collect()
     }
 }
 

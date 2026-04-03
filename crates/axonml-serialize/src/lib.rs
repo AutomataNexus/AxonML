@@ -311,8 +311,8 @@ fn save_safetensors<P: AsRef<Path>>(state_dict: &StateDict, path: P) -> Result<(
         .map(|(name, view)| (name.as_str(), view.clone()))
         .collect();
 
-    let bytes = safetensors::tensor::serialize(&view_refs, &None)
-        .map_err(|e| Error::InvalidOperation {
+    let bytes =
+        safetensors::tensor::serialize(&view_refs, &None).map_err(|e| Error::InvalidOperation {
             message: format!("SafeTensors serialize failed: {e}"),
         })?;
 
@@ -341,38 +341,37 @@ fn load_safetensors<P: AsRef<Path>>(path: P) -> Result<StateDict> {
         // Convert bytes to f32 based on dtype
         let dtype = tensor.dtype();
         let values: Vec<f32> = match dtype {
-            safetensors::Dtype::F32 => {
-                data.chunks_exact(4)
-                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                    .collect()
-            }
-            safetensors::Dtype::F16 => {
-                data.chunks_exact(2)
-                    .map(|c| {
-                        let h = half::f16::from_le_bytes([c[0], c[1]]);
-                        h.to_f32()
-                    })
-                    .collect()
-            }
-            safetensors::Dtype::BF16 => {
-                data.chunks_exact(2)
-                    .map(|c| {
-                        let h = half::bf16::from_le_bytes([c[0], c[1]]);
-                        h.to_f32()
-                    })
-                    .collect()
-            }
-            safetensors::Dtype::F64 => {
-                data.chunks_exact(8)
-                    .map(|c| {
-                        let v = f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]);
-                        v as f32
-                    })
-                    .collect()
-            }
+            safetensors::Dtype::F32 => data
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect(),
+            safetensors::Dtype::F16 => data
+                .chunks_exact(2)
+                .map(|c| {
+                    let h = half::f16::from_le_bytes([c[0], c[1]]);
+                    h.to_f32()
+                })
+                .collect(),
+            safetensors::Dtype::BF16 => data
+                .chunks_exact(2)
+                .map(|c| {
+                    let h = half::bf16::from_le_bytes([c[0], c[1]]);
+                    h.to_f32()
+                })
+                .collect(),
+            safetensors::Dtype::F64 => data
+                .chunks_exact(8)
+                .map(|c| {
+                    let v = f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]);
+                    v as f32
+                })
+                .collect(),
             other => {
                 return Err(Error::InvalidOperation {
-                    message: format!("Unsupported safetensors dtype: {:?} for tensor '{}'", other, name),
+                    message: format!(
+                        "Unsupported safetensors dtype: {:?} for tensor '{}'",
+                        other, name
+                    ),
                 });
             }
         };

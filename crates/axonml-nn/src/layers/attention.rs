@@ -317,10 +317,13 @@ impl MultiHeadAttention {
                 }
             }
 
-            let mut additive_tensor = Tensor::from_vec(expanded, &scores_shape).expect("tensor creation failed");
+            let mut additive_tensor =
+                Tensor::from_vec(expanded, &scores_shape).expect("tensor creation failed");
             let scores_device = scores.data().device();
             if scores_device.is_gpu() {
-                additive_tensor = additive_tensor.to_device(scores_device).expect("device transfer failed");
+                additive_tensor = additive_tensor
+                    .to_device(scores_device)
+                    .expect("device transfer failed");
             }
             let additive_mask = Variable::new(additive_tensor, false);
             scores.add_var(&additive_mask)
@@ -590,7 +593,8 @@ pub fn scaled_dot_product_attention_fused(
         }
     }
 
-    Tensor::from_vec(output, &[batch_size, num_heads, tgt_len, head_dim]).expect("tensor creation failed")
+    Tensor::from_vec(output, &[batch_size, num_heads, tgt_len, head_dim])
+        .expect("tensor creation failed")
 }
 
 // =============================================================================
@@ -816,9 +820,12 @@ mod tests {
             .map(|i| ((i as f32) * 0.03).sin() + 0.5)
             .collect();
 
-        let q = Tensor::from_vec(q_data, &[batch, heads, seq, dim]).expect("tensor creation failed");
-        let k = Tensor::from_vec(k_data, &[batch, heads, seq, dim]).expect("tensor creation failed");
-        let v = Tensor::from_vec(v_data, &[batch, heads, seq, dim]).expect("tensor creation failed");
+        let q =
+            Tensor::from_vec(q_data, &[batch, heads, seq, dim]).expect("tensor creation failed");
+        let k =
+            Tensor::from_vec(k_data, &[batch, heads, seq, dim]).expect("tensor creation failed");
+        let v =
+            Tensor::from_vec(v_data, &[batch, heads, seq, dim]).expect("tensor creation failed");
 
         // Compute forward output using the fused CPU path
         let output = scaled_dot_product_attention_fused(&q, &k, &v, scale, false);

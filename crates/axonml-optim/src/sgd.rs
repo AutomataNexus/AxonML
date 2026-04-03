@@ -230,7 +230,10 @@ mod tests {
 
     #[test]
     fn test_sgd_creation() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
         let optimizer = SGD::new(vec![param], 0.01);
 
@@ -240,7 +243,10 @@ mod tests {
 
     #[test]
     fn test_sgd_with_momentum() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
         let optimizer = SGD::with_momentum(vec![param], 0.01, 0.9);
 
@@ -249,7 +255,10 @@ mod tests {
 
     #[test]
     fn test_sgd_step() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         // Manually set gradient
@@ -269,7 +278,10 @@ mod tests {
 
     #[test]
     fn test_sgd_zero_grad() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         // Set gradient
@@ -293,7 +305,10 @@ mod tests {
 
     #[test]
     fn test_sgd_builder_pattern() {
-        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let var = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let param = Parameter::from_variable(var);
 
         let optimizer = SGD::new(vec![param], 0.01)

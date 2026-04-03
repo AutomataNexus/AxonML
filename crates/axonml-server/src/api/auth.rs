@@ -201,7 +201,10 @@ pub async fn register(
 ) -> Result<(StatusCode, Json<RegisterResponse>), AuthError> {
     // Rate limit: prevent registration spam
     let client_ip = extract_client_ip(&headers, None).unwrap_or_else(|| "unknown".to_string());
-    if !state.auth_rate_limiter.check(&format!("register:{client_ip}")) {
+    if !state
+        .auth_rate_limiter
+        .check(&format!("register:{client_ip}"))
+    {
         return Err(AuthError::Forbidden(
             "Too many registration attempts. Please try again later.".to_string(),
         ));

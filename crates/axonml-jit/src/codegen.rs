@@ -76,7 +76,10 @@ impl CompiledFunction {
                     let flat_inputs: Vec<f32> =
                         inputs.iter().flat_map(|(_, d)| d.iter().copied()).collect();
                     // Allocate exact output size from graph shapes
-                    let output_size: usize = self.graph.outputs().values()
+                    let output_size: usize = self
+                        .graph
+                        .outputs()
+                        .values()
                         .map(|id| self.graph.node(*id).shape.numel())
                         .sum();
                     let mut output = vec![0.0f32; output_size];

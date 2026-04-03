@@ -86,13 +86,21 @@ fn dot_block(block: &QuantizedBlock, activations: &[f32]) -> f32 {
         QuantizedBlock::Q5(b) => {
             let scale = b.scale.to_f32();
             let values = b.unpack();
-            values.iter().zip(activations).map(|(&v, &a)| v as f32 * scale * a).sum()
+            values
+                .iter()
+                .zip(activations)
+                .map(|(&v, &a)| v as f32 * scale * a)
+                .sum()
         }
         QuantizedBlock::Q5_1(b) => {
             let scale = b.scale.to_f32();
             let min = b.min.to_f32();
             let values = b.unpack();
-            values.iter().zip(activations).map(|(&v, &a)| (v as f32 * scale + min) * a).sum()
+            values
+                .iter()
+                .zip(activations)
+                .map(|(&v, &a)| (v as f32 * scale + min) * a)
+                .sum()
         }
         QuantizedBlock::F16(data) => dot_f16_block(data, activations),
         QuantizedBlock::F32(data) => {

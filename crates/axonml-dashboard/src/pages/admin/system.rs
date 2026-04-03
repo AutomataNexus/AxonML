@@ -382,8 +382,7 @@ fn RadarChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
                 js_sys::Reflect::set(&config, &"data".into(), &data).ok();
 
                 let options = js_sys::Object::new();
-                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into())
-                    .ok();
+                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into()).ok();
                 js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).ok();
 
                 // Scales with light theme
@@ -415,8 +414,7 @@ fn RadarChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
                 // Ticks (light theme)
                 let ticks = js_sys::Object::new();
                 js_sys::Reflect::set(&ticks, &"color".into(), &"#6b7280".into()).ok();
-                js_sys::Reflect::set(&ticks, &"backdropColor".into(), &"transparent".into())
-                    .ok();
+                js_sys::Reflect::set(&ticks, &"backdropColor".into(), &"transparent".into()).ok();
                 js_sys::Reflect::set(&r, &"ticks".into(), &ticks).ok();
 
                 js_sys::Reflect::set(&scales, &"r".into(), &r).ok();
@@ -502,8 +500,7 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
                 js_sys::Reflect::set(&config, &"data".into(), &data).ok();
 
                 let options = js_sys::Object::new();
-                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into())
-                    .ok();
+                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into()).ok();
                 js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).ok();
 
                 // Scales with light theme
@@ -514,8 +511,7 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
                 js_sys::Reflect::set(&y, &"beginAtZero".into(), &true.into()).ok();
                 js_sys::Reflect::set(&y, &"max".into(), &JsValue::from_f64(100.0)).ok();
                 let y_grid = js_sys::Object::new();
-                js_sys::Reflect::set(&y_grid, &"color".into(), &"rgba(0, 0, 0, 0.06)".into())
-                    .ok();
+                js_sys::Reflect::set(&y_grid, &"color".into(), &"rgba(0, 0, 0, 0.06)".into()).ok();
                 js_sys::Reflect::set(&y, &"grid".into(), &y_grid).ok();
                 let y_ticks = js_sys::Object::new();
                 js_sys::Reflect::set(&y_ticks, &"color".into(), &"#6b7280".into()).ok();
@@ -529,8 +525,7 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
                 js_sys::Reflect::set(&x, &"grid".into(), &x_grid).ok();
                 let x_ticks = js_sys::Object::new();
                 js_sys::Reflect::set(&x_ticks, &"color".into(), &"#6b7280".into()).ok();
-                js_sys::Reflect::set(&x_ticks, &"maxRotation".into(), &JsValue::from_f64(0.0))
-                    .ok();
+                js_sys::Reflect::set(&x_ticks, &"maxRotation".into(), &JsValue::from_f64(0.0)).ok();
                 js_sys::Reflect::set(&x, &"ticks".into(), &x_ticks).ok();
                 js_sys::Reflect::set(&scales, &"x".into(), &x).ok();
 
@@ -542,8 +537,7 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
                 js_sys::Reflect::set(&legend, &"position".into(), &"top".into()).ok();
                 let legend_labels = js_sys::Object::new();
                 js_sys::Reflect::set(&legend_labels, &"color".into(), &"#374151".into()).ok();
-                js_sys::Reflect::set(&legend_labels, &"usePointStyle".into(), &true.into())
-                    .ok();
+                js_sys::Reflect::set(&legend_labels, &"usePointStyle".into(), &true.into()).ok();
                 js_sys::Reflect::set(&legend_labels, &"padding".into(), &JsValue::from_f64(16.0))
                     .ok();
                 js_sys::Reflect::set(&legend, &"labels".into(), &legend_labels).ok();
@@ -847,8 +841,7 @@ fn NetworkChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoV
                 js_sys::Reflect::set(&config, &"data".into(), &data).ok();
 
                 let options = js_sys::Object::new();
-                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into())
-                    .ok();
+                js_sys::Reflect::set(&options, &"maintainAspectRatio".into(), &false.into()).ok();
                 js_sys::Reflect::set(&options, &"responsive".into(), &true.into()).ok();
 
                 // Scales with light theme
@@ -857,8 +850,7 @@ fn NetworkChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoV
                 let y = js_sys::Object::new();
                 js_sys::Reflect::set(&y, &"beginAtZero".into(), &true.into()).ok();
                 let y_grid = js_sys::Object::new();
-                js_sys::Reflect::set(&y_grid, &"color".into(), &"rgba(0, 0, 0, 0.06)".into())
-                    .ok();
+                js_sys::Reflect::set(&y_grid, &"color".into(), &"rgba(0, 0, 0, 0.06)".into()).ok();
                 js_sys::Reflect::set(&y, &"grid".into(), &y_grid).ok();
                 let y_ticks = js_sys::Object::new();
                 js_sys::Reflect::set(&y_ticks, &"color".into(), &"#6b7280".into()).ok();
@@ -882,8 +874,7 @@ fn NetworkChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoV
                 js_sys::Reflect::set(&legend, &"position".into(), &"top".into()).ok();
                 let legend_labels = js_sys::Object::new();
                 js_sys::Reflect::set(&legend_labels, &"color".into(), &"#374151".into()).ok();
-                js_sys::Reflect::set(&legend_labels, &"usePointStyle".into(), &true.into())
-                    .ok();
+                js_sys::Reflect::set(&legend_labels, &"usePointStyle".into(), &true.into()).ok();
                 js_sys::Reflect::set(&legend, &"labels".into(), &legend_labels).ok();
                 js_sys::Reflect::set(&plugins, &"legend".into(), &legend).ok();
                 js_sys::Reflect::set(&options, &"plugins".into(), &plugins).ok();

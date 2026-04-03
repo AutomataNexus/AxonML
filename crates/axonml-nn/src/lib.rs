@@ -200,7 +200,10 @@ mod tests {
             .add(ReLU)
             .add(Linear::new(5, 2));
 
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 20], &[2, 10]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 20], &[2, 10]).expect("tensor creation failed"),
+            false,
+        );
         let output = model.forward(&input);
         assert_eq!(output.shape(), vec![2, 2]);
     }
@@ -235,10 +238,14 @@ mod tests {
     #[test]
     fn test_loss_computation() {
         let pred = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3])
+                .expect("tensor creation failed"),
             true,
         );
-        let target = Variable::new(Tensor::from_vec(vec![0.0, 2.0], &[2]).expect("tensor creation failed"), false);
+        let target = Variable::new(
+            Tensor::from_vec(vec![0.0, 2.0], &[2]).expect("tensor creation failed"),
+            false,
+        );
 
         let loss_fn = CrossEntropyLoss::new();
         let loss = loss_fn.compute(&pred, &target);
@@ -259,7 +266,10 @@ mod tests {
     #[test]
     fn test_rnn_model() {
         let rnn = LSTM::new(10, 20, 1);
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 60], &[2, 3, 10]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 60], &[2, 3, 10]).expect("tensor creation failed"),
+            false,
+        );
         let output = rnn.forward(&input);
         assert_eq!(output.shape(), vec![2, 3, 20]);
     }

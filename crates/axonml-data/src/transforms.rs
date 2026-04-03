@@ -145,10 +145,7 @@ impl Normalize {
     /// Creates a Normalize for ImageNet (3-channel RGB).
     #[must_use]
     pub fn imagenet() -> Self {
-        Self::per_channel(
-            vec![0.485, 0.456, 0.406],
-            vec![0.229, 0.224, 0.225],
-        )
+        Self::per_channel(vec![0.485, 0.456, 0.406], vec![0.229, 0.224, 0.225])
     }
 }
 
@@ -590,7 +587,8 @@ impl DropoutTransform {
 
     /// Sets whether this transform is in training mode.
     pub fn set_training(&self, training: bool) {
-        self.training.store(training, std::sync::atomic::Ordering::Relaxed);
+        self.training
+            .store(training, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Returns whether this transform is in training mode.
@@ -681,11 +679,8 @@ mod tests {
     #[test]
     fn test_normalize_per_channel() {
         // 2 channels, 2x2 spatial => [2, 2, 2]
-        let input = Tensor::from_vec(
-            vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0],
-            &[2, 2, 2],
-        )
-        .unwrap();
+        let input =
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0], &[2, 2, 2]).unwrap();
         let normalize = Normalize::per_channel(vec![0.0, 10.0], vec![1.0, 10.0]);
 
         let output = normalize.apply(&input);

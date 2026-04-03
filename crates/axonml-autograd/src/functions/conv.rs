@@ -206,8 +206,18 @@ impl GradientFunction for Conv2dBackward {
                             if iw >= 0 && iw < in_w_s {
                                 let col_idx = col_row_base + ow;
                                 let inp_idx = input_row + iw as usize;
-                                debug_assert!(col_idx < col.len(), "im2col col index OOB: {} >= {}", col_idx, col.len());
-                                debug_assert!(inp_idx < input_vec.len(), "im2col input index OOB: {} >= {}", inp_idx, input_vec.len());
+                                debug_assert!(
+                                    col_idx < col.len(),
+                                    "im2col col index OOB: {} >= {}",
+                                    col_idx,
+                                    col.len()
+                                );
+                                debug_assert!(
+                                    inp_idx < input_vec.len(),
+                                    "im2col input index OOB: {} >= {}",
+                                    inp_idx,
+                                    input_vec.len()
+                                );
                                 unsafe {
                                     *col.get_unchecked_mut(col_idx) =
                                         *input_vec.get_unchecked(inp_idx);
@@ -267,8 +277,18 @@ impl GradientFunction for Conv2dBackward {
                             if iw >= 0 && iw < in_w_s {
                                 let gi_idx = gi_row + iw as usize;
                                 let gc_idx = col_row_base + ow;
-                                debug_assert!(gi_idx < gi_batch.len(), "col2im gi index OOB: {} >= {}", gi_idx, gi_batch.len());
-                                debug_assert!(gc_idx < grad_col.len(), "col2im grad_col index OOB: {} >= {}", gc_idx, grad_col.len());
+                                debug_assert!(
+                                    gi_idx < gi_batch.len(),
+                                    "col2im gi index OOB: {} >= {}",
+                                    gi_idx,
+                                    gi_batch.len()
+                                );
+                                debug_assert!(
+                                    gc_idx < grad_col.len(),
+                                    "col2im grad_col index OOB: {} >= {}",
+                                    gc_idx,
+                                    grad_col.len()
+                                );
                                 unsafe {
                                     *gi_batch.get_unchecked_mut(gi_idx) +=
                                         *grad_col.get_unchecked(gc_idx);
@@ -292,9 +312,11 @@ impl GradientFunction for Conv2dBackward {
             }
         }
 
-        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape).expect("backward: tensor creation failed");
+        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape)
+            .expect("backward: tensor creation failed");
         let grad_weight_tensor =
-            Tensor::from_vec(grad_weight, &[self.out_channels, self.in_channels, kh, kw]).expect("backward: tensor creation failed");
+            Tensor::from_vec(grad_weight, &[self.out_channels, self.in_channels, kh, kw])
+                .expect("backward: tensor creation failed");
 
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
@@ -309,7 +331,8 @@ impl GradientFunction for Conv2dBackward {
                 }
             }
             result.push(Some(
-                Tensor::from_vec(grad_bias, &[self.out_channels]).expect("backward: tensor creation failed"),
+                Tensor::from_vec(grad_bias, &[self.out_channels])
+                    .expect("backward: tensor creation failed"),
             ));
         }
 
@@ -537,9 +560,11 @@ impl GradientFunction for GroupedConv2dBackward {
             }
         }
 
-        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape).expect("backward: tensor creation failed");
+        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape)
+            .expect("backward: tensor creation failed");
         let grad_weight_tensor =
-            Tensor::from_vec(grad_weight, &[self.out_channels, ic_per_group, kh, kw]).expect("backward: tensor creation failed");
+            Tensor::from_vec(grad_weight, &[self.out_channels, ic_per_group, kh, kw])
+                .expect("backward: tensor creation failed");
 
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
@@ -554,7 +579,8 @@ impl GradientFunction for GroupedConv2dBackward {
                 }
             }
             result.push(Some(
-                Tensor::from_vec(grad_bias, &[self.out_channels]).expect("backward: tensor creation failed"),
+                Tensor::from_vec(grad_bias, &[self.out_channels])
+                    .expect("backward: tensor creation failed"),
             ));
         }
 
@@ -679,9 +705,12 @@ impl GradientFunction for BatchNorm2dBackward {
             }
         }
 
-        let grad_input_tensor = Tensor::from_vec(grad_input, shape).expect("backward: tensor creation failed");
-        let grad_weight_tensor = Tensor::from_vec(grad_weight, &[channels]).expect("backward: tensor creation failed");
-        let grad_bias_tensor = Tensor::from_vec(grad_bias, &[channels]).expect("backward: tensor creation failed");
+        let grad_input_tensor =
+            Tensor::from_vec(grad_input, shape).expect("backward: tensor creation failed");
+        let grad_weight_tensor =
+            Tensor::from_vec(grad_weight, &[channels]).expect("backward: tensor creation failed");
+        let grad_bias_tensor =
+            Tensor::from_vec(grad_bias, &[channels]).expect("backward: tensor creation failed");
 
         vec![
             Some(grad_input_tensor),
@@ -803,9 +832,12 @@ impl GradientFunction for BatchNorm1dBackward {
             }
         }
 
-        let grad_input_tensor = Tensor::from_vec(grad_input, shape).expect("backward: tensor creation failed");
-        let grad_weight_tensor = Tensor::from_vec(grad_weight, &[channels]).expect("backward: tensor creation failed");
-        let grad_bias_tensor = Tensor::from_vec(grad_bias, &[channels]).expect("backward: tensor creation failed");
+        let grad_input_tensor =
+            Tensor::from_vec(grad_input, shape).expect("backward: tensor creation failed");
+        let grad_weight_tensor =
+            Tensor::from_vec(grad_weight, &[channels]).expect("backward: tensor creation failed");
+        let grad_bias_tensor =
+            Tensor::from_vec(grad_bias, &[channels]).expect("backward: tensor creation failed");
 
         vec![
             Some(grad_input_tensor),
@@ -1061,9 +1093,11 @@ impl GradientFunction for Conv1dBackward {
             }
         }
 
-        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape).expect("backward: tensor creation failed");
+        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape)
+            .expect("backward: tensor creation failed");
         let grad_weight_tensor =
-            Tensor::from_vec(grad_weight, &[self.out_channels, self.in_channels, ks]).expect("backward: tensor creation failed");
+            Tensor::from_vec(grad_weight, &[self.out_channels, self.in_channels, ks])
+                .expect("backward: tensor creation failed");
 
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
@@ -1077,7 +1111,8 @@ impl GradientFunction for Conv1dBackward {
                 }
             }
             result.push(Some(
-                Tensor::from_vec(grad_bias, &[self.out_channels]).expect("backward: tensor creation failed"),
+                Tensor::from_vec(grad_bias, &[self.out_channels])
+                    .expect("backward: tensor creation failed"),
             ));
         }
 
@@ -1149,7 +1184,8 @@ impl GradientFunction for MaxPool2dBackward {
             }
         }
 
-        let grad = Tensor::from_vec(grad_input, &self.input_shape).expect("backward: tensor creation failed");
+        let grad = Tensor::from_vec(grad_input, &self.input_shape)
+            .expect("backward: tensor creation failed");
         vec![Some(grad)]
     }
 
@@ -1205,7 +1241,8 @@ impl GradientFunction for MaxPool1dBackward {
             }
         }
 
-        let grad = Tensor::from_vec(grad_input, &self.input_shape).expect("backward: tensor creation failed");
+        let grad = Tensor::from_vec(grad_input, &self.input_shape)
+            .expect("backward: tensor creation failed");
         vec![Some(grad)]
     }
 
@@ -1321,7 +1358,8 @@ impl GradientFunction for AvgPool2dBackward {
             }
         }
 
-        let grad = Tensor::from_vec(grad_input, &self.input_shape).expect("backward: tensor creation failed");
+        let grad = Tensor::from_vec(grad_input, &self.input_shape)
+            .expect("backward: tensor creation failed");
         vec![Some(grad)]
     }
 
@@ -1414,7 +1452,8 @@ impl GradientFunction for AvgPool1dBackward {
             }
         }
 
-        let grad = Tensor::from_vec(grad_input, &self.input_shape).expect("backward: tensor creation failed");
+        let grad = Tensor::from_vec(grad_input, &self.input_shape)
+            .expect("backward: tensor creation failed");
         vec![Some(grad)]
     }
 
@@ -1500,7 +1539,8 @@ impl GradientFunction for AdaptiveAvgPool2dBackward {
             }
         }
 
-        let grad = Tensor::from_vec(grad_input, &self.input_shape).expect("backward: tensor creation failed");
+        let grad = Tensor::from_vec(grad_input, &self.input_shape)
+            .expect("backward: tensor creation failed");
         vec![Some(grad)]
     }
 
@@ -1702,9 +1742,11 @@ impl GradientFunction for ConvTranspose2dBackward {
             }
         }
 
-        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape).expect("backward: tensor creation failed");
+        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape)
+            .expect("backward: tensor creation failed");
         let grad_weight_tensor =
-            Tensor::from_vec(grad_weight, &[self.in_channels, self.out_channels, kh, kw]).expect("backward: tensor creation failed");
+            Tensor::from_vec(grad_weight, &[self.in_channels, self.out_channels, kh, kw])
+                .expect("backward: tensor creation failed");
 
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
@@ -1718,7 +1760,8 @@ impl GradientFunction for ConvTranspose2dBackward {
                 }
             }
             result.push(Some(
-                Tensor::from_vec(grad_bias, &[self.out_channels]).expect("backward: tensor creation failed"),
+                Tensor::from_vec(grad_bias, &[self.out_channels])
+                    .expect("backward: tensor creation failed"),
             ));
         }
 
@@ -1856,7 +1899,8 @@ impl GradientFunction for LayerNormBackward {
             }
         }
 
-        let d_input_tensor = Tensor::from_vec(d_input, &shape).expect("backward: tensor creation failed");
+        let d_input_tensor =
+            Tensor::from_vec(d_input, &shape).expect("backward: tensor creation failed");
         let d_weight_tensor = Tensor::from_vec(d_weight, self.saved_weight.shape()).unwrap();
         let d_bias_tensor = Tensor::from_vec(d_bias, self.saved_weight.shape()).unwrap();
 
@@ -1994,9 +2038,12 @@ impl GradientFunction for GroupNormBackward {
             }
         }
 
-        let d_input_tensor = Tensor::from_vec(d_input, &shape).expect("backward: tensor creation failed");
-        let d_weight_tensor = Tensor::from_vec(d_weight, &[num_channels]).expect("backward: tensor creation failed");
-        let d_bias_tensor = Tensor::from_vec(d_bias, &[num_channels]).expect("backward: tensor creation failed");
+        let d_input_tensor =
+            Tensor::from_vec(d_input, &shape).expect("backward: tensor creation failed");
+        let d_weight_tensor =
+            Tensor::from_vec(d_weight, &[num_channels]).expect("backward: tensor creation failed");
+        let d_bias_tensor =
+            Tensor::from_vec(d_bias, &[num_channels]).expect("backward: tensor creation failed");
 
         vec![
             Some(d_input_tensor),
@@ -2117,9 +2164,12 @@ impl GradientFunction for InstanceNorm2dBackward {
             }
         }
 
-        let d_input_tensor = Tensor::from_vec(d_input, &shape).expect("backward: tensor creation failed");
-        let d_weight_tensor = Tensor::from_vec(d_weight, &[channels]).expect("backward: tensor creation failed");
-        let d_bias_tensor = Tensor::from_vec(d_bias, &[channels]).expect("backward: tensor creation failed");
+        let d_input_tensor =
+            Tensor::from_vec(d_input, &shape).expect("backward: tensor creation failed");
+        let d_weight_tensor =
+            Tensor::from_vec(d_weight, &[channels]).expect("backward: tensor creation failed");
+        let d_bias_tensor =
+            Tensor::from_vec(d_bias, &[channels]).expect("backward: tensor creation failed");
 
         vec![
             Some(d_input_tensor),
@@ -2153,8 +2203,10 @@ mod tests {
     fn test_conv2d_backward_shapes() {
         // Input: (1, 1, 4, 4), Weight: (1, 1, 3, 3), no padding, stride 1
         // Output: (1, 1, 2, 2)
-        let input = Tensor::from_vec(vec![1.0; 16], &[1, 1, 4, 4]).expect("backward: tensor creation failed");
-        let weight = Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3]).expect("backward: tensor creation failed");
+        let input = Tensor::from_vec(vec![1.0; 16], &[1, 1, 4, 4])
+            .expect("backward: tensor creation failed");
+        let weight = Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3])
+            .expect("backward: tensor creation failed");
 
         let backward = Conv2dBackward::new(
             None,
@@ -2171,7 +2223,8 @@ mod tests {
             false,
         );
 
-        let grad_output = Tensor::from_vec(vec![1.0; 4], &[1, 1, 2, 2]).expect("backward: tensor creation failed");
+        let grad_output = Tensor::from_vec(vec![1.0; 4], &[1, 1, 2, 2])
+            .expect("backward: tensor creation failed");
         let grads = backward.apply(&grad_output);
 
         assert_eq!(grads.len(), 2);
@@ -2181,8 +2234,10 @@ mod tests {
 
     #[test]
     fn test_conv2d_backward_with_bias() {
-        let input = Tensor::from_vec(vec![1.0; 16], &[1, 1, 4, 4]).expect("backward: tensor creation failed");
-        let weight = Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3]).expect("backward: tensor creation failed");
+        let input = Tensor::from_vec(vec![1.0; 16], &[1, 1, 4, 4])
+            .expect("backward: tensor creation failed");
+        let weight = Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3])
+            .expect("backward: tensor creation failed");
 
         let backward = Conv2dBackward::new(
             None,
@@ -2199,7 +2254,8 @@ mod tests {
             true,
         );
 
-        let grad_output = Tensor::from_vec(vec![1.0; 4], &[1, 1, 2, 2]).expect("backward: tensor creation failed");
+        let grad_output = Tensor::from_vec(vec![1.0; 4], &[1, 1, 2, 2])
+            .expect("backward: tensor creation failed");
         let grads = backward.apply(&grad_output);
 
         assert_eq!(grads.len(), 3);
@@ -2217,7 +2273,8 @@ mod tests {
         let backward =
             MaxPool2dBackward::new(None, vec![1, 1, 4, 4], max_indices, (2, 2), (2, 2), (0, 0));
 
-        let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 1, 2, 2]).expect("backward: tensor creation failed");
+        let grad_output = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 1, 2, 2])
+            .expect("backward: tensor creation failed");
         let grads = backward.apply(&grad_output);
 
         let grad = grads[0].as_ref().unwrap();
@@ -2236,7 +2293,8 @@ mod tests {
     fn test_avgpool2d_backward() {
         let backward = AvgPool2dBackward::new(None, vec![1, 1, 4, 4], (2, 2), (2, 2), (0, 0));
 
-        let grad_output = Tensor::from_vec(vec![4.0, 4.0, 4.0, 4.0], &[1, 1, 2, 2]).expect("backward: tensor creation failed");
+        let grad_output = Tensor::from_vec(vec![4.0, 4.0, 4.0, 4.0], &[1, 1, 2, 2])
+            .expect("backward: tensor creation failed");
         let grads = backward.apply(&grad_output);
 
         let grad = grads[0].as_ref().unwrap();
@@ -2251,7 +2309,8 @@ mod tests {
     fn test_adaptive_avgpool2d_backward() {
         let backward = AdaptiveAvgPool2dBackward::new(None, vec![1, 1, 4, 4], (1, 1));
 
-        let grad_output = Tensor::from_vec(vec![16.0], &[1, 1, 1, 1]).expect("backward: tensor creation failed");
+        let grad_output =
+            Tensor::from_vec(vec![16.0], &[1, 1, 1, 1]).expect("backward: tensor creation failed");
         let grads = backward.apply(&grad_output);
 
         let grad = grads[0].as_ref().unwrap();

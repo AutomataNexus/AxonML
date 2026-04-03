@@ -164,8 +164,10 @@ impl Module for BatchNorm1d {
                         .zip(vars.iter())
                         .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
                         .collect();
-                    *running_mean = Tensor::from_vec(new_mean, &[num_features]).expect("tensor creation failed");
-                    *running_var = Tensor::from_vec(new_var, &[num_features]).expect("tensor creation failed");
+                    *running_mean = Tensor::from_vec(new_mean, &[num_features])
+                        .expect("tensor creation failed");
+                    *running_var =
+                        Tensor::from_vec(new_var, &[num_features]).expect("tensor creation failed");
                 }
 
                 let weight_vec = gamma_gpu.to_vec();
@@ -239,8 +241,10 @@ impl Module for BatchNorm1d {
                     .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
                     .collect();
 
-                *running_mean = Tensor::from_vec(new_mean, &[num_features]).expect("tensor creation failed");
-                *running_var = Tensor::from_vec(new_var, &[num_features]).expect("tensor creation failed");
+                *running_mean =
+                    Tensor::from_vec(new_mean, &[num_features]).expect("tensor creation failed");
+                *running_var =
+                    Tensor::from_vec(new_var, &[num_features]).expect("tensor creation failed");
             }
         } else {
             // Use running statistics for inference
@@ -440,8 +444,10 @@ impl Module for BatchNorm2d {
                     .zip(vars.iter())
                     .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
                     .collect();
-                *running_mean = Tensor::from_vec(new_mean, &[channels]).expect("tensor creation failed");
-                *running_var = Tensor::from_vec(new_var, &[channels]).expect("tensor creation failed");
+                *running_mean =
+                    Tensor::from_vec(new_mean, &[channels]).expect("tensor creation failed");
+                *running_var =
+                    Tensor::from_vec(new_var, &[channels]).expect("tensor creation failed");
 
                 let weight_vec = gamma_gpu.to_vec();
                 let requires_grad =
@@ -508,7 +514,8 @@ impl Module for BatchNorm2d {
                 .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
                 .collect();
 
-            *running_mean = Tensor::from_vec(new_mean, &[channels]).expect("tensor creation failed");
+            *running_mean =
+                Tensor::from_vec(new_mean, &[channels]).expect("tensor creation failed");
             *running_var = Tensor::from_vec(new_var, &[channels]).expect("tensor creation failed");
         } else {
             means = self.running_mean.read().to_vec();
@@ -1081,7 +1088,8 @@ mod tests {
     fn test_batchnorm1d() {
         let bn = BatchNorm1d::new(3);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3])
+                .expect("tensor creation failed"),
             false,
         );
         let output = bn.forward(&input);
@@ -1103,7 +1111,8 @@ mod tests {
     fn test_layernorm() {
         let ln = LayerNorm::single(4);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[2, 4]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[2, 4])
+                .expect("tensor creation failed"),
             false,
         );
         let output = ln.forward(&input);
@@ -1132,7 +1141,8 @@ mod tests {
     fn test_groupnorm_normalization() {
         let gn = GroupNorm::with_options(2, 4, 1e-5, false); // No affine
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[1, 4, 1, 2]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[1, 4, 1, 2])
+                .expect("tensor creation failed"),
             false,
         );
         let output = gn.forward(&input);

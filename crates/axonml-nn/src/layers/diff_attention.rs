@@ -108,7 +108,8 @@ impl DifferentialAttention {
         let scale = (half_head_dim as f32).sqrt().recip();
 
         // Lambda is a learnable scalar initialized to lambda_init
-        let lambda_tensor = Tensor::from_vec(vec![lambda_init], &[1]).expect("tensor creation failed");
+        let lambda_tensor =
+            Tensor::from_vec(vec![lambda_init], &[1]).expect("tensor creation failed");
 
         Self {
             q_proj: Linear::new(embed_dim, embed_dim),
@@ -219,7 +220,8 @@ impl DifferentialAttention {
         // and track it through mul_var by creating a ones-like tensor scaled by lambda
         let attn_shape = attn.shape();
         let total = attn_shape.iter().product::<usize>();
-        let lambda_expanded = Tensor::from_vec(vec![lambda_val; total], &attn_shape).expect("tensor creation failed");
+        let lambda_expanded =
+            Tensor::from_vec(vec![lambda_val; total], &attn_shape).expect("tensor creation failed");
         let lambda_var = Variable::new(lambda_expanded, false);
         attn.mul_var(&lambda_var)
     }

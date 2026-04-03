@@ -14,9 +14,9 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use axonml_tensor::Tensor;
 use crate::FusedOp;
 use crate::error::{FusionError, FusionResult};
+use axonml_tensor::Tensor;
 
 // =============================================================================
 // Activation Type
@@ -140,7 +140,9 @@ impl FusedLinear {
         // Use Tensor::matmul for BLAS-accelerated computation
         // input [batch, in] @ weight^T [in, out] → [batch, out]
         let input_2d = if input_shape.len() == 1 {
-            input.reshape(&[1, self.in_features as isize]).expect("reshape failed")
+            input
+                .reshape(&[1, self.in_features as isize])
+                .expect("reshape failed")
         } else {
             input.clone()
         };

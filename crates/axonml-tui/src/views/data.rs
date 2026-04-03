@@ -230,8 +230,8 @@ impl DataView {
             return Err(format!("File not found: {}", path.display()));
         }
 
-        let metadata = std::fs::metadata(path)
-            .map_err(|e| format!("Cannot read file metadata: {}", e))?;
+        let metadata =
+            std::fs::metadata(path).map_err(|e| format!("Cannot read file metadata: {}", e))?;
         let file_size = metadata.len();
         let file_name = path
             .file_name()

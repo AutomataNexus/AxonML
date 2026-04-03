@@ -267,7 +267,9 @@ impl Variable {
         let mut grad_output = Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap();
         let device = self.data.read().device();
         if device.is_gpu() {
-            grad_output = grad_output.to_device(device).expect("device transfer failed");
+            grad_output = grad_output
+                .to_device(device)
+                .expect("device transfer failed");
         }
         crate::backward::backward(self, &grad_output);
     }
@@ -282,7 +284,9 @@ impl Variable {
         }
         let device = self.data.read().device();
         let grad = if grad_output.device() != device && device.is_gpu() {
-            grad_output.to_device(device).expect("device transfer failed")
+            grad_output
+                .to_device(device)
+                .expect("device transfer failed")
         } else {
             grad_output.clone()
         };
@@ -1164,8 +1168,14 @@ mod tests {
 
     #[test]
     fn test_variable_add() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
-        let b = Variable::new(Tensor::from_vec(vec![4.0, 5.0, 6.0], &[3]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![4.0, 5.0, 6.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let c = &a + &b;
         assert_eq!(c.data().to_vec(), vec![5.0, 7.0, 9.0]);
         assert!(c.requires_grad());
@@ -1174,7 +1184,10 @@ mod tests {
 
     #[test]
     fn test_variable_detach() {
-        let a = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.detach();
         assert!(!b.requires_grad());
         assert!(b.is_leaf());
@@ -1182,8 +1195,13 @@ mod tests {
 
     #[test]
     fn test_mse_loss() {
-        let pred = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), true);
-        let target = Variable::from_tensor(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"));
+        let pred = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
+        let target = Variable::from_tensor(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+        );
         let loss = pred.mse_loss(&target);
         assert_eq!(loss.numel(), 1);
         assert!((loss.data().to_vec()[0] - 0.0).abs() < 1e-6);
@@ -1191,7 +1209,10 @@ mod tests {
 
     #[test]
     fn test_exp() {
-        let a = Variable::new(Tensor::from_vec(vec![0.0, 1.0, 2.0], &[3]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![0.0, 1.0, 2.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.exp();
         assert!((b.data().to_vec()[0] - 1.0).abs() < 1e-5);
         assert!((b.data().to_vec()[1] - std::f32::consts::E).abs() < 1e-4);
@@ -1206,7 +1227,8 @@ mod tests {
     #[test]
     fn test_log() {
         let a = Variable::new(
-            Tensor::from_vec(vec![1.0, std::f32::consts::E, 10.0], &[3]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0, std::f32::consts::E, 10.0], &[3])
+                .expect("tensor creation failed"),
             true,
         );
         let b = a.log();
@@ -1222,7 +1244,10 @@ mod tests {
 
     #[test]
     fn test_clamp() {
-        let a = Variable::new(Tensor::from_vec(vec![-1.0, 0.5, 2.0], &[3]).expect("tensor creation failed"), true);
+        let a = Variable::new(
+            Tensor::from_vec(vec![-1.0, 0.5, 2.0], &[3]).expect("tensor creation failed"),
+            true,
+        );
         let b = a.clamp(0.0, 1.0);
         assert_eq!(b.data().to_vec(), vec![0.0, 0.5, 1.0]);
 

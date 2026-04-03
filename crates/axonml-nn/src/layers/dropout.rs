@@ -42,7 +42,9 @@ struct DropoutBackward {
 
 impl GradientFunction for DropoutBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let result = grad_output.mul(&self.mask_tensor).expect("tensor mul failed");
+        let result = grad_output
+            .mul(&self.mask_tensor)
+            .expect("tensor mul failed");
         vec![Some(result)]
     }
 
@@ -396,7 +398,10 @@ mod tests {
     #[test]
     fn test_dropout_training() {
         let dropout = Dropout::new(0.5);
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 1000], &[1000]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 1000], &[1000]).expect("tensor creation failed"),
+            false,
+        );
         let output = dropout.forward(&input);
 
         // Some values should be zero, some should be scaled
@@ -412,7 +417,10 @@ mod tests {
         let mut dropout = Dropout::new(0.5);
         dropout.eval();
 
-        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            false,
+        );
         let output = dropout.forward(&input);
 
         // In eval mode, output should equal input
@@ -422,7 +430,10 @@ mod tests {
     #[test]
     fn test_dropout_zero_probability() {
         let dropout = Dropout::new(0.0);
-        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"), false);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).expect("tensor creation failed"),
+            false,
+        );
         let output = dropout.forward(&input);
 
         assert_eq!(output.data().to_vec(), vec![1.0, 2.0, 3.0]);

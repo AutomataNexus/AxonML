@@ -773,10 +773,8 @@ impl Tensor<f32> {
             // column-major is A_orig^T(m,k) — so we pass trans=true to undo it.
             let a_guard = a.storage.as_cuda_slice();
             let b_guard = b.storage.as_cuda_slice();
-            let mut c_gpu = pool_alloc(m * n).map_err(|e| {
-                crate::Error::InvalidOperation {
-                    message: format!("GPU OOM in 2D matmul ({}x{}x{}): {}", m, k, n, e),
-                }
+            let mut c_gpu = pool_alloc(m * n).map_err(|e| crate::Error::InvalidOperation {
+                message: format!("GPU OOM in 2D matmul ({}x{}x{}): {}", m, k, n, e),
             })?;
 
             // cuBLAS sees column-major data:
@@ -789,8 +787,24 @@ impl Tensor<f32> {
             // Validate lda/ldb/ldc — cuBLAS requires lda >= max(1, rows_of_op(A))
             let lda_min = if op_a { m } else { k };
             let ldb_min = if op_b { k } else { n };
-            assert!(lda >= lda_min.max(1), "cuBLAS lda={} < min={} (m={}, k={}, op_a={})", lda, lda_min, m, k, op_a);
-            assert!(ldb >= ldb_min.max(1), "cuBLAS ldb={} < min={} (k={}, n={}, op_b={})", ldb, ldb_min, k, n, op_b);
+            assert!(
+                lda >= lda_min.max(1),
+                "cuBLAS lda={} < min={} (m={}, k={}, op_a={})",
+                lda,
+                lda_min,
+                m,
+                k,
+                op_a
+            );
+            assert!(
+                ldb >= ldb_min.max(1),
+                "cuBLAS ldb={} < min={} (k={}, n={}, op_b={})",
+                ldb,
+                ldb_min,
+                k,
+                n,
+                op_b
+            );
             assert!(n >= 1, "cuBLAS ldc=n={} must be >= 1", n);
 
             cuda.gemm_f32(
@@ -859,17 +873,17 @@ impl Tensor<f32> {
         //   transa='N': A_cublas is (cublas_m=n, k) col-major, lda=n. Matches (n,k). ✓
         //   If b_transposed: memory is (n,k) row-major = (k,n) col-major. Need (n,k) → transa='T', lda=k.
         let (cublas_transa, cublas_lda) = if b_transposed {
-            (true, k)    // memory (n,k) row → (k,n) col → transpose to (n,k), lda=k
+            (true, k) // memory (n,k) row → (k,n) col → transpose to (n,k), lda=k
         } else {
-            (false, n)   // memory (k,n) row → (n,k) col → no transpose needed, lda=n
+            (false, n) // memory (k,n) row → (n,k) col → no transpose needed, lda=n
         };
         // Row-major A(m,k) viewed as col-major = (k,m). We need cublas op(B) = (k,m).
         //   transb='N': B_cublas is (k, cublas_n=m) col-major, ldb=k. Matches (k,m). ✓
         //   If a_transposed: memory is (k,m) row-major = (m,k) col-major. Need (k,m) → transb='T', ldb=m.
         let (cublas_transb, cublas_ldb) = if a_transposed {
-            (true, m)    // memory (k,m) row → (m,k) col → transpose to (k,m), ldb=m
+            (true, m) // memory (k,m) row → (m,k) col → transpose to (k,m), ldb=m
         } else {
-            (false, k)   // memory (m,k) row → (k,m) col → no transpose needed, ldb=k
+            (false, k) // memory (m,k) row → (k,m) col → no transpose needed, ldb=k
         };
         let cublas_ldc = n;
         let stride_a = (k * n) as i64;
@@ -891,40 +905,57 @@ impl Tensor<f32> {
             let a_slice = &a_vec[bi * a_mat_size..(bi + 1) * a_mat_size];
             let b_slice = &b_vec[bi * b_mat_size..(bi + 1) * b_mat_size];
 
-            let a_gpu_i = cuda.htod_copy(a_slice).map_err(|e| crate::Error::InvalidOperation {
-                message: format!("htod A batch {}: {:?}", bi, e),
-            })?;
-            let b_gpu_i = cuda.htod_copy(b_slice).map_err(|e| crate::Error::InvalidOperation {
-                message: format!("htod B batch {}: {:?}", bi, e),
-            })?;
-            let mut c_gpu_i = cuda.alloc::<f32>(c_mat_size).map_err(|e| crate::Error::InvalidOperation {
-                message: format!("alloc C batch {}: {:?}", bi, e),
-            })?;
+            let a_gpu_i = cuda
+                .htod_copy(a_slice)
+                .map_err(|e| crate::Error::InvalidOperation {
+                    message: format!("htod A batch {}: {:?}", bi, e),
+                })?;
+            let b_gpu_i = cuda
+                .htod_copy(b_slice)
+                .map_err(|e| crate::Error::InvalidOperation {
+                    message: format!("htod B batch {}: {:?}", bi, e),
+                })?;
+            let mut c_gpu_i =
+                cuda.alloc::<f32>(c_mat_size)
+                    .map_err(|e| crate::Error::InvalidOperation {
+                        message: format!("alloc C batch {}: {:?}", bi, e),
+                    })?;
 
             cuda.gemm_f32(
-                cublas_transa, cublas_transb,
-                n, m, k,
+                cublas_transa,
+                cublas_transb,
+                n,
+                m,
+                k,
                 1.0,
-                &b_gpu_i, cublas_lda,
-                &a_gpu_i, cublas_ldb,
+                &b_gpu_i,
+                cublas_lda,
+                &a_gpu_i,
+                cublas_ldb,
                 0.0,
-                &mut c_gpu_i, cublas_ldc,
-            ).map_err(|e| crate::Error::InvalidOperation {
+                &mut c_gpu_i,
+                cublas_ldc,
+            )
+            .map_err(|e| crate::Error::InvalidOperation {
                 message: format!("cuBLAS gemm batch {}/{} failed: {:?}", bi, batch_size, e),
             })?;
 
-            let c_result = cuda.dtoh_copy(&c_gpu_i).map_err(|e| crate::Error::InvalidOperation {
-                message: format!("dtoh C batch {}: {:?}", bi, e),
-            })?;
+            let c_result =
+                cuda.dtoh_copy(&c_gpu_i)
+                    .map_err(|e| crate::Error::InvalidOperation {
+                        message: format!("dtoh C batch {}: {:?}", bi, e),
+                    })?;
             c_vec[bi * c_mat_size..(bi + 1) * c_mat_size].copy_from_slice(&c_result);
         }
 
         // Upload full result to GPU via pool alloc
         drop(a_guard);
         drop(b_guard);
-        let c_gpu_src = cuda.htod_copy(&c_vec).map_err(|e| crate::Error::InvalidOperation {
-            message: format!("htod C result: {:?}", e),
-        })?;
+        let c_gpu_src = cuda
+            .htod_copy(&c_vec)
+            .map_err(|e| crate::Error::InvalidOperation {
+                message: format!("htod C result: {:?}", e),
+            })?;
         // Move to pooled allocation for proper lifecycle management
         let mut c_gpu = pool_alloc(total).map_err(|e| crate::Error::InvalidOperation {
             message: format!("pool alloc C result: {:?}", e),
@@ -2590,7 +2621,7 @@ impl Tensor<f32> {
                 &grad_out_batch,
                 spatial,
                 weight_guard.slice(),
-                out_channels,  // ldb = out_channels (leading dim of weight in col-major view)
+                out_channels, // ldb = out_channels (leading dim of weight in col-major view)
                 0.0,
                 &mut col_gpu,
                 spatial,

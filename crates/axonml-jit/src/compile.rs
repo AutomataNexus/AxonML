@@ -362,12 +362,10 @@ impl CompiledModel {
                 let a = self.get_node_value(*input, values)?;
                 Ok(a.iter().map(|x| x.tanh()).collect())
             }
-            other => {
-                Err(crate::error::JitError::UnsupportedOp(format!(
-                    "CompiledModel::execute_node: operation {:?} not implemented",
-                    other
-                )))
-            }
+            other => Err(crate::error::JitError::UnsupportedOp(format!(
+                "CompiledModel::execute_node: operation {:?} not implemented",
+                other
+            ))),
         }
     }
 
