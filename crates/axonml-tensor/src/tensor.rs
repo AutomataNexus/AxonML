@@ -701,16 +701,16 @@ impl<T: Numeric> Tensor<T> {
     pub fn sum(&self) -> Self {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
-            // Reduce each dimension on GPU using the existing sum_dim kernel
-            let mut t = self.clone();
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = unsafe { gpu_ref(self) };
+            let mut t = self_f32.clone();
             while t.ndim() > 1 {
                 t = t.sum_dim_cuda(0);
             }
-            // Final 1D reduction
             if t.numel() > 1 {
                 t = t.sum_dim_cuda(0);
             }
-            return t;
+            return unsafe { gpu_into(t) };
         }
 
         let data = self.to_vec();

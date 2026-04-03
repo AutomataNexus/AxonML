@@ -751,6 +751,20 @@ impl Tensor<f32> {
         let k = a.shape[a.shape.len() - 1];
         let n = b.shape[b.shape.len() - 1];
 
+        // Guard: cuBLAS requires all dimensions > 0
+        if m == 0 || k == 0 || n == 0 {
+            let out_shape: Vec<usize> = if a.shape.len() == 2 {
+                vec![m, n]
+            } else {
+                let mut s: Vec<usize> = a.shape[..a.shape.len() - 2].to_vec();
+                s.push(m);
+                s.push(n);
+                s
+            };
+            let total: usize = out_shape.iter().product();
+            return Ok(Self::from_vec(vec![0.0f32; total], &out_shape)?);
+        }
+
         if a.shape.len() == 2 && b.shape.len() == 2 {
             // 2D matmul: C(m,n) = A(m,k) @ B(k,n)
             // cuBLAS column-major: C^T(n,m) = B_cm @ A_cm
@@ -759,7 +773,11 @@ impl Tensor<f32> {
             // column-major is A_orig^T(m,k) — so we pass trans=true to undo it.
             let a_guard = a.storage.as_cuda_slice();
             let b_guard = b.storage.as_cuda_slice();
-            let mut c_gpu = pool_alloc(m * n).expect("GPU pool alloc failed");
+            let mut c_gpu = pool_alloc(m * n).map_err(|e| {
+                crate::Error::InvalidOperation {
+                    message: format!("GPU OOM in 2D matmul ({}x{}x{}): {}", m, k, n, e),
+                }
+            })?;
 
             // cuBLAS sees column-major data:
             // Row-major A(m,k) → col-major view as (k,m) = A^T
@@ -768,6 +786,13 @@ impl Tensor<f32> {
             let (ldb, op_b) = if b_transposed { (k, true) } else { (n, false) };
 
             // cuBLAS: C^T(n,m) = B_col(op_b) @ A_col(op_a)
+            // Validate lda/ldb/ldc — cuBLAS requires lda >= max(1, rows_of_op(A))
+            let lda_min = if op_a { m } else { k };
+            let ldb_min = if op_b { k } else { n };
+            assert!(lda >= lda_min.max(1), "cuBLAS lda={} < min={} (m={}, k={}, op_a={})", lda, lda_min, m, k, op_a);
+            assert!(ldb >= ldb_min.max(1), "cuBLAS ldb={} < min={} (k={}, n={}, op_b={})", ldb, ldb_min, k, n, op_b);
+            assert!(n >= 1, "cuBLAS ldc=n={} must be >= 1", n);
+
             cuda.gemm_f32(
                 op_b,
                 op_a,
@@ -797,45 +822,117 @@ impl Tensor<f32> {
         // Batched matmul: cublasSgemmStridedBatched
         let batch_dims: Vec<usize> = a.shape[..a.shape.len() - 2].to_vec();
         let batch_size: usize = batch_dims.iter().product();
+
+        // Guard: cuBLAS requires all dimensions > 0
+        if batch_size == 0 || m == 0 || k == 0 || n == 0 {
+            let mut out_shape = batch_dims.clone();
+            out_shape.push(m);
+            out_shape.push(n);
+            let total: usize = out_shape.iter().product();
+            return Ok(Self::from_vec(vec![0.0f32; total.max(1)], &out_shape)?);
+        }
+
         let total = batch_size * m * n;
 
         let a_guard = a.storage.as_cuda_slice();
         let b_guard = b.storage.as_cuda_slice();
-        let mut c_gpu = pool_alloc(total).expect("GPU pool alloc failed");
 
-        // Leading dims and strides for cuBLAS (column-major perspective)
-        let (lda, a_batch_stride, op_a) = if a_transposed {
-            (m, (m * k) as i64, true)
-        } else {
-            (k, (m * k) as i64, false)
-        };
-        let (ldb, b_batch_stride, op_b) = if b_transposed {
-            (k, (k * n) as i64, true)
-        } else {
-            (n, (k * n) as i64, false)
-        };
-        let c_stride = (m * n) as i64;
+        // Row-major batched matmul: C[b](m,n) = A[b](m,k) @ B[b](k,n)
+        //
+        // cuBLAS is column-major. Row-major data viewed as col-major is transposed.
+        // We use the identity: C_row = A_row @ B_row  ↔  C_col^T = B_col^T @ A_col^T
+        //
+        // cuBLAS call: C_cublas(cublas_m, cublas_n) = op(A_cublas) @ op(B_cublas)
+        //   cublas_m = n (our n), cublas_n = m (our m)
+        //   A_cublas = our B data, B_cublas = our A data
+        //
+        // For non-transposed row-major matrices (the common case):
+        //   our B(k,n) in row-major = (n,k) in col-major → transa='T', lda=n
+        //   our A(m,k) in row-major = (k,m) in col-major → transb='T', ldb=k
+        //   C stored col-major (n,m) → ldc=n
+        //
+        // For "transposed" matrices (memory layout has last 2 dims swapped):
+        //   our B "transposed": memory is (n,k) row-major = (k,n) col-major → transa='N', lda=k
+        //   our A "transposed": memory is (k,m) row-major = (m,k) col-major → transb='N', ldb=m
 
-        cuda.gemm_strided_batched_f32(
-            op_b,
-            op_a,
-            n,
-            m,
-            k,
-            1.0,
-            b_guard.slice(),
-            ldb,
-            b_batch_stride,
-            a_guard.slice(),
-            lda,
-            a_batch_stride,
-            0.0,
-            &mut c_gpu,
-            n,
-            c_stride,
-            batch_size,
-        )
-        .expect("cuBLAS strided batched gemm failed");
+        // Row-major B(k,n) viewed as col-major = (n,k). We need cublas op(A) = (n,k).
+        //   transa='N': A_cublas is (cublas_m=n, k) col-major, lda=n. Matches (n,k). ✓
+        //   If b_transposed: memory is (n,k) row-major = (k,n) col-major. Need (n,k) → transa='T', lda=k.
+        let (cublas_transa, cublas_lda) = if b_transposed {
+            (true, k)    // memory (n,k) row → (k,n) col → transpose to (n,k), lda=k
+        } else {
+            (false, n)   // memory (k,n) row → (n,k) col → no transpose needed, lda=n
+        };
+        // Row-major A(m,k) viewed as col-major = (k,m). We need cublas op(B) = (k,m).
+        //   transb='N': B_cublas is (k, cublas_n=m) col-major, ldb=k. Matches (k,m). ✓
+        //   If a_transposed: memory is (k,m) row-major = (m,k) col-major. Need (k,m) → transb='T', ldb=m.
+        let (cublas_transb, cublas_ldb) = if a_transposed {
+            (true, m)    // memory (k,m) row → (m,k) col → transpose to (k,m), ldb=m
+        } else {
+            (false, k)   // memory (m,k) row → (k,m) col → no transpose needed, ldb=k
+        };
+        let cublas_ldc = n;
+        let stride_a = (k * n) as i64;
+        let stride_b = (m * k) as i64;
+        let stride_c = (m * n) as i64;
+
+        // Loop individual GEMMs: SgemmStridedBatched has driver issues on Blackwell GPUs.
+        // Each batch element uses its own GPU alloc through the working 2D gemm_f32 path.
+        // Results collected on CPU then uploaded as one contiguous GPU tensor.
+        let a_mat_size = m * k;
+        let b_mat_size = k * n;
+        let c_mat_size = m * n;
+
+        let a_vec = a.to_vec();
+        let b_vec = b.to_vec();
+        let mut c_vec = vec![0.0f32; total];
+
+        for bi in 0..batch_size {
+            let a_slice = &a_vec[bi * a_mat_size..(bi + 1) * a_mat_size];
+            let b_slice = &b_vec[bi * b_mat_size..(bi + 1) * b_mat_size];
+
+            let a_gpu_i = cuda.htod_copy(a_slice).map_err(|e| crate::Error::InvalidOperation {
+                message: format!("htod A batch {}: {:?}", bi, e),
+            })?;
+            let b_gpu_i = cuda.htod_copy(b_slice).map_err(|e| crate::Error::InvalidOperation {
+                message: format!("htod B batch {}: {:?}", bi, e),
+            })?;
+            let mut c_gpu_i = cuda.alloc::<f32>(c_mat_size).map_err(|e| crate::Error::InvalidOperation {
+                message: format!("alloc C batch {}: {:?}", bi, e),
+            })?;
+
+            cuda.gemm_f32(
+                cublas_transa, cublas_transb,
+                n, m, k,
+                1.0,
+                &b_gpu_i, cublas_lda,
+                &a_gpu_i, cublas_ldb,
+                0.0,
+                &mut c_gpu_i, cublas_ldc,
+            ).map_err(|e| crate::Error::InvalidOperation {
+                message: format!("cuBLAS gemm batch {}/{} failed: {:?}", bi, batch_size, e),
+            })?;
+
+            let c_result = cuda.dtoh_copy(&c_gpu_i).map_err(|e| crate::Error::InvalidOperation {
+                message: format!("dtoh C batch {}: {:?}", bi, e),
+            })?;
+            c_vec[bi * c_mat_size..(bi + 1) * c_mat_size].copy_from_slice(&c_result);
+        }
+
+        // Upload full result to GPU via pool alloc
+        drop(a_guard);
+        drop(b_guard);
+        let c_gpu_src = cuda.htod_copy(&c_vec).map_err(|e| crate::Error::InvalidOperation {
+            message: format!("htod C result: {:?}", e),
+        })?;
+        // Move to pooled allocation for proper lifecycle management
+        let mut c_gpu = pool_alloc(total).map_err(|e| crate::Error::InvalidOperation {
+            message: format!("pool alloc C result: {:?}", e),
+        })?;
+        cuda.broadcast_copy_f32(&mut c_gpu, &c_gpu_src, total, total)
+            .map_err(|e| crate::Error::InvalidOperation {
+                message: format!("copy C to pool: {:?}", e),
+            })?;
 
         let mut output_shape = batch_dims;
         output_shape.push(m);
@@ -2479,6 +2576,10 @@ impl Tensor<f32> {
             // We want: col(col_h, spatial) = weight^T(col_h, oc) @ grad_out(oc, spatial)
             // col-major: col^T(spatial, col_h) = grad_out^T(spatial, oc) @ weight(oc, col_h)
             // m=spatial, n=col_h, k=oc
+            // col = weight^T @ grad_out → [col_h, spatial]
+            // Row-major: weight(oc, col_h), grad_out(oc, spatial)
+            // cuBLAS col-major: C^T(spatial, col_h) = grad_out^T(spatial, oc) @ weight(oc, col_h)
+            // m=spatial, n=col_h, k=oc, lda=spatial, ldb=out_channels (NOT col_h!), ldc=spatial
             cuda.gemm_f32(
                 false,
                 false,
@@ -2489,7 +2590,7 @@ impl Tensor<f32> {
                 &grad_out_batch,
                 spatial,
                 weight_guard.slice(),
-                col_h,
+                out_channels,  // ldb = out_channels (leading dim of weight in col-major view)
                 0.0,
                 &mut col_gpu,
                 spatial,
