@@ -298,6 +298,7 @@ impl Q5Block {
         let mut packed = [0u8; 20];
         // Pack 32 × 5-bit values: 8 groups of 4 values → 20 bits each → 2.5 bytes
         // Simpler: treat as 160-bit bitstream
+        #[allow(clippy::needless_range_loop)]
         for i in 0..32 {
             let v = (values[i] as u8) & 0x1F; // 5-bit unsigned representation
             let bit_offset = i * 5;
@@ -314,6 +315,7 @@ impl Q5Block {
     /// Unpacks 20 bytes into 32 signed 5-bit values.
     pub fn unpack(&self) -> [i8; 32] {
         let mut result = [0i8; 32];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..32 {
             let bit_offset = i * 5;
             let byte_offset = bit_offset / 8;
@@ -365,6 +367,7 @@ impl Q5_1Block {
     /// Packs 32 unsigned 5-bit values (range 0 to 31) into 20 bytes.
     pub fn pack(values: &[u8; 32]) -> [u8; 20] {
         let mut packed = [0u8; 20];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..32 {
             let v = values[i] & 0x1F;
             let bit_offset = i * 5;
@@ -381,6 +384,7 @@ impl Q5_1Block {
     /// Unpacks 20 bytes into 32 unsigned 5-bit values.
     pub fn unpack(&self) -> [u8; 32] {
         let mut result = [0u8; 32];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..32 {
             let bit_offset = i * 5;
             let byte_offset = bit_offset / 8;

@@ -90,6 +90,7 @@ impl RateLimiter {
 ///
 /// Extract the client IP from `ConnectInfo` or `x-forwarded-for` header,
 /// then check the rate limiter.
+#[allow(dead_code)]
 pub async fn rate_limit_middleware(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     request: Request<Body>,

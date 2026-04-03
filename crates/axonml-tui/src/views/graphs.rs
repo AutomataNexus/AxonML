@@ -34,6 +34,7 @@ pub type DataPoint = (f64, f64);
 
 /// Chart data series for custom metrics.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DataSeries {
     /// Series display name
     pub name: String,
@@ -45,6 +46,7 @@ pub struct DataSeries {
     pub marker: symbols::Marker,
 }
 
+#[allow(dead_code)]
 impl DataSeries {
     /// Creates a new data series.
     pub fn new(name: &str, color: ratatui::style::Color) -> Self {
@@ -262,7 +264,7 @@ impl GraphsView {
     pub fn toggle_zoom(&mut self) {
         self.zoomed = !self.zoomed;
         if self.zoomed {
-            let mid = (self.x_bounds_full[0] + self.x_bounds_full[1]) / 2.0;
+            let mid = self.x_bounds_full[0].midpoint(self.x_bounds_full[1]);
             self.x_bounds = [mid, self.x_bounds_full[1]];
         } else {
             self.x_bounds = self.x_bounds_full;

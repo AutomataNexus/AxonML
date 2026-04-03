@@ -109,6 +109,7 @@ impl MultiHeadAttention {
     /// - [B, H, T, S] → no expansion needed
     ///
     /// Works on both CPU and GPU — uses Variable::expand which preserves device.
+    #[allow(dead_code)]
     fn expand_mask(
         mask: &Variable,
         batch_size: usize,

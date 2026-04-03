@@ -26,6 +26,7 @@ static GLOBAL_SEED: AtomicU64 = AtomicU64::new(0);
 static SEED_SET: AtomicBool = AtomicBool::new(false);
 
 /// Returns the global seed if one was set, for downstream RNG initialization.
+#[allow(dead_code)]
 pub fn global_seed() -> Option<u64> {
     if SEED_SET.load(std::sync::atomic::Ordering::Relaxed) {
         Some(GLOBAL_SEED.load(std::sync::atomic::Ordering::Relaxed))

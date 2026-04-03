@@ -121,7 +121,7 @@ fn execute_convert(args: QuantConvertArgs) -> CliResult<()> {
     println!();
 
     // Perform quantization
-    print_info(&format!("Quantizing to {}...", target_quant.to_string()));
+    print_info(&format!("Quantizing to {}...", target_quant));
     let quantized_dict = quantize_state_dict(&state_dict, target_quant)?;
 
     // Ensure output directory exists
@@ -306,7 +306,7 @@ fn execute_info(args: QuantInfoArgs) -> CliResult<()> {
         let ratio = file_size as f64 / est_size as f64;
         println!(
             "  {}: {} ({:.1}x)",
-            qt.to_string(),
+            qt,
             format_size(est_size),
             ratio
         );

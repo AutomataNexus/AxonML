@@ -288,7 +288,7 @@ impl DataView {
         // Parse header
         let header = lines.next().ok_or("CSV file is empty")?;
         let sep = if header.contains('\t') { '\t' } else { ',' };
-        let columns: Vec<&str> = header.split(sep).map(|s| s.trim()).collect();
+        let columns: Vec<&str> = header.split(sep).map(str::trim).collect();
 
         // Count rows and gather basic stats per numeric column
         let mut row_count = 0usize;
@@ -302,7 +302,7 @@ impl DataView {
             if line.trim().is_empty() {
                 continue;
             }
-            let fields: Vec<&str> = line.split(sep).map(|s| s.trim()).collect();
+            let fields: Vec<&str> = line.split(sep).map(str::trim).collect();
             row_count += 1;
 
             for (i, field) in fields.iter().enumerate().take(num_cols) {

@@ -259,7 +259,7 @@ impl FilesView {
 
         // Read directory contents
         if let Ok(read_dir) = std::fs::read_dir(&self.current_dir) {
-            let mut dir_entries: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
+            let mut dir_entries: Vec<_> = read_dir.filter_map(std::result::Result::ok).collect();
             dir_entries.sort_by(|a, b| {
                 let a_is_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
                 let b_is_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);

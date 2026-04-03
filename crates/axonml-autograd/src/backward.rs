@@ -102,7 +102,7 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
                     // when the forward was on GPU (e.g., Conv1d/Conv2d backward).
                     if input_grad.device() != target_device {
                         input_grad = input_grad
-                            .to_device(target_device.clone())
+                            .to_device(target_device)
                             .expect("backward: failed to migrate gradient to target device");
                     }
                     let next_id = next_fn.id();
@@ -112,7 +112,9 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
                         .entry(next_id)
                         .and_modify(|existing| {
                             // Ensure both tensors are on the same device before add
-                            let ig = if existing.device() != input_grad.device() {
+                            let ig = if existing.device() == input_grad.device() {
+                                input_grad.clone()
+                            } else {
                                 input_grad.to_device(existing.device()).unwrap_or_else(|_| {
                                     // If migration fails, move existing to match input_grad
                                     let moved = existing.to_device(input_grad.device())
@@ -120,8 +122,6 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
                                     *existing = moved;
                                     input_grad.clone()
                                 })
-                            } else {
-                                input_grad.clone()
                             };
                             *existing = existing.add(&ig).expect("tensor add failed");
                         })
