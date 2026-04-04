@@ -304,12 +304,7 @@ fn execute_info(args: QuantInfoArgs) -> CliResult<()> {
     for qt in quant_types {
         let est_size = estimate_quantized_size(num_params, qt);
         let ratio = file_size as f64 / est_size as f64;
-        println!(
-            "  {}: {} ({:.1}x)",
-            qt,
-            format_size(est_size),
-            ratio
-        );
+        println!("  {}: {} ({:.1}x)", qt, format_size(est_size), ratio);
     }
 
     if args.detailed {

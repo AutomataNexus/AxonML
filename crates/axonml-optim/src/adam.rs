@@ -250,7 +250,8 @@ impl Optimizer for Adam {
             let mut max_sq_vec = if self.amsgrad {
                 state
                     .max_exp_avg_sq
-                    .as_ref().map_or_else(|| vec![0.0f32; param_vec.len()], |t| t.to_vec())
+                    .as_ref()
+                    .map_or_else(|| vec![0.0f32; param_vec.len()], |t| t.to_vec())
             } else {
                 Vec::new()
             };
