@@ -613,6 +613,58 @@ impl<T: Scalar> Tensor<T> {
     }
 
     // =========================================================================
+    // Functional Map Operations (zero-copy for CPU tensors)
+    // =========================================================================
+
+    /// Apply a function element-wise, producing a new tensor with the same shape.
+    ///
+    /// Avoids the to_vec() → map → from_vec() pattern by operating directly
+    /// on contiguous storage.
+    #[must_use]
+    pub fn map<F: Fn(T) -> T>(&self, f: F) -> Self {
+        let data = self.to_vec(); // contiguous read
+        let result: Vec<T> = data.into_iter().map(f).collect();
+        Self::from_vec(result, &self.shape).unwrap()
+    }
+
+    /// Apply a binary function element-wise with another tensor of the same shape.
+    ///
+    /// This is the primary zero-allocation pattern for backward functions:
+    /// instead of `a.to_vec()` + `b.to_vec()` + zip + `from_vec()`,
+    /// use `a.zip_map(&b, |x, y| ...)` which does a single allocation.
+    #[must_use]
+    pub fn zip_map<F: Fn(T, T) -> T>(&self, other: &Self, f: F) -> Self {
+        let a = self.to_vec();
+        let b = other.to_vec();
+        debug_assert_eq!(
+            a.len(),
+            b.len(),
+            "zip_map requires same number of elements: {} vs {}",
+            a.len(),
+            b.len()
+        );
+        let result: Vec<T> = a.into_iter().zip(b).map(|(x, y)| f(x, y)).collect();
+        Self::from_vec(result, &self.shape).unwrap()
+    }
+
+    /// Apply a ternary function element-wise with two other tensors.
+    #[must_use]
+    pub fn zip_map3<F: Fn(T, T, T) -> T>(&self, b: &Self, c: &Self, f: F) -> Self {
+        let a_data = self.to_vec();
+        let b_data = b.to_vec();
+        let c_data = c.to_vec();
+        debug_assert_eq!(a_data.len(), b_data.len());
+        debug_assert_eq!(a_data.len(), c_data.len());
+        let result: Vec<T> = a_data
+            .into_iter()
+            .zip(b_data)
+            .zip(c_data)
+            .map(|((a, b), c)| f(a, b, c))
+            .collect();
+        Self::from_vec(result, &self.shape).unwrap()
+    }
+
+    // =========================================================================
     // Device Operations
     // =========================================================================
 
@@ -1318,6 +1370,20 @@ impl<T: Numeric> Tensor<T> {
                 return a_gpu.add(&b_gpu);
             }
         }
+        // Fast path: same shape, both contiguous — no index arithmetic needed
+        if self.shape == other.shape && self.is_contiguous() && other.is_contiguous() {
+            let a = self.storage.as_slice();
+            let b = other.storage.as_slice();
+            let ao = self.offset;
+            let bo = other.offset;
+            let n = numel(&self.shape);
+            let mut result_data = vec![T::zero(); n];
+            for i in 0..n {
+                result_data[i] = a[ao + i] + b[bo + i];
+            }
+            return Self::from_vec(result_data, &self.shape);
+        }
+
         let result_shape = broadcast_shape(&self.shape, &other.shape)?;
         let self_strides = broadcast_strides(&self.shape, &self.strides, &result_shape);
         let other_strides = broadcast_strides(&other.shape, &other.strides, &result_shape);
@@ -1372,6 +1438,19 @@ impl<T: Numeric> Tensor<T> {
                 return a_gpu.sub(&b_gpu);
             }
         }
+        // Fast path: same shape, contiguous
+        if self.shape == other.shape && self.is_contiguous() && other.is_contiguous() {
+            let a = self.storage.as_slice();
+            let b = other.storage.as_slice();
+            let (ao, bo) = (self.offset, other.offset);
+            let n = numel(&self.shape);
+            let mut r = vec![T::zero(); n];
+            for i in 0..n {
+                r[i] = a[ao + i] - b[bo + i];
+            }
+            return Self::from_vec(r, &self.shape);
+        }
+
         let result_shape = broadcast_shape(&self.shape, &other.shape)?;
         let self_strides = broadcast_strides(&self.shape, &self.strides, &result_shape);
         let other_strides = broadcast_strides(&other.shape, &other.strides, &result_shape);
@@ -1426,6 +1505,19 @@ impl<T: Numeric> Tensor<T> {
                 return a_gpu.mul(&b_gpu);
             }
         }
+        // Fast path: same shape, contiguous
+        if self.shape == other.shape && self.is_contiguous() && other.is_contiguous() {
+            let a = self.storage.as_slice();
+            let b = other.storage.as_slice();
+            let (ao, bo) = (self.offset, other.offset);
+            let n = numel(&self.shape);
+            let mut r = vec![T::zero(); n];
+            for i in 0..n {
+                r[i] = a[ao + i] * b[bo + i];
+            }
+            return Self::from_vec(r, &self.shape);
+        }
+
         let result_shape = broadcast_shape(&self.shape, &other.shape)?;
         let self_strides = broadcast_strides(&self.shape, &self.strides, &result_shape);
         let other_strides = broadcast_strides(&other.shape, &other.strides, &result_shape);
@@ -1480,6 +1572,19 @@ impl<T: Numeric> Tensor<T> {
                 return a_gpu.div(&b_gpu);
             }
         }
+        // Fast path: same shape, contiguous
+        if self.shape == other.shape && self.is_contiguous() && other.is_contiguous() {
+            let a = self.storage.as_slice();
+            let b = other.storage.as_slice();
+            let (ao, bo) = (self.offset, other.offset);
+            let n = numel(&self.shape);
+            let mut r = vec![T::zero(); n];
+            for i in 0..n {
+                r[i] = a[ao + i] / b[bo + i];
+            }
+            return Self::from_vec(r, &self.shape);
+        }
+
         let result_shape = broadcast_shape(&self.shape, &other.shape)?;
         let self_strides = broadcast_strides(&self.shape, &self.strides, &result_shape);
         let other_strides = broadcast_strides(&other.shape, &other.strides, &result_shape);

@@ -517,4 +517,142 @@ mod tests {
 
         std::fs::remove_file(&path).ok();
     }
+
+    // =========================================================================
+    // Model Save/Load Roundtrip
+    // =========================================================================
+
+    #[test]
+    fn test_save_load_model_roundtrip() {
+        use axonml_nn::Linear;
+
+        let model = Linear::new(4, 3);
+        let original_data: Vec<f32> = model
+            .parameters()
+            .iter()
+            .flat_map(|p| p.data().to_vec())
+            .collect();
+
+        // Save
+        let path = std::env::temp_dir().join("axonml_test_model_rt.axonml");
+        save_model(&model, &path).expect("save_model failed");
+
+        // Load into new model
+        let model2 = Linear::new(4, 3);
+        let state_dict = load_state_dict(&path).expect("load failed");
+
+        // Apply loaded weights
+        let params2 = model2.named_parameters();
+        for (name, param) in &params2 {
+            if let Some(entry) = state_dict.get(name) {
+                if let Ok(tensor) = entry.data.to_tensor() {
+                    param.update_data(tensor);
+                }
+            }
+        }
+
+        let loaded_data: Vec<f32> = model2
+            .parameters()
+            .iter()
+            .flat_map(|p| p.data().to_vec())
+            .collect();
+
+        // Weights should match exactly
+        assert_eq!(original_data.len(), loaded_data.len());
+        for (a, b) in original_data.iter().zip(loaded_data.iter()) {
+            assert!(
+                (a - b).abs() < 1e-7,
+                "Model weights should survive save/load roundtrip: {} vs {}",
+                a,
+                b
+            );
+        }
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_state_dict_from_module() {
+        use axonml_nn::Linear;
+
+        let model = Linear::new(5, 3);
+        let sd = StateDict::from_module(&model);
+
+        // Linear has weight and bias
+        assert!(
+            sd.len() >= 2,
+            "Linear should have at least 2 params, got {}",
+            sd.len()
+        );
+
+        // Check that tensor data is correct
+        for (name, entry) in sd.entries() {
+            let tensor = entry.data.to_tensor().expect("Should reconstruct tensor");
+            assert!(
+                tensor.to_vec().iter().all(|v| v.is_finite()),
+                "All values should be finite for param {}",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_checkpoint_with_model_state_roundtrip() {
+        use axonml_nn::Linear;
+
+        let model = Linear::new(3, 2);
+        let sd = StateDict::from_module(&model);
+
+        let mut state = TrainingState::new();
+        state.epoch = 5;
+        state.record_loss(0.8);
+        state.record_loss(0.5);
+        state.record_val_loss(0.6);
+        state.record_metric("accuracy", 0.92);
+        state.update_best("accuracy", 0.92, true);
+
+        let checkpoint = Checkpoint::builder()
+            .model_state(sd)
+            .training_state(state)
+            .epoch(5)
+            .global_step(1000)
+            .config("model", "linear_3_2")
+            .config("optimizer", "adam")
+            .build();
+
+        let path = std::env::temp_dir().join("axonml_test_full_checkpoint.axonml");
+        save_checkpoint(&checkpoint, &path).expect("save failed");
+
+        let loaded = load_checkpoint(&path).expect("load failed");
+
+        // Verify all fields survived
+        assert_eq!(loaded.epoch(), 5);
+        assert_eq!(loaded.global_step(), 1000);
+        assert_eq!(loaded.best_metric(), Some(0.92));
+        assert_eq!(loaded.training_state.loss_history, vec![0.8, 0.5]);
+        assert_eq!(loaded.training_state.val_loss_history, vec![0.6]);
+        assert_eq!(loaded.config.get("model"), Some(&"linear_3_2".to_string()));
+        assert_eq!(loaded.config.get("optimizer"), Some(&"adam".to_string()));
+
+        // Verify model state
+        assert!(loaded.model_state.len() >= 2);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_training_state_custom_metrics() {
+        let mut state = TrainingState::new();
+        state.record_metric("auc", 0.85);
+        state.record_metric("auc", 0.90);
+        state.record_metric("f1", 0.75);
+
+        assert_eq!(state.custom_metrics.get("auc").unwrap().len(), 2);
+        assert_eq!(state.custom_metrics.get("f1").unwrap().len(), 1);
+
+        assert!(state.update_best("auc", 0.90, true));
+        assert!(!state.update_best("auc", 0.85, true)); // worse
+        assert!(state.update_best("auc", 0.95, true));
+        assert_eq!(state.best_metric, Some(0.95));
+    }
 }

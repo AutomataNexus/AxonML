@@ -57,18 +57,10 @@ impl GradientFunction for ReluBackward {
             return vec![Some(grad_gpu.relu_backward_cuda(&self.saved_input))];
         }
 
-        // CPU path
-        let input_data = self.saved_input.to_vec();
-        let grad_data = grad_output.to_vec();
-
-        let result: Vec<f32> = input_data
-            .iter()
-            .zip(grad_data.iter())
-            .map(|(&x, &g)| if x > 0.0 { g } else { 0.0 })
-            .collect();
-
+        // CPU path: grad_input = grad_output * (input > 0)
         vec![Some(
-            Tensor::from_vec(result, self.saved_input.shape()).unwrap(),
+            self.saved_input
+                .zip_map(grad_output, |x, g| if x > 0.0 { g } else { 0.0 }),
         )]
     }
 
@@ -123,17 +115,9 @@ impl GradientFunction for SigmoidBackward {
         }
 
         // CPU path: grad = grad_output * output * (1 - output)
-        let output_data = self.saved_output.to_vec();
-        let grad_data = grad_output.to_vec();
-
-        let result: Vec<f32> = output_data
-            .iter()
-            .zip(grad_data.iter())
-            .map(|(&o, &g)| g * o * (1.0 - o))
-            .collect();
-
         vec![Some(
-            Tensor::from_vec(result, self.saved_output.shape()).unwrap(),
+            self.saved_output
+                .zip_map(grad_output, |o, g| g * o * (1.0 - o)),
         )]
     }
 
@@ -188,17 +172,9 @@ impl GradientFunction for TanhBackward {
         }
 
         // CPU path: grad = grad_output * (1 - output^2)
-        let output_data = self.saved_output.to_vec();
-        let grad_data = grad_output.to_vec();
-
-        let result: Vec<f32> = output_data
-            .iter()
-            .zip(grad_data.iter())
-            .map(|(&o, &g)| g * (1.0 - o * o))
-            .collect();
-
         vec![Some(
-            Tensor::from_vec(result, self.saved_output.shape()).unwrap(),
+            self.saved_output
+                .zip_map(grad_output, |o, g| g * (1.0 - o * o)),
         )]
     }
 
@@ -436,18 +412,10 @@ impl GradientFunction for LeakyReluBackward {
             return vec![Some(result)];
         }
 
-        let input_data = self.saved_input.to_vec();
-        let grad_data = grad_output.to_vec();
-
-        let result: Vec<f32> = input_data
-            .iter()
-            .zip(grad_data.iter())
-            .map(|(&x, &g)| if x > 0.0 { g } else { g * self.negative_slope })
-            .collect();
-
-        vec![Some(
-            Tensor::from_vec(result, self.saved_input.shape()).unwrap(),
-        )]
+        let ns = self.negative_slope;
+        vec![Some(self.saved_input.zip_map(grad_output, move |x, g| {
+            if x > 0.0 { g } else { g * ns }
+        }))]
     }
 
     fn name(&self) -> &'static str {
@@ -541,34 +509,17 @@ impl GradientFunction for GeluBackward {
             )];
         }
 
-        let input_data = self.saved_input.to_vec();
-        let grad_data = grad_output.to_vec();
-
         let sqrt_2_pi = (2.0_f32 / std::f32::consts::PI).sqrt();
         let c = 0.044715_f32;
 
-        let result: Vec<f32> = input_data
-            .iter()
-            .zip(grad_data.iter())
-            .map(|(&x, &g)| {
-                let x3 = x * x * x;
-                let inner = sqrt_2_pi * (x + c * x3);
-                let tanh_inner = inner.tanh();
-                let sech2 = 1.0 - tanh_inner * tanh_inner;
-
-                // GELU = 0.5 * x * (1 + tanh(inner))
-                // d/dx = 0.5 * (1 + tanh(inner)) + 0.5 * x * sech^2(inner) * d(inner)/dx
-                // d(inner)/dx = sqrt(2/pi) * (1 + 3 * c * x^2)
-                let d_inner = sqrt_2_pi * (1.0 + 3.0 * c * x * x);
-                let grad = 0.5 * (1.0 + tanh_inner) + 0.5 * x * sech2 * d_inner;
-
-                g * grad
-            })
-            .collect();
-
-        vec![Some(
-            Tensor::from_vec(result, self.saved_input.shape()).unwrap(),
-        )]
+        vec![Some(self.saved_input.zip_map(grad_output, move |x, g| {
+            let x3 = x * x * x;
+            let inner = sqrt_2_pi * (x + c * x3);
+            let tanh_inner = inner.tanh();
+            let sech2 = 1.0 - tanh_inner * tanh_inner;
+            let d_inner = sqrt_2_pi * (1.0 + 3.0 * c * x * x);
+            g * (0.5 * (1.0 + tanh_inner) + 0.5 * x * sech2 * d_inner)
+        }))]
     }
 
     fn name(&self) -> &'static str {
@@ -730,22 +681,11 @@ impl GradientFunction for ClampBackward {
         }
 
         // CPU path
-        let input_data = self.saved_input.to_vec();
-        let grad_data = grad_output.to_vec();
-        let result: Vec<f32> = input_data
-            .iter()
-            .zip(grad_data.iter())
-            .map(|(&x, &g)| {
-                if x > self.min_val && x < self.max_val {
-                    g
-                } else {
-                    0.0
-                }
-            })
-            .collect();
-        vec![Some(
-            Tensor::from_vec(result, self.saved_input.shape()).unwrap(),
-        )]
+        let min_v = self.min_val;
+        let max_v = self.max_val;
+        vec![Some(self.saved_input.zip_map(grad_output, move |x, g| {
+            if x > min_v && x < max_v { g } else { 0.0 }
+        }))]
     }
 
     fn name(&self) -> &'static str {
@@ -971,21 +911,10 @@ impl GradientFunction for SiluBackward {
             )];
         }
 
-        let input_data = self.saved_input.to_vec();
-        let grad_data = grad_output.to_vec();
-
-        let result: Vec<f32> = input_data
-            .iter()
-            .zip(grad_data.iter())
-            .map(|(&x, &g)| {
-                let sig = 1.0 / (1.0 + (-x).exp());
-                g * (sig + x * sig * (1.0 - sig))
-            })
-            .collect();
-
-        vec![Some(
-            Tensor::from_vec(result, self.saved_input.shape()).unwrap(),
-        )]
+        vec![Some(self.saved_input.zip_map(grad_output, |x, g| {
+            let sig = 1.0 / (1.0 + (-x).exp());
+            g * (sig + x * sig * (1.0 - sig))
+        }))]
     }
 
     fn name(&self) -> &'static str {
@@ -1103,22 +1032,10 @@ impl GradientFunction for EluBackward {
             return vec![Some(result)];
         }
 
-        let input_data = self.saved_input.to_vec();
-        let grad_data = grad_output.to_vec();
-
-        let result: Vec<f32> = input_data
-            .iter()
-            .zip(grad_data.iter())
-            .map(
-                |(&x, &g)| {
-                    if x > 0.0 { g } else { g * self.alpha * x.exp() }
-                },
-            )
-            .collect();
-
-        vec![Some(
-            Tensor::from_vec(result, self.saved_input.shape()).unwrap(),
-        )]
+        let alpha = self.alpha;
+        vec![Some(self.saved_input.zip_map(grad_output, move |x, g| {
+            if x > 0.0 { g } else { g * alpha * x.exp() }
+        }))]
     }
 
     fn name(&self) -> &'static str {

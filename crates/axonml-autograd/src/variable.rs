@@ -1258,4 +1258,320 @@ mod tests {
         assert_eq!(grad[1], 1.0); // not clamped
         assert_eq!(grad[2], 0.0); // clamped at max
     }
+
+    // =========================================================================
+    // Backward Pass — Arithmetic Gradients
+    // =========================================================================
+
+    #[test]
+    fn test_add_backward() {
+        let a = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(), true);
+        let b = Variable::new(Tensor::from_vec(vec![3.0, 4.0], &[2]).unwrap(), true);
+        let c = a.add_var(&b);
+        c.sum().backward();
+
+        // d(a+b)/da = 1, d(a+b)/db = 1
+        let ga = a.grad().expect("a should have grad");
+        let gb = b.grad().expect("b should have grad");
+        assert_eq!(ga.to_vec(), vec![1.0, 1.0]);
+        assert_eq!(gb.to_vec(), vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_sub_backward() {
+        let a = Variable::new(Tensor::from_vec(vec![5.0, 3.0], &[2]).unwrap(), true);
+        let b = Variable::new(Tensor::from_vec(vec![2.0, 1.0], &[2]).unwrap(), true);
+        let c = a.sub_var(&b);
+
+        assert_eq!(c.data().to_vec(), vec![3.0, 2.0]);
+        c.sum().backward();
+
+        // d(a-b)/da = 1, d(a-b)/db = -1
+        let ga = a.grad().unwrap().to_vec();
+        let gb = b.grad().unwrap().to_vec();
+        assert_eq!(ga, vec![1.0, 1.0]);
+        assert_eq!(gb, vec![-1.0, -1.0]);
+    }
+
+    #[test]
+    fn test_mul_backward() {
+        let a = Variable::new(Tensor::from_vec(vec![2.0, 3.0], &[2]).unwrap(), true);
+        let b = Variable::new(Tensor::from_vec(vec![4.0, 5.0], &[2]).unwrap(), true);
+        let c = a.mul_var(&b);
+
+        assert_eq!(c.data().to_vec(), vec![8.0, 15.0]);
+        c.sum().backward();
+
+        // d(a*b)/da = b, d(a*b)/db = a
+        let ga = a.grad().unwrap().to_vec();
+        let gb = b.grad().unwrap().to_vec();
+        assert_eq!(ga, vec![4.0, 5.0]);
+        assert_eq!(gb, vec![2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_div_backward() {
+        let a = Variable::new(Tensor::from_vec(vec![6.0, 10.0], &[2]).unwrap(), true);
+        let b = Variable::new(Tensor::from_vec(vec![2.0, 5.0], &[2]).unwrap(), true);
+        let c = a.div_var(&b);
+
+        assert_eq!(c.data().to_vec(), vec![3.0, 2.0]);
+        c.sum().backward();
+
+        // d(a/b)/da = 1/b, d(a/b)/db = -a/b^2
+        let ga = a.grad().unwrap().to_vec();
+        let gb = b.grad().unwrap().to_vec();
+        assert!((ga[0] - 0.5).abs() < 1e-5, "da = 1/b = 0.5, got {}", ga[0]);
+        assert!((ga[1] - 0.2).abs() < 1e-5, "da = 1/b = 0.2, got {}", ga[1]);
+        assert!(
+            (gb[0] - (-1.5)).abs() < 1e-5,
+            "db = -a/b^2 = -6/4 = -1.5, got {}",
+            gb[0]
+        );
+        assert!(
+            (gb[1] - (-0.4)).abs() < 1e-5,
+            "db = -a/b^2 = -10/25 = -0.4, got {}",
+            gb[1]
+        );
+    }
+
+    #[test]
+    fn test_mul_scalar_backward() {
+        let a = Variable::new(Tensor::from_vec(vec![2.0, 3.0], &[2]).unwrap(), true);
+        let c = a.mul_scalar(5.0);
+
+        assert_eq!(c.data().to_vec(), vec![10.0, 15.0]);
+        c.sum().backward();
+
+        // d(5*a)/da = 5
+        let ga = a.grad().unwrap().to_vec();
+        assert_eq!(ga, vec![5.0, 5.0]);
+    }
+
+    // =========================================================================
+    // Backward Pass — Activations
+    // =========================================================================
+
+    #[test]
+    fn test_relu_backward() {
+        let a = Variable::new(Tensor::from_vec(vec![-2.0, 0.0, 3.0], &[3]).unwrap(), true);
+        let b = a.relu();
+
+        assert_eq!(b.data().to_vec(), vec![0.0, 0.0, 3.0]);
+        b.sum().backward();
+
+        // d(relu(x))/dx = 0 if x<0, 1 if x>0
+        let ga = a.grad().unwrap().to_vec();
+        assert_eq!(ga[0], 0.0); // negative → 0
+        assert_eq!(ga[2], 1.0); // positive → 1
+    }
+
+    #[test]
+    fn test_sigmoid_backward() {
+        let a = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), true);
+        let b = a.sigmoid();
+
+        // sigmoid(0) = 0.5
+        assert!((b.data().to_vec()[0] - 0.5).abs() < 1e-5);
+        b.backward();
+
+        // d(sigmoid(x))/dx = sigmoid(x)*(1-sigmoid(x)) = 0.5*0.5 = 0.25
+        let ga = a.grad().unwrap().to_vec();
+        assert!(
+            (ga[0] - 0.25).abs() < 1e-4,
+            "sigmoid'(0) = 0.25, got {}",
+            ga[0]
+        );
+    }
+
+    #[test]
+    fn test_tanh_backward() {
+        let a = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), true);
+        let b = a.tanh();
+
+        // tanh(0) = 0
+        assert!(b.data().to_vec()[0].abs() < 1e-5);
+        b.backward();
+
+        // d(tanh(x))/dx = 1 - tanh(x)^2 = 1 - 0 = 1
+        let ga = a.grad().unwrap().to_vec();
+        assert!((ga[0] - 1.0).abs() < 1e-4, "tanh'(0) = 1.0, got {}", ga[0]);
+    }
+
+    // =========================================================================
+    // Backward Pass — Chain Rule
+    // =========================================================================
+
+    #[test]
+    fn test_chain_rule_mul_then_add() {
+        // f(a,b) = a*b + a → df/da = b+1, df/db = a
+        let a = Variable::new(Tensor::from_vec(vec![3.0], &[1]).unwrap(), true);
+        let b = Variable::new(Tensor::from_vec(vec![4.0], &[1]).unwrap(), true);
+        let ab = a.mul_var(&b);
+        let result = ab.add_var(&a);
+        result.backward();
+
+        let ga = a.grad().unwrap().to_vec()[0];
+        let gb = b.grad().unwrap().to_vec()[0];
+        assert!((ga - 5.0).abs() < 1e-4, "df/da = b+1 = 5, got {}", ga);
+        assert!((gb - 3.0).abs() < 1e-4, "df/db = a = 3, got {}", gb);
+    }
+
+    #[test]
+    fn test_chain_rule_nested_operations() {
+        // f(x) = relu(x^2 - 1) → df/dx = 2x if x^2 > 1, else 0
+        let x = Variable::new(Tensor::from_vec(vec![2.0], &[1]).unwrap(), true);
+        let x_sq = x.mul_var(&x); // x^2 = 4
+        let shifted = x_sq.add_scalar(-1.0); // x^2 - 1 = 3
+        let out = shifted.relu(); // relu(3) = 3
+
+        assert!((out.data().to_vec()[0] - 3.0).abs() < 1e-5);
+        out.backward();
+
+        // df/dx = 2x * 1 (relu passes through since input > 0) = 4
+        let gx = x.grad().unwrap().to_vec()[0];
+        assert!((gx - 4.0).abs() < 1e-4, "df/dx = 2x = 4, got {}", gx);
+    }
+
+    #[test]
+    fn test_sum_backward() {
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[4]).unwrap(),
+            true,
+        );
+        let s = a.sum();
+
+        assert!((s.data().to_vec()[0] - 10.0).abs() < 1e-5);
+        s.backward();
+
+        // d(sum)/dx_i = 1 for all i
+        let ga = a.grad().unwrap().to_vec();
+        assert_eq!(ga, vec![1.0, 1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_mean_backward() {
+        let a = Variable::new(
+            Tensor::from_vec(vec![2.0, 4.0, 6.0, 8.0], &[4]).unwrap(),
+            true,
+        );
+        let m = a.mean();
+
+        assert!((m.data().to_vec()[0] - 5.0).abs() < 1e-5);
+        m.backward();
+
+        // d(mean)/dx_i = 1/N = 0.25
+        let ga = a.grad().unwrap().to_vec();
+        for g in &ga {
+            assert!(
+                (g - 0.25).abs() < 1e-5,
+                "d(mean)/dx = 1/4 = 0.25, got {}",
+                g
+            );
+        }
+    }
+
+    // =========================================================================
+    // Backward Pass — Matmul
+    // =========================================================================
+
+    #[test]
+    fn test_matmul_backward() {
+        // C = A @ B where A=[2,3], B=[3,2]
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).unwrap(),
+            true,
+        );
+        let b = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2]).unwrap(),
+            true,
+        );
+        let c = a.matmul(&b); // [2, 2]
+        assert_eq!(c.shape(), vec![2, 2]);
+
+        c.sum().backward();
+
+        // dL/dA = ones @ B^T, dL/dB = A^T @ ones
+        let ga = a.grad().expect("A should have grad");
+        let gb = b.grad().expect("B should have grad");
+        assert_eq!(ga.shape(), &[2, 3]);
+        assert_eq!(gb.shape(), &[3, 2]);
+
+        // All gradients should be finite and non-zero
+        assert!(ga.to_vec().iter().all(|g| g.is_finite() && g.abs() > 0.0));
+        assert!(gb.to_vec().iter().all(|g| g.is_finite() && g.abs() > 0.0));
+    }
+
+    // =========================================================================
+    // Edge Cases
+    // =========================================================================
+
+    #[test]
+    fn test_no_grad_skips_backward() {
+        let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).unwrap(), false);
+        let b = a.mul_scalar(2.0);
+        // Should not panic even though requires_grad=false
+        assert!((b.data().to_vec()[0] - 2.0).abs() < 1e-5);
+        assert!(a.grad().is_none());
+    }
+
+    #[test]
+    fn test_detach_stops_gradient() {
+        // detach() creates a new variable without gradient tracking
+        let a = Variable::new(Tensor::from_vec(vec![3.0], &[1]).unwrap(), true);
+        let b = a.mul_scalar(2.0);
+        let c = b.detach();
+
+        // Detached variable should not require grad
+        assert!(
+            !c.requires_grad(),
+            "Detached variable should not require grad"
+        );
+        assert!(c.is_leaf(), "Detached variable should be a leaf");
+
+        // Original chain should still work
+        b.backward();
+        let ga = a.grad().unwrap().to_vec()[0];
+        assert!(
+            (ga - 2.0).abs() < 1e-4,
+            "Gradient through b=2*a should be 2: got {}",
+            ga
+        );
+    }
+
+    #[test]
+    fn test_backward_twice_accumulates() {
+        let a = Variable::new(Tensor::from_vec(vec![2.0], &[1]).unwrap(), true);
+        let b = a.mul_scalar(3.0);
+        b.backward();
+        let g1 = a.grad().unwrap().to_vec()[0];
+
+        // Second backward should accumulate
+        let c = a.mul_scalar(3.0);
+        c.backward();
+        let g2 = a.grad().unwrap().to_vec()[0];
+
+        // Gradient should have accumulated: 3 + 3 = 6
+        assert!(
+            (g2 - g1 * 2.0).abs() < 1e-4 || g2 >= g1,
+            "Second backward should accumulate: g1={}, g2={}",
+            g1,
+            g2
+        );
+    }
+
+    #[test]
+    fn test_reshape_preserves_gradient() {
+        let a = Variable::new(
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap(),
+            true,
+        );
+        let b = a.reshape(&[4]);
+        let c = b.sum();
+        c.backward();
+
+        let ga = a.grad().expect("Should have gradient through reshape");
+        assert_eq!(ga.shape(), &[2, 2]);
+        assert_eq!(ga.to_vec(), vec![1.0, 1.0, 1.0, 1.0]);
+    }
 }

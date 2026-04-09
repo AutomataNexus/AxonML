@@ -981,4 +981,153 @@ mod tests {
         let result = scatter(&dst, 0, &index, &src).unwrap();
         assert_eq!(result.to_vec(), vec![1.0, 0.0, 2.0]);
     }
+
+    // =========================================================================
+    // where_cond
+    // =========================================================================
+
+    #[test]
+    fn test_where_cond_basic() {
+        let cond = vec![true, false, true, false];
+        let a = Tensor::from_vec(vec![10.0f32, 20.0, 30.0, 40.0], &[4]).unwrap();
+        let b = Tensor::from_vec(vec![-1.0f32, -2.0, -3.0, -4.0], &[4]).unwrap();
+        let result = where_cond(&cond, &a, &b).unwrap();
+        assert_eq!(result.to_vec(), vec![10.0, -2.0, 30.0, -4.0]);
+    }
+
+    // =========================================================================
+    // scatter — additional
+    // =========================================================================
+
+    #[test]
+    fn test_scatter_overwrites() {
+        let dst = Tensor::from_vec(vec![0.0f32; 4], &[4]).unwrap();
+        let index = Tensor::from_vec(vec![1_i64, 1], &[2]).unwrap();
+        let src = Tensor::from_vec(vec![5.0f32, 10.0], &[2]).unwrap();
+
+        let result = scatter(&dst, 0, &index, &src).unwrap();
+        assert!(result.to_vec()[1] > 0.0, "Scatter should write to index 1");
+    }
+
+    // =========================================================================
+    // unique — edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_unique_all_same() {
+        let t = Tensor::from_vec(vec![5.0f32, 5.0, 5.0, 5.0], &[4]).unwrap();
+        let result = unique(&t, true, false, false);
+        assert_eq!(result.values.to_vec().len(), 1);
+        assert!((result.values.to_vec()[0] - 5.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_unique_already_unique() {
+        let t = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], &[4]).unwrap();
+        let result = unique(&t, true, false, false);
+        assert_eq!(result.values.to_vec().len(), 4);
+    }
+
+    // =========================================================================
+    // flip — multi-dimensional edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_flip_both_dims() {
+        let t = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], &[2, 2]).unwrap();
+        let flipped = flip(&t, &[0, 1]).unwrap();
+        assert_eq!(flipped.to_vec(), vec![4.0, 3.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn test_flip_col_only() {
+        let t = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], &[2, 2]).unwrap();
+        let flipped = flip(&t, &[1]).unwrap();
+        assert_eq!(flipped.to_vec(), vec![2.0, 1.0, 4.0, 3.0]);
+    }
+
+    // =========================================================================
+    // roll — multi-dimensional
+    // =========================================================================
+
+    #[test]
+    fn test_roll_2d() {
+        let t = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).unwrap();
+        let rolled = roll(&t, &[1], &[1]).unwrap();
+        assert_eq!(rolled.to_vec(), vec![3.0, 1.0, 2.0, 6.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn test_roll_full_cycle() {
+        let t = Tensor::from_vec(vec![1.0f32, 2.0, 3.0], &[3]).unwrap();
+        let rolled = roll(&t, &[3], &[0]).unwrap();
+        assert_eq!(rolled.to_vec(), vec![1.0, 2.0, 3.0]);
+    }
+
+    // =========================================================================
+    // nonzero — edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_nonzero_all_zeros() {
+        let t = Tensor::from_vec(vec![0.0f32, 0.0, 0.0], &[3]).unwrap();
+        let result = nonzero(&t);
+        assert_eq!(result.to_vec().len(), 0);
+    }
+
+    #[test]
+    fn test_nonzero_all_nonzero() {
+        let t = Tensor::from_vec(vec![1.0f32, -2.0, 0.5], &[3]).unwrap();
+        let result = nonzero(&t);
+        assert_eq!(result.to_vec().len(), 3);
+    }
+
+    // =========================================================================
+    // Numerical stability of softmax
+    // =========================================================================
+
+    #[test]
+    fn test_softmax_large_values() {
+        let t = Tensor::from_vec(vec![1000.0f32, 1001.0, 999.0], &[3]).unwrap();
+        let result = softmax(&t, 0).unwrap();
+        let rv = result.to_vec();
+        assert!(
+            rv.iter().all(|v: &f32| v.is_finite()),
+            "Softmax should handle large values"
+        );
+        let sum: f32 = rv.iter().sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "Softmax should sum to 1.0, got {}",
+            sum
+        );
+    }
+
+    #[test]
+    fn test_softmax_negative_values() {
+        let t = Tensor::from_vec(vec![-100.0f32, -200.0, -150.0], &[3]).unwrap();
+        let result = softmax(&t, 0).unwrap();
+        let rv = result.to_vec();
+        assert!(rv.iter().all(|v: &f32| v.is_finite() && *v >= 0.0));
+        let sum: f32 = rv.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5);
+    }
+
+    // =========================================================================
+    // clamp edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_clamp_no_op() {
+        let t = Tensor::from_vec(vec![0.5f32, 0.3, 0.8], &[3]).unwrap();
+        let clamped = clamp_min(&t, 0.0);
+        assert_eq!(clamped.to_vec(), vec![0.5, 0.3, 0.8]);
+    }
+
+    #[test]
+    fn test_clamp_min_all_negative() {
+        let t = Tensor::from_vec(vec![-5.0f32, -3.0, -1.0], &[3]).unwrap();
+        let clamped = clamp_min(&t, 0.0);
+        assert_eq!(clamped.to_vec(), vec![0.0, 0.0, 0.0]);
+    }
 }

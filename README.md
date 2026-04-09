@@ -20,11 +20,11 @@ Axonml (named after axons - the nerve fibers that transmit signals between neuro
 
 ## PyTorch Parity: ~92-95% (and beyond)
 
-AxonML provides comprehensive PyTorch-equivalent functionality with **2,141 passing tests**. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
+AxonML provides comprehensive PyTorch-equivalent functionality with **2,240+ passing tests**. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
 
 ## Features
 
-### Core (v0.5.0)
+### Core (v0.6.0)
 
 - **Tensor Operations** (`axonml-tensor`)
   - N-dimensional tensors with arbitrary shapes

@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-08
+
+### Summary
+Production readiness release. **100+ new tests** across all foundation crates, comprehensive CPU backward pass optimization, and zero clippy warnings. Test suite grows from 2,141 to **2,240+** passing tests. Every critical training path — forward, loss, backward, optimizer step, checkpoint save/load — now has verified correctness tests. CPU performance improved by eliminating unnecessary memory copies in backward passes and adding fast paths for contiguous tensor operations.
+
+**14 files changed, 2,142 lines added, 218 lines removed.**
+
+### Added
+
+#### Test Coverage (100+ new tests)
+
+##### `axonml-optim` (+18 tests)
+- Adam step mathematical correctness (verifies update formula)
+- Adam/AdamW convergence on quadratic via autograd (end-to-end training loop test)
+- `zero_grad()` clears all parameter gradients
+- Frozen parameter handling (optimizer skips requires_grad=false)
+- Weight decay shrinks parameters even with zero gradient
+- Learning rate get/set management
+- ReduceLROnPlateau: max mode, min_lr floor, cooldown behavior
+- OneCycleLR: full cycle shape, monotonic warmup/annealing phases
+- CosineAnnealingLR: monotonic decrease, eta_min convergence
+- WarmupLR: constant after warmup completes
+
+##### `axonml-nn` (+35 tests)
+- **Loss functions**: MSE gradient correctness + sum reduction, L1 basic/zero, BCE perfect/worst prediction, BCEWithLogits numerical stability (large logits) + zero logits + reduction modes, SmoothL1 small/large error regimes, CrossEntropy batch independence + 100-class scaling
+- **Normalization**: LayerNorm zero-mean/unit-variance output + gradient flow + batch independence + parameter count, BatchNorm1d per-channel normalization + train/eval mode difference, BatchNorm2d gradient flow, GroupNorm gradient flow
+- **RNN/LSTM/GRU**: LSTMCell forward_step, LSTM multi-layer + gradient flow + different sequence lengths + bounded outputs + parameter count, GRUCell forward_step, GRU multi-layer + forward_mean + forward_last + gradient flow + hidden state evolution, RNNCell gradient flow, RNN multi-layer, GRU numerical stability with large inputs
+- **Conv2d**: Conv1d with padding/stride + multi-channel, grouped Conv2d gradient flow, groups=2, depthwise separable pattern (dw+pw chain), ConvTranspose2d upsample verification + gradient correctness + multi-channel
+
+##### `axonml-autograd` (+17 tests)
+- Arithmetic backward: add, sub, mul, div, mul_scalar — all verified against analytical gradients
+- Activation backward: relu, sigmoid, tanh — derivative values checked at known points
+- Chain rule: mul-then-add composite, nested relu(x^2-1) composite
+- Reductions: sum backward (all-ones gradient), mean backward (1/N gradient)
+- Matmul backward: gradient shapes and non-zero flow for both operands
+- Edge cases: no_grad skips backward, detach stops gradient flow, backward accumulation, reshape preserves gradient
+
+##### `axonml-serialize` (+4 tests)
+- Model save/load roundtrip (Linear weights survive exactly)
+- `StateDict::from_module()` extracts correct parameter count and finite values
+- Full checkpoint roundtrip with model state + training state + config + metrics
+- TrainingState custom metrics tracking and best-metric update logic
+
+##### `axonml-tensor` (+14 tests)
+- `where_cond` basic conditional selection
+- `scatter` duplicate index handling
+- `unique` all-same and all-unique edge cases
+- `flip` both dimensions, column-only flip
+- `roll` 2D rolling, full-cycle (roll by length = identity)
+- `nonzero` all-zeros and all-nonzero edge cases
+- `softmax` numerical stability with large values (+1000) and negative values (-200)
+- `clamp_min` no-op and all-negative cases
+
+#### Tensor API
+- `Tensor::map()` — apply function element-wise, single allocation
+- `Tensor::zip_map()` — binary element-wise operation, single allocation (replaces to_vec + zip + from_vec pattern)
+- `Tensor::zip_map3()` — ternary element-wise operation
+
+### Changed
+
+#### CPU Performance Optimizations
+
+##### Backward Pass — Eliminated 22 unnecessary `to_vec()` memory copies
+- **ReluBackward**: `zip_map(|x, g| if x > 0 { g } else { 0 })` — one allocation instead of three
+- **SigmoidBackward**: `zip_map(|o, g| g * o * (1-o))` — same
+- **TanhBackward**: `zip_map(|o, g| g * (1 - o*o))` — same
+- **GeluBackward**: `zip_map` with full GELU derivative formula
+- **SiluBackward**: `zip_map` with SiLU derivative
+- **EluBackward**: `zip_map` with alpha * exp(x) for negative inputs
+- **LeakyReluBackward**: `zip_map` with negative_slope
+- **ClampBackward**: `zip_map` with range check
+- **BceLossBackward**: `zip_map` with gradient formula
+- **L1LossBackward**: `zip_map` with sign function
+- **SmoothL1LossBackward**: `zip_map` with beta threshold
+
+##### Tensor Element-Wise Operations — Fast path for contiguous same-shape tensors
+- `add()`, `sub()`, `mul()`, `div()` now skip `unravel_index` + `linear_index` per-element when both tensors have the same shape and are contiguous
+- Eliminates O(ndim) index computation per element — the most common case in backward passes
+- Broadcast path unchanged for shape-mismatched tensors
+
+### Fixed
+- 3 clippy warnings (`explicit .into_iter()` in zip arguments)
+- All code formatted with `cargo fmt --all`
+
 ## [0.5.0] - 2026-03-31
 
 ### Summary

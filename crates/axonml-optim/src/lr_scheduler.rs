@@ -621,4 +621,229 @@ mod tests {
         // LR should have been reduced
         assert!(optimizer.get_lr() < initial_lr);
     }
+
+    // =========================================================================
+    // ReduceLROnPlateau — Comprehensive
+    // =========================================================================
+
+    #[test]
+    fn test_reduce_lr_on_plateau_max_mode() {
+        let mut optimizer = create_test_optimizer();
+        let mut scheduler = ReduceLROnPlateau::with_options(&optimizer, "max", 0.5, 2, 0.0, 0, 0.0);
+
+        let initial_lr = optimizer.get_lr();
+
+        // Improving metric (higher is better)
+        scheduler.step_with_metric(&mut optimizer, 0.8);
+        scheduler.step_with_metric(&mut optimizer, 0.9);
+        assert!((optimizer.get_lr() - initial_lr).abs() < 1e-6);
+
+        // Plateau (metric not improving)
+        scheduler.step_with_metric(&mut optimizer, 0.85);
+        scheduler.step_with_metric(&mut optimizer, 0.85);
+        scheduler.step_with_metric(&mut optimizer, 0.85);
+
+        assert!(
+            optimizer.get_lr() < initial_lr,
+            "LR should reduce on plateau in max mode"
+        );
+    }
+
+    #[test]
+    fn test_reduce_lr_on_plateau_min_lr_floor() {
+        let mut optimizer = create_test_optimizer();
+        let mut scheduler =
+            ReduceLROnPlateau::with_options(&optimizer, "min", 0.1, 0, 0.0, 0, 0.001);
+
+        // Force many reductions
+        for _ in 0..50 {
+            scheduler.step_with_metric(&mut optimizer, 999.0); // never improves
+        }
+
+        assert!(
+            optimizer.get_lr() >= 0.001,
+            "LR should not go below min_lr, got {}",
+            optimizer.get_lr()
+        );
+    }
+
+    #[test]
+    fn test_reduce_lr_cooldown() {
+        let mut optimizer = create_test_optimizer();
+        let mut scheduler = ReduceLROnPlateau::with_options(&optimizer, "min", 0.5, 0, 0.0, 3, 0.0);
+
+        let initial_lr = optimizer.get_lr();
+
+        // Trigger reduction
+        scheduler.step_with_metric(&mut optimizer, 999.0);
+        scheduler.step_with_metric(&mut optimizer, 999.0);
+        let lr_after_first_reduce = optimizer.get_lr();
+        assert!(lr_after_first_reduce < initial_lr);
+
+        // During cooldown (3 steps), LR should not change again
+        scheduler.step_with_metric(&mut optimizer, 999.0);
+        scheduler.step_with_metric(&mut optimizer, 999.0);
+        scheduler.step_with_metric(&mut optimizer, 999.0);
+        assert!(
+            (optimizer.get_lr() - lr_after_first_reduce).abs() < 1e-8,
+            "LR should not change during cooldown"
+        );
+    }
+
+    // =========================================================================
+    // OneCycleLR — Comprehensive
+    // =========================================================================
+
+    #[test]
+    fn test_one_cycle_lr_full_cycle() {
+        let mut optimizer = create_test_optimizer();
+        let mut scheduler = OneCycleLR::new(&optimizer, 0.1, 100);
+
+        let mut lrs = Vec::new();
+        for _ in 0..100 {
+            scheduler.step(&mut optimizer);
+            lrs.push(optimizer.get_lr());
+        }
+
+        // Should start low, peak around 30%, end very low
+        let max_lr = lrs.iter().cloned().fold(f32::MIN, f32::max);
+        let final_lr = *lrs.last().unwrap();
+
+        assert!(
+            max_lr > 0.08,
+            "Peak should be near max_lr=0.1, got {}",
+            max_lr
+        );
+        assert!(
+            final_lr < 0.001,
+            "Final LR should be very small, got {}",
+            final_lr
+        );
+
+        // Peak should occur around 30% of total steps
+        let peak_idx = lrs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap()
+            .0;
+        assert!(
+            peak_idx >= 25 && peak_idx <= 35,
+            "Peak should be around step 30, was at step {}",
+            peak_idx
+        );
+    }
+
+    #[test]
+    fn test_one_cycle_lr_monotonic_phases() {
+        let mut optimizer = create_test_optimizer();
+        let mut scheduler = OneCycleLR::new(&optimizer, 0.1, 100);
+
+        let mut lrs = Vec::new();
+        for _ in 0..100 {
+            scheduler.step(&mut optimizer);
+            lrs.push(optimizer.get_lr());
+        }
+
+        // Warmup phase (steps 1-30): should be monotonically increasing
+        for i in 1..29 {
+            assert!(
+                lrs[i] >= lrs[i - 1] - 1e-6,
+                "Warmup should increase: step {} lr={} < step {} lr={}",
+                i,
+                lrs[i],
+                i - 1,
+                lrs[i - 1]
+            );
+        }
+
+        // Annealing phase (steps 31-100): should be monotonically decreasing
+        for i in 32..99 {
+            assert!(
+                lrs[i] <= lrs[i - 1] + 1e-6,
+                "Annealing should decrease: step {} lr={} > step {} lr={}",
+                i,
+                lrs[i],
+                i - 1,
+                lrs[i - 1]
+            );
+        }
+    }
+
+    // =========================================================================
+    // CosineAnnealingLR — Comprehensive
+    // =========================================================================
+
+    #[test]
+    fn test_cosine_annealing_with_eta_min() {
+        let mut optimizer = create_test_optimizer();
+        let mut scheduler = CosineAnnealingLR::with_eta_min(&optimizer, 100, 0.001);
+
+        for _ in 0..100 {
+            scheduler.step(&mut optimizer);
+        }
+
+        // At end should be at eta_min
+        assert!(
+            (optimizer.get_lr() - 0.001).abs() < 0.002,
+            "Should reach eta_min at end, got {}",
+            optimizer.get_lr()
+        );
+    }
+
+    #[test]
+    fn test_cosine_annealing_monotonic_decrease() {
+        let mut optimizer = create_test_optimizer();
+        let mut scheduler = CosineAnnealingLR::new(&optimizer, 100);
+
+        let mut lrs = Vec::new();
+        for _ in 0..100 {
+            scheduler.step(&mut optimizer);
+            lrs.push(optimizer.get_lr());
+        }
+
+        // Cosine annealing should monotonically decrease
+        for i in 1..lrs.len() {
+            assert!(
+                lrs[i] <= lrs[i - 1] + 1e-6,
+                "Cosine should decrease: step {} lr={} > step {} lr={}",
+                i + 1,
+                lrs[i],
+                i,
+                lrs[i - 1]
+            );
+        }
+
+        // All LRs should be non-negative
+        assert!(
+            lrs.iter().all(|lr| *lr >= 0.0),
+            "LRs should be non-negative"
+        );
+    }
+
+    // =========================================================================
+    // WarmupLR — Edge Cases
+    // =========================================================================
+
+    #[test]
+    fn test_warmup_lr_stays_constant_after() {
+        let mut optimizer = create_test_optimizer();
+        let mut scheduler = WarmupLR::new(&optimizer, 5);
+
+        for _ in 0..5 {
+            scheduler.step(&mut optimizer);
+        }
+        let target = optimizer.get_lr();
+
+        // Should stay constant for many more steps
+        for _ in 0..100 {
+            scheduler.step(&mut optimizer);
+            assert!(
+                (optimizer.get_lr() - target).abs() < 1e-8,
+                "LR should stay at {} after warmup, got {}",
+                target,
+                optimizer.get_lr()
+            );
+        }
+    }
 }

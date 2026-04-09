@@ -234,28 +234,27 @@ struct CrossEntropyBackward {
 
 impl GradientFunction for CrossEntropyBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // GPU fast path: use CUDA cross_entropy_bwd kernel
-        #[cfg(feature = "cuda")]
-        if self.softmax_probs.device().is_gpu() {
-            let grad_out_gpu = if grad_output.device().is_gpu() {
-                grad_output.clone()
-            } else {
-                grad_output.to_device(self.softmax_probs.device()).unwrap()
-            };
-            let grad_tensor = self
-                .softmax_probs
-                .cross_entropy_bwd_cuda(&self.targets, &grad_out_gpu);
-            return vec![Some(grad_tensor)];
-        }
-
-        // CPU path
+        // Always use the exact CPU path for correctness, then transfer
+        // result to GPU if needed. The CUDA cross_entropy_bwd kernel has
+        // precision issues with approximate reciprocal/exp that cause
+        // training to stall. The CPU backward is fast enough since CE
+        // backward is O(N*C) — negligible vs the forward pass matmuls.
         let softmax_vec = self.softmax_probs.to_vec();
         let target_vec = self.targets.to_vec();
         let grad_vec = grad_output.to_vec();
         let mut grad_input = vec![0.0f32; self.batch_size * self.num_classes];
 
+        // Handle both per-sample grad_output [N] and scalar [1] (from mean reduction)
+        let is_scalar_grad = grad_vec.len() == 1;
+
         for b in 0..self.batch_size {
-            let grad_scale = grad_vec[b];
+            let grad_scale = if is_scalar_grad {
+                grad_vec[0]
+            } else if b < grad_vec.len() {
+                grad_vec[b]
+            } else {
+                1.0 / self.batch_size as f32
+            };
             let offset = b * self.num_classes;
             let tc = target_vec[b] as usize;
             for c in 0..self.num_classes {
@@ -269,8 +268,9 @@ impl GradientFunction for CrossEntropyBackward {
 
         let mut grad_tensor = Tensor::from_vec(grad_input, &[self.batch_size, self.num_classes])
             .expect("tensor creation failed");
-        if grad_output.device().is_gpu() {
-            grad_tensor = grad_tensor.to_device(grad_output.device()).unwrap();
+        // Transfer to GPU if the forward was on GPU
+        if self.softmax_probs.device().is_gpu() {
+            grad_tensor = grad_tensor.to_device(self.softmax_probs.device()).unwrap();
         }
         vec![Some(grad_tensor)]
     }
@@ -1212,5 +1212,225 @@ mod tests {
         // Gradients should be non-zero
         let grad_norm: f32 = grad_vec.iter().map(|g| g * g).sum();
         assert!(grad_norm > 1e-10);
+    }
+
+    // =========================================================================
+    // MSE Loss Comprehensive
+    // =========================================================================
+
+    #[test]
+    fn test_mse_loss_gradient_correctness() {
+        use axonml_autograd::backward;
+
+        // MSE gradient = 2*(input - target) / N
+        let input = Variable::new(Tensor::from_vec(vec![3.0, 1.0], &[2]).unwrap(), true);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 1.0], &[2]).unwrap(), false);
+
+        let loss = MSELoss::new().compute(&input, &target);
+        // loss = ((3-1)^2 + (1-1)^2) / 2 = 4/2 = 2.0
+        assert!(
+            (loss.data().to_vec()[0] - 2.0).abs() < 1e-5,
+            "MSE should be 2.0"
+        );
+
+        let ones = Tensor::from_vec(vec![1.0], &loss.shape()).unwrap();
+        backward(&loss, &ones);
+
+        let grad = input.grad().expect("Should have gradient");
+        let gv = grad.to_vec();
+        // dL/dx = 2*(x-t)/N = 2*(3-1)/2 = 2.0 for first, 0.0 for second
+        assert!(
+            (gv[0] - 2.0).abs() < 0.1,
+            "Grad[0] should be ~2.0, got {}",
+            gv[0]
+        );
+        assert!(gv[1].abs() < 0.1, "Grad[1] should be ~0.0, got {}", gv[1]);
+    }
+
+    #[test]
+    fn test_mse_loss_reduction_sum() {
+        let input = Variable::new(Tensor::from_vec(vec![2.0, 4.0], &[2]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 1.0], &[2]).unwrap(), false);
+        let loss = MSELoss::with_reduction(Reduction::Sum).compute(&input, &target);
+        // sum = (2-1)^2 + (4-1)^2 = 1 + 9 = 10
+        assert!((loss.data().to_vec()[0] - 10.0).abs() < 1e-5);
+    }
+
+    // =========================================================================
+    // L1 Loss
+    // =========================================================================
+
+    #[test]
+    fn test_l1_loss_basic() {
+        let input = Variable::new(Tensor::from_vec(vec![1.0, 5.0, 3.0], &[3]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 4.0], &[3]).unwrap(), false);
+        let loss = L1Loss::new().compute(&input, &target);
+        // mean(|0| + |3| + |-1|) = 4/3 ≈ 1.333
+        assert!((loss.data().to_vec()[0] - 4.0 / 3.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_l1_loss_zero() {
+        let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(), false);
+        let loss = L1Loss::new().compute(&input, &target);
+        assert!(
+            loss.data().to_vec()[0].abs() < 1e-6,
+            "Identical inputs should give 0 loss"
+        );
+    }
+
+    // =========================================================================
+    // BCE Loss Edge Cases
+    // =========================================================================
+
+    #[test]
+    fn test_bce_loss_perfect_prediction() {
+        let loss_fn = BCELoss::new();
+        // Near-perfect predictions
+        let input = Variable::new(Tensor::from_vec(vec![0.999, 0.001], &[2]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[2]).unwrap(), false);
+        let loss = loss_fn.compute(&input, &target);
+        assert!(
+            loss.data().to_vec()[0] < 0.01,
+            "Perfect prediction should have near-zero loss"
+        );
+    }
+
+    #[test]
+    fn test_bce_loss_worst_prediction() {
+        let loss_fn = BCELoss::new();
+        // Worst predictions (inverted)
+        let input = Variable::new(Tensor::from_vec(vec![0.001, 0.999], &[2]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[2]).unwrap(), false);
+        let loss = loss_fn.compute(&input, &target);
+        // Should be high
+        assert!(
+            loss.data().to_vec()[0] > 3.0,
+            "Worst prediction should have high loss"
+        );
+    }
+
+    // =========================================================================
+    // BCEWithLogitsLoss Comprehensive
+    // =========================================================================
+
+    #[test]
+    fn test_bce_with_logits_numerical_stability() {
+        let loss_fn = BCEWithLogitsLoss::new();
+        // Very large logits should not produce NaN/Inf
+        let input = Variable::new(
+            Tensor::from_vec(vec![100.0, -100.0, 50.0, -50.0], &[4]).unwrap(),
+            false,
+        );
+        let target = Variable::new(
+            Tensor::from_vec(vec![1.0, 0.0, 1.0, 0.0], &[4]).unwrap(),
+            false,
+        );
+        let loss = loss_fn.compute(&input, &target);
+        let val = loss.data().to_vec()[0];
+        assert!(
+            val.is_finite(),
+            "Loss should be finite for large logits, got {}",
+            val
+        );
+        assert!(val >= 0.0, "BCE loss should be non-negative");
+    }
+
+    #[test]
+    fn test_bce_with_logits_zero_logits() {
+        let loss_fn = BCEWithLogitsLoss::new();
+        // Zero logits → sigmoid(0) = 0.5 → random prediction
+        let input = Variable::new(Tensor::from_vec(vec![0.0, 0.0], &[2]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[2]).unwrap(), false);
+        let loss = loss_fn.compute(&input, &target);
+        // Should be ln(2) ≈ 0.693
+        assert!((loss.data().to_vec()[0] - 0.693).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_bce_with_logits_reduction_none() {
+        let loss_fn = BCEWithLogitsLoss::with_reduction(Reduction::None);
+        let input = Variable::new(Tensor::from_vec(vec![0.0, 0.0, 0.0], &[3]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 1.0], &[3]).unwrap(), false);
+        let loss = loss_fn.compute(&input, &target);
+        // Should return per-element losses, not reduced
+        assert_eq!(loss.shape().len(), 1);
+        assert_eq!(loss.shape()[0], 3);
+    }
+
+    // =========================================================================
+    // SmoothL1 Loss
+    // =========================================================================
+
+    #[test]
+    fn test_smooth_l1_small_error() {
+        // For |diff| < beta=1.0: loss = 0.5 * diff^2 / beta
+        let loss_fn = SmoothL1Loss::new();
+        let input = Variable::new(Tensor::from_vec(vec![1.0], &[1]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![1.3], &[1]).unwrap(), false);
+        let loss = loss_fn.compute(&input, &target);
+        // diff=0.3, |0.3| < 1.0, loss = 0.5 * 0.09 / 1.0 = 0.045
+        assert!((loss.data().to_vec()[0] - 0.045).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_smooth_l1_large_error() {
+        // For |diff| >= beta=1.0: loss = |diff| - 0.5*beta
+        let loss_fn = SmoothL1Loss::new();
+        let input = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![5.0], &[1]).unwrap(), false);
+        let loss = loss_fn.compute(&input, &target);
+        // diff=5.0, |5| >= 1.0, loss = 5.0 - 0.5 = 4.5
+        assert!((loss.data().to_vec()[0] - 4.5).abs() < 0.1);
+    }
+
+    // =========================================================================
+    // Cross-Entropy Batch Consistency
+    // =========================================================================
+
+    #[test]
+    fn test_cross_entropy_batch_independence() {
+        let loss_fn = CrossEntropyLoss::new();
+
+        // Single sample
+        let input1 = Variable::new(
+            Tensor::from_vec(vec![2.0, 1.0, 0.1], &[1, 3]).unwrap(),
+            false,
+        );
+        let target1 = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false);
+        let loss1 = loss_fn.compute(&input1, &target1).data().to_vec()[0];
+
+        // Same sample duplicated in batch
+        let input2 = Variable::new(
+            Tensor::from_vec(vec![2.0, 1.0, 0.1, 2.0, 1.0, 0.1], &[2, 3]).unwrap(),
+            false,
+        );
+        let target2 = Variable::new(Tensor::from_vec(vec![0.0, 0.0], &[2]).unwrap(), false);
+        let loss2 = loss_fn.compute(&input2, &target2).data().to_vec()[0];
+
+        // Mean reduction should give same result for duplicated batch
+        assert!(
+            (loss1 - loss2).abs() < 1e-5,
+            "Duplicated batch should give same loss: {} vs {}",
+            loss1,
+            loss2
+        );
+    }
+
+    #[test]
+    fn test_cross_entropy_high_class_count() {
+        // Test with many classes (like BirdCLEF 234 species)
+        let n_classes = 100;
+        let mut logits = vec![0.0f32; n_classes];
+        logits[42] = 5.0; // Correct class has high logit
+
+        let loss_fn = CrossEntropyLoss::new();
+        let input = Variable::new(Tensor::from_vec(logits, &[1, n_classes]).unwrap(), false);
+        let target = Variable::new(Tensor::from_vec(vec![42.0], &[1]).unwrap(), false);
+        let loss = loss_fn.compute(&input, &target);
+        let val = loss.data().to_vec()[0];
+        assert!(val.is_finite(), "Should handle 100 classes");
+        assert!(val < 1.0, "Correct class should have low loss, got {}", val);
     }
 }
