@@ -309,10 +309,11 @@ pub fn cpu_gemm(a: &[f32], b: &[f32], m: usize, n: usize, k: usize) -> Vec<f32> 
 // =============================================================================
 
 #[cfg(feature = "cuda")]
+/// CUDA backend integration tests — validates GPU kernel correctness.
 pub mod cuda_tests {
     use super::*;
     use crate::backends::Backend;
-    use crate::backends::cuda::{CudaBackend, device_count, is_available};
+    use crate::backends::cuda::{CudaBackend, is_available};
 
     /// Run all CUDA tests.
     pub fn run_all_tests(config: &GpuTestConfig) -> GpuTestReport {
@@ -506,7 +507,7 @@ pub mod cuda_tests {
         }
     }
 
-    fn test_sigmoid(backend: &CudaBackend, size: usize, config: &GpuTestConfig) -> GpuTestResult {
+    fn test_sigmoid(backend: &CudaBackend, size: usize, _config: &GpuTestConfig) -> GpuTestResult {
         let name = format!("sigmoid_f32_{}", size);
         let a = random_vec(size, 42);
         let expected = cpu_sigmoid(&a);
@@ -539,7 +540,7 @@ pub mod cuda_tests {
         }
     }
 
-    fn test_tanh(backend: &CudaBackend, size: usize, config: &GpuTestConfig) -> GpuTestResult {
+    fn test_tanh(backend: &CudaBackend, size: usize, _config: &GpuTestConfig) -> GpuTestResult {
         let name = format!("tanh_f32_{}", size);
         let a = random_vec(size, 42);
         let expected = cpu_tanh(&a);
@@ -581,7 +582,7 @@ pub mod cuda_tests {
         m: usize,
         n: usize,
         k: usize,
-        config: &GpuTestConfig,
+        _config: &GpuTestConfig,
     ) -> GpuTestResult {
         let name = format!("gemm_f32_{}x{}x{}", m, n, k);
 

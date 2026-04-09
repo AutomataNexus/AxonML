@@ -886,9 +886,11 @@ impl Tensor<f32> {
             (false, k) // memory (m,k) row → (k,m) col → no transpose needed, ldb=k
         };
         let cublas_ldc = n;
-        let stride_a = (k * n) as i64;
-        let stride_b = (m * k) as i64;
-        let stride_c = (m * n) as i64;
+        // Strides for strided batched GEMM (reserved for future use when
+        // SgemmStridedBatched driver issues on Blackwell GPUs are resolved)
+        let _stride_a = (k * n) as i64;
+        let _stride_b = (m * k) as i64;
+        let _stride_c = (m * n) as i64;
 
         // Loop individual GEMMs: SgemmStridedBatched has driver issues on Blackwell GPUs.
         // Each batch element uses its own GPU alloc through the working 2D gemm_f32 path.
