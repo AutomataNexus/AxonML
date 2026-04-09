@@ -365,12 +365,12 @@ impl<T: Scalar> Tensor<T> {
             ));
         }
 
-        if self.is_scalar() {
-            Ok(self.storage.as_slice()[self.offset])
+        // Use to_vec() which handles both CPU and GPU tensors safely
+        let data = self.to_vec();
+        if data.is_empty() {
+            Err(Error::invalid_operation("item() on empty tensor"))
         } else {
-            // Single element but not scalar shape
-            let indices = vec![0; self.ndim()];
-            self.get(&indices)
+            Ok(data[0])
         }
     }
 
