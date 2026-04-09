@@ -1214,4 +1214,150 @@ mod tests {
             "ConvTranspose2d: input gradient should flow through backward"
         );
     }
+
+    // =========================================================================
+    // Conv1d Comprehensive
+    // =========================================================================
+
+    #[test]
+    fn test_conv1d_with_padding_and_stride() {
+        let conv = Conv1d::with_options(1, 4, 3, 2, 1, true);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 1 * 1 * 16], &[1, 1, 16]).unwrap(),
+            true,
+        );
+        let output = conv.forward(&input);
+        // L_out = (16 + 2*1 - 3) / 2 + 1 = 8
+        assert_eq!(output.shape(), vec![1, 4, 8]);
+
+        output.sum().backward();
+        let grad = input.grad().expect("Conv1d should propagate gradients");
+        assert_eq!(grad.shape(), &[1, 1, 16]);
+        assert!(grad.to_vec().iter().any(|g| g.abs() > 0.0));
+    }
+
+    #[test]
+    fn test_conv1d_multi_channel() {
+        let conv = Conv1d::new(3, 8, 5); // 3 input channels, 8 output, kernel 5
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.5; 2 * 3 * 20], &[2, 3, 20]).unwrap(),
+            false,
+        );
+        let output = conv.forward(&input);
+        // L_out = (20 - 5) / 1 + 1 = 16 (no padding)
+        assert_eq!(output.shape(), vec![2, 8, 16]);
+    }
+
+    // =========================================================================
+    // Conv2d Grouped — Correctness
+    // =========================================================================
+
+    #[test]
+    fn test_conv2d_grouped_gradient_flow() {
+        let conv = Conv2d::depthwise(4, 3);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 1 * 4 * 8 * 8], &[1, 4, 8, 8]).unwrap(),
+            true,
+        );
+        let output = conv.forward(&input);
+        output.sum().backward();
+
+        let grad = input
+            .grad()
+            .expect("Grouped conv should propagate gradients");
+        assert_eq!(grad.shape(), &[1, 4, 8, 8]);
+        assert!(grad.to_vec().iter().any(|g| g.abs() > 0.0));
+
+        // Parameters should also get gradients
+        for p in conv.parameters() {
+            let g = p.grad().expect("Conv params should have gradients");
+            assert!(g.to_vec().iter().any(|v| v.abs() > 0.0));
+        }
+    }
+
+    #[test]
+    fn test_conv2d_groups_two() {
+        // 2 groups: 4 input channels split into 2 groups of 2
+        let conv = Conv2d::with_groups(4, 8, (3, 3), (1, 1), (1, 1), true, 2);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 1 * 4 * 6 * 6], &[1, 4, 6, 6]).unwrap(),
+            false,
+        );
+        let output = conv.forward(&input);
+        assert_eq!(output.shape(), vec![1, 8, 6, 6]);
+    }
+
+    #[test]
+    fn test_conv2d_depthwise_separable_pattern() {
+        // Depthwise separable: depthwise conv + pointwise conv (standard MobileNet pattern)
+        let dw = Conv2d::depthwise(16, 3); // 16 channels, 3x3 kernel
+        let pw = Conv2d::with_options(16, 32, (1, 1), (1, 1), (0, 0), true); // pointwise
+
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 1 * 16 * 8 * 8], &[1, 16, 8, 8]).unwrap(),
+            true,
+        );
+        let dw_out = dw.forward(&input);
+        assert_eq!(dw_out.shape(), vec![1, 16, 8, 8]);
+
+        let pw_out = pw.forward(&dw_out);
+        assert_eq!(pw_out.shape(), vec![1, 32, 8, 8]);
+
+        // Full gradient flow through both
+        pw_out.sum().backward();
+        let grad = input
+            .grad()
+            .expect("Should propagate through depthwise separable");
+        assert_eq!(grad.shape(), &[1, 16, 8, 8]);
+    }
+
+    // =========================================================================
+    // ConvTranspose2d Comprehensive
+    // =========================================================================
+
+    #[test]
+    fn test_conv_transpose2d_upsamples() {
+        // ConvTranspose2d with stride=2 should roughly double spatial dims
+        let conv_t = ConvTranspose2d::with_options(1, 1, (4, 4), (2, 2), (1, 1), (0, 0), true);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 1 * 1 * 4 * 4], &[1, 1, 4, 4]).unwrap(),
+            false,
+        );
+        let output = conv_t.forward(&input);
+        // H_out = (4-1)*2 - 2*1 + 4 + 0 = 8
+        assert_eq!(output.shape(), vec![1, 1, 8, 8]);
+    }
+
+    #[test]
+    fn test_conv_transpose2d_gradient_correctness() {
+        let conv_t = ConvTranspose2d::new(2, 4, 3);
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.5; 1 * 2 * 4 * 4], &[1, 2, 4, 4]).unwrap(),
+            true,
+        );
+        let output = conv_t.forward(&input);
+        output.sum().backward();
+
+        let grad = input.grad().unwrap();
+        assert_eq!(grad.shape(), &[1, 2, 4, 4]);
+        assert!(grad.to_vec().iter().all(|g| g.is_finite()));
+        assert!(grad.to_vec().iter().any(|g| g.abs() > 0.0));
+
+        // Weight params should also have gradients
+        for p in conv_t.parameters() {
+            assert!(p.grad().is_some(), "ConvTranspose2d params need gradients");
+        }
+    }
+
+    #[test]
+    fn test_conv_transpose2d_multi_channel() {
+        let conv_t = ConvTranspose2d::new(8, 16, 3);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 2 * 8 * 4 * 4], &[2, 8, 4, 4]).unwrap(),
+            false,
+        );
+        let output = conv_t.forward(&input);
+        assert_eq!(output.shape()[0], 2); // batch
+        assert_eq!(output.shape()[1], 16); // out_channels
+    }
 }

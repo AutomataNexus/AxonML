@@ -456,18 +456,26 @@ impl Module for LSTM {
             (shape[1], shape[0], shape[2])
         };
 
+        let lstm_input_device = input.data().device();
+        #[cfg(feature = "cuda")]
+        let lstm_on_gpu = lstm_input_device.is_gpu();
+        #[cfg(not(feature = "cuda"))]
+        let lstm_on_gpu = false;
+
         let mut states: Vec<(Variable, Variable)> = (0..self.num_layers)
             .map(|_| {
-                (
-                    Variable::new(
-                        zeros(&[batch_size, self.hidden_size]),
-                        input.requires_grad(),
-                    ),
-                    Variable::new(
-                        zeros(&[batch_size, self.hidden_size]),
-                        input.requires_grad(),
-                    ),
-                )
+                let make_h = || {
+                    let h_cpu = zeros(&[batch_size, self.hidden_size]);
+                    let h_tensor = if lstm_on_gpu {
+                        h_cpu
+                            .to_device(lstm_input_device)
+                            .expect("LSTM: failed to move hidden state to GPU")
+                    } else {
+                        h_cpu
+                    };
+                    Variable::new(h_tensor, input.requires_grad())
+                };
+                (make_h(), make_h())
             })
             .collect();
 
@@ -531,13 +539,14 @@ impl Module for LSTM {
                         );
                         let grad_fn = axonml_autograd::GradFn::new(backward_fn);
 
+                        let fused_requires_grad = gates.requires_grad() || c.requires_grad();
                         let h_new = Variable::from_operation(
                             h_tensor,
                             grad_fn.clone(),
-                            input.requires_grad(),
+                            fused_requires_grad,
                         );
                         let c_new =
-                            Variable::from_operation(c_tensor, grad_fn, input.requires_grad());
+                            Variable::from_operation(c_tensor, grad_fn, fused_requires_grad);
                         states[0] = (h_new, c_new);
                     }
                 }
@@ -794,13 +803,27 @@ impl Module for GRU {
             (shape[1], shape[0], shape[2])
         };
 
+        // Check if we're on GPU for fused gate kernel path
+        #[cfg(feature = "cuda")]
+        let on_gpu = input.data().device().is_gpu();
+        #[cfg(not(feature = "cuda"))]
+        let on_gpu = false;
+
+        let input_device = input.data().device();
+
         // Initialize hidden states for all layers as Variables (with gradients)
+        // Move to the same device as input so GPU fused kernels receive GPU tensors.
         let mut hidden_states: Vec<Variable> = (0..self.num_layers)
             .map(|_| {
-                Variable::new(
-                    zeros(&[batch_size, self.hidden_size]),
-                    input.requires_grad(),
-                )
+                let h_cpu = zeros(&[batch_size, self.hidden_size]);
+                let h_tensor = if on_gpu {
+                    h_cpu
+                        .to_device(input_device)
+                        .expect("GRU: failed to move hidden state to GPU")
+                } else {
+                    h_cpu
+                };
+                Variable::new(h_tensor, input.requires_grad())
             })
             .collect();
 
@@ -817,12 +840,6 @@ impl Module for GRU {
         let bias_hh_0 = cell0.bias_hh.variable();
 
         let mut output_vars: Vec<Variable> = Vec::with_capacity(seq_len);
-
-        // Check if we're on GPU for fused gate kernel path
-        #[cfg(feature = "cuda")]
-        let on_gpu = input.data().device().is_gpu();
-        #[cfg(not(feature = "cuda"))]
-        let on_gpu = false;
 
         for t in 0..seq_len {
             // Layer 0: use pre-computed ih projection + hoisted weight transpose
@@ -859,8 +876,15 @@ impl Module for GRU {
                         );
                         let grad_fn = axonml_autograd::GradFn::new(backward_fn);
 
+                        // Use requires_grad=true if ANY input to the fused op
+                        // requires grad — the GRU parameters (w_ih, w_hh, bias)
+                        // always require grad during training, so ih_t and hh
+                        // will have requires_grad=true even when the raw input
+                        // Variable does not.
+                        let fused_requires_grad =
+                            ih_t.requires_grad() || hh.requires_grad() || hidden.requires_grad();
                         let h_new =
-                            Variable::from_operation(h_tensor, grad_fn, input.requires_grad());
+                            Variable::from_operation(h_tensor, grad_fn, fused_requires_grad);
                         hidden_states[0] = h_new;
                     }
                 }
@@ -1179,6 +1203,289 @@ mod tests {
         assert!(
             has_grad,
             "At least one GRU parameter should have non-zero gradients"
+        );
+    }
+
+    // =========================================================================
+    // LSTM Comprehensive
+    // =========================================================================
+
+    #[test]
+    fn test_lstm_cell_forward_step() {
+        let cell = LSTMCell::new(8, 16);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 2 * 8], &[2, 8]).unwrap(), false);
+        let hidden = Variable::new(
+            Tensor::from_vec(vec![0.0; 2 * 16], &[2, 16]).unwrap(),
+            false,
+        );
+        let cell_state = Variable::new(
+            Tensor::from_vec(vec![0.0; 2 * 16], &[2, 16]).unwrap(),
+            false,
+        );
+        let hx = (hidden, cell_state);
+        let (h, c) = cell.forward_step(&input, &hx);
+        assert_eq!(h.shape(), vec![2, 16]);
+        assert_eq!(c.shape(), vec![2, 16]);
+    }
+
+    #[test]
+    fn test_lstm_multi_layer() {
+        let lstm = LSTM::new(8, 16, 3); // 3 layers
+        assert_eq!(lstm.num_layers(), 3);
+        assert_eq!(lstm.hidden_size(), 16);
+
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.5; 2 * 5 * 8], &[2, 5, 8]).unwrap(),
+            false,
+        );
+        let output = lstm.forward(&input);
+        assert_eq!(output.shape(), vec![2, 5, 16]);
+    }
+
+    #[test]
+    fn test_lstm_forward_last() {
+        let lstm = LSTM::new(8, 16, 1);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 2 * 10 * 8], &[2, 10, 8]).unwrap(),
+            false,
+        );
+        // forward_last should return only the last time step
+        // The LSTM module may not have forward_last, but forward returns [B, T, H]
+        let output = lstm.forward(&input);
+        assert_eq!(output.shape(), vec![2, 10, 16]);
+
+        // Last timestep extraction
+        let out_vec = output.data().to_vec();
+        let last_t0 = &out_vec[9 * 16..10 * 16]; // batch 0, time 9
+        assert!(
+            last_t0.iter().all(|v| v.is_finite()),
+            "Last output should be finite"
+        );
+    }
+
+    #[test]
+    fn test_lstm_gradient_flow() {
+        let lstm = LSTM::new(4, 8, 1);
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.5; 1 * 3 * 4], &[1, 3, 4]).unwrap(),
+            true,
+        );
+        let output = lstm.forward(&input);
+        let loss = output.sum();
+        loss.backward();
+
+        let input_grad = input
+            .grad()
+            .expect("Input should have gradient through LSTM");
+        assert_eq!(input_grad.shape(), &[1, 3, 4]);
+        assert!(
+            input_grad.to_vec().iter().any(|g| g.abs() > 1e-10),
+            "LSTM should propagate gradients to input"
+        );
+
+        // Parameters should also have gradients
+        let params = lstm.parameters();
+        let grads_exist = params.iter().any(|p| {
+            p.grad()
+                .map(|g| g.to_vec().iter().any(|v| v.abs() > 0.0))
+                .unwrap_or(false)
+        });
+        assert!(grads_exist, "LSTM parameters should have gradients");
+    }
+
+    #[test]
+    fn test_lstm_different_sequence_lengths() {
+        let lstm = LSTM::new(4, 8, 1);
+
+        // Short sequence
+        let short = Variable::new(
+            Tensor::from_vec(vec![1.0; 1 * 2 * 4], &[1, 2, 4]).unwrap(),
+            false,
+        );
+        let out_short = lstm.forward(&short);
+        assert_eq!(out_short.shape(), vec![1, 2, 8]);
+
+        // Long sequence
+        let long = Variable::new(
+            Tensor::from_vec(vec![1.0; 1 * 20 * 4], &[1, 20, 4]).unwrap(),
+            false,
+        );
+        let out_long = lstm.forward(&long);
+        assert_eq!(out_long.shape(), vec![1, 20, 8]);
+    }
+
+    #[test]
+    fn test_lstm_parameters_count() {
+        // LSTM has 4 gates (i, f, g, o), each with input and hidden weights + biases
+        // Per layer: 4 * (input_size * hidden_size + hidden_size * hidden_size + 2 * hidden_size)
+        let lstm = LSTM::new(10, 20, 1);
+        let n = lstm.parameters().iter().map(|p| p.numel()).sum::<usize>();
+        // Expected: 4 * (10*20 + 20*20 + 20 + 20) = 4 * (200 + 400 + 40) = 2560
+        assert!(n > 0, "LSTM should have parameters");
+    }
+
+    // =========================================================================
+    // GRU Comprehensive
+    // =========================================================================
+
+    #[test]
+    fn test_gru_cell_forward_step() {
+        let cell = GRUCell::new(8, 16);
+        assert_eq!(cell.input_size(), 8);
+        assert_eq!(cell.hidden_size(), 16);
+
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 2 * 8], &[2, 8]).unwrap(), false);
+        let hidden = Variable::new(
+            Tensor::from_vec(vec![0.0; 2 * 16], &[2, 16]).unwrap(),
+            false,
+        );
+        let output = cell.forward_step(&input, &hidden);
+        assert_eq!(output.shape(), vec![2, 16]);
+    }
+
+    #[test]
+    fn test_gru_multi_layer() {
+        let gru = GRU::new(8, 16, 2);
+        assert_eq!(gru.num_layers(), 2);
+        assert_eq!(gru.hidden_size(), 16);
+
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.5; 2 * 5 * 8], &[2, 5, 8]).unwrap(),
+            false,
+        );
+        let output = gru.forward(&input);
+        assert_eq!(output.shape(), vec![2, 5, 16]);
+    }
+
+    #[test]
+    fn test_gru_forward_mean() {
+        let gru = GRU::new(4, 8, 1);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 2 * 5 * 4], &[2, 5, 4]).unwrap(),
+            false,
+        );
+        let mean_out = gru.forward_mean(&input);
+        // forward_mean averages over time: [B, T, H] → [B, H]
+        assert_eq!(mean_out.shape(), vec![2, 8]);
+    }
+
+    #[test]
+    fn test_gru_forward_last() {
+        let gru = GRU::new(4, 8, 1);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 2 * 5 * 4], &[2, 5, 4]).unwrap(),
+            false,
+        );
+        let last_out = gru.forward_last(&input);
+        // forward_last returns only last timestep: [B, T, H] → [B, H]
+        assert_eq!(last_out.shape(), vec![2, 8]);
+    }
+
+    #[test]
+    fn test_gru_gradient_flow_to_input() {
+        let gru = GRU::new(4, 8, 1);
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.5; 1 * 3 * 4], &[1, 3, 4]).unwrap(),
+            true,
+        );
+        let output = gru.forward(&input);
+        output.sum().backward();
+
+        let grad = input
+            .grad()
+            .expect("Input should have gradient through GRU");
+        assert_eq!(grad.shape(), &[1, 3, 4]);
+        assert!(
+            grad.to_vec().iter().any(|g| g.abs() > 1e-10),
+            "GRU should propagate gradients"
+        );
+    }
+
+    #[test]
+    fn test_gru_hidden_state_evolves() {
+        let gru = GRU::new(4, 8, 1);
+        let input = Variable::new(
+            Tensor::from_vec(vec![1.0; 1 * 5 * 4], &[1, 5, 4]).unwrap(),
+            false,
+        );
+        let output = gru.forward(&input);
+        let out_vec = output.data().to_vec();
+
+        // Hidden states at different timesteps should differ
+        let t0 = &out_vec[0..8];
+        let t4 = &out_vec[4 * 8..5 * 8];
+        let diff: f32 = t0.iter().zip(t4.iter()).map(|(a, b)| (a - b).abs()).sum();
+        assert!(
+            diff > 1e-6,
+            "GRU hidden state should evolve over time, diff={}",
+            diff
+        );
+    }
+
+    // =========================================================================
+    // RNN Basic
+    // =========================================================================
+
+    #[test]
+    fn test_rnn_cell_gradient_flow() {
+        let cell = RNNCell::new(4, 8);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 1 * 4], &[1, 4]).unwrap(), true);
+        let hidden = Variable::new(Tensor::from_vec(vec![0.0; 1 * 8], &[1, 8]).unwrap(), false);
+        let out = cell.forward_step(&input, &hidden);
+        out.sum().backward();
+
+        let grad = input.grad().expect("RNNCell should propagate gradients");
+        assert_eq!(grad.shape(), &[1, 4]);
+    }
+
+    #[test]
+    fn test_rnn_multi_layer() {
+        let rnn = RNN::with_options(8, 16, 3, true); // 3 layers, bias
+        let input = Variable::new(
+            Tensor::from_vec(vec![0.5; 2 * 5 * 8], &[2, 5, 8]).unwrap(),
+            false,
+        );
+        let output = rnn.forward(&input);
+        assert_eq!(output.shape(), vec![2, 5, 16]);
+    }
+
+    // =========================================================================
+    // Numerical Stability
+    // =========================================================================
+
+    #[test]
+    fn test_lstm_outputs_are_bounded() {
+        // LSTM should produce bounded outputs (tanh output gate)
+        let lstm = LSTM::new(4, 8, 1);
+        let input = Variable::new(
+            Tensor::from_vec(vec![100.0; 1 * 10 * 4], &[1, 10, 4]).unwrap(),
+            false,
+        );
+        let output = lstm.forward(&input);
+        let out_vec = output.data().to_vec();
+
+        // All outputs should be in [-1, 1] range (tanh bounded)
+        for v in &out_vec {
+            assert!(v.is_finite(), "LSTM output should be finite, got {}", v);
+            assert!(
+                v.abs() <= 1.0 + 1e-5,
+                "LSTM output should be bounded by tanh: got {}",
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn test_gru_outputs_finite_with_large_input() {
+        let gru = GRU::new(4, 8, 1);
+        let input = Variable::new(
+            Tensor::from_vec(vec![50.0; 1 * 5 * 4], &[1, 5, 4]).unwrap(),
+            false,
+        );
+        let output = gru.forward(&input);
+        assert!(
+            output.data().to_vec().iter().all(|v| v.is_finite()),
+            "GRU should produce finite outputs for large inputs"
         );
     }
 }

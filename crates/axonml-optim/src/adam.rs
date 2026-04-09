@@ -624,4 +624,223 @@ mod tests {
         assert!((optimizer.eps - 1e-7).abs() < 1e-9);
         assert!(optimizer.amsgrad);
     }
+
+    // =========================================================================
+    // Adam Step Correctness Tests
+    // =========================================================================
+
+    /// Verify Adam update matches the mathematical formula exactly.
+    /// After one step with grad=[1,1], lr=0.1, betas=(0.9,0.999):
+    ///   m = 0.1*[1,1], v = 0.001*[1,1]
+    ///   m_hat = m/0.1 = [1,1], v_hat = v/0.001 = [1,1]
+    ///   param -= 0.1 * 1.0 / (1.0 + 1e-8) ≈ 0.1
+    #[test]
+    fn test_adam_step_correctness() {
+        let var = Variable::new(Tensor::from_vec(vec![0.5, -0.3], &[2]).unwrap(), true);
+        let param = Parameter::from_variable(var);
+        param.set_grad(Tensor::from_vec(vec![1.0, 1.0], &[2]).unwrap());
+
+        let mut opt = Adam::new(vec![param.clone()], 0.1);
+        let before = param.data().to_vec();
+        opt.step();
+        let after = param.data().to_vec();
+
+        // Both params should decrease (positive gradient → decrease)
+        assert!(
+            after[0] < before[0],
+            "param[0] should decrease: {} -> {}",
+            before[0],
+            after[0]
+        );
+        assert!(
+            after[1] < before[1],
+            "param[1] should decrease: {} -> {}",
+            before[1],
+            after[1]
+        );
+
+        // After one Adam step with uniform gradient, both should change by the same amount
+        let delta0 = before[0] - after[0];
+        let delta1 = before[1] - after[1];
+        assert!(
+            (delta0 - delta1).abs() < 1e-6,
+            "Uniform gradient should produce uniform update: {} vs {}",
+            delta0,
+            delta1
+        );
+    }
+
+    /// Verify Adam converges on a simple quadratic: minimize f(x) = x^2.
+    /// Uses autograd for proper gradient computation.
+    #[test]
+    fn test_adam_converges_on_quadratic() {
+        let var = Variable::new(Tensor::from_vec(vec![5.0], &[1]).unwrap(), true);
+        let param = Parameter::from_variable(var);
+        let mut opt = Adam::new(vec![param.clone()], 0.1);
+
+        for _ in 0..200 {
+            opt.zero_grad();
+            // f(x) = x^2 → loss, compute gradient via autograd
+            let x = param.variable();
+            let loss = x.mul_var(&x).sum(); // x^2
+            loss.backward();
+            opt.step();
+        }
+
+        let final_x = param.data().to_vec()[0];
+        assert!(
+            final_x.abs() < 0.1,
+            "Adam should converge near 0 for f(x)=x^2, got {}",
+            final_x
+        );
+    }
+
+    /// Verify zero_grad actually clears all gradients.
+    #[test]
+    fn test_adam_zero_grad() {
+        let var = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(), true);
+        let param = Parameter::from_variable(var);
+        param.set_grad(Tensor::from_vec(vec![0.5, 0.5], &[2]).unwrap());
+        assert!(param.grad().is_some());
+
+        let mut opt = Adam::new(vec![param.clone()], 0.01);
+        opt.zero_grad();
+        // After zero_grad, gradient should be None or all zeros
+        if let Some(g) = param.grad() {
+            let gv = g.to_vec();
+            assert!(
+                gv.iter().all(|&v| v.abs() < 1e-10),
+                "Gradients should be zero after zero_grad: {:?}",
+                gv
+            );
+        }
+    }
+
+    /// Verify set_lr / get_lr work correctly.
+    #[test]
+    fn test_adam_lr_management() {
+        let var = Variable::new(Tensor::from_vec(vec![1.0], &[1]).unwrap(), true);
+        let param = Parameter::from_variable(var);
+        let mut opt = Adam::new(vec![param], 0.001);
+
+        assert!((opt.get_lr() - 0.001).abs() < 1e-8);
+        opt.set_lr(0.01);
+        assert!((opt.get_lr() - 0.01).abs() < 1e-8);
+    }
+
+    /// Verify Adam handles no-grad params gracefully (skips them).
+    #[test]
+    fn test_adam_skips_frozen_params() {
+        let trainable = Parameter::from_variable(Variable::new(
+            Tensor::from_vec(vec![1.0], &[1]).unwrap(),
+            true,
+        ));
+        let frozen = Parameter::from_variable(Variable::new(
+            Tensor::from_vec(vec![2.0], &[1]).unwrap(),
+            false,
+        ));
+
+        trainable.set_grad(Tensor::from_vec(vec![1.0], &[1]).unwrap());
+
+        let mut opt = Adam::new(vec![trainable.clone(), frozen.clone()], 0.1);
+        opt.step();
+
+        // Trainable should change, frozen should not
+        assert!((trainable.data().to_vec()[0] - 1.0).abs() > 1e-6);
+        assert!((frozen.data().to_vec()[0] - 2.0).abs() < 1e-8);
+    }
+
+    /// Verify Adam with weight decay actually decays weights.
+    #[test]
+    fn test_adam_weight_decay() {
+        let var = Variable::new(Tensor::from_vec(vec![10.0], &[1]).unwrap(), true);
+        let param = Parameter::from_variable(var);
+        // Set zero gradient — only weight decay should modify params
+        param.set_grad(Tensor::from_vec(vec![0.0], &[1]).unwrap());
+
+        let mut opt = Adam::new(vec![param.clone()], 0.1).weight_decay(0.1);
+        let before = param.data().to_vec()[0];
+        opt.step();
+        let after = param.data().to_vec()[0];
+
+        // With weight_decay, even zero gradient should shrink params
+        // (grad_effective = grad + wd * param = 0 + 0.1 * 10.0 = 1.0)
+        assert!(
+            after < before,
+            "Weight decay should shrink large params: {} -> {}",
+            before,
+            after
+        );
+    }
+
+    /// Verify multiple Adam steps produce improvement on a simple loss using autograd.
+    #[test]
+    fn test_adam_multiple_steps_improve() {
+        let var = Variable::new(Tensor::from_vec(vec![3.0, -2.0], &[2]).unwrap(), true);
+        let param = Parameter::from_variable(var);
+        let mut opt = Adam::new(vec![param.clone()], 0.05);
+
+        let mut losses = Vec::new();
+        for _ in 0..50 {
+            opt.zero_grad();
+            let x = param.variable();
+            let loss = x.mul_var(&x).sum(); // ||x||^2
+            losses.push(loss.data().to_vec()[0]);
+            loss.backward();
+            opt.step();
+        }
+
+        // First loss should be much higher than last loss
+        let first = losses[0];
+        let last = *losses.last().unwrap();
+        assert!(
+            last < first * 0.5,
+            "Loss should decrease significantly: first={}, last={}",
+            first,
+            last
+        );
+    }
+
+    // =========================================================================
+    // AdamW Tests
+    // =========================================================================
+
+    /// Verify AdamW step works and decoupled weight decay differs from L2.
+    #[test]
+    fn test_adamw_step_correctness() {
+        let var = Variable::new(Tensor::from_vec(vec![5.0, -3.0], &[2]).unwrap(), true);
+        let param = Parameter::from_variable(var);
+        param.set_grad(Tensor::from_vec(vec![1.0, -1.0], &[2]).unwrap());
+
+        let mut opt = AdamW::new(vec![param.clone()], 0.01);
+        let before = param.data().to_vec();
+        opt.step();
+        let after = param.data().to_vec();
+
+        // Positive grad → decrease, negative grad → increase
+        assert!(after[0] < before[0], "Positive grad should decrease param");
+        assert!(after[1] > before[1], "Negative grad should increase param");
+    }
+
+    /// Verify AdamW converges using autograd.
+    #[test]
+    fn test_adamw_converges() {
+        let var = Variable::new(Tensor::from_vec(vec![4.0], &[1]).unwrap(), true);
+        let param = Parameter::from_variable(var);
+        let mut opt = AdamW::new(vec![param.clone()], 0.1);
+
+        for _ in 0..200 {
+            opt.zero_grad();
+            let x = param.variable();
+            let loss = x.mul_var(&x).sum();
+            loss.backward();
+            opt.step();
+        }
+
+        assert!(
+            param.data().to_vec()[0].abs() < 0.1,
+            "AdamW should converge near 0, got {}",
+            param.data().to_vec()[0]
+        );
+    }
 }

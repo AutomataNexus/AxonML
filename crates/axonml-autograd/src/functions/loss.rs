@@ -301,19 +301,8 @@ impl BceLossBackward {
 
 impl GradientFunction for BceLossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let input_data = self.saved_input.to_vec();
-        let target_data = self.saved_target.to_vec();
-        let numel = input_data.len() as f32;
+        let numel = self.saved_input.numel() as f32;
         let eps = 1e-7_f32;
-
-        let grad_data: Vec<f32> = input_data
-            .iter()
-            .zip(target_data.iter())
-            .map(|(&p, &y)| {
-                let p = p.clamp(eps, 1.0 - eps);
-                (p - y) / (p * (1.0 - p))
-            })
-            .collect();
 
         let scale = match self.reduction {
             Reduction::Mean => grad_output.to_vec()[0] / numel,
@@ -321,8 +310,10 @@ impl GradientFunction for BceLossBackward {
             Reduction::None => 1.0,
         };
 
-        let grad: Vec<f32> = grad_data.iter().map(|&v| v * scale).collect();
-        let grad = Tensor::from_vec(grad, self.saved_input.shape()).unwrap();
+        let grad = self.saved_input.zip_map(&self.saved_target, move |p, y| {
+            let p = p.clamp(eps, 1.0 - eps);
+            scale * (p - y) / (p * (1.0 - p))
+        });
 
         vec![Some(grad)]
     }
@@ -376,32 +367,23 @@ impl L1LossBackward {
 
 impl GradientFunction for L1LossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let pred_data = self.saved_pred.to_vec();
-        let target_data = self.saved_target.to_vec();
-        let numel = pred_data.len() as f32;
-
-        let grad_data: Vec<f32> = pred_data
-            .iter()
-            .zip(target_data.iter())
-            .map(|(&p, &t)| {
-                if p > t {
-                    1.0
-                } else if p < t {
-                    -1.0
-                } else {
-                    0.0
-                }
-            })
-            .collect();
-
+        let numel = self.saved_pred.numel() as f32;
         let scale = match self.reduction {
             Reduction::Mean => grad_output.to_vec()[0] / numel,
             Reduction::Sum => grad_output.to_vec()[0],
             Reduction::None => 1.0,
         };
 
-        let grad: Vec<f32> = grad_data.iter().map(|&v| v * scale).collect();
-        let grad = Tensor::from_vec(grad, self.saved_pred.shape()).unwrap();
+        let grad = self.saved_pred.zip_map(&self.saved_target, move |p, t| {
+            let sign = if p > t {
+                1.0
+            } else if p < t {
+                -1.0
+            } else {
+                0.0
+            };
+            scale * sign
+        });
 
         vec![Some(grad)]
     }
@@ -458,33 +440,25 @@ impl SmoothL1LossBackward {
 
 impl GradientFunction for SmoothL1LossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let pred_data = self.saved_pred.to_vec();
-        let target_data = self.saved_target.to_vec();
-        let numel = pred_data.len() as f32;
-
-        let grad_data: Vec<f32> = pred_data
-            .iter()
-            .zip(target_data.iter())
-            .map(|(&p, &t)| {
-                let diff = p - t;
-                if diff.abs() < self.beta {
-                    diff / self.beta
-                } else if diff > 0.0 {
-                    1.0
-                } else {
-                    -1.0
-                }
-            })
-            .collect();
-
+        let numel = self.saved_pred.numel() as f32;
+        let beta = self.beta;
         let scale = match self.reduction {
             Reduction::Mean => grad_output.to_vec()[0] / numel,
             Reduction::Sum => grad_output.to_vec()[0],
             Reduction::None => 1.0,
         };
 
-        let grad: Vec<f32> = grad_data.iter().map(|&v| v * scale).collect();
-        let grad = Tensor::from_vec(grad, self.saved_pred.shape()).unwrap();
+        let grad = self.saved_pred.zip_map(&self.saved_target, move |p, t| {
+            let diff = p - t;
+            let g = if diff.abs() < beta {
+                diff / beta
+            } else if diff > 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
+            scale * g
+        });
 
         vec![Some(grad)]
     }
