@@ -15,7 +15,7 @@
 //! liable for any damages arising from the use of this software.
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::{CudaSlice, DeviceSlice};
+use cudarc::driver::CudaSlice;
 
 #[cfg(feature = "cuda")]
 use std::collections::HashMap;

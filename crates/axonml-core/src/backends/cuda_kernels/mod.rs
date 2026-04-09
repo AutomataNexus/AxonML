@@ -2473,7 +2473,16 @@ pub const CROSS_ENTROPY_PTX: &str = r#"
     mul.lo.s32 %r5, %r2, %r1;     // r5 = b * C
 
     // ===== Phase 1: Find max =====
+    // Initialize all shared memory slots to -inf so unused threads don't
+    // contribute garbage values during the reduction.
     mov.f32 %f1, 0fFF800000;      // -inf
+    cvt.u64.u32 %rd5, %r3;
+    shl.b64 %rd5, %rd5, 2;
+    mov.u64 %rd9, sdata;
+    add.s64 %rd8, %rd9, %rd5;
+    st.shared.f32 [%rd8], %f1;
+    bar.sync 0;
+
     mov.u32 %r6, %r3;             // c = tid
 $L__ce_max_loop:
     setp.ge.u32 %p1, %r6, %r1;
@@ -3263,6 +3272,7 @@ $L__mask_padding_exit:
 }
 "#;
 
+/// PTX assembly for Conv2d CUDA kernels (im2col, bias_add, col2im).
 pub const CONV_PTX: &str = r#"
 .version 7.0
 .target sm_50

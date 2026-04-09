@@ -860,7 +860,6 @@ fn reduce_grad_for_broadcast(grad: &Tensor<f32>, target_shape: &[usize]) -> Tens
             #[cfg(feature = "cuda")]
             if dims_to_reduce == 1 && grad_ndim == 2 && grad.device().is_gpu() {
                 let m = grad_shape[0];
-                let n = grad_shape[1];
                 let ones_data = vec![1.0f32; m];
                 let ones = Tensor::from_vec(ones_data, &[1, m])
                     .unwrap()

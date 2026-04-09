@@ -25,8 +25,6 @@ use crate::error::{Error, Result};
 
 #[cfg(feature = "cuda")]
 use cudarc::driver::CudaSlice;
-#[cfg(feature = "cuda")]
-use cudarc::driver::DeviceSlice;
 
 // =============================================================================
 // Storage Data Enum
@@ -391,7 +389,6 @@ impl Storage<f32> {
                 let cpu_storage = self.to_device_f32(Device::Cpu)?;
                 cpu_storage.to_device_f32(device)
             }
-            _ => Err(Error::DeviceNotAvailable { device }),
         }
     }
 }
