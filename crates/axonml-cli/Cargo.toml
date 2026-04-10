@@ -5,7 +5,7 @@
 # Provides a unified CLI for project scaffolding, training, evaluation,
 # model management, and deployment of Axonml ML models.
 #
-# @version 0.3.1
+# @version 0.6.1
 # @author AutomataNexus Development Team
 # @license MIT OR Apache-2.0
 # =============================================================================
@@ -42,7 +42,7 @@ axonml-optim = { workspace = true }
 axonml-data = { workspace = true }
 axonml-vision = { workspace = true }
 axonml-serialize = { workspace = true }
-axonml-onnx = { path = "../axonml-onnx", version = "0.6.0" }
+axonml-onnx = { path = "../axonml-onnx", version = "0.6.1" }
 axonml-quant = { workspace = true }
 axonml-tui.workspace = true
 
