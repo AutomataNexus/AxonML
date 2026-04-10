@@ -5,7 +5,7 @@
 # A PyTorch-equivalent machine learning framework written in pure Rust.
 # Provides tensors, automatic differentiation, neural networks, and more.
 #
-# @version 0.4.3
+# @version 0.6.0
 # @author AutomataNexus Development Team
 # @license MIT OR Apache-2.0
 # =============================================================================

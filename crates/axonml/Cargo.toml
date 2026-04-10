@@ -35,6 +35,12 @@ llm = ["nn", "dep:axonml-llm"]
 jit = ["core", "dep:axonml-jit"]
 # ONNX import/export
 onnx = ["core", "dep:axonml-onnx"]
+# Serialization (SafeTensors, StateDict)
+serialize = ["core", "dep:axonml-serialize"]
+# Quantization (INT8/INT4/F16)
+quant = ["nn", "dep:axonml-quant"]
+# Kernel fusion optimization
+fusion = ["core", "dep:axonml-fusion"]
 # NCCL distributed communication (requires CUDA + libnccl.so.2)
 nccl = ["distributed", "axonml-distributed/nccl"]
 # CUDA GPU acceleration
@@ -44,7 +50,7 @@ cudnn = ["cuda", "axonml-core/cudnn", "axonml-tensor/cudnn", "axonml-nn/cudnn"]
 # WebGPU/Vulkan GPU acceleration
 wgpu = ["axonml-core/wgpu"]
 # Full feature set
-full = ["core", "nn", "data", "vision", "text", "audio", "distributed", "profile", "llm", "jit", "onnx"]
+full = ["core", "nn", "data", "vision", "text", "audio", "distributed", "profile", "llm", "jit", "onnx", "serialize", "quant", "fusion"]
 
 [dependencies]
 axonml-core = { workspace = true, optional = true }
@@ -61,4 +67,7 @@ axonml-profile = { workspace = true, optional = true }
 axonml-llm = { workspace = true, optional = true }
 axonml-jit = { workspace = true, optional = true }
 axonml-onnx = { workspace = true, optional = true }
+axonml-serialize = { workspace = true, optional = true }
+axonml-quant = { workspace = true, optional = true }
+axonml-fusion = { workspace = true, optional = true }
 rand = "0.8"

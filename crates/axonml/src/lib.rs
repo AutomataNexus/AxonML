@@ -132,6 +132,15 @@ pub use axonml_jit as jit;
 #[cfg(feature = "onnx")]
 pub use axonml_onnx as onnx;
 
+#[cfg(feature = "serialize")]
+pub use axonml_serialize as serialize;
+
+#[cfg(feature = "quant")]
+pub use axonml_quant as quant;
+
+#[cfg(feature = "fusion")]
+pub use axonml_fusion as fusion;
+
 // =============================================================================
 // HVAC Diagnostic System
 // =============================================================================

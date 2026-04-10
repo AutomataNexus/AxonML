@@ -20,7 +20,7 @@ Axonml (named after axons - the nerve fibers that transmit signals between neuro
 
 ## PyTorch Parity: ~92-95% (and beyond)
 
-AxonML provides comprehensive PyTorch-equivalent functionality with **2,240+ passing tests**. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
+AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ passing tests**. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
 
 ## Features
 
@@ -94,7 +94,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,240+ pas
   - **Nexus** *(novel)* — Dual-pathway object detector (~430K params) with predictive coding, persistent GRU object memory, uncertainty quantification, and 3-scale anchor-free heads
   - **Phantom** *(novel)* — Event-driven face detector (~126K params) with sparse processing, GRU face tracking, and confidence accumulation. Compute drops to ~5% in steady state
   - **NightVision** *(novel)* — Multi-domain thermal IR detector (~2.6M params) with CSP backbone, Thermal FPN with domain-adaptive feature modulation, and YOLOX decoupled heads. Supports 5 domains: Wildlife, Human, Interstellar, Vehicle, and General
-  - **Biometric GPU Training Pipelines** — Full GPU-accelerated training for Mnemosyne (face), Argus (iris), and Ariadne (gait) with checkpoint/resume support, trained on LFW, CASIA-Iris, and FVC2000 datasets
+  - **Biometric GPU Training Pipelines** — Full GPU-accelerated training for Mnemosyne (face), Argus (iris), and Ariadne (fingerprint) with checkpoint/resume support, trained on LFW, CASIA-Iris, and FVC2000 datasets
 
 - **Audio Processing** (`axonml-audio`)
   - MelSpectrogram, MFCC transforms
@@ -447,7 +447,7 @@ Add Axonml to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = "0.4"
+axonml = "0.6"
 ```
 
 ### Basic Usage
@@ -761,7 +761,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ### Test Suite
 
-The framework includes **1,988 tests** across all crates:
+The framework includes **2,182 tests** across all crates:
 
 ```bash
 cargo test --workspace
@@ -769,27 +769,27 @@ cargo test --workspace
 
 | Crate | Tests |
 |-------|-------|
-| axonml-core | 31 |
-| axonml-tensor | 98 |
-| axonml-autograd | 105 |
-| axonml-nn | 171 |
-| axonml-optim | 79 |
-| axonml-data | 55 |
-| axonml-vision | 607 |
-| axonml-audio | 37 |
-| axonml-text | 43 |
-| axonml-distributed | 83 |
-| axonml-serialize | 31 |
-| axonml-onnx | 28 |
-| axonml-quant | 26 |
-| axonml-fusion | 31 |
-| axonml-jit | 27 |
+| axonml-core | 91 |
+| axonml-tensor | 112 |
+| axonml-autograd | 132 |
+| axonml-nn | 249 |
+| axonml-optim | 96 |
+| axonml-data | 63 |
+| axonml-vision | 741 |
+| axonml-audio | 28 |
+| axonml-text | 39 |
+| axonml-distributed | 82 |
+| axonml-serialize | 32 |
+| axonml-onnx | 23 |
+| axonml-quant | 24 |
+| axonml-fusion | 30 |
+| axonml-jit | 31 |
 | axonml-profile | 27 |
-| axonml-llm | 73 |
-| axonml-server | 120 |
-| axonml-cli | 74 (unit) + 37 (integration) |
-| axonml-tui | 14 |
-| axonml (umbrella) | 25 (unit + integration) |
+| axonml-llm | 109 |
+| axonml-server | 49 |
+| axonml-cli | 112 |
+| axonml-tui | 9 |
+| axonml (umbrella) | 103 |
 
 ## License
 

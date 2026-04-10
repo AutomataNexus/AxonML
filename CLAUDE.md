@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AxonML is a PyTorch-equivalent machine learning framework written in pure Rust (~92-95% PyTorch parity). It's a monorepo workspace with 22 crates organized in layered architecture. The test suite includes 2,141+ passing tests.
+AxonML is a PyTorch-equivalent machine learning framework written in pure Rust (~92-95% PyTorch parity). It's a monorepo workspace with 22 crates organized in layered architecture. The test suite includes 2,182+ passing tests.
 
 ## Build Commands
 
@@ -120,7 +120,7 @@ pm2 startup  # Follow the instructions to enable boot persistence
 
 **Foundation Layer:**
 - `axonml-core` - Device abstraction (CPU, CUDA, Vulkan, Metal, WebGPU), data types, storage, GPU memory pool, CUDNN/NCCL integration
-- `axonml-tensor` - N-dimensional arrays with broadcasting, views, slicing, BLAS ops, sparse tensors, topk/sort/gather/scatter/unique, 59 CUDA kernels
+- `axonml-tensor` - N-dimensional arrays with broadcasting, views, slicing, BLAS ops, sparse tensors, topk/sort/gather/scatter/unique, 60 CUDA kernels
 
 **Computation Layer:**
 - `axonml-autograd` - Reverse-mode automatic differentiation, computational graphs, AMP (autocast), gradient checkpointing, fused LSTM/GRU/Attention backward
@@ -171,13 +171,12 @@ pm2 startup  # Follow the instructions to enable boot persistence
 - Anomaly - Autoencoder-based anomaly detection
 - FPN - Feature Pyramid Network (multi-scale features)
 
-**Vision — Biometric Suite:**
-- Argus - Face recognition (ArcFace embedding)
-- Echo - Speaker verification (GRU + stats pooling)
-- Ariadne - Gait recognition (temporal modeling)
-- Themis - Anti-spoofing (binary classifier)
-- Polar - Iris recognition
-- Mnemosyne - Person re-identification
+**Vision — Biometric Suite (Aegis Identity):**
+- Mnemosyne - Face identity via temporal crystallization (GRU attractor convergence, liveness detection)
+- Argus - Iris identity via polar-native radial phase encoding (rotation-invariant matching)
+- Ariadne - Fingerprint identity via ridge event fields (Gabor wavelet banks, singularity detection)
+- Echo - Voice identity via predictive speaker residuals (GRU + stats pooling)
+- Themis - Multimodal belief propagation fusion (uncertainty-aware gating, forensic reporting)
 
 **Vision — Multi-Sensor:**
 - Nexus - Multi-modal fusion (backbone + attention + gated blending)
@@ -186,14 +185,14 @@ pm2 startup  # Follow the instructions to enable boot persistence
 
 **HVAC Models (Edge Deployment):**
 - Panoptes - Facility-wide anomaly detection (per-type encoders + cross-equipment transformer + temporal LSTM, 47K params)
-- Boreas - AHU controller (LSTM)
-- Zephyrus - DOAS controller (GRU)
-- Vulcan - Boiler controller (MLP)
-- Naiad - Pump controller (LSTM)
-- Aquilo - Steam bundle controller (GRU)
-- Colossus - Chiller plant controller (transformer)
-- Apollo - Multi-equipment coordinator (transformer)
-- Gaia - Geothermal controller
+- Boreas - Refrigeration systems diagnostic (LSTM + attention, ~1.2M params)
+- Zephyrus - Airflow systems diagnostic (GCN + Conv temporal extraction, ~845K params)
+- Vulcan - Mechanical systems diagnostic (Wide & Deep + FFT vibration analysis, ~1.1M params)
+- Naiad - Water systems diagnostic (Conv1d + multi-head self-attention, ~533K params)
+- Aquilo - Electrical systems diagnostic (parallel FFT analyzers, ~608K params)
+- Colossus - Master aggregator (cross-specialist attention + fusion, ~1.5M params)
+- Apollo - Master coordinator (final diagnosis from all models + raw sensors, ~1.8M params)
+- Gaia - Safety validator (adversarial robustness + safety-critical output heads, ~896K params)
 
 **LLM Architectures:**
 - BERT - Bidirectional encoder (classification, NER)
@@ -204,7 +203,7 @@ pm2 startup  # Follow the instructions to enable boot persistence
 
 ## GPU Acceleration (CUDA)
 
-**59 custom CUDA kernels + CUDNN integration. 98% forward / 98% backward GPU coverage.**
+**60 custom CUDA kernels + CUDNN integration. 98% forward / 98% backward GPU coverage.**
 
 ```bash
 # Build with CUDA support
@@ -217,7 +216,7 @@ cargo build --release --features cudnn
 cargo build --release --features nccl
 ```
 
-**CUDA Kernels (59 total):**
+**CUDA Kernels (60 total):**
 - Element-wise: add, sub, mul, div (+ broadcast variants, + backward)
 - Activations: relu, sigmoid, tanh, gelu, silu, elu, leaky_relu (+ backward)
 - Fused LSTM gates: forward (lstm_gates_f32) + backward (lstm_gates_backward_f32)

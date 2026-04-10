@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.0] - 2026-04-08
 
 ### Summary
-Production readiness release. **100+ new tests** across all foundation crates, comprehensive CPU backward pass optimization, and zero clippy warnings. Test suite grows from 2,141 to **2,240+** passing tests. Every critical training path — forward, loss, backward, optimizer step, checkpoint save/load — now has verified correctness tests. CPU performance improved by eliminating unnecessary memory copies in backward passes and adding fast paths for contiguous tensor operations.
+Production readiness release. **100+ new tests** across all foundation crates, comprehensive CPU backward pass optimization, and zero clippy warnings. Test suite grows from 2,141 to **2,182+** passing tests. Every critical training path — forward, loss, backward, optimizer step, checkpoint save/load — now has verified correctness tests. CPU performance improved by eliminating unnecessary memory copies in backward passes and adding fast paths for contiguous tensor operations.
 
 **14 files changed, 2,142 lines added, 218 lines removed.**
 
