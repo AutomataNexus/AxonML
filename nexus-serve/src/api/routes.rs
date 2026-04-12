@@ -2,9 +2,13 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::Json;
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Json, Response};
+use futures::stream::{Stream, StreamExt};
+use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::types::*;
 use crate::model::inference::InferenceEngine;
@@ -78,7 +82,7 @@ pub async fn list_models(State(state): State<Arc<AppState>>) -> Json<ModelListRe
 pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ChatCompletionRequest>,
-) -> Result<Json<ChatCompletionResponse>, (StatusCode, Json<ApiError>)> {
+) -> Result<Response, (StatusCode, Json<ApiError>)> {
     // Resolve the requested model or alias (e.g., "sage" → "Qwen2.5 Coder 1.5B Instruct"),
     // or fall back to the default model if none specified.
     let requested = match req.model.as_deref() {
@@ -101,62 +105,170 @@ pub async fn chat_completions(
         .unwrap()
         .as_secs();
 
-    // Build prompt using the model's chat template.
-    // For Qwen/LLaMA/Mistral families this is the ChatML format:
-    //   <|im_start|>role\ncontent<|im_end|>\n
-    //   ...
-    //   <|im_start|>assistant\n
-    // Other formats (Gemma, Phi) would need different handling.
+    // Build prompt using the model's chat template (ChatML for Qwen/LLaMA/Mistral).
     let prompt = format_chatml(&req.messages);
 
-    // Get engine + tokenizer
-    let engines = state.engines.read().await;
-    let tokenizers = state.tokenizers.read().await;
+    // Get engine + tokenizer. We clone the Arcs so the background task can own them.
+    let engine = {
+        let engines = state.engines.read().await;
+        engines
+            .get(&model_id)
+            .cloned()
+            .ok_or_else(|| api_error(503, &format!("Model {} not loaded for inference", model_id)))?
+    };
+    let tokenizer = {
+        let tokenizers = state.tokenizers.read().await;
+        tokenizers
+            .get(&model_id)
+            .cloned()
+            .ok_or_else(|| api_error(503, &format!("Tokenizer for {} not loaded", model_id)))?
+    };
 
-    let engine = engines
-        .get(&model_id)
-        .ok_or_else(|| api_error(503, &format!("Model {} not loaded for inference", model_id)))?;
-    let tokenizer = tokenizers
-        .get(&model_id)
-        .ok_or_else(|| api_error(503, &format!("Tokenizer for {} not loaded", model_id)))?;
-
-    // Tokenize + generate
+    // Tokenize prompt
     let input_ids = tokenizer.encode(&prompt);
     let prompt_tokens = input_ids.len();
 
-    let generated_ids = engine.generate(
-        &input_ids,
-        req.max_tokens,
-        req.temperature,
-        req.top_p.unwrap_or(0.9),
-    );
+    let max_tokens = req.max_tokens;
+    let temperature = req.temperature;
+    let top_p = req.top_p.unwrap_or(0.9);
+    let chat_id = format!("chatcmpl-{}", now);
 
-    let completion_tokens = generated_ids.len();
-    let response_text = tokenizer.decode(&generated_ids);
+    if req.stream {
+        // SSE streaming path
+        let stream = build_chat_stream(
+            chat_id,
+            model_id,
+            now,
+            engine,
+            tokenizer,
+            input_ids,
+            max_tokens,
+            temperature,
+            top_p,
+        );
+        let sse = Sse::new(stream).keep_alive(KeepAlive::default());
+        Ok(sse.into_response())
+    } else {
+        // Non-streaming: run to completion and return JSON
+        let generated_ids =
+            engine.generate(&input_ids, max_tokens, temperature, top_p);
+        let completion_tokens = generated_ids.len();
+        let response_text = tokenizer.decode(&generated_ids);
 
-    Ok(Json(ChatCompletionResponse {
-        id: format!("chatcmpl-{}", now),
-        object: "chat.completion".to_string(),
-        created: now,
-        model: model_id,
-        choices: vec![ChatChoice {
+        let body = Json(ChatCompletionResponse {
+            id: chat_id,
+            object: "chat.completion".to_string(),
+            created: now,
+            model: model_id,
+            choices: vec![ChatChoice {
+                index: 0,
+                message: ChatMessage {
+                    role: "assistant".to_string(),
+                    content: response_text,
+                },
+                finish_reason: if completion_tokens >= max_tokens {
+                    "length".to_string()
+                } else {
+                    "stop".to_string()
+                },
+            }],
+            usage: Usage {
+                prompt_tokens,
+                completion_tokens,
+                total_tokens: prompt_tokens + completion_tokens,
+            },
+        });
+        Ok(body.into_response())
+    }
+}
+
+/// Build an SSE stream that runs generation in a blocking task and yields
+/// one chunk per token, following the OpenAI chat.completion.chunk format.
+fn build_chat_stream(
+    chat_id: String,
+    model_id: String,
+    created: u64,
+    engine: Arc<InferenceEngine>,
+    tokenizer: Arc<Tokenizer>,
+    input_ids: Vec<u32>,
+    max_tokens: usize,
+    temperature: f32,
+    top_p: f32,
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
+
+    // First chunk: announce the assistant role
+    let role_chunk = ChatCompletionChunk {
+        id: chat_id.clone(),
+        object: "chat.completion.chunk".to_string(),
+        created,
+        model: model_id.clone(),
+        choices: vec![ChatChunkChoice {
             index: 0,
-            message: ChatMessage {
-                role: "assistant".to_string(),
-                content: response_text,
+            delta: ChunkDelta {
+                role: Some("assistant".to_string()),
+                content: None,
             },
-            finish_reason: if completion_tokens >= req.max_tokens {
-                "length".to_string()
-            } else {
-                "stop".to_string()
-            },
+            finish_reason: None,
         }],
-        usage: Usage {
-            prompt_tokens,
-            completion_tokens,
-            total_tokens: prompt_tokens + completion_tokens,
-        },
-    }))
+    };
+    let _ = tx.send(Event::default().data(serde_json::to_string(&role_chunk).unwrap()));
+
+    // Generation runs on a blocking thread (inference is synchronous and CPU/GPU-bound).
+    tokio::task::spawn_blocking(move || {
+        let mut token_count = 0usize;
+
+        engine.generate_stream(
+            &input_ids,
+            max_tokens,
+            temperature,
+            top_p,
+            |tok_id| {
+                token_count += 1;
+                // Decode this single token to its text chunk
+                let piece = tokenizer.decode(&[tok_id]);
+                let chunk = ChatCompletionChunk {
+                    id: chat_id.clone(),
+                    object: "chat.completion.chunk".to_string(),
+                    created,
+                    model: model_id.clone(),
+                    choices: vec![ChatChunkChoice {
+                        index: 0,
+                        delta: ChunkDelta {
+                            role: None,
+                            content: Some(piece),
+                        },
+                        finish_reason: None,
+                    }],
+                };
+                let payload = match serde_json::to_string(&chunk) {
+                    Ok(s) => s,
+                    Err(_) => return false,
+                };
+                // Send; if the receiver dropped (client disconnected), stop.
+                tx.send(Event::default().data(payload)).is_ok()
+            },
+        );
+
+        // Final chunk with finish_reason
+        let finish = if token_count >= max_tokens { "length" } else { "stop" };
+        let final_chunk = ChatCompletionChunk {
+            id: chat_id.clone(),
+            object: "chat.completion.chunk".to_string(),
+            created,
+            model: model_id.clone(),
+            choices: vec![ChatChunkChoice {
+                index: 0,
+                delta: ChunkDelta::default(),
+                finish_reason: Some(finish.to_string()),
+            }],
+        };
+        let _ = tx.send(Event::default().data(serde_json::to_string(&final_chunk).unwrap()));
+        // OpenAI-spec terminator
+        let _ = tx.send(Event::default().data("[DONE]"));
+    });
+
+    UnboundedReceiverStream::new(rx).map(Ok)
 }
 
 // =============================================================================

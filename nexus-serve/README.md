@@ -22,21 +22,32 @@ Pure-Rust LLM inference server. Replaces ollama with native AxonML inference ove
 # Build with GPU
 cargo build --release --features cuda
 
-# Load a GGUF model and start serving
+# Load with friendly aliases (sage/oracle match nexus-agent configs)
 target/release/nexus-serve \
-  --model /usr/share/ollama/.ollama/models/blobs/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104 \
+  --alias sage   /usr/share/ollama/.ollama/models/blobs/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104 \
+  --alias oracle /usr/share/ollama/.ollama/models/blobs/sha256-4c27e0f5b5adf02ac956c7322bd2ee7636fe3f45a8512c9aba5385242cb6e09a \
   --port 11435
 
-# Query it
+# Query using the alias
 curl http://localhost:11435/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen2.5 Coder 1.5B Instruct",
+    "model": "sage",
     "messages": [{"role": "user", "content": "What is 2+2?"}],
     "max_tokens": 50,
     "temperature": 0.0
   }'
 ```
+
+## Model Aliases
+
+Use `--alias NAME PATH` to load a model AND register a friendly name for it. Requests for `NAME` will route to the canonical GGUF model name.
+
+```bash
+nexus-serve --alias sage /path/to/qwen.gguf --alias oracle /path/to/gemma.gguf
+```
+
+Aliases appear in `/v1/models` with `object: "model-alias"`. Clients can use either the alias or the canonical model name.
 
 ## Endpoints
 

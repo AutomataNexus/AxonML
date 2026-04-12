@@ -8,3 +8,4 @@
 pub mod gguf;
 pub mod inference;
 pub mod registry;
+pub mod weight;

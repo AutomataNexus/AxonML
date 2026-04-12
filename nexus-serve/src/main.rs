@@ -38,6 +38,11 @@ struct Config {
     aliases: Vec<(String, PathBuf)>,
     port: u16,
     host: String,
+    /// If true, keep weights in their compact GGUF form and dequantize per-matmul.
+    /// Saves ~5x RAM (e.g., 27B Gemma: 50GB → 10GB) at the cost of inference speed.
+    quantized_weights: bool,
+    /// Number of CPU threads for matmul/dequant. `None` = rayon default (all cores).
+    threads: Option<usize>,
 }
 
 impl Config {
@@ -48,7 +53,12 @@ impl Config {
             aliases: Vec::new(),
             port: 11435,  // ollama is 11434, we're +1
             host: "0.0.0.0".to_string(),
+            quantized_weights: false,
+            threads: None,
         };
+
+        // Also check the nexus-serve config file if it exists
+        cfg.merge_config_file();
 
         let mut i = 1;
         while i < args.len() {
@@ -74,6 +84,13 @@ impl Config {
                     i += 1;
                     cfg.host = args[i].clone();
                 }
+                "--quantized" | "-q" => {
+                    cfg.quantized_weights = true;
+                }
+                "--threads" | "-t" => {
+                    i += 1;
+                    cfg.threads = Some(args[i].parse().expect("Invalid --threads"));
+                }
                 "--help" | "-h" => {
                     print_help();
                     std::process::exit(0);
@@ -94,6 +111,73 @@ impl Config {
 
         cfg
     }
+
+    /// Merge values from `~/.config/nexus-serve/config.toml` if it exists.
+    /// CLI flags take precedence over config file values.
+    ///
+    /// Example config:
+    /// ```toml
+    /// threads = 24
+    /// port = 11435
+    /// quantized = true
+    ///
+    /// [hardware]
+    /// # Documentation only — used for sanity-check warnings.
+    /// cpu  = "Intel Core Ultra 9 275HX"
+    /// cores = 24
+    /// ram_gb = 64
+    /// ```
+    fn merge_config_file(&mut self) {
+        let config_path = std::env::var("HOME")
+            .ok()
+            .map(|h| std::path::PathBuf::from(h).join(".config/nexus-serve/config.toml"))
+            .filter(|p| p.exists());
+
+        let Some(path) = config_path else { return };
+
+        let Ok(content) = std::fs::read_to_string(&path) else { return };
+
+        println!("Loading config: {}", path.display());
+
+        // Very small hand-rolled parser for just the keys we care about.
+        // Avoids pulling in a TOML dependency for such a small config.
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') || line.starts_with('[') {
+                continue;
+            }
+            let Some((key, val)) = line.split_once('=') else { continue };
+            let key = key.trim();
+            let val = val.trim().trim_matches(&['"', '\''][..]);
+            match key {
+                "threads" => {
+                    if self.threads.is_none() {
+                        if let Ok(n) = val.parse::<usize>() {
+                            self.threads = Some(n);
+                        }
+                    }
+                }
+                "port" => {
+                    if self.port == 11435 {
+                        if let Ok(p) = val.parse::<u16>() {
+                            self.port = p;
+                        }
+                    }
+                }
+                "quantized" => {
+                    if val == "true" {
+                        self.quantized_weights = true;
+                    }
+                }
+                "host" => {
+                    if self.host == "0.0.0.0" {
+                        self.host = val.to_string();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 fn print_help() {
@@ -107,9 +191,16 @@ OPTIONS:
     --alias, -a NAME PATH  Load a model AND register a friendly alias.
                            Requests for NAME will route to the model at PATH.
                            (e.g., --alias sage /path/to/qwen.gguf)
+    --quantized, -q        Keep weights in compact GGUF form, dequantize per-matmul.
+                           Saves ~5x RAM at the cost of inference speed.
+                           Required to fit large models (e.g., 27B Gemma) in 16GB RAM.
+    --threads, -t N        CPU thread count for matmul/dequantization.
+                           Default: all physical cores (24 on Intel Core Ultra 9 275HX).
     --port, -p PORT        Listen port (default: 11435)
     --host HOST            Listen host (default: 0.0.0.0)
     --help, -h             Show this help
+
+CONFIG FILE: ~/.config/nexus-serve/config.toml — see README for format.
 
 EXAMPLES:
     nexus-serve --model qwen2.5-coder-1.5b.gguf
@@ -143,6 +234,24 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let cfg = Config::from_args();
+
+    // Configure the global rayon thread pool for parallel dequantization + CPU matmul.
+    // If the user set --threads N (or threads=N in config), use N. Otherwise rayon
+    // defaults to num_cpus::get() which on a 24-core machine is 24.
+    if let Some(n) = cfg.threads {
+        if let Err(e) = rayon::ThreadPoolBuilder::new().num_threads(n).build_global() {
+            eprintln!("Warning: failed to set rayon thread count to {n}: {e}");
+        } else {
+            println!("Rayon thread pool: {} threads", n);
+        }
+    }
+    // Also hint to downstream BLAS (matrixmultiply uses this).
+    if std::env::var_os("RAYON_NUM_THREADS").is_none() {
+        if let Some(n) = cfg.threads {
+            // SAFETY: single-threaded at startup.
+            unsafe { std::env::set_var("RAYON_NUM_THREADS", n.to_string()) };
+        }
+    }
 
     println!("═══════════════════════════════════════════════════════════");
     println!(" nexus-serve — Pure-Rust LLM Inference Server");
@@ -230,10 +339,10 @@ async fn main() {
                     path_to_name.insert(path.clone(), model_name.clone());
                     println!("  Registered as: {}", model_name);
 
-                    // Load inference engine (dequantize weights → f32)
+                    // Load inference engine (dequantize weights → f32, or keep quantized)
                     match MappedGguf::open(path, &gguf) {
                         Ok(mapped) => {
-                            match InferenceEngine::from_gguf(&gguf, &mapped) {
+                            match InferenceEngine::from_gguf_with_mode(&gguf, &mapped, cfg.quantized_weights) {
                                 Ok(mut engine) => {
                                     // Move weights to GPU if CUDA is available
                                     #[cfg(feature = "cuda")]

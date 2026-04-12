@@ -46,6 +46,37 @@ pub struct ChatChoice {
 }
 
 // =============================================================================
+// SSE streaming chunk (OpenAI format)
+// =============================================================================
+
+/// One SSE chunk for streaming chat completions.
+/// Emitted as `data: {json}\n\n` per token, with a final `data: [DONE]\n\n`.
+#[derive(Debug, Serialize)]
+pub struct ChatCompletionChunk {
+    pub id: String,
+    pub object: String, // "chat.completion.chunk"
+    pub created: u64,
+    pub model: String,
+    pub choices: Vec<ChatChunkChoice>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChatChunkChoice {
+    pub index: usize,
+    pub delta: ChunkDelta,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct ChunkDelta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+}
+
+// =============================================================================
 // OpenAI Completions (text)
 // =============================================================================
 

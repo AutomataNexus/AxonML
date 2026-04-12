@@ -20,6 +20,7 @@ use axonml_tensor::Tensor;
 use memmap2::Mmap;
 
 use super::gguf::{self, GgufFile, GgufTensorInfo, GgmlType};
+use super::weight::Weight;
 
 // =============================================================================
 // Config extracted from GGUF metadata
@@ -119,7 +120,7 @@ pub struct MappedGguf {
     _mmap: Mmap,
     data_ptr: *const u8,
     data_offset: u64,
-    tensors: HashMap<String, GgufTensorInfo>,
+    pub tensors: HashMap<String, GgufTensorInfo>,
 }
 
 unsafe impl Send for MappedGguf {}
@@ -224,6 +225,18 @@ impl MappedGguf {
         self.tensors.contains_key(name)
     }
 
+    /// Load the raw tensor bytes (compressed/quantized form) without dequantizing.
+    /// Used for lazy-dequant mode where weights stay compact in RAM.
+    pub fn load_tensor_raw(&self, name: &str) -> Option<Vec<u8>> {
+        let info = self.tensors.get(name)?;
+        let total_bytes = info.total_bytes() as usize;
+        let offset = (self.data_offset + info.offset) as usize;
+        let raw_data = unsafe {
+            std::slice::from_raw_parts(self.data_ptr.add(offset), total_bytes)
+        };
+        Some(raw_data.to_vec())
+    }
+
     pub fn tensor_names(&self) -> Vec<&str> {
         self.tensors.keys().map(|s| s.as_str()).collect()
     }
@@ -241,23 +254,27 @@ pub struct InferenceEngine {
     pub layers: Vec<LayerWeights>,
     /// Output norm [hidden_size]
     pub output_norm: Vec<f32>,
-    /// LM head [hidden_size, vocab_size] — PRE-TRANSPOSED
-    pub lm_head_t: Tensor<f32>,
+    /// LM head — logical shape `[hidden, vocab]` (post-transpose).
+    pub lm_head: Weight,
+    /// Target compute device for matmul. For f32 weights, inputs and weights
+    /// live on this device. For quantized weights, dequantization happens on
+    /// CPU but the dequantized scratch is moved here for matmul.
+    pub compute_device: Device,
 }
 
 /// Weights for one transformer layer.
-/// All weight matrices are PRE-TRANSPOSED at load time:
-/// stored as [in_dim, out_dim] so matmul is: input @ weight = [seq, out_dim]
+/// Each weight is logically shaped `[in, out]` (post-transpose convention):
+/// matmul is: `input [seq, in] @ weight [in, out] = [seq, out]`.
 pub struct LayerWeights {
     pub attn_norm: Vec<f32>,
-    pub q_weight_t: Tensor<f32>,  // [hidden, n_heads*head_dim] PRE-TRANSPOSED
-    pub k_weight_t: Tensor<f32>,  // [hidden, n_kv_heads*head_dim]
-    pub v_weight_t: Tensor<f32>,  // [hidden, n_kv_heads*head_dim]
-    pub o_weight_t: Tensor<f32>,  // [n_heads*head_dim, hidden]
+    pub q_weight: Weight,    // [hidden, n_heads*head_dim]
+    pub k_weight: Weight,    // [hidden, n_kv_heads*head_dim]
+    pub v_weight: Weight,    // [hidden, n_kv_heads*head_dim]
+    pub o_weight: Weight,    // [n_heads*head_dim, hidden]
     pub ffn_norm: Vec<f32>,
-    pub gate_weight_t: Tensor<f32>, // [hidden, intermediate]
-    pub up_weight_t: Tensor<f32>,   // [hidden, intermediate]
-    pub down_weight_t: Tensor<f32>, // [intermediate, hidden]
+    pub gate_weight: Weight, // [hidden, intermediate]
+    pub up_weight: Weight,   // [hidden, intermediate]
+    pub down_weight: Weight, // [intermediate, hidden]
     pub q_bias: Option<Vec<f32>>,
     pub k_bias: Option<Vec<f32>>,
     pub v_bias: Option<Vec<f32>>,
@@ -265,30 +282,34 @@ pub struct LayerWeights {
 
 impl LayerWeights {
     /// Move all weight tensors to the specified device (GPU).
+    /// Quantized weights stay on CPU (dequantized to GPU per-matmul).
     fn to_device(&mut self, device: Device) {
-        self.q_weight_t = self.q_weight_t.to_device(device.clone()).unwrap_or_else(|_| self.q_weight_t.clone());
-        self.k_weight_t = self.k_weight_t.to_device(device.clone()).unwrap_or_else(|_| self.k_weight_t.clone());
-        self.v_weight_t = self.v_weight_t.to_device(device.clone()).unwrap_or_else(|_| self.v_weight_t.clone());
-        self.o_weight_t = self.o_weight_t.to_device(device.clone()).unwrap_or_else(|_| self.o_weight_t.clone());
-        self.gate_weight_t = self.gate_weight_t.to_device(device.clone()).unwrap_or_else(|_| self.gate_weight_t.clone());
-        self.up_weight_t = self.up_weight_t.to_device(device.clone()).unwrap_or_else(|_| self.up_weight_t.clone());
-        self.down_weight_t = self.down_weight_t.to_device(device).unwrap_or_else(|_| self.down_weight_t.clone());
+        self.q_weight.to_device(device.clone());
+        self.k_weight.to_device(device.clone());
+        self.v_weight.to_device(device.clone());
+        self.o_weight.to_device(device.clone());
+        self.gate_weight.to_device(device.clone());
+        self.up_weight.to_device(device.clone());
+        self.down_weight.to_device(device);
     }
 }
 
 impl InferenceEngine {
-    /// Move all weight matrices to GPU. Norms stay on CPU (element-wise, fast).
+    /// Move all weight matrices to GPU (f32 variant) and set the compute device.
+    /// Quantized weights stay in CPU RAM (dequantization produces per-matmul
+    /// scratch tensors that get moved to `compute_device`).
     pub fn to_device(&mut self, device: Device) {
-        println!("  Moving weights to {:?}...", device);
-        self.lm_head_t = self.lm_head_t.to_device(device.clone()).unwrap_or_else(|_| self.lm_head_t.clone());
+        println!("  Setting compute device to {:?}...", device);
+        self.compute_device = device.clone();
+        self.lm_head.to_device(device.clone());
         let num_layers = self.layers.len();
         for (i, layer) in self.layers.iter_mut().enumerate() {
             layer.to_device(device.clone());
             if (i + 1) % 7 == 0 || i + 1 == num_layers {
-                println!("    Moved layer {}/{}", i + 1, num_layers);
+                println!("    Layer {}/{}", i + 1, num_layers);
             }
         }
-        println!("  Weights on {:?}", device);
+        println!("  Compute device: {:?}", device);
     }
 }
 
@@ -323,43 +344,56 @@ impl KvCache {
 }
 
 impl InferenceEngine {
+    /// Load a model from GGUF, fully dequantizing to f32 (fast, big).
     pub fn from_gguf(gguf: &GgufFile, mapped: &MappedGguf) -> Result<Self, String> {
+        Self::from_gguf_with_mode(gguf, mapped, false)
+    }
+
+    /// Load a model from GGUF. If `quantized_weights` is true, weight matrices
+    /// are kept in their compact GGUF form and dequantized per-matmul (saves ~5x RAM,
+    /// at the cost of inference speed). Norms and the token embedding are always
+    /// dequantized eagerly since they're used on every token.
+    pub fn from_gguf_with_mode(
+        gguf: &GgufFile,
+        mapped: &MappedGguf,
+        quantized_weights: bool,
+    ) -> Result<Self, String> {
         let config = InferenceConfig::from_gguf(gguf);
 
-        println!("  Loading weights into f32 tensors...");
+        println!("  Loading weights (mode: {}) ...",
+            if quantized_weights { "quantized (lazy dequant)" } else { "f32 (eager dequant)" });
         println!("    Architecture: {}", config.architecture);
         println!("    Hidden: {}, Layers: {}, Heads: {}/{}",
             config.hidden_size, config.num_layers, config.num_heads, config.num_kv_heads);
         println!("    Vocab: {}, Context: {}", config.vocab_size, config.max_seq_len);
 
-        // Token embeddings as flat Vec (fast lookup)
+        // Token embeddings as flat Vec (fast lookup) — always dequantized
         let token_embed = load_vec(mapped, "token_embd.weight")?;
 
-        // Load per-layer weights — PRE-TRANSPOSE at load time
+        // Load per-layer weights
         let mut layers = Vec::with_capacity(config.num_layers);
         for i in 0..config.num_layers {
             let prefix = format!("blk.{i}");
 
             let attn_norm = load_vec(mapped, &format!("{prefix}.attn_norm.weight"))?;
 
-            // Load + transpose weight matrices so matmul is: [seq, in] @ [in, out]
-            let q_weight_t = load_and_transpose(mapped, &format!("{prefix}.attn_q.weight"))?;
-            let k_weight_t = load_and_transpose(mapped, &format!("{prefix}.attn_k.weight"))?;
-            let v_weight_t = load_and_transpose(mapped, &format!("{prefix}.attn_v.weight"))?;
-            let o_weight_t = load_and_transpose(mapped, &format!("{prefix}.attn_output.weight"))?;
+            let q_weight = load_weight(mapped, &format!("{prefix}.attn_q.weight"), quantized_weights)?;
+            let k_weight = load_weight(mapped, &format!("{prefix}.attn_k.weight"), quantized_weights)?;
+            let v_weight = load_weight(mapped, &format!("{prefix}.attn_v.weight"), quantized_weights)?;
+            let o_weight = load_weight(mapped, &format!("{prefix}.attn_output.weight"), quantized_weights)?;
 
             let ffn_norm = load_vec(mapped, &format!("{prefix}.ffn_norm.weight"))?;
-            let gate_weight_t = load_and_transpose(mapped, &format!("{prefix}.ffn_gate.weight"))?;
-            let up_weight_t = load_and_transpose(mapped, &format!("{prefix}.ffn_up.weight"))?;
-            let down_weight_t = load_and_transpose(mapped, &format!("{prefix}.ffn_down.weight"))?;
+            let gate_weight = load_weight(mapped, &format!("{prefix}.ffn_gate.weight"), quantized_weights)?;
+            let up_weight = load_weight(mapped, &format!("{prefix}.ffn_up.weight"), quantized_weights)?;
+            let down_weight = load_weight(mapped, &format!("{prefix}.ffn_down.weight"), quantized_weights)?;
 
             let q_bias = try_load_vec(mapped, &format!("{prefix}.attn_q.bias"));
             let k_bias = try_load_vec(mapped, &format!("{prefix}.attn_k.bias"));
             let v_bias = try_load_vec(mapped, &format!("{prefix}.attn_v.bias"));
 
             layers.push(LayerWeights {
-                attn_norm, q_weight_t, k_weight_t, v_weight_t, o_weight_t,
-                ffn_norm, gate_weight_t, up_weight_t, down_weight_t,
+                attn_norm, q_weight, k_weight, v_weight, o_weight,
+                ffn_norm, gate_weight, up_weight, down_weight,
                 q_bias, k_bias, v_bias,
             });
 
@@ -368,40 +402,43 @@ impl InferenceEngine {
             }
         }
 
-        // Output norm
+        // Output norm — always dequantized (always used)
         let output_norm = load_vec(mapped, "output_norm.weight")?;
 
         // LM head: need [hidden, vocab] for input @ lm_head = [seq, vocab]
-        let lm_head_t = if mapped.has_tensor("output.weight") {
-            load_and_transpose(mapped, "output.weight")?
+        let lm_head = if mapped.has_tensor("output.weight") {
+            load_weight(mapped, "output.weight", quantized_weights)?
         } else {
-            // Tied embeddings: load_and_transpose handles the dim mapping
             println!("    LM head tied to token embeddings");
-            load_and_transpose(mapped, "token_embd.weight")?
+            load_weight(mapped, "token_embd.weight", quantized_weights)?
         };
 
         let total_bytes: usize = token_embed.len() * 4
             + layers.iter().map(|l| {
                 l.attn_norm.len() * 4
-                + l.q_weight_t.to_vec().len() * 4
-                + l.k_weight_t.to_vec().len() * 4
-                + l.v_weight_t.to_vec().len() * 4
-                + l.o_weight_t.to_vec().len() * 4
+                + l.q_weight.bytes()
+                + l.k_weight.bytes()
+                + l.v_weight.bytes()
+                + l.o_weight.bytes()
                 + l.ffn_norm.len() * 4
-                + l.gate_weight_t.to_vec().len() * 4
-                + l.up_weight_t.to_vec().len() * 4
-                + l.down_weight_t.to_vec().len() * 4
+                + l.gate_weight.bytes()
+                + l.up_weight.bytes()
+                + l.down_weight.bytes()
             }).sum::<usize>()
-            + output_norm.len() * 4;
+            + output_norm.len() * 4
+            + lm_head.bytes();
 
-        println!("  Model loaded: {:.1} GB f32 weights in RAM", total_bytes as f64 / 1e9);
+        println!("  Model loaded: {:.2} GB in RAM ({} mode)",
+            total_bytes as f64 / 1e9,
+            if quantized_weights { "quantized" } else { "f32" });
 
         Ok(Self {
             config,
             token_embed,
             layers,
             output_norm,
-            lm_head_t,
+            lm_head,
+            compute_device: Device::Cpu,
         })
     }
 
@@ -413,8 +450,28 @@ impl InferenceEngine {
         temperature: f32,
         top_p: f32,
     ) -> Vec<u32> {
+        let mut out = Vec::with_capacity(max_new_tokens);
+        self.generate_stream(prompt_ids, max_new_tokens, temperature, top_p, |tok| {
+            out.push(tok);
+            true // keep going
+        });
+        out
+    }
+
+    /// Generate tokens with a per-token callback for streaming.
+    ///
+    /// The callback receives each new token as it is produced. Return `true`
+    /// from the callback to continue generation, or `false` to stop early
+    /// (e.g., on client disconnect).
+    pub fn generate_stream<F: FnMut(u32) -> bool>(
+        &self,
+        prompt_ids: &[u32],
+        max_new_tokens: usize,
+        temperature: f32,
+        top_p: f32,
+        mut on_token: F,
+    ) {
         let mut kv_cache = KvCache::new(self.config.num_layers);
-        let mut generated = Vec::with_capacity(max_new_tokens);
 
         // Prefill: process entire prompt at once
         let logits = self.forward_batch(prompt_ids, &mut kv_cache);
@@ -427,10 +484,13 @@ impl InferenceEngine {
             sample_top_p(last_logits, temperature, top_p)
         };
 
-        if next_id == 0 || next_id == 151643 || next_id == 151645 { // common EOS tokens
-            return generated;
+        // Common EOS tokens: <|endoftext|> for LLaMA/Qwen, <|im_end|> for ChatML
+        if next_id == 0 || next_id == 151643 || next_id == 151645 {
+            return;
         }
-        generated.push(next_id);
+        if !on_token(next_id) {
+            return;
+        }
 
         // Decode: process one token at a time with KV cache
         for _ in 1..max_new_tokens {
@@ -445,15 +505,15 @@ impl InferenceEngine {
             if next_id == 0 || next_id == 151643 || next_id == 151645 {
                 break;
             }
-            generated.push(next_id);
+            if !on_token(next_id) {
+                break;
+            }
         }
-
-        generated
     }
 
-    /// Detect the device weights are on.
+    /// The device where matmul runs. Inputs are moved here before each matmul.
     fn weight_device(&self) -> Device {
-        self.lm_head_t.device()
+        self.compute_device.clone()
     }
 
     /// Move a CPU tensor to the weight device (GPU if available).
@@ -495,9 +555,9 @@ impl InferenceEngine {
             let normed_t = self.to_weight_device(Tensor::from_vec(normed, &[seq_len, hidden]).unwrap());
 
             // QKV projections — matmul on weight device (GPU if available)
-            let mut q_data = normed_t.matmul(&layer.q_weight_t).unwrap().to_vec();
-            let k_data = normed_t.matmul(&layer.k_weight_t).unwrap().to_vec();
-            let mut v_data_new = normed_t.matmul(&layer.v_weight_t).unwrap().to_vec();
+            let mut q_data = layer.q_weight.matmul(&normed_t).to_vec();
+            let k_data = layer.k_weight.matmul(&normed_t).to_vec();
+            let mut v_data_new = layer.v_weight.matmul(&normed_t).to_vec();
             let mut k_data_new = k_data.clone();
 
             // Biases — Qwen2 has Q, K, and V biases
@@ -522,7 +582,7 @@ impl InferenceEngine {
             let attn_t = self.to_weight_device(Tensor::from_vec(attn_out, &[seq_len, n_heads * head_dim]).unwrap());
 
             // Output projection (GPU matmul)
-            let attn_proj = attn_t.matmul(&layer.o_weight_t).unwrap().to_vec();
+            let attn_proj = layer.o_weight.matmul(&attn_t).to_vec();
 
             // Residual
             for i in 0..x.len() { x[i] += attn_proj[i]; }
@@ -531,8 +591,8 @@ impl InferenceEngine {
             let normed2 = rms_norm_vec(&x, &layer.ffn_norm, self.config.rms_norm_eps, seq_len, hidden);
             let normed2_t = self.to_weight_device(Tensor::from_vec(normed2, &[seq_len, hidden]).unwrap());
 
-            let gate_data = normed2_t.matmul(&layer.gate_weight_t).unwrap().to_vec();
-            let up_data = normed2_t.matmul(&layer.up_weight_t).unwrap().to_vec();
+            let gate_data = layer.gate_weight.matmul(&normed2_t).to_vec();
+            let up_data = layer.up_weight.matmul(&normed2_t).to_vec();
 
             // SiLU(gate) * up (CPU — element-wise)
             let inter_size = self.config.intermediate_size;
@@ -542,7 +602,7 @@ impl InferenceEngine {
                 ffn_data[i] = (g / (1.0 + (-g).exp())) * up_data[i];
             }
             let ffn_t = self.to_weight_device(Tensor::from_vec(ffn_data, &[seq_len, inter_size]).unwrap());
-            let ffn_out = ffn_t.matmul(&layer.down_weight_t).unwrap().to_vec();
+            let ffn_out = layer.down_weight.matmul(&ffn_t).to_vec();
 
             for i in 0..x.len() { x[i] += ffn_out[i]; }
         }
@@ -552,7 +612,7 @@ impl InferenceEngine {
         // Final norm + LM head
         let normed = rms_norm_vec(&x, &self.output_norm, self.config.rms_norm_eps, seq_len, hidden);
         let normed_t = self.to_weight_device(Tensor::from_vec(normed, &[seq_len, hidden]).unwrap());
-        normed_t.matmul(&self.lm_head_t).unwrap().to_vec()
+        self.lm_head.matmul(&normed_t).to_vec()
     }
 
     /// Forward pass for a SINGLE token using KV cache (decode step).
@@ -578,9 +638,9 @@ impl InferenceEngine {
             let normed_t = self.to_weight_device(Tensor::from_vec(normed, &[1, hidden]).unwrap());
 
             // QKV — matmul on weight device (GPU)
-            let mut q_data = normed_t.matmul(&layer.q_weight_t).unwrap().to_vec();
-            let mut k_data = normed_t.matmul(&layer.k_weight_t).unwrap().to_vec();
-            let mut v_data = normed_t.matmul(&layer.v_weight_t).unwrap().to_vec();
+            let mut q_data = layer.q_weight.matmul(&normed_t).to_vec();
+            let mut k_data = layer.k_weight.matmul(&normed_t).to_vec();
+            let mut v_data = layer.v_weight.matmul(&normed_t).to_vec();
 
             // Qwen2 has Q, K, and V biases
             if let Some(ref b) = layer.q_bias { for i in 0..q_data.len() { q_data[i] += b[i]; } }
@@ -603,7 +663,7 @@ impl InferenceEngine {
             );
 
             let attn_t = self.to_weight_device(Tensor::from_vec(attn_out, &[1, n_heads * head_dim]).unwrap());
-            let attn_proj = attn_t.matmul(&layer.o_weight_t).unwrap().to_vec();
+            let attn_proj = layer.o_weight.matmul(&attn_t).to_vec();
 
             for i in 0..hidden { x[i] += attn_proj[i]; }
 
@@ -611,8 +671,8 @@ impl InferenceEngine {
             let normed2 = rms_norm_single(&x, &layer.ffn_norm, self.config.rms_norm_eps);
             let normed2_t = self.to_weight_device(Tensor::from_vec(normed2, &[1, hidden]).unwrap());
 
-            let gate_data = normed2_t.matmul(&layer.gate_weight_t).unwrap().to_vec();
-            let up_data = normed2_t.matmul(&layer.up_weight_t).unwrap().to_vec();
+            let gate_data = layer.gate_weight.matmul(&normed2_t).to_vec();
+            let up_data = layer.up_weight.matmul(&normed2_t).to_vec();
 
             let inter_size = self.config.intermediate_size;
             let mut ffn_data = vec![0.0f32; inter_size];
@@ -621,7 +681,7 @@ impl InferenceEngine {
                 ffn_data[i] = (g / (1.0 + (-g).exp())) * up_data[i];
             }
             let ffn_t = self.to_weight_device(Tensor::from_vec(ffn_data, &[1, inter_size]).unwrap());
-            let ffn_out = ffn_t.matmul(&layer.down_weight_t).unwrap().to_vec();
+            let ffn_out = layer.down_weight.matmul(&ffn_t).to_vec();
 
             for i in 0..hidden { x[i] += ffn_out[i]; }
         }
@@ -631,7 +691,7 @@ impl InferenceEngine {
         // Final norm + LM head
         let normed = rms_norm_single(&x, &self.output_norm, self.config.rms_norm_eps);
         let normed_t = self.to_weight_device(Tensor::from_vec(normed, &[1, hidden]).unwrap());
-        normed_t.matmul(&self.lm_head_t).unwrap().to_vec()
+        self.lm_head.matmul(&normed_t).to_vec()
     }
 }
 
@@ -871,31 +931,41 @@ fn try_load_vec(mapped: &MappedGguf, name: &str) -> Option<Vec<f32>> {
     mapped.load_tensor_f32(name).map(|(data, _)| data)
 }
 
-/// Load a weight matrix and transpose it for matmul: input @ weight_t = [seq, out]
+/// Load a weight matrix as a `Weight`.
 ///
-/// GGUF dim convention: dims[0]=columns, dims[1]=rows, data row-major.
-/// AxonML's Tensor::from_vec(data, &[A,B]) treats A as rows and B as cols (C-order).
+/// If `quantized` is false: fully dequantize to a pre-transposed f32 tensor
+/// with logical shape `[in, out]`.
 ///
-/// So from_vec(data, &dims) with dims=[cols, rows] creates a tensor where the flat
-/// buffer is interpreted as dims[0] rows of dims[1] cols — which effectively reads
-/// the GGUF [rows, cols] physical layout as [cols, rows] logical. Then .transpose()
-/// flips it to [rows, cols] = the correct weight orientation for matmul.
+/// If `quantized` is true: copy the raw quantized bytes into a `Weight::Quantized`
+/// (dequantization deferred to matmul time, saves ~5x RAM).
 ///
-/// This was verified against llama.cpp output — the old [dims[1],dims[0]] version
-/// double-transposed and produced incoherent output.
-fn load_and_transpose(mapped: &MappedGguf, name: &str) -> Result<Tensor<f32>, String> {
-    let (data, dims) = mapped.load_tensor_f32(name)
+/// GGUF dim convention: dims[0]=columns (in_features), dims[1]=rows (out_features).
+/// Data is stored row-major with shape [rows, cols] = [out, in].
+fn load_weight(mapped: &MappedGguf, name: &str, quantized: bool) -> Result<Weight, String> {
+    // Get tensor metadata
+    let info = mapped.tensors.get(name)
         .ok_or_else(|| format!("Tensor not found: {name}"))?;
+    let dims: Vec<usize> = info.dims.iter().map(|&d| d as usize).collect();
 
-    if dims.len() == 2 {
-        // GGUF convention: dims[0] = columns (in_features), dims[1] = rows (out_features)
-        // Data is row-major: [out, in] physically.
-        // from_vec(data, &[out, in]) matches the physical layout.
-        // transpose → [in, out] for matmul: input [seq, in] @ weight [in, out]
-        let t = Tensor::from_vec(data, &[dims[1], dims[0]])
-            .map_err(|e| format!("{name} (shape [{}, {}]): {e}", dims[1], dims[0]))?;
-        t.transpose(0, 1).map_err(|e| format!("{name} transpose: {e}"))
+    if quantized && dims.len() == 2 {
+        // Lazy dequant path: store raw bytes
+        let raw = mapped.load_tensor_raw(name)
+            .ok_or_else(|| format!("Failed to load raw bytes for {name}"))?;
+        Ok(Weight::from_quantized(raw, dims, info.dtype))
     } else {
-        Tensor::from_vec(data, &dims).map_err(|e| format!("{name}: {e}"))
+        // Eager dequant path: pre-transpose to f32 tensor
+        let (data, dims) = mapped.load_tensor_f32(name)
+            .ok_or_else(|| format!("Tensor not found: {name}"))?;
+
+        let tensor = if dims.len() == 2 {
+            // from_vec(data, &[out, in]) matches the physical GGUF layout.
+            // transpose → [in, out] for matmul: input [seq, in] @ weight [in, out].
+            let t = Tensor::from_vec(data, &[dims[1], dims[0]])
+                .map_err(|e| format!("{name} (shape [{}, {}]): {e}", dims[1], dims[0]))?;
+            t.transpose(0, 1).map_err(|e| format!("{name} transpose: {e}"))?
+        } else {
+            Tensor::from_vec(data, &dims).map_err(|e| format!("{name}: {e}"))?
+        };
+        Ok(Weight::from_f32(tensor))
     }
 }
