@@ -18,39 +18,55 @@ use std::any::Any;
 
 use axonml_autograd::no_grad::is_grad_enabled;
 use axonml_autograd::{GradFn, GradientFunction, Variable};
-use axonml_nn::{Linear, Module, Parameter};
+use axonml_nn::loss::CrossEntropyLoss;
+use axonml_nn::{Embedding, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
+
+use crate::llama::RMSNorm;
 
 // =============================================================================
 // SSM Configuration
 // =============================================================================
 
-/// Configuration for a selective SSM block.
+/// Configuration for a selective SSM block (and, when used with
+/// [`SSMForCausalLM`], the full SSM language model built on top of it).
 #[derive(Debug, Clone)]
 pub struct SSMConfig {
-    /// Model dimension
+    /// Vocabulary size (used by [`SSMForCausalLM`]; ignored by bare [`SSMBlock`]).
+    pub vocab_size: usize,
+    /// Model dimension (hidden size).
     pub d_model: usize,
-    /// SSM state expansion factor (state dimension)
+    /// Number of stacked SSM blocks in [`SSMForCausalLM`] (ignored by bare [`SSMBlock`]).
+    pub num_layers: usize,
+    /// SSM state expansion factor (state dimension).
     pub d_state: usize,
-    /// Inner dimension (expansion ratio * d_model)
+    /// Inner dimension (expansion ratio * d_model).
     pub d_inner: usize,
-    /// 1D convolution kernel size
+    /// 1D convolution kernel size.
     pub d_conv: usize,
-    /// Rank of dt projection
+    /// Rank of dt projection.
     pub dt_rank: usize,
+    /// Final RMSNorm epsilon used by [`SSMForCausalLM`].
+    pub rms_norm_eps: f32,
 }
 
 impl SSMConfig {
-    /// Create SSM config from model dimension with standard expansion.
-    pub fn from_d_model(d_model: usize) -> Self {
+    /// Create SSM config from a model dimension and vocab size using standard
+    /// expansion factors (d_inner = 2 * d_model, d_state = 16, d_conv = 4,
+    /// dt_rank = ceil(d_model / 16)). Defaults to 4 stacked blocks; construct
+    /// the struct literally if you want a different `num_layers`.
+    pub fn from_d_model(d_model: usize, vocab_size: usize) -> Self {
         let d_inner = d_model * 2;
         let d_state = 16;
         Self {
+            vocab_size,
             d_model,
+            num_layers: 4,
             d_state,
             d_inner,
             d_conv: 4,
             dt_rank: d_model.div_ceil(16), // ceil(d_model / 16)
+            rms_norm_eps: 1e-5,
         }
     }
 }
@@ -515,6 +531,167 @@ impl SSMBlock {
 }
 
 // =============================================================================
+// SSMForCausalLM — full Mamba-style language model
+// =============================================================================
+
+/// SSM-based causal language model.
+///
+/// Architecture (matches the `*ForCausalLM` pattern used by LLaMA, Mistral,
+/// Phi, and other axonml-llm models):
+///
+/// ```text
+/// input_ids [B, S] (u32)
+///     ↓  embed_tokens (Embedding(vocab_size, d_model))
+/// hidden [B, S, d_model]
+///     ↓  blocks[0..num_layers]  (SSMBlock stack)
+/// hidden [B, S, d_model]
+///     ↓  norm (RMSNorm(d_model))
+/// hidden [B, S, d_model]
+///     ↓  lm_head (Linear(d_model, vocab_size))
+/// logits [B, S, vocab_size]
+/// ```
+#[derive(Debug)]
+pub struct SSMForCausalLM {
+    /// Token embeddings.
+    embed_tokens: Embedding,
+    /// Stacked SSM blocks.
+    blocks: Vec<SSMBlock>,
+    /// Final RMSNorm before the LM head.
+    norm: RMSNorm,
+    /// Linear projection to vocab_size.
+    lm_head: Linear,
+    /// Config (kept for introspection and checkpoint metadata).
+    config: SSMConfig,
+}
+
+impl SSMForCausalLM {
+    /// Create a new SSM causal language model from a config.
+    pub fn new(config: &SSMConfig) -> Self {
+        let blocks = (0..config.num_layers)
+            .map(|_| SSMBlock::new(config))
+            .collect();
+        Self {
+            embed_tokens: Embedding::new(config.vocab_size, config.d_model),
+            blocks,
+            norm: RMSNorm::new(config.d_model, config.rms_norm_eps),
+            lm_head: Linear::new(config.d_model, config.vocab_size),
+            config: config.clone(),
+        }
+    }
+
+    /// Forward pass: token IDs `[B, S]` → logits `[B, S, vocab_size]`.
+    pub fn forward_ids(&self, input_ids: &Tensor<u32>) -> Variable {
+        // Convert token IDs to f32 on CPU for the embedding lookup.
+        // `Embedding::lookup` handles the CPU-indices → GPU-weights crossing
+        // internally via `embedding_gather_cuda` when the weights are on GPU.
+        let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
+        let ids_var =
+            Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
+
+        let mut hidden = self.embed_tokens.forward(&ids_var);
+        for block in &self.blocks {
+            hidden = block.forward(&hidden);
+        }
+        let hidden = self.norm.forward(&hidden);
+        self.lm_head.forward(&hidden)
+    }
+
+    /// Forward pass with shifted cross-entropy loss for next-token prediction.
+    ///
+    /// Returns `(logits, loss)`. Shifts logits/labels internally so `logits[:, :-1]`
+    /// predicts `labels[:, 1:]`, matching the GPT-2 / Hydra / Chimera / Trident
+    /// `forward_with_loss` pattern. Out-of-range label indices are clamped to 0.
+    pub fn forward_with_loss(
+        &self,
+        input_ids: &Tensor<u32>,
+        labels: &Tensor<u32>,
+    ) -> (Variable, Variable) {
+        let logits = self.forward_ids(input_ids);
+
+        let shape = logits.data().shape().to_vec();
+        let batch_size = shape[0];
+        let seq_len = shape[1];
+        let vocab_size = shape[2];
+
+        if seq_len <= 1 {
+            let zero = Variable::new(Tensor::from_vec(vec![0.0f32], &[1]).unwrap(), false);
+            return (logits, zero);
+        }
+
+        // Shift: drop the last logit position and the first label position so
+        // position i in the shifted logits predicts position i+1 in the labels.
+        let shift_logits = logits.narrow(1, 0, seq_len - 1);
+        let n = batch_size * (seq_len - 1);
+        let logits_flat = shift_logits.reshape(&[n, vocab_size]);
+
+        let labels_vec = labels.to_vec();
+        let mut shift_labels = Vec::with_capacity(n);
+        for b in 0..batch_size {
+            for s in 1..seq_len {
+                let l = labels_vec[b * seq_len + s] as usize;
+                shift_labels.push(if l < vocab_size { l as f32 } else { 0.0 });
+            }
+        }
+        let mut target_tensor = Tensor::from_vec(shift_labels, &[n]).unwrap();
+
+        // Move targets to the logits' device so the fused GPU CE kernel triggers.
+        let logits_device = logits.data().device();
+        if logits_device.is_gpu() {
+            target_tensor = target_tensor.to_device(logits_device).unwrap();
+        }
+        let target_var = Variable::new(target_tensor, false);
+
+        let loss = CrossEntropyLoss::new().compute(&logits_flat, &target_var);
+        (logits, loss)
+    }
+
+    /// Return this model's config.
+    pub fn config(&self) -> &SSMConfig {
+        &self.config
+    }
+
+    /// Collect all trainable parameters.
+    pub fn parameters(&self) -> Vec<Parameter> {
+        let mut params = Vec::new();
+        params.extend(self.embed_tokens.parameters());
+        for block in &self.blocks {
+            params.extend(block.parameters());
+        }
+        params.extend(self.norm.parameters());
+        params.extend(self.lm_head.parameters());
+        params
+    }
+
+    /// Switch to training mode. SSMBlock / Embedding / Linear / RMSNorm do not
+    /// currently have dropout so this is a no-op, but the method is provided
+    /// for API symmetry with the other `*ForCausalLM` types.
+    pub fn train(&mut self) {}
+
+    /// Switch to evaluation mode (see `train`).
+    pub fn eval(&mut self) {}
+}
+
+impl Module for SSMForCausalLM {
+    /// `Module::forward` treats `input` as an already-embedded hidden-state
+    /// tensor `[B, S, d_model]` and runs the block stack + final norm + LM head,
+    /// matching the convention used by [`LLaMAForCausalLM`](crate::llama::LLaMAForCausalLM)
+    /// and [`HydraModel`](crate::hydra::HydraModel). For token-ID input use
+    /// [`SSMForCausalLM::forward_ids`].
+    fn forward(&self, input: &Variable) -> Variable {
+        let mut hidden = input.clone();
+        for block in &self.blocks {
+            hidden = block.forward(&hidden);
+        }
+        let hidden = self.norm.forward(&hidden);
+        self.lm_head.forward(&hidden)
+    }
+
+    fn parameters(&self) -> Vec<Parameter> {
+        SSMForCausalLM::parameters(self)
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -546,7 +723,7 @@ mod tests {
 
     #[test]
     fn test_ssm_block_shape() {
-        let config = SSMConfig::from_d_model(128);
+        let config = SSMConfig::from_d_model(128, 1000);
         let block = SSMBlock::new(&config);
         let x = Variable::new(
             Tensor::from_vec(vec![0.1f32; 2 * 8 * 128], &[2, 8, 128]).unwrap(),
@@ -558,7 +735,7 @@ mod tests {
 
     #[test]
     fn test_ssm_block_backward() {
-        let config = SSMConfig::from_d_model(32);
+        let config = SSMConfig::from_d_model(32, 1000);
         let block = SSMBlock::new(&config);
         let x = Variable::new(
             Tensor::from_vec(vec![0.1f32; 1 * 4 * 32], &[1, 4, 32]).unwrap(),
@@ -568,5 +745,34 @@ mod tests {
         let loss = y.sum();
         loss.backward();
         // Should not panic
+    }
+
+    #[test]
+    fn test_ssm_for_causal_lm_forward_and_loss() {
+        // Mirrors the test_trident_forward_with_loss pattern: a tiny [2, 3]
+        // input, check the logits shape matches [batch, seq, vocab] and the
+        // loss is a positive scalar.
+        let config = SSMConfig::from_d_model(32, 1000);
+        let model = SSMForCausalLM::new(&config);
+
+        let input_ids = Tensor::from_vec(vec![1u32, 2, 3, 4, 5, 6], &[2, 3]).unwrap();
+        let labels = Tensor::from_vec(vec![2u32, 3, 4, 5, 6, 7], &[2, 3]).unwrap();
+
+        // forward_ids shape
+        let logits = model.forward_ids(&input_ids);
+        assert_eq!(logits.data().shape(), &[2, 3, config.vocab_size]);
+
+        // forward_with_loss shape + scalar loss
+        let (logits2, loss) = model.forward_with_loss(&input_ids, &labels);
+        assert_eq!(logits2.data().shape(), &[2, 3, config.vocab_size]);
+        assert_eq!(loss.data().numel(), 1);
+
+        let loss_val = loss.data().to_vec()[0];
+        assert!(loss_val > 0.0, "Loss should be positive, got {}", loss_val);
+
+        // parameters() should be non-empty and match what impl Module sees.
+        assert!(!model.parameters().is_empty());
+        let module_params = <SSMForCausalLM as Module>::parameters(&model);
+        assert_eq!(module_params.len(), model.parameters().len());
     }
 }

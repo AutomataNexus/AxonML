@@ -553,6 +553,12 @@ impl HydraBlock {
     /// Create an SSM block.
     pub fn new_ssm(config: &HydraConfig) -> Self {
         let ssm_config = SSMConfig {
+            // SSMForCausalLM-only fields — ignored when constructing a bare
+            // SSMBlock, but required by the struct since SSMConfig now backs
+            // the full SSM language model too.
+            vocab_size: config.vocab_size,
+            num_layers: 1,
+            rms_norm_eps: config.rms_norm_eps,
             d_model: config.d_model,
             d_state: config.d_state,
             d_inner: config.d_inner(),
