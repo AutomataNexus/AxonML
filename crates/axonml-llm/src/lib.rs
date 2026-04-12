@@ -54,7 +54,7 @@ pub use hydra::{HydraConfig, HydraModel};
 pub use llama::{LLaMA, LLaMAConfig, LLaMAForCausalLM};
 pub use mistral::{Mistral, MistralConfig, MistralForCausalLM};
 pub use phi::{Phi, PhiConfig, PhiForCausalLM};
-pub use ssm::{SSMBlock, SSMConfig};
+pub use ssm::{SSMBlock, SSMConfig, SSMForCausalLM};
 pub use state_dict::{LoadResult, LoadStateDict};
 pub use tokenizer::{HFTokenizer, SpecialTokens};
 pub use transformer::{TransformerBlock, TransformerDecoder, TransformerEncoder};
