@@ -53,8 +53,8 @@
 
 pub mod trainer;
 pub use trainer::{
-    clip_grad_norm, compute_accuracy, Callback, EarlyStopping, ProgressLogger, TrainingConfig,
-    TrainingHistory, TrainingMetrics, TrainingState,
+    Callback, EarlyStopping, ProgressLogger, TrainingConfig, TrainingHistory, TrainingMetrics,
+    TrainingState, clip_grad_norm, compute_accuracy,
 };
 
 // =============================================================================
@@ -76,9 +76,9 @@ pub use hub::{
 
 pub mod benchmark;
 pub use benchmark::{
-    benchmark_model, benchmark_model_named, compare_models, print_memory_profile,
-    print_throughput_results, profile_model_memory, throughput_test, warmup_model, MemorySnapshot,
-    ThroughputConfig, ThroughputResult,
+    MemorySnapshot, ThroughputConfig, ThroughputResult, benchmark_model, benchmark_model_named,
+    compare_models, print_memory_profile, print_throughput_results, profile_model_memory,
+    throughput_test, warmup_model,
 };
 
 // =============================================================================
@@ -86,4 +86,4 @@ pub use benchmark::{
 // =============================================================================
 
 pub mod adversarial;
-pub use adversarial::{adversarial_training_step, fgsm_attack, pgd_attack, AdversarialTrainer};
+pub use adversarial::{AdversarialTrainer, adversarial_training_step, fgsm_attack, pgd_attack};

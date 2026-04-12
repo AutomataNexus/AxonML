@@ -143,7 +143,7 @@ pub mod prelude {
 
     // Autograd
     #[cfg(feature = "core")]
-    pub use axonml_autograd::{no_grad, Variable};
+    pub use axonml_autograd::{Variable, no_grad};
 
     // Neural network modules
     #[cfg(feature = "nn")]
@@ -156,8 +156,7 @@ pub mod prelude {
     // Optimizers
     #[cfg(feature = "nn")]
     pub use axonml_optim::{
-        Adam, AdamW, CosineAnnealingLR, ExponentialLR, LRScheduler, Optimizer, RMSprop, SGD,
-        StepLR,
+        Adam, AdamW, CosineAnnealingLR, ExponentialLR, LRScheduler, Optimizer, RMSprop, SGD, StepLR,
     };
 
     // Data loading
@@ -188,8 +187,8 @@ pub mod prelude {
     // Distributed
     #[cfg(feature = "distributed")]
     pub use axonml_distributed::{
-        all_reduce_mean, all_reduce_sum, barrier, broadcast, DistributedDataParallel, ProcessGroup,
-        World, DDP,
+        DDP, DistributedDataParallel, ProcessGroup, World, all_reduce_mean, all_reduce_sum,
+        barrier, broadcast,
     };
 
     // Profiling
@@ -202,8 +201,8 @@ pub mod prelude {
     // LLM architectures — all nine models
     #[cfg(feature = "llm")]
     pub use axonml_llm::{
-        Bert, BertConfig, BertForMaskedLM, BertForSequenceClassification, GenerationConfig, GPT2,
-        GPT2Config, GPT2LMHead, TextGenerator,
+        Bert, BertConfig, BertForMaskedLM, BertForSequenceClassification, GPT2, GPT2Config,
+        GPT2LMHead, GenerationConfig, TextGenerator,
     };
 
     // Training infrastructure
@@ -216,7 +215,7 @@ pub mod prelude {
     // JIT compilation
     #[cfg(feature = "jit")]
     pub use axonml_jit::{
-        trace, CompiledFunction, Graph, JitCompiler, Optimizer as JitOptimizer, TracedValue,
+        CompiledFunction, Graph, JitCompiler, Optimizer as JitOptimizer, TracedValue, trace,
     };
 }
 
