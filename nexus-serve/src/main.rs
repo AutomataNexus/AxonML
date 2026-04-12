@@ -32,6 +32,24 @@ use nexus_serve::tokenizer::Tokenizer;
 // CLI
 // =============================================================================
 
+/// Which input source produced a given config value.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Source {
+    Default,
+    Config,
+    Cli,
+}
+
+impl Source {
+    fn label(self) -> &'static str {
+        match self {
+            Source::Default => "default",
+            Source::Config => "config",
+            Source::Cli => "cli",
+        }
+    }
+}
+
 struct Config {
     model_paths: Vec<PathBuf>,
     /// (alias, model_path) — the path must also appear in model_paths
@@ -43,6 +61,18 @@ struct Config {
     quantized_weights: bool,
     /// Number of CPU threads for matmul/dequant. `None` = rayon default (all cores).
     threads: Option<usize>,
+    /// Explicit config file path from --config. If `None`, falls back to
+    /// `~/.config/nexus-serve/config.toml`.
+    config_path: Option<PathBuf>,
+    /// Optional `[hardware]` metadata from the config file. Used for validation warnings.
+    hw_cores: Option<usize>,
+    hw_cpu: Option<String>,
+    hw_ram_gb: Option<usize>,
+    /// Per-key source tracking so startup can echo where each value came from.
+    src_port: Source,
+    src_host: Source,
+    src_threads: Source,
+    src_quantized: Source,
 }
 
 impl Config {
@@ -55,14 +85,41 @@ impl Config {
             host: "0.0.0.0".to_string(),
             quantized_weights: false,
             threads: None,
+            config_path: None,
+            hw_cores: None,
+            hw_cpu: None,
+            hw_ram_gb: None,
+            src_port: Source::Default,
+            src_host: Source::Default,
+            src_threads: Source::Default,
+            src_quantized: Source::Default,
         };
 
-        // Also check the nexus-serve config file if it exists
+        // Pre-pass for --config PATH so the config file is resolved *before*
+        // we decide whether CLI values should override it.
+        {
+            let mut i = 1;
+            while i < args.len() {
+                if args[i] == "--config" || args[i] == "-c" {
+                    i += 1;
+                    if i < args.len() {
+                        cfg.config_path = Some(PathBuf::from(&args[i]));
+                    }
+                }
+                i += 1;
+            }
+        }
+
+        // Load config file (~/.config/nexus-serve/config.toml or --config PATH)
         cfg.merge_config_file();
 
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
+                "--config" | "-c" => {
+                    // Already handled in the pre-pass above; skip its value.
+                    i += 1;
+                }
                 "--model" | "-m" => {
                     i += 1;
                     cfg.model_paths.push(PathBuf::from(&args[i]));
@@ -79,17 +136,21 @@ impl Config {
                 "--port" | "-p" => {
                     i += 1;
                     cfg.port = args[i].parse().expect("Invalid port");
+                    cfg.src_port = Source::Cli;
                 }
                 "--host" => {
                     i += 1;
                     cfg.host = args[i].clone();
+                    cfg.src_host = Source::Cli;
                 }
                 "--quantized" | "-q" => {
                     cfg.quantized_weights = true;
+                    cfg.src_quantized = Source::Cli;
                 }
                 "--threads" | "-t" => {
                     i += 1;
                     cfg.threads = Some(args[i].parse().expect("Invalid --threads"));
+                    cfg.src_threads = Source::Cli;
                 }
                 "--help" | "-h" => {
                     print_help();
@@ -128,53 +189,146 @@ impl Config {
     /// ram_gb = 64
     /// ```
     fn merge_config_file(&mut self) {
-        let config_path = std::env::var("HOME")
-            .ok()
-            .map(|h| std::path::PathBuf::from(h).join(".config/nexus-serve/config.toml"))
-            .filter(|p| p.exists());
+        // Resolution order:
+        //   1. --config PATH (explicit, errors loudly if missing)
+        //   2. ~/.config/nexus-serve/config.toml (silently skipped if absent)
+        let (path, from_cli) = if let Some(p) = &self.config_path {
+            (p.clone(), true)
+        } else {
+            let Some(p) = std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".config/nexus-serve/config.toml"))
+                .filter(|p| p.exists())
+            else {
+                return;
+            };
+            (p, false)
+        };
 
-        let Some(path) = config_path else { return };
-
-        let Ok(content) = std::fs::read_to_string(&path) else { return };
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                if from_cli {
+                    eprintln!("error: failed to read --config {}: {}", path.display(), e);
+                    std::process::exit(1);
+                }
+                return;
+            }
+        };
 
         println!("Loading config: {}", path.display());
 
-        // Very small hand-rolled parser for just the keys we care about.
-        // Avoids pulling in a TOML dependency for such a small config.
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') || line.starts_with('[') {
+        // Very small hand-rolled TOML parser for just the keys we care about.
+        // Tracks the current section so we can route `[hardware]` keys separately.
+        let mut section = String::new();
+        for raw in content.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') {
                 continue;
             }
+            if let Some(rest) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                section = rest.trim().to_string();
+                continue;
+            }
+            // Strip trailing "# comment" if any.
+            let line = line.split('#').next().unwrap_or(line).trim();
             let Some((key, val)) = line.split_once('=') else { continue };
             let key = key.trim();
             let val = val.trim().trim_matches(&['"', '\''][..]);
-            match key {
-                "threads" => {
-                    if self.threads.is_none() {
-                        if let Ok(n) = val.parse::<usize>() {
-                            self.threads = Some(n);
-                        }
+
+            match (section.as_str(), key) {
+                ("", "threads") => {
+                    if let Ok(n) = val.parse::<usize>() {
+                        self.threads = Some(n);
+                        self.src_threads = Source::Config;
                     }
                 }
-                "port" => {
-                    if self.port == 11435 {
-                        if let Ok(p) = val.parse::<u16>() {
-                            self.port = p;
-                        }
+                ("", "port") => {
+                    if let Ok(p) = val.parse::<u16>() {
+                        self.port = p;
+                        self.src_port = Source::Config;
                     }
                 }
-                "quantized" => {
+                ("", "quantized") => {
                     if val == "true" {
                         self.quantized_weights = true;
+                        self.src_quantized = Source::Config;
+                    } else if val == "false" {
+                        self.quantized_weights = false;
+                        self.src_quantized = Source::Config;
                     }
                 }
-                "host" => {
-                    if self.host == "0.0.0.0" {
-                        self.host = val.to_string();
-                    }
+                ("", "host") => {
+                    self.host = val.to_string();
+                    self.src_host = Source::Config;
                 }
+                ("hardware", "cpu") => self.hw_cpu = Some(val.to_string()),
+                ("hardware", "cores") => self.hw_cores = val.parse::<usize>().ok(),
+                ("hardware", "ram_gb") => self.hw_ram_gb = val.parse::<usize>().ok(),
                 _ => {}
+            }
+        }
+    }
+
+    /// Print the resolved configuration (with source tags) and warn on anything
+    /// suspicious — threads > detected cores, hardware.cores mismatch, etc.
+    fn echo_and_validate(&self) {
+        let detected_cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(0);
+
+        println!("Resolved config:");
+        println!(
+            "  host      = {:<20}  [{}]",
+            self.host,
+            self.src_host.label()
+        );
+        println!(
+            "  port      = {:<20}  [{}]",
+            self.port,
+            self.src_port.label()
+        );
+        match self.threads {
+            Some(n) => println!(
+                "  threads   = {:<20}  [{}]",
+                n,
+                self.src_threads.label()
+            ),
+            None => println!(
+                "  threads   = {:<20}  [{}]",
+                format!("auto ({})", detected_cores),
+                self.src_threads.label()
+            ),
+        }
+        println!(
+            "  quantized = {:<20}  [{}]",
+            self.quantized_weights,
+            self.src_quantized.label()
+        );
+        if let Some(cpu) = &self.hw_cpu {
+            println!("  hardware  = {}", cpu);
+        }
+        println!();
+
+        // Warn if requested thread count exceeds detected cores.
+        if let Some(requested) = self.threads {
+            if detected_cores > 0 && requested > detected_cores {
+                eprintln!(
+                    "warning: threads={} exceeds detected CPU parallelism ({}). \
+                     Expect worse performance from oversubscription.",
+                    requested, detected_cores
+                );
+            }
+        }
+
+        // Warn if the config's [hardware].cores doesn't match the machine.
+        if let Some(declared) = self.hw_cores {
+            if detected_cores > 0 && declared != detected_cores {
+                eprintln!(
+                    "warning: config [hardware] cores = {} but available_parallelism() = {}. \
+                     Config may be stale.",
+                    declared, detected_cores
+                );
             }
         }
     }
@@ -198,9 +352,20 @@ OPTIONS:
                            Default: all physical cores (24 on Intel Core Ultra 9 275HX).
     --port, -p PORT        Listen port (default: 11435)
     --host HOST            Listen host (default: 0.0.0.0)
+    --config, -c PATH      Load settings from a TOML file. Overrides the default
+                           ~/.config/nexus-serve/config.toml location. CLI flags
+                           still take precedence over config file values.
     --help, -h             Show this help
 
-CONFIG FILE: ~/.config/nexus-serve/config.toml — see README for format.
+CONFIG FILE
+    Default path: ~/.config/nexus-serve/config.toml
+    Override:     --config PATH
+    Example:      nexus-serve/config.example.toml (in this repo)
+
+    Supported keys: threads, port, quantized, host, and a [hardware] section
+    (cpu, cores, ram_gb) used for validation warnings.
+
+    Precedence: CLI flags > config file > built-in defaults.
 
 EXAMPLES:
     nexus-serve --model qwen2.5-coder-1.5b.gguf
@@ -235,6 +400,15 @@ async fn main() {
 
     let cfg = Config::from_args();
 
+    println!("═══════════════════════════════════════════════════════════");
+    println!(" nexus-serve — Pure-Rust LLM Inference Server");
+    println!(" Powered by AxonML");
+    println!("═══════════════════════════════════════════════════════════");
+    println!();
+
+    // Echo resolved config with source tags and run sanity validation.
+    cfg.echo_and_validate();
+
     // Configure the global rayon thread pool for parallel dequantization + CPU matmul.
     // If the user set --threads N (or threads=N in config), use N. Otherwise rayon
     // defaults to num_cpus::get() which on a 24-core machine is 24.
@@ -252,12 +426,6 @@ async fn main() {
             unsafe { std::env::set_var("RAYON_NUM_THREADS", n.to_string()) };
         }
     }
-
-    println!("═══════════════════════════════════════════════════════════");
-    println!(" nexus-serve — Pure-Rust LLM Inference Server");
-    println!(" Powered by AxonML");
-    println!("═══════════════════════════════════════════════════════════");
-    println!();
 
     let registry = ModelRegistry::new();
     let mut engines: std::collections::HashMap<String, Arc<InferenceEngine>> = std::collections::HashMap::new();
@@ -343,6 +511,7 @@ async fn main() {
                     match MappedGguf::open(path, &gguf) {
                         Ok(mapped) => {
                             match InferenceEngine::from_gguf_with_mode(&gguf, &mapped, cfg.quantized_weights) {
+                                #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
                                 Ok(mut engine) => {
                                     // Move weights to GPU if CUDA is available
                                     #[cfg(feature = "cuda")]
