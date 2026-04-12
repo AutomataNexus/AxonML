@@ -132,7 +132,7 @@ async fn test_model_lifecycle_flow() {
         .expect("List models failed");
 
     assert!(list_response.status().is_success(), "Should list models");
-    let initial_models: Vec<Value> = list_response.json().await.expect("Failed to parse");
+    let _initial_models: Vec<Value> = list_response.json().await.expect("Failed to parse");
 
     // Step 2: Create a new model
     let unique_name = format!("e2e_model_{}", chrono::Utc::now().timestamp_millis());

@@ -248,9 +248,11 @@ pub fn recommended_models(task: &str) -> Vec<UnifiedModelInfo> {
 }
 
 // =============================================================================
-// Helper Functions
+// Helper Functions (used by vision-gated callers below; appears dead to clippy
+// when compiled without --features vision, but is reachable at runtime)
 // =============================================================================
 
+#[allow(dead_code)]
 fn extract_architecture(name: &str) -> String {
     if name.starts_with("resnet") {
         "ResNet".to_string()
@@ -273,11 +275,13 @@ fn extract_architecture(name: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn estimate_params_from_size(size_bytes: u64) -> u64 {
     // Rough estimate: 4 bytes per float32 parameter
     size_bytes / 4
 }
 
+#[allow(dead_code)]
 fn format_params(params: u64) -> String {
     if params >= 1_000_000_000 {
         format!("{:.1}B", params as f64 / 1_000_000_000.0)

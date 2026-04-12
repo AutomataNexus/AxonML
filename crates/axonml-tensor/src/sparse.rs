@@ -574,8 +574,8 @@ mod tests {
         let dense = sparse.to_dense();
         let data = dense.to_vec();
 
-        assert_eq!(data[0 * 3 + 1], 1.0); // (0, 1)
-        assert_eq!(data[1 * 3 + 0], 2.0); // (1, 0)
+        assert_eq!(data[1], 1.0); // (0, 1)
+        assert_eq!(data[3], 2.0); // (1, 0)
         assert_eq!(data[2 * 3 + 2], 3.0); // (2, 2)
     }
 

@@ -27,7 +27,7 @@ fn main() {
     println!();
 
     // Create test configuration
-    let config = GpuTestConfig {
+    let _config = GpuTestConfig {
         atol: 1e-5,
         rtol: 1e-4,
         test_sizes: vec![1, 16, 64, 256, 1024, 4096],
@@ -36,7 +36,7 @@ fn main() {
         bench_iters: 50,
     };
 
-    let mut reports: Vec<GpuTestReport> = Vec::new();
+    let reports: Vec<GpuTestReport> = Vec::new();
 
     // Run CUDA tests if available
     #[cfg(feature = "cuda")]

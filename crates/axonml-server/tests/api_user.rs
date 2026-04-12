@@ -17,7 +17,6 @@
 mod common;
 
 use common::*;
-use serde_json::Value;
 
 macro_rules! require_server {
     () => {

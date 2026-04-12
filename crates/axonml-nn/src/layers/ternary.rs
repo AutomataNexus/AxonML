@@ -691,7 +691,7 @@ mod tests {
         let layer = TernaryLinear::new(64, 32);
         let sparsity = layer.weight_sparsity();
         // Sparsity should be between 0 and 1
-        assert!(sparsity >= 0.0 && sparsity <= 1.0);
+        assert!((0.0..=1.0).contains(&sparsity));
     }
 
     #[test]
