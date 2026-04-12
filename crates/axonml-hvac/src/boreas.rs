@@ -1,7 +1,7 @@
 //! BOREAS — Refrigeration Systems Diagnostic Model (~1.2M params)
 //!
 //! # File
-//! `crates/axonml/src/hvac/boreas.rs`
+//! `crates/axonml-hvac/src/boreas.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

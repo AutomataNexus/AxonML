@@ -1,7 +1,7 @@
 //! Panoptes — Facility-Wide Anomaly Detection Model
 //!
 //! # File
-//! `crates/axonml/src/hvac/panoptes.rs`
+//! `crates/axonml-hvac/src/panoptes.rs`
 //!
 //! # Description
 //! All-seeing facility monitor that ingests heterogeneous equipment sensor data

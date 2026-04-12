@@ -8,66 +8,96 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-description = "A complete ML/AI framework in pure Rust - PyTorch-equivalent functionality"
+description = "AxonML — a complete ML/AI framework in pure Rust (umbrella crate)"
 readme = "README.md"
 
+# =============================================================================
+# Features
+# =============================================================================
+#
+# The umbrella crate is a thin re-export layer plus the live training monitor.
+# Every sub-crate is gated behind a feature flag so downstream users can pick
+# exactly what they need.
+#
 [features]
 default = ["full"]
-# Core features (always included)
-core = ["dep:axonml-core", "dep:axonml-tensor", "dep:axonml-autograd"]
-# Neural network features
-nn = ["core", "dep:axonml-nn", "dep:axonml-optim"]
-# Data loading
-data = ["core", "dep:axonml-data"]
-# Vision processing
-vision = ["nn", "data", "dep:axonml-vision"]
-# Text processing
-text = ["nn", "data", "dep:axonml-text"]
-# Audio processing
-audio = ["nn", "data", "dep:axonml-audio"]
-# Distributed training
-distributed = ["nn", "dep:axonml-distributed"]
-# Profiling tools
-profile = ["core", "dep:axonml-profile"]
-# LLM architectures (BERT, GPT-2)
-llm = ["nn", "dep:axonml-llm"]
-# JIT compilation
-jit = ["core", "dep:axonml-jit"]
-# ONNX import/export
-onnx = ["core", "dep:axonml-onnx"]
-# Serialization (SafeTensors, StateDict)
-serialize = ["core", "dep:axonml-serialize"]
-# Quantization (INT8/INT4/F16)
-quant = ["nn", "dep:axonml-quant"]
-# Kernel fusion optimization
-fusion = ["core", "dep:axonml-fusion"]
-# NCCL distributed communication (requires CUDA + libnccl.so.2)
-nccl = ["distributed", "axonml-distributed/nccl"]
-# CUDA GPU acceleration
-cuda = ["axonml-core/cuda", "axonml-tensor/cuda", "axonml-nn/cuda"]
-# cuDNN acceleration (requires CUDA)
-cudnn = ["cuda", "axonml-core/cudnn", "axonml-tensor/cudnn", "axonml-nn/cudnn"]
-# WebGPU/Vulkan GPU acceleration
-wgpu = ["axonml-core/wgpu"]
-# Full feature set
-full = ["core", "nn", "data", "vision", "text", "audio", "distributed", "profile", "llm", "jit", "onnx", "serialize", "quant", "fusion"]
 
+# --- core ------------------------------------------------------------------
+core = ["dep:axonml-core", "dep:axonml-tensor", "dep:axonml-autograd"]
+
+# --- neural networks -------------------------------------------------------
+nn   = ["core", "dep:axonml-nn", "dep:axonml-optim"]
+
+# --- data loading ----------------------------------------------------------
+data = ["core", "dep:axonml-data"]
+
+# --- domain crates ---------------------------------------------------------
+vision      = ["nn", "data", "dep:axonml-vision"]
+text        = ["nn", "data", "dep:axonml-text"]
+audio       = ["nn", "data", "dep:axonml-audio"]
+llm         = ["nn", "dep:axonml-llm"]
+hvac        = ["nn", "dep:axonml-hvac"]
+
+# --- training infrastructure ----------------------------------------------
+train       = ["nn", "dep:axonml-train"]
+
+# --- infrastructure --------------------------------------------------------
+distributed = ["nn", "dep:axonml-distributed"]
+profile     = ["core", "dep:axonml-profile"]
+serialize   = ["core", "dep:axonml-serialize"]
+quant       = ["nn", "dep:axonml-quant"]
+fusion      = ["core", "dep:axonml-fusion"]
+jit         = ["core", "dep:axonml-jit"]
+onnx        = ["core", "dep:axonml-onnx"]
+
+# --- NCCL distributed (requires CUDA + libnccl.so.2) ----------------------
+nccl = ["distributed", "axonml-distributed/nccl"]
+
+# --- GPU backends ----------------------------------------------------------
+cuda  = ["axonml-core/cuda", "axonml-tensor/cuda", "axonml-nn/cuda"]
+cudnn = ["cuda", "axonml-core/cudnn", "axonml-tensor/cudnn", "axonml-nn/cudnn"]
+wgpu  = ["axonml-core/wgpu"]
+
+# --- Full feature set ------------------------------------------------------
+full = [
+    "core",
+    "nn",
+    "data",
+    "vision",
+    "text",
+    "audio",
+    "distributed",
+    "profile",
+    "llm",
+    "hvac",
+    "train",
+    "jit",
+    "onnx",
+    "serialize",
+    "quant",
+    "fusion",
+]
+
+# =============================================================================
+# Dependencies
+# =============================================================================
 [dependencies]
-axonml-core = { workspace = true, optional = true }
-axonml-tensor = { workspace = true, optional = true }
-axonml-autograd = { workspace = true, optional = true }
-axonml-nn = { workspace = true, optional = true }
-axonml-optim = { workspace = true, optional = true }
-axonml-data = { workspace = true, optional = true }
-axonml-vision = { workspace = true, optional = true }
-axonml-text = { workspace = true, optional = true }
-axonml-audio = { workspace = true, optional = true }
+axonml-core        = { workspace = true, optional = true }
+axonml-tensor      = { workspace = true, optional = true }
+axonml-autograd    = { workspace = true, optional = true }
+axonml-nn          = { workspace = true, optional = true }
+axonml-optim       = { workspace = true, optional = true }
+axonml-data        = { workspace = true, optional = true }
+axonml-vision      = { workspace = true, optional = true }
+axonml-text        = { workspace = true, optional = true }
+axonml-audio       = { workspace = true, optional = true }
 axonml-distributed = { workspace = true, optional = true }
-axonml-profile = { workspace = true, optional = true }
-axonml-llm = { workspace = true, optional = true }
-axonml-jit = { workspace = true, optional = true }
-axonml-onnx = { workspace = true, optional = true }
-axonml-serialize = { workspace = true, optional = true }
-axonml-quant = { workspace = true, optional = true }
-axonml-fusion = { workspace = true, optional = true }
-rand = "0.8"
+axonml-profile     = { workspace = true, optional = true }
+axonml-llm         = { workspace = true, optional = true }
+axonml-jit         = { workspace = true, optional = true }
+axonml-onnx        = { workspace = true, optional = true }
+axonml-serialize   = { workspace = true, optional = true }
+axonml-quant       = { workspace = true, optional = true }
+axonml-fusion      = { workspace = true, optional = true }
+axonml-hvac        = { workspace = true, optional = true }
+axonml-train       = { workspace = true, optional = true }

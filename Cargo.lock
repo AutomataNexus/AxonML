@@ -339,6 +339,7 @@ dependencies = [
  "axonml-data",
  "axonml-distributed",
  "axonml-fusion",
+ "axonml-hvac",
  "axonml-jit",
  "axonml-llm",
  "axonml-nn",
@@ -349,8 +350,8 @@ dependencies = [
  "axonml-serialize",
  "axonml-tensor",
  "axonml-text",
+ "axonml-train",
  "axonml-vision",
- "rand 0.8.5",
 ]
 
 [[package]]
@@ -503,6 +504,20 @@ dependencies = [
  "matrixmultiply",
  "rayon",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "axonml-hvac"
+version = "0.6.1"
+dependencies = [
+ "axonml",
+ "axonml-autograd",
+ "axonml-core",
+ "axonml-nn",
+ "axonml-optim",
+ "axonml-serialize",
+ "axonml-tensor",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -706,6 +721,19 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "axonml-train"
+version = "0.6.1"
+dependencies = [
+ "axonml-autograd",
+ "axonml-core",
+ "axonml-llm",
+ "axonml-nn",
+ "axonml-optim",
+ "axonml-tensor",
+ "axonml-vision",
 ]
 
 [[package]]

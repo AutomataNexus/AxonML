@@ -1,7 +1,7 @@
 //! AQUILO — Electrical Systems Diagnostic Model (~608K params)
 //!
 //! # File
-//! `crates/axonml/src/hvac/aquilo.rs`
+//! `crates/axonml-hvac/src/aquilo.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

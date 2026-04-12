@@ -1,7 +1,7 @@
 //! HVAC Multi-Horizon Predictor Inference Example
 //!
 //! # File
-//! `crates/axonml/examples/hvac_inference.rs`
+//! `crates/axonml-hvac/examples/hvac_inference.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

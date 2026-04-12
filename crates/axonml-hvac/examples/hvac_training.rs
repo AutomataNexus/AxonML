@@ -1,7 +1,7 @@
 //! HVAC Multi-Horizon Predictor - Training with Synthetic Data
 //!
 //! # File
-//! `crates/axonml/examples/hvac_training.rs`
+//! `crates/axonml-hvac/examples/hvac_training.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

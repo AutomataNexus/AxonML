@@ -1,7 +1,7 @@
 //! VULCAN — Mechanical Systems Diagnostic Model (~1.1M params)
 //!
 //! # File
-//! `crates/axonml/src/hvac/vulcan.rs`
+//! `crates/axonml-hvac/src/vulcan.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

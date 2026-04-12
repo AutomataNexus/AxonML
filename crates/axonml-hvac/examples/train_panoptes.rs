@@ -1,7 +1,7 @@
 //! Train Panoptes — Facility-Wide Anomaly Detection Model
 //!
 //! # File
-//! `crates/axonml/examples/train_panoptes.rs`
+//! `crates/axonml-hvac/examples/train_panoptes.rs`
 //!
 //! # Description
 //! Trains the Panoptes model on physics-informed synthetic data generated
@@ -10,7 +10,7 @@
 //!
 //! # Usage
 //! ```bash
-//! cargo run --release -p axonml --example train_panoptes
+//! cargo run --release -p axonml-hvac --example train_panoptes
 //! ```
 //!
 //! # Author
@@ -24,8 +24,8 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use axonml::hvac::panoptes::*;
-use axonml::hvac::panoptes_datagen::*;
+use axonml_hvac::panoptes::*;
+use axonml_hvac::panoptes_datagen::*;
 use axonml_autograd::Variable;
 use axonml_nn::MSELoss;
 use axonml_optim::{Adam, Optimizer};

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../../assets/axonml-logo.png" alt="AxonML Logo" width="200"/>
+  <img src="https://raw.githubusercontent.com/AutomataNexus/AxonML/main/AxonML-logo.png" alt="AxonML Logo" width="200"/>
 </p>
 
 <h1 align="center">axonml-tui</h1>

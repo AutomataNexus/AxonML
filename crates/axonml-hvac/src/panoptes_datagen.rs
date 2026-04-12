@@ -1,7 +1,7 @@
 //! Panoptes Synthetic Data Generator — Physics-Informed Facility Simulation
 //!
 //! # File
-//! `crates/axonml/src/hvac/panoptes_datagen.rs`
+//! `crates/axonml-hvac/src/panoptes_datagen.rs`
 //!
 //! # Description
 //! Generates realistic training data for the Panoptes facility-wide anomaly
@@ -1132,7 +1132,7 @@ impl PanoptesTrainingData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hvac::panoptes::MAX_SENSORS;
+    use crate::panoptes::MAX_SENSORS;
 
     #[test]
     fn test_hvac_mode() {

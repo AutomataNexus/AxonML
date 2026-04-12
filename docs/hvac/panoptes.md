@@ -385,7 +385,7 @@ CORRELATION CHAINS (examples):
 ### Creating the Model
 
 ```rust
-use axonml::hvac::panoptes::*;
+use axonml_hvac::panoptes::*;
 
 // Create model for Warren (59 equipment)
 let model = Panoptes::new(59);

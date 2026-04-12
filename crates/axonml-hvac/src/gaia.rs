@@ -1,7 +1,7 @@
 //! GAIA — Safety Validator Model (~896K params)
 //!
 //! # File
-//! `crates/axonml/src/hvac/gaia.rs`
+//! `crates/axonml-hvac/src/gaia.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

@@ -1,7 +1,7 @@
 //! Unified Model Hub - Central Registry for All Pretrained Models
 //!
 //! # File
-//! `crates/axonml/src/hub.rs`
+//! `crates/axonml-train/src/hub.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

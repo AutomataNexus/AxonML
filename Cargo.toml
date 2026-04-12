@@ -34,6 +34,8 @@ members = [
     "crates/axonml-tui",
     "crates/axonml-server",
     "crates/axonml-dashboard",
+    "crates/axonml-hvac",
+    "crates/axonml-train",
     "crates/axonml",
 ]
 
@@ -70,6 +72,8 @@ axonml-profile = { path = "crates/axonml-profile", version = "0.6.1" }
 axonml-llm = { path = "crates/axonml-llm", version = "0.6.1" }
 axonml-jit = { path = "crates/axonml-jit", version = "0.6.1" }
 axonml-tui = { path = "crates/axonml-tui", version = "0.6.1" }
+axonml-hvac = { path = "crates/axonml-hvac", version = "0.6.1" }
+axonml-train = { path = "crates/axonml-train", version = "0.6.1" }
 
 # External dependencies
 thiserror = "1.0"

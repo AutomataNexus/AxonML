@@ -1,7 +1,7 @@
 //! NAIAD — Water Systems Diagnostic Model (~533K params)
 //!
 //! # File
-//! `crates/axonml/src/hvac/naiad.rs`
+//! `crates/axonml-hvac/src/naiad.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

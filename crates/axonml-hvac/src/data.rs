@@ -1,7 +1,7 @@
 //! HVAC Sensor Data Pipeline
 //!
 //! # File
-//! `crates/axonml/src/hvac/data.rs`
+//! `crates/axonml-hvac/src/data.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

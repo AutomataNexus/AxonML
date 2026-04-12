@@ -1,7 +1,7 @@
 //! HVAC Multi-Horizon Predictor - Native AxonML Implementation
 //!
 //! # File
-//! `crates/axonml/examples/hvac_model.rs`
+//! `crates/axonml-hvac/examples/hvac_model.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

@@ -1,0 +1,43 @@
+# =============================================================================
+# Axonml HVAC - Domain-Specific HVAC Diagnostic Models
+# =============================================================================
+#
+# Provides the HVAC 8-model diagnostic system (Apollo, Aquilo, Boreas,
+# Colossus, Gaia, Naiad, Panoptes, Vulcan, Zephyrus) for building-controls
+# fault detection and predictive maintenance workloads.
+#
+# @version 0.6.1
+# @author AutomataNexus Development Team
+# @license MIT OR Apache-2.0
+# =============================================================================
+
+[package]
+name = "axonml-hvac"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords = ["hvac", "fault-detection", "building-controls", "diagnostics", "iot"]
+categories = ["science", "algorithms"]
+description = "HVAC diagnostic and fault-detection models built on the Axonml ML framework"
+readme = "README.md"
+
+[dependencies]
+axonml-core = { workspace = true }
+axonml-tensor = { workspace = true }
+axonml-autograd = { workspace = true }
+axonml-nn = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+axonml-optim = { workspace = true }
+axonml-serialize = { workspace = true }
+axonml = { path = "../axonml" }
+
+[features]
+default = []
+cuda = ["axonml-core/cuda", "axonml-tensor/cuda", "axonml-nn/cuda", "axonml-autograd/cuda"]

@@ -1,7 +1,7 @@
 //! Adversarial Training Utilities
 //!
 //! # File
-//! `crates/axonml/src/adversarial.rs`
+//! `crates/axonml-train/src/adversarial.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus
@@ -14,13 +14,9 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-#[cfg(feature = "nn")]
 use axonml_autograd::Variable;
-#[cfg(feature = "nn")]
 use axonml_nn::Module;
-#[cfg(feature = "nn")]
 use axonml_optim::Optimizer;
-#[cfg(feature = "nn")]
 use axonml_tensor::Tensor;
 
 // =============================================================================
@@ -33,7 +29,7 @@ use axonml_tensor::Tensor;
 ///
 /// # Example
 /// ```ignore
-/// use axonml::adversarial::AdversarialTrainer;
+/// use axonml_train::adversarial::AdversarialTrainer;
 ///
 /// let mut trainer = AdversarialTrainer::new(gen_optimizer, disc_optimizer);
 /// trainer.set_disc_steps_per_gen(5); // Train D 5x per G step
@@ -44,7 +40,6 @@ use axonml_tensor::Tensor;
 ///     });
 /// }
 /// ```
-#[cfg(feature = "nn")]
 pub struct AdversarialTrainer {
     gen_optimizer: Box<dyn Optimizer>,
     disc_optimizer: Box<dyn Optimizer>,
@@ -52,7 +47,6 @@ pub struct AdversarialTrainer {
     current_step: usize,
 }
 
-#[cfg(feature = "nn")]
 impl AdversarialTrainer {
     /// Creates a new adversarial trainer.
     pub fn new(gen_optimizer: Box<dyn Optimizer>, disc_optimizer: Box<dyn Optimizer>) -> Self {
@@ -166,7 +160,7 @@ impl AdversarialTrainer {
 ///
 /// # Example
 /// ```ignore
-/// use axonml::adversarial::fgsm_attack;
+/// use axonml_train::adversarial::fgsm_attack;
 ///
 /// // 1. Forward pass with gradient tracking
 /// let input = Variable::new(tensor, true);
@@ -178,7 +172,6 @@ impl AdversarialTrainer {
 /// let grad = input.grad().unwrap();
 /// let adv_input = fgsm_attack(&input, &grad, 0.03);
 /// ```
-#[cfg(feature = "nn")]
 pub fn fgsm_attack(input: &Variable, grad: &Tensor<f32>, epsilon: f32) -> Variable {
     let input_data = input.data().to_vec();
     let grad_data = grad.to_vec();
@@ -230,7 +223,7 @@ pub fn fgsm_attack(input: &Variable, grad: &Tensor<f32>, epsilon: f32) -> Variab
 ///
 /// # Example
 /// ```ignore
-/// use axonml::adversarial::pgd_attack;
+/// use axonml_train::adversarial::pgd_attack;
 ///
 /// let adv_input = pgd_attack(
 ///     &model, &input, &target,
@@ -240,7 +233,6 @@ pub fn fgsm_attack(input: &Variable, grad: &Tensor<f32>, epsilon: f32) -> Variab
 ///     |pred, target| cross_entropy(pred, target),
 /// );
 /// ```
-#[cfg(feature = "nn")]
 pub fn pgd_attack<F>(
     model: &dyn Module,
     input: &Variable,
@@ -312,7 +304,6 @@ where
 ///
 /// # Returns
 /// Tuple of (clean_loss, adversarial_loss)
-#[cfg(feature = "nn")]
 pub fn adversarial_training_step<F>(
     model: &dyn Module,
     optimizer: &mut dyn Optimizer,
@@ -362,7 +353,6 @@ where
 // =============================================================================
 
 #[cfg(test)]
-#[cfg(feature = "nn")]
 mod tests {
     use super::*;
     use axonml_nn::{Linear, ReLU, Sequential};

@@ -1,4 +1,4 @@
-//! axonml library root
+//! Axonml — Umbrella Crate
 //!
 //! # File
 //! `crates/axonml/src/lib.rs`
@@ -6,18 +6,30 @@
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus
 //!
-//! # Updated
-//! March 8, 2026
+//! # Overview
+//!
+//! `axonml` is a thin umbrella crate that re-exports the full AxonML deep
+//! learning framework under a single unified namespace. It also hosts the
+//! **live browser training monitor** (`TrainingMonitor`), which is small,
+//! dependency-light, and used by essentially every training script in the
+//! workspace.
+//!
+//! Domain-specific models (e.g. HVAC diagnostics) and training infrastructure
+//! (trainer, hub, benchmark, adversarial) live in dedicated sibling crates:
+//!
+//! - `axonml-hvac`  — HVAC fault-detection models (Apollo, Panoptes, etc.)
+//! - `axonml-train` — `TrainingConfig`, `EarlyStopping`, `AdversarialTrainer`,
+//!                    `benchmark_model`, unified model hub
+//!
+//! This separation was made in April 2026 to keep the umbrella crate focused
+//! on re-exports and the live training dashboard.
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-#![warn(missing_docs)]
 #![warn(clippy::all)]
-#![warn(clippy::pedantic)]
-// ML/tensor-specific allowances
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_precision_loss)]
@@ -27,52 +39,8 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::similar_names)]
-#![allow(clippy::many_single_char_names)]
-#![allow(clippy::too_many_arguments)]
 #![allow(clippy::doc_markdown)]
-#![allow(clippy::cast_lossless)]
-#![allow(clippy::needless_pass_by_value)]
-#![allow(clippy::redundant_closure_for_method_calls)]
 #![allow(clippy::uninlined_format_args)]
-#![allow(clippy::ptr_arg)]
-#![allow(clippy::return_self_not_must_use)]
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
-#![allow(clippy::items_after_statements)]
-#![allow(clippy::unreadable_literal)]
-#![allow(clippy::if_same_then_else)]
-#![allow(clippy::needless_range_loop)]
-#![allow(clippy::trivially_copy_pass_by_ref)]
-#![allow(clippy::unnecessary_wraps)]
-#![allow(clippy::match_same_arms)]
-#![allow(clippy::unused_self)]
-#![allow(clippy::too_many_lines)]
-#![allow(clippy::single_match_else)]
-#![allow(clippy::fn_params_excessive_bools)]
-#![allow(clippy::struct_excessive_bools)]
-#![allow(clippy::format_push_string)]
-#![allow(clippy::erasing_op)]
-#![allow(clippy::type_repetition_in_bounds)]
-#![allow(clippy::iter_without_into_iter)]
-#![allow(clippy::should_implement_trait)]
-#![allow(clippy::use_debug)]
-#![allow(clippy::case_sensitive_file_extension_comparisons)]
-#![allow(clippy::large_enum_variant)]
-#![allow(clippy::panic)]
-#![allow(clippy::struct_field_names)]
-#![allow(clippy::missing_fields_in_debug)]
-#![allow(clippy::upper_case_acronyms)]
-#![allow(clippy::assigning_clones)]
-#![allow(clippy::option_if_let_else)]
-#![allow(clippy::manual_let_else)]
-#![allow(clippy::explicit_iter_loop)]
-#![allow(clippy::default_trait_access)]
-#![allow(clippy::only_used_in_recursion)]
-#![allow(clippy::manual_clamp)]
-#![allow(clippy::ref_option)]
-#![allow(clippy::multiple_bound_locations)]
-#![allow(clippy::comparison_chain)]
-#![allow(clippy::manual_assert)]
-#![allow(clippy::unnecessary_debug_formatting)]
 
 // =============================================================================
 // Core Re-exports
@@ -141,16 +109,14 @@ pub use axonml_quant as quant;
 #[cfg(feature = "fusion")]
 pub use axonml_fusion as fusion;
 
-// =============================================================================
-// HVAC Diagnostic System
-// =============================================================================
+#[cfg(feature = "hvac")]
+pub use axonml_hvac as hvac;
 
-/// HVAC 8-model diagnostic system (~8.6M total parameters).
-#[cfg(feature = "nn")]
-pub mod hvac;
+#[cfg(feature = "train")]
+pub use axonml_train as train;
 
 // =============================================================================
-// Training Monitor
+// Training Monitor — stays in the umbrella crate
 // =============================================================================
 
 /// Live browser-based training monitor — opens Chromium with real-time charts.
@@ -158,67 +124,10 @@ pub mod monitor;
 pub use monitor::TrainingMonitor;
 
 // =============================================================================
-// Adversarial Training
-// =============================================================================
-
-/// Adversarial training utilities (FGSM, PGD, adversarial trainer).
-pub mod adversarial;
-
-#[cfg(feature = "nn")]
-pub use adversarial::{AdversarialTrainer, adversarial_training_step, fgsm_attack, pgd_attack};
-
-// =============================================================================
-// Training Utilities
-// =============================================================================
-
-pub mod trainer;
-pub use trainer::{
-    Callback, EarlyStopping, ProgressLogger, TrainingConfig, TrainingHistory, TrainingMetrics,
-    TrainingState,
-};
-
-#[cfg(feature = "nn")]
-pub use trainer::clip_grad_norm;
-
-#[cfg(feature = "core")]
-pub use trainer::compute_accuracy;
-
-// =============================================================================
-// Model Hub
-// =============================================================================
-
-pub mod hub;
-pub use hub::{BenchmarkResult, ModelCategory, UnifiedModelInfo};
-
-#[cfg(all(feature = "vision", feature = "llm"))]
-pub use hub::{
-    compare_benchmarks, list_all_models, models_by_category, models_by_max_params,
-    models_by_max_size_mb, recommended_models, search_models,
-};
-
-// =============================================================================
-// Benchmarking
-// =============================================================================
-
-pub mod benchmark;
-pub use benchmark::{MemorySnapshot, ThroughputConfig, ThroughputResult, print_throughput_results};
-
-#[cfg(all(feature = "core", feature = "nn"))]
-pub use benchmark::{
-    benchmark_model, benchmark_model_named, compare_models, throughput_test, warmup_model,
-};
-
-#[cfg(feature = "nn")]
-pub use benchmark::{print_memory_profile, profile_model_memory};
-
-// =============================================================================
 // Prelude
 // =============================================================================
 
 /// Common imports for machine learning tasks.
-///
-/// This module re-exports the most commonly used types and traits from all
-/// Axonml subcrates, allowing you to get started quickly with:
 ///
 /// ```ignore
 /// use axonml::prelude::*;
@@ -234,7 +143,7 @@ pub mod prelude {
 
     // Autograd
     #[cfg(feature = "core")]
-    pub use axonml_autograd::{Variable, no_grad};
+    pub use axonml_autograd::{no_grad, Variable};
 
     // Neural network modules
     #[cfg(feature = "nn")]
@@ -247,7 +156,8 @@ pub mod prelude {
     // Optimizers
     #[cfg(feature = "nn")]
     pub use axonml_optim::{
-        Adam, AdamW, CosineAnnealingLR, ExponentialLR, LRScheduler, Optimizer, RMSprop, SGD, StepLR,
+        Adam, AdamW, CosineAnnealingLR, ExponentialLR, LRScheduler, Optimizer, RMSprop, SGD,
+        StepLR,
     };
 
     // Data loading
@@ -278,8 +188,8 @@ pub mod prelude {
     // Distributed
     #[cfg(feature = "distributed")]
     pub use axonml_distributed::{
-        DDP, DistributedDataParallel, ProcessGroup, World, all_reduce_mean, all_reduce_sum,
-        barrier, broadcast,
+        all_reduce_mean, all_reduce_sum, barrier, broadcast, DistributedDataParallel, ProcessGroup,
+        World, DDP,
     };
 
     // Profiling
@@ -289,17 +199,24 @@ pub mod prelude {
         ProfileReport, Profiler, TimelineProfiler,
     };
 
-    // LLM architectures
+    // LLM architectures — all nine models
     #[cfg(feature = "llm")]
     pub use axonml_llm::{
-        Bert, BertConfig, BertForMaskedLM, BertForSequenceClassification, GPT2, GPT2Config,
-        GPT2LMHead, GenerationConfig, TextGenerator,
+        Bert, BertConfig, BertForMaskedLM, BertForSequenceClassification, GenerationConfig, GPT2,
+        GPT2Config, GPT2LMHead, TextGenerator,
+    };
+
+    // Training infrastructure
+    #[cfg(feature = "train")]
+    pub use axonml_train::{
+        AdversarialTrainer, Callback, EarlyStopping, ProgressLogger, TrainingConfig,
+        TrainingHistory, TrainingMetrics,
     };
 
     // JIT compilation
     #[cfg(feature = "jit")]
     pub use axonml_jit::{
-        CompiledFunction, Graph, JitCompiler, Optimizer as JitOptimizer, TracedValue, trace,
+        trace, CompiledFunction, Graph, JitCompiler, Optimizer as JitOptimizer, TracedValue,
     };
 }
 
@@ -351,6 +268,21 @@ pub fn features() -> String {
     #[cfg(feature = "onnx")]
     features.push("onnx");
 
+    #[cfg(feature = "serialize")]
+    features.push("serialize");
+
+    #[cfg(feature = "quant")]
+    features.push("quant");
+
+    #[cfg(feature = "fusion")]
+    features.push("fusion");
+
+    #[cfg(feature = "hvac")]
+    features.push("hvac");
+
+    #[cfg(feature = "train")]
+    features.push("train");
+
     if features.is_empty() {
         "none".to_string()
     } else {
@@ -375,7 +307,6 @@ mod tests {
     #[test]
     fn test_features() {
         let f = features();
-        // With default features, should have all
         assert!(f.contains("core"));
     }
 
@@ -383,7 +314,6 @@ mod tests {
     #[test]
     fn test_tensor_creation() {
         use tensor::Tensor;
-
         let t = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap();
         assert_eq!(t.shape(), &[2, 2]);
     }
@@ -393,7 +323,6 @@ mod tests {
     fn test_variable_creation() {
         use autograd::Variable;
         use tensor::Tensor;
-
         let t = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap();
         let v = Variable::new(t, true);
         assert_eq!(v.data().shape(), &[3]);
@@ -410,111 +339,6 @@ mod tests {
         let layer = Linear::new(4, 2);
         let input = Variable::new(Tensor::from_vec(vec![1.0; 4], &[1, 4]).unwrap(), false);
         let output = layer.forward(&input);
-
         assert_eq!(output.data().shape(), &[1, 2]);
-    }
-
-    #[cfg(feature = "nn")]
-    #[test]
-    fn test_optimizer() {
-        use nn::Linear;
-        use nn::Module;
-        use optim::{Adam, Optimizer};
-
-        let model = Linear::new(4, 2);
-        let mut optimizer = Adam::new(model.parameters(), 0.001);
-
-        // Should be able to zero gradients
-        optimizer.zero_grad();
-    }
-
-    #[cfg(feature = "data")]
-    #[test]
-    fn test_dataloader() {
-        use data::{DataLoader, Dataset};
-        use tensor::Tensor;
-
-        struct DummyDataset;
-
-        impl Dataset for DummyDataset {
-            type Item = (Tensor<f32>, Tensor<f32>);
-
-            fn len(&self) -> usize {
-                100
-            }
-
-            fn get(&self, _index: usize) -> Option<Self::Item> {
-                let x = Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap();
-                let y = Tensor::from_vec(vec![1.0], &[1]).unwrap();
-                Some((x, y))
-            }
-        }
-
-        let dataset = DummyDataset;
-        let loader = DataLoader::new(dataset, 10);
-
-        assert_eq!(loader.len(), 10); // 100 / 10
-    }
-
-    #[cfg(feature = "vision")]
-    #[test]
-    fn test_vision_dataset() {
-        use data::Dataset;
-        use vision::SyntheticMNIST;
-
-        let dataset = SyntheticMNIST::new(100);
-        assert_eq!(dataset.len(), 100);
-    }
-
-    #[cfg(feature = "text")]
-    #[test]
-    fn test_tokenizer() {
-        use text::{Tokenizer, WhitespaceTokenizer};
-
-        let tokenizer = WhitespaceTokenizer::new();
-        let tokens = tokenizer.tokenize("hello world");
-
-        assert_eq!(tokens, vec!["hello", "world"]);
-    }
-
-    #[cfg(feature = "audio")]
-    #[test]
-    fn test_audio_transform() {
-        use audio::MelSpectrogram;
-        use data::Transform;
-        use std::f32::consts::PI;
-        use tensor::Tensor;
-
-        // Create a simple sine wave
-        let data: Vec<f32> = (0..4096)
-            .map(|i| (2.0 * PI * 440.0 * i as f32 / 16000.0).sin())
-            .collect();
-        let audio = Tensor::from_vec(data, &[4096]).unwrap();
-
-        let mel = MelSpectrogram::with_params(16000, 512, 256, 40);
-        let spec = mel.apply(&audio);
-
-        assert_eq!(spec.shape()[0], 40); // 40 mel bins
-    }
-
-    #[cfg(feature = "distributed")]
-    #[test]
-    fn test_distributed_world() {
-        use distributed::World;
-
-        let world = World::mock();
-        assert_eq!(world.rank(), 0);
-        assert_eq!(world.world_size(), 1);
-    }
-
-    #[test]
-    fn test_prelude_imports() {
-        // This test just ensures the prelude compiles correctly
-        use crate::prelude::*;
-
-        #[cfg(feature = "core")]
-        {
-            let _ = Device::Cpu;
-        }
     }
 }

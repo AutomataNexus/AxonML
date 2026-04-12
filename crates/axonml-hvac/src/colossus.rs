@@ -1,7 +1,7 @@
 //! COLOSSUS — Master Aggregator Model (~1.5M params)
 //!
 //! # File
-//! `crates/axonml/src/hvac/colossus.rs`
+//! `crates/axonml-hvac/src/colossus.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

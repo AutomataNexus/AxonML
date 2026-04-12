@@ -1,7 +1,7 @@
 //! HVAC 4-Stage Inference Pipeline
 //!
 //! # File
-//! `crates/axonml/src/hvac/pipeline.rs`
+//! `crates/axonml-hvac/src/pipeline.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

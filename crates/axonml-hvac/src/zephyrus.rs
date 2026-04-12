@@ -1,7 +1,7 @@
 //! ZEPHYRUS — Airflow Systems Diagnostic Model (~845K params)
 //!
 //! # File
-//! `crates/axonml/src/hvac/zephyrus.rs`
+//! `crates/axonml-hvac/src/zephyrus.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus

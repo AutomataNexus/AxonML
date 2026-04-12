@@ -1,7 +1,7 @@
 //! APOLLO — Master Coordinator Model (~1.8M params)
 //!
 //! # File
-//! `crates/axonml/src/hvac/apollo.rs`
+//! `crates/axonml-hvac/src/apollo.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus
