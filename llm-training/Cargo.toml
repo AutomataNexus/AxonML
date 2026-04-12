@@ -1,0 +1,43 @@
+[package]
+name = "llm-training"
+version = "0.1.0"
+edition = "2024"
+description = "Train the nine AxonML LLM architectures end-to-end on real text corpora"
+rust-version = "1.85"
+
+# Standalone workspace — decouples from /opt/AxonML root workspace so we can
+# iterate on training code without rebuilding the entire framework.
+[workspace]
+
+[dependencies]
+axonml-core      = { path = "/opt/AxonML/crates/axonml-core" }
+axonml-tensor    = { path = "/opt/AxonML/crates/axonml-tensor" }
+axonml-autograd  = { path = "/opt/AxonML/crates/axonml-autograd" }
+axonml-nn        = { path = "/opt/AxonML/crates/axonml-nn" }
+axonml-optim     = { path = "/opt/AxonML/crates/axonml-optim" }
+axonml-llm       = { path = "/opt/AxonML/crates/axonml-llm" }
+axonml-serialize = { path = "/opt/AxonML/crates/axonml-serialize" }
+axonml           = { path = "/opt/AxonML/crates/axonml" }
+
+rand = "0.8"
+
+[features]
+default = []
+cuda = [
+    "axonml-core/cuda",
+    "axonml-tensor/cuda",
+    "axonml-autograd/cuda",
+    "axonml-nn/cuda",
+]
+
+# =============================================================================
+# Training binaries — one per LLM architecture
+# =============================================================================
+
+[[bin]]
+name = "train_gpt2"
+path = "src/bin/train_gpt2.rs"
+
+[[bin]]
+name = "train_llama"
+path = "src/bin/train_llama.rs"
