@@ -14,7 +14,7 @@ This is a **standalone crate** — `[workspace]` is empty so `cargo` doesn't pul
 |-------|----------------|--------|--------|
 | GPT-2 | Decoder-only transformer | `train_gpt2` | ✓ |
 | LLaMA | RoPE, GQA, SwiGLU | `train_llama` | ✓ |
-| Mistral | Sliding-window attention, GQA | `train_mistral` | — |
+| Mistral | Sliding-window attention, GQA | `train_mistral` | ✓ |
 | Phi | Partial RoPE, compact design | `train_phi` | — |
 | BERT | Bidirectional masked LM | `train_bert` | — |
 | SSM / Mamba | Selective S6 scan, depthwise conv | `train_ssm` | — |

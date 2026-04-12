@@ -1,29 +1,30 @@
-//! Train LLaMA on Shakespeare
+//! Train Mistral on Shakespeare
 //!
-//! End-to-end training of the AxonML `LLaMAForCausalLM` on real text, with:
-//! - RoPE rotary positional embeddings
+//! End-to-end training of the AxonML `MistralForCausalLM` on real text, with:
+//! - Sliding-window attention
 //! - Grouped-query attention (GQA)
+//! - RoPE rotary positional embeddings
 //! - SwiGLU MLP with RMSNorm
 //! - GPU acceleration (`--features cuda`)
 //! - Live browser training monitor
 //! - Periodic best-model + full-checkpoint saving
 //! - Resume from latest / best / specific path
-//! - In-flight text sampling to watch the model learn
+//! - In-flight greedy text sampling
 //!
 //! Usage:
-//!   cargo run --release --bin train_llama -p llm-training --features cuda
-//!   cargo run --release --bin train_llama -p llm-training --features cuda -- \
-//!       --epochs 10 --bs 16 --seq-len 128 --resume latest
+//!   cargo run --release --bin train_mistral -p llm-training --features cuda
+//!   cargo run --release --bin train_mistral -p llm-training --features cuda -- \
+//!       --epochs 10 --bs 16 --seq-len 128 --sliding-window 64 --resume latest
 //!
-//! Unlike GPT-2, the LLaMA crate does not expose a `forward_with_loss` method,
-//! so this binary computes the shifted cross-entropy loss locally via
-//! `axonml_nn::loss::CrossEntropyLoss` (same pattern GPT-2 uses internally).
+//! Like LLaMA, `MistralForCausalLM` does not expose a `forward_with_loss`
+//! method, so the shifted cross-entropy is computed via the shared
+//! `llm_training::shifted_cross_entropy` helper.
 
 use std::path::PathBuf;
 use std::time::Instant;
 
 use axonml_core::Device;
-use axonml_llm::{LLaMAConfig, LLaMAForCausalLM};
+use axonml_llm::{MistralConfig, MistralForCausalLM};
 use axonml_nn::Module;
 use axonml_optim::{Adam, Optimizer};
 use axonml_serialize::{save_checkpoint, save_model, Checkpoint, StateDict, TrainingState};
@@ -39,13 +40,14 @@ use llm_training::{
 // =============================================================================
 
 const DEFAULT_CORPUS: &str = "/opt/datasets/text/shakespeare.txt";
-const DEFAULT_OUTPUT_DIR: &str = "/opt/AxonML/llm-training/checkpoints/llama";
+const DEFAULT_OUTPUT_DIR: &str = "/opt/AxonML/llm-training/checkpoints/mistral";
 const DEFAULT_SEQ_LEN: usize = 128;
 const DEFAULT_D_MODEL: usize = 192;
 const DEFAULT_INTERMEDIATE: usize = 512; // ~8/3 * d_model for SwiGLU
 const DEFAULT_NUM_LAYERS: usize = 4;
 const DEFAULT_NUM_HEADS: usize = 6;
 const DEFAULT_NUM_KV_HEADS: usize = 2; // GQA with 3:1 query:kv ratio
+const DEFAULT_SLIDING_WINDOW: usize = 64; // half the context — actually exercises the feature
 const DEFAULT_BATCH_SIZE: usize = 16;
 const DEFAULT_EPOCHS: usize = 5;
 const DEFAULT_LR: f32 = 3e-4;
@@ -69,6 +71,7 @@ struct Config {
     num_layers: usize,
     num_heads: usize,
     num_kv_heads: usize,
+    sliding_window: usize,
     batch_size: usize,
     epochs: usize,
     lr: f32,
@@ -90,6 +93,7 @@ impl Default for Config {
             num_layers: DEFAULT_NUM_LAYERS,
             num_heads: DEFAULT_NUM_HEADS,
             num_kv_heads: DEFAULT_NUM_KV_HEADS,
+            sliding_window: DEFAULT_SLIDING_WINDOW,
             batch_size: DEFAULT_BATCH_SIZE,
             epochs: DEFAULT_EPOCHS,
             lr: DEFAULT_LR,
@@ -117,6 +121,7 @@ impl Config {
                 "--layers" => { i += 1; cfg.num_layers = args[i].parse().unwrap(); }
                 "--heads" => { i += 1; cfg.num_heads = args[i].parse().unwrap(); }
                 "--kv-heads" => { i += 1; cfg.num_kv_heads = args[i].parse().unwrap(); }
+                "--sliding-window" => { i += 1; cfg.sliding_window = args[i].parse().unwrap(); }
                 "--bs" | "--batch-size" => { i += 1; cfg.batch_size = args[i].parse().unwrap(); }
                 "--epochs" => { i += 1; cfg.epochs = args[i].parse().unwrap(); }
                 "--lr" => { i += 1; cfg.lr = args[i].parse().unwrap(); }
@@ -140,19 +145,20 @@ impl Config {
 }
 
 fn print_help() {
-    println!(r#"Train LLaMA on a text corpus.
+    println!(r#"Train Mistral on a text corpus.
 
-Usage: train_llama [OPTIONS]
+Usage: train_mistral [OPTIONS]
 
 Options:
   --corpus PATH        Text corpus (default: /opt/datasets/text/shakespeare.txt)
-  --out PATH           Checkpoint directory (default: .../checkpoints/llama)
+  --out PATH           Checkpoint directory (default: .../checkpoints/mistral)
   --seq-len N          Context window length (default: 128)
   --d-model N          Hidden dimension (default: 192)
   --intermediate N     SwiGLU intermediate size (default: 512)
   --layers N           Transformer blocks (default: 4)
   --heads N            Attention heads (default: 6)
   --kv-heads N         KV heads for GQA; must divide --heads (default: 2)
+  --sliding-window N   Sliding-window attention span (default: 64)
   --bs N               Batch size (default: 16)
   --epochs N           Epochs (default: 5)
   --lr FLOAT           Learning rate (default: 3e-4)
@@ -170,7 +176,7 @@ Options:
 // =============================================================================
 
 fn generate(
-    model: &LLaMAForCausalLM,
+    model: &MistralForCausalLM,
     tokenizer: &CharTokenizer,
     prompt: &str,
     n_chars: usize,
@@ -220,11 +226,11 @@ fn main() {
     let cfg = Config::from_args();
 
     println!("═══════════════════════════════════════════════════════════");
-    println!(" LLaMA Training — AxonML on Shakespeare");
+    println!(" Mistral Training — AxonML on Shakespeare");
     println!("═══════════════════════════════════════════════════════════");
     println!();
 
-    // ---- Sanity check GQA ratio ----
+    // ---- Sanity check GQA / head divisibility ----
     if cfg.num_heads % cfg.num_kv_heads != 0 {
         eprintln!(
             "Invalid GQA config: --heads ({}) must be divisible by --kv-heads ({})",
@@ -238,6 +244,12 @@ fn main() {
             cfg.d_model, cfg.num_heads
         );
         std::process::exit(1);
+    }
+    if cfg.sliding_window > cfg.seq_len {
+        eprintln!(
+            "Warning: --sliding-window ({}) > --seq-len ({}); capping to seq_len",
+            cfg.sliding_window, cfg.seq_len
+        );
     }
 
     // ---- Device detection ----
@@ -258,7 +270,8 @@ fn main() {
     println!();
 
     // ---- Build model ----
-    let model_config = LLaMAConfig {
+    let effective_window = cfg.sliding_window.min(cfg.seq_len);
+    let model_config = MistralConfig {
         vocab_size,
         hidden_size: cfg.d_model,
         intermediate_size: cfg.intermediate,
@@ -266,22 +279,23 @@ fn main() {
         num_attention_heads: cfg.num_heads,
         num_key_value_heads: cfg.num_kv_heads,
         max_position_embeddings: cfg.seq_len,
+        sliding_window: effective_window,
         rms_norm_eps: DEFAULT_RMS_EPS,
         rope_theta: DEFAULT_ROPE_THETA,
         attention_dropout: 0.0,
-        hidden_dropout: 0.0,
     };
-    let mut model = LLaMAForCausalLM::new(&model_config);
+    let mut model = MistralForCausalLM::new(&model_config);
     let param_count: usize = model.parameters().iter().map(|p| p.data().numel()).sum();
 
-    println!("Model:  LLaMA (RoPE + GQA + SwiGLU + RMSNorm)");
-    println!("  d_model       : {}", cfg.d_model);
-    println!("  intermediate  : {}", cfg.intermediate);
-    println!("  layers        : {}", cfg.num_layers);
-    println!("  heads         : {}", cfg.num_heads);
-    println!("  kv_heads      : {} (GQA ratio {}:1)", cfg.num_kv_heads, cfg.num_heads / cfg.num_kv_heads);
-    println!("  seq_len       : {}", cfg.seq_len);
-    println!("  params        : {}", format_count(param_count));
+    println!("Model:  Mistral (RoPE + GQA + Sliding Window + SwiGLU + RMSNorm)");
+    println!("  d_model         : {}", cfg.d_model);
+    println!("  intermediate    : {}", cfg.intermediate);
+    println!("  layers          : {}", cfg.num_layers);
+    println!("  heads           : {}", cfg.num_heads);
+    println!("  kv_heads        : {} (GQA ratio {}:1)", cfg.num_kv_heads, cfg.num_heads / cfg.num_kv_heads);
+    println!("  sliding_window  : {}", effective_window);
+    println!("  seq_len         : {}", cfg.seq_len);
+    println!("  params          : {}", format_count(param_count));
     println!();
 
     // ---- Resume from checkpoint if available ----
@@ -309,7 +323,7 @@ fn main() {
     }
 
     // ---- Launch training monitor ----
-    let monitor = axonml::TrainingMonitor::new("LLaMA (Shakespeare)", param_count)
+    let monitor = axonml::TrainingMonitor::new("Mistral (Shakespeare)", param_count)
         .total_epochs(cfg.epochs)
         .batch_size(cfg.batch_size)
         .launch();
@@ -342,12 +356,9 @@ fn main() {
         let mut epoch_count = 0usize;
 
         for step in 1..=cfg.steps_per_epoch {
-            // Sample batch
+            // u32 tensors stay on CPU — the embedding gather handles the
+            // CPU-indices → GPU-weights crossing internally.
             let batch_data = dataset.sample_batch(cfg.batch_size, &mut rng);
-
-            // u32 tensors stay on CPU — `Embedding.lookup` handles the CPU-indices →
-            // GPU-weights gather internally via `embedding_gather_cuda`. Moving a
-            // `Tensor<u32>` to GPU panics with "GPU tensors are only supported for f32".
             let input_ids = Tensor::<u32>::from_vec(
                 batch_data.clone(),
                 &[cfg.batch_size, cfg.seq_len],
@@ -357,7 +368,7 @@ fn main() {
                 &[cfg.batch_size, cfg.seq_len],
             ).unwrap();
 
-            // Forward + loss (locally computed since LLaMA has no forward_with_loss)
+            // Forward + shifted CE loss (Mistral has no forward_with_loss).
             optimizer.zero_grad();
             let logits = model.forward_ids(&input_ids);
             let loss = shifted_cross_entropy(&logits, &labels);
@@ -422,7 +433,6 @@ fn main() {
             } else {
                 println!("  ★ new best loss {:.4} → {}", epoch_avg, best_path.display());
             }
-            // Also save full best checkpoint so we can resume from it
             let best_ckpt = cfg.output_dir.join("checkpoint_best.axonml");
             let cp = Checkpoint::builder()
                 .model_state(StateDict::from_module(&model))
@@ -432,7 +442,7 @@ fn main() {
             save_checkpoint(&cp, &best_ckpt).ok();
         }
 
-        // Always save latest (so --resume latest always works)
+        // Always save latest
         let latest_ckpt = cfg.output_dir.join("checkpoint_latest.axonml");
         let cp = Checkpoint::builder()
             .model_state(StateDict::from_module(&model))

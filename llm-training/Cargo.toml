@@ -41,3 +41,7 @@ path = "src/bin/train_gpt2.rs"
 [[bin]]
 name = "train_llama"
 path = "src/bin/train_llama.rs"
+
+[[bin]]
+name = "train_mistral"
+path = "src/bin/train_mistral.rs"
