@@ -8,8 +8,8 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"/></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
-  <img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust 1.75+"/>
-  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0"/>
+  <img src="https://img.shields.io/badge/Rust-1.85+-orange.svg" alt="Rust 1.85+"/>
+  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1"/>
   <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML"/>
 </p>
 
@@ -128,8 +128,8 @@ pm2 reload axonml-server            # Zero-downtime reload
 
 | User | Email | Password |
 |------|-------|----------|
-| Admin | admin@axonml.local | admin |
-| DevOps | DevOps@automatanexus.com | Invertedskynet2$ |
+| Admin | admin@axonml.local | Set by `AxonML_DB_Init.sh` or auto-generated on first server start (written to temp file) |
+| DevOps | DevOps@AutomataNexus.com | Set via `AXONML_DEVOPS_PASSWORD` environment variable |
 
 ### Configuration
 
@@ -143,9 +143,9 @@ data_dir = "~/.axonml"
 
 [aegis]
 host = "localhost"
-port = 9090
-username = "demo"
-password = "demo"
+port = 9090          # Must match Aegis-DB's --port (default: 9090)
+username = ""        # Set via Vault, AEGIS_USER env var, or here
+password = ""        # Set via Vault, AEGIS_PASS env var, or here
 
 [auth]
 jwt_secret = "your-secure-random-secret-here"

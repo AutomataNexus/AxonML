@@ -120,7 +120,7 @@ fn default_aegis_host() -> String {
     "localhost".to_string()
 }
 fn default_aegis_port() -> u16 {
-    3020
+    9090
 }
 // SECURITY: No default database credentials - must be explicitly configured
 fn default_aegis_user() -> String {
@@ -357,7 +357,7 @@ mod tests {
     fn test_default_config() {
         let config = Config::default();
         assert_eq!(config.server.port, 3000);
-        assert_eq!(config.aegis.port, 3020);
+        assert_eq!(config.aegis.port, 9090);
     }
 
     #[test]
