@@ -24,28 +24,42 @@ use std::sync::{Arc, Mutex};
 // Config
 // ─────────────────────────────────────────────────────────────────────────────
 
-const WIDTH: f32 = 260.0;
-const HEIGHT: f32 = 380.0;
+const WIDTH: f32 = 280.0;
+const HEIGHT: f32 = 420.0;
 const TAILSCALE_POLL_SECS: u64 = 10;
 const RATE_LIMITS_POLL_SECS: u64 = 30;
 
 const SERVER_SSH: &str = "devops@100.67.227.31";
+const SERVER_HOST: &str = "100.67.227.31";
+const SERVER_USER: &str = "devops";
 const SERVER_RATE_LIMITS_PATH: &str = "/home/devops/.nexusoracle/rate_limits.json";
 const LOCAL_CACHE_COPY: &str = "/tmp/.tech-ticker-rate-limits.json";
 const MONITOR_CACHE_DIR: &str = "/var/lib/tailscale-monitor";
 const MONITOR_CACHE_DIR_ALT: &str = "/home/devops/.tailscale-monitor";
 const SRC_EXE: &str = "/opt/NexusOracle/apps/oracle-chat/src-tauri/target/x86_64-pc-windows-gnu/release/oracle-chat-tauri.exe";
+const RESTART_SCRIPT: &str = "/opt/NexusOracle/restartoracle.sh";
 
-/// Techs to show, in display order. Each row is (display_name, tailscale_host).
+/// Daemon base URL — local to the AN server over Tailscale.
+const DAEMON_URL: &str = "http://100.67.227.31:4780";
+/// Owner API key used by the ticker to hit owner-only endpoints.
+/// Same key Andrew uses; owners bypass rate limits.
+const OWNER_API_KEY: &str = "qUUlVoumbb3xXQFqv3jNdr-8wAiDt_oT6IYiw6D6ogw";
+
+/// Techs to show, in display order.
+/// Format: (display_name, tailscale_host, wsl_ssh_user)
 ///
 /// Owners (Andrew, DevOps) are deliberately excluded — they bypass the rate
 /// limiter so their row would always be empty.
-const TECHS: &[(&str, &str)] = &[
-    ("Nick", "nick"),
-    ("Leon", "leon-wsl"),
-    ("John", "john"),
-    ("Keenan", "keenan"),
-    ("Denior", "denior"),
+///
+/// `wsl_ssh_user` is used when the "SSH" button opens a Windows Terminal tab
+/// into the tech's WSL — empty string disables the button for that row
+/// (techs not on Tailscale yet).
+const TECHS: &[(&str, &str, &str)] = &[
+    ("Nick",   "nick",     "getac"),
+    ("Leon",   "leon-wsl", "ulvenr"),
+    ("John",   "john",     ""),
+    ("Keenan", "keenan",   ""),
+    ("Denior", "denior",   ""),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,10 +117,21 @@ struct TechState {
     update_pending: bool,
 }
 
+/// Transient UI feedback for a running action (Reset / Build).
+#[derive(Clone, Default)]
+struct ActionState {
+    /// Short label shown while the action is running (e.g. "building...").
+    in_flight: Option<String>,
+    /// Last action result, shown briefly in the header.
+    last_result: Option<(String, bool)>, // (msg, is_error)
+    last_result_at: Option<std::time::Instant>,
+}
+
 struct Shared {
     techs: HashMap<String, TechState>,
     last_rate_limits_fetch: Option<chrono::DateTime<chrono::Local>>,
     last_rate_limits_error: Option<String>,
+    action: ActionState,
 }
 
 struct TechApp {
@@ -118,12 +143,13 @@ impl TechApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let techs: HashMap<String, TechState> = TECHS
             .iter()
-            .map(|(name, _)| (name.to_string(), TechState::default()))
+            .map(|(name, _, _)| (name.to_string(), TechState::default()))
             .collect();
         let state = Arc::new(Mutex::new(Shared {
             techs,
             last_rate_limits_fetch: None,
             last_rate_limits_error: None,
+            action: ActionState::default(),
         }));
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -165,7 +191,7 @@ async fn refresh_tailscale(state: &Arc<Mutex<Shared>>) {
     let stdout = String::from_utf8_lossy(&out.stdout);
 
     let Ok(mut s) = state.lock() else { return };
-    for (name, host) in TECHS {
+    for (name, host, _wsl) in TECHS {
         let online = stdout
             .lines()
             .filter(|l| {
@@ -185,7 +211,7 @@ async fn refresh_update_pending(state: &Arc<Mutex<Shared>>) {
         Err(_) => return,
     };
     let Ok(mut s) = state.lock() else { return };
-    for (name, _host) in TECHS {
+    for (name, _host, _wsl) in TECHS {
         // Cache lives in one of two places depending on permissions
         let c1 = format!("{MONITOR_CACHE_DIR}/pushed-{}", name.to_lowercase());
         let c2 = format!("{MONITOR_CACHE_DIR_ALT}/pushed-{}", name.to_lowercase());
@@ -279,7 +305,7 @@ async fn refresh_rate_limits(state: &Arc<Mutex<Shared>>) {
 
     let now = chrono::Utc::now();
 
-    for (name, _host) in TECHS {
+    for (name, _host, _wsl) in TECHS {
         let t = match s.techs.get_mut(*name) {
             Some(t) => t,
             None => continue,
@@ -366,26 +392,37 @@ impl eframe::App for TechApp {
         visuals.override_text_color = Some(CREAM);
         ctx.set_visuals(visuals);
 
-        let snapshot: Vec<(String, TechState)> = {
+        let snapshot: Vec<(String, &'static str, &'static str, TechState)> = {
             let s = self.state.lock().unwrap();
             TECHS
                 .iter()
-                .map(|(name, _)| {
+                .map(|(name, host, wsl)| {
                     let t = s.techs.get(*name).cloned().unwrap_or_default();
-                    (name.to_string(), t)
+                    (name.to_string(), *host, *wsl, t)
                 })
                 .collect()
         };
-        let (last_fetch, last_err) = {
+        let (last_fetch, last_err, action) = {
             let s = self.state.lock().unwrap();
             (
                 s.last_rate_limits_fetch,
                 s.last_rate_limits_error.clone(),
+                s.action.clone(),
             )
         };
 
+        // Expire stale "last_result" after 8s so transient status messages clear.
+        if let Some(t) = action.last_result_at {
+            if t.elapsed() > std::time::Duration::from_secs(8) {
+                if let Ok(mut s) = self.state.lock() {
+                    s.action.last_result = None;
+                    s.action.last_result_at = None;
+                }
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Header
+            // Header row
             ui.horizontal(|ui| {
                 draw_led(ui, TEAL, 5.0, true);
                 ui.label(
@@ -395,15 +432,30 @@ impl eframe::App for TechApp {
                         .color(CREAM),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // "Build" button (rebuild exe + SIGUSR1 monitor)
+                    let building = action.in_flight.as_deref() == Some("build");
+                    let btn_label = if building { "building..." } else { "Build" };
+                    let btn = egui::Button::new(
+                        egui::RichText::new(btn_label).size(9.0).color(CREAM),
+                    )
+                    .fill(if building { AMBER.linear_multiply(0.5) } else { TEAL.linear_multiply(0.25) })
+                    .stroke(egui::Stroke::new(1.0, TEAL))
+                    .rounding(3.0)
+                    .min_size(egui::vec2(54.0, 18.0));
+                    if ui.add_enabled(!building, btn).on_hover_text(
+                        "Run restartoracle.sh: rebuild the .exe then trigger an immediate push to any online tech",
+                    ).clicked() {
+                        self.trigger_build();
+                    }
+                    ui.add_space(4.0);
+
                     if last_err.is_some() {
                         ui.label(
                             egui::RichText::new("⚠ sync")
                                 .size(9.0)
                                 .color(TERRACOTTA),
                         )
-                        .on_hover_text(
-                            last_err.clone().unwrap_or_default(),
-                        );
+                        .on_hover_text(last_err.clone().unwrap_or_default());
                     } else if let Some(t) = last_fetch {
                         ui.label(
                             egui::RichText::new(t.format("%H:%M").to_string())
@@ -413,11 +465,24 @@ impl eframe::App for TechApp {
                     }
                 });
             });
+
+            // Second header line: current action status / result (very subtle)
+            if let Some(msg) = &action.in_flight {
+                ui.label(
+                    egui::RichText::new(format!("⚙ {msg}"))
+                        .size(9.0)
+                        .color(AMBER),
+                );
+            } else if let Some((msg, is_err)) = &action.last_result {
+                let color = if *is_err { TERRACOTTA } else { TEAL };
+                ui.label(egui::RichText::new(msg).size(9.0).color(color));
+            }
+
             ui.separator();
 
             // Per-tech rows
-            for (name, t) in &snapshot {
-                draw_tech_row(ui, name, t);
+            for (name, _host, wsl, t) in &snapshot {
+                self.draw_tech_row(ui, name, wsl, t);
             }
 
             // Footer: legend
@@ -443,87 +508,222 @@ impl eframe::App for TechApp {
     }
 }
 
-fn draw_tech_row(ui: &mut egui::Ui, name: &str, t: &TechState) {
-    let usage_color = if t.max > 0 && t.used >= t.max {
-        TERRACOTTA
-    } else if t.max > 0 && t.used as f32 / t.max as f32 >= 0.66 {
-        AMBER
-    } else {
-        TEAL
-    };
+impl TechApp {
+    fn draw_tech_row(
+        &self,
+        ui: &mut egui::Ui,
+        name: &str,
+        wsl_user: &str,
+        t: &TechState,
+    ) {
+        let usage_color = if t.max > 0 && t.used >= t.max {
+            TERRACOTTA
+        } else if t.max > 0 && t.used as f32 / t.max as f32 >= 0.66 {
+            AMBER
+        } else {
+            TEAL
+        };
 
-    // Card background
-    egui::Frame::none()
-        .fill(BG_ROW)
-        .rounding(4.0)
-        .inner_margin(egui::Margin::symmetric(8.0, 6.0))
-        .show(ui, |ui| {
-            // Line 1: LED + name + (update pending) ...spacer... usage
-            ui.horizontal(|ui| {
-                let color = if t.online { TEAL } else { SLATE };
-                draw_led(ui, color, 5.0, t.online);
-                ui.label(
-                    egui::RichText::new(name)
-                        .strong()
-                        .size(12.0)
-                        .color(CREAM),
-                );
-                if t.update_pending {
-                    ui.add_space(2.0);
-                    draw_led(ui, AMBER, 3.5, true);
-                }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        egui::Frame::none()
+            .fill(BG_ROW)
+            .rounding(4.0)
+            .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+            .show(ui, |ui| {
+                // Line 1: LED + name + [update-LED] [SSH] [Reset] ...spacer... usage
+                ui.horizontal(|ui| {
+                    let color = if t.online { TEAL } else { SLATE };
+                    draw_led(ui, color, 5.0, t.online);
                     ui.label(
-                        egui::RichText::new(format!("{}/{}", t.used, t.max))
+                        egui::RichText::new(name)
                             .strong()
-                            .size(13.0)
-                            .color(usage_color),
+                            .size(12.0)
+                            .color(CREAM),
+                    );
+                    if t.update_pending {
+                        ui.add_space(2.0);
+                        draw_led(ui, AMBER, 3.5, true);
+                    }
+
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            // Usage counter (always)
+                            ui.label(
+                                egui::RichText::new(format!("{}/{}", t.used, t.max))
+                                    .strong()
+                                    .size(13.0)
+                                    .color(usage_color),
+                            );
+
+                            ui.add_space(4.0);
+
+                            // Reset button — always shown
+                            let reset_btn = egui::Button::new(
+                                egui::RichText::new("↺").size(11.0).color(TEAL),
+                            )
+                            .frame(false)
+                            .min_size(egui::vec2(18.0, 18.0));
+                            if ui.add(reset_btn)
+                                .on_hover_text(format!(
+                                    "Clear {name}'s rate-limit counter on the daemon"
+                                ))
+                                .clicked()
+                            {
+                                self.trigger_reset(name.to_string());
+                            }
+
+                            // SSH button — only if tech has a known WSL user + is online
+                            let ssh_enabled = !wsl_user.is_empty() && t.online;
+                            let ssh_color = if ssh_enabled { TEAL } else { SLATE };
+                            let ssh_btn = egui::Button::new(
+                                egui::RichText::new("⌨").size(11.0).color(ssh_color),
+                            )
+                            .frame(false)
+                            .min_size(egui::vec2(18.0, 18.0));
+                            let ssh_resp = ui.add_enabled(ssh_enabled, ssh_btn);
+                            let hover = if wsl_user.is_empty() {
+                                format!("{name}: not on Tailscale yet")
+                            } else if !t.online {
+                                format!("{name} is offline")
+                            } else {
+                                format!("SSH to {wsl_user}@{name} in a new terminal tab")
+                            };
+                            if ssh_resp.on_hover_text(hover).clicked() {
+                                self.trigger_ssh(name.to_string(), wsl_user.to_string());
+                            }
+                        },
                     );
                 });
-            });
 
-            // Line 2: last-used (prominent) ...spacer... window
-            ui.horizontal(|ui| {
-                let (last_label, last_color) = match t.last_request {
-                    Some(ts) => (format!("last used {}", rel_time(ts)), CREAM),
-                    None => ("never used".to_string(), TEXT_DIM),
-                };
-                ui.label(
-                    egui::RichText::new(last_label)
-                        .size(10.0)
-                        .color(last_color),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Line 2: last-used (prominent) ...spacer... window
+                ui.horizontal(|ui| {
+                    let (last_label, last_color) = match t.last_request {
+                        Some(ts) => (format!("last used {}", rel_time(ts)), CREAM),
+                        None => ("never used".to_string(), TEXT_DIM),
+                    };
                     ui.label(
-                        egui::RichText::new(format!("{}h window", t.window_hours))
-                            .size(9.0)
-                            .color(TEXT_DIM),
+                        egui::RichText::new(last_label)
+                            .size(10.0)
+                            .color(last_color),
+                    );
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{}h window", t.window_hours))
+                                    .size(9.0)
+                                    .color(TEXT_DIM),
+                            );
+                        },
                     );
                 });
+
+                // Line 3: thin usage bar
+                let (bar_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 2.5),
+                    egui::Sense::hover(),
+                );
+                ui.painter().rect_filled(
+                    bar_rect,
+                    1.0,
+                    egui::Color32::from_rgba_unmultiplied(90, 85, 80, 200),
+                );
+                if t.max > 0 {
+                    let frac = (t.used as f32 / t.max as f32).clamp(0.0, 1.0);
+                    let fill_rect = egui::Rect::from_min_size(
+                        bar_rect.min,
+                        egui::vec2(bar_rect.width() * frac, bar_rect.height()),
+                    );
+                    ui.painter().rect_filled(fill_rect, 1.0, usage_color);
+                }
             });
 
-            // Line 3: thin usage bar
-            let (bar_rect, _) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), 2.5),
-                egui::Sense::hover(),
-            );
-            ui.painter().rect_filled(
-                bar_rect,
-                1.0,
-                egui::Color32::from_rgba_unmultiplied(90, 85, 80, 200),
-            );
-            if t.max > 0 {
-                let frac = (t.used as f32 / t.max as f32).clamp(0.0, 1.0);
-                let fill_rect = egui::Rect::from_min_size(
-                    bar_rect.min,
-                    egui::vec2(bar_rect.width() * frac, bar_rect.height()),
-                );
-                ui.painter().rect_filled(fill_rect, 1.0, usage_color);
+        ui.add_space(3.0);
+    }
+
+    // ── Actions ──────────────────────────────────────────────────────────────
+
+    fn trigger_reset(&self, tech_name: String) {
+        let state = self.state.clone();
+        if let Ok(mut s) = state.lock() {
+            s.action.in_flight = Some(format!("reset {tech_name}"));
+        }
+        self.runtime.spawn(async move {
+            let client = reqwest::Client::new();
+            let res = client
+                .post(format!("{DAEMON_URL}/api/v1/rate-limits/reset"))
+                .header("Authorization", format!("Bearer {OWNER_API_KEY}"))
+                .json(&serde_json::json!({ "tech_name": tech_name }))
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await;
+            if let Ok(mut s) = state.lock() {
+                s.action.in_flight = None;
+                s.action.last_result = Some(match res {
+                    Ok(r) if r.status().is_success() => (
+                        format!("reset {tech_name}: OK"),
+                        false,
+                    ),
+                    Ok(r) => (format!("reset {tech_name} → HTTP {}", r.status()), true),
+                    Err(e) => (format!("reset {tech_name}: {e}"), true),
+                });
+                s.action.last_result_at = Some(std::time::Instant::now());
             }
         });
+    }
 
-    ui.add_space(3.0);
+    fn trigger_ssh(&self, tech_name: String, wsl_user: String) {
+        // Spawn a new Windows Terminal tab that SSHes into the tech's WSL via
+        // Tailscale, using sshpass for non-interactive auth (same password we
+        // use throughout the workspace for tech WSLs).
+        let password = "Invertedskynet2$";
+        let target = format!("{wsl_user}@{tech_name}");
+        let inner = format!(
+            "sshpass -p '{password}' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {target}"
+        );
+        let _ = std::process::Command::new("wt.exe")
+            .args([
+                "-w",
+                "0",
+                "new-tab",
+                "--title",
+                &format!("ssh {tech_name}"),
+                "wsl.exe",
+                "-d",
+                "Ubuntu",
+                "-e",
+                "bash",
+                "-lc",
+                &inner,
+            ])
+            .spawn();
+    }
+
+    fn trigger_build(&self) {
+        let state = self.state.clone();
+        if let Ok(mut s) = state.lock() {
+            s.action.in_flight = Some("build".to_string());
+        }
+        self.runtime.spawn(async move {
+            let out = tokio::process::Command::new("bash")
+                .arg(RESTART_SCRIPT)
+                .output()
+                .await;
+            if let Ok(mut s) = state.lock() {
+                s.action.in_flight = None;
+                s.action.last_result = Some(match out {
+                    Ok(o) if o.status.success() => ("build OK — pushing to online techs".to_string(), false),
+                    Ok(o) => {
+                        let stderr = String::from_utf8_lossy(&o.stderr);
+                        let first = stderr.lines().filter(|l| !l.is_empty()).next().unwrap_or("build failed");
+                        (format!("build: {first}"), true)
+                    }
+                    Err(e) => (format!("build spawn failed: {e}"), true),
+                });
+                s.action.last_result_at = Some(std::time::Instant::now());
+            }
+        });
+    }
 }
 
 /// Relative "Nh ago" / "Nm ago" string.
