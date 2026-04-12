@@ -45,3 +45,7 @@ path = "src/bin/train_llama.rs"
 [[bin]]
 name = "train_mistral"
 path = "src/bin/train_mistral.rs"
+
+[[bin]]
+name = "train_phi"
+path = "src/bin/train_phi.rs"
