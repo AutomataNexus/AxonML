@@ -16,7 +16,7 @@ This is a **standalone crate** — `[workspace]` is empty so `cargo` doesn't pul
 | LLaMA | RoPE, GQA, SwiGLU | `train_llama` | ✓ |
 | Mistral | Sliding-window attention, GQA | `train_mistral` | ✓ |
 | Phi | Partial RoPE, compact design | `train_phi` | ✓ |
-| BERT | Bidirectional masked LM | `train_bert` | — |
+| BERT | Bidirectional classifier (binary classification) | `train_bert` | ✓ |
 | SSM / Mamba | Selective S6 scan, depthwise conv | `train_ssm` | ✓ |
 | Hydra | Hybrid SSM + windowed attention | `train_hydra` | ✓ |
 | Chimera | Sparse MoE + Differential Attention | `train_chimera` | ✓ |
