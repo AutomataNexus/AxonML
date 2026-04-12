@@ -100,3 +100,9 @@ release-artifacts/coa/
 .ipynb_checkpoints/
 axonml-server-bin
 internal/
+# Claude Code / Obsidian vault files (per-session, not project code)
+WORK_STATE.md
+summary.md
+CHEATSHEET.md
+claudeconvo.md
+oracleresponses.md
