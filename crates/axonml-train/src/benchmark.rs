@@ -1,7 +1,7 @@
 //! Model Benchmarking Utilities
 //!
 //! # File
-//! `crates/axonml/src/benchmark.rs`
+//! `crates/axonml-train/src/benchmark.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus
@@ -16,10 +16,8 @@
 
 use std::time::Instant;
 
-#[cfg(all(feature = "core", feature = "nn"))]
 use axonml_autograd::Variable;
 
-#[cfg(feature = "nn")]
 use axonml_nn::Module;
 
 use crate::hub::BenchmarkResult;
@@ -32,7 +30,6 @@ use crate::hub::BenchmarkResult;
 ///
 /// This helps stabilize timing measurements by ensuring any lazy initialization
 /// is complete and caches are populated.
-#[cfg(all(feature = "core", feature = "nn"))]
 pub fn warmup_model<M: Module>(model: &M, input: &Variable, iterations: usize) {
     for _ in 0..iterations {
         let _ = model.forward(input);
@@ -42,7 +39,6 @@ pub fn warmup_model<M: Module>(model: &M, input: &Variable, iterations: usize) {
 /// Benchmark model inference.
 ///
 /// Runs the model forward pass multiple times and collects timing statistics.
-#[cfg(all(feature = "core", feature = "nn"))]
 pub fn benchmark_model<M: Module>(
     model: &M,
     input: &Variable,
@@ -65,7 +61,6 @@ pub fn benchmark_model<M: Module>(
 }
 
 /// Benchmark model with custom name.
-#[cfg(all(feature = "core", feature = "nn"))]
 pub fn benchmark_model_named<M: Module>(
     model: &M,
     input: &Variable,
@@ -78,7 +73,6 @@ pub fn benchmark_model_named<M: Module>(
 }
 
 /// Compare multiple models on the same input.
-#[cfg(all(feature = "core", feature = "nn"))]
 pub fn compare_models<M: Module>(
     models: &[(&str, &M)],
     input: &Variable,
@@ -137,7 +131,6 @@ pub struct ThroughputResult {
 }
 
 /// Run throughput tests across different batch sizes.
-#[cfg(all(feature = "core", feature = "nn"))]
 pub fn throughput_test<M, F>(
     model: &M,
     input_fn: F,
@@ -222,7 +215,6 @@ impl MemorySnapshot {
 }
 
 /// Profile memory usage of a model.
-#[cfg(feature = "nn")]
 pub fn profile_model_memory<M: Module>(model: &M) -> MemorySnapshot {
     let params = model.parameters();
     let param_count = params.len();
@@ -294,7 +286,6 @@ mod tests {
         assert!((result.latency_per_sample_ms - 1.0).abs() < 0.01);
     }
 
-    #[cfg(all(feature = "core", feature = "nn"))]
     #[test]
     fn test_benchmark_model() {
         use axonml_nn::Linear;
@@ -311,7 +302,6 @@ mod tests {
         assert!(result.throughput > 0.0);
     }
 
-    #[cfg(feature = "nn")]
     #[test]
     fn test_profile_model_memory() {
         use axonml_nn::Linear;

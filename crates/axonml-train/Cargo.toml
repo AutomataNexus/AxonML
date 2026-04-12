@@ -1,0 +1,56 @@
+# =============================================================================
+# Axonml Train - Training Infrastructure
+# =============================================================================
+#
+# High-level training utilities split out of the axonml umbrella crate:
+#
+#   - `trainer`      High-level `TrainingConfig`, `Callback`, `EarlyStopping`,
+#                    `ProgressLogger`, `TrainingHistory`, gradient clipping.
+#   - `hub`          Unified model hub / registry, `UnifiedModelInfo`.
+#   - `benchmark`    Throughput / memory benchmarking helpers.
+#   - `adversarial`  FGSM / PGD adversarial attacks and adversarial trainer.
+#
+# The `monitor` (live browser training dashboard) stays in the top-level
+# `axonml` umbrella crate.
+#
+# @version 0.6.1
+# @author AutomataNexus Development Team
+# @license MIT OR Apache-2.0
+# =============================================================================
+
+[package]
+name = "axonml-train"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords = ["training", "machine-learning", "benchmark", "adversarial", "deep-learning"]
+categories = ["science", "algorithms"]
+description = "High-level training, benchmarking, and adversarial training infrastructure for AxonML"
+readme = "README.md"
+
+[dependencies]
+axonml-core = { workspace = true }
+axonml-tensor = { workspace = true }
+axonml-autograd = { workspace = true }
+axonml-nn = { workspace = true }
+axonml-optim = { workspace = true }
+
+# Optional domain crates — only needed by the hub registry
+axonml-vision = { workspace = true, optional = true }
+axonml-llm = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enable vision-model entries in the unified hub registry
+vision = ["dep:axonml-vision"]
+# Enable LLM entries in the unified hub registry
+llm = ["dep:axonml-llm"]
+# Enable both — required for `compare_benchmarks`, `list_all_models`, etc.
+full = ["vision", "llm"]
+# GPU acceleration
+cuda = ["axonml-core/cuda", "axonml-tensor/cuda", "axonml-nn/cuda", "axonml-autograd/cuda"]

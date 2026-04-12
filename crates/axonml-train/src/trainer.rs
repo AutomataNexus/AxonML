@@ -1,7 +1,7 @@
 //! High-Level Training Utilities
 //!
 //! # File
-//! `crates/axonml/src/trainer.rs`
+//! `crates/axonml-train/src/trainer.rs`
 //!
 //! # Author
 //! Andrew Jewell Sr - AutomataNexus
@@ -14,10 +14,8 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-#[cfg(feature = "core")]
 use axonml_tensor::Tensor;
 
-#[cfg(feature = "nn")]
 use axonml_nn::Parameter;
 
 // =============================================================================
@@ -408,7 +406,6 @@ impl Default for TrainingHistory {
 // =============================================================================
 
 /// Clips gradients by global norm.
-#[cfg(feature = "nn")]
 pub fn clip_grad_norm(parameters: &[Parameter], max_norm: f32) -> f32 {
     let mut total_norm_sq = 0.0f32;
 
@@ -426,7 +423,6 @@ pub fn clip_grad_norm(parameters: &[Parameter], max_norm: f32) -> f32 {
         for param in parameters {
             if let Some(grad) = param.grad() {
                 let clipped: Vec<f32> = grad.to_vec().iter().map(|x| x * clip_coef).collect();
-                #[cfg(feature = "core")]
                 {
                     let clipped_tensor = Tensor::from_vec(clipped, grad.shape()).unwrap();
                     param.variable().set_grad(clipped_tensor);
@@ -439,7 +435,6 @@ pub fn clip_grad_norm(parameters: &[Parameter], max_norm: f32) -> f32 {
 }
 
 /// Computes accuracy for classification.
-#[cfg(feature = "core")]
 pub fn compute_accuracy(predictions: &Tensor<f32>, targets: &Tensor<f32>) -> f32 {
     let pred_vec = predictions.to_vec();
     let target_vec = targets.to_vec();
@@ -558,7 +553,6 @@ mod tests {
         assert_eq!(history.best_val_loss(), Some(0.35));
     }
 
-    #[cfg(feature = "core")]
     #[test]
     fn test_compute_accuracy() {
         use axonml_tensor::Tensor;
