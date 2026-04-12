@@ -1223,7 +1223,7 @@ mod tests {
     fn test_conv1d_with_padding_and_stride() {
         let conv = Conv1d::with_options(1, 4, 3, 2, 1, true);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 1 * 16], &[1, 1, 16]).unwrap(),
+            Tensor::from_vec(vec![1.0; 16], &[1, 1, 16]).unwrap(),
             true,
         );
         let output = conv.forward(&input);
@@ -1256,7 +1256,7 @@ mod tests {
     fn test_conv2d_grouped_gradient_flow() {
         let conv = Conv2d::depthwise(4, 3);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 4 * 8 * 8], &[1, 4, 8, 8]).unwrap(),
+            Tensor::from_vec(vec![1.0; 4 * 8 * 8], &[1, 4, 8, 8]).unwrap(),
             true,
         );
         let output = conv.forward(&input);
@@ -1280,7 +1280,7 @@ mod tests {
         // 2 groups: 4 input channels split into 2 groups of 2
         let conv = Conv2d::with_groups(4, 8, (3, 3), (1, 1), (1, 1), true, 2);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 4 * 6 * 6], &[1, 4, 6, 6]).unwrap(),
+            Tensor::from_vec(vec![1.0; 4 * 6 * 6], &[1, 4, 6, 6]).unwrap(),
             false,
         );
         let output = conv.forward(&input);
@@ -1294,7 +1294,7 @@ mod tests {
         let pw = Conv2d::with_options(16, 32, (1, 1), (1, 1), (0, 0), true); // pointwise
 
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 16 * 8 * 8], &[1, 16, 8, 8]).unwrap(),
+            Tensor::from_vec(vec![1.0; 16 * 8 * 8], &[1, 16, 8, 8]).unwrap(),
             true,
         );
         let dw_out = dw.forward(&input);
@@ -1320,7 +1320,7 @@ mod tests {
         // ConvTranspose2d with stride=2 should roughly double spatial dims
         let conv_t = ConvTranspose2d::with_options(1, 1, (4, 4), (2, 2), (1, 1), (0, 0), true);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 1 * 4 * 4], &[1, 1, 4, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0; 4 * 4], &[1, 1, 4, 4]).unwrap(),
             false,
         );
         let output = conv_t.forward(&input);
@@ -1332,7 +1332,7 @@ mod tests {
     fn test_conv_transpose2d_gradient_correctness() {
         let conv_t = ConvTranspose2d::new(2, 4, 3);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5; 1 * 2 * 4 * 4], &[1, 2, 4, 4]).unwrap(),
+            Tensor::from_vec(vec![0.5; 2 * 4 * 4], &[1, 2, 4, 4]).unwrap(),
             true,
         );
         let output = conv_t.forward(&input);

@@ -380,10 +380,10 @@ mod tests {
         let src: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
         let dst_ptr = cpu.allocate(16); // 4 f32s
 
-        cpu.copy_to_device(dst_ptr, src.as_ptr() as *const u8, 16);
+        cpu.copy_to_device(dst_ptr, src.as_ptr().cast::<u8>(), 16);
 
         let mut result = [0.0f32; 4];
-        cpu.copy_to_host(result.as_mut_ptr() as *mut u8, dst_ptr as *const u8, 16);
+        cpu.copy_to_host(result.as_mut_ptr().cast::<u8>(), dst_ptr.cast_const(), 16);
 
         assert_eq!(result, [1.0, 2.0, 3.0, 4.0]);
         cpu.deallocate(dst_ptr, 16);

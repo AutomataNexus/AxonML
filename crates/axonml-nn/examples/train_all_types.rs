@@ -98,8 +98,8 @@ fn main() {
     println!("=== AxonML Training Pipeline — All Model Types ===");
     println!("  Steps: {STEPS} | LR: {LR} | Optimizer: Adam\n");
     println!(
-        "  {:24} | {:26} | {:>7} | {:>6} | {}",
-        "Model", "Loss (start → end)", "Δ%", "Time", "Status"
+        "  {:24} | {:26} | {:>7} | {:>6} | Status",
+        "Model", "Loss (start → end)", "Δ%", "Time"
     );
     println!(
         "  {:-<24}-+-{:-<26}-+-{:-<7}-+-{:-<6}-+-{:-<6}",

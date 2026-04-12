@@ -1267,7 +1267,7 @@ mod tests {
     fn test_lstm_gradient_flow() {
         let lstm = LSTM::new(4, 8, 1);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5; 1 * 3 * 4], &[1, 3, 4]).unwrap(),
+            Tensor::from_vec(vec![0.5; 3 * 4], &[1, 3, 4]).unwrap(),
             true,
         );
         let output = lstm.forward(&input);
@@ -1287,8 +1287,7 @@ mod tests {
         let params = lstm.parameters();
         let grads_exist = params.iter().any(|p| {
             p.grad()
-                .map(|g| g.to_vec().iter().any(|v| v.abs() > 0.0))
-                .unwrap_or(false)
+                .is_some_and(|g| g.to_vec().iter().any(|v| v.abs() > 0.0))
         });
         assert!(grads_exist, "LSTM parameters should have gradients");
     }
@@ -1299,7 +1298,7 @@ mod tests {
 
         // Short sequence
         let short = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 2 * 4], &[1, 2, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0; 2 * 4], &[1, 2, 4]).unwrap(),
             false,
         );
         let out_short = lstm.forward(&short);
@@ -1307,7 +1306,7 @@ mod tests {
 
         // Long sequence
         let long = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 20 * 4], &[1, 20, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0; 20 * 4], &[1, 20, 4]).unwrap(),
             false,
         );
         let out_long = lstm.forward(&long);
@@ -1385,7 +1384,7 @@ mod tests {
     fn test_gru_gradient_flow_to_input() {
         let gru = GRU::new(4, 8, 1);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5; 1 * 3 * 4], &[1, 3, 4]).unwrap(),
+            Tensor::from_vec(vec![0.5; 3 * 4], &[1, 3, 4]).unwrap(),
             true,
         );
         let output = gru.forward(&input);
@@ -1405,7 +1404,7 @@ mod tests {
     fn test_gru_hidden_state_evolves() {
         let gru = GRU::new(4, 8, 1);
         let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 5 * 4], &[1, 5, 4]).unwrap(),
+            Tensor::from_vec(vec![1.0; 5 * 4], &[1, 5, 4]).unwrap(),
             false,
         );
         let output = gru.forward(&input);
@@ -1429,8 +1428,8 @@ mod tests {
     #[test]
     fn test_rnn_cell_gradient_flow() {
         let cell = RNNCell::new(4, 8);
-        let input = Variable::new(Tensor::from_vec(vec![1.0; 1 * 4], &[1, 4]).unwrap(), true);
-        let hidden = Variable::new(Tensor::from_vec(vec![0.0; 1 * 8], &[1, 8]).unwrap(), false);
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 4], &[1, 4]).unwrap(), true);
+        let hidden = Variable::new(Tensor::from_vec(vec![0.0; 8], &[1, 8]).unwrap(), false);
         let out = cell.forward_step(&input, &hidden);
         out.sum().backward();
 
@@ -1458,7 +1457,7 @@ mod tests {
         // LSTM should produce bounded outputs (tanh output gate)
         let lstm = LSTM::new(4, 8, 1);
         let input = Variable::new(
-            Tensor::from_vec(vec![100.0; 1 * 10 * 4], &[1, 10, 4]).unwrap(),
+            Tensor::from_vec(vec![100.0; 10 * 4], &[1, 10, 4]).unwrap(),
             false,
         );
         let output = lstm.forward(&input);
@@ -1479,7 +1478,7 @@ mod tests {
     fn test_gru_outputs_finite_with_large_input() {
         let gru = GRU::new(4, 8, 1);
         let input = Variable::new(
-            Tensor::from_vec(vec![50.0; 1 * 5 * 4], &[1, 5, 4]).unwrap(),
+            Tensor::from_vec(vec![50.0; 5 * 4], &[1, 5, 4]).unwrap(),
             false,
         );
         let output = gru.forward(&input);

@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn test_lstm_backward_finite_nonzero() {
-        let batch = 1;
+        let _batch = 1;
         let hidden = 2;
         let gates = Tensor::from_vec(vec![0.5, -0.3, 0.8, 0.1, 0.2, 0.4, -0.5, 0.6], &[1, 8])
             .expect("backward: tensor creation failed");
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn test_gru_backward_finite_nonzero() {
-        let batch = 1;
+        let _batch = 1;
         let hidden = 3;
         let gates = Tensor::from_vec(vec![0.5, -0.3, 0.8, 0.1, 0.2, 0.4, -0.5, 0.6, 0.3], &[1, 9])
             .expect("backward: tensor creation failed");

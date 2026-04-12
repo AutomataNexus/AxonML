@@ -706,7 +706,7 @@ mod tests {
         }
 
         // Should start low, peak around 30%, end very low
-        let max_lr = lrs.iter().cloned().fold(f32::MIN, f32::max);
+        let max_lr = lrs.iter().copied().fold(f32::MIN, f32::max);
         let final_lr = *lrs.last().unwrap();
 
         assert!(
@@ -728,7 +728,7 @@ mod tests {
             .unwrap()
             .0;
         assert!(
-            peak_idx >= 25 && peak_idx <= 35,
+            (25..=35).contains(&peak_idx),
             "Peak should be around step 30, was at step {}",
             peak_idx
         );

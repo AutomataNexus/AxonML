@@ -543,7 +543,7 @@ mod tests {
         // With identity adjacency, each node only sees itself
         let gcn = GCNConv::new(4, 8);
         let x = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 3 * 4], &[1, 3, 4]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0; 3 * 4], &[1, 3, 4]).expect("tensor creation failed"),
             false,
         );
 
@@ -616,7 +616,7 @@ mod tests {
     fn test_gat_conv_single_head() {
         let gat = GATConv::new(16, 8, 1);
         let x = Variable::new(
-            Tensor::from_vec(vec![1.0; 1 * 5 * 16], &[1, 5, 16]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![1.0; 5 * 16], &[1, 5, 16]).expect("tensor creation failed"),
             false,
         );
         let adj = Variable::new(
@@ -651,7 +651,7 @@ mod tests {
         // Zero adjacency should produce only bias in output
         let gcn = GCNConv::new(4, 4);
         let x = Variable::new(
-            Tensor::from_vec(vec![99.0; 1 * 3 * 4], &[1, 3, 4]).expect("tensor creation failed"),
+            Tensor::from_vec(vec![99.0; 3 * 4], &[1, 3, 4]).expect("tensor creation failed"),
             false,
         );
         let adj = Variable::new(
