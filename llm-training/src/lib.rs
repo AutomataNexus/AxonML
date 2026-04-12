@@ -12,8 +12,11 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use axonml_autograd::Variable;
+use axonml_nn::loss::CrossEntropyLoss;
 use axonml_nn::Module;
 use axonml_serialize::{load_checkpoint, Checkpoint, TrainingState};
+use axonml_tensor::Tensor;
 
 // =============================================================================
 // Character Tokenizer
@@ -259,6 +262,66 @@ pub fn load_model_from_checkpoint<M: Module>(
     );
 
     Ok((checkpoint.epoch(), checkpoint.training_state.clone()))
+}
+
+// =============================================================================
+// Shifted cross-entropy loss for causal language modeling
+// =============================================================================
+
+/// Compute the standard causal-LM cross-entropy loss from a [B, S, V] logits
+/// Variable and a [B, S] u32 labels Tensor: logits[:-1] predicts labels[1:].
+///
+/// This is the shift-then-reshape pattern that GPT-2, LLaMA, Mistral, Phi,
+/// and SSM/Mamba all need. Hydra and Chimera expose their own
+/// `forward_with_loss` methods and do not need this helper.
+///
+/// # Device handling
+/// `labels` is expected on CPU (u32 tensors cannot be moved to GPU — moving a
+/// `Tensor<u32>` with `--features cuda` enabled panics at `tensor.rs:682`
+/// with *"GPU tensors are only supported for f32"*). The shifted-label f32
+/// target tensor this function builds is moved to the logits' device so the
+/// fused GPU cross-entropy kernel triggers when training on CUDA.
+///
+/// # Out-of-range labels
+/// Any label index `>= vocab_size` is defensively clamped to 0 (padding),
+/// matching the pattern used internally by `GPT2LMHead::cross_entropy_loss`.
+pub fn shifted_cross_entropy(logits: &Variable, labels: &Tensor<u32>) -> Variable {
+    let logits_data = logits.data();
+    let shape = logits_data.shape();
+    let batch_size = shape[0];
+    let seq_len = shape[1];
+    let vocab_size = shape[2];
+
+    if seq_len <= 1 {
+        // Degenerate case — return zero loss.
+        let zero = Tensor::from_vec(vec![0.0f32], &[1]).unwrap();
+        return Variable::new(zero, false);
+    }
+
+    // Shift logits: drop the last position → predict positions 1..S from 0..S-1.
+    let shift_logits = logits.narrow(1, 0, seq_len - 1);
+    let n = batch_size * (seq_len - 1);
+    let logits_flat = shift_logits.reshape(&[n, vocab_size]);
+
+    // Shift labels: drop position 0, keep positions 1..S, flatten to [N].
+    let labels_vec = labels.to_vec();
+    let mut shift_labels = Vec::with_capacity(n);
+    for b in 0..batch_size {
+        for s in 1..seq_len {
+            let l = labels_vec[b * seq_len + s] as usize;
+            shift_labels.push(if l < vocab_size { l as f32 } else { 0.0 });
+        }
+    }
+    let mut target_tensor = Tensor::from_vec(shift_labels, &[n]).unwrap();
+
+    // Move targets to the logits' device so the fused GPU CE kernel triggers.
+    let logits_device = logits_data.device();
+    if logits_device.is_gpu() {
+        target_tensor = target_tensor.to_device(logits_device).unwrap();
+    }
+    let target_var = Variable::new(target_tensor, false);
+
+    CrossEntropyLoss::new().compute(&logits_flat, &target_var)
 }
 
 // =============================================================================
