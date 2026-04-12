@@ -103,15 +103,18 @@ USAGE:
     nexus-serve [OPTIONS] [MODEL_FILES...]
 
 OPTIONS:
-    --model, -m PATH    Load a model (GGUF, SafeTensors, or .axonml)
-    --port, -p PORT     Listen port (default: 11435)
-    --host HOST         Listen host (default: 0.0.0.0)
-    --help, -h          Show this help
+    --model, -m PATH       Load a model (GGUF, SafeTensors, or .axonml)
+    --alias, -a NAME PATH  Load a model AND register a friendly alias.
+                           Requests for NAME will route to the model at PATH.
+                           (e.g., --alias sage /path/to/qwen.gguf)
+    --port, -p PORT        Listen port (default: 11435)
+    --host HOST            Listen host (default: 0.0.0.0)
+    --help, -h             Show this help
 
 EXAMPLES:
     nexus-serve --model qwen2.5-coder-1.5b.gguf
+    nexus-serve --alias sage /path/to/qwen.gguf --alias oracle /path/to/gemma.gguf
     nexus-serve --model model1.gguf --model model2.gguf --port 11435
-    nexus-serve /path/to/model.gguf
 
 API ENDPOINTS (OpenAI-compatible):
     POST /v1/chat/completions
@@ -224,6 +227,7 @@ async fn main() {
                         })
                         .await;
 
+                    path_to_name.insert(path.clone(), model_name.clone());
                     println!("  Registered as: {}", model_name);
 
                     // Load inference engine (dequantize weights → f32)
@@ -316,6 +320,20 @@ async fn main() {
             // TODO: SafeTensors and .axonml loading
             println!("  TODO: non-GGUF format loading not yet implemented");
         }
+    }
+
+    // Register aliases after all models are loaded
+    if !cfg.aliases.is_empty() {
+        println!("Registering aliases:");
+        for (alias_name, alias_path) in &cfg.aliases {
+            if let Some(canonical) = path_to_name.get(alias_path) {
+                registry.register_alias(alias_name, canonical).await;
+                println!("  {alias_name} → {canonical}");
+            } else {
+                eprintln!("  WARNING: alias '{alias_name}' path not loaded: {}", alias_path.display());
+            }
+        }
+        println!();
     }
 
     // Build router
