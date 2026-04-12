@@ -24,9 +24,9 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+use axonml_autograd::Variable;
 use axonml_hvac::panoptes::*;
 use axonml_hvac::panoptes_datagen::*;
-use axonml_autograd::Variable;
 use axonml_nn::MSELoss;
 use axonml_optim::{Adam, Optimizer};
 use axonml_tensor::Tensor;

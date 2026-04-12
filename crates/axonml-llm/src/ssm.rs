@@ -585,8 +585,7 @@ impl SSMForCausalLM {
         // `Embedding::lookup` handles the CPU-indices → GPU-weights crossing
         // internally via `embedding_gather_cuda` when the weights are on GPU.
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var =
-            Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
+        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
 
         let mut hidden = self.embed_tokens.forward(&ids_var);
         for block in &self.blocks {

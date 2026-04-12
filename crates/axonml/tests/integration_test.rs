@@ -271,19 +271,13 @@ fn test_cnn_mnist() {
     // Create dataloader
     let loader = DataLoader::new(dataset, 8);
 
-    // One forward pass through a batch
-    let mut success = false;
-    for batch in loader.iter() {
-        let input = Variable::new(batch.data, false);
-        let output = model.forward(&input);
+    // One forward pass through a single batch
+    let batch = loader.iter().next().expect("No batches produced");
+    let input = Variable::new(batch.data, false);
+    let output = model.forward(&input);
 
-        // Output should be [batch_size, 10] for 10 classes
-        assert_eq!(output.data().shape()[1], 10);
-        success = true;
-        break;
-    }
-
-    assert!(success, "No batches processed");
+    // Output should be [batch_size, 10] for 10 classes
+    assert_eq!(output.data().shape()[1], 10);
     println!("✓ CNN on MNIST works");
 }
 

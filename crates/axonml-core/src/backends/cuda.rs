@@ -20,8 +20,7 @@ use cudarc::cublas::{CudaBlas, Gemm, GemmConfig, sys::cublasOperation_t};
 use cudarc::cudnn::Cudnn;
 #[cfg(feature = "cuda")]
 use cudarc::driver::{
-    CudaContext, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PushKernelArg,
-    ValidAsZeroBits,
+    CudaContext, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PushKernelArg, ValidAsZeroBits,
 };
 
 use super::Backend;
