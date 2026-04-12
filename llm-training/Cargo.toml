@@ -61,3 +61,7 @@ path = "src/bin/train_bert.rs"
 [[bin]]
 name = "train_chimera"
 path = "src/bin/train_chimera.rs"
+
+[[bin]]
+name = "train_ssm"
+path = "src/bin/train_ssm.rs"
