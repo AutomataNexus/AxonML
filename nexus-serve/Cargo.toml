@@ -1,0 +1,52 @@
+[package]
+name = "nexus-serve"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Pure-Rust LLM inference server — load HuggingFace models, serve via OpenAI-compatible API. Replaces ollama with native AxonML inference."
+
+[workspace]
+
+[dependencies]
+# AxonML framework
+axonml-core      = { path = "/opt/AxonML/crates/axonml-core" }
+axonml-tensor    = { path = "/opt/AxonML/crates/axonml-tensor" }
+axonml-autograd  = { path = "/opt/AxonML/crates/axonml-autograd" }
+axonml-nn        = { path = "/opt/AxonML/crates/axonml-nn" }
+axonml-llm       = { path = "/opt/AxonML/crates/axonml-llm" }
+axonml-serialize = { path = "/opt/AxonML/crates/axonml-serialize" }
+
+# HTTP server
+axum = { version = "0.8", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# GGUF model loading
+byteorder = "1.5"
+memmap2 = "0.9"
+
+# Tokenizer
+tokenizers = "0.21"
+
+# Misc
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1"
+
+[features]
+default = []
+cuda = [
+    "axonml-core/cuda",
+    "axonml-tensor/cuda",
+    "axonml-autograd/cuda",
+    "axonml-nn/cuda",
+]
+
+[[bin]]
+name = "nexus-serve"
+path = "src/main.rs"
