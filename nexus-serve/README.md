@@ -198,12 +198,24 @@ cargo test --release --test q4k_block_test
 cargo test --release --test q6k_block_test
 ```
 
+### Lazy-dequant (`--quantized`) accuracy
+
+The lazy-dequant path (rayon-parallel block dequant into per-matmul scratch, see `src/model/weight.rs`) produces outputs **bit-identical** to the eager f32 path. Verified 2026-04-12 against Sage (Qwen 2.5 Coder 1.5B, Q4_K/Q6_K GGUF) at `temperature = 0.0`, `max_tokens = 8`:
+
+| Prompt | Eager f32 output | `--quantized` output | Match |
+|---|---|---|---|
+| "What is 2+2?" | `2 + 2 equals 4.` | `2 + 2 equals 4.` | ✓ |
+| "Name a color." | `Blue` | `Blue` | ✓ |
+| "Say the word hello." | `Hello` | `Hello` | ✓ |
+
+Performance cost on CPU (24 threads, same machine, same prompt): ~22 % slower in `--quantized` mode — the per-matmul dequant pass is added work even when rayon-parallelized. Memory cost: Sage drops from 6.2 GB RAM (eager) to ~1.0 GB (lazy), so the trade is worth it on RAM-constrained systems and for multi-model setups. No accuracy penalty.
+
 ## Known Limitations
 
 - **Gemma architecture** — not yet supported (requires different attention + rotary)
 - **Phi, Mamba, MoE** — not yet supported
 - **Concurrent requests** — correctness is fine (each `generate_stream()` call allocates its own `KvCache` on the stack; two requests return correct, prompt-specific answers in parallel). The shared `Arc<InferenceEngine>` only holds read-only weights. **Throughput, however, is not additive**: concurrent requests share the rayon CPU pool (and, for GPU, the CUDA context), so two simultaneous generations each run at roughly half the speed of a solo one. If you need real concurrent throughput, horizontal-scale by running multiple `nexus-serve` processes behind a load balancer.
-- **Quantized-inference accuracy** — the lazy-dequant path (`--quantized`) is implemented (rayon-parallel block dequant, per-matmul scratch) but hasn't been accuracy-tested side-by-side with the eager-dequant f32 path yet. Prefer the eager path for now unless you're RAM-constrained.
+- **Oracle (Gemma 4, 9.6 GB GGUF → ~20 GB f32)** — needs 20 GB+ RAM for eager dequant, or Gemma architecture support for lazy dequant (see above). Works in neither mode today.
 
 ## Historical Bugs (for reference)
 
