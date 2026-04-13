@@ -19,7 +19,7 @@
 //!
 //! - `axonml-hvac`  — HVAC fault-detection models (Apollo, Panoptes, etc.)
 //! - `axonml-train` — `TrainingConfig`, `EarlyStopping`, `AdversarialTrainer`,
-//!                    `benchmark_model`, unified model hub
+//!   `benchmark_model`, unified model hub
 //!
 //! This separation was made in April 2026 to keep the umbrella crate focused
 //! on re-exports and the live training dashboard.

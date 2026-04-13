@@ -346,7 +346,7 @@ mod tests {
         let model = VQAModel::small(100, 50);
 
         let image = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
             false,
         );
 
@@ -375,7 +375,7 @@ mod tests {
     fn test_vision_encoder() {
         let enc = VisionEncoder::new(64, 4, 2, 8);
         let image = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
             false,
         );
         let output = enc.forward(&image);

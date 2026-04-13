@@ -355,7 +355,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axonml_nn::{Linear, ReLU, Sequential};
+    use axonml_nn::{Linear, Sequential};
     use std::ops::Neg;
 
     #[test]

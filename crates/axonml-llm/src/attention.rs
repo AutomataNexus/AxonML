@@ -503,17 +503,17 @@ mod tests {
 
         // Check that future positions are masked
         let data = mask.to_vec();
-        assert!(data[0 * 4 + 1].is_infinite()); // position 0 can't attend to 1
-        assert!(data[0 * 4 + 2].is_infinite()); // position 0 can't attend to 2
-        assert!(data[0 * 4 + 3].is_infinite()); // position 0 can't attend to 3
-        assert!(data[1 * 4 + 2].is_infinite()); // position 1 can't attend to 2
-        assert!(data[1 * 4 + 3].is_infinite()); // position 1 can't attend to 3
+        assert!(data[1].is_infinite()); // position 0 can't attend to 1
+        assert!(data[2].is_infinite()); // position 0 can't attend to 2
+        assert!(data[3].is_infinite()); // position 0 can't attend to 3
+        assert!(data[4 + 2].is_infinite()); // position 1 can't attend to 2
+        assert!(data[4 + 3].is_infinite()); // position 1 can't attend to 3
 
         // Check that current and past positions are not masked
-        assert_eq!(data[0 * 4 + 0], 0.0); // position 0 can attend to 0
-        assert_eq!(data[1 * 4 + 0], 0.0); // position 1 can attend to 0
-        assert_eq!(data[1 * 4 + 1], 0.0); // position 1 can attend to 1
-        assert_eq!(data[3 * 4 + 0], 0.0); // position 3 can attend to 0
+        assert_eq!(data[0], 0.0); // position 0 can attend to 0
+        assert_eq!(data[4], 0.0); // position 1 can attend to 0
+        assert_eq!(data[4 + 1], 0.0); // position 1 can attend to 1
+        assert_eq!(data[3 * 4], 0.0); // position 3 can attend to 0
     }
 
     #[test]

@@ -626,7 +626,7 @@ mod tests {
 
         let _face_gt = |image_idx: usize, _nc: usize| -> Vec<GroundTruth> {
             // Diverse face-like ground truth
-            let h = |v: f32| -> f32 { ((v * 127.1 + 311.7).sin() * 43758.5453).fract().abs() };
+            let h = |v: f32| -> f32 { ((v * 127.1 + 311.7).sin() * 43_758.547).fract().abs() };
             let n = 1 + (h(image_idx as f32) * 3.0) as usize; // 1-3 faces
             (0..n)
                 .map(|b| {

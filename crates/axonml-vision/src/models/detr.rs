@@ -439,7 +439,7 @@ mod tests {
 
         // Simulated backbone features [1, 64, 4, 4]
         let features = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 64 * 4 * 4], &[1, 64, 4, 4]).unwrap(),
+            Tensor::from_vec(vec![0.1; 64 * 4 * 4], &[1, 64, 4, 4]).unwrap(),
             false,
         );
 
@@ -450,7 +450,7 @@ mod tests {
         // Bbox values should be in [0, 1] (sigmoid)
         let bbox_data = bbox.data().to_vec();
         for &v in &bbox_data {
-            assert!(v >= 0.0 && v <= 1.0);
+            assert!((0.0..=1.0).contains(&v));
         }
     }
 
@@ -459,7 +459,7 @@ mod tests {
         let model = DETR::small(10);
 
         let features = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 64 * 4 * 4], &[1, 64, 4, 4]).unwrap(),
+            Tensor::from_vec(vec![0.1; 64 * 4 * 4], &[1, 64, 4, 4]).unwrap(),
             false,
         );
 
@@ -473,7 +473,7 @@ mod tests {
     fn test_detr_encoder_layer() {
         let layer = DETREncoderLayer::new(64, 4, 256);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 16 * 64], &[1, 16, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 16 * 64], &[1, 16, 64]).unwrap(),
             false,
         );
         let output = layer.forward(&input);

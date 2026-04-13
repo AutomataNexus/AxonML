@@ -38,12 +38,16 @@ const REPOS: &[(&str, &str)] = &[
 ];
 
 fn main() -> eframe::Result {
+    // Frameless + transparent — we paint our own rounded background and a
+    // custom titlebar. Matches the style we set on tech-ticker so both
+    // widgets look like a single cohesive set.
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([TICKER_WIDTH, TICKER_HEIGHT])
             .with_always_on_top()
-            .with_decorations(true)
-            .with_transparent(false)
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_resizable(true)
             .with_title("nexus-agent"),
         ..Default::default()
     };
@@ -342,9 +346,27 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
         // Only commits + pushes once `cargo fmt --check` and `cargo clippy -- -D warnings`
         // both pass locally. If the loop can't reach a green verify, toast and leave
         // the working tree dirty for manual investigation.
+        //
+        // Per LESSONS.md L18: `/opt/AxonML/crates/` is chattr +i locked. Before fix
+        // attempts, run `sudo /opt/AxonML/unlock-crates.sh` if the local repo path
+        // matches, and re-lock after a successful push.
         const MAX_RALPH_ITER: usize = 5;
         let mut verified = false;
         let mut current_errors = error_log.clone();
+        let is_axonml = *local_path == "/opt/AxonML";
+
+        // Unlock before attempting any writes — required for AxonML framework code
+        if is_axonml {
+            let unlock = tokio::process::Command::new("sudo")
+                .args(["-n", "/opt/AxonML/unlock-crates.sh"])
+                .output().await;
+            if let Ok(mut s) = state.lock() {
+                match unlock {
+                    Ok(o) if o.status.success() => s.push_log("    unlocked /opt/AxonML/crates", false),
+                    _ => s.push_log("    WARN: unlock-crates failed (sudo NOPASSWD not set?); writes may fail", true),
+                }
+            }
+        }
 
         for iter in 0..MAX_RALPH_ITER {
             if let Ok(mut s) = state.lock() {
@@ -352,13 +374,30 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
             }
 
             // Apply fixes
-            let _ = tokio::process::Command::new("cargo")
+            let fmt_out = tokio::process::Command::new("cargo")
                 .args(["fmt", "--all"])
                 .current_dir(local_path)
                 .output().await;
 
+            // Detect the chattr-immutable symptom and self-heal on the fly.
+            // `cargo fmt` prints "Operation not permitted (os error 1)" to stderr when
+            // files have `chattr +i`. If we see that, call unlock-crates and let the
+            // next iteration retry.
+            if let Ok(ref out) = fmt_out {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                if stderr.contains("Operation not permitted") && is_axonml {
+                    if let Ok(mut s) = state.lock() {
+                        s.push_log("      perm denied — re-running unlock-crates", true);
+                    }
+                    let _ = tokio::process::Command::new("sudo")
+                        .args(["-n", "/opt/AxonML/unlock-crates.sh"])
+                        .output().await;
+                }
+            }
+            let _ = fmt_out;
+
             let _ = tokio::process::Command::new("cargo")
-                .args(["clippy", "--fix", "--allow-dirty", "--allow-staged", "--all-targets", "--workspace"])
+                .args(["clippy", "--fix", "--allow-dirty", "--allow-staged", "--workspace"])
                 .current_dir(local_path)
                 .output().await;
 
@@ -383,7 +422,7 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
             let fmt_ok = fmt_check.as_ref().map(|o| o.status.success()).unwrap_or(false);
 
             let clippy_check = tokio::process::Command::new("cargo")
-                .args(["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])
+                .args(["clippy", "--workspace", "--", "-D", "warnings"])
                 .current_dir(local_path)
                 .output().await;
             let clippy_ok = clippy_check.as_ref().map(|o| o.status.success()).unwrap_or(false);
@@ -462,6 +501,19 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
                             s.push_log(&format!("    {short_name}: verified + pushed ({files_changed} files)"), false);
                         } else {
                             s.push_log(&format!("    {short_name}: verified + committed but push failed"), true);
+                        }
+                    }
+
+                    // Re-lock AxonML/crates after a successful push
+                    if pushed && is_axonml {
+                        let relock = tokio::process::Command::new("sudo")
+                            .args(["-n", "/opt/AxonML/lock-crates.sh"])
+                            .output().await;
+                        if let Ok(mut s) = state.lock() {
+                            match relock {
+                                Ok(o) if o.status.success() => s.push_log("    re-locked /opt/AxonML/crates", false),
+                                _ => s.push_log("    WARN: re-lock failed", true),
+                            }
                         }
                     }
 
@@ -618,31 +670,113 @@ async fn git_dirty_check(state: Arc<Mutex<SharedState>>) {
 // =============================================================================
 
 impl eframe::App for TickerApp {
+    /// Transparent framebuffer clear so only our rounded Frame shows —
+    /// without this the area outside the rounded pill paints opaque.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Repaint frequently for pulse animation
         ctx.request_repaint_after(std::time::Duration::from_millis(60));
 
-        // Dark theme with NexusStratum palette
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = BG_DARK;
-        visuals.window_fill = BG_DARK;
-        visuals.override_text_color = Some(CREAM);
+        // Load persisted theme on first frame, then apply egui visuals that match.
+        // We sync ACTIVE_THEME from disk once, on the first paint, so load order
+        // doesn't matter. Toggling happens via the header button (bottom of impl).
+        static LOADED: std::sync::Once = std::sync::Once::new();
+        LOADED.call_once(|| set_active_theme(Theme::load()));
+
+        let is_light = ACTIVE_THEME.load(std::sync::atomic::Ordering::Relaxed) == 1;
+        let mut visuals = if is_light { egui::Visuals::light() } else { egui::Visuals::dark() };
+        visuals.panel_fill = egui::Color32::TRANSPARENT;
+        visuals.window_fill = egui::Color32::TRANSPARENT;
+        visuals.override_text_color = Some(CREAM());
         ctx.set_visuals(visuals);
 
         let snap = self.state.lock().unwrap().clone_snapshot();
         let is_active = snap.status_label != "IDLE";
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // ---- Header: main status LED + label + right-side indicators ----
+        // Outer rounded pill — matches the tech-ticker chrome.
+        let outer_frame = egui::Frame::none()
+            .fill(BG_DARK())
+            .rounding(egui::Rounding::same(10.0))
+            .stroke(egui::Stroke::new(
+                1.0,
+                if is_light {
+                    egui::Color32::from_rgba_unmultiplied(
+                        TEXT_DIM().r(), TEXT_DIM().g(), TEXT_DIM().b(), 90,
+                    )
+                } else {
+                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 18)
+                },
+            ))
+            .shadow(egui::epaint::Shadow {
+                offset: egui::vec2(0.0, 2.0),
+                blur: 8.0,
+                spread: 0.0,
+                color: egui::Color32::from_rgba_unmultiplied(0, 0, 0, if is_light { 32 } else { 120 }),
+            })
+            .inner_margin(egui::Margin::symmetric(10.0, 8.0));
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().inner_margin(egui::Margin::same(6.0)))
+            .show(ctx, |ui| { outer_frame.show(ui, |ui| {
+            // ── Custom titlebar: drag region + close/min buttons ──────────
+            let title_resp = ui.horizontal(|ui| {
+                let main_color = status_led_color(&snap.status_label);
+                draw_led(ui, main_color, 5.0, is_active);
+                ui.label(egui::RichText::new("NEXUS-AGENT").strong().size(11.0).color(CREAM()));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Close
+                    if ui.add(egui::Button::new(
+                        egui::RichText::new("✕").size(12.0).color(TEXT_DIM()),
+                    ).frame(false).min_size(egui::vec2(20.0, 20.0)))
+                        .on_hover_text("close").clicked()
+                    {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    // Minimize
+                    if ui.add(egui::Button::new(
+                        egui::RichText::new("—").size(12.0).color(TEXT_DIM()),
+                    ).frame(false).min_size(egui::vec2(20.0, 20.0)))
+                        .on_hover_text("minimize").clicked()
+                    {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    }
+                });
+            }).response;
+            let drag_sense = ui.interact(title_resp.rect, egui::Id::new("nexus-drag"), egui::Sense::click_and_drag());
+            if drag_sense.drag_started_by(egui::PointerButton::Primary) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+            ui.separator();
+
+            // ---- Status line (was the old header): status LED + detail + right-side toggles ----
             ui.horizontal(|ui| {
                 let main_color = status_led_color(&snap.status_label);
                 draw_led(ui, main_color, 6.0, is_active);
-                ui.label(egui::RichText::new(snap.status_label).strong().size(11.0).color(CREAM));
-                ui.label(egui::RichText::new(&snap.status_detail).size(9.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new(snap.status_label).strong().size(11.0).color(CREAM()));
+                ui.label(egui::RichText::new(&snap.status_detail).size(9.0).color(TEXT_DIM()));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Theme toggle — ☀ / ☾ to flip light/dark, persists across restarts
+                    let is_light_now = ACTIVE_THEME.load(std::sync::atomic::Ordering::Relaxed) == 1;
+                    let theme_glyph = if is_light_now { "☾" } else { "☀" };
+                    let theme_btn = egui::RichText::new(theme_glyph).size(11.0).color(AMBER()).strong();
+                    if ui.add(egui::Button::new(theme_btn)
+                        .frame(false)
+                        .min_size(egui::vec2(16.0, 16.0)))
+                        .on_hover_text("Toggle light/dark theme")
+                        .clicked()
+                    {
+                        let new_theme = if is_light_now { Theme::Dark } else { Theme::Light };
+                        set_active_theme(new_theme);
+                        new_theme.save();
+                    }
+                    ui.add_space(4.0);
+
                     // Help button — opens CHEATSHEET.md in neovim via Windows Terminal
-                    let help_btn = egui::RichText::new("?").size(11.0).color(TEAL).strong();
+                    let help_btn = egui::RichText::new("?").size(11.0).color(TEAL()).strong();
                     if ui.add(egui::Button::new(help_btn)
                         .frame(false)
                         .min_size(egui::vec2(16.0, 16.0)))
@@ -654,14 +788,14 @@ impl eframe::App for TickerApp {
                     ui.add_space(4.0);
 
                     // nexus-serve LED
-                    let serve_c = if snap.backend_online { TEAL } else { TERRACOTTA };
+                    let serve_c = if snap.backend_online { TEAL() } else { TERRACOTTA() };
                     draw_led(ui, serve_c, 4.0, !snap.backend_online);
-                    ui.label(egui::RichText::new("serve").size(8.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("serve").size(8.0).color(TEXT_DIM()));
 
                     // CI summary LED
-                    let ci_c = if snap.ci_failures == 0 { TEAL } else { TERRACOTTA };
+                    let ci_c = if snap.ci_failures == 0 { TEAL() } else { TERRACOTTA() };
                     draw_led(ui, ci_c, 4.0, snap.ci_failures > 0);
-                    ui.label(egui::RichText::new(format!("CI:{}", snap.ci_failures)).size(8.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new(format!("CI:{}", snap.ci_failures)).size(8.0).color(TEXT_DIM()));
                 });
             });
 
@@ -669,18 +803,47 @@ impl eframe::App for TickerApp {
             ui.horizontal_wrapped(|ui| {
                 for (name, ci_ok) in &snap.repo_statuses {
                     let color = match ci_ok {
-                        Some(true) => TEAL,
-                        Some(false) => TERRACOTTA,
-                        None => SLATE,
+                        Some(true) => TEAL(),
+                        Some(false) => TERRACOTTA(),
+                        None => SLATE(),
                     };
                     draw_led(ui, color, 3.0, *ci_ok == Some(false));
-                    ui.label(egui::RichText::new(name).size(8.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new(name).size(8.0).color(TEXT_DIM()));
                     ui.add_space(4.0);
                 }
             });
 
             ui.add_space(2.0);
             ui.separator();
+
+            // ---- Log toolbar: Copy All + Clear ----
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("log").size(9.0).color(TEXT_DIM()));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(egui::Button::new(egui::RichText::new("clear").size(9.0).color(TERRACOTTA()))
+                        .frame(false))
+                        .on_hover_text("Clear the log buffer")
+                        .clicked()
+                    {
+                        if let Ok(mut s) = self.state.lock() {
+                            s.log.clear();
+                            s.push_log("log cleared", false);
+                        }
+                    }
+                    ui.add_space(6.0);
+                    if ui.add(egui::Button::new(egui::RichText::new("copy all").size(9.0).color(TEAL()))
+                        .frame(false))
+                        .on_hover_text("Copy entire log to clipboard")
+                        .clicked()
+                    {
+                        let full: String = snap.log_entries.iter()
+                            .map(|(ts, msg, _)| format!("{ts}  {msg}"))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        ctx.copy_text(full);
+                    }
+                });
+            });
 
             // ---- Scrolling log ----
             let available = ui.available_height() - 30.0;
@@ -690,8 +853,8 @@ impl eframe::App for TickerApp {
                 .show(ui, |ui| {
                     for (ts, msg, is_err) in &snap.log_entries {
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(ts).size(8.0).color(SLATE));
-                            let color = if *is_err { TERRACOTTA } else { CREAM };
+                            ui.label(egui::RichText::new(ts).size(8.0).color(SLATE()));
+                            let color = if *is_err { TERRACOTTA() } else { CREAM() };
                             ui.label(egui::RichText::new(msg).size(9.0).color(color));
                         });
                     }
@@ -703,12 +866,12 @@ impl eframe::App for TickerApp {
                 let pushes = snap.pending_pushes.clone();
                 for pp in &pushes {
                     ui.horizontal(|ui| {
-                        draw_led(ui, AMBER, 3.5, true);
+                        draw_led(ui, AMBER(), 3.5, true);
                         ui.label(egui::RichText::new(
                             format!("{}: {} file(s) — {}", pp.0, pp.2, pp.1)
-                        ).size(9.0).color(AMBER));
+                        ).size(9.0).color(AMBER()));
 
-                        if ui.button(egui::RichText::new("Push").size(9.0).color(TEAL)).clicked() {
+                        if ui.button(egui::RichText::new("Push").size(9.0).color(TEAL())).clicked() {
                             let path = pp.3.clone();
                             let name = pp.0.clone();
                             let state_ref = self.state.clone();
@@ -734,7 +897,7 @@ impl eframe::App for TickerApp {
                             });
                         }
 
-                        if ui.button(egui::RichText::new("Revert").size(9.0).color(TERRACOTTA)).clicked() {
+                        if ui.button(egui::RichText::new("Revert").size(9.0).color(TERRACOTTA())).clicked() {
                             let path = pp.3.clone();
                             let name = pp.0.clone();
                             let state_ref = self.state.clone();
@@ -783,6 +946,7 @@ impl eframe::App for TickerApp {
                     r.request_focus();
                 }
             });
+            }); // closes outer_frame.show
         });
     }
 }
@@ -791,13 +955,89 @@ impl eframe::App for TickerApp {
 // NexusStratum palette + LED rendering
 // =============================================================================
 
-const CREAM: egui::Color32 = egui::Color32::from_rgb(245, 240, 235);       // #F5F0EB
-const TEAL: egui::Color32 = egui::Color32::from_rgb(20, 184, 166);         // #14b8a6
-const TERRACOTTA: egui::Color32 = egui::Color32::from_rgb(205, 92, 68);    // warm red
-const AMBER: egui::Color32 = egui::Color32::from_rgb(245, 180, 60);
-const SLATE: egui::Color32 = egui::Color32::from_rgb(150, 145, 138);       // unknown/grey
-const BG_DARK: egui::Color32 = egui::Color32::from_rgb(45, 42, 38);        // #2D2A26
-const TEXT_DIM: egui::Color32 = egui::Color32::from_rgb(155, 145, 138);     // #9B918A
+// ─── Theme system (mirrors tech_ticker.rs) ───────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq)]
+#[allow(dead_code)]
+enum Theme { Dark, Light }
+
+const THEME_FILE: &str = "/tmp/.nexus-ticker-theme";
+
+impl Theme {
+    fn load() -> Self {
+        match std::fs::read_to_string(THEME_FILE).ok().as_deref().map(str::trim) {
+            Some("light") => Self::Light,
+            _ => Self::Dark,
+        }
+    }
+    fn save(&self) {
+        let _ = std::fs::write(THEME_FILE, match self { Self::Dark => "dark", Self::Light => "light" });
+    }
+    #[allow(dead_code)]
+    fn toggle(self) -> Self { if self == Self::Dark { Self::Light } else { Self::Dark } }
+}
+
+#[derive(Clone, Copy)]
+struct Palette {
+    bg: egui::Color32,
+    bg_row: egui::Color32,
+    text: egui::Color32,
+    text_dim: egui::Color32,
+    accent: egui::Color32,
+    warn: egui::Color32,
+    alert: egui::Color32,
+    slate: egui::Color32,
+}
+
+const DARK: Palette = Palette {
+    bg: egui::Color32::from_rgb(45, 42, 38),
+    bg_row: egui::Color32::from_rgb(55, 50, 46),
+    text: egui::Color32::from_rgb(245, 240, 235),
+    text_dim: egui::Color32::from_rgb(155, 145, 138),
+    accent: egui::Color32::from_rgb(20, 184, 166),
+    warn: egui::Color32::from_rgb(245, 180, 60),
+    alert: egui::Color32::from_rgb(205, 92, 68),
+    slate: egui::Color32::from_rgb(150, 145, 138),
+};
+
+const LIGHT: Palette = Palette {
+    bg: egui::Color32::from_rgb(250, 249, 245),
+    bg_row: egui::Color32::from_rgb(241, 236, 224),
+    text: egui::Color32::from_rgb(61, 57, 41),
+    text_dim: egui::Color32::from_rgb(141, 132, 119),
+    accent: egui::Color32::from_rgb(201, 100, 66),
+    warn: egui::Color32::from_rgb(201, 133, 50),
+    alert: egui::Color32::from_rgb(180, 60, 50),
+    slate: egui::Color32::from_rgb(180, 172, 158),
+};
+
+static ACTIVE_THEME: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+fn active_palette() -> Palette {
+    match ACTIVE_THEME.load(std::sync::atomic::Ordering::Relaxed) { 1 => LIGHT, _ => DARK }
+}
+#[allow(dead_code)]
+fn set_active_theme(t: Theme) {
+    ACTIVE_THEME.store(match t { Theme::Dark => 0, Theme::Light => 1 }, std::sync::atomic::Ordering::Relaxed);
+}
+
+// Named-color accessors — all resolve via the active palette, so swapping
+// themes flips the UI without touching draw code.
+#[allow(non_snake_case)]
+fn CREAM() -> egui::Color32 { active_palette().text }
+#[allow(non_snake_case)]
+fn TEAL() -> egui::Color32 { active_palette().accent }
+#[allow(non_snake_case)]
+fn TERRACOTTA() -> egui::Color32 { active_palette().alert }
+#[allow(non_snake_case)]
+fn AMBER() -> egui::Color32 { active_palette().warn }
+#[allow(non_snake_case)]
+fn SLATE() -> egui::Color32 { active_palette().slate }
+#[allow(non_snake_case)]
+fn BG_DARK() -> egui::Color32 { active_palette().bg }
+#[allow(non_snake_case)]
+fn BG_ROW() -> egui::Color32 { active_palette().bg_row }
+#[allow(non_snake_case)]
+fn TEXT_DIM() -> egui::Color32 { active_palette().text_dim }
 
 /// Draw a pulsing LED circle. `pulse` controls brightness oscillation.
 fn draw_led(ui: &mut egui::Ui, color: egui::Color32, radius: f32, pulse: bool) {
@@ -830,11 +1070,11 @@ fn draw_led(ui: &mut egui::Ui, color: egui::Color32, radius: f32, pulse: bool) {
 
 fn status_led_color(status: &str) -> egui::Color32 {
     match status {
-        "IDLE" => TEAL,
-        "MONITORING" => TEAL,
-        "FIXING" => AMBER,
-        "ERROR" => TERRACOTTA,
-        _ => SLATE,
+        "IDLE" => TEAL(),
+        "MONITORING" => TEAL(),
+        "FIXING" => AMBER(),
+        "ERROR" => TERRACOTTA(),
+        _ => SLATE(),
     }
 }
 

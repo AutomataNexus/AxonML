@@ -1222,10 +1222,7 @@ mod tests {
     #[test]
     fn test_conv1d_with_padding_and_stride() {
         let conv = Conv1d::with_options(1, 4, 3, 2, 1, true);
-        let input = Variable::new(
-            Tensor::from_vec(vec![1.0; 16], &[1, 1, 16]).unwrap(),
-            true,
-        );
+        let input = Variable::new(Tensor::from_vec(vec![1.0; 16], &[1, 1, 16]).unwrap(), true);
         let output = conv.forward(&input);
         // L_out = (16 + 2*1 - 3) / 2 + 1 = 8
         assert_eq!(output.shape(), vec![1, 4, 8]);

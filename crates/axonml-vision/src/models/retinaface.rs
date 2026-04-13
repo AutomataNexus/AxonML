@@ -447,7 +447,7 @@ mod tests {
     fn test_context_module() {
         let ctx = ContextModule::new(64, 64);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 64 * 8 * 8], &[1, 64, 8, 8]).unwrap(),
+            Tensor::from_vec(vec![0.1; 64 * 8 * 8], &[1, 64, 8, 8]).unwrap(),
             false,
         );
         let output = ctx.forward(&input);
@@ -458,7 +458,7 @@ mod tests {
     fn test_detection_head() {
         let head = DetectionHead::new(64, 2);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 64 * 8 * 8], &[1, 64, 8, 8]).unwrap(),
+            Tensor::from_vec(vec![0.1; 64 * 8 * 8], &[1, 64, 8, 8]).unwrap(),
             false,
         );
         let (cls, bbox, ldm) = head.forward(&input);
@@ -471,7 +471,7 @@ mod tests {
     fn test_retinaface_forward_smoke() {
         let model = RetinaFace::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
             false,
         );
         let output = model.forward(&input);

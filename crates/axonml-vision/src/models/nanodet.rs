@@ -733,7 +733,7 @@ mod tests {
     fn test_shuffle_block_stride1() {
         let block = ShuffleBlock::new(48, 48, 1);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 48 * 8 * 8], &[1, 48, 8, 8]).unwrap(),
+            Tensor::from_vec(vec![0.1; 48 * 8 * 8], &[1, 48, 8, 8]).unwrap(),
             false,
         );
         let output = block.forward(&input);
@@ -744,7 +744,7 @@ mod tests {
     fn test_shuffle_block_stride2() {
         let block = ShuffleBlock::new(24, 48, 2);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 24 * 16 * 16], &[1, 24, 16, 16]).unwrap(),
+            Tensor::from_vec(vec![0.1; 24 * 16 * 16], &[1, 24, 16, 16]).unwrap(),
             false,
         );
         let output = block.forward(&input);
@@ -773,7 +773,7 @@ mod tests {
     fn test_nanodet_forward() {
         let model = NanoDet::new(20);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
             false,
         );
         let output = model.forward(&input);
@@ -785,7 +785,7 @@ mod tests {
     #[test]
     fn test_channel_shuffle() {
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 4 * 2 * 2], &[1, 4, 2, 2]).unwrap(),
+            Tensor::from_vec(vec![0.1; 4 * 2 * 2], &[1, 4, 2, 2]).unwrap(),
             false,
         );
         let output = channel_shuffle(&input, 2);

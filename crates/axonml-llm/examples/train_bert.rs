@@ -159,7 +159,7 @@ fn main() {
         let mut epoch_loss = 0.0_f32;
         let mut epoch_correct = 0usize;
         let mut epoch_total = 0usize;
-        let num_batches = (NUM_TRAIN + BATCH_SIZE - 1) / BATCH_SIZE;
+        let num_batches = NUM_TRAIN.div_ceil(BATCH_SIZE);
 
         for batch_idx in 0..num_batches {
             let start = batch_idx * BATCH_SIZE;
@@ -217,7 +217,7 @@ fn main() {
         model.eval();
         let mut test_loss = 0.0_f32;
         let mut test_correct = 0usize;
-        let test_batches = (NUM_TEST + BATCH_SIZE - 1) / BATCH_SIZE;
+        let test_batches = NUM_TEST.div_ceil(BATCH_SIZE);
 
         for batch_idx in 0..test_batches {
             let start = batch_idx * BATCH_SIZE;

@@ -303,7 +303,7 @@ mod tests {
         // Verify forward pass produces finite output at multiple scales
         for size in [64, 128] {
             let pixels: Vec<f32> = (0..3 * size * size)
-                .map(|i| ((i as f32 * 0.001).sin() * 0.5 + 0.5))
+                .map(|i| (i as f32 * 0.001).sin() * 0.5 + 0.5)
                 .collect();
             let frame = Variable::new(
                 Tensor::from_vec(pixels, &[1, 3, size, size]).unwrap(),
@@ -334,7 +334,7 @@ mod tests {
         for step in 0..3 {
             let seed = step as f32 * 0.1;
             let pixels: Vec<f32> = (0..3 * 64 * 64)
-                .map(|i| ((i as f32 * 0.001 + seed).sin() * 0.5 + 0.5))
+                .map(|i| (i as f32 * 0.001 + seed).sin() * 0.5 + 0.5)
                 .collect();
             let frame = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
             let gt_faces = vec![[10.0, 10.0, 30.0, 30.0]];
@@ -466,7 +466,7 @@ mod tests {
         for step in 0..5 {
             let seed = step as f32 * 0.1;
             let pixels: Vec<f32> = (0..3 * 64 * 64)
-                .map(|i| ((i as f32 * 0.001 + seed).sin() * 0.5 + 0.5))
+                .map(|i| (i as f32 * 0.001 + seed).sin() * 0.5 + 0.5)
                 .collect();
             let input = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
 
