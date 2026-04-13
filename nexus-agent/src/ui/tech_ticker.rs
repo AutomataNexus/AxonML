@@ -71,30 +71,151 @@ const TECHS: &[(&str, &str, &str)] = &[
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NexusStratum palette
+// Palettes — dark (NexusStratum) + light (Claude browser UI)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CREAM: egui::Color32 = egui::Color32::from_rgb(245, 240, 235);
+/// Which theme the ticker is currently rendering in. Persisted so it sticks
+/// across restarts.
+#[derive(Clone, Copy, PartialEq)]
+enum Theme {
+    Dark,
+    Light,
+}
+
+const THEME_FILE: &str = "/tmp/.tech-ticker-theme";
+
+impl Theme {
+    fn load() -> Self {
+        match std::fs::read_to_string(THEME_FILE).ok().as_deref().map(str::trim) {
+            Some("light") => Self::Light,
+            _ => Self::Dark,
+        }
+    }
+    fn save(&self) {
+        let _ = std::fs::write(
+            THEME_FILE,
+            match self {
+                Self::Dark => "dark",
+                Self::Light => "light",
+            },
+        );
+    }
+}
+
+/// A palette is just a bundle of named colors. We keep a static Dark one
+/// and a Light one, then swap by which `Palette` we hand to draw helpers.
+#[derive(Clone, Copy)]
+struct Palette {
+    bg:       egui::Color32,
+    bg_row:   egui::Color32,
+    text:     egui::Color32,
+    text_dim: egui::Color32,
+    accent:   egui::Color32,   // "good" / primary action (teal dark, claude-coral light)
+    warn:     egui::Color32,   // amber — "close to limit" / unacknowledged events
+    alert:    egui::Color32,   // terracotta — errors / disabled / over-limit
+    slate:    egui::Color32,   // dim/offline/unknown
+}
+
+// ── Dark theme (original NexusStratum) ──────────────────────────────────────
+const DARK: Palette = Palette {
+    bg:       egui::Color32::from_rgb(45, 42, 38),     // #2D2A26
+    bg_row:   egui::Color32::from_rgb(55, 50, 46),
+    text:     egui::Color32::from_rgb(245, 240, 235),
+    text_dim: egui::Color32::from_rgb(155, 145, 138),
+    accent:   egui::Color32::from_rgb(20, 184, 166),   // teal
+    warn:     egui::Color32::from_rgb(245, 180, 60),   // amber
+    alert:    egui::Color32::from_rgb(205, 92, 68),    // terracotta
+    slate:    egui::Color32::from_rgb(150, 145, 138),
+};
+
+// ── Light theme — Claude browser UI palette ─────────────────────────────────
+const LIGHT: Palette = Palette {
+    bg:       egui::Color32::from_rgb(250, 249, 245),  // #faf9f5 warm cream
+    bg_row:   egui::Color32::from_rgb(237, 231, 216),  // #ede7d8 warmer, reads as a card
+    text:     egui::Color32::from_rgb(61, 57, 41),     // #3d3929 warm brown
+    text_dim: egui::Color32::from_rgb(141, 132, 119),  // #8d8477 warm grey
+    accent:   egui::Color32::from_rgb(201, 100, 66),   // #c96442 Claude coral
+    // Deep burnt-orange — legible on the cream bg where pure amber washes out.
+    warn:     egui::Color32::from_rgb(176, 88, 22),    // #b05816
+    alert:    egui::Color32::from_rgb(170, 50, 40),    // deep red
+    slate:    egui::Color32::from_rgb(180, 172, 158),  // soft tan
+};
+
+// LED semantic colors — teal / terracotta / slate work in both themes so
+// they stay as constants. Amber is too washed-out on a cream background
+// though, so it's promoted to a palette-driven lookup.
 const TEAL: egui::Color32 = egui::Color32::from_rgb(20, 184, 166);
 const TERRACOTTA: egui::Color32 = egui::Color32::from_rgb(205, 92, 68);
-const AMBER: egui::Color32 = egui::Color32::from_rgb(245, 180, 60);
 const SLATE: egui::Color32 = egui::Color32::from_rgb(150, 145, 138);
-const BG_DARK: egui::Color32 = egui::Color32::from_rgb(45, 42, 38);
-const BG_ROW: egui::Color32 = egui::Color32::from_rgb(55, 50, 46);
-const TEXT_DIM: egui::Color32 = egui::Color32::from_rgb(155, 145, 138);
+
+/// Warn color — bright amber on dark, deep burnt-orange on light so it
+/// reads against the warm cream background.
+#[allow(non_snake_case)]
+fn AMBER() -> egui::Color32 {
+    active_palette().warn
+}
+
+/// Process-wide current theme. Reading is hot-path inside paint, so keep it
+/// cheap — `AtomicU8` + a tiny decode helper.
+static ACTIVE_THEME: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+fn active_palette() -> Palette {
+    match ACTIVE_THEME.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => LIGHT,
+        _ => DARK,
+    }
+}
+fn set_active_theme(t: Theme) {
+    let v: u8 = match t {
+        Theme::Dark => 0,
+        Theme::Light => 1,
+    };
+    ACTIVE_THEME.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Helper to pick primary-text color using the current palette.
+fn c_text() -> egui::Color32 {
+    active_palette().text
+}
+fn c_text_dim() -> egui::Color32 {
+    active_palette().text_dim
+}
+fn c_bg() -> egui::Color32 {
+    active_palette().bg
+}
+fn c_bg_row() -> egui::Color32 {
+    active_palette().bg_row
+}
+
+// Backwards-compat names for the existing UI code — resolve via the palette
+// lookup at call time so theme switches take effect without a refactor.
+#[allow(non_snake_case)]
+fn CREAM() -> egui::Color32 { c_text() }
+#[allow(non_snake_case)]
+fn TEXT_DIM() -> egui::Color32 { c_text_dim() }
+#[allow(non_snake_case)]
+fn BG_DARK() -> egui::Color32 { c_bg() }
+#[allow(non_snake_case)]
+fn BG_ROW() -> egui::Color32 { c_bg_row() }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Entry
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn main() -> eframe::Result {
+    // Restore persisted theme before the first paint so there's no flash.
+    set_active_theme(Theme::load());
+
+    // Frameless + transparent so we can paint a rounded background + custom
+    // titlebar ourselves. WSLg's Xwayland path doesn't always pick up DWM's
+    // default corner rounding, so drawing it in-app is the reliable option.
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([WIDTH, HEIGHT])
             .with_min_inner_size([WIDTH, 120.0])
             .with_always_on_top()
-            .with_decorations(true)
-            .with_transparent(false)
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_resizable(true)
             .with_title("tech-monitor"),
         ..Default::default()
     };
@@ -263,6 +384,7 @@ impl TechApp {
             relay_state: None,
             last_relay_error: None,
             show_events: false,
+            disabled_techs: HashMap::new(),
         }));
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -294,6 +416,15 @@ impl TechApp {
             loop {
                 refresh_relay(&s3).await;
                 tokio::time::sleep(std::time::Duration::from_secs(RELAY_POLL_SECS)).await;
+            }
+        });
+
+        // Tech-access overrides poller — populates the Disable/Enable state
+        let s4 = state.clone();
+        runtime.spawn(async move {
+            loop {
+                refresh_tech_overrides(&s4).await;
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
             }
         });
 
@@ -440,6 +571,35 @@ fn persist_last_seen(ts: chrono::DateTime<chrono::Utc>) {
     let _ = std::fs::write(LAST_SEEN_FILE, ts.to_rfc3339());
 }
 
+/// Poll the daemon for current tech-access disable overrides so the ticker
+/// can render the Disable button in the correct on/off state.
+async fn refresh_tech_overrides(state: &Arc<Mutex<Shared>>) {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let resp = client
+        .get(format!("{DAEMON_URL}/api/v1/tech-access/overrides"))
+        .header("Authorization", format!("Bearer {OWNER_API_KEY}"))
+        .send()
+        .await;
+    let Ok(r) = resp else { return };
+    if !r.status().is_success() {
+        return;
+    }
+    let Ok(map) = r.json::<HashMap<String, RemoteOverride>>().await else {
+        return;
+    };
+    let disabled: HashMap<String, String> = map
+        .into_iter()
+        .filter(|(_, v)| v.disabled)
+        .map(|(k, v)| (k, v.reason))
+        .collect();
+    if let Ok(mut s) = state.lock() {
+        s.disabled_techs = disabled;
+    }
+}
+
 async fn refresh_rate_limits(state: &Arc<Mutex<Shared>>) {
     // scp the JSON down (SSH key auth — same as used elsewhere in this
     // workspace). Fallback: if scp fails, we leave the data stale but record
@@ -580,14 +740,27 @@ fn parse_tech_overrides(cfg: &str) -> HashMap<String, (usize, u64)> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 impl eframe::App for TechApp {
+    /// Clear the framebuffer to fully transparent each frame. Without this
+    /// override, eframe clears to `visuals.panel_fill` (opaque) and the area
+    /// outside our rounded Frame shows up as a dark rectangle.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Repaint for LED pulse
         ctx.request_repaint_after(std::time::Duration::from_millis(80));
 
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = BG_DARK;
-        visuals.window_fill = BG_DARK;
-        visuals.override_text_color = Some(CREAM);
+        // Pick base visuals depending on active theme. The outer CentralPanel
+        // is transparent — we paint a rounded `Frame` inside it to get the
+        // custom window chrome.
+        let mut visuals = match active_palette().bg == LIGHT.bg {
+            true => egui::Visuals::light(),
+            false => egui::Visuals::dark(),
+        };
+        visuals.panel_fill = egui::Color32::TRANSPARENT;
+        visuals.window_fill = egui::Color32::TRANSPARENT;
+        visuals.override_text_color = Some(CREAM());
         ctx.set_visuals(visuals);
 
         let snapshot: Vec<(String, &'static str, &'static str, TechState)> = {
@@ -629,24 +802,106 @@ impl eframe::App for TechApp {
             }
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // Header row
-            ui.horizontal(|ui| {
+        let palette = active_palette();
+        let is_light = palette.bg == LIGHT.bg;
+        // Outer rounded frame — this is our whole window surface. It has a
+        // subtle border and drop shadow so it reads as a floating pill
+        // against whatever's behind it (now that the OS chrome is gone).
+        let outer_frame = egui::Frame::none()
+            .fill(palette.bg)
+            .rounding(egui::Rounding::same(10.0))
+            .stroke(egui::Stroke::new(
+                1.0,
+                if is_light {
+                    egui::Color32::from_rgba_unmultiplied(
+                        palette.text_dim.r(),
+                        palette.text_dim.g(),
+                        palette.text_dim.b(),
+                        90,
+                    )
+                } else {
+                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 18)
+                },
+            ))
+            .shadow(egui::epaint::Shadow {
+                offset: egui::vec2(0.0, 2.0),
+                blur: 8.0,
+                spread: 0.0,
+                color: egui::Color32::from_rgba_unmultiplied(0, 0, 0, if is_light { 32 } else { 120 }),
+            })
+            .inner_margin(egui::Margin::symmetric(10.0, 8.0));
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().inner_margin(egui::Margin::same(6.0)))
+            .show(ctx, |ui| { outer_frame.show(ui, |ui| {
+            // ── Custom titlebar (drag region + close button) ─────────────
+            let title_resp = ui.horizontal(|ui| {
                 draw_led(ui, TEAL, 5.0, true);
                 ui.label(
                     egui::RichText::new("TECH MONITOR")
                         .strong()
                         .size(11.0)
-                        .color(CREAM),
+                        .color(CREAM()),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Close — red-X on hover
+                    let close = egui::Button::new(
+                        egui::RichText::new("✕").size(12.0).color(TEXT_DIM()),
+                    )
+                    .frame(false)
+                    .min_size(egui::vec2(20.0, 20.0));
+                    if ui.add(close).on_hover_text("close").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    // Minimize
+                    let min = egui::Button::new(
+                        egui::RichText::new("—").size(12.0).color(TEXT_DIM()),
+                    )
+                    .frame(false)
+                    .min_size(egui::vec2(20.0, 20.0));
+                    if ui.add(min).on_hover_text("minimize").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    }
+                });
+            }).response;
+
+            // Any drag that starts on the title-row (not on its buttons,
+            // since buttons consume the click) moves the OS window.
+            let drag_sense = ui.interact(title_resp.rect, egui::Id::new("drag-zone"), egui::Sense::click_and_drag());
+            if drag_sense.drag_started_by(egui::PointerButton::Primary) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+
+            ui.separator();
+
+            // ── Row that holds the old "tools" (theme toggle, Build) ─────
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Theme toggle — sun (to switch to light) / moon (to switch to dark).
+                    let is_light = active_palette().bg == LIGHT.bg;
+                    let (glyph, hover, next) = if is_light {
+                        ("☾", "switch to dark theme", Theme::Dark)
+                    } else {
+                        ("☀", "switch to light theme (Claude palette)", Theme::Light)
+                    };
+                    let theme_btn = egui::Button::new(
+                        egui::RichText::new(glyph).size(11.0).color(TEXT_DIM()),
+                    )
+                    .frame(false)
+                    .min_size(egui::vec2(18.0, 18.0));
+                    if ui.add(theme_btn).on_hover_text(hover).clicked() {
+                        set_active_theme(next);
+                        next.save();
+                    }
+                    ui.add_space(4.0);
+
                     // "Build" button (rebuild exe + SIGUSR1 monitor)
                     let building = action.in_flight.as_deref() == Some("build");
                     let btn_label = if building { "building..." } else { "Build" };
                     let btn = egui::Button::new(
-                        egui::RichText::new(btn_label).size(9.0).color(CREAM),
+                        egui::RichText::new(btn_label).size(9.0).color(CREAM()),
                     )
-                    .fill(if building { AMBER.linear_multiply(0.5) } else { TEAL.linear_multiply(0.25) })
+                    .fill(if building { AMBER().linear_multiply(0.5) } else { TEAL.linear_multiply(0.25) })
                     .stroke(egui::Stroke::new(1.0, TEAL))
                     .rounding(3.0)
                     .min_size(egui::vec2(54.0, 18.0));
@@ -668,7 +923,7 @@ impl eframe::App for TechApp {
                         ui.label(
                             egui::RichText::new(t.format("%H:%M").to_string())
                                 .size(9.0)
-                                .color(TEXT_DIM),
+                                .color(TEXT_DIM()),
                         );
                     }
                 });
@@ -679,7 +934,7 @@ impl eframe::App for TechApp {
                 ui.label(
                     egui::RichText::new(format!("⚙ {msg}"))
                         .size(9.0)
-                        .color(AMBER),
+                        .color(AMBER()),
                 );
             } else if let Some((msg, is_err)) = &action.last_result {
                 let color = if *is_err { TERRACOTTA } else { TEAL };
@@ -697,12 +952,12 @@ impl eframe::App for TechApp {
                         .unwrap_or_default();
                     (
                         format!("⚠ {new_count} events since {since}"),
-                        AMBER,
+                        AMBER(),
                     )
                 } else if relay_err.is_some() {
                     ("⚠ relay offline".to_string(), TERRACOTTA)
                 } else {
-                    (format!("{} events", events.len()), TEXT_DIM)
+                    (format!("{} events", events.len()), TEXT_DIM())
                 };
                 let btn = egui::Button::new(
                     egui::RichText::new(&label).size(9.0).color(color),
@@ -750,7 +1005,7 @@ impl eframe::App for TechApp {
                         for ev in events.iter().rev().take(30) {
                             let ts_local =
                                 ev.ts().with_timezone(&chrono::Local).format("%H:%M");
-                            let color = if ev.is_alert() { TERRACOTTA } else if ev.ts() > last_seen { AMBER } else { TEXT_DIM };
+                            let color = if ev.is_alert() { TERRACOTTA } else if ev.ts() > last_seen { AMBER() } else { TEXT_DIM() };
                             ui.label(
                                 egui::RichText::new(format!("{ts_local}  {}", ev.summary()))
                                     .size(9.0)
@@ -763,26 +1018,32 @@ impl eframe::App for TechApp {
             ui.separator();
 
             // Per-tech rows
+            let disabled_techs: HashMap<String, String> = {
+                let s = self.state.lock().unwrap();
+                s.disabled_techs.clone()
+            };
             for (name, _host, wsl, t) in &snapshot {
-                self.draw_tech_row(ui, name, wsl, t);
+                let is_disabled = disabled_techs.contains_key(&name.to_lowercase());
+                self.draw_tech_row(ui, name, wsl, t, is_disabled);
             }
 
             // Footer: legend
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 draw_led(ui, TEAL, 3.0, false);
-                ui.label(egui::RichText::new("online").size(8.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("online").size(8.0).color(TEXT_DIM()));
                 ui.add_space(4.0);
                 draw_led(ui, SLATE, 3.0, false);
-                ui.label(egui::RichText::new("offline").size(8.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("offline").size(8.0).color(TEXT_DIM()));
                 ui.add_space(4.0);
-                draw_led(ui, AMBER, 3.0, true);
+                draw_led(ui, AMBER(), 3.0, true);
                 ui.label(
                     egui::RichText::new("update pending")
                         .size(8.0)
-                        .color(TEXT_DIM),
+                        .color(TEXT_DIM()),
                 );
             });
+            }); // closes outer_frame.show
         });
 
         // Keep the runtime alive
@@ -797,19 +1058,48 @@ impl TechApp {
         name: &str,
         wsl_user: &str,
         t: &TechState,
+        is_disabled: bool,
     ) {
-        let usage_color = if t.max > 0 && t.used >= t.max {
+        let usage_color = if is_disabled {
+            TERRACOTTA
+        } else if t.max > 0 && t.used >= t.max {
             TERRACOTTA
         } else if t.max > 0 && t.used as f32 / t.max as f32 >= 0.66 {
-            AMBER
+            AMBER()
         } else {
             TEAL
         };
 
+        // Beveled row card: slightly rounder corners, a hairline border in
+        // the palette's dim-text color, and a soft drop-shadow to separate
+        // rows from the panel background.
+        let palette = active_palette();
+        let is_light = palette.bg == LIGHT.bg;
+        let border = egui::Stroke::new(
+            1.0,
+            if is_light {
+                egui::Color32::from_rgba_unmultiplied(
+                    palette.text_dim.r(),
+                    palette.text_dim.g(),
+                    palette.text_dim.b(),
+                    60, // very subtle tan-border
+                )
+            } else {
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10) // hairline highlight
+            },
+        );
+        let shadow = egui::epaint::Shadow {
+            offset: egui::vec2(0.0, 1.0),
+            blur: 4.0,
+            spread: 0.0,
+            color: egui::Color32::from_rgba_unmultiplied(0, 0, 0, if is_light { 24 } else { 80 }),
+        };
         egui::Frame::none()
-            .fill(BG_ROW)
-            .rounding(4.0)
-            .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+            .fill(BG_ROW())
+            .rounding(egui::Rounding::same(6.0))
+            .stroke(border)
+            .shadow(shadow)
+            .inner_margin(egui::Margin::symmetric(10.0, 7.0))
             .show(ui, |ui| {
                 // Line 1: LED + name + [update-LED] [SSH] [Reset] ...spacer... usage
                 ui.horizontal(|ui| {
@@ -819,11 +1109,11 @@ impl TechApp {
                         egui::RichText::new(name)
                             .strong()
                             .size(12.0)
-                            .color(CREAM),
+                            .color(CREAM()),
                     );
                     if t.update_pending {
                         ui.add_space(2.0);
-                        draw_led(ui, AMBER, 3.5, true);
+                        draw_led(ui, AMBER(), 3.5, true);
                     }
 
                     ui.with_layout(
@@ -873,6 +1163,23 @@ impl TechApp {
                             if ssh_resp.on_hover_text(hover).clicked() {
                                 self.trigger_ssh(name.to_string(), wsl_user.to_string());
                             }
+
+                            // Disable/Enable toggle — always shown. Glyph and
+                            // color reflect current state; click flips it via
+                            // the daemon's tech-access endpoint.
+                            let (glyph, color, hover_text) = if is_disabled {
+                                ("✓", TEAL, format!("Click to ENABLE {name}"))
+                            } else {
+                                ("⊘", TERRACOTTA, format!("Click to DISABLE {name} (they will get 403 on next request)"))
+                            };
+                            let toggle_btn = egui::Button::new(
+                                egui::RichText::new(glyph).size(12.0).color(color),
+                            )
+                            .frame(false)
+                            .min_size(egui::vec2(18.0, 18.0));
+                            if ui.add(toggle_btn).on_hover_text(hover_text).clicked() {
+                                self.trigger_toggle_disable(name.to_string(), is_disabled);
+                            }
                         },
                     );
                 });
@@ -880,8 +1187,8 @@ impl TechApp {
                 // Line 2: last-used (prominent) ...spacer... window
                 ui.horizontal(|ui| {
                     let (last_label, last_color) = match t.last_request {
-                        Some(ts) => (format!("last used {}", rel_time(ts)), CREAM),
-                        None => ("never used".to_string(), TEXT_DIM),
+                        Some(ts) => (format!("last used {}", rel_time(ts)), CREAM()),
+                        None => ("never used".to_string(), TEXT_DIM()),
                     };
                     ui.label(
                         egui::RichText::new(last_label)
@@ -894,7 +1201,7 @@ impl TechApp {
                             ui.label(
                                 egui::RichText::new(format!("{}h window", t.window_hours))
                                     .size(9.0)
-                                    .color(TEXT_DIM),
+                                    .color(TEXT_DIM()),
                             );
                         },
                     );
@@ -920,10 +1227,62 @@ impl TechApp {
                 }
             });
 
-        ui.add_space(3.0);
+        ui.add_space(5.0);
     }
 
     // ── Actions ──────────────────────────────────────────────────────────────
+
+    fn trigger_toggle_disable(&self, tech_name: String, currently_disabled: bool) {
+        let state = self.state.clone();
+        let label = if currently_disabled {
+            format!("enable {tech_name}")
+        } else {
+            format!("disable {tech_name}")
+        };
+        if let Ok(mut s) = state.lock() {
+            s.action.in_flight = Some(label.clone());
+        }
+        let endpoint = if currently_disabled {
+            "tech-access/enable"
+        } else {
+            "tech-access/disable"
+        };
+        let body = if currently_disabled {
+            serde_json::json!({ "tech_name": tech_name })
+        } else {
+            serde_json::json!({ "tech_name": tech_name, "reason": "disabled from tech-ticker" })
+        };
+        let name_for_log = tech_name.clone();
+        self.runtime.spawn(async move {
+            let client = reqwest::Client::new();
+            let res = client
+                .post(format!("{DAEMON_URL}/api/v1/{endpoint}"))
+                .header("Authorization", format!("Bearer {OWNER_API_KEY}"))
+                .json(&body)
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await;
+            if let Ok(mut s) = state.lock() {
+                s.action.in_flight = None;
+                s.action.last_result = Some(match res {
+                    Ok(r) if r.status().is_success() => {
+                        // Optimistically update local state so the button
+                        // flips before the 30s poll catches up.
+                        let key = name_for_log.to_lowercase();
+                        if currently_disabled {
+                            s.disabled_techs.remove(&key);
+                        } else {
+                            s.disabled_techs.insert(key, "disabled from tech-ticker".to_string());
+                        }
+                        (format!("{label}: OK"), false)
+                    }
+                    Ok(r) => (format!("{label} → HTTP {}", r.status()), true),
+                    Err(e) => (format!("{label}: {e}"), true),
+                });
+                s.action.last_result_at = Some(std::time::Instant::now());
+            }
+        });
+    }
 
     fn trigger_reset(&self, tech_name: String) {
         let state = self.state.clone();

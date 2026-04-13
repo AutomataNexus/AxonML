@@ -716,11 +716,15 @@ impl eframe::App for TickerApp {
                 spread: 0.0,
                 color: egui::Color32::from_rgba_unmultiplied(0, 0, 0, if is_light { 32 } else { 120 }),
             })
-            .inner_margin(egui::Margin::symmetric(10.0, 8.0));
+            .inner_margin(egui::Margin { left: 10.0, right: 10.0, top: 8.0, bottom: 10.0 });
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none().inner_margin(egui::Margin::same(6.0)))
             .show(ctx, |ui| { outer_frame.show(ui, |ui| {
+            // Force a hard clip to the outer frame's inner rect so no child
+            // widget (scrollbar, text edit border) paints over the rounded
+            // corners.
+            ui.set_clip_rect(ui.max_rect());
             // ── Custom titlebar: drag region + close/min buttons ──────────
             let title_resp = ui.horizontal(|ui| {
                 let main_color = status_led_color(&snap.status_label);
@@ -850,6 +854,8 @@ impl eframe::App for TickerApp {
             egui::ScrollArea::vertical()
                 .max_height(available)
                 .stick_to_bottom(true)
+                .auto_shrink([false, false])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .show(ui, |ui| {
                     for (ts, msg, is_err) in &snap.log_entries {
                         ui.horizontal(|ui| {
