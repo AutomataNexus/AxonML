@@ -41,6 +41,9 @@ enum AgentCommand {
     Research { task: String },
     /// Orchestrator — training queue manager, GPU scheduling, job coordination
     Orchestrator { task: String },
+    /// CI Fixer — invoked by the ticker ralph loop for test/assertion failures
+    /// that `cargo fmt` and `cargo clippy --fix` can't resolve.
+    CiFixer { task: String },
     /// List available models on the nexus-serve backend
     Models,
     /// Health check — verify nexus-serve is reachable
@@ -105,6 +108,9 @@ async fn main() -> anyhow::Result<()> {
         }
         AgentCommand::Orchestrator { task } => {
             run_agent("orchestrator", agents::orchestrator::config(), &args.model, &task, &backend).await?;
+        }
+        AgentCommand::CiFixer { task } => {
+            run_agent("ci-fixer", agents::ci_fixer::config(), &args.model, &task, &backend).await?;
         }
     }
 

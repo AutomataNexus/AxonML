@@ -37,39 +37,20 @@ const REPOS: &[(&str, &str)] = &[
     ("AutomataNexus/NexusOracle", "/opt/NexusOracle"),
 ];
 
-fn parse_position_args() -> Option<egui::Pos2> {
-    let args: Vec<String> = std::env::args().collect();
-    let mut x: Option<f32> = None;
-    let mut y: Option<f32> = None;
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--x" if i + 1 < args.len() => { x = args[i + 1].parse().ok(); i += 2; }
-            "--y" if i + 1 < args.len() => { y = args[i + 1].parse().ok(); i += 2; }
-            _ => { i += 1; }
-        }
-    }
-    match (x, y) { (Some(x), Some(y)) => Some(egui::pos2(x, y)), _ => None }
-}
-
 fn main() -> eframe::Result {
     // Frameless + transparent — we paint our own rounded background and a
     // custom titlebar. Matches the style we set on tech-ticker so both
     // widgets look like a single cohesive set.
-    //
-    // Accepts `--x <N> --y <N>` CLI args for scripted stacking on boot
-    // (see /mnt/c/Users/Autom/stack-tickers.ps1).
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([TICKER_WIDTH, TICKER_HEIGHT])
-        .with_always_on_top()
-        .with_decorations(false)
-        .with_transparent(true)
-        .with_resizable(true)
-        .with_title("nexus-agent");
-    if let Some(pos) = parse_position_args() {
-        viewport = viewport.with_position(pos);
-    }
-    let options = eframe::NativeOptions { viewport, ..Default::default() };
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([TICKER_WIDTH, TICKER_HEIGHT])
+            .with_always_on_top()
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_resizable(true)
+            .with_title("nexus-agent"),
+        ..Default::default()
+    };
 
     eframe::run_native(
         "nexus-ticker",
@@ -759,21 +740,30 @@ impl eframe::App for TickerApp {
                 draw_led(ui, main_color, 5.0, is_active);
                 ui.label(egui::RichText::new("NEXUS-AGENT").strong().size(11.0).color(CREAM()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Close
+                    // Close — WSLg doesn't always honor ViewportCommand::Close,
+                    // so send the command AND forcefully exit after a short tick.
                     if ui.add(egui::Button::new(
                         egui::RichText::new("✕").size(12.0).color(TEXT_DIM()),
                     ).frame(false).min_size(egui::vec2(20.0, 20.0)))
                         .on_hover_text("close").clicked()
                     {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        std::process::exit(0);
                     }
-                    // Minimize
+                    // Minimize — Wayland under WSLg doesn't expose a "minimize to
+                    // taskbar" primitive the way Windows expects. Try the viewport
+                    // command first, then fall back to xdotool which drives the
+                    // underlying X11 path.
                     if ui.add(egui::Button::new(
                         egui::RichText::new("—").size(12.0).color(TEXT_DIM()),
                     ).frame(false).min_size(egui::vec2(20.0, 20.0)))
                         .on_hover_text("minimize").clicked()
                     {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                        let _ = std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg("xdotool search --name '^nexus-agent$' windowminimize 2>/dev/null")
+                            .spawn();
                     }
                 });
             }).response;

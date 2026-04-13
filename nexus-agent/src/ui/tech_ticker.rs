@@ -201,21 +201,6 @@ fn BG_ROW() -> egui::Color32 { c_bg_row() }
 // Entry
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn parse_position_args() -> Option<egui::Pos2> {
-    let args: Vec<String> = std::env::args().collect();
-    let mut x: Option<f32> = None;
-    let mut y: Option<f32> = None;
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--x" if i + 1 < args.len() => { x = args[i + 1].parse().ok(); i += 2; }
-            "--y" if i + 1 < args.len() => { y = args[i + 1].parse().ok(); i += 2; }
-            _ => { i += 1; }
-        }
-    }
-    match (x, y) { (Some(x), Some(y)) => Some(egui::pos2(x, y)), _ => None }
-}
-
 fn main() -> eframe::Result {
     // Restore persisted theme before the first paint so there's no flash.
     set_active_theme(Theme::load());
@@ -223,21 +208,17 @@ fn main() -> eframe::Result {
     // Frameless + transparent so we can paint a rounded background + custom
     // titlebar ourselves. WSLg's Xwayland path doesn't always pick up DWM's
     // default corner rounding, so drawing it in-app is the reliable option.
-    //
-    // Accepts `--x <N> --y <N>` CLI args for scripted stacking on boot
-    // (see /mnt/c/Users/Autom/stack-tickers.ps1).
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([WIDTH, HEIGHT])
-        .with_min_inner_size([WIDTH, 120.0])
-        .with_always_on_top()
-        .with_decorations(false)
-        .with_transparent(true)
-        .with_resizable(true)
-        .with_title("tech-monitor");
-    if let Some(pos) = parse_position_args() {
-        viewport = viewport.with_position(pos);
-    }
-    let options = eframe::NativeOptions { viewport, ..Default::default() };
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([WIDTH, HEIGHT])
+            .with_min_inner_size([WIDTH, 120.0])
+            .with_always_on_top()
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_resizable(true)
+            .with_title("tech-monitor"),
+        ..Default::default()
+    };
     eframe::run_native(
         "tech-ticker",
         options,
@@ -871,6 +852,7 @@ impl eframe::App for TechApp {
                     .min_size(egui::vec2(20.0, 20.0));
                     if ui.add(close).on_hover_text("close").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        std::process::exit(0);
                     }
                     // Minimize
                     let min = egui::Button::new(
@@ -880,6 +862,10 @@ impl eframe::App for TechApp {
                     .min_size(egui::vec2(20.0, 20.0));
                     if ui.add(min).on_hover_text("minimize").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                        let _ = std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg("xdotool search --name '^tech-monitor$' windowminimize 2>/dev/null")
+                            .spawn();
                     }
                 });
             }).response;
