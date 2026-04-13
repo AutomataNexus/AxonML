@@ -200,7 +200,7 @@ fn main() {
 
     // Training loop
     vit.train();
-    let num_batches = (NUM_TRAIN + BATCH_SIZE - 1) / BATCH_SIZE;
+    let num_batches = NUM_TRAIN.div_ceil(BATCH_SIZE);
 
     for epoch in 1..=NUM_EPOCHS {
         let epoch_start = Instant::now();
@@ -237,7 +237,7 @@ fn main() {
         let mut val_loss = 0.0f32;
         let mut val_correct = 0usize;
         let mut val_total = 0usize;
-        let val_batches = (NUM_VAL + BATCH_SIZE - 1) / BATCH_SIZE;
+        let val_batches = NUM_VAL.div_ceil(BATCH_SIZE);
 
         for batch_idx in 0..val_batches {
             let start = batch_idx * BATCH_SIZE;

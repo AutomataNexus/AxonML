@@ -449,7 +449,7 @@ pub fn compute_accuracy(predictions: &Tensor<f32>, targets: &Tensor<f32>) -> f32
 
     let mut correct = 0;
 
-    for b in 0..batch_size {
+    for (b, &target_f) in target_vec.iter().enumerate().take(batch_size) {
         // Find argmax of predictions
         let mut max_idx = 0;
         let mut max_val = f32::NEG_INFINITY;
@@ -462,7 +462,7 @@ pub fn compute_accuracy(predictions: &Tensor<f32>, targets: &Tensor<f32>) -> f32
         }
 
         // Compare with target
-        let target = target_vec[b] as usize;
+        let target = target_f as usize;
         if max_idx == target {
             correct += 1;
         }

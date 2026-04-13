@@ -510,7 +510,7 @@ mod tests {
     fn test_dpt_small_forward() {
         let model = DPT::small();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
             false,
         );
         let output = model.forward(&input);
@@ -539,7 +539,7 @@ mod tests {
     fn test_fastdepth_forward() {
         let model = FastDepth::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
             false,
         );
         let output = model.forward(&input);
@@ -557,7 +557,7 @@ mod tests {
     fn test_dpt_estimate_depth() {
         let model = DPT::small();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
             false,
         );
         let depth_map = model.estimate_depth(&input);

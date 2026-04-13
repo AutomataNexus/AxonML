@@ -823,7 +823,7 @@ mod tests {
 
         let mut snap = FacilitySnapshot::new(n);
         // Equipment with all missing values
-        snap.set_equipment(0, "test-missing", EQUIP_AHU, &vec![None; AHU_SENSORS]);
+        snap.set_equipment(0, "test-missing", EQUIP_AHU, &[None; AHU_SENSORS]);
         // Equipment with partial values
         snap.set_equipment(
             1,

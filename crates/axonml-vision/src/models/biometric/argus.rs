@@ -594,14 +594,14 @@ mod tests {
 
     fn make_iris(val: f32) -> Variable {
         Variable::new(
-            Tensor::from_vec(vec![val; 1 * 1 * 64 * 64], &[1, 1, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![val; 64 * 64], &[1, 1, 64, 64]).unwrap(),
             false,
         )
     }
 
     fn make_polar_strip(val: f32) -> Variable {
         Variable::new(
-            Tensor::from_vec(vec![val; 1 * 1 * 32 * 256], &[1, 1, 32, 256]).unwrap(),
+            Tensor::from_vec(vec![val; 32 * 256], &[1, 1, 32, 256]).unwrap(),
             false,
         )
     }
@@ -668,7 +668,7 @@ mod tests {
     fn test_argus_encode_polar_shape() {
         let model = ArgusIris::new();
         let polar_strip = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 32 * 256], &[1, 1, 32, 256]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 32 * 256], &[1, 1, 32, 256]).unwrap(),
             false,
         );
         let (embedding, logvar) = model.encode_polar(&polar_strip);
@@ -680,7 +680,7 @@ mod tests {
     fn test_argus_full_forward() {
         let model = ArgusIris::new();
         let iris = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 64 * 64], &[1, 1, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 64 * 64], &[1, 1, 64, 64]).unwrap(),
             false,
         );
         let (embedding, logvar) = model.forward_full(&iris);
@@ -692,7 +692,7 @@ mod tests {
     fn test_argus_embedding_normalized() {
         let model = ArgusIris::new();
         let iris = Variable::new(
-            Tensor::from_vec(vec![0.3f32; 1 * 1 * 64 * 64], &[1, 1, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![0.3f32; 64 * 64], &[1, 1, 64, 64]).unwrap(),
             false,
         );
         let identity = model.extract_identity(&iris);
@@ -805,7 +805,7 @@ mod tests {
         let iris = make_iris(0.5);
         let quality = model.assess_quality(&iris);
         assert!(
-            quality >= 0.0 && quality <= 1.0,
+            (0.0..=1.0).contains(&quality),
             "Quality out of [0,1] range: {}",
             quality
         );
@@ -1006,7 +1006,7 @@ mod tests {
     fn test_phase_gradient_computation() {
         // Manually verify gradient computation on a small signal
         // Signal: [0, 2, 4, 6, 8] — linear ramp
-        let signal = vec![0.0, 2.0, 4.0, 6.0, 8.0];
+        let signal = [0.0, 2.0, 4.0, 6.0, 8.0];
         let len = signal.len();
 
         let mut gradient = vec![0.0f32; len];
@@ -1027,7 +1027,7 @@ mod tests {
         }
 
         // Now test with step function: [0, 0, 1, 1, 1]
-        let step = vec![0.0, 0.0, 1.0, 1.0, 1.0];
+        let step = [0.0, 0.0, 1.0, 1.0, 1.0];
         let mut step_grad = vec![0.0f32; len];
         step_grad[0] = step[1] - step[0]; // = 0.0
         for a in 1..len - 1 {
@@ -1065,7 +1065,7 @@ mod tests {
     #[test]
     fn test_phase_gradient_constant_signal() {
         // Constant signal should have zero gradient everywhere
-        let signal = vec![0.5f32; 10];
+        let signal = [0.5f32; 10];
         let len = signal.len();
         let mut gradient = vec![0.0f32; len];
         gradient[0] = signal[1] - signal[0];
@@ -1092,7 +1092,7 @@ mod tests {
     fn test_batch_forward() {
         let model = ArgusIris::new();
         let batch_iris = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 2 * 1 * 64 * 64], &[2, 1, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 2 * 64 * 64], &[2, 1, 64, 64]).unwrap(),
             false,
         );
         let (embedding, logvar) = model.forward_full(&batch_iris);
@@ -1106,7 +1106,7 @@ mod tests {
     fn test_batch_encode_polar() {
         let model = ArgusIris::new();
         let batch_polar = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 2 * 1 * 32 * 256], &[2, 1, 32, 256]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 2 * 32 * 256], &[2, 1, 32, 256]).unwrap(),
             false,
         );
         let (embedding, logvar) = model.encode_polar(&batch_polar);
@@ -1337,7 +1337,7 @@ mod tests {
     fn test_resize_polar_strip_upsample() {
         // Upsample from [1,1,8,64] to [1,1,32,256]
         let small = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 8 * 64], &[1, 1, 8, 64]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 8 * 64], &[1, 1, 8, 64]).unwrap(),
             false,
         );
         let resized = ArgusIris::resize_polar_strip(&small, 32, 256);

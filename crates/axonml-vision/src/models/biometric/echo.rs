@@ -649,7 +649,7 @@ mod tests {
     fn test_echo_forward_shape() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 50], &[1, 40, 50]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 50], &[1, 40, 50]).unwrap(),
             false,
         );
         let output = model.forward(&mel);
@@ -665,7 +665,7 @@ mod tests {
     fn test_echo_full_forward() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 50], &[1, 40, 50]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 50], &[1, 40, 50]).unwrap(),
             false,
         );
         let (predicted, embedding, logvar) = model.forward_full(&mel);
@@ -678,7 +678,7 @@ mod tests {
     fn test_echo_embedding_normalized() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.2f32; 1 * 40 * 30], &[1, 40, 30]).unwrap(),
+            Tensor::from_vec(vec![0.2f32; 40 * 30], &[1, 40, 30]).unwrap(),
             false,
         );
         let identity = model.extract_identity(&mel);
@@ -694,7 +694,7 @@ mod tests {
     fn test_echo_prediction_error_nonneg() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 50], &[1, 40, 50]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 50], &[1, 40, 50]).unwrap(),
             false,
         );
         let error = model.prediction_error(&mel);
@@ -714,7 +714,7 @@ mod tests {
     fn test_echo_residuals_shape() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 50], &[1, 40, 50]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 50], &[1, 40, 50]).unwrap(),
             false,
         );
         let (predicted, residuals) = model.predict_and_residual(&mel);
@@ -743,7 +743,7 @@ mod tests {
 
         // Short utterance
         let mel_short = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 20], &[1, 40, 20]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 20], &[1, 40, 20]).unwrap(),
             false,
         );
         let out_short = model.forward(&mel_short);
@@ -751,7 +751,7 @@ mod tests {
 
         // Long utterance
         let mel_long = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 200], &[1, 40, 200]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 200], &[1, 40, 200]).unwrap(),
             false,
         );
         let out_long = model.forward(&mel_long);
@@ -766,12 +766,12 @@ mod tests {
     fn test_replay_detection_output_range() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 100], &[1, 40, 100]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 100], &[1, 40, 100]).unwrap(),
             false,
         );
         let score = model.detect_replay(&mel);
         assert!(
-            score >= 0.0 && score <= 1.0,
+            (0.0..=1.0).contains(&score),
             "Spoofing score should be in [0,1], got {}",
             score
         );
@@ -784,13 +784,13 @@ mod tests {
         // have very low spectral flatness variance — characteristic of spoofed audio.
         let model = EchoSpeaker::new();
         let mel_uniform = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 40 * 100], &[1, 40, 100]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 40 * 100], &[1, 40, 100]).unwrap(),
             false,
         );
         let score_uniform = model.detect_replay(&mel_uniform);
 
         // Create varied input (different patterns per frame to simulate speech)
-        let mut varied_data = vec![0.0f32; 1 * 40 * 100];
+        let mut varied_data = vec![0.0f32; 40 * 100];
         for t in 0..100 {
             for m in 0..40 {
                 // Simulate voiced/unvoiced variation: some frames have harmonic
@@ -828,7 +828,7 @@ mod tests {
         let model = EchoSpeaker::new();
         // Very short input — should still produce a valid score
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 4], &[1, 40, 4]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 4], &[1, 40, 4]).unwrap(),
             false,
         );
         let score = model.detect_replay(&mel);
@@ -836,7 +836,7 @@ mod tests {
             score.is_finite(),
             "Replay score should be finite for short input"
         );
-        assert!(score >= 0.0 && score <= 1.0);
+        assert!((0.0..=1.0).contains(&score));
     }
 
     // -------------------------------------------------------------------------
@@ -848,7 +848,7 @@ mod tests {
         let model = EchoSpeaker::new();
         let time = 80;
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * time], &[1, 40, time]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * time], &[1, 40, time]).unwrap(),
             false,
         );
         let mask = model.voice_activity(&mel);
@@ -914,7 +914,7 @@ mod tests {
         // Near-zero energy everywhere — threshold adapts, but with constant
         // energy the IQR is 0 so threshold equals p25
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.0001f32; 1 * 40 * 50], &[1, 40, 50]).unwrap(),
+            Tensor::from_vec(vec![0.0001f32; 40 * 50], &[1, 40, 50]).unwrap(),
             false,
         );
         let mask = model.voice_activity(&mel);
@@ -927,7 +927,7 @@ mod tests {
     fn test_vad_single_frame() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 40 * 1], &[1, 40, 1]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 40], &[1, 40, 1]).unwrap(),
             false,
         );
         let mask = model.voice_activity(&mel);
@@ -942,7 +942,7 @@ mod tests {
     fn test_temporal_consistency_output_range() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 100], &[1, 40, 100]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 100], &[1, 40, 100]).unwrap(),
             false,
         );
         let consistency = model.temporal_consistency(&mel);
@@ -953,7 +953,7 @@ mod tests {
         );
         // Cosine similarity range is [-1, 1]
         assert!(
-            consistency >= -1.01 && consistency <= 1.01,
+            (-1.01..=1.01).contains(&consistency),
             "Temporal consistency should be in [-1, 1], got {}",
             consistency
         );
@@ -965,7 +965,7 @@ mod tests {
         // so consistency should be high.
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.3f32; 1 * 40 * 120], &[1, 40, 120]).unwrap(),
+            Tensor::from_vec(vec![0.3f32; 40 * 120], &[1, 40, 120]).unwrap(),
             false,
         );
         let consistency = model.temporal_consistency(&mel);
@@ -982,7 +982,7 @@ mod tests {
         // Very short input — cannot split into multiple segments
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 4], &[1, 40, 4]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 4], &[1, 40, 4]).unwrap(),
             false,
         );
         let consistency = model.temporal_consistency(&mel);
@@ -1002,7 +1002,7 @@ mod tests {
     fn test_speaking_rate_finite_nonneg() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 100], &[1, 40, 100]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 100], &[1, 40, 100]).unwrap(),
             false,
         );
         let rate = model.speaking_rate(&mel);
@@ -1023,7 +1023,7 @@ mod tests {
         let model = EchoSpeaker::new();
         // Very short input — not enough for rate estimation
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 5], &[1, 40, 5]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 5], &[1, 40, 5]).unwrap(),
             false,
         );
         let rate = model.speaking_rate(&mel);
@@ -1073,7 +1073,7 @@ mod tests {
     fn test_speaking_rate_silence() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.0f32; 1 * 40 * 100], &[1, 40, 100]).unwrap(),
+            Tensor::from_vec(vec![0.0f32; 40 * 100], &[1, 40, 100]).unwrap(),
             false,
         );
         let rate = model.speaking_rate(&mel);
@@ -1121,7 +1121,7 @@ mod tests {
     fn test_echo_very_short_input_4_frames() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 40 * 4], &[1, 40, 4]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 40 * 4], &[1, 40, 4]).unwrap(),
             false,
         );
         let output = model.forward(&mel);
@@ -1138,7 +1138,7 @@ mod tests {
     fn test_echo_single_frame_input() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 40 * 1], &[1, 40, 1]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 40], &[1, 40, 1]).unwrap(),
             false,
         );
         // Single frame should still produce valid output (conv padding handles it)
@@ -1159,7 +1159,7 @@ mod tests {
     fn test_echo_outputs_all_finite() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.3f32; 1 * 40 * 80], &[1, 40, 80]).unwrap(),
+            Tensor::from_vec(vec![0.3f32; 40 * 80], &[1, 40, 80]).unwrap(),
             false,
         );
         let (predicted, embedding, logvar) = model.forward_full(&mel);
@@ -1190,7 +1190,7 @@ mod tests {
         // Test normalization for several different inputs
         for val in [0.01f32, 0.1, 0.5, 1.0, 2.0] {
             let mel = Variable::new(
-                Tensor::from_vec(vec![val; 1 * 40 * 40], &[1, 40, 40]).unwrap(),
+                Tensor::from_vec(vec![val; 40 * 40], &[1, 40, 40]).unwrap(),
                 false,
             );
             let identity = model.extract_identity(&mel);
@@ -1213,7 +1213,7 @@ mod tests {
         // Verify that predicted + residuals = original mel for various inputs
         let model = EchoSpeaker::new();
 
-        let mut input_data = vec![0.0f32; 1 * 40 * 60];
+        let mut input_data = vec![0.0f32; 40 * 60];
         for i in 0..input_data.len() {
             input_data[i] = (i as f32 * 0.01).sin() * 0.5;
         }
@@ -1246,7 +1246,7 @@ mod tests {
     #[test]
     fn test_prediction_error_finite_for_varied_input() {
         let model = EchoSpeaker::new();
-        let mut data = vec![0.0f32; 1 * 40 * 50];
+        let mut data = vec![0.0f32; 40 * 50];
         for i in 0..data.len() {
             data[i] = ((i as f32) * 0.1).cos() * 0.8;
         }
@@ -1270,7 +1270,7 @@ mod tests {
         assert_eq!(model.embed_dim(), 32);
 
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 32 * 40], &[1, 32, 40]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 32 * 40], &[1, 32, 40]).unwrap(),
             false,
         );
         let output = model.forward(&mel);
@@ -1285,7 +1285,7 @@ mod tests {
     fn test_all_analysis_methods_on_same_input() {
         let model = EchoSpeaker::new();
         let mel = Variable::new(
-            Tensor::from_vec(vec![0.2f32; 1 * 40 * 100], &[1, 40, 100]).unwrap(),
+            Tensor::from_vec(vec![0.2f32; 40 * 100], &[1, 40, 100]).unwrap(),
             false,
         );
 
@@ -1297,7 +1297,7 @@ mod tests {
         let identity = model.extract_identity(&mel);
 
         // All should produce valid outputs
-        assert!(spoof >= 0.0 && spoof <= 1.0);
+        assert!((0.0..=1.0).contains(&spoof));
         assert_eq!(vad.len(), 100);
         assert!(consistency.is_finite());
         assert!(rate >= 0.0 && rate.is_finite());

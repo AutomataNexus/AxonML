@@ -178,19 +178,19 @@ mod tests {
 
         // Simulate backbone features at 4 scales
         let c2 = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 64 * 16 * 16], &[1, 64, 16, 16]).unwrap(),
+            Tensor::from_vec(vec![0.1; 64 * 16 * 16], &[1, 64, 16, 16]).unwrap(),
             false,
         );
         let c3 = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 128 * 8 * 8], &[1, 128, 8, 8]).unwrap(),
+            Tensor::from_vec(vec![0.1; 128 * 8 * 8], &[1, 128, 8, 8]).unwrap(),
             false,
         );
         let c4 = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 256 * 4 * 4], &[1, 256, 4, 4]).unwrap(),
+            Tensor::from_vec(vec![0.1; 256 * 4 * 4], &[1, 256, 4, 4]).unwrap(),
             false,
         );
         let c5 = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 512 * 2 * 2], &[1, 512, 2, 2]).unwrap(),
+            Tensor::from_vec(vec![0.1; 512 * 2 * 2], &[1, 512, 2, 2]).unwrap(),
             false,
         );
 

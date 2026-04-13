@@ -1200,7 +1200,7 @@ mod tests {
 
     fn make_face(val: f32) -> Variable {
         Variable::new(
-            Tensor::from_vec(vec![val; 1 * 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![val; 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
             false,
         )
     }
@@ -1211,21 +1211,21 @@ mod tests {
 
     fn make_fingerprint(val: f32) -> Variable {
         Variable::new(
-            Tensor::from_vec(vec![val; 1 * 1 * 128 * 128], &[1, 1, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![val; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
         )
     }
 
     fn make_voice(val: f32) -> Variable {
         Variable::new(
-            Tensor::from_vec(vec![val; 1 * 40 * 50], &[1, 40, 50]).unwrap(),
+            Tensor::from_vec(vec![val; 40 * 50], &[1, 40, 50]).unwrap(),
             false,
         )
     }
 
     fn make_iris(val: f32) -> Variable {
         Variable::new(
-            Tensor::from_vec(vec![val; 1 * 1 * 64 * 64], &[1, 1, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![val; 64 * 64], &[1, 1, 64, 64]).unwrap(),
             false,
         )
     }

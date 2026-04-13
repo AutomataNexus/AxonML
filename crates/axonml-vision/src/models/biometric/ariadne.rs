@@ -847,7 +847,7 @@ mod tests {
     fn test_ariadne_forward_shape() {
         let model = AriadneFingerprint::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 128 * 128], &[1, 1, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
         );
         let output = model.forward(&input);
@@ -858,7 +858,7 @@ mod tests {
     fn test_ariadne_full_forward() {
         let model = AriadneFingerprint::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 128 * 128], &[1, 1, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
         );
         let (embedding, logvar) = model.forward_full(&input);
@@ -870,7 +870,7 @@ mod tests {
     fn test_ariadne_embedding_normalized() {
         let model = AriadneFingerprint::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.3f32; 1 * 1 * 128 * 128], &[1, 1, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.3f32; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
         );
         let identity = model.extract_identity(&input);
@@ -886,7 +886,7 @@ mod tests {
     fn test_ariadne_ridge_events_shape() {
         let model = AriadneFingerprint::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 128 * 128], &[1, 1, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
         );
         let events = model.extract_ridge_events(&input);
@@ -913,7 +913,7 @@ mod tests {
     fn test_ridge_density_map_shape() {
         let model = AriadneFingerprint::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 128 * 128], &[1, 1, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
         );
         let density = model.ridge_density_map(&input);
@@ -925,7 +925,7 @@ mod tests {
     fn test_ridge_density_map_non_negative() {
         let model = AriadneFingerprint::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.2f32; 1 * 1 * 128 * 128], &[1, 1, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.2f32; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
         );
         let density = model.ridge_density_map(&input);
@@ -999,7 +999,7 @@ mod tests {
     fn test_singularity_detection_small_image() {
         let model = AriadneFingerprint::new();
         // Very small image (below kernel size, but padded conv handles it)
-        let data = vec![0.5f32; 1 * 1 * 8 * 8];
+        let data = vec![0.5f32; 8 * 8];
         let input = Variable::new(Tensor::from_vec(data, &[1, 1, 8, 8]).unwrap(), false);
         let singularities = model.detect_singularities(&input);
         // Should not panic; may return empty or a few detections
@@ -1069,7 +1069,7 @@ mod tests {
         let model = AriadneFingerprint::new();
         // Uniform constant input -> all Gabor responses same -> consistent orientation
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 128 * 128], &[1, 1, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
         );
         let score = model.orientation_consistency(&input);
@@ -1115,7 +1115,7 @@ mod tests {
         let score = model.orientation_consistency(&input);
         // Zero magnitude means no foreground; score should be 0 or very low
         assert!(
-            score >= 0.0 && score <= 1.0,
+            (0.0..=1.0).contains(&score),
             "Score out of [0,1]: {}",
             score
         );
@@ -1129,7 +1129,7 @@ mod tests {
             false,
         );
         let score = model.orientation_consistency(&input);
-        assert!(score >= 0.0 && score <= 1.0, "Score {} not in [0,1]", score);
+        assert!((0.0..=1.0).contains(&score), "Score {} not in [0,1]", score);
     }
 
     // =========================================================================
@@ -1212,7 +1212,7 @@ mod tests {
         let batch_size = 3;
         let input = Variable::new(
             Tensor::from_vec(
-                vec![0.4f32; batch_size * 1 * 128 * 128],
+                vec![0.4f32; batch_size * 128 * 128],
                 &[batch_size, 1, 128, 128],
             )
             .unwrap(),
@@ -1228,7 +1228,7 @@ mod tests {
         let batch_size = 2;
         let input = Variable::new(
             Tensor::from_vec(
-                vec![0.3f32; batch_size * 1 * 128 * 128],
+                vec![0.3f32; batch_size * 128 * 128],
                 &[batch_size, 1, 128, 128],
             )
             .unwrap(),
@@ -1246,7 +1246,7 @@ mod tests {
     fn test_forward_large_values_no_nan() {
         let model = AriadneFingerprint::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![100.0f32; 1 * 1 * 128 * 128], &[1, 1, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![100.0f32; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
         );
         let (embedding, logvar) = model.forward_full(&input);
@@ -1273,7 +1273,7 @@ mod tests {
             !score.is_nan(),
             "NaN orientation consistency with large values"
         );
-        assert!(score >= 0.0 && score <= 1.0, "Score {} out of [0,1]", score);
+        assert!((0.0..=1.0).contains(&score), "Score {} out of [0,1]", score);
     }
 
     // =========================================================================
@@ -1357,7 +1357,7 @@ mod tests {
         let model = AriadneFingerprint::new();
         // Minimum viable size (Conv2d with 7x7 kernel needs >= 7x7 with padding 3)
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 8 * 8], &[1, 1, 8, 8]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 8 * 8], &[1, 1, 8, 8]).unwrap(),
             false,
         );
         // Should not panic

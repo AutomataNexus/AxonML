@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use axonml_autograd::Variable;
 use axonml_core::Device;
-use axonml_nn::{Module, Parameter};
+use axonml_nn::Module;
 use axonml_optim::{AdamW, Optimizer};
 use axonml_serialize::{
     Checkpoint, StateDict, TrainingState, load_checkpoint, save_checkpoint, save_model,
@@ -354,7 +354,7 @@ fn main() {
     // Move model to GPU
     if device.is_gpu() {
         for param in model.parameters() {
-            param.to_device(device.clone());
+            param.to_device(device);
         }
         println!("  Model moved to GPU");
     }
@@ -383,7 +383,7 @@ fn main() {
             training_state = state;
             if device.is_gpu() {
                 for param in model.parameters() {
-                    param.to_device(device.clone());
+                    param.to_device(device);
                 }
             }
         } else {
@@ -428,9 +428,9 @@ fn main() {
             let mut neg_t = Tensor::from_vec(neg_data, &[config.batch_size, 1, 32, 256]).unwrap();
 
             if device.is_gpu() {
-                anchor_t = anchor_t.to_device(device.clone()).unwrap();
-                pos_t = pos_t.to_device(device.clone()).unwrap();
-                neg_t = neg_t.to_device(device.clone()).unwrap();
+                anchor_t = anchor_t.to_device(device).unwrap();
+                pos_t = pos_t.to_device(device).unwrap();
+                neg_t = neg_t.to_device(device).unwrap();
             }
 
             let anchor_var = Variable::new(anchor_t, false);

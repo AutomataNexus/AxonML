@@ -152,15 +152,15 @@ mod tests {
         let fpn = ThermalFPN::default_config(); // 64/128/256 → 128
 
         let p3 = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 64 * 16 * 16], &[1, 64, 16, 16]).unwrap(),
+            Tensor::from_vec(vec![0.1; 64 * 16 * 16], &[1, 64, 16, 16]).unwrap(),
             false,
         );
         let p4 = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 128 * 8 * 8], &[1, 128, 8, 8]).unwrap(),
+            Tensor::from_vec(vec![0.1; 128 * 8 * 8], &[1, 128, 8, 8]).unwrap(),
             false,
         );
         let p5 = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 256 * 4 * 4], &[1, 256, 4, 4]).unwrap(),
+            Tensor::from_vec(vec![0.1; 256 * 4 * 4], &[1, 256, 4, 4]).unwrap(),
             false,
         );
 

@@ -107,7 +107,7 @@ fn test_optimizer() {
     loss.backward();
 
     // Check that gradients exist on leaf params
-    let has_grad = model.parameters().iter().any(|p| p.grad().is_some());
+    let _has_grad = model.parameters().iter().any(|p| p.grad().is_some());
 
     optimizer.step();
     optimizer.zero_grad();

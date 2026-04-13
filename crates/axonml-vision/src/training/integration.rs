@@ -26,7 +26,7 @@ mod tests {
     use crate::models::lenet::{LeNet, MLP, SimpleCNN};
     use crate::models::resnet::ResNet;
     use crate::models::transformer::VisionTransformer;
-    use crate::transforms::{ImageNormalize, Resize};
+    use crate::transforms::ImageNormalize;
 
     // =========================================================================
     // Helpers
@@ -337,7 +337,7 @@ mod tests {
         for step in 0..5 {
             let seed = step as f32 * 0.1;
             let pixels: Vec<f32> = (0..3 * 64 * 64)
-                .map(|i| ((i as f32 * 0.001 + seed).sin() * 0.5 + 0.5))
+                .map(|i| (i as f32 * 0.001 + seed).sin() * 0.5 + 0.5)
                 .collect();
             let frame = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
             let gt_faces = vec![[8.0, 8.0, 32.0, 32.0]];
@@ -382,7 +382,7 @@ mod tests {
             // Simulate a face crop: [1, 3, 32, 32]
             let seed = step as f32 * 0.05;
             let pixels: Vec<f32> = (0..3 * 32 * 32)
-                .map(|i| ((i as f32 * 0.01 + seed).sin() * 0.5 + 0.5))
+                .map(|i| (i as f32 * 0.01 + seed).sin() * 0.5 + 0.5)
                 .collect();
             let face = Variable::new(Tensor::from_vec(pixels, &[1, 3, 32, 32]).unwrap(), false);
 

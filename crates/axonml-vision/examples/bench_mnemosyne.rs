@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use axonml_autograd::Variable;
-use axonml_nn::{Module, Parameter};
+use axonml_nn::Module;
 use axonml_serialize::load_state_dict;
 use axonml_tensor::Tensor;
 
@@ -376,15 +376,13 @@ fn load_model(model_path: &Path) -> MnemosyneIdentity {
         let state_dict = if let Ok(checkpoint) = axonml_serialize::load_checkpoint(model_path) {
             println!("  Checkpoint epoch: {}", checkpoint.epoch());
             Some(checkpoint.model_state)
-        } else if let Ok(sd) = load_state_dict(model_path) {
-            Some(sd)
         } else {
-            None
+            load_state_dict(model_path).ok()
         };
 
         if let Some(state_dict) = state_dict {
             // Collect all saved tensors sorted by shape for deterministic matching
-            let mut saved_tensors: Vec<_> = state_dict
+            let saved_tensors: Vec<_> = state_dict
                 .entries()
                 .filter_map(|(_, entry)| entry.data.to_tensor().ok())
                 .collect();

@@ -737,7 +737,7 @@ mod tests {
         let config = SSMConfig::from_d_model(32, 1000);
         let block = SSMBlock::new(&config);
         let x = Variable::new(
-            Tensor::from_vec(vec![0.1f32; 1 * 4 * 32], &[1, 4, 32]).unwrap(),
+            Tensor::from_vec(vec![0.1f32; 4 * 32], &[1, 4, 32]).unwrap(),
             true,
         );
         let y = block.forward(&x);

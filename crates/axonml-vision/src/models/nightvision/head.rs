@@ -166,7 +166,7 @@ mod tests {
     fn test_decoupled_head_shapes() {
         let head = DecoupledHead::new(128, 10, 0);
         let x = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 128 * 8 * 8], &[1, 128, 8, 8]).unwrap(),
+            Tensor::from_vec(vec![0.1; 128 * 8 * 8], &[1, 128, 8, 8]).unwrap(),
             false,
         );
 

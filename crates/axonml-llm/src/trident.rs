@@ -670,7 +670,7 @@ mod tests {
         let config = TridentConfig::tiny();
         let model = TridentModel::new(&config);
         let sparsity = model.average_sparsity();
-        assert!(sparsity >= 0.0 && sparsity <= 1.0);
+        assert!((0.0..=1.0).contains(&sparsity));
     }
 
     #[test]

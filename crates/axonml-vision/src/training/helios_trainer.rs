@@ -404,7 +404,7 @@ mod tests {
         let gt_boxes = vec![vec![[10.0, 10.0, 40.0, 40.0]]];
         let gt_classes = vec![vec![0usize]];
 
-        let (total, cls, bx, dfl) = trainer.train_step(&input, &gt_boxes, &gt_classes);
+        let (total, cls, bx, _dfl) = trainer.train_step(&input, &gt_boxes, &gt_classes);
         assert!(total.is_finite(), "Total loss should be finite");
         assert!(cls >= 0.0);
         assert!(bx >= 0.0);
@@ -459,7 +459,7 @@ mod tests {
 
         let map50 = trainer.evaluate(&[eval_img], &eval_boxes, &eval_classes);
         assert!(map50.is_finite());
-        assert!(map50 >= 0.0 && map50 <= 1.0);
+        assert!((0.0..=1.0).contains(&map50));
     }
 
     #[test]
@@ -473,7 +473,7 @@ mod tests {
         for step in 0..3 {
             let seed = step as f32 * 0.1;
             let pixels: Vec<f32> = (0..3 * 64 * 64)
-                .map(|i| ((i as f32 * 0.001 + seed).sin() * 0.5 + 0.5))
+                .map(|i| (i as f32 * 0.001 + seed).sin() * 0.5 + 0.5)
                 .collect();
             let input = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
 

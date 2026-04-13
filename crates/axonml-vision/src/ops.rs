@@ -917,7 +917,7 @@ mod tests {
 
         let data = pe.to_vec();
         for &v in &data {
-            assert!(v >= -1.0 && v <= 1.0);
+            assert!((-1.0..=1.0).contains(&v));
         }
     }
 

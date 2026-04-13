@@ -370,7 +370,7 @@ mod tests {
         let model = NightVision::new(config);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 128 * 128], &[1, 1, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 128 * 128], &[1, 1, 128, 128]).unwrap(),
             false,
         );
 
@@ -392,11 +392,11 @@ mod tests {
         let model = NightVision::new(config);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 64 * 64], &[1, 1, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 64 * 64], &[1, 1, 64, 64]).unwrap(),
             false,
         );
 
-        let (cls, bbox, obj) = model.forward_flat(&input);
+        let (cls, bbox, _obj) = model.forward_flat(&input);
         assert_eq!(cls.shape()[0], 1);
         assert_eq!(cls.shape()[2], 1); // 1 class (person)
         assert_eq!(bbox.shape()[2], 4);
@@ -408,7 +408,7 @@ mod tests {
         let model = NightVision::new(config);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 1 * 64 * 64], &[1, 1, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 64 * 64], &[1, 1, 64, 64]).unwrap(),
             false,
         );
 
@@ -435,11 +435,11 @@ mod tests {
         let model = NightVision::new(config);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5f32; 1 * 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![0.5f32; 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
             false,
         );
 
-        let (cls, bbox, obj) = model.forward_flat(&input);
+        let (cls, _bbox, _obj) = model.forward_flat(&input);
         assert_eq!(cls.shape()[2], 3);
     }
 }

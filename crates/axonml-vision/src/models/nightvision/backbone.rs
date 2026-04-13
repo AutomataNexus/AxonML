@@ -345,7 +345,7 @@ mod tests {
     fn test_bottleneck_shortcut() {
         let block = Bottleneck::new(16, 16, true);
         let x = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(),
+            Tensor::from_vec(vec![0.1; 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(),
             false,
         );
         let y = block.forward(&x);
@@ -356,7 +356,7 @@ mod tests {
     fn test_bottleneck_no_shortcut() {
         let block = Bottleneck::new(16, 32, false);
         let x = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(),
+            Tensor::from_vec(vec![0.1; 16 * 4 * 4], &[1, 16, 4, 4]).unwrap(),
             false,
         );
         let y = block.forward(&x);
@@ -367,7 +367,7 @@ mod tests {
     fn test_csp_block_shape() {
         let block = CSPBlock::new(32, 64, 1);
         let x = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 32 * 8 * 8], &[1, 32, 8, 8]).unwrap(),
+            Tensor::from_vec(vec![0.1; 32 * 8 * 8], &[1, 32, 8, 8]).unwrap(),
             false,
         );
         let y = block.forward(&x);
@@ -382,7 +382,7 @@ mod tests {
     fn test_thermal_backbone_3ch() {
         let backbone = ThermalBackbone::new(3);
         let x = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
             false,
         );
         let (p3, p4, p5) = backbone.forward(&x);
@@ -401,7 +401,7 @@ mod tests {
     fn test_thermal_backbone_1ch() {
         let backbone = ThermalBackbone::new(1);
         let x = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 1 * 32 * 32], &[1, 1, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.1; 32 * 32], &[1, 1, 32, 32]).unwrap(),
             false,
         );
         let (p3, p4, p5) = backbone.forward(&x);

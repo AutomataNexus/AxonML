@@ -766,7 +766,7 @@ mod tests {
         // Velocity should be in [0, 1] (sigmoid output)
         let vel_val = velocity.data().to_vec()[0];
         assert!(
-            vel_val >= 0.0 && vel_val <= 1.0,
+            (0.0..=1.0).contains(&vel_val),
             "Velocity {} not in [0,1]",
             vel_val
         );
@@ -774,7 +774,7 @@ mod tests {
         // Quality should be in [0, 1] (sigmoid output)
         let qual_val = quality.data().to_vec()[0];
         assert!(
-            qual_val >= 0.0 && qual_val <= 1.0,
+            (0.0..=1.0).contains(&qual_val),
             "Quality {} not in [0,1]",
             qual_val
         );
@@ -855,7 +855,7 @@ mod tests {
         let encoding = model.encode_face(&face);
         let quality = model.compute_quality(&encoding);
         let q = quality.data().to_vec()[0];
-        assert!(q >= 0.0 && q <= 1.0, "Quality {} not in [0,1]", q);
+        assert!((0.0..=1.0).contains(&q), "Quality {} not in [0,1]", q);
     }
 
     #[test]
@@ -1070,7 +1070,7 @@ mod tests {
 
         let drift = model.detect_drift(&hidden, &orthogonal);
         assert!(
-            drift >= 0.0 && drift <= 2.0,
+            (0.0..=2.0).contains(&drift),
             "Drift {} should be in [0, 2]",
             drift
         );
@@ -1103,7 +1103,7 @@ mod tests {
 
         // Final velocity should be in [0, 1] (sigmoid output)
         assert!(
-            final_velocity >= 0.0 && final_velocity <= 1.0,
+            (0.0..=1.0).contains(&final_velocity),
             "Final velocity {} out of [0,1]",
             final_velocity
         );
@@ -1118,7 +1118,7 @@ mod tests {
 
         assert_eq!(hidden.shape(), &[1, 64]);
         assert_eq!(qualities.len(), 1);
-        assert!(velocity >= 0.0 && velocity <= 1.0);
+        assert!((0.0..=1.0).contains(&velocity));
     }
 
     #[test]
@@ -1167,7 +1167,7 @@ mod tests {
 
         let quality = model.assess_quality(&face);
         assert!(
-            quality >= 0.0 && quality <= 1.0,
+            (0.0..=1.0).contains(&quality),
             "Quality {} out of [0,1]",
             quality
         );
@@ -1191,7 +1191,7 @@ mod tests {
 
         let quality = model.assess_quality(&face);
         assert!(
-            quality >= 0.0 && quality <= 1.0,
+            (0.0..=1.0).contains(&quality),
             "Quality {} out of range for zero input",
             quality
         );
@@ -1206,7 +1206,7 @@ mod tests {
             let face = make_face(1, fill);
             let q = model.assess_quality(&face);
             assert!(
-                q >= 0.0 && q <= 1.0,
+                (0.0..=1.0).contains(&q),
                 "Quality {} out of [0,1] for fill={}",
                 q,
                 fill
@@ -1446,7 +1446,7 @@ mod tests {
         assert!(liveness.liveness_score >= 0.0 && liveness.liveness_score <= 1.0);
         assert_eq!(final_hidden.shape(), &[1, 64]);
         assert_eq!(qualities.len(), 6);
-        assert!(final_vel >= 0.0 && final_vel <= 1.0);
+        assert!((0.0..=1.0).contains(&final_vel));
     }
 
     // =========================================================================
@@ -1508,7 +1508,7 @@ mod tests {
         let model = MnemosyneIdentity::new();
         let params = model.parameters();
         println!("Mnemosyne params: {}", params.len());
-        assert!(params.len() > 0, "Model must have parameters");
+        assert!(!params.is_empty(), "Model must have parameters");
 
         let mut optimizer = Adam::new(params, 0.001);
 
@@ -1536,9 +1536,9 @@ mod tests {
             let negative_face = Variable::new(Tensor::randn(&[1, 3, 64, 64]), false);
 
             // Forward pass — single frame crystallization
-            let (hidden_a, vel_a, _, _) = model.crystallize_step(&anchor_face, None);
-            let (hidden_p, vel_p, _, _) = model.crystallize_step(&positive_face, None);
-            let (hidden_n, vel_n, _, _) = model.crystallize_step(&negative_face, None);
+            let (hidden_a, _vel_a, _, _) = model.crystallize_step(&anchor_face, None);
+            let (hidden_p, _vel_p, _, _) = model.crystallize_step(&positive_face, None);
+            let (hidden_n, _vel_n, _, _) = model.crystallize_step(&negative_face, None);
 
             // L2-normalize embeddings (graph-tracked via mul_scalar)
             let emb_a = l2_normalize_var(&hidden_a);

@@ -125,8 +125,8 @@ fn main() {
     let total_start = Instant::now();
 
     println!(
-        "{:<6} {:<10} {:<10} {:<8} {:<30} {}",
-        "Epoch", "Loss", "PPL", "Time", "Expert Util (layer 0)", "Lambda[0]"
+        "{:<6} {:<10} {:<10} {:<8} {:<30} Lambda[0]",
+        "Epoch", "Loss", "PPL", "Time", "Expert Util (layer 0)"
     );
     println!("{}", "-".repeat(85));
 
@@ -134,7 +134,7 @@ fn main() {
         let epoch_start = Instant::now();
         let mut epoch_loss = 0.0f32;
         let mut epoch_tokens = 0usize;
-        let num_batches = (NUM_TRAIN + BATCH_SIZE - 1) / BATCH_SIZE;
+        let num_batches = NUM_TRAIN.div_ceil(BATCH_SIZE);
 
         for batch_idx in 0..num_batches {
             let start = batch_idx * BATCH_SIZE;

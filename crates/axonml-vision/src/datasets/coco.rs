@@ -253,7 +253,7 @@ mod tests {
     fn test_coco_category_remapping() {
         // COCO uses non-contiguous category IDs (1-90 with gaps)
         let mut cat_remap: HashMap<u64, usize> = HashMap::new();
-        let cats = vec![1, 3, 5, 10]; // Non-contiguous
+        let cats = [1, 3, 5, 10]; // Non-contiguous
         for (new_id, &old_id) in cats.iter().enumerate() {
             cat_remap.insert(old_id, new_id);
         }
@@ -282,6 +282,6 @@ mod tests {
         assert!((normalized[3] - 220.0 / 480.0).abs() < 1e-5);
 
         // All values should be in [0, 1]
-        assert!(normalized.iter().all(|&v| v >= 0.0 && v <= 1.0));
+        assert!(normalized.iter().all(|&v| (0.0..=1.0).contains(&v)));
     }
 }

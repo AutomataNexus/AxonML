@@ -237,7 +237,7 @@ mod tests {
     fn test_class_head() {
         let head = ClassHead::new(64, 288, 20);
         let x = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * (64 + 288)], &[1, 352]).unwrap(),
+            Tensor::from_vec(vec![0.1; 64 + 288], &[1, 352]).unwrap(),
             false,
         );
         let out = head.forward(&x);

@@ -770,7 +770,11 @@ mod tests {
         let mask_vec = mask.data().to_vec();
 
         for &v in &mask_vec {
-            assert!((0.0..=1.0).contains(&v), "Soft mask value {} not in [0, 1]", v);
+            assert!(
+                (0.0..=1.0).contains(&v),
+                "Soft mask value {} not in [0, 1]",
+                v
+            );
         }
     }
 

@@ -101,7 +101,7 @@ mod detection_smoke_tests {
         assert!(count > 0 && count < 1_000_000, "NanoDet: {} params", count);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
             false,
         );
         let out = model.forward(&input);
@@ -118,7 +118,7 @@ mod detection_smoke_tests {
         assert!(count > 10_000, "RetinaFace: {} params", count);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
             false,
         );
         let out = model.forward(&input);
@@ -135,7 +135,7 @@ mod detection_smoke_tests {
         assert!(count > 10_000, "DETR: {} params", count);
 
         let features = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 64 * 4 * 4], &[1, 64, 4, 4]).unwrap(),
+            Tensor::from_vec(vec![0.1; 64 * 4 * 4], &[1, 64, 4, 4]).unwrap(),
             false,
         );
         let (cls, bbox) = model.forward_detection(&features);
@@ -156,7 +156,7 @@ mod detection_smoke_tests {
         assert!(count > 10_000, "DPT: {} params", count);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
             false,
         );
         let out = model.forward(&input);
@@ -176,7 +176,7 @@ mod detection_smoke_tests {
         );
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
             false,
         );
         let out = model.forward(&input);
@@ -193,7 +193,7 @@ mod detection_smoke_tests {
         assert!(count > 1_000, "VQA: {} params", count);
 
         let image = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
             false,
         );
         let question = Variable::new(
@@ -213,7 +213,7 @@ mod detection_smoke_tests {
         assert!(count > 1_000, "PatchCore: {} params", count);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5; 1 * 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.5; 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
             false,
         );
         let out = model.forward(&input);
@@ -230,7 +230,7 @@ mod detection_smoke_tests {
         assert!(count > 1_000, "StudentTeacher: {} params", count);
 
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5; 1 * 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.5; 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
             false,
         );
         let out = model.forward(&input);

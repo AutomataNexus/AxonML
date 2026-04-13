@@ -351,7 +351,7 @@ fn main() {
     // Move model to GPU
     if device.is_gpu() {
         for param in model.parameters() {
-            param.to_device(device.clone());
+            param.to_device(device);
         }
         println!("  Model moved to GPU");
     }
@@ -383,7 +383,7 @@ fn main() {
             training_state = state;
             if device.is_gpu() {
                 for param in model.parameters() {
-                    param.to_device(device.clone());
+                    param.to_device(device);
                 }
             }
         } else {
@@ -422,8 +422,8 @@ fn main() {
             let mut t_a = Tensor::from_vec(data_a, &[config.batch_size, 1, 128, 128]).unwrap();
             let mut t_b = Tensor::from_vec(data_b, &[config.batch_size, 1, 128, 128]).unwrap();
             if device.is_gpu() {
-                t_a = t_a.to_device(device.clone()).unwrap();
-                t_b = t_b.to_device(device.clone()).unwrap();
+                t_a = t_a.to_device(device).unwrap();
+                t_b = t_b.to_device(device).unwrap();
             }
 
             let var_a = Variable::new(t_a, false);

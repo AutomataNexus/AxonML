@@ -476,7 +476,7 @@ mod tests {
 
         // Fit on "normal" images
         let normal = Variable::new(
-            Tensor::from_vec(vec![0.5; 4 * 1 * 32 * 32], &[4, 1, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.5; 4 * 32 * 32], &[4, 1, 32, 32]).unwrap(),
             false,
         );
         model.fit(&normal, 0.5);
@@ -485,7 +485,7 @@ mod tests {
 
         // Predict on test image
         let test = Variable::new(
-            Tensor::from_vec(vec![0.5; 1 * 1 * 32 * 32], &[1, 1, 32, 32]).unwrap(),
+            Tensor::from_vec(vec![0.5; 32 * 32], &[1, 1, 32, 32]).unwrap(),
             false,
         );
         let results = model.predict(&test);
@@ -503,7 +503,7 @@ mod tests {
     fn test_student_teacher_loss() {
         let model = StudentTeacher::new(1, 32);
         let normal = Variable::new(
-            Tensor::from_vec(vec![0.5; 2 * 1 * 16 * 16], &[2, 1, 16, 16]).unwrap(),
+            Tensor::from_vec(vec![0.5; 2 * 16 * 16], &[2, 1, 16, 16]).unwrap(),
             true,
         );
         let loss = model.training_loss(&normal);
@@ -514,7 +514,7 @@ mod tests {
     fn test_student_teacher_predict() {
         let model = StudentTeacher::new(1, 32);
         let test = Variable::new(
-            Tensor::from_vec(vec![0.5; 2 * 1 * 16 * 16], &[2, 1, 16, 16]).unwrap(),
+            Tensor::from_vec(vec![0.5; 2 * 16 * 16], &[2, 1, 16, 16]).unwrap(),
             false,
         );
         let results = model.predict(&test);

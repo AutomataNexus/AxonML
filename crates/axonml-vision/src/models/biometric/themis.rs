@@ -703,7 +703,7 @@ mod tests {
             model.fuse(Some((&face_emb, -1.0)), None, None, None, None);
 
         assert_eq!(fused.shape(), &[1, 48]);
-        assert!(match_prob >= 0.0 && match_prob <= 1.0);
+        assert!((0.0..=1.0).contains(&match_prob));
         assert!(
             confidence > 0.0,
             "Single modality should have positive confidence"
@@ -725,7 +725,7 @@ mod tests {
         );
 
         assert_eq!(fused.shape(), &[1, 48]);
-        assert!(match_prob >= 0.0 && match_prob <= 1.0);
+        assert!((0.0..=1.0).contains(&match_prob));
         assert!(confidence > 0.0);
     }
 
@@ -763,7 +763,7 @@ mod tests {
         );
 
         assert_eq!(fused.shape(), &[1, 48]);
-        assert!(match_prob >= 0.0 && match_prob <= 1.0);
+        assert!((0.0..=1.0).contains(&match_prob));
         assert!(confidence > 0.0);
 
         // Test temporal accumulation: reuse belief state
@@ -1221,7 +1221,7 @@ mod tests {
             model.fuse_forensic(Some((&face, -1.0)), Some((&finger, -0.5)), None, None, None);
 
         assert_eq!(fused.shape(), &[1, 48]);
-        assert!(match_prob >= 0.0 && match_prob <= 1.0);
+        assert!((0.0..=1.0).contains(&match_prob));
         assert!(confidence > 0.0);
         assert_eq!(belief.shape(), &[1, 48]);
 
@@ -1312,7 +1312,7 @@ mod tests {
         );
 
         assert_eq!(fused.shape(), &[1, 48]);
-        assert!(match_prob >= 0.0 && match_prob <= 1.0);
+        assert!((0.0..=1.0).contains(&match_prob));
         // Very negative logvar -> uncertainty gate near 1.0
         assert!(
             confidence > 0.99,
@@ -1445,7 +1445,7 @@ mod tests {
         let (fused, prob, conf, _) =
             model.fuse_with_decay(Some((&face, -1.0)), None, None, None, None, 0.5);
         assert_eq!(fused.shape(), &[1, 48]);
-        assert!(prob >= 0.0 && prob <= 1.0);
+        assert!((0.0..=1.0).contains(&prob));
         assert!(conf > 0.0);
     }
 

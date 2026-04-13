@@ -474,14 +474,14 @@ mod tests {
 
     fn make_iris(val: f32) -> Variable {
         Variable::new(
-            Tensor::from_vec(vec![val; 1 * 1 * 64 * 64], &[1, 1, 64, 64]).unwrap(),
+            Tensor::from_vec(vec![val; 64 * 64], &[1, 1, 64, 64]).unwrap(),
             false,
         )
     }
 
     fn make_strip(val: f32) -> Variable {
         Variable::new(
-            Tensor::from_vec(vec![val; 1 * 1 * 32 * 256], &[1, 1, 32, 256]).unwrap(),
+            Tensor::from_vec(vec![val; 32 * 256], &[1, 1, 32, 256]).unwrap(),
             false,
         )
     }

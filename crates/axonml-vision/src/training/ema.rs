@@ -191,12 +191,12 @@ mod tests {
     #[test]
     fn test_ema_apply_and_restore() {
         let params = make_params();
-        let original_data = params[0].variable().data().to_vec();
+        let _original_data = params[0].variable().data().to_vec();
 
         let mut ema = ModelEMA::new(&params, 0.5);
 
         // Modify params and update EMA multiple times
-        for i in 0..100 {
+        for _i in 0..100 {
             params[0].update_data(Tensor::from_vec(vec![10.0; 4], &[2, 2]).unwrap());
             ema.update(&params);
         }

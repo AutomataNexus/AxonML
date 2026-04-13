@@ -643,7 +643,7 @@ mod tests {
     fn test_blazeblock() {
         let block = BlazeBlock::new(24, 24, 1);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 24 * 16 * 16], &[1, 24, 16, 16]).unwrap(),
+            Tensor::from_vec(vec![0.1; 24 * 16 * 16], &[1, 24, 16, 16]).unwrap(),
             false,
         );
         let output = block.forward(&input);
@@ -654,7 +654,7 @@ mod tests {
     fn test_blazeblock_downsample() {
         let block = BlazeBlock::new(24, 48, 2);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 24 * 16 * 16], &[1, 24, 16, 16]).unwrap(),
+            Tensor::from_vec(vec![0.1; 24 * 16 * 16], &[1, 24, 16, 16]).unwrap(),
             false,
         );
         let output = block.forward(&input);
@@ -665,7 +665,7 @@ mod tests {
     fn test_double_blazeblock() {
         let block = DoubleBlazeBlock::new(64, 64, 96, 2);
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 64 * 16 * 16], &[1, 64, 16, 16]).unwrap(),
+            Tensor::from_vec(vec![0.1; 64 * 16 * 16], &[1, 64, 16, 16]).unwrap(),
             false,
         );
         let output = block.forward(&input);
@@ -691,7 +691,7 @@ mod tests {
     fn test_blazeface_forward_train() {
         let model = BlazeFace::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
             false,
         );
         let (cls, bbox) = model.forward_train(&input);
@@ -715,7 +715,7 @@ mod tests {
     fn test_blazeface_detect() {
         let model = BlazeFace::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.5; 1 * 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.5; 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
             false,
         );
         // Just verify it runs without panic
@@ -726,7 +726,7 @@ mod tests {
     fn test_blazeface_backward() {
         let model = BlazeFace::new();
         let input = Variable::new(
-            Tensor::from_vec(vec![0.1; 1 * 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
+            Tensor::from_vec(vec![0.1; 3 * 128 * 128], &[1, 3, 128, 128]).unwrap(),
             true,
         );
         let (cls, _bbox) = model.forward_train(&input);

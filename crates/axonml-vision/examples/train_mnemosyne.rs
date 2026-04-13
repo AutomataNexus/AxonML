@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use axonml_autograd::Variable;
 use axonml_core::Device;
-use axonml_nn::{Module, Parameter};
+use axonml_nn::Module;
 use axonml_optim::{AdamW, Optimizer};
 use axonml_serialize::{
     Checkpoint, StateDict, TrainingState, load_checkpoint, save_checkpoint, save_model,
@@ -164,7 +164,7 @@ fn crystallize_batched(
     for step_data in steps {
         let mut t = Tensor::from_vec(step_data.clone(), &[batch_size, 3, 64, 64]).unwrap();
         if device.is_gpu() {
-            t = t.to_device(device.clone()).unwrap();
+            t = t.to_device(*device).unwrap();
         }
         let face = Variable::new(t, false);
         let (h, velocity, _logvar, _quality) = model.crystallize_step(&face, hidden.as_ref());
@@ -450,7 +450,7 @@ fn main() {
     // Move model to GPU
     if device.is_gpu() {
         for param in model.parameters() {
-            param.to_device(device.clone());
+            param.to_device(device);
         }
         println!("  Model moved to GPU");
     }
@@ -480,7 +480,7 @@ fn main() {
             // Re-move params to GPU after loading (weights were loaded on CPU)
             if device.is_gpu() {
                 for param in model.parameters() {
-                    param.to_device(device.clone());
+                    param.to_device(device);
                 }
             }
         } else {

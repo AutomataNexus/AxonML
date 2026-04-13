@@ -818,7 +818,6 @@ async fn admin_record_metrics(
 
 #[cfg(test)]
 mod tests {
-    
 
     #[test]
     fn test_app_state_clone() {

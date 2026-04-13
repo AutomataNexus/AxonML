@@ -161,7 +161,7 @@ impl HvacDataGenerator {
             // ===== PUMP CURRENTS (0-5) =====
             // 4-Pipe HW Pumps
             if conditions.hw_lead_pump == 0 {
-                data[base + 0] = if is_heating {
+                data[base] = if is_heating {
                     base_current + self.noise(2.0)
                 } else {
                     0.5
@@ -173,7 +173,7 @@ impl HvacDataGenerator {
                 } else {
                     0.5
                 };
-                data[base + 0] = 0.3 + self.noise(0.1);
+                data[base] = 0.3 + self.noise(0.1);
             }
 
             // 4-Pipe CW Pumps
@@ -474,7 +474,7 @@ impl HvacDataGenerator {
         println!("Generated {} total samples", total_samples);
 
         // Print label distribution
-        let mut label_counts = vec![0usize; 20];
+        let mut label_counts = [0usize; 20];
         for &label in &all_labels {
             label_counts[label as usize] += 1;
         }
