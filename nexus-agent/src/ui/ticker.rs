@@ -1026,14 +1026,26 @@ fn set_active_theme(t: Theme) {
     ACTIVE_THEME.store(match t { Theme::Dark => 0, Theme::Light => 1 }, std::sync::atomic::Ordering::Relaxed);
 }
 
-// Named-color accessors — all resolve via the active palette, so swapping
-// themes flips the UI without touching draw code.
+// Named-color accessors. Surface colors (bg, text, text_dim) follow the
+// active palette so dark/light swap cleanly. Semantic LED colors (TEAL =
+// success/online, TERRACOTTA = failure, AMBER = warn, SLATE = unknown)
+// stay FIXED in both themes — "green means good" has to be green even on
+// a cream background, or users can't tell passing from failing CI.
 #[allow(non_snake_case)]
 fn CREAM() -> egui::Color32 { active_palette().text }
+// Semantic status colors — theme-aware only for Amber (since pure yellow
+// is unreadable on cream). Teal and red stay put so CI pass/fail is never
+// ambiguous.
 #[allow(non_snake_case)]
-fn TEAL() -> egui::Color32 { active_palette().accent }
+fn TEAL() -> egui::Color32 { egui::Color32::from_rgb(20, 184, 166) }
 #[allow(non_snake_case)]
-fn TERRACOTTA() -> egui::Color32 { active_palette().alert }
+fn TERRACOTTA() -> egui::Color32 {
+    if active_palette().bg == LIGHT.bg {
+        egui::Color32::from_rgb(200, 50, 40)  // deeper red on cream for contrast
+    } else {
+        egui::Color32::from_rgb(205, 92, 68)
+    }
+}
 #[allow(non_snake_case)]
 fn AMBER() -> egui::Color32 { active_palette().warn }
 #[allow(non_snake_case)]
