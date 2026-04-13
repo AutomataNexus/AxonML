@@ -378,8 +378,12 @@ pub struct InferenceEngine {
     pub config: InferenceConfig,
     /// Token embedding [vocab_size, hidden_size]
     pub token_embed: Vec<f32>,
-    /// Per-layer weights (pre-transposed for matmul)
+    /// Per-layer weights for LLaMA-family architectures (LLaMA, Qwen2,
+    /// Mistral). Empty when `gemma4` is populated.
     pub layers: Vec<LayerWeights>,
+    /// Per-layer weights + top-level specials for Gemma 4. `None` for
+    /// LLaMA/Qwen2/Mistral. Present when `config.architecture == "gemma4"`.
+    pub gemma4: Option<Gemma4Weights>,
     /// Output norm [hidden_size]
     pub output_norm: Vec<f32>,
     /// LM head — logical shape `[hidden, vocab]` (post-transpose).
@@ -422,6 +426,119 @@ impl LayerWeights {
     }
 }
 
+// =============================================================================
+// Gemma 4 — distinct per-layer layout (sandwich norms, Q/K norm, etc.)
+// =============================================================================
+
+/// Weights for one Gemma-family transformer layer.
+///
+/// Differs from the LLaMA-family `LayerWeights`:
+/// - Four norms wrap each sublayer (pre + post attention, pre + post FFN)
+///   instead of two
+/// - Extra RMSNorm on Q and K projections (applied per-head, pre-RoPE)
+/// - No Q/K/V bias (Gemma projections are pure matmul)
+///
+/// Shape conventions match `LayerWeights`: each `Weight` is logically
+/// `[in, out]` (post-transpose), so matmul is `input @ weight`.
+pub struct Gemma4LayerWeights {
+    // Norms (RMSNorm weights, 1D)
+    pub attn_norm: Vec<f32>,                  // [hidden]  — pre-attn
+    pub post_attention_norm: Vec<f32>,        // [hidden]  — post-attn (Gemma-only)
+    pub ffn_norm: Vec<f32>,                   // [hidden]  — pre-FFN
+    pub post_ffw_norm: Vec<f32>,              // [hidden]  — post-FFN (Gemma-only)
+    pub post_norm: Option<Vec<f32>>,          // [hidden]  — `blk.N.post_norm`; purpose TBD
+    pub q_norm: Vec<f32>,                     // [qk_norm_dim]  — applied per-head, pre-RoPE
+    pub k_norm: Vec<f32>,                     // [qk_norm_dim]
+    // Attention projections
+    pub q_weight: Weight,                     // [hidden, n_heads * head_dim]
+    pub k_weight: Weight,                     // [hidden, n_kv_heads * head_dim]
+    pub v_weight: Weight,
+    pub o_weight: Weight,                     // [n_heads * head_dim, hidden]
+    // FFN projections
+    pub gate_weight: Weight,                  // [hidden, intermediate]
+    pub up_weight: Weight,
+    pub down_weight: Weight,                  // [intermediate, hidden]
+}
+
+impl Gemma4LayerWeights {
+    fn to_device(&mut self, device: Device) {
+        self.q_weight.to_device(device.clone());
+        self.k_weight.to_device(device.clone());
+        self.v_weight.to_device(device.clone());
+        self.o_weight.to_device(device.clone());
+        self.gate_weight.to_device(device.clone());
+        self.up_weight.to_device(device.clone());
+        self.down_weight.to_device(device);
+        // Norms are tiny (1D, ~few KB each) and live in Vec<f32>; they stay on CPU.
+    }
+}
+
+/// Top-level weights specific to Gemma 4. Includes the per-layer input
+/// embeddings feature (Gemma 3/4 novelty).
+pub struct Gemma4Weights {
+    pub layers: Vec<Gemma4LayerWeights>,
+
+    /// Per-layer token embedding table, shape `[vocab, num_layers * per_layer_input_width]`
+    /// (stored flat as `Vec<f32>`). Looked up once per token at the start of a
+    /// forward pass, then sliced per-layer and added to the hidden state.
+    pub per_layer_token_embd: Vec<f32>,
+
+    /// Projects per-layer input (width = `per_layer_input_width`) back to
+    /// `hidden_size`. Shape `[per_layer_input_width, hidden_size]`.
+    pub per_layer_model_proj: Weight,
+
+    /// RMSNorm weight for the per-layer input path. Shape `[per_layer_input_width]`.
+    pub per_layer_proj_norm: Vec<f32>,
+
+    /// Optional pre-computed RoPE frequency table. Shape `[head_dim / 2]` or
+    /// similar — we fall back to computing RoPE freqs on the fly if the tensor
+    /// is absent in the GGUF.
+    pub rope_freqs: Option<Vec<f32>>,
+}
+
+impl Gemma4Weights {
+    fn to_device(&mut self, device: Device) {
+        self.per_layer_model_proj.to_device(device.clone());
+        let num_layers = self.layers.len();
+        for (i, layer) in self.layers.iter_mut().enumerate() {
+            layer.to_device(device.clone());
+            if (i + 1) % 7 == 0 || i + 1 == num_layers {
+                println!("    Layer {}/{}", i + 1, num_layers);
+            }
+        }
+    }
+
+    /// Compressed bytes used in RAM across all Gemma-specific weights.
+    fn bytes(&self) -> usize {
+        let mut total = 0;
+        for l in &self.layers {
+            total += l.attn_norm.len() * 4;
+            total += l.post_attention_norm.len() * 4;
+            total += l.ffn_norm.len() * 4;
+            total += l.post_ffw_norm.len() * 4;
+            if let Some(ref p) = l.post_norm {
+                total += p.len() * 4;
+            }
+            total += l.q_norm.len() * 4;
+            total += l.k_norm.len() * 4;
+            total += l.q_weight.bytes();
+            total += l.k_weight.bytes();
+            total += l.v_weight.bytes();
+            total += l.o_weight.bytes();
+            total += l.gate_weight.bytes();
+            total += l.up_weight.bytes();
+            total += l.down_weight.bytes();
+        }
+        total += self.per_layer_token_embd.len() * 4;
+        total += self.per_layer_model_proj.bytes();
+        total += self.per_layer_proj_norm.len() * 4;
+        if let Some(ref r) = self.rope_freqs {
+            total += r.len() * 4;
+        }
+        total
+    }
+}
+
 impl InferenceEngine {
     /// Move all weight matrices to GPU (f32 variant) and set the compute device.
     /// Quantized weights stay in CPU RAM (dequantization produces per-matmul
@@ -430,11 +547,18 @@ impl InferenceEngine {
         println!("  Setting compute device to {:?}...", device);
         self.compute_device = device.clone();
         self.lm_head.to_device(device.clone());
-        let num_layers = self.layers.len();
-        for (i, layer) in self.layers.iter_mut().enumerate() {
-            layer.to_device(device.clone());
-            if (i + 1) % 7 == 0 || i + 1 == num_layers {
-                println!("    Layer {}/{}", i + 1, num_layers);
+
+        if let Some(ref mut g) = self.gemma4 {
+            // Gemma 4 path: layers live on `gemma4`, main `layers` is empty.
+            g.to_device(device.clone());
+        } else {
+            // LLaMA / Qwen2 / Mistral path.
+            let num_layers = self.layers.len();
+            for (i, layer) in self.layers.iter_mut().enumerate() {
+                layer.to_device(device.clone());
+                if (i + 1) % 7 == 0 || i + 1 == num_layers {
+                    println!("    Layer {}/{}", i + 1, num_layers);
+                }
             }
         }
         println!("  Compute device: {:?}", device);
@@ -494,6 +618,13 @@ impl InferenceEngine {
         println!("    Hidden: {}, Layers: {}, Heads: {}/{}",
             config.hidden_size, config.num_layers, config.num_heads, config.num_kv_heads);
         println!("    Vocab: {}, Context: {}", config.vocab_size, config.max_seq_len);
+
+        // Dispatch on architecture. Gemma models have a distinct per-layer
+        // layout (sandwich norms, Q/K norm, per-layer input embeddings) and
+        // the top-level tensors (vision/audio towers) must be skipped.
+        if config.architecture.starts_with("gemma") {
+            return Self::load_gemma4(gguf, mapped, quantized_weights, config);
+        }
 
         // Token embeddings as flat Vec (fast lookup) — always dequantized
         let token_embed = load_vec(mapped, "token_embd.weight")?;
@@ -564,6 +695,125 @@ impl InferenceEngine {
             config,
             token_embed,
             layers,
+            gemma4: None,
+            output_norm,
+            lm_head,
+            compute_device: Device::Cpu,
+        })
+    }
+
+    /// Gemma 4 weight loader. Called from `from_gguf_with_mode` when the
+    /// architecture is a Gemma variant. Skips the vision (`v.*`) and audio
+    /// (`a.*`) towers — nexus-serve is text-only for this round.
+    fn load_gemma4(
+        _gguf: &GgufFile,
+        mapped: &MappedGguf,
+        quantized_weights: bool,
+        config: InferenceConfig,
+    ) -> Result<Self, String> {
+        // Token embedding: [vocab, hidden]. Always eagerly dequantized.
+        let token_embed = load_vec(mapped, "token_embd.weight")?;
+
+        // Per-layer weights: load the 7 Gemma-specific norms + Q/K/V/O + gate/up/down
+        let mut gemma_layers = Vec::with_capacity(config.num_layers);
+        for i in 0..config.num_layers {
+            let prefix = format!("blk.{i}");
+
+            let attn_norm = load_vec(mapped, &format!("{prefix}.attn_norm.weight"))?;
+            let post_attention_norm = load_vec(
+                mapped, &format!("{prefix}.post_attention_norm.weight"))?;
+            let ffn_norm = load_vec(mapped, &format!("{prefix}.ffn_norm.weight"))?;
+            let post_ffw_norm = load_vec(mapped, &format!("{prefix}.post_ffw_norm.weight"))?;
+            // post_norm is present on Gemma 4 but its exact role is still being
+            // verified against reference code — load as optional.
+            let post_norm = try_load_vec(mapped, &format!("{prefix}.post_norm.weight"));
+            let q_norm = load_vec(mapped, &format!("{prefix}.attn_q_norm.weight"))?;
+            let k_norm = load_vec(mapped, &format!("{prefix}.attn_k_norm.weight"))?;
+
+            let q_weight = load_weight(mapped, &format!("{prefix}.attn_q.weight"), quantized_weights)?;
+            let k_weight = load_weight(mapped, &format!("{prefix}.attn_k.weight"), quantized_weights)?;
+            let v_weight = load_weight(mapped, &format!("{prefix}.attn_v.weight"), quantized_weights)?;
+            let o_weight = load_weight(mapped, &format!("{prefix}.attn_output.weight"), quantized_weights)?;
+
+            let gate_weight = load_weight(mapped, &format!("{prefix}.ffn_gate.weight"), quantized_weights)?;
+            let up_weight = load_weight(mapped, &format!("{prefix}.ffn_up.weight"), quantized_weights)?;
+            let down_weight = load_weight(mapped, &format!("{prefix}.ffn_down.weight"), quantized_weights)?;
+
+            gemma_layers.push(Gemma4LayerWeights {
+                attn_norm,
+                post_attention_norm,
+                ffn_norm,
+                post_ffw_norm,
+                post_norm,
+                q_norm,
+                k_norm,
+                q_weight,
+                k_weight,
+                v_weight,
+                o_weight,
+                gate_weight,
+                up_weight,
+                down_weight,
+            });
+
+            if (i + 1) % 7 == 0 || i + 1 == config.num_layers {
+                println!("    Loaded layer {}/{}", i + 1, config.num_layers);
+            }
+        }
+
+        // Top-level: per-layer input embeddings (Gemma 3/4 novelty).
+        let per_layer_token_embd = load_vec(mapped, "per_layer_token_embd.weight")?;
+        let per_layer_model_proj = load_weight(
+            mapped, "per_layer_model_proj.weight", quantized_weights)?;
+        let per_layer_proj_norm = load_vec(mapped, "per_layer_proj_norm.weight")?;
+
+        // Optional pre-computed RoPE frequency table. We'll fall back to
+        // computing RoPE freqs analytically if this isn't present.
+        let rope_freqs = try_load_vec(mapped, "rope_freqs.weight");
+
+        // Output norm — always eager.
+        let output_norm = load_vec(mapped, "output_norm.weight")?;
+
+        // LM head: Gemma 4 ties to `token_embd.weight` (no standalone
+        // `output.weight`). Fall back to token_embd if not present.
+        let lm_head = if mapped.has_tensor("output.weight") {
+            load_weight(mapped, "output.weight", quantized_weights)?
+        } else {
+            println!("    LM head tied to token embeddings");
+            load_weight(mapped, "token_embd.weight", quantized_weights)?
+        };
+
+        // Sanity-check: count skipped vision/audio tensors so the user sees
+        // what was filtered out.
+        let skipped_v = mapped.tensor_names().iter().filter(|n| n.starts_with("v.")).count();
+        let skipped_a = mapped.tensor_names().iter().filter(|n| n.starts_with("a.") || n.starts_with("mm.")).count();
+        if skipped_v + skipped_a > 0 {
+            println!("    Skipped {} vision + {} audio/multimodal tensors (text-only serving)",
+                skipped_v, skipped_a);
+        }
+
+        let gemma = Gemma4Weights {
+            layers: gemma_layers,
+            per_layer_token_embd,
+            per_layer_model_proj,
+            per_layer_proj_norm,
+            rope_freqs,
+        };
+
+        let total_bytes = token_embed.len() * 4
+            + gemma.bytes()
+            + output_norm.len() * 4
+            + lm_head.bytes();
+
+        println!("  Model loaded: {:.2} GB in RAM ({} mode, gemma4 path)",
+            total_bytes as f64 / 1e9,
+            if quantized_weights { "quantized" } else { "f32" });
+
+        Ok(Self {
+            config,
+            token_embed,
+            layers: Vec::new(), // LLaMA-family layers unused in Gemma path
+            gemma4: Some(gemma),
             output_norm,
             lm_head,
             compute_device: Device::Cpu,
@@ -599,6 +849,20 @@ impl InferenceEngine {
         top_p: f32,
         mut on_token: F,
     ) {
+        // Gemma 4 weights are loaded but the forward pass is not yet wired
+        // up (see WORK_STATE W16, stages 4–6). Fail loudly rather than run
+        // the LLaMA forward path over Gemma weights — that would produce
+        // shape panics or subtly-wrong output.
+        if self.gemma4.is_some() {
+            eprintln!(
+                "nexus-serve: generation not yet implemented for architecture '{}'. \
+                 Weights are loaded, forward pass + SWA KV cache are still in flight. \
+                 See WORK_STATE.md W16.",
+                self.config.architecture,
+            );
+            return;
+        }
+
         let mut kv_cache = KvCache::new(self.config.num_layers);
 
         // Prefill: process entire prompt at once
