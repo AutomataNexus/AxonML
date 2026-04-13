@@ -221,6 +221,17 @@ struct Shared {
     last_relay_error: Option<String>,
     /// Show or hide the events dropdown below the header.
     show_events: bool,
+    /// Per-tech disable state, keyed lowercase — mirrors the daemon's
+    /// ~/.nexusoracle/tech_overrides.json. Populated by poll_tech_overrides.
+    disabled_techs: HashMap<String, String>, // name-lowercase → reason
+}
+
+#[derive(Clone, Default, Deserialize)]
+struct RemoteOverride {
+    #[serde(default)]
+    disabled: bool,
+    #[serde(default)]
+    reason: String,
 }
 
 struct TechApp {
