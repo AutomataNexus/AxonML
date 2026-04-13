@@ -96,6 +96,40 @@ Resolved config:
   hardware  = Intel Core Ultra 9 275HX
 ```
 
+## Streaming
+
+`POST /v1/chat/completions` with `"stream": true` returns an OpenAI-compatible Server-Sent Events (SSE) stream. The server emits:
+
+1. An initial `role` chunk (`delta.role = "assistant"`) so clients can render an empty assistant bubble immediately.
+2. One `content` chunk per generated token (`delta.content = "<piece>"`), emitted the moment the token callback fires — not after generation completes.
+3. Axum-level SSE keep-alive comments (`:`) approximately every 15 s so browser / proxy connections don't time out during slow prefill or decode.
+4. A final chunk carrying `finish_reason = "stop"` or `"length"`.
+5. An OpenAI-spec `data: [DONE]` terminator line.
+
+Generation runs on a `tokio::task::spawn_blocking` thread so the tokio runtime stays responsive; each token flows through an unbounded `mpsc` channel into the SSE response body. Client disconnects are detected by the `tx.send(...).is_ok()` return value — generation stops early if the receiver drops.
+
+Example:
+
+```bash
+curl -N http://localhost:11435/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "sage",
+    "messages": [{"role":"user","content":"Count to 3."}],
+    "max_tokens": 20,
+    "stream": true
+  }'
+```
+
+Throughput depends heavily on backend:
+
+| Model | Build | Throughput |
+|---|---|---|
+| Sage (Qwen2.5 Coder 1.5B) f32 | CPU (24 threads) | ~0.05–0.3 tok/s |
+| Sage f32 | `--features cuda` | ~10–50× the CPU rate |
+
+On CPU, prefill of even a short prompt can take a minute or more. That's a raw compute bottleneck, not a streaming bug — the first token chunk is sent the instant the model emits it.
+
 ## Endpoints
 
 All OpenAI-compatible:
@@ -166,7 +200,6 @@ cargo test --release --test q6k_block_test
 
 ## Known Limitations
 
-- **Streaming SSE** not implemented — responses are blocking
 - **Gemma architecture** — not yet supported (requires different attention + rotary)
 - **Phi, Mamba, MoE** — not yet supported
 - **Concurrent requests** — correctness is fine (each `generate_stream()` call allocates its own `KvCache` on the stack; two requests return correct, prompt-specific answers in parallel). The shared `Arc<InferenceEngine>` only holds read-only weights. **Throughput, however, is not additive**: concurrent requests share the rayon CPU pool (and, for GPU, the CUDA context), so two simultaneous generations each run at roughly half the speed of a solo one. If you need real concurrent throughput, horizontal-scale by running multiple `nexus-serve` processes behind a load balancer.
