@@ -546,9 +546,115 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
                 }
             }
         } else if !verified {
-            // Ralph loop exhausted without reaching a green local verify
+            // Ralph's fmt/clippy loop couldn't reach a green local verify.
+            // Before giving up, delegate to the `ci-fixer` agent which has
+            // full shell + file tools and can handle test assertions,
+            // flaky convergence, logic bugs — things lint autofix can't.
             if let Ok(mut s) = state.lock() {
-                s.push_log(&format!("    {short_name}: ralph loop exhausted after {MAX_RALPH_ITER} passes — manual fix needed"), true);
+                s.push_log(&format!("    {short_name}: delegating to ci-fixer agent..."), false);
+                s.status = Status::Fixing(format!("ci-fixer: {short_name}..."));
+            }
+
+            // Hand the agent the repo + the error log tail. The agent is
+            // instructed to stop once the failing test passes locally — it
+            // does NOT commit or push; that stays our responsibility below.
+            let agent_task = format!(
+                "Repo: {local_path}\nShort name: {short_name}\n\nCI error log (tail):\n{current_errors}\n\n\
+                 Reproduce the failure in {local_path}, identify the root cause, and apply the minimum change that makes the failing test pass locally. \
+                 Do not commit. Do not push. Stop when the test is green."
+            );
+            let agent_out = tokio::process::Command::new(
+                "/opt/AxonML/nexus-agent/target/release/nexus-agent",
+            )
+                .args(["ci-fixer", &agent_task])
+                .output()
+                .await;
+            match agent_out {
+                Ok(ref o) if o.status.success() => {
+                    let summary_tail = String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .rev()
+                        .take(3)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    if let Ok(mut s) = state.lock() {
+                        s.push_log(&format!("    ci-fixer: {}", &summary_tail[..summary_tail.len().min(160)]), false);
+                    }
+                }
+                _ => {
+                    if let Ok(mut s) = state.lock() {
+                        s.push_log("    ci-fixer: invocation failed", true);
+                    }
+                }
+            }
+
+            // Did the agent actually leave fixes on disk? Re-verify locally.
+            let fmt_check2 = tokio::process::Command::new("cargo")
+                .args(["fmt", "--all", "--", "--check"])
+                .current_dir(local_path)
+                .output().await;
+            let clippy_check2 = tokio::process::Command::new("cargo")
+                .args(["clippy", "--workspace", "--", "-D", "warnings"])
+                .current_dir(local_path)
+                .output().await;
+            let test_check = tokio::process::Command::new("cargo")
+                .args(["test", "--workspace", "--no-fail-fast"])
+                .current_dir(local_path)
+                .output().await;
+            let all_green = fmt_check2.as_ref().map(|o| o.status.success()).unwrap_or(false)
+                && clippy_check2.as_ref().map(|o| o.status.success()).unwrap_or(false)
+                && test_check.as_ref().map(|o| o.status.success()).unwrap_or(false);
+            let diff_out = tokio::process::Command::new("git")
+                .args(["diff", "--stat"])
+                .current_dir(local_path)
+                .output().await;
+            let agent_has_changes = diff_out.map(|d| !d.stdout.is_empty()).unwrap_or(false);
+
+            if all_green && agent_has_changes {
+                // Agent produced a working fix — take over and push it,
+                // using the same commit + re-lock + toast path as the ralph
+                // success branch above.
+                if let Ok(mut s) = state.lock() {
+                    s.push_log(&format!("    ci-fixer: verified — committing"), false);
+                }
+                let _ = tokio::process::Command::new("git").args(["add", "-A"]).current_dir(local_path).output().await;
+                let commit = tokio::process::Command::new("git")
+                    .args(["commit", "-m", "fix: resolve CI failures (ci-fixer agent)"])
+                    .current_dir(local_path)
+                    .output().await;
+                if commit.as_ref().map(|c| c.status.success()).unwrap_or(false) {
+                    let push = tokio::process::Command::new("git")
+                        .args(["push"])
+                        .current_dir(local_path)
+                        .output().await;
+                    let pushed = push.as_ref().map(|p| p.status.success()).unwrap_or(false);
+                    if let Ok(mut s) = state.lock() {
+                        if pushed {
+                            s.push_log(&format!("    {short_name}: ci-fixer fix pushed"), false);
+                            if let Some(r) = s.repos.iter_mut().find(|r| r.name == *repo_gh) {
+                                r.ci_ok = Some(true);
+                            }
+                            total_failures = total_failures.saturating_sub(1);
+                        } else {
+                            s.push_log(&format!("    {short_name}: ci-fixer fix committed but push failed"), true);
+                        }
+                    }
+                    if pushed && is_axonml {
+                        let _ = tokio::process::Command::new("sudo")
+                            .args(["-n", "/opt/AxonML/lock-crates.sh"])
+                            .output().await;
+                    }
+                    continue; // move to the next repo
+                }
+            }
+
+            // Agent couldn't or didn't fix it — fall through to the
+            // "manual fix needed" toast that was already here.
+            if let Ok(mut s) = state.lock() {
+                s.push_log(&format!("    {short_name}: ralph + ci-fixer exhausted — manual fix needed"), true);
             }
 
             let toast_msg = format!("{short_name}: auto-fix exhausted {MAX_RALPH_ITER} passes. Manual fix needed.");
