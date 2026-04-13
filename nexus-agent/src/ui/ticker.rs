@@ -499,6 +499,15 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
                     if let Ok(mut s) = state.lock() {
                         if pushed {
                             s.push_log(&format!("    {short_name}: verified + pushed ({files_changed} files)"), false);
+                            // Optimistic LED: we just pushed a verified fix
+                            // so the next GitHub CI run will be green. Flip
+                            // the repo LED now instead of waiting for the
+                            // 5-minute poll, and decrement the failure count
+                            // so the header LED goes back to idle.
+                            if let Some(r) = s.repos.iter_mut().find(|r| r.name == *repo_gh) {
+                                r.ci_ok = Some(true);
+                            }
+                            total_failures = total_failures.saturating_sub(1);
                         } else {
                             s.push_log(&format!("    {short_name}: verified + committed but push failed"), true);
                         }

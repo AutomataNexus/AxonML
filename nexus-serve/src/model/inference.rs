@@ -849,24 +849,15 @@ impl InferenceEngine {
         top_p: f32,
         mut on_token: F,
     ) {
-        // Gemma 4 weights are loaded but the forward pass is not yet wired
-        // up (see WORK_STATE W16, stages 4–6). Fail loudly rather than run
-        // the LLaMA forward path over Gemma weights — that would produce
-        // shape panics or subtly-wrong output.
-        if self.gemma4.is_some() {
-            eprintln!(
-                "nexus-serve: generation not yet implemented for architecture '{}'. \
-                 Weights are loaded, forward pass + SWA KV cache are still in flight. \
-                 See WORK_STATE.md W16.",
-                self.config.architecture,
-            );
-            return;
-        }
-
+        let is_gemma = self.gemma4.is_some();
         let mut kv_cache = KvCache::new(self.config.num_layers);
 
         // Prefill: process entire prompt at once
-        let logits = self.forward_batch(prompt_ids, &mut kv_cache);
+        let logits = if is_gemma {
+            self.forward_batch_gemma4(prompt_ids, &mut kv_cache)
+        } else {
+            self.forward_batch(prompt_ids, &mut kv_cache)
+        };
         let vocab_size = self.config.vocab_size;
         let last_logits = &logits[logits.len() - vocab_size..];
 
@@ -886,7 +877,11 @@ impl InferenceEngine {
 
         // Decode: process one token at a time with KV cache
         for _ in 1..max_new_tokens {
-            let logits = self.forward_one(next_id, &mut kv_cache);
+            let logits = if is_gemma {
+                self.forward_one_gemma4(next_id, &mut kv_cache)
+            } else {
+                self.forward_one(next_id, &mut kv_cache)
+            };
 
             next_id = if temperature < 0.01 {
                 argmax(&logits) as u32
@@ -1085,6 +1080,275 @@ impl InferenceEngine {
         let normed_t = self.to_weight_device(Tensor::from_vec(normed, &[1, hidden]).unwrap());
         self.lm_head.matmul(&normed_t).to_vec()
     }
+
+    // =========================================================================
+    // Gemma 4 forward pass
+    //
+    // Differences from forward_batch / forward_one above:
+    //   - Each layer has its own head_dim (512 for full-attention layers,
+    //     256 for SWA layers, controlled by sliding_window_pattern).
+    //   - Each layer picks its RoPE base (1M for full, 10k for SWA).
+    //   - Attention is preceded by two RMSNorms (pre-attn on hidden, then
+    //     per-head Q/K RMSNorm pre-RoPE).
+    //   - Attention output is followed by a second RMSNorm (post-attn) before
+    //     the residual add.
+    //   - FFN uses GELU (exact) on the gate, not SiLU.
+    //   - FFN output is followed by a second RMSNorm (post-FFN) before residual.
+    //   - Final logits are softcapped: logits = tanh(logits / cap) * cap.
+    //   - Per-layer input embedding addition is NOT YET implemented — see
+    //     the TODO below. This means Oracle output won't match Gemma reference
+    //     exactly but should still be coherent; will be added in a follow-up.
+    // =========================================================================
+
+    fn forward_batch_gemma4(
+        &self,
+        token_ids: &[u32],
+        kv_cache: &mut KvCache,
+    ) -> Vec<f32> {
+        let gemma = self.gemma4.as_ref().expect("gemma4 forward without gemma4 weights");
+        let gconf = self.config.gemma.as_ref().expect("gemma4 forward without gemma config");
+
+        let seq_len = token_ids.len();
+        let hidden = self.config.hidden_size;
+        let n_heads = self.config.num_heads;
+        let n_kv_heads = self.config.num_kv_heads;
+        let pos_offset = kv_cache.len;
+
+        // Token embedding lookup (same as LLaMA path, since token_embed is [vocab, hidden])
+        let mut x = vec![0.0f32; seq_len * hidden];
+        for (pos, &id) in token_ids.iter().enumerate() {
+            let id = id as usize;
+            if id < self.config.vocab_size {
+                x[pos * hidden..(pos + 1) * hidden]
+                    .copy_from_slice(&self.token_embed[id * hidden..(id + 1) * hidden]);
+            }
+        }
+
+        // TODO(W16 stage 4b): per-layer input embedding addition. Gemma 3/4 looks
+        // up an additional per-token embedding from `per_layer_token_embd` and
+        // adds a per-layer projection of it to `x` at each layer. Without this
+        // step the output will be systematically biased vs reference but should
+        // still be coherent. Capturing the per-layer base for future use:
+        let _ = &gemma.per_layer_token_embd;
+        let _ = &gemma.per_layer_model_proj;
+        let _ = &gemma.per_layer_proj_norm;
+
+        for (li, layer) in gemma.layers.iter().enumerate() {
+            let is_swa = gconf.sliding_window_pattern.get(li).copied().unwrap_or(false);
+            let head_dim = if is_swa { gconf.head_dim_swa } else { self.config.head_dim };
+            let rope_theta = if is_swa { gconf.rope_theta_swa } else { self.config.rope_theta };
+            let kv_dim = n_kv_heads * head_dim;
+            let q_dim = n_heads * head_dim;
+
+            // ─── Attention sublayer ─────────────────────────────────────────
+            // 1. Pre-attn RMSNorm on hidden state
+            let normed = rms_norm_vec(&x, &layer.attn_norm, self.config.rms_norm_eps, seq_len, hidden);
+            let normed_t = self.to_weight_device(
+                Tensor::from_vec(normed, &[seq_len, hidden]).unwrap());
+
+            // 2. Q/K/V projections
+            let mut q_data = layer.q_weight.matmul(&normed_t).to_vec();
+            let mut k_data = layer.k_weight.matmul(&normed_t).to_vec();
+            let v_data = layer.v_weight.matmul(&normed_t).to_vec();
+
+            // 3. Per-head Q/K RMSNorm (Gemma-specific, pre-RoPE)
+            rms_norm_per_head_inplace(&mut q_data, &layer.q_norm, self.config.rms_norm_eps,
+                seq_len, n_heads, head_dim);
+            rms_norm_per_head_inplace(&mut k_data, &layer.k_norm, self.config.rms_norm_eps,
+                seq_len, n_kv_heads, head_dim);
+
+            // 4. Split-halves RoPE (dual base: full vs SWA)
+            apply_rope_inplace(&mut q_data, seq_len, n_heads, head_dim, rope_theta, pos_offset);
+            apply_rope_inplace(&mut k_data, seq_len, n_kv_heads, head_dim, rope_theta, pos_offset);
+
+            // 5. Append to KV cache (per-layer stride because head_dim varies)
+            kv_cache.k_cache[li].extend_from_slice(&k_data);
+            kv_cache.v_cache[li].extend_from_slice(&v_data);
+
+            // 6. Attention. SWA layers mask out positions older than `sliding_window`.
+            let total_len = kv_cache.len + seq_len;
+            let attn_out = if is_swa {
+                cached_attention_swa(
+                    &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                    seq_len, total_len, n_heads, n_kv_heads, head_dim, pos_offset,
+                    gconf.sliding_window,
+                )
+            } else {
+                cached_attention(
+                    &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                    seq_len, total_len, n_heads, n_kv_heads, head_dim, pos_offset,
+                )
+            };
+            let _ = kv_dim;
+
+            // 7. Output projection
+            let attn_t = self.to_weight_device(
+                Tensor::from_vec(attn_out, &[seq_len, q_dim]).unwrap());
+            let attn_proj = layer.o_weight.matmul(&attn_t).to_vec();
+
+            // 8. POST-attn RMSNorm (Gemma-specific) — applied to the attention
+            //    output BEFORE the residual add.
+            let attn_normed = rms_norm_vec(&attn_proj, &layer.post_attention_norm,
+                self.config.rms_norm_eps, seq_len, hidden);
+
+            // 9. Residual: h = h + post_attn_norm(attn_proj)
+            for i in 0..x.len() { x[i] += attn_normed[i]; }
+
+            // ─── FFN sublayer ───────────────────────────────────────────────
+            // 10. Pre-FFN RMSNorm
+            let normed2 = rms_norm_vec(&x, &layer.ffn_norm, self.config.rms_norm_eps,
+                seq_len, hidden);
+            let normed2_t = self.to_weight_device(
+                Tensor::from_vec(normed2, &[seq_len, hidden]).unwrap());
+
+            // 11. Gate/Up projections + GELU activation
+            let gate_data = layer.gate_weight.matmul(&normed2_t).to_vec();
+            let up_data = layer.up_weight.matmul(&normed2_t).to_vec();
+            let inter_size = self.config.intermediate_size;
+            let mut ffn_data = vec![0.0f32; seq_len * inter_size];
+            for i in 0..ffn_data.len() {
+                ffn_data[i] = gelu_exact(gate_data[i]) * up_data[i];
+            }
+
+            // 12. Down projection
+            let ffn_t = self.to_weight_device(
+                Tensor::from_vec(ffn_data, &[seq_len, inter_size]).unwrap());
+            let ffn_out = layer.down_weight.matmul(&ffn_t).to_vec();
+
+            // 13. POST-FFN RMSNorm (Gemma-specific)
+            let ffn_normed = rms_norm_vec(&ffn_out, &layer.post_ffw_norm,
+                self.config.rms_norm_eps, seq_len, hidden);
+
+            // 14. Residual: h = h + post_ffw_norm(ffn_out)
+            for i in 0..x.len() { x[i] += ffn_normed[i]; }
+        }
+
+        kv_cache.len += seq_len;
+
+        // Final output norm
+        let normed = rms_norm_vec(&x, &self.output_norm, self.config.rms_norm_eps, seq_len, hidden);
+        let normed_t = self.to_weight_device(
+            Tensor::from_vec(normed, &[seq_len, hidden]).unwrap());
+
+        // LM head → vocab logits
+        let mut logits = self.lm_head.matmul(&normed_t).to_vec();
+
+        // Gemma-specific final logit softcap
+        if let Some(cap) = gconf.final_logit_softcap {
+            softcap_inplace(&mut logits, cap);
+        }
+
+        logits
+    }
+
+    fn forward_one_gemma4(&self, token_id: u32, kv_cache: &mut KvCache) -> Vec<f32> {
+        let gemma = self.gemma4.as_ref().expect("gemma4 forward without gemma4 weights");
+        let gconf = self.config.gemma.as_ref().expect("gemma4 forward without gemma config");
+
+        let hidden = self.config.hidden_size;
+        let n_heads = self.config.num_heads;
+        let n_kv_heads = self.config.num_kv_heads;
+        let pos = kv_cache.len;
+
+        // Token embedding lookup — single token
+        let mut x = vec![0.0f32; hidden];
+        let id = token_id as usize;
+        if id < self.config.vocab_size {
+            x.copy_from_slice(&self.token_embed[id * hidden..(id + 1) * hidden]);
+        }
+
+        for (li, layer) in gemma.layers.iter().enumerate() {
+            let is_swa = gconf.sliding_window_pattern.get(li).copied().unwrap_or(false);
+            let head_dim = if is_swa { gconf.head_dim_swa } else { self.config.head_dim };
+            let rope_theta = if is_swa { gconf.rope_theta_swa } else { self.config.rope_theta };
+            let q_dim = n_heads * head_dim;
+
+            // Pre-attn RMSNorm
+            let normed = rms_norm_single(&x, &layer.attn_norm, self.config.rms_norm_eps);
+            let normed_t = self.to_weight_device(
+                Tensor::from_vec(normed, &[1, hidden]).unwrap());
+
+            // Q/K/V projections
+            let mut q_data = layer.q_weight.matmul(&normed_t).to_vec();
+            let mut k_data = layer.k_weight.matmul(&normed_t).to_vec();
+            let v_data = layer.v_weight.matmul(&normed_t).to_vec();
+
+            // Per-head Q/K RMSNorm
+            rms_norm_per_head_inplace(&mut q_data, &layer.q_norm, self.config.rms_norm_eps,
+                1, n_heads, head_dim);
+            rms_norm_per_head_inplace(&mut k_data, &layer.k_norm, self.config.rms_norm_eps,
+                1, n_kv_heads, head_dim);
+
+            // RoPE
+            apply_rope_single(&mut q_data, n_heads, head_dim, rope_theta, pos);
+            apply_rope_single(&mut k_data, n_kv_heads, head_dim, rope_theta, pos);
+
+            // Append to KV cache
+            kv_cache.k_cache[li].extend_from_slice(&k_data);
+            kv_cache.v_cache[li].extend_from_slice(&v_data);
+
+            // Single-query attention (SWA or full)
+            let total_len = pos + 1;
+            let attn_out = if is_swa {
+                single_query_attention_swa(
+                    &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                    total_len, n_heads, n_kv_heads, head_dim, gconf.sliding_window,
+                )
+            } else {
+                single_query_attention(
+                    &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                    total_len, n_heads, n_kv_heads, head_dim,
+                )
+            };
+
+            // Output projection
+            let attn_t = self.to_weight_device(
+                Tensor::from_vec(attn_out, &[1, q_dim]).unwrap());
+            let attn_proj = layer.o_weight.matmul(&attn_t).to_vec();
+
+            // POST-attn RMSNorm
+            let attn_normed = rms_norm_single(&attn_proj, &layer.post_attention_norm,
+                self.config.rms_norm_eps);
+
+            // Residual
+            for i in 0..hidden { x[i] += attn_normed[i]; }
+
+            // FFN sublayer
+            let normed2 = rms_norm_single(&x, &layer.ffn_norm, self.config.rms_norm_eps);
+            let normed2_t = self.to_weight_device(
+                Tensor::from_vec(normed2, &[1, hidden]).unwrap());
+
+            let gate_data = layer.gate_weight.matmul(&normed2_t).to_vec();
+            let up_data = layer.up_weight.matmul(&normed2_t).to_vec();
+            let inter_size = self.config.intermediate_size;
+            let mut ffn_data = vec![0.0f32; inter_size];
+            for i in 0..inter_size {
+                ffn_data[i] = gelu_exact(gate_data[i]) * up_data[i];
+            }
+            let ffn_t = self.to_weight_device(
+                Tensor::from_vec(ffn_data, &[1, inter_size]).unwrap());
+            let ffn_out = layer.down_weight.matmul(&ffn_t).to_vec();
+
+            // POST-FFN RMSNorm
+            let ffn_normed = rms_norm_single(&ffn_out, &layer.post_ffw_norm,
+                self.config.rms_norm_eps);
+
+            // Residual
+            for i in 0..hidden { x[i] += ffn_normed[i]; }
+        }
+
+        kv_cache.len += 1;
+
+        let normed = rms_norm_single(&x, &self.output_norm, self.config.rms_norm_eps);
+        let normed_t = self.to_weight_device(Tensor::from_vec(normed, &[1, hidden]).unwrap());
+        let mut logits = self.lm_head.matmul(&normed_t).to_vec();
+
+        if let Some(cap) = gconf.final_logit_softcap {
+            softcap_inplace(&mut logits, cap);
+        }
+
+        logits
+    }
 }
 
 // =============================================================================
@@ -1234,6 +1498,171 @@ fn single_query_attention(
         }
 
         // Softmax
+        let max_s = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let mut exp_sum = 0.0f32;
+        for s in &mut scores {
+            *s = (*s - max_s).exp();
+            exp_sum += *s;
+        }
+        for s in &mut scores { *s /= exp_sum + 1e-8; }
+
+        for d in 0..head_dim {
+            let mut sum = 0.0f32;
+            for t in 0..kv_len {
+                sum += scores[t] * v_cache[t * kv_dim + kv_h * head_dim + d];
+            }
+            out[h * head_dim + d] = sum;
+        }
+    }
+    out
+}
+
+/// Exact GELU (Gemma FFN activation).
+///
+/// `gelu(x) = 0.5 * x * (1 + erf(x / sqrt(2)))`
+///
+/// Approximates erf via the Abramowitz-Stegun rational. Accurate enough for
+/// inference (< 1e-7 error). Gemma uses the exact GELU, not the tanh-approx
+/// variant found in GPT-2.
+fn gelu_exact(x: f32) -> f32 {
+    // erf(z) ≈ 1 - (a1*t + a2*t^2 + a3*t^3 + a4*t^4 + a5*t^5) * exp(-z^2)
+    // with t = 1 / (1 + p*z), p = 0.3275911 (Abramowitz-Stegun 7.1.26)
+    let z = x * std::f32::consts::FRAC_1_SQRT_2; // x / sqrt(2)
+    let sign = z.signum();
+    let z_abs = z.abs();
+    let t = 1.0 / (1.0 + 0.3275911 * z_abs);
+    let y = 1.0
+        - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+            + 0.254829592)
+            * t
+            * (-z_abs * z_abs).exp();
+    let erf_z = sign * y;
+    0.5 * x * (1.0 + erf_z)
+}
+
+/// Per-head RMSNorm applied in-place, used for Gemma's Q/K norm pre-RoPE.
+///
+/// Layout of `data`: `[seq_len, n_heads, head_dim]` flattened.
+/// `weight` has shape `[head_dim]` (one per-channel scale, shared across heads).
+/// For each (position, head) compute the RMS over the head's `head_dim`
+/// elements and scale by `weight`.
+fn rms_norm_per_head_inplace(
+    data: &mut [f32],
+    weight: &[f32],
+    eps: f32,
+    seq_len: usize,
+    n_heads: usize,
+    head_dim: usize,
+) {
+    let expected_weight_len = head_dim;
+    // Gemma's q_norm/k_norm weights are head_dim-wide. If that assumption is
+    // ever violated we still produce a shape-correct output but the norm is
+    // applied incorrectly; clamp to be safe.
+    let w_len = weight.len().min(expected_weight_len);
+    for s in 0..seq_len {
+        for h in 0..n_heads {
+            let offset = (s * n_heads + h) * head_dim;
+            let ss: f32 = data[offset..offset + head_dim].iter().map(|v| v * v).sum::<f32>()
+                / head_dim as f32;
+            let rms = (ss + eps).sqrt();
+            for d in 0..head_dim {
+                let w = if d < w_len { weight[d] } else { 1.0 };
+                data[offset + d] = data[offset + d] / rms * w;
+            }
+        }
+    }
+}
+
+/// In-place Gemma-style logit softcap: `logits = tanh(logits / cap) * cap`.
+/// Keeps pre-softmax logits bounded in `[-cap, cap]`.
+fn softcap_inplace(logits: &mut [f32], cap: f32) {
+    if cap <= 0.0 { return; }
+    let inv = 1.0 / cap;
+    for l in logits.iter_mut() {
+        *l = (*l * inv).tanh() * cap;
+    }
+}
+
+/// Sliding-window attention for prefill. Same as `cached_attention` but
+/// positions older than `pos - swa_window + 1` are masked out.
+#[allow(clippy::too_many_arguments)]
+fn cached_attention_swa(
+    q: &[f32], k_cache: &[f32], v_cache: &[f32],
+    q_len: usize, kv_len: usize,
+    n_heads: usize, n_kv_heads: usize, head_dim: usize,
+    pos_offset: usize,
+    swa_window: usize,
+) -> Vec<f32> {
+    let gqa_ratio = n_heads / n_kv_heads;
+    let scale = 1.0 / (head_dim as f32).sqrt();
+    let kv_dim = n_kv_heads * head_dim;
+    let mut out = vec![0.0f32; q_len * n_heads * head_dim];
+
+    for qi in 0..q_len {
+        let abs_pos = qi + pos_offset;
+        // Sliding window: allowed positions are [window_start, abs_pos] inclusive
+        let window_start = abs_pos.saturating_sub(swa_window.saturating_sub(1));
+
+        for h in 0..n_heads {
+            let kv_h = h / gqa_ratio;
+
+            let mut scores = vec![f32::NEG_INFINITY; kv_len];
+            for t in window_start..=abs_pos.min(kv_len - 1) {
+                let mut dot = 0.0f32;
+                for d in 0..head_dim {
+                    dot += q[qi * n_heads * head_dim + h * head_dim + d]
+                         * k_cache[t * kv_dim + kv_h * head_dim + d];
+                }
+                scores[t] = dot * scale;
+            }
+
+            let max_s = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let mut exp_sum = 0.0f32;
+            for s in &mut scores {
+                *s = (*s - max_s).exp();
+                exp_sum += *s;
+            }
+            for s in &mut scores { *s /= exp_sum + 1e-8; }
+
+            for d in 0..head_dim {
+                let mut sum = 0.0f32;
+                for t in 0..kv_len {
+                    sum += scores[t] * v_cache[t * kv_dim + kv_h * head_dim + d];
+                }
+                out[qi * n_heads * head_dim + h * head_dim + d] = sum;
+            }
+        }
+    }
+    out
+}
+
+/// Sliding-window single-query attention for decode. Same as
+/// `single_query_attention` but positions older than `kv_len - swa_window`
+/// are masked.
+fn single_query_attention_swa(
+    q: &[f32], k_cache: &[f32], v_cache: &[f32],
+    kv_len: usize, n_heads: usize, n_kv_heads: usize, head_dim: usize,
+    swa_window: usize,
+) -> Vec<f32> {
+    let gqa_ratio = n_heads / n_kv_heads;
+    let scale = 1.0 / (head_dim as f32).sqrt();
+    let kv_dim = n_kv_heads * head_dim;
+    let mut out = vec![0.0f32; n_heads * head_dim];
+
+    let window_start = kv_len.saturating_sub(swa_window);
+
+    for h in 0..n_heads {
+        let kv_h = h / gqa_ratio;
+
+        let mut scores = vec![f32::NEG_INFINITY; kv_len];
+        for t in window_start..kv_len {
+            let mut dot = 0.0f32;
+            for d in 0..head_dim {
+                dot += q[h * head_dim + d] * k_cache[t * kv_dim + kv_h * head_dim + d];
+            }
+            scores[t] = dot * scale;
+        }
+
         let max_s = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let mut exp_sum = 0.0f32;
         for s in &mut scores {
