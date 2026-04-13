@@ -24,8 +24,8 @@ use std::sync::{Arc, Mutex};
 // Config
 // ─────────────────────────────────────────────────────────────────────────────
 
-const WIDTH: f32 = 280.0;
-const HEIGHT: f32 = 420.0;
+const WIDTH: f32 = 300.0;
+const HEIGHT: f32 = 480.0;
 const TAILSCALE_POLL_SECS: u64 = 10;
 const RATE_LIMITS_POLL_SECS: u64 = 30;
 
@@ -41,6 +41,14 @@ const RESTART_SCRIPT: &str = "/opt/NexusOracle/restartoracle.sh";
 
 /// Daemon base URL — local to the AN server over Tailscale.
 const DAEMON_URL: &str = "http://100.67.227.31:4780";
+
+/// Server-side relay (tailscale-relay) — pushes + event log + push state.
+const RELAY_URL: &str = "http://100.67.227.31:4790";
+const RELAY_POLL_SECS: u64 = 10;
+/// Max events kept in memory for the dropdown panel.
+const EVENTS_IN_MEMORY: usize = 200;
+/// Stored between runs so we can compute "while you were away".
+const LAST_SEEN_FILE: &str = "/tmp/.tech-ticker-last-seen";
 /// Owner API key used by the ticker to hit owner-only endpoints.
 /// Same key Andrew uses; owners bypass rate limits.
 const OWNER_API_KEY: &str = "qUUlVoumbb3xXQFqv3jNdr-8wAiDt_oT6IYiw6D6ogw";
@@ -127,11 +135,92 @@ struct ActionState {
     last_result_at: Option<std::time::Instant>,
 }
 
+/// Mirrors the relay's /push-state JSON.
+#[derive(Clone, Default, Deserialize)]
+struct RelayPushState {
+    #[serde(default)]
+    staged_build_mtime: u64,
+    #[serde(default)]
+    techs: HashMap<String, RelayTechState>,
+}
+#[derive(Clone, Default, Deserialize)]
+struct RelayTechState {
+    #[serde(default)]
+    last_pushed_build_mtime: u64,
+    #[serde(default)]
+    last_pushed_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    online: bool,
+}
+
+/// One event pulled from the relay's /events log (JSONL).
+#[derive(Clone, Deserialize)]
+#[serde(tag = "kind")]
+#[serde(rename_all = "snake_case")]
+enum RelayEvent {
+    RelayStarted    { ts: chrono::DateTime<chrono::Utc>, #[serde(default)] pid: u32 },
+    TechOnline      { ts: chrono::DateTime<chrono::Utc>, tech: String, #[serde(default)] host: String },
+    TechOffline     { ts: chrono::DateTime<chrono::Utc>, tech: String, #[serde(default)] host: String },
+    PushOk          { ts: chrono::DateTime<chrono::Utc>, tech: String, #[serde(default)] build_ts: Option<chrono::DateTime<chrono::Utc>> },
+    PushFailed      { ts: chrono::DateTime<chrono::Utc>, tech: String, #[serde(default)] error: String },
+    RateLimitHit    { ts: chrono::DateTime<chrono::Utc>, #[serde(default)] log: String },
+    RateLimitReset  { ts: chrono::DateTime<chrono::Utc>, #[serde(default)] log: String },
+    AuthError       { ts: chrono::DateTime<chrono::Utc>, #[serde(default)] log: String },
+    DiagnosticSession { ts: chrono::DateTime<chrono::Utc>, equipment: String, #[serde(default)] file: String },
+    #[serde(other)]
+    Other,
+}
+
+impl RelayEvent {
+    fn ts(&self) -> chrono::DateTime<chrono::Utc> {
+        match self {
+            RelayEvent::RelayStarted { ts, .. }
+            | RelayEvent::TechOnline { ts, .. }
+            | RelayEvent::TechOffline { ts, .. }
+            | RelayEvent::PushOk { ts, .. }
+            | RelayEvent::PushFailed { ts, .. }
+            | RelayEvent::RateLimitHit { ts, .. }
+            | RelayEvent::RateLimitReset { ts, .. }
+            | RelayEvent::AuthError { ts, .. }
+            | RelayEvent::DiagnosticSession { ts, .. } => *ts,
+            RelayEvent::Other => chrono::Utc::now(),
+        }
+    }
+    fn summary(&self) -> String {
+        match self {
+            RelayEvent::RelayStarted { .. } => "relay started".into(),
+            RelayEvent::TechOnline { tech, .. } => format!("{tech} online"),
+            RelayEvent::TechOffline { tech, .. } => format!("{tech} offline"),
+            RelayEvent::PushOk { tech, .. } => format!("pushed → {tech}"),
+            RelayEvent::PushFailed { tech, error, .. } => format!("push {tech} FAILED: {error}"),
+            RelayEvent::RateLimitHit { .. } => "rate-limit hit".into(),
+            RelayEvent::RateLimitReset { .. } => "rate-limit reset".into(),
+            RelayEvent::AuthError { .. } => "auth error".into(),
+            RelayEvent::DiagnosticSession { equipment, .. } => format!("session: {equipment}"),
+            RelayEvent::Other => "?".into(),
+        }
+    }
+    fn is_alert(&self) -> bool {
+        matches!(self, RelayEvent::PushFailed { .. } | RelayEvent::AuthError { .. })
+    }
+}
+
 struct Shared {
     techs: HashMap<String, TechState>,
     last_rate_limits_fetch: Option<chrono::DateTime<chrono::Local>>,
     last_rate_limits_error: Option<String>,
     action: ActionState,
+    /// Recent events pulled from the relay (newest last), capped at
+    /// EVENTS_IN_MEMORY.
+    events: Vec<RelayEvent>,
+    /// Timestamp of the newest event we've "acknowledged" (persists to
+    /// LAST_SEEN_FILE). Events newer than this count toward the banner.
+    last_seen: chrono::DateTime<chrono::Utc>,
+    /// Relay /push-state last successful fetch + error string.
+    relay_state: Option<RelayPushState>,
+    last_relay_error: Option<String>,
+    /// Show or hide the events dropdown below the header.
+    show_events: bool,
 }
 
 struct TechApp {
@@ -145,16 +234,30 @@ impl TechApp {
             .iter()
             .map(|(name, _, _)| (name.to_string(), TechState::default()))
             .collect();
+        // Restore last_seen from disk so the banner only shows events
+        // Andrew hasn't acknowledged yet, even after a reboot.
+        let last_seen = std::fs::read_to_string(LAST_SEEN_FILE)
+            .ok()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s.trim()).ok())
+            .map(|d| d.with_timezone(&chrono::Utc))
+            .unwrap_or_else(|| chrono::Utc::now() - chrono::Duration::days(7));
+
         let state = Arc::new(Mutex::new(Shared {
             techs,
             last_rate_limits_fetch: None,
             last_rate_limits_error: None,
             action: ActionState::default(),
+            events: Vec::new(),
+            last_seen,
+            relay_state: None,
+            last_relay_error: None,
+            show_events: false,
         }));
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
 
-        // Tailscale poller
+        // Tailscale poller (local fallback — relay is authoritative when
+        // reachable, this catches the case where the relay is down).
         let s1 = state.clone();
         runtime.spawn(async move {
             loop {
@@ -164,13 +267,22 @@ impl TechApp {
             }
         });
 
-        // Rate-limits poller
+        // Rate-limits poller (daemon-owned data not in the relay)
         let s2 = state.clone();
         runtime.spawn(async move {
             loop {
                 refresh_rate_limits(&s2).await;
                 tokio::time::sleep(std::time::Duration::from_secs(RATE_LIMITS_POLL_SECS))
                     .await;
+            }
+        });
+
+        // Relay poller — events + push state
+        let s3 = state.clone();
+        runtime.spawn(async move {
+            loop {
+                refresh_relay(&s3).await;
+                tokio::time::sleep(std::time::Duration::from_secs(RELAY_POLL_SECS)).await;
             }
         });
 
@@ -241,6 +353,82 @@ async fn refresh_update_pending(state: &Arc<Mutex<Shared>>) {
 
 #[derive(Deserialize)]
 struct RateLimitsRaw(HashMap<String, Vec<String>>);
+
+async fn refresh_relay(state: &Arc<Mutex<Shared>>) {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    // /push-state — populates per-tech online + last-pushed-at
+    let ps = client
+        .get(format!("{RELAY_URL}/push-state"))
+        .send()
+        .await;
+    let ps_result: Result<RelayPushState, String> = match ps {
+        Ok(r) if r.status().is_success() => r
+            .json::<RelayPushState>()
+            .await
+            .map_err(|e| e.to_string()),
+        Ok(r) => Err(format!("HTTP {}", r.status())),
+        Err(e) => Err(e.to_string()),
+    };
+
+    // /events — newline-delimited JSON events
+    let ev = client.get(format!("{RELAY_URL}/events")).send().await;
+    let events_result: Result<Vec<RelayEvent>, String> = match ev {
+        Ok(r) if r.status().is_success() => r
+            .text()
+            .await
+            .map_err(|e| e.to_string())
+            .map(|body| {
+                body.lines()
+                    .filter(|l| !l.is_empty())
+                    .filter_map(|l| serde_json::from_str::<RelayEvent>(l).ok())
+                    .collect()
+            }),
+        Ok(r) => Err(format!("HTTP {}", r.status())),
+        Err(e) => Err(e.to_string()),
+    };
+
+    let Ok(mut s) = state.lock() else { return };
+    match (ps_result, events_result) {
+        (Ok(ps), Ok(mut events)) => {
+            s.last_relay_error = None;
+
+            // Apply relay's online/update-pending view on top of whatever
+            // the local poller filled in — relay is authoritative.
+            for (name, host, _wsl, _win) in TECHS {
+                let rs = ps.techs.get(*name).cloned().unwrap_or_default();
+                if let Some(t) = s.techs.get_mut(*name) {
+                    t.online = rs.online;
+                    t.update_pending = rs.last_pushed_build_mtime < ps.staged_build_mtime;
+                }
+                let _ = host;
+            }
+            s.relay_state = Some(ps);
+
+            // Cap event history so memory doesn't grow forever.
+            if events.len() > EVENTS_IN_MEMORY {
+                let start = events.len() - EVENTS_IN_MEMORY;
+                events.drain(..start);
+            }
+            s.events = events;
+        }
+        (ps_res, ev_res) => {
+            let err = ps_res
+                .err()
+                .or(ev_res.err())
+                .unwrap_or_else(|| "relay error".into());
+            s.last_relay_error = Some(err);
+        }
+    }
+}
+
+/// Write last_seen to disk so the banner stays correct across restarts.
+fn persist_last_seen(ts: chrono::DateTime<chrono::Utc>) {
+    let _ = std::fs::write(LAST_SEEN_FILE, ts.to_rfc3339());
+}
 
 async fn refresh_rate_limits(state: &Arc<Mutex<Shared>>) {
     // scp the JSON down (SSH key auth — same as used elsewhere in this
