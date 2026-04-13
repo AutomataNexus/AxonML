@@ -398,13 +398,12 @@ async fn refresh_relay(state: &Arc<Mutex<Shared>>) {
 
             // Apply relay's online/update-pending view on top of whatever
             // the local poller filled in — relay is authoritative.
-            for (name, host, _wsl, _win) in TECHS {
+            for (name, _host, _wsl) in TECHS {
                 let rs = ps.techs.get(*name).cloned().unwrap_or_default();
                 if let Some(t) = s.techs.get_mut(*name) {
                     t.online = rs.online;
                     t.update_pending = rs.last_pushed_build_mtime < ps.staged_build_mtime;
                 }
-                let _ = host;
             }
             s.relay_state = Some(ps);
 
