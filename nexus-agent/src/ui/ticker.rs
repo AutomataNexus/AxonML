@@ -37,20 +37,39 @@ const REPOS: &[(&str, &str)] = &[
     ("AutomataNexus/NexusOracle", "/opt/NexusOracle"),
 ];
 
+fn parse_position_args() -> Option<egui::Pos2> {
+    let args: Vec<String> = std::env::args().collect();
+    let mut x: Option<f32> = None;
+    let mut y: Option<f32> = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--x" if i + 1 < args.len() => { x = args[i + 1].parse().ok(); i += 2; }
+            "--y" if i + 1 < args.len() => { y = args[i + 1].parse().ok(); i += 2; }
+            _ => { i += 1; }
+        }
+    }
+    match (x, y) { (Some(x), Some(y)) => Some(egui::pos2(x, y)), _ => None }
+}
+
 fn main() -> eframe::Result {
     // Frameless + transparent — we paint our own rounded background and a
     // custom titlebar. Matches the style we set on tech-ticker so both
     // widgets look like a single cohesive set.
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([TICKER_WIDTH, TICKER_HEIGHT])
-            .with_always_on_top()
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_resizable(true)
-            .with_title("nexus-agent"),
-        ..Default::default()
-    };
+    //
+    // Accepts `--x <N> --y <N>` CLI args for scripted stacking on boot
+    // (see /mnt/c/Users/Autom/stack-tickers.ps1).
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([TICKER_WIDTH, TICKER_HEIGHT])
+        .with_always_on_top()
+        .with_decorations(false)
+        .with_transparent(true)
+        .with_resizable(true)
+        .with_title("nexus-agent");
+    if let Some(pos) = parse_position_args() {
+        viewport = viewport.with_position(pos);
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
 
     eframe::run_native(
         "nexus-ticker",
