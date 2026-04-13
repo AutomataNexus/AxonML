@@ -590,14 +590,24 @@ impl eframe::App for TechApp {
                 })
                 .collect()
         };
-        let (last_fetch, last_err, action) = {
+        let (last_fetch, last_err, action, events, last_seen, relay_err, show_events) = {
             let s = self.state.lock().unwrap();
             (
                 s.last_rate_limits_fetch,
                 s.last_rate_limits_error.clone(),
                 s.action.clone(),
+                s.events.clone(),
+                s.last_seen,
+                s.last_relay_error.clone(),
+                s.show_events,
             )
         };
+        let new_events: Vec<RelayEvent> = events
+            .iter()
+            .filter(|e| e.ts() > last_seen)
+            .cloned()
+            .collect();
+        let new_count = new_events.len();
 
         // Expire stale "last_result" after 8s so transient status messages clear.
         if let Some(t) = action.last_result_at {
@@ -664,6 +674,80 @@ impl eframe::App for TechApp {
             } else if let Some((msg, is_err)) = &action.last_result {
                 let color = if *is_err { TERRACOTTA } else { TEAL };
                 ui.label(egui::RichText::new(msg).size(9.0).color(color));
+            }
+
+            // ── "While you were away" banner + collapsible events panel ──
+            // Always show a small events toggle; when new events exist, it
+            // gets highlighted in amber with the count.
+            ui.horizontal(|ui| {
+                let oldest_new = new_events.iter().map(|e| e.ts()).min();
+                let (label, color) = if new_count > 0 {
+                    let since = oldest_new
+                        .map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string())
+                        .unwrap_or_default();
+                    (
+                        format!("⚠ {new_count} events since {since}"),
+                        AMBER,
+                    )
+                } else if relay_err.is_some() {
+                    ("⚠ relay offline".to_string(), TERRACOTTA)
+                } else {
+                    (format!("{} events", events.len()), TEXT_DIM)
+                };
+                let btn = egui::Button::new(
+                    egui::RichText::new(&label).size(9.0).color(color),
+                )
+                .frame(false);
+                if ui.add(btn)
+                    .on_hover_text(
+                        relay_err.clone()
+                            .map(|e| format!("relay error: {e}"))
+                            .unwrap_or_else(|| "click to expand event log".into())
+                    )
+                    .clicked()
+                {
+                    if let Ok(mut s) = self.state.lock() {
+                        s.show_events = !s.show_events;
+                    }
+                }
+                if new_count > 0 {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(
+                            egui::Button::new(
+                                egui::RichText::new("dismiss").size(9.0).color(TEAL),
+                            )
+                            .frame(false),
+                        )
+                        .on_hover_text("mark all events as seen")
+                        .clicked()
+                        {
+                            let newest = events.iter().map(|e| e.ts()).max();
+                            if let Some(ts) = newest {
+                                if let Ok(mut s) = self.state.lock() {
+                                    s.last_seen = ts;
+                                }
+                                persist_last_seen(ts);
+                            }
+                        }
+                    });
+                }
+            });
+
+            if show_events {
+                egui::ScrollArea::vertical()
+                    .max_height(100.0)
+                    .show(ui, |ui| {
+                        for ev in events.iter().rev().take(30) {
+                            let ts_local =
+                                ev.ts().with_timezone(&chrono::Local).format("%H:%M");
+                            let color = if ev.is_alert() { TERRACOTTA } else if ev.ts() > last_seen { AMBER } else { TEXT_DIM };
+                            ui.label(
+                                egui::RichText::new(format!("{ts_local}  {}", ev.summary()))
+                                    .size(9.0)
+                                    .color(color),
+                            );
+                        }
+                    });
             }
 
             ui.separator();
