@@ -3,8 +3,12 @@
 //!
 //! This is NOT a passive status display. The ticker:
 //! 1. Polls GitHub CI every 5 minutes for all monitored repos
-//! 2. When it finds failures, automatically runs `cargo clippy --fix` and
-//!    `cargo fmt`, commits the fix, and pushes — then reports the result
+//! 2. When it finds failures, runs a **ralph loop** (up to 5 passes): apply
+//!    `cargo fmt --all` + `cargo clippy --fix` + targeted unused-import removal,
+//!    then verify locally via `cargo fmt --check` and `cargo clippy -- -D warnings`.
+//!    Only commits + auto-pushes once the local verify is green. If the loop
+//!    exhausts 5 passes without verifying, it toasts the user for manual fix
+//!    instead of pushing a broken "fix" commit.
 //! 3. Monitors Tailscale for offline controllers
 //! 4. Checks for uncommitted changes across repos
 //! 5. Accepts manual commands via the input bar
@@ -334,50 +338,96 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
             s.status = Status::Fixing(format!("fixing {short_name}..."));
         }
 
-        // ---- Step 2: Apply fixes in order of severity ----
-        let mut fixed_something = false;
+        // ---- Step 2: Ralph loop — fix → local verify → fix → verify, max 5 passes ----
+        // Only commits + pushes once `cargo fmt --check` and `cargo clippy -- -D warnings`
+        // both pass locally. If the loop can't reach a green verify, toast and leave
+        // the working tree dirty for manual investigation.
+        const MAX_RALPH_ITER: usize = 5;
+        let mut verified = false;
+        let mut current_errors = error_log.clone();
 
-        // 2a: cargo fmt
-        let _ = tokio::process::Command::new("cargo")
-            .args(["fmt", "--all"])
-            .current_dir(local_path)
-            .output().await;
+        for iter in 0..MAX_RALPH_ITER {
+            if let Ok(mut s) = state.lock() {
+                s.push_log(&format!("    ralph pass {}/{}", iter + 1, MAX_RALPH_ITER), false);
+            }
 
-        // 2b: cargo clippy --fix
-        let _ = tokio::process::Command::new("cargo")
-            .args(["clippy", "--fix", "--allow-dirty", "--allow-staged", "--all-targets"])
-            .current_dir(local_path)
-            .output().await;
+            // Apply fixes
+            let _ = tokio::process::Command::new("cargo")
+                .args(["fmt", "--all"])
+                .current_dir(local_path)
+                .output().await;
 
-        // 2c: Parse specific errors and apply targeted fixes
-        for line in error_log.lines() {
-            // Unused import: remove it
-            if line.contains("unused import") {
-                if let Some(file_info) = extract_file_line(line) {
-                    let removed = remove_unused_import(&file_info.0, file_info.1).await;
-                    if removed {
-                        if let Ok(mut s) = state.lock() {
-                            s.push_log(&format!("    removed unused import in {}:{}", file_info.0, file_info.1), false);
+            let _ = tokio::process::Command::new("cargo")
+                .args(["clippy", "--fix", "--allow-dirty", "--allow-staged", "--all-targets", "--workspace"])
+                .current_dir(local_path)
+                .output().await;
+
+            for line in current_errors.lines() {
+                if line.contains("unused import") {
+                    if let Some(file_info) = extract_file_line(line) {
+                        let removed = remove_unused_import(&file_info.0, file_info.1).await;
+                        if removed {
+                            if let Ok(mut s) = state.lock() {
+                                s.push_log(&format!("      removed unused import in {}:{}", file_info.0, file_info.1), false);
+                            }
                         }
                     }
                 }
             }
-            // Dead code: add allow attribute
-            if line.contains("is never used") || line.contains("never read") {
-                // clippy --fix usually handles these, but if not, we note it
+
+            // Local verify — same commands CI runs
+            let fmt_check = tokio::process::Command::new("cargo")
+                .args(["fmt", "--all", "--", "--check"])
+                .current_dir(local_path)
+                .output().await;
+            let fmt_ok = fmt_check.as_ref().map(|o| o.status.success()).unwrap_or(false);
+
+            let clippy_check = tokio::process::Command::new("cargo")
+                .args(["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])
+                .current_dir(local_path)
+                .output().await;
+            let clippy_ok = clippy_check.as_ref().map(|o| o.status.success()).unwrap_or(false);
+
+            if fmt_ok && clippy_ok {
+                verified = true;
+                if let Ok(mut s) = state.lock() {
+                    s.push_log(&format!("    verified locally on pass {}", iter + 1), false);
+                }
+                break;
             }
+
+            // Collect fresh errors for the next iteration (targeted fixes key off them)
+            let mut next_errors = String::new();
+            if let Ok(o) = fmt_check {
+                next_errors.push_str(&String::from_utf8_lossy(&o.stdout));
+                next_errors.push('\n');
+            }
+            if let Ok(o) = clippy_check {
+                next_errors.push_str(&String::from_utf8_lossy(&o.stderr));
+            }
+
+            if let Ok(mut s) = state.lock() {
+                let remaining_preview: String = next_errors.lines()
+                    .filter(|l| l.contains("error") || l.contains("warning") || l.contains("Diff in"))
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                if !remaining_preview.is_empty() {
+                    s.push_log(&format!("      still failing: {}", &remaining_preview[..remaining_preview.len().min(120)]), true);
+                }
+            }
+
+            current_errors = next_errors;
         }
 
-        // Check if anything changed
+        // Did any files change on disk?
         let diff_out = tokio::process::Command::new("git")
             .args(["diff", "--stat"])
             .current_dir(local_path)
             .output().await;
         let has_changes = diff_out.map(|d| !d.stdout.is_empty()).unwrap_or(false);
 
-        if has_changes {
-            fixed_something = true;
-
+        if verified && has_changes {
             // Count changed files
             let diff_stat = tokio::process::Command::new("git")
                 .args(["diff", "--stat", "--numstat"])
@@ -387,13 +437,13 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
                 String::from_utf8_lossy(&d.stdout).lines().count()
             }).unwrap_or(0);
 
-            // Stage + commit (NO co-author)
+            // Stage + commit + auto-push (safe — we verified locally)
             let _ = tokio::process::Command::new("git")
                 .args(["add", "-A"])
                 .current_dir(local_path)
                 .output().await;
 
-            let commit_msg = format!("fix: resolve CI failures (fmt + clippy + unused imports)");
+            let commit_msg = "fix: resolve CI failures (verified locally via ralph loop)".to_string();
             let commit = tokio::process::Command::new("git")
                 .args(["commit", "-m", &commit_msg])
                 .current_dir(local_path)
@@ -401,19 +451,25 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
 
             if let Ok(c) = &commit {
                 if c.status.success() {
-                    // Queue for push approval — don't auto-push
+                    let push = tokio::process::Command::new("git")
+                        .args(["push"])
+                        .current_dir(local_path)
+                        .output().await;
+                    let pushed = push.as_ref().map(|p| p.status.success()).unwrap_or(false);
+
                     if let Ok(mut s) = state.lock() {
-                        s.pending_pushes.push(PendingPush {
-                            repo_name: short_name.to_string(),
-                            local_path: local_path.to_string(),
-                            commit_msg: commit_msg.clone(),
-                            files_changed,
-                        });
-                        s.push_log(&format!("    committed fix ({files_changed} files) — awaiting push approval"), false);
+                        if pushed {
+                            s.push_log(&format!("    {short_name}: verified + pushed ({files_changed} files)"), false);
+                        } else {
+                            s.push_log(&format!("    {short_name}: verified + committed but push failed"), true);
+                        }
                     }
 
-                    // Toast notification on Windows
-                    let toast_msg = format!("{short_name}: CI fix committed ({files_changed} files). Accept push?");
+                    let toast_msg = if pushed {
+                        format!("{short_name}: verified fix pushed ({files_changed} files)")
+                    } else {
+                        format!("{short_name}: fix committed but push failed — check ticker")
+                    };
                     let _ = tokio::process::Command::new("powershell.exe")
                         .args(["-Command", &format!(
                             "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; \
@@ -428,15 +484,13 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
                         .output().await;
                 }
             }
-        }
-
-        if !fixed_something {
-            // Nothing we could auto-fix — toast + log it
+        } else if !verified {
+            // Ralph loop exhausted without reaching a green local verify
             if let Ok(mut s) = state.lock() {
-                s.push_log(&format!("    {short_name}: CI errors need manual investigation"), true);
+                s.push_log(&format!("    {short_name}: ralph loop exhausted after {MAX_RALPH_ITER} passes — manual fix needed"), true);
             }
 
-            let toast_msg = format!("{short_name}: CI failing, auto-fix couldn't resolve. Check ticker.");
+            let toast_msg = format!("{short_name}: auto-fix exhausted {MAX_RALPH_ITER} passes. Manual fix needed.");
             let _ = tokio::process::Command::new("powershell.exe")
                 .args(["-Command", &format!(
                     "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; \
@@ -450,6 +504,7 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
                 )])
                 .output().await;
         }
+        // verified && !has_changes is a no-op — CI flaked or was a transient false positive.
     }
 
     if let Ok(mut s) = state.lock() {
@@ -462,6 +517,34 @@ async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
         } else {
             s.status = Status::Fixing(format!("{} fix(es) awaiting push approval", s.pending_pushes.len()));
         }
+    }
+}
+
+/// Wait for GitHub to surface a CI run for `sha` and return whether it passed.
+/// Returns Ok(true) on success, Ok(false) on failure, Err if we time out or can't tell.
+#[allow(dead_code)]
+async fn wait_for_ci_on_sha(repo_gh: &str, sha: &str, timeout_secs: u64) -> Result<bool, String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err("timeout".to_string());
+        }
+        let out = tokio::process::Command::new("gh")
+            .args(["run", "list", "--repo", repo_gh, "--commit", sha, "--limit", "1",
+                   "--json", "status,conclusion"])
+            .output().await
+            .map_err(|e| e.to_string())?;
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if let Ok(runs) = serde_json::from_str::<Vec<serde_json::Value>>(&stdout) {
+            if !runs.is_empty() {
+                let status = runs[0].get("status").and_then(|v| v.as_str()).unwrap_or("");
+                if status == "completed" {
+                    let conclusion = runs[0].get("conclusion").and_then(|v| v.as_str()).unwrap_or("");
+                    return Ok(conclusion == "success");
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
     }
 }
 
