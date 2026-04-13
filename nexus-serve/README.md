@@ -169,7 +169,7 @@ cargo test --release --test q6k_block_test
 - **Streaming SSE** not implemented — responses are blocking
 - **Gemma architecture** — not yet supported (requires different attention + rotary)
 - **Phi, Mamba, MoE** — not yet supported
-- **Concurrent requests** — the `InferenceEngine` is shared behind an `Arc`, so two simultaneous chat requests would trample each other's KV cache. Serial / one-request-at-a-time use is fine; concurrent request handling needs per-request cache isolation.
+- **Concurrent requests** — correctness is fine (each `generate_stream()` call allocates its own `KvCache` on the stack; two requests return correct, prompt-specific answers in parallel). The shared `Arc<InferenceEngine>` only holds read-only weights. **Throughput, however, is not additive**: concurrent requests share the rayon CPU pool (and, for GPU, the CUDA context), so two simultaneous generations each run at roughly half the speed of a solo one. If you need real concurrent throughput, horizontal-scale by running multiple `nexus-serve` processes behind a load balancer.
 - **Quantized-inference accuracy** — the lazy-dequant path (`--quantized`) is implemented (rayon-parallel block dequant, per-matmul scratch) but hasn't been accuracy-tested side-by-side with the eager-dequant f32 path yet. Prefer the eager path for now unless you're RAM-constrained.
 
 ## Historical Bugs (for reference)
