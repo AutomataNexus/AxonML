@@ -34,17 +34,49 @@ pub struct InferenceConfig {
     pub num_layers: usize,
     pub num_heads: usize,
     pub num_kv_heads: usize,
+    /// Head dim for full attention. For LLaMA/Qwen2: `hidden_size / num_heads`.
+    /// For Gemma 4: `gemma4.attention.key_length` (often decoupled from hidden_size).
     pub head_dim: usize,
     pub max_seq_len: usize,
     pub rms_norm_eps: f32,
     pub rope_theta: f32,
     pub architecture: String,
+    /// Gemma-family hyperparameters (sliding window, dual RoPE base, softcap,
+    /// per-layer token embeddings). `None` for LLaMA/Qwen2/Mistral.
+    pub gemma: Option<GemmaConfig>,
+}
+
+/// Gemma-family extras not present in LLaMA/Qwen2/Mistral.
+///
+/// Populated when `architecture` starts with `"gemma"`.
+#[derive(Debug, Clone)]
+pub struct GemmaConfig {
+    /// Per-layer: true means use sliding-window attention for this layer.
+    /// Length == `num_layers`. For Gemma 4, every 6th layer is full-attention.
+    pub sliding_window_pattern: Vec<bool>,
+    /// Sliding window size in tokens (e.g. 512).
+    pub sliding_window: usize,
+    /// Head dim used in SWA layers (may be smaller than `head_dim`, e.g. 256 vs 512).
+    pub head_dim_swa: usize,
+    /// RoPE θ used in SWA layers (e.g. 10_000, distinct from full-attention 1_000_000).
+    pub rope_theta_swa: f32,
+    /// RoPE dim count for full layers (may be < `head_dim`).
+    pub rope_dim: usize,
+    /// RoPE dim count for SWA layers (may be < `head_dim_swa`).
+    pub rope_dim_swa: usize,
+    /// Final logit softcap: `logits = tanh(logits / softcap) * softcap`. `None` disables.
+    pub final_logit_softcap: Option<f32>,
+    /// Width of the per-layer input embedding (e.g. 256). Adds one scaled vector per layer.
+    pub per_layer_input_width: usize,
+    /// Q/K RMSNorm dimension (e.g. 256 — applied per-head before RoPE).
+    pub qk_norm_dim: usize,
 }
 
 impl InferenceConfig {
     pub fn from_gguf(gguf: &GgufFile) -> Self {
         let arch = gguf.architecture().unwrap_or("llama").to_string();
         let prefix = &arch;
+        let is_gemma = arch.starts_with("gemma");
 
         let hidden_size = gguf
             .get_meta(&format!("{prefix}.embedding_length"))
@@ -66,7 +98,13 @@ impl InferenceConfig {
             .and_then(|v| v.as_u32())
             .unwrap_or(num_heads as u32) as usize;
 
-        let head_dim = hidden_size / num_heads;
+        // head_dim: LLaMA/Qwen2 derive it from hidden/num_heads; Gemma specifies
+        // it explicitly via key_length because it's decoupled from hidden_size.
+        let head_dim = gguf
+            .get_meta(&format!("{prefix}.attention.key_length"))
+            .and_then(|v| v.as_u32())
+            .map(|v| v as usize)
+            .unwrap_or(hidden_size / num_heads);
 
         let intermediate_size = gguf
             .get_meta(&format!("{prefix}.feed_forward_length"))
@@ -96,6 +134,12 @@ impl InferenceConfig {
             })
             .unwrap_or(32000);
 
+        let gemma = if is_gemma {
+            Some(Self::parse_gemma_config(gguf, prefix, num_layers, head_dim))
+        } else {
+            None
+        };
+
         Self {
             vocab_size,
             hidden_size,
@@ -108,6 +152,90 @@ impl InferenceConfig {
             rms_norm_eps,
             rope_theta,
             architecture: arch,
+            gemma,
+        }
+    }
+
+    /// Extract Gemma-family fields (sliding window, dual RoPE, softcap, …).
+    fn parse_gemma_config(
+        gguf: &GgufFile,
+        prefix: &str,
+        num_layers: usize,
+        head_dim: usize,
+    ) -> GemmaConfig {
+        let sliding_window = gguf
+            .get_meta(&format!("{prefix}.attention.sliding_window"))
+            .and_then(|v| v.as_u32())
+            .unwrap_or(4096) as usize;
+
+        // Extract the per-layer SWA pattern. Stored as a GGUF array of bools
+        // with length == num_layers. For Gemma 4 the pattern is "most layers
+        // SWA, every 6th full" but we read it verbatim from metadata.
+        let sliding_window_pattern = gguf
+            .get_meta(&format!("{prefix}.attention.sliding_window_pattern"))
+            .and_then(|v| match v {
+                gguf::GgufValue::Array(arr) => Some(
+                    arr.iter()
+                        .map(|elt| matches!(elt, gguf::GgufValue::Bool(true)))
+                        .collect::<Vec<bool>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_else(|| vec![false; num_layers]);
+
+        // SWA head dim: defaults to `head_dim` for models that don't have the
+        // split (e.g. Gemma 2 uses a single head_dim across all layers).
+        let head_dim_swa = gguf
+            .get_meta(&format!("{prefix}.attention.key_length_swa"))
+            .and_then(|v| v.as_u32())
+            .map(|v| v as usize)
+            .unwrap_or(head_dim);
+
+        let rope_theta_swa = gguf
+            .get_meta(&format!("{prefix}.rope.freq_base_swa"))
+            .and_then(|v| v.as_f32())
+            .unwrap_or(10_000.0);
+
+        let rope_dim = gguf
+            .get_meta(&format!("{prefix}.rope.dimension_count"))
+            .and_then(|v| v.as_u32())
+            .map(|v| v as usize)
+            .unwrap_or(head_dim);
+
+        let rope_dim_swa = gguf
+            .get_meta(&format!("{prefix}.rope.dimension_count_swa"))
+            .and_then(|v| v.as_u32())
+            .map(|v| v as usize)
+            .unwrap_or(head_dim_swa);
+
+        let final_logit_softcap = gguf
+            .get_meta(&format!("{prefix}.final_logit_softcapping"))
+            .and_then(|v| v.as_f32());
+
+        // Per-layer input embedding width (e.g. 256). Not all Gemma variants
+        // have this — Gemma 2 doesn't, Gemma 3/4 do.
+        let per_layer_input_width = gguf
+            .get_meta(&format!("{prefix}.embedding_length_per_layer_input"))
+            .and_then(|v| v.as_u32())
+            .map(|v| v as usize)
+            .unwrap_or(0);
+
+        // Q/K norm dim — usually the SWA head dim (256) or a fixed per-head
+        // scale. We don't see a dedicated metadata key, so fall back to the
+        // `attn_q_norm.weight` tensor's first dim when we load weights.
+        // For now, default to head_dim_swa which is correct for Gemma 4.
+        let qk_norm_dim = head_dim_swa;
+
+        GemmaConfig {
+            sliding_window_pattern,
+            sliding_window,
+            head_dim_swa,
+            rope_theta_swa,
+            rope_dim,
+            rope_dim_swa,
+            final_logit_softcap,
+            per_layer_input_width,
+            qk_norm_dim,
         }
     }
 }
