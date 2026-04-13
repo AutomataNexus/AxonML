@@ -49,6 +49,53 @@ nexus-serve --alias sage /path/to/qwen.gguf --alias oracle /path/to/gemma.gguf
 
 Aliases appear in `/v1/models` with `object: "model-alias"`. Clients can use either the alias or the canonical model name.
 
+## Configuration
+
+Persistent settings live in a TOML file. CLI flags always win over config values, and config values always win over built-in defaults.
+
+**Precedence:** `CLI flag  >  config file  >  default`
+
+**Default path:** `~/.config/nexus-serve/config.toml`
+**Override path:** `nexus-serve --config /some/other/path.toml`
+
+A fully-commented starter config ships at [`config.example.toml`](config.example.toml) in this repo. Copy it into place:
+
+```bash
+mkdir -p ~/.config/nexus-serve
+cp config.example.toml ~/.config/nexus-serve/config.toml
+```
+
+Supported top-level keys:
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `threads` | integer | all cores | Parallel block dequant + CPU matmul pool. Matches `--threads`. |
+| `port` | integer | `11435` | Listen port. Matches `--port`. |
+| `host` | string | `"0.0.0.0"` | Listen host. Matches `--host`. |
+| `quantized` | bool | `false` | Lazy per-matmul dequant for memory savings. Matches `--quantized`. |
+
+A `[hardware]` section is accepted for documentation and validation:
+
+```toml
+[hardware]
+cpu    = "Intel Core Ultra 9 275HX"
+cores  = 24
+ram_gb = 64
+```
+
+At startup nexus-serve compares `hardware.cores` against `std::thread::available_parallelism()` and warns if they disagree — useful to catch "config copied to the wrong machine" situations. It also warns if `threads` (from CLI or config) exceeds detected cores.
+
+Startup prints a `Resolved config` block so you can see which setting came from CLI, config, or default:
+
+```
+Resolved config:
+  host      = 0.0.0.0               [default]
+  port      = 11435                 [default]
+  threads   = 24                    [config]
+  quantized = true                  [cli]
+  hardware  = Intel Core Ultra 9 275HX
+```
+
 ## Endpoints
 
 All OpenAI-compatible:
@@ -122,7 +169,8 @@ cargo test --release --test q6k_block_test
 - **Streaming SSE** not implemented — responses are blocking
 - **Gemma architecture** — not yet supported (requires different attention + rotary)
 - **Phi, Mamba, MoE** — not yet supported
-- **Large models** — Oracle (Gemma 4 9.6GB GGUF → ~20GB f32) needs 20GB+ RAM. Long-term: quantized inference (keep weights quantized, dequantize per-layer on the fly)
+- **Concurrent requests** — the `InferenceEngine` is shared behind an `Arc`, so two simultaneous chat requests would trample each other's KV cache. Serial / one-request-at-a-time use is fine; concurrent request handling needs per-request cache isolation.
+- **Quantized-inference accuracy** — the lazy-dequant path (`--quantized`) is implemented (rayon-parallel block dequant, per-matmul scratch) but hasn't been accuracy-tested side-by-side with the eager-dequant f32 path yet. Prefer the eager path for now unless you're RAM-constrained.
 
 ## Historical Bugs (for reference)
 

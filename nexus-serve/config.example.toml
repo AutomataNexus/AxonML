@@ -1,0 +1,55 @@
+# nexus-serve — example configuration.
+#
+# Copy this file to `~/.config/nexus-serve/config.toml`, or point nexus-serve
+# at it explicitly with `--config PATH`. CLI flags always override config
+# values (e.g., `--threads 12` wins over `threads = 24` below).
+#
+# Any key you leave commented out falls back to the built-in default.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Networking
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Listen port. Ollama uses 11434; nexus-serve defaults to 11435 so both can
+# coexist on the same machine.
+# port = 11435
+
+# Listen host. Use "0.0.0.0" to accept connections from other machines on the
+# local network (e.g., the desktop ticker / nexus-agent running on Windows via
+# WSLg), or "127.0.0.1" to lock it down to the local machine only.
+# host = "0.0.0.0"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Inference performance
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Number of CPU threads used for parallel block dequantization and CPU matmul.
+# Typical guidance:
+#   - Leave unset to use all physical cores (rayon default).
+#   - Set to your physical core count on machines with SMT/hyperthreading —
+#     oversubscribing past physical cores usually slows things down.
+#   - Set lower than core count if you want to reserve headroom for other
+#     work on the same machine.
+threads = 24
+
+# If true, keep weights in their compact quantized GGUF form (Q4_K, Q6_K, Q8_0,
+# Q4_0) and dequantize a fresh scratch buffer per matmul. Saves roughly 5× RAM
+# at the cost of inference speed. Usually required to fit 27B-class models on
+# 16–64 GB machines.
+quantized = false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hardware declaration (documentation + validation)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# These values are informational. At startup nexus-serve compares `cores` to
+# `std::thread::available_parallelism()` and prints a warning if they diverge
+# — useful to catch "config file copied to the wrong machine" situations.
+
+[hardware]
+cpu    = "Intel Core Ultra 9 275HX"
+cores  = 24
+ram_gb = 64
+# gpu is documentation-only right now (GPU usage is controlled by building
+# with `--features cuda`, not by this file).
+gpu    = "CUDA (built with --features cuda)"
