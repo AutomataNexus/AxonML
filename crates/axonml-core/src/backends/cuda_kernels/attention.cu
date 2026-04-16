@@ -122,6 +122,135 @@ extern "C" __global__ void fused_attention_fwd_f32(
 }
 
 // =============================================================================
+// Fused Flash-Decode Attention (inference hot path for nexus-serve)
+// =============================================================================
+//
+// Single-query decode: one CTA = one warp = one attention head.
+// Runs the full attention = softmax(q · Kᵀ / √d) · V in one kernel launch
+// using online softmax (Dao et al., FlashAttention-2). Memory cost is O(head_dim)
+// per head instead of O(kv_len).
+//
+// Shapes (all row-major contiguous):
+//   q       : [n_heads,    head_dim]         — current-token query projection
+//   k_cache : [kv_len, n_kv_heads, head_dim] — full K cache (grows per token)
+//   v_cache : [kv_len, n_kv_heads, head_dim] — full V cache
+//   out     : [n_heads,    head_dim]         — attention output for the one token
+//
+// GQA: `n_heads` Q heads share `n_kv_heads` KV heads (ratio = n_heads / n_kv_heads).
+// Head `h` reads KV head `h / gqa_ratio`.
+//
+// SWA: if `swa_window > 0` and `kv_len > swa_window`, positions
+// `[0, kv_len - swa_window)` are masked out (sliding window for Gemma 3 etc).
+// Pass `swa_window = 0` for full causal attention.
+//
+// Thread layout: one warp (32 lanes) per head. Each lane owns `DIMS =
+// ceil(head_dim / 32)` elements of q and o. Dot product is a partial-sum
+// per lane followed by `__shfl_xor_sync` warp reduction. After reduction
+// all lanes hold the full scalar score `s`, then update (m, l, o) in
+// registers and move to the next kv position.
+//
+// Launch:
+//   grid  = (n_heads, 1, 1)
+//   block = (32,       1, 1)
+extern "C" __global__ void fused_attn_decode_f32(
+    const float* __restrict__ q,          // [n_heads,   head_dim]
+    const float* __restrict__ k_cache,    // [kv_len, n_kv_heads, head_dim]
+    const float* __restrict__ v_cache,    // [kv_len, n_kv_heads, head_dim]
+    float* __restrict__       out,        // [n_heads,   head_dim]
+    unsigned int kv_len,
+    unsigned int n_heads,
+    unsigned int n_kv_heads,
+    unsigned int head_dim,
+    unsigned int swa_window,              // 0 ⇒ full attention
+    float scale
+) {
+    const unsigned int h    = blockIdx.x;
+    const unsigned int lane = threadIdx.x;
+    if (h >= n_heads || lane >= 32u) return;
+
+    const unsigned int gqa_ratio = n_heads / n_kv_heads;
+    const unsigned int kv_h      = h / gqa_ratio;
+    const unsigned int kv_dim    = n_kv_heads * head_dim;
+
+    // Window: mask positions < window_start. 0 = full causal.
+    const unsigned int window_start = (swa_window > 0u && kv_len > swa_window)
+        ? (kv_len - swa_window) : 0u;
+
+    // Per-thread registers for q and o. head_dim ≤ 256 → DIMS ≤ 8.
+    // Bumping to 16 keeps a margin; the tail is always bounds-checked.
+    constexpr int MAX_DIMS = 16;
+    float q_reg[MAX_DIMS];
+    float o_reg[MAX_DIMS];
+
+    const unsigned int DIMS = (head_dim + 31u) / 32u;
+    #pragma unroll
+    for (int d = 0; d < MAX_DIMS; ++d) {
+        if ((unsigned int)d < DIMS) {
+            unsigned int di = lane + (unsigned int)d * 32u;
+            q_reg[d] = (di < head_dim) ? q[h * head_dim + di] : 0.0f;
+        } else {
+            q_reg[d] = 0.0f;
+        }
+        o_reg[d] = 0.0f;
+    }
+
+    float m = -FLT_MAX;   // running max score
+    float l = 0.0f;       // running softmax denominator
+
+    for (unsigned int t = window_start; t < kv_len; ++t) {
+        // ── Partial dot product q · k_t for this lane's DIMS slice ──
+        const float* k_row = k_cache + t * kv_dim + kv_h * head_dim;
+        float partial = 0.0f;
+        #pragma unroll
+        for (int d = 0; d < MAX_DIMS; ++d) {
+            if ((unsigned int)d < DIMS) {
+                unsigned int di = lane + (unsigned int)d * 32u;
+                if (di < head_dim) {
+                    partial += q_reg[d] * k_row[di];
+                }
+            }
+        }
+
+        // ── Warp reduce: after this every lane holds the full score ──
+        #pragma unroll
+        for (int off = 16; off > 0; off >>= 1) {
+            partial += __shfl_xor_sync(0xffffffffu, partial, off);
+        }
+        float s = partial * scale;
+
+        // ── Online softmax rescale ──
+        float m_new = fmaxf(m, s);
+        float alpha = expf(m - m_new);       // rescale factor for old o and l
+        float beta  = expf(s - m_new);       // weight for the new v contribution
+
+        // ── Accumulate o = o * alpha + v_t * beta ──
+        const float* v_row = v_cache + t * kv_dim + kv_h * head_dim;
+        #pragma unroll
+        for (int d = 0; d < MAX_DIMS; ++d) {
+            if ((unsigned int)d < DIMS) {
+                unsigned int di = lane + (unsigned int)d * 32u;
+                float vv = (di < head_dim) ? v_row[di] : 0.0f;
+                o_reg[d] = o_reg[d] * alpha + vv * beta;
+            }
+        }
+        l = l * alpha + beta;
+        m = m_new;
+    }
+
+    // ── Normalise and write output ──
+    float inv_l = (l > 0.0f) ? (1.0f / l) : 0.0f;
+    #pragma unroll
+    for (int d = 0; d < MAX_DIMS; ++d) {
+        if ((unsigned int)d < DIMS) {
+            unsigned int di = lane + (unsigned int)d * 32u;
+            if (di < head_dim) {
+                out[h * head_dim + di] = o_reg[d] * inv_l;
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Fused Attention Backward Kernel (recomputation-based, memory-efficient)
 // =============================================================================
 //

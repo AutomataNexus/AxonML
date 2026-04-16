@@ -3734,7 +3734,11 @@ impl CudaKernels {
         kernels.load_module(
             "attention",
             ATTENTION_PTX,
-            &["fused_attention_fwd_f32", "fused_attention_bwd_f32"],
+            &[
+                "fused_attention_fwd_f32",
+                "fused_attention_bwd_f32",
+                "fused_attn_decode_f32",
+            ],
         )?;
 
         // Load Q4_K dequant-in-shader matmul (LLM inference on quantized weights).

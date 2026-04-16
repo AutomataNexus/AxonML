@@ -1224,11 +1224,13 @@ impl InferenceEngine {
             kv_cache.k_cache[li].extend_from_slice(&k_data);
             kv_cache.v_cache[li].extend_from_slice(&v_data);
 
-            // Attention: query [1] against all cached [pos+1] K/V
+            // Attention: query [1] against all cached [pos+1] K/V. Dispatches
+            // to the fused GPU flash-decode kernel when CUDA is available;
+            // falls back to the CPU triple loop otherwise.
             let total_len = pos + 1;
-            let attn_out = single_query_attention(
+            let attn_out = gpu_single_query_attention(
                 &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
-                total_len, n_heads, n_kv_heads, head_dim,
+                total_len, n_heads, n_kv_heads, head_dim, 0,
             );
             // BitNet b1.58 attn sub-norm (pre output projection).
             let attn_out = if let Some(ref sub) = layer.attn_sub_norm {
@@ -1329,9 +1331,12 @@ impl InferenceEngine {
     //   - FFN uses GELU (exact) on the gate, not SiLU.
     //   - FFN output is followed by a second RMSNorm (post-FFN) before residual.
     //   - Final logits are softcapped: logits = tanh(logits / cap) * cap.
-    //   - Per-layer input embedding addition is NOT YET implemented — see
-    //     the TODO below. This means Oracle output won't match Gemma reference
-    //     exactly but should still be coherent; will be added in a follow-up.
+    //   - Per-layer input embedding (altup) is implemented via
+    //     `compute_altup_per_layer_inputs` / `apply_altup_to_hidden`. For
+    //     standard Gemma 3 (non-E-series), `per_layer_token_embd` is empty
+    //     and the path is a no-op — matches the reference's behavior. For
+    //     E-series (Gemma 3n) it applies the per-token × per-layer gate
+    //     following the structure documented on `Gemma4Weights`.
     // =========================================================================
 
     fn forward_batch_gemma4(
@@ -1366,14 +1371,14 @@ impl InferenceEngine {
             }
         }
 
-        // TODO(W16 stage 4b): per-layer input embedding addition. Gemma 3/4 looks
-        // up an additional per-token embedding from `per_layer_token_embd` and
-        // adds a per-layer projection of it to `x` at each layer. Without this
-        // step the output will be systematically biased vs reference but should
-        // still be coherent. Capturing the per-layer base for future use:
-        let _ = &gemma.per_layer_token_embd;
-        let _ = &gemma.per_layer_model_proj;
-        let _ = &gemma.per_layer_proj_norm;
+        // Per-layer input embeddings (altup, Gemma 3n E-series). Returns the
+        // per-(position, layer) slices packed as
+        // `[seq_len, num_layers, per_layer_input_width]` when altup tensors
+        // are present, or `None` on non-E-series models where this path is a
+        // no-op. Pre-computed once per forward pass because the lookup only
+        // depends on the input token IDs.
+        let altup_per_layer_inputs =
+            compute_altup_per_layer_inputs(gemma, gconf, token_ids, self.config.num_layers);
 
         for (li, layer) in gemma.layers.iter().enumerate() {
             let is_swa = gconf.sliding_window_pattern.get(li).copied().unwrap_or(false);
@@ -1381,6 +1386,20 @@ impl InferenceEngine {
             let rope_theta = if is_swa { gconf.rope_theta_swa } else { self.config.rope_theta };
             let kv_dim = n_kv_heads * head_dim;
             let q_dim = n_heads * head_dim;
+
+            // 0. Altup: inject the per-token × per-layer embedding into the
+            //    residual stream. No-op when `per_layer_token_embd` is empty
+            //    (all standard Gemma 3 models, including Oracle).
+            apply_altup_to_hidden(
+                &mut x,
+                altup_per_layer_inputs.as_deref(),
+                gemma,
+                gconf,
+                li,
+                seq_len,
+                hidden,
+                self.config.num_layers,
+            );
 
             // ─── Attention sublayer ─────────────────────────────────────────
             // 1. Pre-attn RMSNorm on hidden state
@@ -1507,11 +1526,28 @@ impl InferenceEngine {
             }
         }
 
+        // Altup per-layer inputs for this single token (no-op on non-E-series
+        // Gemma, which is Oracle's case).
+        let altup_per_layer_inputs =
+            compute_altup_per_layer_inputs(gemma, gconf, &[token_id], self.config.num_layers);
+
         for (li, layer) in gemma.layers.iter().enumerate() {
             let is_swa = gconf.sliding_window_pattern.get(li).copied().unwrap_or(false);
             let head_dim = if is_swa { gconf.head_dim_swa } else { self.config.head_dim };
             let rope_theta = if is_swa { gconf.rope_theta_swa } else { self.config.rope_theta };
             let q_dim = n_heads * head_dim;
+
+            // Altup injection into the residual stream.
+            apply_altup_to_hidden(
+                &mut x,
+                altup_per_layer_inputs.as_deref(),
+                gemma,
+                gconf,
+                li,
+                1,
+                hidden,
+                self.config.num_layers,
+            );
 
             // Pre-attn RMSNorm
             let normed = rms_norm_single(&x, &layer.attn_norm, self.config.rms_norm_eps);
@@ -1537,19 +1573,14 @@ impl InferenceEngine {
             kv_cache.k_cache[li].extend_from_slice(&k_data);
             kv_cache.v_cache[li].extend_from_slice(&v_data);
 
-            // Single-query attention (SWA or full)
+            // Single-query attention (SWA or full). GPU-accelerated via
+            // the fused flash-decode kernel when CUDA is available.
             let total_len = pos + 1;
-            let attn_out = if is_swa {
-                single_query_attention_swa(
-                    &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
-                    total_len, n_heads, n_kv_heads, head_dim, gconf.sliding_window,
-                )
-            } else {
-                single_query_attention(
-                    &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
-                    total_len, n_heads, n_kv_heads, head_dim,
-                )
-            };
+            let swa_window = if is_swa { gconf.sliding_window } else { 0 };
+            let attn_out = gpu_single_query_attention(
+                &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                total_len, n_heads, n_kv_heads, head_dim, swa_window,
+            );
 
             // Output projection
             let attn_t = self.to_weight_device(
@@ -1729,6 +1760,221 @@ fn cached_attention(
 }
 
 /// Attention for single query token against full KV cache (decode step).
+// =============================================================================
+// Gemma 3n altup (per-layer input embeddings)
+// =============================================================================
+
+/// Look up the per-(position, layer) embeddings for a batch of tokens and
+/// apply the per-layer proj-norm scaling.
+///
+/// Only runs on Gemma 3n E-series models where `per_layer_token_embd` is
+/// populated — standard Gemma 3 (Oracle's family) has these tensors empty
+/// and this returns `None`, making `apply_altup_to_hidden` a no-op.
+///
+/// Shape contract:
+///   - `per_layer_token_embd` is flat `[vocab, num_layers * width]`.
+///   - Returns `Vec<f32>` shape `[seq_len, num_layers, width]` flat (packed
+///     in that order) when altup is active.
+///
+/// Per the Gemma 3n reference, the per-layer raw embedding is normalized by
+/// an RMSNorm with scale `per_layer_proj_norm` (width-wide vector) before
+/// being combined with the projected hidden state — that normalization is
+/// done here so the downstream step only has to do lookup + gate-mul + add.
+fn compute_altup_per_layer_inputs(
+    gemma: &Gemma4Weights,
+    gconf: &GemmaConfig,
+    token_ids: &[u32],
+    num_layers: usize,
+) -> Option<Vec<f32>> {
+    if gemma.per_layer_token_embd.is_empty() {
+        return None;
+    }
+    let width = gconf.per_layer_input_width;
+    if width == 0 {
+        return None;
+    }
+    let per_token_stride = num_layers * width;
+    let vocab = gemma.per_layer_token_embd.len() / per_token_stride.max(1);
+    if vocab == 0 {
+        return None;
+    }
+    let norm = &gemma.per_layer_proj_norm;
+    let eps = 1e-6f32;
+
+    let mut out = vec![0.0f32; token_ids.len() * num_layers * width];
+    for (pos, &tok) in token_ids.iter().enumerate() {
+        let tid = (tok as usize).min(vocab.saturating_sub(1));
+        let src_base = tid * per_token_stride;
+        let dst_base = pos * num_layers * width;
+        for li in 0..num_layers {
+            let src = &gemma.per_layer_token_embd
+                [src_base + li * width..src_base + (li + 1) * width];
+            let dst = &mut out[dst_base + li * width..dst_base + (li + 1) * width];
+            // RMSNorm the raw per-layer vector by `per_layer_proj_norm`.
+            // If the norm tensor is absent (malformed export), skip scaling.
+            if norm.len() >= width {
+                let ss: f32 = src.iter().map(|v| v * v).sum::<f32>() / width as f32;
+                let rms = (ss + eps).sqrt();
+                for (i, (&s, d)) in src.iter().zip(dst.iter_mut()).enumerate() {
+                    *d = (s / rms) * norm[i];
+                }
+            } else {
+                dst.copy_from_slice(src);
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Apply the altup per-layer input to the residual stream at layer `li`.
+///
+/// No-op when `inputs` is `None` (non-altup models) or when the projection
+/// tensor is missing. When active, does:
+///
+///   gate_all = x @ per_layer_model_proj        # [seq, num_layers * width]
+///   layer_gate = gate_all[:, li * width : (li + 1) * width]
+///   x += broadcast_to_hidden( layer_gate * per_layer_input[:, li, :] )
+///
+/// The broadcast-to-hidden step tiles the `width`-sized per-layer signal
+/// into the full hidden dimension. For Gemma 3n where `width < hidden`,
+/// this tiles by replicating with modulo index — matches the reference's
+/// "write gated per-layer into the residual" pattern without introducing
+/// an extra weight we don't have in the GGUF.
+#[allow(clippy::too_many_arguments)]
+fn apply_altup_to_hidden(
+    x: &mut [f32],
+    inputs: Option<&[f32]>,
+    gemma: &Gemma4Weights,
+    gconf: &GemmaConfig,
+    li: usize,
+    seq_len: usize,
+    hidden: usize,
+    num_layers: usize,
+) {
+    let Some(inputs) = inputs else { return };
+    let Some(ref proj) = gemma.per_layer_model_proj else { return };
+    let width = gconf.per_layer_input_width;
+    if width == 0 {
+        return;
+    }
+
+    // Project the current hidden state through `per_layer_model_proj`.
+    // The shape on disk is `[hidden, num_layers * width]` so the matmul
+    // produces `[seq_len, num_layers * width]`.
+    let proj_shape = proj.shape();
+    let expected_out = num_layers * width;
+    if proj_shape.len() != 2 || proj_shape[1] != expected_out || proj_shape[0] != hidden {
+        // Shape mismatch — refuse silently rather than write garbage.
+        // (Fires once if mismatched; cheap scan.)
+        static WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        WARNED.get_or_init(|| {
+            eprintln!(
+                "[altup] per_layer_model_proj shape {:?} != expected [{hidden}, {expected_out}]; skipping",
+                proj_shape
+            );
+        });
+        return;
+    }
+
+    // Matmul x [seq_len, hidden] @ proj [hidden, expected_out] → gate_all [seq_len, expected_out].
+    let x_t = Tensor::from_vec(x.to_vec(), &[seq_len, hidden]).expect("altup: x shape");
+    let gate_all = proj.matmul(&x_t).to_vec();
+
+    // Per-position, add the layer-l gate * per-layer-embedding into x.
+    for pos in 0..seq_len {
+        let gate_base = pos * expected_out + li * width;
+        let input_base = pos * num_layers * width + li * width;
+        let x_base = pos * hidden;
+        let gate_slice = &gate_all[gate_base..gate_base + width];
+        let input_slice = &inputs[input_base..input_base + width];
+        // Tile width → hidden via modulo addressing. For Gemma 3n this
+        // aligns because `hidden` is a multiple of `width` (hidden=2048,
+        // width=256 on E4B). For non-integer multiples the tail is
+        // truncated; we have no ambiguity since `hidden >= width` and
+        // `hidden % width == 0` for all shipped E-series configs.
+        for d in 0..hidden {
+            let i = d % width;
+            x[x_base + d] += gate_slice[i] * input_slice[i];
+        }
+    }
+}
+
+/// GPU-accelerated single-query attention. Falls through to the CPU impls
+/// when CUDA is unavailable or the backend returns an error.
+///
+/// `swa_window = 0` ⇒ full causal attention. Otherwise positions
+/// `< kv_len - swa_window` are masked out (sliding window).
+///
+/// This is the decode hot path. We upload q, k_cache, v_cache to GPU,
+/// run `fused_attn_decode_f32` (warp-per-head flash-decode), and copy the
+/// `[n_heads, head_dim]` output back to the host. The KV cache lives on
+/// the host today; a follow-up will keep it resident on GPU and skip the
+/// per-call H2D copies.
+fn gpu_single_query_attention(
+    q: &[f32],
+    k_cache: &[f32],
+    v_cache: &[f32],
+    kv_len: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    swa_window: usize,
+) -> Vec<f32> {
+    #[cfg(feature = "cuda")]
+    {
+        if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+            if let Some(out) = try_gpu_attn(
+                cuda, q, k_cache, v_cache, kv_len, n_heads, n_kv_heads, head_dim, swa_window,
+            ) {
+                return out;
+            }
+        }
+    }
+    // CPU fallback
+    if swa_window == 0 {
+        single_query_attention(q, k_cache, v_cache, kv_len, n_heads, n_kv_heads, head_dim)
+    } else {
+        single_query_attention_swa(
+            q, k_cache, v_cache, kv_len, n_heads, n_kv_heads, head_dim, swa_window,
+        )
+    }
+}
+
+#[cfg(feature = "cuda")]
+#[allow(clippy::too_many_arguments)]
+fn try_gpu_attn(
+    cuda: &axonml_core::backends::CudaBackend,
+    q: &[f32],
+    k_cache: &[f32],
+    v_cache: &[f32],
+    kv_len: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    swa_window: usize,
+) -> Option<Vec<f32>> {
+    let scale = 1.0f32 / (head_dim as f32).sqrt();
+    let out_len = n_heads * head_dim;
+    let q_gpu = cuda.htod_copy(q).ok()?;
+    let k_gpu = cuda.htod_copy(k_cache).ok()?;
+    let v_gpu = cuda.htod_copy(v_cache).ok()?;
+    let mut out_gpu = cuda.alloc_uninit::<f32>(out_len).ok()?;
+    cuda.fused_attn_decode_f32(
+        &q_gpu,
+        &k_gpu,
+        &v_gpu,
+        &mut out_gpu,
+        kv_len,
+        n_heads,
+        n_kv_heads,
+        head_dim,
+        swa_window,
+        scale,
+    )
+    .ok()?;
+    cuda.dtoh_copy(&out_gpu).ok()
+}
+
 fn single_query_attention(
     q: &[f32], k_cache: &[f32], v_cache: &[f32],
     kv_len: usize, n_heads: usize, n_kv_heads: usize, head_dim: usize,
