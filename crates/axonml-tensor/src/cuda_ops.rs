@@ -695,12 +695,21 @@ impl Tensor<f32> {
         in_dim: usize,
     ) -> Result<Self> {
         assert!(self.device().is_gpu(), "q4k_gemm_cuda: self must be on GPU");
-        assert_eq!(in_dim % 256, 0, "q4k_gemm_cuda: in_dim must be a multiple of 256");
+        assert_eq!(
+            in_dim % 256,
+            0,
+            "q4k_gemm_cuda: in_dim must be a multiple of 256"
+        );
 
         let a_data = self.contiguous_gpu();
         // self shape can be [m, in] or flat [m*in]; normalize.
         let numel = a_data.numel();
-        assert!(numel % in_dim == 0, "q4k_gemm_cuda: numel ({}) not divisible by in_dim ({})", numel, in_dim);
+        assert!(
+            numel % in_dim == 0,
+            "q4k_gemm_cuda: numel ({}) not divisible by in_dim ({})",
+            numel,
+            in_dim
+        );
         let m = numel / in_dim;
 
         let cuda = get_cuda_backend().expect("CUDA backend not available");
@@ -745,7 +754,11 @@ impl Tensor<f32> {
             self.numel(),
             in_dim
         );
-        assert_eq!(in_dim % 256, 0, "q4k_gemv_cuda: in_dim must be a multiple of 256");
+        assert_eq!(
+            in_dim % 256,
+            0,
+            "q4k_gemv_cuda: in_dim must be a multiple of 256"
+        );
 
         let a_data = self.contiguous_gpu();
         let cuda = get_cuda_backend().expect("CUDA backend not available");
@@ -775,11 +788,20 @@ impl Tensor<f32> {
         in_dim: usize,
     ) -> Result<Self> {
         assert!(self.device().is_gpu(), "q6k_gemm_cuda: self must be on GPU");
-        assert_eq!(in_dim % 256, 0, "q6k_gemm_cuda: in_dim must be a multiple of 256");
+        assert_eq!(
+            in_dim % 256,
+            0,
+            "q6k_gemm_cuda: in_dim must be a multiple of 256"
+        );
 
         let a_data = self.contiguous_gpu();
         let numel = a_data.numel();
-        assert!(numel % in_dim == 0, "q6k_gemm_cuda: numel ({}) not divisible by in_dim ({})", numel, in_dim);
+        assert!(
+            numel % in_dim == 0,
+            "q6k_gemm_cuda: numel ({}) not divisible by in_dim ({})",
+            numel,
+            in_dim
+        );
         let m = numel / in_dim;
 
         let cuda = get_cuda_backend().expect("CUDA backend not available");
@@ -816,7 +838,11 @@ impl Tensor<f32> {
             self.numel(),
             in_dim
         );
-        assert_eq!(in_dim % 256, 0, "q6k_gemv_cuda: in_dim must be a multiple of 256");
+        assert_eq!(
+            in_dim % 256,
+            0,
+            "q6k_gemv_cuda: in_dim must be a multiple of 256"
+        );
 
         let a_data = self.contiguous_gpu();
         let cuda = get_cuda_backend().expect("CUDA backend not available");

@@ -812,23 +812,25 @@ fn gemv_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: usize
     let target_slab = 256usize.max(n / (rayon::current_num_threads() * 4).max(1));
     let slab = target_slab.min(n).max(1);
 
-    c.par_chunks_mut(slab).enumerate().for_each(|(slab_idx, c_slab)| {
-        let col_start = slab_idx * slab;
-        let this_n = c_slab.len();
-        // Zero this slab (we accumulate into it).
-        c_slab.fill(0.0);
-        // Stream through rows of B. For each row k_i, multiply by a[k_i] and
-        // accumulate into c_slab. The inner loop over `this_n` is trivially
-        // auto-vectorizable (FMA in rustc-generated AVX2/AVX-512 code).
-        for k_i in 0..k {
-            let a_k = a[k_i];
-            let row_start = k_i * n + col_start;
-            let b_row = &b[row_start..row_start + this_n];
-            for (c_val, &b_val) in c_slab.iter_mut().zip(b_row.iter()) {
-                *c_val += a_k * b_val;
+    c.par_chunks_mut(slab)
+        .enumerate()
+        .for_each(|(slab_idx, c_slab)| {
+            let col_start = slab_idx * slab;
+            let this_n = c_slab.len();
+            // Zero this slab (we accumulate into it).
+            c_slab.fill(0.0);
+            // Stream through rows of B. For each row k_i, multiply by a[k_i] and
+            // accumulate into c_slab. The inner loop over `this_n` is trivially
+            // auto-vectorizable (FMA in rustc-generated AVX2/AVX-512 code).
+            for k_i in 0..k {
+                let a_k = a[k_i];
+                let row_start = k_i * n + col_start;
+                let b_row = &b[row_start..row_start + this_n];
+                for (c_val, &b_val) in c_slab.iter_mut().zip(b_row.iter()) {
+                    *c_val += a_k * b_val;
+                }
             }
-        }
-    });
+        });
 }
 
 // =============================================================================

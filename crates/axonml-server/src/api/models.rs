@@ -621,10 +621,10 @@ pub async fn download_version(
     let mut file_path: Option<PathBuf> = None;
 
     if version_dir.exists() {
-        let canon_root = std::fs::canonicalize(&models_root)
-            .map_err(|e| AuthError::Internal(e.to_string()))?;
-        let canon_dir = std::fs::canonicalize(&version_dir)
-            .map_err(|e| AuthError::Internal(e.to_string()))?;
+        let canon_root =
+            std::fs::canonicalize(&models_root).map_err(|e| AuthError::Internal(e.to_string()))?;
+        let canon_dir =
+            std::fs::canonicalize(&version_dir).map_err(|e| AuthError::Internal(e.to_string()))?;
         if !canon_dir.starts_with(&canon_root) {
             return Err(AuthError::InvalidInput(
                 "version_dir escapes models root".to_string(),
