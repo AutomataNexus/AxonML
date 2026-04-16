@@ -95,9 +95,14 @@ fn main() {
         d_model: D_MODEL,
         num_layers: NUM_LAYERS,
         num_heads: NUM_HEADS,
+        num_kv_heads: NUM_HEADS,
         intermediate_size: INTERMEDIATE_SIZE,
         max_seq_len: MAX_SEQ_LEN,
         rms_norm_eps: 1e-6,
+        use_rope: false,
+        rope_theta: 10_000.0,
+        use_squared_relu: false,
+        use_sub_ln: false,
     };
 
     let model = TridentModel::new(&config);

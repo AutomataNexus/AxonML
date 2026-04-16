@@ -1112,11 +1112,14 @@ impl InferenceEngine {
             kv_cache.k_cache[li].extend_from_slice(&k_data_new);
             kv_cache.v_cache[li].extend_from_slice(&v_data_new);
 
-            // Attention with full KV cache
+            // Attention with full KV cache. GPU-accelerated via the fused
+            // decode kernel (one launch per query row, causal masking via
+            // kv_len clamping, Q/K/V uploaded once and reused). Falls back
+            // to the CPU triple loop on non-CUDA builds.
             let total_len = kv_cache.len + seq_len;
-            let attn_out = cached_attention(
+            let attn_out = gpu_cached_attention(
                 &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
-                seq_len, total_len, n_heads, n_kv_heads, head_dim, pos_offset,
+                seq_len, total_len, n_heads, n_kv_heads, head_dim, pos_offset, 0,
             );
             // BitNet b1.58 attn sub-norm (pre output projection).
             let attn_out = if let Some(ref sub) = layer.attn_sub_norm {
@@ -1426,20 +1429,14 @@ impl InferenceEngine {
             kv_cache.k_cache[li].extend_from_slice(&k_data);
             kv_cache.v_cache[li].extend_from_slice(&v_data);
 
-            // 6. Attention. SWA layers mask out positions older than `sliding_window`.
+            // 6. Attention. GPU-accelerated prefill, with optional SWA mask.
             let total_len = kv_cache.len + seq_len;
-            let attn_out = if is_swa {
-                cached_attention_swa(
-                    &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
-                    seq_len, total_len, n_heads, n_kv_heads, head_dim, pos_offset,
-                    gconf.sliding_window,
-                )
-            } else {
-                cached_attention(
-                    &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
-                    seq_len, total_len, n_heads, n_kv_heads, head_dim, pos_offset,
-                )
-            };
+            let swa_window_batch = if is_swa { gconf.sliding_window } else { 0 };
+            let attn_out = gpu_cached_attention(
+                &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                seq_len, total_len, n_heads, n_kv_heads, head_dim, pos_offset,
+                swa_window_batch,
+            );
             let _ = kv_dim;
 
             // 7. Output projection
@@ -1973,6 +1970,96 @@ fn try_gpu_attn(
     )
     .ok()?;
     cuda.dtoh_copy(&out_gpu).ok()
+}
+
+/// GPU-accelerated prefill attention (multi-query, causal). Uploads Q, K, V
+/// to GPU once, then loops the `fused_attn_decode_f32` kernel per query
+/// position with growing `kv_len` for causal masking. Same GPU buffers
+/// reused across all positions — no per-call H2D.
+///
+/// Falls back to the CPU `cached_attention` path when CUDA is unavailable.
+#[allow(clippy::too_many_arguments)]
+fn gpu_cached_attention(
+    q: &[f32],
+    k_cache: &[f32],
+    v_cache: &[f32],
+    seq_len: usize,
+    total_len: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    pos_offset: usize,
+    swa_window: usize,
+) -> Vec<f32> {
+    #[cfg(feature = "cuda")]
+    {
+        if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+            if let Some(out) = try_gpu_prefill_attn(
+                cuda, q, k_cache, v_cache, seq_len, total_len,
+                n_heads, n_kv_heads, head_dim, pos_offset, swa_window,
+            ) {
+                return out;
+            }
+        }
+    }
+    if swa_window == 0 {
+        cached_attention(q, k_cache, v_cache, seq_len, total_len, n_heads, n_kv_heads, head_dim, pos_offset)
+    } else {
+        cached_attention_swa(q, k_cache, v_cache, seq_len, total_len, n_heads, n_kv_heads, head_dim, pos_offset, swa_window)
+    }
+}
+
+#[cfg(feature = "cuda")]
+#[allow(clippy::too_many_arguments)]
+fn try_gpu_prefill_attn(
+    cuda: &axonml_core::backends::CudaBackend,
+    q: &[f32],
+    k_cache: &[f32],
+    v_cache: &[f32],
+    seq_len: usize,
+    total_len: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    pos_offset: usize,
+    swa_window: usize,
+) -> Option<Vec<f32>> {
+    let scale = 1.0f32 / (head_dim as f32).sqrt();
+    let q_stride = n_heads * head_dim;
+    let out_total = seq_len * q_stride;
+
+    // Upload K/V cache once; Q rows are small enough to upload per-iteration.
+    let k_gpu = cuda.htod_copy(k_cache).ok()?;
+    let v_gpu = cuda.htod_copy(v_cache).ok()?;
+    let mut out = vec![0.0f32; out_total];
+
+    for i in 0..seq_len {
+        let kv_len = pos_offset + i + 1;
+        let q_start = i * q_stride;
+        let q_row = &q[q_start..q_start + q_stride];
+
+        let q_gpu = cuda.htod_copy(q_row).ok()?;
+        let mut o_gpu = cuda.alloc_uninit::<f32>(q_stride).ok()?;
+
+        cuda.fused_attn_decode_f32(
+            &q_gpu,
+            &k_gpu,
+            &v_gpu,
+            &mut o_gpu,
+            kv_len,
+            n_heads,
+            n_kv_heads,
+            head_dim,
+            swa_window,
+            scale,
+        )
+        .ok()?;
+
+        let row_out = cuda.dtoh_copy(&o_gpu).ok()?;
+        out[q_start..q_start + q_stride].copy_from_slice(&row_out);
+    }
+
+    Some(out)
 }
 
 fn single_query_attention(
