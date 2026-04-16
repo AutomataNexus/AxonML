@@ -643,13 +643,79 @@ impl CpuBackend {
     }
 
     /// Performs f32 matrix multiplication: C = A @ B using optimized GEMM.
+    ///
+    /// For `m == 1` (GEMV — a row vector times a matrix, produced by every
+    /// per-token decode step in LLM inference), matrixmultiply v0.3 only
+    /// parallelizes along the `m` dimension and so stays on one core. We
+    /// intercept that case and fan across rayon by slicing the output
+    /// dimension `n`: each thread computes a contiguous slab of `c` with
+    /// row-major streaming reads of B (SIMD-friendly, contiguous, L1-local).
     pub fn matmul_f32(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize, k: usize) {
+        if m == 1 && n >= 512 && k >= 256 {
+            gemv_row_parallel_f32(c, a, b, n, k);
+            return;
+        }
         Self::sgemm(c, a, b, m, n, k, 1.0, 0.0);
     }
 
     /// Performs f64 matrix multiplication: C = A @ B using optimized GEMM.
     pub fn matmul_f64(c: &mut [f64], a: &[f64], b: &[f64], m: usize, n: usize, k: usize) {
         Self::dgemm(c, a, b, m, n, k, 1.0, 0.0);
+    }
+
+    /// Performs f32 matmul where `B` is stored in its NATURAL `[n, k]` row-major
+    /// layout: `C = A @ B^T` where `A` is `[m, k]`, `B` is `[n, k]`, `C` is `[m, n]`.
+    ///
+    /// This is the dominant pattern in LLM inference — GGUF dequantized weights
+    /// come out as `[out, in]` row-major, and a naive implementation would
+    /// first transpose to `[in, out]` before calling `matmul_f32`. That
+    /// transpose is an `O(n*k)` single-threaded memcpy (measured at 30+ s/token
+    /// on a 14B model, saturating one core while 23 others sat idle — the
+    /// GGUF load path's hot bottleneck). This function skips the transpose
+    /// entirely:
+    ///
+    /// - **m=1 (decode)**: dispatches to [`gemv_bt_row_parallel_f32`] which
+    ///   parallelizes over rows of `B` — each rayon worker dots its row with
+    ///   `A` and writes one element of `C`. Linear with `rayon::current_num_threads()`.
+    /// - **m>1 (prefill)**: calls `matrixmultiply::sgemm` with `B`'s row-major
+    ///   stride `(k, 1)` but reads as if it were `[k, n]` column-major via
+    ///   `(rs=1, cs=k)` — the classic "transpose by stride" trick. Zero copy.
+    ///
+    /// # Panics
+    /// Does not panic. Debug-asserts shape consistency.
+    pub fn matmul_f32_bt(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize, k: usize) {
+        debug_assert_eq!(a.len(), m * k);
+        debug_assert_eq!(b.len(), n * k);
+        debug_assert_eq!(c.len(), m * n);
+
+        if m == 1 {
+            gemv_bt_row_parallel_f32(c, a, b, n, k);
+            return;
+        }
+
+        // m > 1: sgemm with B reinterpreted as [k, n] via transposed strides.
+        // Physical B layout is row-major [n, k]: element B[i, j] is at offset `i*k + j`.
+        // We want matmul to see it as a [k, n] matrix: element B'[i, j] at `j*k + i`.
+        // Setting rs=1 (stride 1 between rows) and cs=k (stride k between cols)
+        // on the same pointer reinterprets the layout correctly.
+        unsafe {
+            matrixmultiply::sgemm(
+                m,
+                k,
+                n,
+                1.0,
+                a.as_ptr(),
+                k as isize, // A row stride
+                1,          // A col stride — row-major [m, k]
+                b.as_ptr(),
+                1,          // B row stride — transposed view
+                k as isize, // B col stride — transposed view
+                0.0,
+                c.as_mut_ptr(),
+                n as isize,
+                1, // C row-major [m, n]
+            );
+        }
     }
 
     /// Transposes a matrix.
@@ -676,6 +742,93 @@ impl CpuBackend {
         }
         sum
     }
+}
+
+// =============================================================================
+// Parallel GEMV (m=1) — used by LLM per-token decode
+// =============================================================================
+
+/// Parallel f32 row-vector × matrix multiply: `c = a @ B` where `a` is `[1, k]`
+/// (treated as a length-`k` row), `B` is `[k, n]` row-major, and `c` is `[1, n]`
+/// (length-`n` row).
+///
+/// Loop order: outer over rows of B (`k`), inner over the output slab. This
+/// gives contiguous SIMD-friendly reads of B (one full row per outer iteration)
+/// and contiguous FMA-accumulation writes into `c_slab`. Rayon fans the work
+/// across slabs of `c` so each worker owns a disjoint column range — no
+/// synchronization between workers.
+/// Parallel GEMV where `B` is stored in its NATURAL `[n, k]` row-major layout.
+///
+/// Computes `c = a @ B^T` for row-vector `a` of length `k` and matrix `B` of
+/// shape `[n, k]` row-major. Each worker owns a contiguous slab of output
+/// columns and computes `c_slab[j] = dot(a, B[j])` — a simple dot product
+/// per output column, embarrassingly parallel.
+///
+/// Why this layout beats `gemv_row_parallel_f32` for LLM inference: GGUF
+/// weights are stored `[out_features, in_features]` row-major. The previous
+/// code required a transpose to `[in_features, out_features]` before calling
+/// `gemv_row_parallel_f32`, which is a single-threaded `O(out*in)` memcpy.
+/// This variant consumes the natural layout directly, so dequant → matmul
+/// has no intermediate copy. Rows of `B` stream contiguously through L1 and
+/// the dot-product inner loop auto-vectorizes.
+fn gemv_bt_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: usize) {
+    debug_assert_eq!(a.len(), k);
+    debug_assert_eq!(b.len(), n * k);
+    debug_assert_eq!(c.len(), n);
+
+    // Chunk size heuristic: aim for ~64 output rows per task (each row is a
+    // k-length dot product). This balances rayon overhead against per-task
+    // cache residency.
+    let threads = rayon::current_num_threads().max(1);
+    let chunk = (n / (threads * 4)).max(16).min(n);
+
+    c.par_chunks_mut(chunk)
+        .enumerate()
+        .for_each(|(chunk_idx, c_chunk)| {
+            let row_base = chunk_idx * chunk;
+            for (local_i, c_slot) in c_chunk.iter_mut().enumerate() {
+                let row = row_base + local_i;
+                let b_row = &b[row * k..row * k + k];
+                // Dot product. The compiler auto-vectorizes this tight loop
+                // into FMAs when AVX2/AVX-512 is available.
+                let mut acc = 0.0f32;
+                for (&ai, &bi) in a.iter().zip(b_row.iter()) {
+                    acc += ai * bi;
+                }
+                *c_slot = acc;
+            }
+        });
+}
+
+fn gemv_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: usize) {
+    debug_assert_eq!(a.len(), k);
+    debug_assert_eq!(b.len(), k * n);
+    debug_assert_eq!(c.len(), n);
+
+    // Slab size: aim for ~256 output cols per worker, bounded so we don't spawn
+    // orders-of-magnitude more slabs than threads. Each slab does k*slab FMAs;
+    // for k=2560, slab=256 gives ~650K FMAs per slab — good cache residency
+    // (~1 MB of B's rows streamed per slab at this width).
+    let target_slab = 256usize.max(n / (rayon::current_num_threads() * 4).max(1));
+    let slab = target_slab.min(n).max(1);
+
+    c.par_chunks_mut(slab).enumerate().for_each(|(slab_idx, c_slab)| {
+        let col_start = slab_idx * slab;
+        let this_n = c_slab.len();
+        // Zero this slab (we accumulate into it).
+        c_slab.fill(0.0);
+        // Stream through rows of B. For each row k_i, multiply by a[k_i] and
+        // accumulate into c_slab. The inner loop over `this_n` is trivially
+        // auto-vectorizable (FMA in rustc-generated AVX2/AVX-512 code).
+        for k_i in 0..k {
+            let a_k = a[k_i];
+            let row_start = k_i * n + col_start;
+            let b_row = &b[row_start..row_start + this_n];
+            for (c_val, &b_val) in c_slab.iter_mut().zip(b_row.iter()) {
+                *c_val += a_k * b_val;
+            }
+        }
+    });
 }
 
 // =============================================================================

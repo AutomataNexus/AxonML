@@ -4,8 +4,10 @@
 //! the ReAct loop for a particular task domain.
 
 pub mod ci_fixer;
+pub mod code;
 pub mod fieldtech;
 pub mod knowledge;
 pub mod orchestrator;
 pub mod research;
 pub mod retrain;
+pub mod shield;

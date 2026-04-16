@@ -683,6 +683,161 @@ impl Tensor<f32> {
     }
 
     // =========================================================================
+    // Quantized matrix multiplication (GPU, dequant-in-shader)
+    // =========================================================================
+
+    /// Q4_K GEMM: `self` is `[m, in]` on GPU, `w` is a device-side `[out, in]`
+    /// weight matrix in raw Q4_K bytes. Returns `[m, out]` on GPU.
+    pub fn q4k_gemm_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu(), "q4k_gemm_cuda: self must be on GPU");
+        assert_eq!(in_dim % 256, 0, "q4k_gemm_cuda: in_dim must be a multiple of 256");
+
+        let a_data = self.contiguous_gpu();
+        // self shape can be [m, in] or flat [m*in]; normalize.
+        let numel = a_data.numel();
+        assert!(numel % in_dim == 0, "q4k_gemm_cuda: numel ({}) not divisible by in_dim ({})", numel, in_dim);
+        let m = numel / in_dim;
+
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc(m * out_dim).expect("GPU pool alloc failed");
+
+        cuda.q4k_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
+            .expect("CUDA q4k_gemm_f32 failed");
+
+        let shape = Shape::from_slice(&[m, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, m * out_dim, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
+    /// Q4_K GEMV: `self` is a `[1, in]` row vector on GPU, `w` is a device-side
+    /// `[out, in]` weight matrix stored as raw Q4_K super-block bytes. Returns
+    /// a `[1, out]` row vector on GPU.
+    ///
+    /// Calls the `q4k_gemv_f32` kernel — see `axonml-core/.../q4k_matmul.cu`.
+    ///
+    /// Requirements:
+    ///   - `self.device()` is GPU, `self.numel() == in_dim`
+    ///   - `in_dim % 256 == 0`
+    ///   - `w.len() == out_dim * (in_dim / 256) * 144`
+    pub fn q4k_gemv_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu(), "q4k_gemv_cuda: self must be on GPU");
+        assert_eq!(
+            self.numel(),
+            in_dim,
+            "q4k_gemv_cuda: self.numel() ({}) != in_dim ({})",
+            self.numel(),
+            in_dim
+        );
+        assert_eq!(in_dim % 256, 0, "q4k_gemv_cuda: in_dim must be a multiple of 256");
+
+        let a_data = self.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc(out_dim).expect("GPU pool alloc failed");
+
+        cuda.q4k_gemv_f32(w, a_guard.slice(), &mut out, out_dim, in_dim)
+            .expect("CUDA q4k_gemv_f32 failed");
+
+        let shape = Shape::from_slice(&[1, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, out_dim, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
+    /// Q6_K GEMM: `self` is `[m, in]` on GPU, `w` is a device-side `[out, in]`
+    /// weight matrix in raw Q6_K bytes. Returns `[m, out]` on GPU.
+    pub fn q6k_gemm_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu(), "q6k_gemm_cuda: self must be on GPU");
+        assert_eq!(in_dim % 256, 0, "q6k_gemm_cuda: in_dim must be a multiple of 256");
+
+        let a_data = self.contiguous_gpu();
+        let numel = a_data.numel();
+        assert!(numel % in_dim == 0, "q6k_gemm_cuda: numel ({}) not divisible by in_dim ({})", numel, in_dim);
+        let m = numel / in_dim;
+
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc(m * out_dim).expect("GPU pool alloc failed");
+
+        cuda.q6k_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
+            .expect("CUDA q6k_gemm_f32 failed");
+
+        let shape = Shape::from_slice(&[m, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, m * out_dim, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
+    /// Q6_K GEMV: `self` is `[1, in]` row vector on GPU, `w` is a device-side
+    /// `[out, in]` weight matrix in raw Q6_K super-block bytes. Returns `[1, out]`.
+    pub fn q6k_gemv_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu(), "q6k_gemv_cuda: self must be on GPU");
+        assert_eq!(
+            self.numel(),
+            in_dim,
+            "q6k_gemv_cuda: self.numel() ({}) != in_dim ({})",
+            self.numel(),
+            in_dim
+        );
+        assert_eq!(in_dim % 256, 0, "q6k_gemv_cuda: in_dim must be a multiple of 256");
+
+        let a_data = self.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc(out_dim).expect("GPU pool alloc failed");
+
+        cuda.q6k_gemv_f32(w, a_guard.slice(), &mut out, out_dim, in_dim)
+            .expect("CUDA q6k_gemv_f32 failed");
+
+        let shape = Shape::from_slice(&[1, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, out_dim, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
+    // =========================================================================
     // Matrix Multiplication (GPU) — the critical speedup
     // =========================================================================
 

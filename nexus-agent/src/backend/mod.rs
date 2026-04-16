@@ -3,6 +3,7 @@
 //! The backend talks to nexus-serve (or any OpenAI-compatible endpoint)
 //! over HTTP. No external API dependencies — fully self-hosted.
 
+pub mod anthropic;
 pub mod local;
 
 use async_trait::async_trait;

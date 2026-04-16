@@ -27,7 +27,7 @@ categories = ["science", "mathematics"]
 [features]
 default = ["std"]
 std = ["axonml-core/std"]
-cuda = ["axonml-core/cuda"]
+cuda = ["axonml-core/cuda", "dep:cudarc"]
 cudnn = ["cuda", "axonml-core/cudnn"]
 
 [dependencies]
@@ -37,6 +37,7 @@ rand.workspace = true
 rand_distr.workspace = true
 smallvec.workspace = true
 half.workspace = true
+cudarc = { workspace = true, optional = true }
 
 [dev-dependencies]
 approx.workspace = true

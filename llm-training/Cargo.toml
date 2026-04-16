@@ -20,6 +20,8 @@ axonml-serialize = { path = "/opt/AxonML/crates/axonml-serialize" }
 axonml           = { path = "/opt/AxonML/crates/axonml" }
 
 rand = "0.8"
+signal-hook = "0.3"
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 
 [features]
 default = []
@@ -65,3 +67,11 @@ path = "src/bin/train_chimera.rs"
 [[bin]]
 name = "train_ssm"
 path = "src/bin/train_ssm.rs"
+
+[[bin]]
+name = "train_ctl"
+path = "src/bin/train_ctl.rs"
+
+[[bin]]
+name = "train_trident_code"
+path = "src/bin/train_trident_code.rs"
