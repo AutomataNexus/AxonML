@@ -402,7 +402,14 @@ pub fn matmul_i2s_i8(
             // SAFETY: feature-detected above.
             unsafe {
                 matmul_i2s_i8_avxvnni(
-                    acts_int8, act_scales, m, k, weight_bytes, n, weight_scale, output,
+                    acts_int8,
+                    act_scales,
+                    m,
+                    k,
+                    weight_bytes,
+                    n,
+                    weight_scale,
+                    output,
                 );
             }
             return;
@@ -410,7 +417,14 @@ pub fn matmul_i2s_i8(
     }
 
     matmul_i2s_i8_scalar(
-        acts_int8, act_scales, m, k, weight_bytes, n, weight_scale, output,
+        acts_int8,
+        act_scales,
+        m,
+        k,
+        weight_bytes,
+        n,
+        weight_scale,
+        output,
     );
 }
 
@@ -522,7 +536,14 @@ unsafe fn matmul_i2s_i8_avxvnni(
     // API works on every machine — this is the scaffolding for the
     // follow-up perf commit.
     matmul_i2s_i8_scalar(
-        acts_int8, act_scales, m, k, weight_bytes, n, weight_scale, output,
+        acts_int8,
+        act_scales,
+        m,
+        k,
+        weight_bytes,
+        n,
+        weight_scale,
+        output,
     );
 }
 
@@ -695,10 +716,7 @@ mod tests {
         reference_matmul(&activations, m, k, &weight_bytes, n, scale, &mut ref_out);
 
         for (i, (f, r)) in fused_out.iter().zip(ref_out.iter()).enumerate() {
-            assert!(
-                (f - r).abs() < 1e-5,
-                "mismatch at {i}: fused={f}, ref={r}",
-            );
+            assert!((f - r).abs() < 1e-5, "mismatch at {i}: fused={f}, ref={r}",);
         }
     }
 
@@ -735,10 +753,7 @@ mod tests {
         reference_matmul(&activations, m, k, &weight_bytes, n, scale, &mut ref_out);
 
         for (i, (f, r)) in fused_out.iter().zip(ref_out.iter()).enumerate() {
-            assert!(
-                (f - r).abs() < 1e-4,
-                "mismatch at {i}: fused={f}, ref={r}",
-            );
+            assert!((f - r).abs() < 1e-4, "mismatch at {i}: fused={f}, ref={r}",);
         }
     }
 
@@ -781,7 +796,15 @@ mod tests {
         }
 
         let mut ref_out = vec![0.0f32; m * n];
-        matmul_i2s(&activations, m, k, &weight_bytes, n, weight_scale, &mut ref_out);
+        matmul_i2s(
+            &activations,
+            m,
+            k,
+            &weight_bytes,
+            n,
+            weight_scale,
+            &mut ref_out,
+        );
 
         // Quantize activations per row.
         let mut acts_i8 = vec![0i8; m * k];
@@ -827,12 +850,21 @@ mod tests {
         let scale = quantize_row_to_int8(&input, &mut output);
         assert!(scale > 0.0);
         // Largest magnitude is 2.0; should map to ±127.
-        let max_idx = input.iter().enumerate().max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap()).unwrap().0;
+        let max_idx = input
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap())
+            .unwrap()
+            .0;
         assert_eq!(output[max_idx].unsigned_abs(), 127);
         // Dequantized values should be close to the originals.
         for (i, &v) in input.iter().enumerate() {
             let recovered = output[i] as f32 * scale;
-            assert!((recovered - v).abs() < scale, "idx {i}: {v} → {} (scale={scale})", recovered);
+            assert!(
+                (recovered - v).abs() < scale,
+                "idx {i}: {v} → {} (scale={scale})",
+                recovered
+            );
         }
     }
 

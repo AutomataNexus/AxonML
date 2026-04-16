@@ -549,7 +549,11 @@ impl TridentMLP {
 
     fn forward(&self, x: &Variable) -> Variable {
         if self.use_squared_relu {
-            let gate = self.gate_proj.as_ref().expect("gate_proj set when use_squared_relu").forward(x);
+            let gate = self
+                .gate_proj
+                .as_ref()
+                .expect("gate_proj set when use_squared_relu")
+                .forward(x);
             let up = self.up_proj.forward(x);
             // squared_relu(gate) = relu(gate)^2
             let gate_act = gate.relu().pow(2.0);
@@ -1019,9 +1023,7 @@ mod tests {
             optimizer.step();
         }
 
-        println!(
-            "[trident convergence] start_loss={start_loss:.4} end_loss={last_loss:.4}"
-        );
+        println!("[trident convergence] start_loss={start_loss:.4} end_loss={last_loss:.4}");
         // On a tiny 2-layer model with 3 fixed patterns, 100 steps of
         // Adam 3e-3 should push loss down by at least ~30% from the
         // near-uniform starting point. Very generous bound to avoid

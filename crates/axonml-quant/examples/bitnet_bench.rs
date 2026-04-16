@@ -10,7 +10,7 @@
 
 use std::time::Instant;
 
-use axonml_quant::bitnet::{matmul_i2s, I2sBlock, I2S_BLOCK_SIZE, I2S_BYTES_PER_BLOCK};
+use axonml_quant::bitnet::{I2S_BLOCK_SIZE, I2S_BYTES_PER_BLOCK, I2sBlock, matmul_i2s};
 
 const SCALE: f32 = 0.05;
 
@@ -69,7 +69,7 @@ fn main() {
     // Decode-step shapes (m=1, BitNet-2B hidden=2560, ffn=6912, kv=640).
     println!("=== decode (m=1) — dominant during token generation ===");
     bench(1, 2560, 2560, 200); // q_proj / o_proj
-    bench(1, 2560, 640, 200);  // k_proj / v_proj (GQA)
+    bench(1, 2560, 640, 200); // k_proj / v_proj (GQA)
     bench(1, 2560, 6912, 200); // gate / up
     bench(1, 6912, 2560, 200); // down
 

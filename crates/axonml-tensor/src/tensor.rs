@@ -1717,8 +1717,16 @@ impl<T: Numeric> Tensor<T> {
             };
 
             // Materialization fallbacks (only when we couldn't use a direct slice).
-            let a_owned: Option<Vec<T>> = if self_fast { None } else { Some(self.contiguous().to_vec()) };
-            let b_owned: Option<Vec<T>> = if other_fast { None } else { Some(other.contiguous().to_vec()) };
+            let a_owned: Option<Vec<T>> = if self_fast {
+                None
+            } else {
+                Some(self.contiguous().to_vec())
+            };
+            let b_owned: Option<Vec<T>> = if other_fast {
+                None
+            } else {
+                Some(other.contiguous().to_vec())
+            };
             let a: &[T] = a_owned.as_deref().unwrap_or(a_slice);
             let b: &[T] = b_owned.as_deref().unwrap_or(b_slice);
 
@@ -1746,12 +1754,14 @@ impl<T: Numeric> Tensor<T> {
                 }
             }
 
-            // Skip zero-init on the output buffer — CpuBackend::matmul
-            // overwrites every element via sgemm/gemv with beta=0.
-            // SAFETY: capacity is m*n, all elements are written by matmul
-            // before any read, and T: Scalar has no drop/validity requirements.
-            let mut c_data: Vec<T> = Vec::with_capacity(m * n);
-            unsafe { c_data.set_len(m * n); }
+            // CpuBackend::matmul overwrites every element via sgemm/gemv
+            // with beta=0, so the zero-init memset here is never observed.
+            // Previously used `Vec::with_capacity + set_len` to avoid the
+            // memset entirely, but clippy::uninit_vec flags that pattern —
+            // and for any matmul big enough to matter, the memset cost is
+            // dominated by the O(m*n*k) FMA work that follows. For tiny
+            // matmuls the memset is ~μs.
+            let mut c_data: Vec<T> = vec![T::zero(); m * n];
             CpuBackend::matmul(&mut c_data, a, b, m, n, k1);
             return Self::from_vec(c_data, &[m, n]);
         }
