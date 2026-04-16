@@ -369,7 +369,7 @@ fn format_prompt(architecture: &str, messages: &[crate::api::types::ChatMessage]
 /// Matches the official LLaMA-3 Instruct template (used by BitNet b1.58-2B-4T).
 /// BitNet's vocab omits ChatML's `<|im_start|>`/`<|im_end|>`, so using the
 /// wrong template causes the model to echo them as raw UTF-8 bytes in the
-/// output — see `project_trident_coder.md` resolution 2026-04-14.
+/// output.
 fn format_llama3(messages: &[crate::api::types::ChatMessage]) -> String {
     let mut prompt = String::new();
     prompt.push_str("<|begin_of_text|>");

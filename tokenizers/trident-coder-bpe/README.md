@@ -24,8 +24,7 @@ Built on 2026-04-13 23:58:51 EDT in 0.0 minutes of corpus-build wall time
 dodge markdown table cell escaping. In the actual vocab they appear as e.g.
 `<|endoftext|>`.)
 
-The last four tokens back Claude Messages API tool-call delivery
-(see `~/.claude/projects/-opt-AxonML/memory/feedback_tool_call_format.md`):
+The last four tokens back Anthropic Messages API tool-call delivery:
 
 - `<|tool_use|>` … `<|tool_end|>` wraps an assistant-emitted tool-use block
 - `<|tool_result|>` … `<|tool_end|>` wraps the user-turn tool_result block

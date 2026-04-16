@@ -150,8 +150,7 @@ impl TridentConfig {
     /// Before the real 1B training run, either (a) move LLaMA's
     /// `RepeatKVBackward` helper into a shared crate and wire it here, or
     /// (b) flip `num_kv_heads` to match `num_heads`. For inference this is
-    /// fine (no backward pass). For the Colab kickoff this limitation is
-    /// tracked in `project_trident_coder.md` as a pre-launch task.
+    /// fine (no backward pass).
     pub fn trident_1b(vocab_size: usize) -> Self {
         Self {
             vocab_size,

@@ -1,8 +1,7 @@
 //! Code agent — local agentic coder powered by nexus-serve.
 //!
 //! Runs via nexus-serve's Anthropic Messages API (`/v1/messages`) so tool
-//! calls round-trip as native `tool_use` / `tool_result` content blocks
-//! (see `feedback_tool_call_format.md`).
+//! calls round-trip as native `tool_use` / `tool_result` content blocks.
 //!
 //! Default invocation (DeepSeek-R1-Distill-Qwen-7B on :11436):
 //!   nexus-agent --url http://127.0.0.1:11436 --anthropic code \

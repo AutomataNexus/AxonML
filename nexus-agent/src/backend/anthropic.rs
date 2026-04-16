@@ -8,10 +8,9 @@
 //! blocks, and convert inbound `tool_use` blocks back into our internal
 //! `ToolCall` form so the existing ReAct loop doesn't need to change.
 //!
-//! Andrew's hard rule (`feedback_tool_call_format.md`): any nexus-agent
-//! ↔ nexus-serve tool call uses this format end-to-end. The OpenAI
-//! backend (`backend::local::LocalBackend`) is kept for legacy agents
-//! that were written against `/v1/chat/completions`.
+//! Hard rule: any nexus-agent ↔ nexus-serve tool call uses this format
+//! end-to-end. The OpenAI backend (`backend::local::LocalBackend`) is
+//! kept for legacy agents that were written against `/v1/chat/completions`.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

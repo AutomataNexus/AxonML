@@ -219,7 +219,7 @@ Performance cost on CPU (24 threads, same machine, same prompt): ~22 % slower in
 
 ## Historical Bugs (for reference)
 
-Six distinct bugs had to be fixed for Qwen2 to produce coherent output. All are documented in `/home/devops/.claude/projects/-opt-AxonML/memory/reference_gguf_inference_gotchas.md`:
+Six distinct bugs had to be fixed for Qwen2 to produce coherent output:
 
 1. **F16 subnormal dequantization** — initial exponent was `-1` instead of `-14` (1000x scale error)
 2. **Q4_K dequantization** — wrong sub-block loop structure; each 64-element chunk uses two different scales

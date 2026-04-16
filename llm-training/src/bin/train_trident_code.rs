@@ -11,8 +11,7 @@
 //!
 //! # Tokenizer
 //! Loads the 32k-vocab byte-level BPE at
-//! `/opt/AxonML/tokenizers/trident-coder-bpe/tokenizer.json`. See
-//! `project_trident_coder.md` for the training protocol.
+//! `/opt/AxonML/tokenizers/trident-coder-bpe/tokenizer.json`.
 //!
 //! # Dataset
 //! Expects pre-tokenized token IDs on disk as a flat u32 little-endian file
