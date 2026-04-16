@@ -626,6 +626,7 @@ async fn main() {
         .route("/v1/models", get(routes::list_models))
         .route("/v1/chat/completions", post(routes::chat_completions))
         .route("/v1/completions", post(routes::completions))
+        .route("/v1/messages", post(nexus_serve::api::messages::messages))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

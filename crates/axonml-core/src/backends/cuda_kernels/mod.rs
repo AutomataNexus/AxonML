@@ -3556,6 +3556,22 @@ pub const POOLING_PTX: &str = include_str!("pooling.ptx");
 /// Fused attention kernel: scaled dot-product attention without materializing N*N matrix
 pub const ATTENTION_PTX: &str = include_str!("attention.ptx");
 
+/// Q4_K quantized matmul (dequant-in-shader).
+///
+/// Compiled from `q4k_matmul.cu`. Exposes `q4k_gemv_f32` which computes
+/// `c[j] = sum_k a[k] * B[j, k]` where B is laid out as Q4_K super-blocks
+/// in physical GGUF layout `[out, in]`. Used for Oracle-class models that
+/// can't fit f32 weights in 12 GB VRAM.
+pub const Q4K_MATMUL_PTX: &str = include_str!("q4k_matmul.ptx");
+
+/// Q6_K quantized matmul (dequant-in-shader).
+///
+/// Compiled from `q6k_matmul.cu`. Same shape contract as Q4_K but with
+/// the 210-byte Q6_K super-block layout. Primary consumer: LM head matmul,
+/// which is Q6_K in most GGUF exports and fires every decode token — moving
+/// it off the CPU dequant path is the biggest single-matmul decode win.
+pub const Q6K_MATMUL_PTX: &str = include_str!("q6k_matmul.ptx");
+
 /// CUDA Kernel registry for managing loaded kernels
 #[cfg(feature = "cuda")]
 pub struct CudaKernels {
@@ -3719,6 +3735,21 @@ impl CudaKernels {
             "attention",
             ATTENTION_PTX,
             &["fused_attention_fwd_f32", "fused_attention_bwd_f32"],
+        )?;
+
+        // Load Q4_K dequant-in-shader matmul (LLM inference on quantized weights).
+        // GEMV (m=1) for decode + GEMM (m>1) for prefill.
+        kernels.load_module(
+            "q4k_matmul",
+            Q4K_MATMUL_PTX,
+            &["q4k_gemv_f32", "q4k_gemm_f32"],
+        )?;
+
+        // Q6_K dequant-in-shader matmul — LM head + higher-precision weights.
+        kernels.load_module(
+            "q6k_matmul",
+            Q6K_MATMUL_PTX,
+            &["q6k_gemv_f32", "q6k_gemm_f32"],
         )?;
 
         Ok(kernels)

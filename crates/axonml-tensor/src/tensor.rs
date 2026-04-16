@@ -1682,10 +1682,45 @@ impl<T: Numeric> Tensor<T> {
             )));
         }
 
-        // For 2D matrices, do simple matmul
+        // For 2D matrices, do simple matmul.
+        //
+        // Fast path: when both tensors are already contiguous with offset 0
+        // (the common case for pre-loaded weights and intermediate activations),
+        // read the storage slices directly and skip the `.to_vec()` allocation-
+        // and-copy. This is critical for LLM inference where the same weight
+        // matrix is multiplied by a different input for every decoded token:
+        // without this path we pay a full weight-matrix memcpy per matmul
+        // (~10 MB × 7 matmuls × 42 layers = ~3 GB of memcpy per decode token
+        // on an 8B model).
         if self.ndim() == 2 && other.ndim() == 2 {
-            let a_data = self.contiguous().to_vec();
-            let b_data = other.contiguous().to_vec();
+            let self_fast = self.is_contiguous() && self.offset == 0;
+            let other_fast = other.is_contiguous() && other.offset == 0;
+
+            // We still need owned buffers for CPU matmul (matrixmultiply + our
+            // gemv reads from slices, but the cuda fallback owns Vec<f32>).
+            // Whenever possible, avoid materializing the slow side — at worst
+            // one allocation, not two.
+            let self_storage = self.storage.as_slice();
+            let other_storage = other.storage.as_slice();
+
+            let a_slice: &[T] = if self_fast {
+                &self_storage[..m * k1]
+            } else {
+                // Fall back to materializing — keep the Vec alive for the call.
+                // Hoisted into an Option so the borrow lives long enough.
+                &[]
+            };
+            let b_slice: &[T] = if other_fast {
+                &other_storage[..k1 * n]
+            } else {
+                &[]
+            };
+
+            // Materialization fallbacks (only when we couldn't use a direct slice).
+            let a_owned: Option<Vec<T>> = if self_fast { None } else { Some(self.contiguous().to_vec()) };
+            let b_owned: Option<Vec<T>> = if other_fast { None } else { Some(other.contiguous().to_vec()) };
+            let a: &[T] = a_owned.as_deref().unwrap_or(a_slice);
+            let b: &[T] = b_owned.as_deref().unwrap_or(b_slice);
 
             // GPU-accelerated matmul for CPU tensors: only for very large matrices
             // where transfer overhead is negligible relative to compute.
@@ -1698,8 +1733,8 @@ impl<T: Numeric> Tensor<T> {
                 {
                     debug_assert!(std::mem::size_of::<T>() == std::mem::size_of::<f32>());
                     // SAFETY: T is f32 (checked by TypeId above), same size and layout
-                    let a_f32: &[f32] = unsafe { std::mem::transmute(a_data.as_slice()) };
-                    let b_f32: &[f32] = unsafe { std::mem::transmute(b_data.as_slice()) };
+                    let a_f32: &[f32] = unsafe { std::mem::transmute(a) };
+                    let b_f32: &[f32] = unsafe { std::mem::transmute(b) };
                     if let Some(c_f32) = cuda_accel::cuda_matmul(a_f32, b_f32, m, n, k1) {
                         // SAFETY: T is f32, Vec<f32> → Vec<T> is a no-op transmute
                         let c_t: Vec<T> = unsafe {
@@ -1711,8 +1746,13 @@ impl<T: Numeric> Tensor<T> {
                 }
             }
 
-            let mut c_data = vec![T::zero(); m * n];
-            CpuBackend::matmul(&mut c_data, &a_data, &b_data, m, n, k1);
+            // Skip zero-init on the output buffer — CpuBackend::matmul
+            // overwrites every element via sgemm/gemv with beta=0.
+            // SAFETY: capacity is m*n, all elements are written by matmul
+            // before any read, and T: Scalar has no drop/validity requirements.
+            let mut c_data: Vec<T> = Vec::with_capacity(m * n);
+            unsafe { c_data.set_len(m * n); }
+            CpuBackend::matmul(&mut c_data, a, b, m, n, k1);
             return Self::from_vec(c_data, &[m, n]);
         }
 

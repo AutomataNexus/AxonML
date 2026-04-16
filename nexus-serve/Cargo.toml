@@ -15,6 +15,7 @@ axonml-autograd  = { path = "/opt/AxonML/crates/axonml-autograd" }
 axonml-nn        = { path = "/opt/AxonML/crates/axonml-nn" }
 axonml-llm       = { path = "/opt/AxonML/crates/axonml-llm" }
 axonml-serialize = { path = "/opt/AxonML/crates/axonml-serialize" }
+axonml-quant     = { path = "/opt/AxonML/crates/axonml-quant" }
 
 # HTTP server
 axum = { version = "0.8", features = ["json"] }
@@ -50,8 +51,19 @@ cuda = [
     "axonml-tensor/cuda",
     "axonml-autograd/cuda",
     "axonml-nn/cuda",
+    "dep:cudarc",
 ]
+
+[dependencies.cudarc]
+version = "0.19"
+optional = true
+default-features = false
+features = ["std", "driver", "cuda-12060"]
 
 [[bin]]
 name = "nexus-serve"
 path = "src/main.rs"
+
+[[bin]]
+name = "gguf_inspect"
+path = "src/bin/gguf_inspect.rs"

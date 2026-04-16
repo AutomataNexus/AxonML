@@ -105,9 +105,6 @@ pub async fn chat_completions(
         .unwrap()
         .as_secs();
 
-    // Build prompt using the model's chat template (ChatML for Qwen/LLaMA/Mistral).
-    let prompt = format_chatml(&req.messages);
-
     // Get engine + tokenizer. We clone the Arcs so the background task can own them.
     let engine = {
         let engines = state.engines.read().await;
@@ -123,6 +120,10 @@ pub async fn chat_completions(
             .cloned()
             .ok_or_else(|| api_error(503, &format!("Tokenizer for {} not loaded", model_id)))?
     };
+
+    // Build prompt using the model's chat template. ChatML for Qwen/LLaMA/Mistral;
+    // Gemma 3/4 use `<start_of_turn>…<end_of_turn>` turns instead.
+    let prompt = format_prompt(engine.architecture(), &req.messages);
 
     // Tokenize prompt
     let input_ids = tokenizer.encode(&prompt);
@@ -346,6 +347,43 @@ pub async fn completions(
 // Chat template formatting
 // =============================================================================
 
+/// Dispatch chat-template formatting by model architecture. Gemma 3/4 use a
+/// distinct `<start_of_turn>…<end_of_turn>` turn format that ChatML's
+/// `<|im_start|>` specials can't substitute for (they tokenize as garbage
+/// against the Gemma vocab, which makes the first-token argmax fire EOS).
+fn format_prompt(architecture: &str, messages: &[crate::api::types::ChatMessage]) -> String {
+    match architecture {
+        "gemma" | "gemma2" | "gemma3" | "gemma4" => format_gemma(messages),
+        a if a.starts_with("bitnet") => format_llama3(messages),
+        _ => format_chatml(messages),
+    }
+}
+
+/// Format messages using the LLaMA-3 / BitNet chat template.
+///
+/// Output:
+///   <|begin_of_text|><|start_header_id|>role<|end_header_id|>\n\ncontent<|eot_id|>
+///   ...
+///   <|start_header_id|>assistant<|end_header_id|>\n\n
+///
+/// Matches the official LLaMA-3 Instruct template (used by BitNet b1.58-2B-4T).
+/// BitNet's vocab omits ChatML's `<|im_start|>`/`<|im_end|>`, so using the
+/// wrong template causes the model to echo them as raw UTF-8 bytes in the
+/// output — see `project_trident_coder.md` resolution 2026-04-14.
+fn format_llama3(messages: &[crate::api::types::ChatMessage]) -> String {
+    let mut prompt = String::new();
+    prompt.push_str("<|begin_of_text|>");
+    for m in messages {
+        prompt.push_str("<|start_header_id|>");
+        prompt.push_str(&m.role);
+        prompt.push_str("<|end_header_id|>\n\n");
+        prompt.push_str(&m.content);
+        prompt.push_str("<|eot_id|>");
+    }
+    prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
+    prompt
+}
+
 /// Format messages using the ChatML template (used by Qwen, many LLaMA derivatives,
 /// Mistral Instruct, and most modern instruction-tuned models).
 ///
@@ -363,6 +401,30 @@ fn format_chatml(messages: &[crate::api::types::ChatMessage]) -> String {
         prompt.push_str("<|im_end|>\n");
     }
     prompt.push_str("<|im_start|>assistant\n");
+    prompt
+}
+
+/// Format messages using the Gemma instruction-tuned chat template.
+///
+/// Output:
+///   <start_of_turn>role\ncontent<end_of_turn>\n
+///   ...
+///   <start_of_turn>model\n
+///
+/// Role mapping follows Google's official Gemma Jinja template: `assistant`
+/// becomes `model`; `user` and `system` pass through. Content is trimmed
+/// (matches the upstream template's `| trim`).
+fn format_gemma(messages: &[crate::api::types::ChatMessage]) -> String {
+    let mut prompt = String::new();
+    for m in messages {
+        let role = if m.role == "assistant" { "model" } else { m.role.as_str() };
+        prompt.push_str("<start_of_turn>");
+        prompt.push_str(role);
+        prompt.push('\n');
+        prompt.push_str(m.content.trim());
+        prompt.push_str("<end_of_turn>\n");
+    }
+    prompt.push_str("<start_of_turn>model\n");
     prompt
 }
 

@@ -31,12 +31,13 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use axonml_autograd::Variable;
+use axonml_autograd::no_grad::is_grad_enabled;
+use axonml_autograd::{GradFn, Variable};
 use axonml_nn::layers::ternary::TernaryLinear;
 use axonml_nn::{Embedding, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
 
-use crate::llama::RMSNorm;
+use crate::llama::{RMSNorm, RepeatKVBackward, RotaryEmbedding};
 
 // =============================================================================
 // Trident Configuration
@@ -53,12 +54,32 @@ pub struct TridentConfig {
     pub num_layers: usize,
     /// Number of attention heads (default: 8)
     pub num_heads: usize,
+    /// Number of key-value heads for grouped-query attention.
+    /// Must divide `num_heads`. Equal to `num_heads` for vanilla MHA.
+    pub num_kv_heads: usize,
     /// Intermediate size for MLP (default: 4 * d_model)
     pub intermediate_size: usize,
     /// Maximum sequence length (default: 2048)
     pub max_seq_len: usize,
     /// RMSNorm epsilon (default: 1e-6)
     pub rms_norm_eps: f32,
+    // ------------------------------------------------------------------
+    // BitNet b1.58-compatible architecture flags. Default to `false` so
+    // legacy callers (tiny/default_150m/medium) keep the original MHA +
+    // SiLU-MLP behavior. `trident_1b` / `trident_3b` turn them on.
+    // ------------------------------------------------------------------
+    /// Apply rotary position embedding inside attention. When false, positions
+    /// are unencoded (matches the original 150M Trident toy).
+    pub use_rope: bool,
+    /// RoPE base θ. Only read when `use_rope = true` (default 10_000).
+    pub rope_theta: f32,
+    /// Use ReLU² (`relu(gate)^2 * up`) FFN gating instead of SwiGLU/SiLU.
+    /// Matches BitNet b1.58-2B-4T. When false, the MLP falls back to the
+    /// legacy 2-linear SiLU stack (`up → SiLU → down`).
+    pub use_squared_relu: bool,
+    /// Insert the two BitNet-style SubLN (RMSNorm) layers: one before
+    /// `o_proj` in attention, one before `ffn_down` in the MLP.
+    pub use_sub_ln: bool,
 }
 
 impl TridentConfig {
@@ -69,9 +90,14 @@ impl TridentConfig {
             d_model: 512,
             num_layers: 12,
             num_heads: 8,
+            num_kv_heads: 8,
             intermediate_size: 2048,
             max_seq_len: 2048,
             rms_norm_eps: 1e-6,
+            use_rope: false,
+            rope_theta: 10_000.0,
+            use_squared_relu: false,
+            use_sub_ln: false,
         }
     }
 
@@ -82,9 +108,14 @@ impl TridentConfig {
             d_model: 64,
             num_layers: 2,
             num_heads: 4,
+            num_kv_heads: 4,
             intermediate_size: 256,
             max_seq_len: 128,
             rms_norm_eps: 1e-6,
+            use_rope: false,
+            rope_theta: 10_000.0,
+            use_squared_relu: false,
+            use_sub_ln: false,
         }
     }
 
@@ -95,9 +126,93 @@ impl TridentConfig {
             d_model: 768,
             num_layers: 16,
             num_heads: 12,
+            num_kv_heads: 12,
             intermediate_size: 3072,
             max_seq_len: 2048,
             rms_norm_eps: 1e-6,
+            use_rope: false,
+            rope_theta: 10_000.0,
+            use_squared_relu: false,
+            use_sub_ln: false,
+        }
+    }
+
+    /// 1B-parameter config for Trident-Coder training on The Stack v2.
+    ///
+    /// Matches the BitNet b1.58 training recipe:
+    /// - d_model=2048, 24 layers, 16 Q heads, 4 KV heads (4:1 GQA)
+    /// - ReLU²-gated FFN with BitNet SubLN
+    /// - RoPE θ=500_000 (LLaMA-3 long-context scaling)
+    /// - Context 4096
+    ///
+    /// NOTE: GQA (num_kv_heads < num_heads) currently severs the autograd
+    /// graph on the KV-repeat step (see `TridentAttention::repeat_kv`).
+    /// Before the real 1B training run, either (a) move LLaMA's
+    /// `RepeatKVBackward` helper into a shared crate and wire it here, or
+    /// (b) flip `num_kv_heads` to match `num_heads`. For inference this is
+    /// fine (no backward pass). For the Colab kickoff this limitation is
+    /// tracked in `project_trident_coder.md` as a pre-launch task.
+    pub fn trident_1b(vocab_size: usize) -> Self {
+        Self {
+            vocab_size,
+            d_model: 2048,
+            num_layers: 24,
+            num_heads: 16,
+            num_kv_heads: 4,
+            intermediate_size: 5504,
+            max_seq_len: 4096,
+            rms_norm_eps: 1e-5,
+            use_rope: true,
+            rope_theta: 500_000.0,
+            use_squared_relu: true,
+            use_sub_ln: true,
+        }
+    }
+
+    /// 3B-parameter config — stub for later scaling. Not trained yet.
+    pub fn trident_3b(vocab_size: usize) -> Self {
+        Self {
+            vocab_size,
+            d_model: 3200,
+            num_layers: 26,
+            num_heads: 32,
+            num_kv_heads: 8,
+            intermediate_size: 8640,
+            max_seq_len: 4096,
+            rms_norm_eps: 1e-5,
+            use_rope: true,
+            rope_theta: 500_000.0,
+            use_squared_relu: true,
+            use_sub_ln: true,
+        }
+    }
+
+    /// Smoke-test config (~30M) — tiny 1B-shaped model so local CPU runs of
+    /// `train_trident_code --config smoke` exercise the real architecture
+    /// (RoPE + ReLU²-gated FFN + SubLN) without taking hours to warm up.
+    ///
+    /// Uses vanilla MHA (num_kv_heads == num_heads) so autograd flows
+    /// cleanly through `repeat_kv` (which would otherwise sever the graph —
+    /// see comment in `TridentAttention::repeat_kv`).
+    pub fn smoke(vocab_size: usize) -> Self {
+        Self {
+            vocab_size,
+            d_model: 256,
+            num_layers: 4,
+            // GQA 4:1 — mirrors `trident_1b`'s shape at toy scale so the
+            // smoke test actually exercises `repeat_kv` (with its
+            // graph-preserving `RepeatKVBackward`). Before the fix landed
+            // this had to be `num_kv_heads == num_heads` to avoid severing
+            // the autograd graph.
+            num_heads: 8,
+            num_kv_heads: 2,
+            intermediate_size: 688,
+            max_seq_len: 512,
+            rms_norm_eps: 1e-5,
+            use_rope: true,
+            rope_theta: 500_000.0,
+            use_squared_relu: true,
+            use_sub_ln: true,
         }
     }
 
@@ -110,13 +225,19 @@ impl TridentConfig {
     pub fn estimated_params(&self) -> usize {
         let embedding = self.vocab_size * self.d_model;
         let lm_head = self.d_model * self.vocab_size;
+        let head_dim = self.head_dim();
+        let kv_hidden = self.num_kv_heads * head_dim;
         let per_layer = {
-            // QKV + output projection
-            let attn = 4 * self.d_model * self.d_model;
-            // Up + down MLP
-            let mlp = 2 * self.d_model * self.intermediate_size;
-            // RMSNorm weights (2 per layer)
-            let norms = 2 * self.d_model;
+            // Q + O on d_model, K + V on kv_hidden (GQA aware)
+            let attn = 2 * self.d_model * self.d_model + 2 * self.d_model * kv_hidden;
+            // MLP: up + down (always), gate (if squared_relu)
+            let mlp_linears = if self.use_squared_relu { 3 } else { 2 };
+            let mlp = mlp_linears * self.d_model * self.intermediate_size;
+            // RMSNorm weights (2 per layer) + optional sub-norms
+            let mut norms = 2 * self.d_model;
+            if self.use_sub_ln {
+                norms += self.d_model + self.intermediate_size;
+            }
             attn + mlp + norms
         };
         embedding + lm_head + self.num_layers * per_layer
@@ -124,20 +245,25 @@ impl TridentConfig {
 
     /// Estimate ternary storage in bytes (transformer weights only).
     pub fn ternary_storage_bytes(&self) -> usize {
+        let head_dim = self.head_dim();
+        let kv_hidden = self.num_kv_heads * head_dim;
         let per_layer = {
-            let attn = 4 * self.d_model * self.d_model;
-            let mlp = 2 * self.d_model * self.intermediate_size;
+            let attn = 2 * self.d_model * self.d_model + 2 * self.d_model * kv_hidden;
+            let mlp_linears = if self.use_squared_relu { 3 } else { 2 };
+            let mlp = mlp_linears * self.d_model * self.intermediate_size;
             attn + mlp
         };
         let total_ternary_weights = self.num_layers * per_layer;
-        // 2 bits per weight, packed 4 per byte, + scale factors
         let packed_bytes = total_ternary_weights.div_ceil(4);
-        let scale_bytes = self.num_layers * 6 * 4; // 6 TernaryLinear layers per block, 4 bytes per scale
-        // Add fp32 embeddings + lm_head + norms
-        let fp32_bytes = (self.vocab_size * self.d_model
+        let linears_per_block = 4 + if self.use_squared_relu { 3 } else { 2 };
+        let scale_bytes = self.num_layers * linears_per_block * 4;
+        let mut fp32_bytes = (self.vocab_size * self.d_model
             + self.d_model * self.vocab_size
             + self.num_layers * 2 * self.d_model)
             * 4;
+        if self.use_sub_ln {
+            fp32_bytes += self.num_layers * (self.d_model + self.intermediate_size) * 4;
+        }
         packed_bytes + scale_bytes + fp32_bytes
     }
 
@@ -155,6 +281,12 @@ impl TridentConfig {
 ///
 /// Uses TernaryLinear for Q, K, V, and output projections.
 /// Activations remain in full precision (fp32) throughout.
+///
+/// Supports:
+/// - Grouped-query attention (GQA) when `num_kv_heads < num_heads`
+/// - Rotary position embedding (RoPE) when `config.use_rope`
+/// - BitNet SubLN (RMSNorm) before the output projection when
+///   `config.use_sub_ln`
 #[derive(Debug)]
 struct TridentAttention {
     /// Query projection (ternary)
@@ -165,8 +297,14 @@ struct TridentAttention {
     v_proj: TernaryLinear,
     /// Output projection (ternary)
     o_proj: TernaryLinear,
-    /// Number of attention heads
+    /// Optional RoPE (shared head_dim rotary embedding table)
+    rotary_emb: Option<RotaryEmbedding>,
+    /// Optional SubLN — RMSNorm(d_model) applied before `o_proj`
+    attn_sub_norm: Option<RMSNorm>,
+    /// Number of query heads
     num_heads: usize,
+    /// Number of KV heads (= num_heads for vanilla MHA, < for GQA)
+    num_kv_heads: usize,
     /// Head dimension
     head_dim: usize,
     /// Hidden size
@@ -176,12 +314,30 @@ struct TridentAttention {
 impl TridentAttention {
     fn new(config: &TridentConfig) -> Self {
         let head_dim = config.head_dim();
+        let kv_hidden = config.num_kv_heads * head_dim;
+        let rotary_emb = if config.use_rope {
+            Some(RotaryEmbedding::new(
+                head_dim,
+                config.max_seq_len,
+                config.rope_theta,
+            ))
+        } else {
+            None
+        };
+        let attn_sub_norm = if config.use_sub_ln {
+            Some(RMSNorm::new(config.d_model, config.rms_norm_eps))
+        } else {
+            None
+        };
         Self {
             q_proj: TernaryLinear::with_bias(config.d_model, config.d_model, false),
-            k_proj: TernaryLinear::with_bias(config.d_model, config.d_model, false),
-            v_proj: TernaryLinear::with_bias(config.d_model, config.d_model, false),
+            k_proj: TernaryLinear::with_bias(config.d_model, kv_hidden, false),
+            v_proj: TernaryLinear::with_bias(config.d_model, kv_hidden, false),
             o_proj: TernaryLinear::with_bias(config.d_model, config.d_model, false),
+            rotary_emb,
+            attn_sub_norm,
             num_heads: config.num_heads,
+            num_kv_heads: config.num_kv_heads,
             head_dim,
             hidden_size: config.d_model,
         }
@@ -198,16 +354,31 @@ impl TridentAttention {
         let k = self.k_proj.forward(hidden_states);
         let v = self.v_proj.forward(hidden_states);
 
-        // Reshape for multi-head attention: [batch, seq, heads, head_dim] -> [batch, heads, seq, head_dim]
+        // Reshape for multi-head attention
         let q = q
             .reshape(&[batch_size, seq_len, self.num_heads, self.head_dim])
             .transpose(1, 2);
         let k = k
-            .reshape(&[batch_size, seq_len, self.num_heads, self.head_dim])
+            .reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim])
             .transpose(1, 2);
         let v = v
-            .reshape(&[batch_size, seq_len, self.num_heads, self.head_dim])
+            .reshape(&[batch_size, seq_len, self.num_kv_heads, self.head_dim])
             .transpose(1, 2);
+
+        // Apply RoPE if configured
+        let (q, k) = if let Some(rope) = &self.rotary_emb {
+            rope.apply(&q, &k, 0)
+        } else {
+            (q, k)
+        };
+
+        // Expand KV heads for GQA
+        let (k, v) = if self.num_kv_heads != self.num_heads {
+            let n_rep = self.num_heads / self.num_kv_heads;
+            (self.repeat_kv(&k, n_rep), self.repeat_kv(&v, n_rep))
+        } else {
+            (k, v)
+        };
 
         // Scaled dot-product attention
         let scale = 1.0 / (self.head_dim as f32).sqrt();
@@ -229,8 +400,70 @@ impl TridentAttention {
                 .transpose(1, 2)
                 .reshape(&[batch_size, seq_len, self.hidden_size]);
 
+        // BitNet SubLN: RMSNorm before output projection
+        let attn_output = if let Some(norm) = &self.attn_sub_norm {
+            norm.forward(&attn_output)
+        } else {
+            attn_output
+        };
+
         // Output projection (ternary)
         self.o_proj.forward(&attn_output)
+    }
+
+    /// Repeat KV heads `n_rep` times along the head dimension for GQA.
+    /// Data-only copy (no autograd); acceptable because KV projections
+    /// contribute to the attention output via `matmul(Q, K^T)` and
+    /// `matmul(W, V)`; gradients flow through those matmuls back into
+    /// the repeated tensor. The repeat itself is a view-like
+    /// reshape-broadcast; for the training smoke test we use a plain
+    /// rebroadcast and let the matmul autograd handle gradient accumulation
+    /// via standard broadcasting backward.
+    /// Repeat each KV head `n_rep` times along the head axis so GQA Q
+    /// heads can each attend to a broadcasted K/V. Graph-preserving:
+    /// builds the repeated tensor eagerly (same pattern as `phi.rs` and
+    /// `mistral.rs`) and attaches a `RepeatKVBackward` grad fn that sums
+    /// the upstream gradient across each group of `n_rep` copies back
+    /// into the original KV head. This is what unblocks `trident_1b`'s
+    /// GQA 16Q/4KV config for training.
+    fn repeat_kv(&self, x: &Variable, n_rep: usize) -> Variable {
+        if n_rep == 1 {
+            return x.clone();
+        }
+
+        let data = x.data();
+        let shape = data.shape();
+        let batch = shape[0];
+        let num_kv_heads = shape[1];
+        let seq_len = shape[2];
+        let head_dim = shape[3];
+
+        let data_vec = data.to_vec();
+        let mut output = Vec::with_capacity(data_vec.len() * n_rep);
+        for b in 0..batch {
+            for h in 0..num_kv_heads {
+                for _ in 0..n_rep {
+                    for s in 0..seq_len {
+                        let offset = ((b * num_kv_heads + h) * seq_len + s) * head_dim;
+                        output.extend_from_slice(&data_vec[offset..offset + head_dim]);
+                    }
+                }
+            }
+        }
+
+        let output_tensor =
+            Tensor::from_vec(output, &[batch, num_kv_heads * n_rep, seq_len, head_dim]).unwrap();
+
+        if x.requires_grad() && is_grad_enabled() {
+            let grad_fn = GradFn::new(RepeatKVBackward {
+                next_fns: vec![x.grad_fn().cloned()],
+                num_kv_heads,
+                n_rep,
+            });
+            Variable::from_operation(output_tensor, grad_fn, true)
+        } else {
+            Variable::new(output_tensor, false)
+        }
     }
 
     fn create_causal_mask(&self, seq_len: usize) -> Tensor<f32> {
@@ -249,6 +482,9 @@ impl TridentAttention {
         params.extend(self.k_proj.parameters());
         params.extend(self.v_proj.parameters());
         params.extend(self.o_proj.parameters());
+        if let Some(n) = &self.attn_sub_norm {
+            params.extend(n.parameters());
+        }
         params
     }
 
@@ -264,40 +500,91 @@ impl TridentAttention {
 // Trident MLP
 // =============================================================================
 
-/// Feed-forward MLP with ternary weight projections and SiLU activation.
+/// Feed-forward MLP with ternary weight projections.
 ///
-/// Architecture: TernaryLinear(up) -> SiLU -> TernaryLinear(down)
-/// Activations remain fp32 throughout.
+/// Two modes, selected by `TridentConfig::use_squared_relu`:
+///
+/// - **Legacy SiLU (2-linear)**: `up → SiLU → down`. Keeps the original
+///   150M toy model unchanged.
+/// - **BitNet ReLU² gated (3-linear)**: `gate_act = relu(gate)^2`,
+///   `inner = ffn_sub_norm(gate_act * up)`, `out = down(inner)`. Matches
+///   Microsoft BitNet b1.58-2B-4T.
 #[derive(Debug)]
 struct TridentMLP {
     /// Up projection (ternary)
     up_proj: TernaryLinear,
+    /// Gate projection — only populated in ReLU² mode (None in legacy SiLU)
+    gate_proj: Option<TernaryLinear>,
     /// Down projection (ternary)
     down_proj: TernaryLinear,
+    /// Optional SubLN — RMSNorm(intermediate_size) applied before `down_proj`
+    ffn_sub_norm: Option<RMSNorm>,
+    /// Whether to use the BitNet ReLU²-gated pathway
+    use_squared_relu: bool,
 }
 
 impl TridentMLP {
     fn new(config: &TridentConfig) -> Self {
+        let gate_proj = if config.use_squared_relu {
+            Some(TernaryLinear::with_bias(
+                config.d_model,
+                config.intermediate_size,
+                false,
+            ))
+        } else {
+            None
+        };
+        let ffn_sub_norm = if config.use_sub_ln {
+            Some(RMSNorm::new(config.intermediate_size, config.rms_norm_eps))
+        } else {
+            None
+        };
         Self {
             up_proj: TernaryLinear::with_bias(config.d_model, config.intermediate_size, false),
+            gate_proj,
             down_proj: TernaryLinear::with_bias(config.intermediate_size, config.d_model, false),
+            ffn_sub_norm,
+            use_squared_relu: config.use_squared_relu,
         }
     }
 
     fn forward(&self, x: &Variable) -> Variable {
-        let up = self.up_proj.forward(x).silu();
-        self.down_proj.forward(&up)
+        if self.use_squared_relu {
+            let gate = self.gate_proj.as_ref().expect("gate_proj set when use_squared_relu").forward(x);
+            let up = self.up_proj.forward(x);
+            // squared_relu(gate) = relu(gate)^2
+            let gate_act = gate.relu().pow(2.0);
+            let gated = gate_act.mul(&up);
+            let normed = if let Some(n) = &self.ffn_sub_norm {
+                n.forward(&gated)
+            } else {
+                gated
+            };
+            self.down_proj.forward(&normed)
+        } else {
+            let up = self.up_proj.forward(x).silu();
+            self.down_proj.forward(&up)
+        }
     }
 
     fn parameters(&self) -> Vec<Parameter> {
         let mut params = Vec::new();
         params.extend(self.up_proj.parameters());
+        if let Some(g) = &self.gate_proj {
+            params.extend(g.parameters());
+        }
         params.extend(self.down_proj.parameters());
+        if let Some(n) = &self.ffn_sub_norm {
+            params.extend(n.parameters());
+        }
         params
     }
 
     fn quantize_for_inference(&mut self) {
         self.up_proj.quantize_for_inference();
+        if let Some(g) = &mut self.gate_proj {
+            g.quantize_for_inference();
+        }
         self.down_proj.quantize_for_inference();
     }
 }
@@ -516,10 +803,15 @@ impl TridentModel {
             total_sparsity += block.attention.k_proj.weight_sparsity();
             total_sparsity += block.attention.v_proj.weight_sparsity();
             total_sparsity += block.attention.o_proj.weight_sparsity();
+            count += 4;
             // MLP projections
             total_sparsity += block.mlp.up_proj.weight_sparsity();
             total_sparsity += block.mlp.down_proj.weight_sparsity();
-            count += 6;
+            count += 2;
+            if let Some(g) = &block.mlp.gate_proj {
+                total_sparsity += g.weight_sparsity();
+                count += 1;
+            }
         }
 
         if count > 0 {
@@ -671,6 +963,106 @@ mod tests {
         let model = TridentModel::new(&config);
         let sparsity = model.average_sparsity();
         assert!((0.0..=1.0).contains(&sparsity));
+    }
+
+    /// Convergence test for the BitNet-shaped architecture: runs 100 opt
+    /// steps on tiny synthetic data and checks loss drops meaningfully.
+    /// Exercises the full path — RoPE + squared-ReLU-gated FFN + SubLN +
+    /// ternary linears — with `num_kv_heads == num_heads` so autograd
+    /// flows through the KV projections unimpeded.
+    #[test]
+    fn test_trident_1b_shape_converges() {
+        use axonml_optim::{Adam, Optimizer};
+        // Shrunken 1B-shaped config: smoke-sized but same feature switches.
+        let config = TridentConfig {
+            vocab_size: 64,
+            d_model: 48,
+            num_layers: 2,
+            num_heads: 4,
+            num_kv_heads: 4,
+            intermediate_size: 128,
+            max_seq_len: 32,
+            rms_norm_eps: 1e-5,
+            use_rope: true,
+            rope_theta: 10_000.0,
+            use_squared_relu: true,
+            use_sub_ln: true,
+        };
+        let model = TridentModel::new(&config);
+        let mut optimizer = Adam::new(model.parameters(), 3e-3);
+
+        // Deterministic tiny corpus: 3 repeating patterns of length 8.
+        let seq_len = 8usize;
+        let batch_size = 4usize;
+        let patterns: Vec<Vec<u32>> = vec![
+            vec![1, 2, 3, 4, 5, 6, 7, 8],
+            vec![9, 10, 11, 12, 13, 14, 15, 16],
+            vec![17, 18, 19, 20, 21, 22, 23, 24],
+        ];
+
+        let mut flat_batch = Vec::with_capacity(batch_size * seq_len);
+        for b in 0..batch_size {
+            flat_batch.extend_from_slice(&patterns[b % patterns.len()]);
+        }
+        let ids = Tensor::from_vec(flat_batch.clone(), &[batch_size, seq_len]).unwrap();
+        let labels = Tensor::from_vec(flat_batch, &[batch_size, seq_len]).unwrap();
+
+        // Initial loss — ln(vocab) ≈ 4.16 for vocab=64 if uniform.
+        let (_, loss0) = model.forward_with_loss(&ids, &labels);
+        let start_loss = loss0.data().to_vec()[0];
+
+        let mut last_loss = start_loss;
+        for _ in 0..100 {
+            optimizer.zero_grad();
+            let (_, loss) = model.forward_with_loss(&ids, &labels);
+            last_loss = loss.data().to_vec()[0];
+            loss.backward();
+            optimizer.step();
+        }
+
+        println!(
+            "[trident convergence] start_loss={start_loss:.4} end_loss={last_loss:.4}"
+        );
+        // On a tiny 2-layer model with 3 fixed patterns, 100 steps of
+        // Adam 3e-3 should push loss down by at least ~30% from the
+        // near-uniform starting point. Very generous bound to avoid
+        // flakiness on RNG-sensitive inits; the key signal is that the
+        // gradient flows and loss moves monotonically.
+        assert!(
+            last_loss < start_loss * 0.7,
+            "Trident did not converge: start={start_loss:.4}, end={last_loss:.4}"
+        );
+        assert!(last_loss.is_finite(), "Loss went NaN/Inf: {last_loss}");
+    }
+
+    #[test]
+    fn test_trident_1b_config_shapes() {
+        let cfg = TridentConfig::trident_1b(32_000);
+        assert_eq!(cfg.d_model, 2048);
+        assert_eq!(cfg.num_layers, 24);
+        assert_eq!(cfg.num_heads, 16);
+        assert_eq!(cfg.num_kv_heads, 4);
+        assert_eq!(cfg.intermediate_size, 5504);
+        assert_eq!(cfg.max_seq_len, 4096);
+        assert!((cfg.rope_theta - 500_000.0).abs() < 1e-3);
+        assert!(cfg.use_rope);
+        assert!(cfg.use_squared_relu);
+        assert!(cfg.use_sub_ln);
+        // Rough param count check — should be in the 1B ballpark.
+        let n = cfg.estimated_params();
+        assert!(
+            (800_000_000..1_500_000_000).contains(&n),
+            "1B config estimated_params={n} outside [0.8B, 1.5B]"
+        );
+    }
+
+    #[test]
+    fn test_trident_smoke_forward() {
+        let cfg = TridentConfig::smoke(64);
+        let model = TridentModel::new(&cfg);
+        let ids = Tensor::from_vec(vec![1u32, 2, 3, 4], &[1, 4]).unwrap();
+        let logits = model.forward_ids(&ids);
+        assert_eq!(logits.data().shape(), &[1, 4, 64]);
     }
 
     #[test]

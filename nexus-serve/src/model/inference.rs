@@ -18,6 +18,7 @@ use std::path::Path;
 use axonml_core::Device;
 use axonml_tensor::Tensor;
 use memmap2::Mmap;
+use rayon::prelude::*;
 
 use super::gguf::{self, GgufFile, GgufTensorInfo, GgmlType};
 use super::weight::Weight;
@@ -121,10 +122,14 @@ impl InferenceConfig {
             .and_then(|v| v.as_f32())
             .unwrap_or(1e-5);
 
+        // Gemma 3 (non-E-series) GGUFs often omit `rope.freq_base` entirely.
+        // The architecture actually uses 1,000,000 for global layers and
+        // 10,000 for sliding-window layers (Gemma 3 tech report §3.1).
+        // Fall back to the correct Gemma default when missing.
         let rope_theta = gguf
             .get_meta(&format!("{prefix}.rope.freq_base"))
             .and_then(|v| v.as_f32())
-            .unwrap_or(10000.0);
+            .unwrap_or_else(|| if is_gemma { 1_000_000.0 } else { 10_000.0 });
 
         let vocab_size = gguf
             .get_meta("tokenizer.ggml.tokens")
@@ -135,7 +140,45 @@ impl InferenceConfig {
             .unwrap_or(32000);
 
         let gemma = if is_gemma {
-            Some(Self::parse_gemma_config(gguf, prefix, num_layers, head_dim))
+            // Dump every Gemma-prefixed metadata key so we can see exactly
+            // what the GGUF exposes (Gemma 3 vs Gemma 3n / E-series differ).
+            let mut keys: Vec<&String> = gguf.metadata.keys().filter(|k| k.starts_with(prefix)).collect();
+            keys.sort();
+            eprintln!("[gemma-meta] {} keys with prefix '{}':", keys.len(), prefix);
+            for k in &keys {
+                if let Some(v) = gguf.metadata.get(*k) {
+                    let s = match v {
+                        gguf::GgufValue::U32(n) => format!("U32({})", n),
+                        gguf::GgufValue::I32(n) => format!("I32({})", n),
+                        gguf::GgufValue::F32(n) => format!("F32({})", n),
+                        gguf::GgufValue::Bool(b) => format!("Bool({})", b),
+                        gguf::GgufValue::String(s) => format!("String(len={})", s.len()),
+                        gguf::GgufValue::Array(a) => format!("Array(len={})", a.len()),
+                        _ => "Other".to_string(),
+                    };
+                    eprintln!("  {} = {}", k, s);
+                }
+            }
+            let cfg = Self::parse_gemma_config(gguf, prefix, num_layers, head_dim);
+            eprintln!(
+                "[gemma-config] prefix={} hidden={} n_q={} n_kv={} head_dim={} inter={} rope={}  swa_head_dim={} rope_swa={} rope_dim={} rope_dim_swa={} softcap={:?} altup_width={} swa_pattern_len={} swa_true_count={}",
+                prefix,
+                hidden_size,
+                num_heads,
+                num_kv_heads,
+                head_dim,
+                intermediate_size,
+                rope_theta,
+                cfg.head_dim_swa,
+                cfg.rope_theta_swa,
+                cfg.rope_dim,
+                cfg.rope_dim_swa,
+                cfg.final_logit_softcap,
+                cfg.per_layer_input_width,
+                cfg.sliding_window_pattern.len(),
+                cfg.sliding_window_pattern.iter().filter(|&&b| b).count(),
+            );
+            Some(cfg)
         } else {
             None
         };
@@ -169,8 +212,10 @@ impl InferenceConfig {
             .unwrap_or(4096) as usize;
 
         // Extract the per-layer SWA pattern. Stored as a GGUF array of bools
-        // with length == num_layers. For Gemma 4 the pattern is "most layers
-        // SWA, every 6th full" but we read it verbatim from metadata.
+        // with length == num_layers. For E4B the pattern is explicit in
+        // metadata; for Gemma 3 (non-E-series) the GGUF typically omits it
+        // and the canonical pattern is "5 SWA, 1 global" repeating (Gemma 3
+        // tech report §3.1). Fall back to that when missing.
         let sliding_window_pattern = gguf
             .get_meta(&format!("{prefix}.attention.sliding_window_pattern"))
             .and_then(|v| match v {
@@ -181,7 +226,12 @@ impl InferenceConfig {
                 ),
                 _ => None,
             })
-            .unwrap_or_else(|| vec![false; num_layers]);
+            .unwrap_or_else(|| {
+                // 5 SWA + 1 global, repeating: indices 0..4 SWA, index 5 global,
+                // 6..10 SWA, 11 global, etc. Each layer `i` is SWA iff
+                // `(i % 6) != 5`.
+                (0..num_layers).map(|i| (i % 6) != 5).collect()
+            });
 
         // SWA head dim: defaults to `head_dim` for models that don't have the
         // split (e.g. Gemma 2 uses a single head_dim across all layers).
@@ -340,6 +390,22 @@ impl MappedGguf {
                     output[i] = f32::from_bits((bits as u32) << 16);
                 }
             }
+            GgmlType::I2S => {
+                // BitNet b1.58 ternary weights. The eager path needs both
+                // the packed bytes and the tensor-wide scale. `raw_data`
+                // here is just the packed region (no scale) because
+                // `load_tensor_f32` uses `info.total_bytes()` without the
+                // I2_S +4 extension that `load_tensor_raw` does. Read the
+                // scale directly from the mmap at `offset + total_bytes`.
+                let scale_offset = (self.data_offset + info.offset) as usize + total_bytes;
+                let scale_bytes = unsafe {
+                    std::slice::from_raw_parts(self.data_ptr.add(scale_offset), 4)
+                };
+                let scale = f32::from_le_bytes([
+                    scale_bytes[0], scale_bytes[1], scale_bytes[2], scale_bytes[3],
+                ]);
+                axonml_quant::bitnet::dequantize_i2s(raw_data, scale, &mut output);
+            }
             other => {
                 eprintln!("  WARNING: unsupported quantization {:?} for tensor {}, filling with zeros", other, name);
             }
@@ -355,9 +421,18 @@ impl MappedGguf {
 
     /// Load the raw tensor bytes (compressed/quantized form) without dequantizing.
     /// Used for lazy-dequant mode where weights stay compact in RAM.
+    ///
+    /// **I2_S special case:** Microsoft's format stores a tensor-wide f32
+    /// scale at offset `total_bytes` (right after the packed data, inside
+    /// the 32-byte GGUF alignment padding). We read 4 extra bytes for
+    /// I2_S tensors so the scale is appended to the returned buffer —
+    /// callers recover it via the last 4 bytes (`f32::from_le_bytes`).
     pub fn load_tensor_raw(&self, name: &str) -> Option<Vec<u8>> {
         let info = self.tensors.get(name)?;
-        let total_bytes = info.total_bytes() as usize;
+        let mut total_bytes = info.total_bytes() as usize;
+        if info.dtype == GgmlType::I2S {
+            total_bytes += 4; // trailing f32 tensor-wide scale
+        }
         let offset = (self.data_offset + info.offset) as usize;
         let raw_data = unsafe {
             std::slice::from_raw_parts(self.data_ptr.add(offset), total_bytes)
@@ -410,6 +485,16 @@ pub struct LayerWeights {
     pub q_bias: Option<Vec<f32>>,
     pub k_bias: Option<Vec<f32>>,
     pub v_bias: Option<Vec<f32>>,
+    /// BitNet b1.58: RMSNorm applied to the attention output right BEFORE
+    /// `o_weight`, after the softmax-weighted V sum. Stabilizes training at
+    /// ternary precision by keeping the input to the quantized output
+    /// projection in a well-conditioned range. `None` for non-BitNet archs.
+    /// Shape: `[n_heads * head_dim]`.
+    pub attn_sub_norm: Option<Vec<f32>>,
+    /// BitNet b1.58: RMSNorm applied to the FFN hidden state (post-SwiGLU)
+    /// right BEFORE `down_weight`. Same purpose as `attn_sub_norm`. `None`
+    /// for non-BitNet archs. Shape: `[intermediate_size]`.
+    pub ffn_sub_norm: Option<Vec<f32>>,
 }
 
 impl LayerWeights {
@@ -483,9 +568,11 @@ pub struct Gemma4Weights {
     /// forward pass, then sliced per-layer and added to the hidden state.
     pub per_layer_token_embd: Vec<f32>,
 
-    /// Projects per-layer input (width = `per_layer_input_width`) back to
-    /// `hidden_size`. Shape `[per_layer_input_width, hidden_size]`.
-    pub per_layer_model_proj: Weight,
+    /// Altup gate projection. `None` on non-E-series Gemma models that omit
+    /// the altup mechanism entirely. When present, shape is
+    /// `[hidden_size, num_layers * per_layer_input_width]` — projects the
+    /// hidden state to a per-layer gate vector.
+    pub per_layer_model_proj: Option<Weight>,
 
     /// RMSNorm weight for the per-layer input path. Shape `[per_layer_input_width]`.
     pub per_layer_proj_norm: Vec<f32>,
@@ -498,7 +585,9 @@ pub struct Gemma4Weights {
 
 impl Gemma4Weights {
     fn to_device(&mut self, device: Device) {
-        self.per_layer_model_proj.to_device(device.clone());
+        if let Some(ref mut proj) = self.per_layer_model_proj {
+            proj.to_device(device.clone());
+        }
         let num_layers = self.layers.len();
         for (i, layer) in self.layers.iter_mut().enumerate() {
             layer.to_device(device.clone());
@@ -530,7 +619,7 @@ impl Gemma4Weights {
             total += l.down_weight.bytes();
         }
         total += self.per_layer_token_embd.len() * 4;
-        total += self.per_layer_model_proj.bytes();
+        total += self.per_layer_model_proj.as_ref().map(|p| p.bytes()).unwrap_or(0);
         total += self.per_layer_proj_norm.len() * 4;
         if let Some(ref r) = self.rope_freqs {
             total += r.len() * 4;
@@ -540,6 +629,32 @@ impl Gemma4Weights {
 }
 
 impl InferenceEngine {
+    /// Architecture string from GGUF metadata (e.g. "qwen2", "llama", "gemma4").
+    /// Used by the HTTP layer to pick a chat template and by `stop_tokens()`
+    /// to pick EOS IDs.
+    pub fn architecture(&self) -> &str {
+        &self.config.architecture
+    }
+
+    /// Stop-token IDs that terminate generation in `generate_stream`.
+    ///
+    /// Qwen2-family: 151643 `<|endoftext|>`, 151645 `<|im_end|>`, 0 (pad — kept
+    /// for backward compat with earlier runs; safe because Qwen never emits 0).
+    ///
+    /// Gemma 3/4: 1 `<eos>`, 106 `<end_of_turn>`. Gemma's pad is 0 but pad is
+    /// never emitted — we intentionally omit it so a spurious 0 doesn't end
+    /// the turn.
+    pub fn stop_tokens(&self) -> &'static [u32] {
+        match self.config.architecture.as_str() {
+            "gemma" | "gemma2" | "gemma3" | "gemma4" => &[1, 106],
+            // BitNet b1.58 uses the LLaMA-3 tokenizer: 128000 BOS,
+            // 128001 `<|end_of_text|>`, 128009 `<|eot_id|>`. Include both
+            // EOS and EOT so the assistant turn terminates cleanly.
+            a if a.starts_with("bitnet") => &[128001, 128009],
+            _ => &[0, 151643, 151645],
+        }
+    }
+
     /// Move all weight matrices to GPU (f32 variant) and set the compute device.
     /// Quantized weights stay in CPU RAM (dequantization produces per-matmul
     /// scratch tensors that get moved to `compute_device`).
@@ -650,10 +765,18 @@ impl InferenceEngine {
             let k_bias = try_load_vec(mapped, &format!("{prefix}.attn_k.bias"));
             let v_bias = try_load_vec(mapped, &format!("{prefix}.attn_v.bias"));
 
+            // BitNet b1.58 sub-norms — present only on BitNet GGUFs.
+            // try_load_vec returns None for other architectures, and the
+            // forward pass gates on `Option` so LLaMA/Qwen2/Mistral stay
+            // bit-identical.
+            let attn_sub_norm = try_load_vec(mapped, &format!("{prefix}.attn_sub_norm.weight"));
+            let ffn_sub_norm = try_load_vec(mapped, &format!("{prefix}.ffn_sub_norm.weight"));
+
             layers.push(LayerWeights {
                 attn_norm, q_weight, k_weight, v_weight, o_weight,
                 ffn_norm, gate_weight, up_weight, down_weight,
                 q_bias, k_bias, v_bias,
+                attn_sub_norm, ffn_sub_norm,
             });
 
             if (i + 1) % 7 == 0 || i + 1 == config.num_layers {
@@ -761,11 +884,39 @@ impl InferenceEngine {
             }
         }
 
-        // Top-level: per-layer input embeddings (Gemma 3/4 novelty).
-        let per_layer_token_embd = load_vec(mapped, "per_layer_token_embd.weight")?;
-        let per_layer_model_proj = load_weight(
-            mapped, "per_layer_model_proj.weight", quantized_weights)?;
-        let per_layer_proj_norm = load_vec(mapped, "per_layer_proj_norm.weight")?;
+        // Top-level: per-layer input embeddings — the altup mechanism used by
+        // Gemma 3n / Gemma 4 E-series ("Effective" compressed variants).
+        // Standard Gemma 3 sizes (1B/4B/12B/27B) don't have altup and omit
+        // these tensors entirely. Detect by presence rather than by arch name
+        // so one loader handles both families.
+        let has_altup = mapped.has_tensor("per_layer_token_embd.weight");
+        let per_layer_token_embd = if has_altup {
+            load_vec(mapped, "per_layer_token_embd.weight")?
+        } else {
+            Vec::new()
+        };
+        let per_layer_model_proj = if has_altup {
+            Some(load_weight(mapped, "per_layer_model_proj.weight", quantized_weights)?)
+        } else {
+            None
+        };
+        let per_layer_proj_norm = if has_altup {
+            load_vec(mapped, "per_layer_proj_norm.weight")?
+        } else {
+            Vec::new()
+        };
+        if has_altup {
+            println!(
+                "    Altup: token_embd={} proj.shape={:?} proj_norm={} (width={}, layers={})",
+                per_layer_token_embd.len(),
+                per_layer_model_proj.as_ref().map(|w| w.shape()),
+                per_layer_proj_norm.len(),
+                config.gemma.as_ref().map(|g| g.per_layer_input_width).unwrap_or(0),
+                config.num_layers,
+            );
+        } else {
+            println!("    No altup — standard Gemma architecture (non-E-series)");
+        }
 
         // Optional pre-computed RoPE frequency table. We'll fall back to
         // computing RoPE freqs analytically if this isn't present.
@@ -861,14 +1012,15 @@ impl InferenceEngine {
         let vocab_size = self.config.vocab_size;
         let last_logits = &logits[logits.len() - vocab_size..];
 
+        let stop = self.stop_tokens();
+
         let mut next_id = if temperature < 0.01 {
             argmax(last_logits) as u32
         } else {
             sample_top_p(last_logits, temperature, top_p)
         };
 
-        // Common EOS tokens: <|endoftext|> for LLaMA/Qwen, <|im_end|> for ChatML
-        if next_id == 0 || next_id == 151643 || next_id == 151645 {
+        if stop.contains(&next_id) {
             return;
         }
         if !on_token(next_id) {
@@ -889,7 +1041,7 @@ impl InferenceEngine {
                 sample_top_p(&logits, temperature, top_p)
             };
 
-            if next_id == 0 || next_id == 151643 || next_id == 151645 {
+            if stop.contains(&next_id) {
                 break;
             }
             if !on_token(next_id) {
@@ -966,6 +1118,12 @@ impl InferenceEngine {
                 &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
                 seq_len, total_len, n_heads, n_kv_heads, head_dim, pos_offset,
             );
+            // BitNet b1.58 attn sub-norm (pre output projection).
+            let attn_out = if let Some(ref sub) = layer.attn_sub_norm {
+                rms_norm_vec(&attn_out, sub, self.config.rms_norm_eps, seq_len, n_heads * head_dim)
+            } else {
+                attn_out
+            };
             let attn_t = self.to_weight_device(Tensor::from_vec(attn_out, &[seq_len, n_heads * head_dim]).unwrap());
 
             // Output projection (GPU matmul)
@@ -981,13 +1139,37 @@ impl InferenceEngine {
             let gate_data = layer.gate_weight.matmul(&normed2_t).to_vec();
             let up_data = layer.up_weight.matmul(&normed2_t).to_vec();
 
-            // SiLU(gate) * up (CPU — element-wise)
+            // FFN activation — architecture-dependent:
+            //   - LLaMA/Qwen/Mistral: SwiGLU → SiLU(gate) * up
+            //   - BitNet b1.58:       ReLU² gated → max(0, gate)² * up
+            // BitNet's HF model card is explicit: "squared ReLU (ReLU²)
+            // activation in FFN layers". Switching on architecture avoids
+            // regressing the LLaMA-family models.
             let inter_size = self.config.intermediate_size;
-            let mut ffn_data = vec![0.0f32; seq_len * inter_size];
-            for i in 0..ffn_data.len() {
-                let g = gate_data[i];
-                ffn_data[i] = (g / (1.0 + (-g).exp())) * up_data[i];
+            let mut ffn_data: Vec<f32> = vec![0.0f32; seq_len * inter_size];
+            let is_bitnet = self.config.architecture.starts_with("bitnet");
+            if is_bitnet {
+                ffn_data
+                    .par_iter_mut()
+                    .zip(gate_data.par_iter().zip(up_data.par_iter()))
+                    .for_each(|(out, (&g, &u))| {
+                        let r = g.max(0.0);
+                        *out = r * r * u;
+                    });
+            } else {
+                ffn_data
+                    .par_iter_mut()
+                    .zip(gate_data.par_iter().zip(up_data.par_iter()))
+                    .for_each(|(out, (&g, &u))| {
+                        *out = (g / (1.0 + (-g).exp())) * u;
+                    });
             }
+            // BitNet b1.58 FFN sub-norm (pre down projection).
+            let ffn_data = if let Some(ref sub) = layer.ffn_sub_norm {
+                rms_norm_vec(&ffn_data, sub, self.config.rms_norm_eps, seq_len, inter_size)
+            } else {
+                ffn_data
+            };
             let ffn_t = self.to_weight_device(Tensor::from_vec(ffn_data, &[seq_len, inter_size]).unwrap());
             let ffn_out = layer.down_weight.matmul(&ffn_t).to_vec();
 
@@ -1048,6 +1230,12 @@ impl InferenceEngine {
                 &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
                 total_len, n_heads, n_kv_heads, head_dim,
             );
+            // BitNet b1.58 attn sub-norm (pre output projection).
+            let attn_out = if let Some(ref sub) = layer.attn_sub_norm {
+                rms_norm_single(&attn_out, sub, self.config.rms_norm_eps)
+            } else {
+                attn_out
+            };
 
             let attn_t = self.to_weight_device(Tensor::from_vec(attn_out, &[1, n_heads * head_dim]).unwrap());
             let attn_proj = layer.o_weight.matmul(&attn_t).to_vec();
@@ -1062,11 +1250,32 @@ impl InferenceEngine {
             let up_data = layer.up_weight.matmul(&normed2_t).to_vec();
 
             let inter_size = self.config.intermediate_size;
-            let mut ffn_data = vec![0.0f32; inter_size];
-            for i in 0..inter_size {
-                let g = gate_data[i];
-                ffn_data[i] = (g / (1.0 + (-g).exp())) * up_data[i];
+            let mut ffn_data: Vec<f32> = vec![0.0f32; inter_size];
+            let is_bitnet = self.config.architecture.starts_with("bitnet");
+            if is_bitnet {
+                // BitNet: ReLU²(gate) * up
+                ffn_data
+                    .par_iter_mut()
+                    .zip(gate_data.par_iter().zip(up_data.par_iter()))
+                    .for_each(|(out, (&g, &u))| {
+                        let r = g.max(0.0);
+                        *out = r * r * u;
+                    });
+            } else {
+                // LLaMA/Qwen/Mistral: SwiGLU → SiLU(gate) * up
+                ffn_data
+                    .par_iter_mut()
+                    .zip(gate_data.par_iter().zip(up_data.par_iter()))
+                    .for_each(|(out, (&g, &u))| {
+                        *out = (g / (1.0 + (-g).exp())) * u;
+                    });
             }
+            // BitNet b1.58 FFN sub-norm (pre down projection).
+            let ffn_data = if let Some(ref sub) = layer.ffn_sub_norm {
+                rms_norm_single(&ffn_data, sub, self.config.rms_norm_eps)
+            } else {
+                ffn_data
+            };
             let ffn_t = self.to_weight_device(Tensor::from_vec(ffn_data, &[1, inter_size]).unwrap());
             let ffn_out = layer.down_weight.matmul(&ffn_t).to_vec();
 
@@ -1077,8 +1286,33 @@ impl InferenceEngine {
 
         // Final norm + LM head
         let normed = rms_norm_single(&x, &self.output_norm, self.config.rms_norm_eps);
+        if std::env::var("BITNET_DEBUG").is_ok() {
+            let n_nan = normed.iter().filter(|v| v.is_nan()).count();
+            let n_inf = normed.iter().filter(|v| v.is_infinite()).count();
+            let max = normed.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let min = normed.iter().cloned().fold(f32::INFINITY, f32::min);
+            let mean = normed.iter().sum::<f32>() / normed.len() as f32;
+            eprintln!("[DBG pre-lm_head] n={} nan={n_nan} inf={n_inf} min={min:.4} max={max:.4} mean={mean:.4}",
+                normed.len());
+        }
         let normed_t = self.to_weight_device(Tensor::from_vec(normed, &[1, hidden]).unwrap());
-        self.lm_head.matmul(&normed_t).to_vec()
+        let logits = self.lm_head.matmul(&normed_t).to_vec();
+        if std::env::var("BITNET_DEBUG").is_ok() {
+            let n_nan = logits.iter().filter(|v| v.is_nan()).count();
+            let n_inf = logits.iter().filter(|v| v.is_infinite()).count();
+            let max_idx = logits.iter().enumerate()
+                .fold((0usize, f32::NEG_INFINITY), |(i, m), (j, &v)| if v > m { (j, v) } else { (i, m) });
+            let max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let min = logits.iter().cloned().fold(f32::INFINITY, f32::min);
+            // Top-5 logits
+            let mut idx: Vec<usize> = (0..logits.len()).collect();
+            idx.sort_by(|&a, &b| logits[b].partial_cmp(&logits[a]).unwrap_or(std::cmp::Ordering::Equal));
+            let top: Vec<String> = idx.iter().take(5).map(|&i| format!("{i}:{:.3}", logits[i])).collect();
+            eprintln!("[DBG logits] n={} nan={n_nan} inf={n_inf} min={min:.4} max={max:.4} top5={}",
+                logits.len(), top.join(", "));
+            eprintln!("[DBG]  argmax={} logit={:.4}", max_idx.0, max_idx.1);
+        }
+        logits
     }
 
     // =========================================================================
@@ -1114,13 +1348,21 @@ impl InferenceEngine {
         let n_kv_heads = self.config.num_kv_heads;
         let pos_offset = kv_cache.len;
 
-        // Token embedding lookup (same as LLaMA path, since token_embed is [vocab, hidden])
+        // Token embedding lookup. Gemma (all variants) scales the token
+        // embeddings by sqrt(hidden_size) at the input — this is the
+        // `embed_scale` factor documented in the Gemma tech reports. Missing
+        // it produces a hidden state ~50× too small for Gemma 3 4B (hidden=2560)
+        // and breaks downstream attention/norm behavior.
+        let embed_scale = (hidden as f32).sqrt();
         let mut x = vec![0.0f32; seq_len * hidden];
         for (pos, &id) in token_ids.iter().enumerate() {
             let id = id as usize;
             if id < self.config.vocab_size {
-                x[pos * hidden..(pos + 1) * hidden]
-                    .copy_from_slice(&self.token_embed[id * hidden..(id + 1) * hidden]);
+                let src = &self.token_embed[id * hidden..(id + 1) * hidden];
+                let dst = &mut x[pos * hidden..(pos + 1) * hidden];
+                for (d, &s) in dst.iter_mut().zip(src.iter()) {
+                    *d = s * embed_scale;
+                }
             }
         }
 
@@ -1205,10 +1447,13 @@ impl InferenceEngine {
             let gate_data = layer.gate_weight.matmul(&normed2_t).to_vec();
             let up_data = layer.up_weight.matmul(&normed2_t).to_vec();
             let inter_size = self.config.intermediate_size;
-            let mut ffn_data = vec![0.0f32; seq_len * inter_size];
-            for i in 0..ffn_data.len() {
-                ffn_data[i] = gelu_exact(gate_data[i]) * up_data[i];
-            }
+            let mut ffn_data: Vec<f32> = vec![0.0f32; seq_len * inter_size];
+            ffn_data
+                .par_iter_mut()
+                .zip(gate_data.par_iter().zip(up_data.par_iter()))
+                .for_each(|(out, (&g, &u))| {
+                    *out = gelu_exact(g) * u;
+                });
 
             // 12. Down projection
             let ffn_t = self.to_weight_device(
@@ -1250,11 +1495,16 @@ impl InferenceEngine {
         let n_kv_heads = self.config.num_kv_heads;
         let pos = kv_cache.len;
 
-        // Token embedding lookup — single token
+        // Token embedding lookup — single token, scaled by sqrt(hidden_size)
+        // (Gemma-specific `embed_scale`; see the forward_batch_gemma4 comment).
+        let embed_scale = (hidden as f32).sqrt();
         let mut x = vec![0.0f32; hidden];
         let id = token_id as usize;
         if id < self.config.vocab_size {
-            x.copy_from_slice(&self.token_embed[id * hidden..(id + 1) * hidden]);
+            let src = &self.token_embed[id * hidden..(id + 1) * hidden];
+            for (d, &s) in x.iter_mut().zip(src.iter()) {
+                *d = s * embed_scale;
+            }
         }
 
         for (li, layer) in gemma.layers.iter().enumerate() {
@@ -1321,10 +1571,13 @@ impl InferenceEngine {
             let gate_data = layer.gate_weight.matmul(&normed2_t).to_vec();
             let up_data = layer.up_weight.matmul(&normed2_t).to_vec();
             let inter_size = self.config.intermediate_size;
-            let mut ffn_data = vec![0.0f32; inter_size];
-            for i in 0..inter_size {
-                ffn_data[i] = gelu_exact(gate_data[i]) * up_data[i];
-            }
+            let mut ffn_data: Vec<f32> = vec![0.0f32; inter_size];
+            ffn_data
+                .par_iter_mut()
+                .zip(gate_data.par_iter().zip(up_data.par_iter()))
+                .for_each(|(out, (&g, &u))| {
+                    *out = gelu_exact(g) * u;
+                });
             let ffn_t = self.to_weight_device(
                 Tensor::from_vec(ffn_data, &[1, inter_size]).unwrap());
             let ffn_out = layer.down_weight.matmul(&ffn_t).to_vec();
@@ -1768,7 +2021,20 @@ fn load_weight(mapped: &MappedGguf, name: &str, quantized: bool) -> Result<Weigh
         .ok_or_else(|| format!("Tensor not found: {name}"))?;
     let dims: Vec<usize> = info.dims.iter().map(|&d| d as usize).collect();
 
-    if quantized && dims.len() == 2 {
+    // Lazy-dequant only makes sense for block-quantized types (Q4/Q5/Q6/Q8/I2S).
+    // F16/BF16/F32 weights have trivial dequant but the lazy path re-runs it on
+    // every matmul — catastrophic for a tied LM head (e.g. BitNet's 656 MB F16
+    // token_embd doubling as the LM head = 1.3 GB of f32 scratch + GEMM per
+    // decode token). Keep these eager even under `--quantized`.
+    let is_block_quantized = matches!(
+        info.dtype,
+        GgmlType::Q4_0 | GgmlType::Q4_1 | GgmlType::Q5_0 | GgmlType::Q5_1
+        | GgmlType::Q8_0 | GgmlType::Q8_1 | GgmlType::Q2K | GgmlType::Q3K
+        | GgmlType::Q4K | GgmlType::Q5K | GgmlType::Q6K | GgmlType::Q8K
+        | GgmlType::I2S,
+    );
+
+    if quantized && dims.len() == 2 && is_block_quantized {
         // Lazy dequant path: store raw bytes
         let raw = mapped.load_tensor_raw(name)
             .ok_or_else(|| format!("Failed to load raw bytes for {name}"))?;
@@ -1781,9 +2047,14 @@ fn load_weight(mapped: &MappedGguf, name: &str, quantized: bool) -> Result<Weigh
         let tensor = if dims.len() == 2 {
             // from_vec(data, &[out, in]) matches the physical GGUF layout.
             // transpose → [in, out] for matmul: input [seq, in] @ weight [in, out].
+            // contiguous() materializes the transposed layout into a flat buffer
+            // so every subsequent matmul can read the weight storage directly
+            // without re-paying the transpose cost per call. On an 8B model
+            // with 42 layers × 7 matmuls per decode, skipping this one-shot
+            // materialization would cost ~3 GB of memcpy per token.
             let t = Tensor::from_vec(data, &[dims[1], dims[0]])
                 .map_err(|e| format!("{name} (shape [{}, {}]): {e}", dims[1], dims[0]))?;
-            t.transpose(0, 1).map_err(|e| format!("{name} transpose: {e}"))?
+            t.transpose(0, 1).map_err(|e| format!("{name} transpose: {e}"))?.contiguous()
         } else {
             Tensor::from_vec(data, &dims).map_err(|e| format!("{name}: {e}"))?
         };

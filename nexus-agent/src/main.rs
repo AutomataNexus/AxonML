@@ -8,7 +8,9 @@
 
 use clap::Parser;
 use nexus_agent::{
-    agents, backend::local::LocalBackend, backend::LlmBackend, react_loop, tools, ToolRegistry,
+    agents,
+    backend::{anthropic::AnthropicBackend, local::LocalBackend, LlmBackend},
+    react_loop, tools, ToolRegistry,
 };
 
 #[derive(Parser)]
@@ -20,9 +22,19 @@ struct Args {
     #[arg(long, default_value = "http://127.0.0.1:11435")]
     url: String,
 
-    /// Model to use (default: qwen3)
-    #[arg(long, short, default_value = "qwen3")]
-    model: String,
+    /// Model to use. Overrides the agent's default model (each agent picks
+    /// the model it was tuned for — `code` → `deepseek`, `knowledge` →
+    /// `qwen3`, etc.). Pass this only to force a different model.
+    #[arg(long, short)]
+    model: Option<String>,
+
+    /// Route through nexus-serve's Anthropic Messages API (`/v1/messages`)
+    /// instead of the OpenAI-compatible `/v1/chat/completions`. Enables
+    /// native `tool_use` / `tool_result` content blocks end-to-end. This
+    /// is the recommended path for BitNet-based agents; the OpenAI path
+    /// remains the default for legacy agents built against /v1/chat.
+    #[arg(long)]
+    anthropic: bool,
 
     /// Agent type
     #[command(subcommand)]
@@ -44,6 +56,12 @@ enum AgentCommand {
     /// CI Fixer — invoked by the ticker ralph loop for test/assertion failures
     /// that `cargo fmt` and `cargo clippy --fix` can't resolve.
     CiFixer { task: String },
+    /// Shield Agent — invoked by the security-ticker drill-down modal to
+    /// investigate stat-chip events and propose user-acceptable fixes.
+    Shield { task: String },
+    /// Code agent — local agentic coder. Defaults to BitNet-2B via
+    /// nexus-serve's Anthropic Messages API. Pair with `--anthropic`.
+    Code { task: String },
     /// List available models on the nexus-serve backend
     Models,
     /// Health check — verify nexus-serve is reachable
@@ -62,8 +80,16 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    // Create backend
-    let backend = LocalBackend::with_url(&args.url);
+    // Dispatch through a trait object so both backend types share one code
+    // path. Clippy would prefer an `enum BackendChoice`, but the trait
+    // object keeps `run_agent` monomorphisation-free and lets future
+    // backends (cloud Anthropic, OpenAI cloud) slot in behind the same
+    // --anthropic-style flags.
+    let backend: Box<dyn LlmBackend> = if args.anthropic {
+        Box::new(AnthropicBackend::with_url(&args.url))
+    } else {
+        Box::new(LocalBackend::with_url(&args.url))
+    };
 
     match args.agent {
         AgentCommand::Health => {
@@ -95,22 +121,28 @@ async fn main() -> anyhow::Result<()> {
         }
 
         AgentCommand::Knowledge { task } => {
-            run_agent("knowledge", agents::knowledge::config(), &args.model, &task, &backend).await?;
+            run_agent("knowledge", agents::knowledge::config(), args.model.as_deref(), &task, backend.as_ref()).await?;
         }
         AgentCommand::Retrain { task } => {
-            run_agent("retrain", agents::retrain::config(), &args.model, &task, &backend).await?;
+            run_agent("retrain", agents::retrain::config(), args.model.as_deref(), &task, backend.as_ref()).await?;
         }
         AgentCommand::Fieldtech { task } => {
-            run_agent("fieldtech", agents::fieldtech::config(), &args.model, &task, &backend).await?;
+            run_agent("fieldtech", agents::fieldtech::config(), args.model.as_deref(), &task, backend.as_ref()).await?;
         }
         AgentCommand::Research { task } => {
-            run_agent("research", agents::research::config(), &args.model, &task, &backend).await?;
+            run_agent("research", agents::research::config(), args.model.as_deref(), &task, backend.as_ref()).await?;
         }
         AgentCommand::Orchestrator { task } => {
-            run_agent("orchestrator", agents::orchestrator::config(), &args.model, &task, &backend).await?;
+            run_agent("orchestrator", agents::orchestrator::config(), args.model.as_deref(), &task, backend.as_ref()).await?;
         }
         AgentCommand::CiFixer { task } => {
-            run_agent("ci-fixer", agents::ci_fixer::config(), &args.model, &task, &backend).await?;
+            run_agent("ci-fixer", agents::ci_fixer::config(), args.model.as_deref(), &task, backend.as_ref()).await?;
+        }
+        AgentCommand::Shield { task } => {
+            run_agent("shield", agents::shield::config(), args.model.as_deref(), &task, backend.as_ref()).await?;
+        }
+        AgentCommand::Code { task } => {
+            run_agent("code", agents::code::config(), args.model.as_deref(), &task, backend.as_ref()).await?;
         }
     }
 
@@ -120,11 +152,13 @@ async fn main() -> anyhow::Result<()> {
 async fn run_agent(
     name: &str,
     mut config: nexus_agent::AgentConfig,
-    model_override: &str,
+    model_override: Option<&str>,
     task: &str,
-    backend: &impl nexus_agent::backend::LlmBackend,
+    backend: &dyn nexus_agent::backend::LlmBackend,
 ) -> anyhow::Result<()> {
-    config.model = model_override.to_string();
+    if let Some(m) = model_override {
+        config.model = m.to_string();
+    }
 
     let mut registry = ToolRegistry::new();
     tools::register_all(&mut registry);

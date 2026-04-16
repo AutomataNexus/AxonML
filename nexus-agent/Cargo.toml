@@ -52,3 +52,7 @@ path = "src/ui/ticker.rs"
 [[bin]]
 name = "tech-ticker"
 path = "src/ui/tech_ticker.rs"
+
+[[bin]]
+name = "ferrum-ticker"
+path = "src/ui/ferrum_ticker.rs"

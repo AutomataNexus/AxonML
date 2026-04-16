@@ -131,12 +131,32 @@ impl Tokenizer {
                 id_to_token,
                 ..
             } => {
-                if !merges.is_empty() {
-                    bpe_encode(text, token_to_id, merges, id_to_token)
-                } else {
-                    // No merges — greedy longest-match encoding
-                    greedy_encode(text, token_to_id)
+                // Special tokens (`<|begin_of_text|>`, `<|eot_id|>`, etc.)
+                // must be matched exactly BEFORE byte-level BPE runs. If
+                // we let the BPE merges break them into character-level
+                // tokens, the model never sees the actual special-token
+                // ID in the prompt and tends to echo the pattern back as
+                // raw bytes in its output. Split the input on special
+                // tokens, BPE-encode each non-special chunk, then
+                // interleave the special-token IDs.
+                let specials = collect_special_tokens(token_to_id);
+                let mut out: Vec<u32> = Vec::new();
+                for segment in split_on_specials(text, &specials) {
+                    match segment {
+                        Segment::Special(id) => out.push(id),
+                        Segment::Literal(s) => {
+                            if s.is_empty() {
+                                continue;
+                            }
+                            if !merges.is_empty() {
+                                out.extend(bpe_encode(s, token_to_id, merges, id_to_token));
+                            } else {
+                                out.extend(greedy_encode(s, token_to_id));
+                            }
+                        }
+                    }
                 }
+                out
             }
 
             Self::CharLevel { char_to_id, .. } => text
@@ -152,16 +172,51 @@ impl Tokenizer {
             Self::HuggingFace(tok) => tok.decode(ids, true).unwrap_or_default(),
 
             Self::GgufBpe { id_to_token, .. } => {
-                let mut result = String::new();
+                // Byte-level BPE (GPT-2 / LLaMA-3 / BitNet-2B): each character
+                // in the token string maps to one underlying byte via the
+                // `bytes_to_unicode()` permutation. We concatenate the bytes
+                // across all tokens and interpret the result as UTF-8. This
+                // correctly reverses `Ġ → 0x20 (space)`, `Ċ → 0x0A (newline)`,
+                // raw multi-byte UTF-8 glyphs, and the `<0xNN>` sentinel tokens
+                // that some GGUF vocabs use for control bytes.
+                let map = byte_decode_map();
+                let mut bytes: Vec<u8> = Vec::with_capacity(ids.len() * 4);
                 for &id in ids {
-                    if let Some(tok) = id_to_token.get(id as usize) {
-                        // GGUF BPE tokens use byte-level encoding for special chars.
-                        // Common patterns: "Ġ" = leading space, "Ċ" = newline
-                        // Also raw byte tokens like <0xNN>
-                        result.push_str(&decode_bpe_token(tok));
+                    let Some(tok) = id_to_token.get(id as usize) else { continue };
+                    // Skip special tokens that shouldn't appear in output.
+                    if matches!(tok.as_str(),
+                        "<s>" | "</s>" | "<|endoftext|>"
+                        | "<|im_start|>" | "<|im_end|>"
+                        | "<|begin_of_text|>" | "<|end_of_text|>"
+                        | "<|start_header_id|>" | "<|end_header_id|>"
+                        | "<|eot_id|>") {
+                        continue;
+                    }
+                    // `<0xNN>` sentinel → one raw byte.
+                    if tok.starts_with("<0x") && tok.ends_with('>') && tok.len() == 6 {
+                        if let Ok(b) = u8::from_str_radix(&tok[3..5], 16) {
+                            bytes.push(b);
+                            continue;
+                        }
+                    }
+                    // Otherwise map each character through byte_decode_map.
+                    // Unknown characters fall through as-is (UTF-8 bytes of
+                    // the char itself), which is the graceful path for
+                    // SentencePiece-style vocabs that never took the byte-
+                    // level remapping (we handle `▁` explicitly).
+                    for c in tok.chars() {
+                        if c == '\u{2581}' {
+                            bytes.push(b' ');
+                        } else if let Some(&b) = map.get(&c) {
+                            bytes.push(b);
+                        } else {
+                            // Emit the char's own UTF-8.
+                            let mut tmp = [0u8; 4];
+                            bytes.extend_from_slice(c.encode_utf8(&mut tmp).as_bytes());
+                        }
                     }
                 }
-                result
+                String::from_utf8_lossy(&bytes).into_owned()
             }
 
             Self::CharLevel { chars, .. } => ids
@@ -201,19 +256,32 @@ impl Tokenizer {
 // =============================================================================
 
 /// BPE encode using merge rules from GGUF.
+///
+/// Applies the GPT-2 / LLaMA-3 byte-level permutation on the input UTF-8
+/// bytes so every byte becomes exactly one unicode character from the
+/// canonical set. This is what BitNet and LLaMA-3 vocabs expect:
+/// `0x20` (space) must become `Ġ` (U+0120) **before** BPE merges run, or
+/// no merge rule will ever match (`Ġhello` is in the vocab, `" hello"`
+/// with literal space is not). Falling back to `<0xNN>` sentinels for
+/// non-printable bytes is kept for SentencePiece-style vocabs that don't
+/// use the byte-level map.
 fn bpe_encode(
     text: &str,
     token_to_id: &HashMap<String, u32>,
     merges: &[(String, String)],
     _vocab: &[String],
 ) -> Vec<u32> {
-    // Start with UTF-8 bytes as individual tokens
+    let forward = byte_encode_map();
     let bytes = text.as_bytes();
     let mut symbols: Vec<String> = bytes
         .iter()
         .map(|&b| {
-            // Try single byte as char first
-            if b.is_ascii() && !b.is_ascii_control() {
+            // Byte-level BPE: every byte has a unique unicode char.
+            if let Some(&c) = forward.get(&b) {
+                String::from(c)
+            } else if b.is_ascii() && !b.is_ascii_control() {
+                // Shouldn't happen (map covers 256), but keep the old
+                // fallback for defensiveness.
                 String::from(b as char)
             } else {
                 format!("<0x{:02X}>", b)
@@ -286,6 +354,123 @@ fn greedy_encode(text: &str, token_to_id: &HashMap<String, u32>) -> Vec<u32> {
 }
 
 /// Decode a BPE token string, handling byte-level encoding.
+/// GPT-2 / LLaMA-3 / BitNet byte-level BPE char → byte mapping, built once
+/// lazily and cached for the life of the process.
+///
+/// Matches OpenAI's `bytes_to_unicode` (GPT-2 paper): printable ASCII and
+/// Latin-1 bytes map to themselves (`0x21..=0x7E`, `0xA1..=0xAC`,
+/// `0xAE..=0xFF`); every other byte is remapped to a character in the
+/// `U+0100..` range in the order they're encountered. This is the
+/// remapping that produces `Ġ` for space (`0x20` → `U+0120`), `Ċ` for
+/// newline (`0x0A` → `U+010A`), etc.
+// =============================================================================
+// Special-token scanning (exact-match before BPE)
+// =============================================================================
+
+enum Segment<'a> {
+    Literal(&'a str),
+    Special(u32),
+}
+
+/// Gather the (text, id) list of tokens that look like special markers —
+/// anything starting with `<|` or surrounded by `<>` delimiters. Sorted by
+/// descending length so longest match wins during scanning.
+///
+/// Matching HuggingFace's "added_tokens" behavior without needing the
+/// explicit list: if the GGUF vocab has `<|eot_id|>` as a single token
+/// string, we treat it as a literal to match before BPE.
+fn collect_special_tokens(token_to_id: &HashMap<String, u32>) -> Vec<(String, u32)> {
+    let mut specials: Vec<(String, u32)> = token_to_id
+        .iter()
+        .filter(|(tok, _)| {
+            let s = tok.as_str();
+            (s.starts_with("<|") && s.ends_with("|>")) || s == "<s>" || s == "</s>"
+        })
+        .map(|(t, &i)| (t.clone(), i))
+        .collect();
+    specials.sort_by_key(|(t, _)| std::cmp::Reverse(t.len()));
+    specials
+}
+
+/// Scan `text` left-to-right, emitting `Literal` spans interleaved with
+/// `Special(id)` for each special-token exact match.
+fn split_on_specials<'a>(text: &'a str, specials: &[(String, u32)]) -> Vec<Segment<'a>> {
+    if specials.is_empty() {
+        return vec![Segment::Literal(text)];
+    }
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    let mut lit_start = 0usize;
+    while i < bytes.len() {
+        let mut matched: Option<(usize, u32)> = None;
+        for (tok, id) in specials {
+            let tb = tok.as_bytes();
+            if i + tb.len() <= bytes.len() && &bytes[i..i + tb.len()] == tb {
+                matched = Some((tb.len(), *id));
+                break;
+            }
+        }
+        if let Some((len, id)) = matched {
+            if i > lit_start {
+                out.push(Segment::Literal(&text[lit_start..i]));
+            }
+            out.push(Segment::Special(id));
+            i += len;
+            lit_start = i;
+        } else {
+            i += 1;
+        }
+    }
+    if lit_start < bytes.len() {
+        out.push(Segment::Literal(&text[lit_start..]));
+    }
+    out
+}
+
+/// Inverse of [`byte_decode_map`] — byte → char forward map used by BPE
+/// encode so space (`0x20`) becomes `Ġ` (U+0120) before merges run.
+fn byte_encode_map() -> &'static HashMap<u8, char> {
+    use std::sync::OnceLock;
+    static MAP: OnceLock<HashMap<u8, char>> = OnceLock::new();
+    MAP.get_or_init(|| {
+        byte_decode_map()
+            .iter()
+            .map(|(&c, &b)| (b, c))
+            .collect()
+    })
+}
+
+fn byte_decode_map() -> &'static HashMap<char, u8> {
+    use std::sync::OnceLock;
+    static MAP: OnceLock<HashMap<char, u8>> = OnceLock::new();
+    MAP.get_or_init(|| {
+        // Canonical printable set: 0x21..=0x7E, 0xA1..=0xAC, 0xAE..=0xFF.
+        let mut canonical: Vec<u8> = Vec::with_capacity(256);
+        for b in 0x21u8..=0x7E { canonical.push(b); }
+        for b in 0xA1u8..=0xAC { canonical.push(b); }
+        for b in 0xAEu8..=0xFF { canonical.push(b); }
+
+        // Forward map: byte → char. Canonical bytes map to themselves; other
+        // bytes get code points 0x100, 0x101, ... in ascending order.
+        let mut forward: Vec<(u8, char)> = canonical
+            .iter()
+            .map(|&b| (b, b as char))
+            .collect();
+        let mut next_cp: u32 = 0x100;
+        for b in 0u8..=255 {
+            if !canonical.contains(&b) {
+                let c = char::from_u32(next_cp).unwrap();
+                forward.push((b, c));
+                next_cp += 1;
+            }
+        }
+
+        // Reverse it: char → byte.
+        forward.into_iter().map(|(b, c)| (c, b)).collect()
+    })
+}
+
 fn decode_bpe_token(token: &str) -> String {
     // Handle byte tokens: <0xNN>
     if token.starts_with("<0x") && token.ends_with('>') && token.len() == 6 {
@@ -313,6 +498,50 @@ fn decode_bpe_token(token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn byte_level_map_covers_256_bytes_bijectively() {
+        let map = byte_decode_map();
+        assert_eq!(map.len(), 256, "byte decode map must cover 256 bytes");
+        let mut seen = vec![false; 256];
+        for &b in map.values() {
+            assert!(!seen[b as usize], "byte 0x{b:02X} appears twice");
+            seen[b as usize] = true;
+        }
+        // Key landmarks from GPT-2 / LLaMA-3 byte-level BPE:
+        assert_eq!(map.get(&'Ġ'), Some(&0x20), "Ġ → space (0x20)");
+        assert_eq!(map.get(&'Ċ'), Some(&0x0A), "Ċ → newline (0x0A)");
+        assert_eq!(map.get(&'ĉ'), Some(&0x09), "ĉ → tab (0x09)");
+        // Printable ASCII is identity.
+        assert_eq!(map.get(&'A'), Some(&0x41));
+        assert_eq!(map.get(&'z'), Some(&0x7A));
+        // Latin-1 printable passes through.
+        assert_eq!(map.get(&'¡'), Some(&0xA1));
+        assert_eq!(map.get(&'ÿ'), Some(&0xFF));
+    }
+
+    #[test]
+    fn gguf_bpe_decode_reverses_byte_level_tokens() {
+        // Build a minimal GGUF-style BPE tokenizer with a handful of tokens.
+        let tokens = vec![
+            "<|endoftext|>".to_string(), // id 0
+            "Ġhello".to_string(),         // id 1 → " hello"
+            "Ġworld".to_string(),         // id 2 → " world"
+            "!".to_string(),               // id 3
+            "Ċ".to_string(),               // id 4 → "\n"
+        ];
+        let mut token_to_id = HashMap::new();
+        for (i, t) in tokens.iter().enumerate() {
+            token_to_id.insert(t.clone(), i as u32);
+        }
+        let tok = Tokenizer::GgufBpe {
+            id_to_token: tokens,
+            token_to_id,
+            merges: vec![],
+        };
+        let decoded = tok.decode(&[1, 2, 3, 4]);
+        assert_eq!(decoded, " hello world!\n");
+    }
 
     #[test]
     fn test_char_level_roundtrip() {

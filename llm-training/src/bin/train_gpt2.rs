@@ -2,15 +2,26 @@
 //!
 //! End-to-end training of the AxonML `GPT2LMHead` on real text, with:
 //! - GPU acceleration (`--features cuda`)
-//! - Live browser training monitor
-//! - Periodic best-model + full-checkpoint saving
+//! - Live browser training monitor (always on)
+//! - Periodic best / latest / epoch / step checkpoint saving
 //! - Resume from latest / best / specific path
+//! - Graceful pause / resume / stop via `train_ctl` (Unix socket + signals)
 //! - In-flight text sampling to watch the model learn
+//!
+//! Golden-path reference for Phase 0 lifecycle controls (see
+//! `feedback_training_control.md`): every other `train_*` binary in this
+//! crate is retrofitted to match this pattern.
 //!
 //! Usage:
 //!   cargo run --release --bin train_gpt2 -p llm-training --features cuda
 //!   cargo run --release --bin train_gpt2 -p llm-training --features cuda -- \
 //!       --epochs 10 --bs 32 --seq-len 128 --resume latest
+//!
+//!   # In another terminal while training is running:
+//!   cargo run --release --bin train_ctl -- status
+//!   cargo run --release --bin train_ctl -- pause
+//!   cargo run --release --bin train_ctl -- resume
+//!   cargo run --release --bin train_ctl -- stop
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -19,12 +30,12 @@ use axonml_core::Device;
 use axonml_llm::{GPT2Config, GPT2LMHead};
 use axonml_nn::Module;
 use axonml_optim::{Adam, Optimizer};
-use axonml_serialize::{save_checkpoint, save_model, Checkpoint, StateDict, TrainingState};
+use axonml_serialize::TrainingState;
 use axonml_tensor::Tensor;
 
 use llm_training::{
     find_checkpoint, format_count, load_model_from_checkpoint, read_corpus, CharTokenizer,
-    ResumeMode, TextDataset,
+    LoopAction, ResumeMode, TextDataset, TrainingLifecycle,
 };
 
 // =============================================================================
@@ -44,6 +55,8 @@ const DEFAULT_STEPS_PER_EPOCH: usize = 500;
 const DEFAULT_LOG_EVERY: usize = 50;
 const DEFAULT_GENERATE_EVERY: usize = 100;
 const DEFAULT_SEED: u64 = 1337;
+const DEFAULT_CHECKPOINT_EVERY_STEPS: u64 = 0; // 0 = disabled; epoch checkpoint only
+const DEFAULT_KEEP_LAST_K: usize = 5;
 
 // =============================================================================
 // Config / CLI
@@ -64,6 +77,8 @@ struct Config {
     generate_every: usize,
     seed: u64,
     resume: ResumeMode,
+    checkpoint_every_steps: u64,
+    keep_last_k: usize,
 }
 
 impl Default for Config {
@@ -83,6 +98,8 @@ impl Default for Config {
             generate_every: DEFAULT_GENERATE_EVERY,
             seed: DEFAULT_SEED,
             resume: ResumeMode::Latest,
+            checkpoint_every_steps: DEFAULT_CHECKPOINT_EVERY_STEPS,
+            keep_last_k: DEFAULT_KEEP_LAST_K,
         }
     }
 }
@@ -109,6 +126,8 @@ impl Config {
                 "--seed" => { i += 1; cfg.seed = args[i].parse().unwrap(); }
                 "--resume" => { i += 1; cfg.resume = ResumeMode::from_str(&args[i]); }
                 "--fresh" => { cfg.resume = ResumeMode::None; }
+                "--checkpoint-every-steps" => { i += 1; cfg.checkpoint_every_steps = args[i].parse().unwrap(); }
+                "--keep-last-k" => { i += 1; cfg.keep_last_k = args[i].parse().unwrap(); }
                 "--help" | "-h" => { print_help(); std::process::exit(0); }
                 other => {
                     eprintln!("Unknown argument: {other}");
@@ -143,6 +162,8 @@ Options:
   --seed N          RNG seed (default: 1337)
   --resume MODE     Resume: none|latest|best|<path> (default: latest)
   --fresh           Equivalent to --resume none
+  --checkpoint-every-steps N   Rotating step-level checkpoint every N steps (0 = off)
+  --keep-last-k N   Keep last N step checkpoints on disk (default: 5)
   --help, -h        Show help"#);
 }
 
@@ -268,12 +289,16 @@ fn main() {
     // forward pass when `--features cuda` is enabled. The Trident paper's
     // training loop uses this same pattern.
 
-    // ---- Launch training monitor ----
-    let monitor = axonml::TrainingMonitor::new("GPT-2 (Shakespeare)", param_count)
+    // ---- Training lifecycle (monitor + signals + control socket) ----
+    let lifecycle = TrainingLifecycle::builder()
+        .model_name("GPT-2 (Shakespeare)")
+        .output_dir(&cfg.output_dir)
+        .param_count(param_count)
         .total_epochs(cfg.epochs)
         .batch_size(cfg.batch_size)
-        .launch();
-    println!("Monitor: http://127.0.0.1:{}", monitor.port());
+        .checkpoint_every_steps(cfg.checkpoint_every_steps)
+        .keep_last_k(cfg.keep_last_k)
+        .start();
     println!();
 
     // ---- Optimizer ----
@@ -293,7 +318,9 @@ fn main() {
     let global_start = Instant::now();
     let mut global_step = training_state.global_step;
 
-    for epoch in (start_epoch + 1)..=cfg.epochs {
+    let mut stopped_early = false;
+    'outer: for epoch in (start_epoch + 1)..=cfg.epochs {
+        lifecycle.set_epoch(epoch);
         model.train();
         let epoch_start = Instant::now();
         let mut running_loss = 0.0f32;
@@ -302,6 +329,19 @@ fn main() {
         let mut epoch_count = 0usize;
 
         for step in 1..=cfg.steps_per_epoch {
+            // Poll lifecycle: handle pause (blocks), stop, ad-hoc checkpoint.
+            match lifecycle.poll() {
+                LoopAction::Stop => {
+                    lifecycle.save_final(&model, &training_state, epoch);
+                    stopped_early = true;
+                    break 'outer;
+                }
+                LoopAction::CheckpointNow => {
+                    lifecycle.save_step(&model, &training_state, epoch);
+                }
+                LoopAction::Continue => {}
+            }
+
             // Sample batch
             let batch_data = dataset.sample_batch(cfg.batch_size, &mut rng);
 
@@ -332,6 +372,12 @@ fn main() {
             global_step += 1;
             training_state.next_step();
             training_state.record_loss(loss_val);
+            lifecycle.tick(global_step as u64, loss_val);
+
+            // Step-level rotating checkpoint (configurable via --checkpoint-every-steps).
+            if lifecycle.should_step_checkpoint(global_step as u64) {
+                lifecycle.save_step(&model, &training_state, epoch);
+            }
 
             if step % cfg.log_every == 0 {
                 let avg = running_loss / running_count as f32;
@@ -363,52 +409,18 @@ fn main() {
         let epoch_ppl = epoch_avg.exp().min(99999.0);
         let epoch_time = epoch_start.elapsed();
 
-        monitor.log_epoch(
-            epoch,
-            epoch_avg,
-            None,
-            vec![("perplexity", epoch_ppl)],
-        );
+        lifecycle.log_epoch(epoch, epoch_avg, None, vec![("perplexity", epoch_ppl)]);
 
-        // Save best
-        if epoch_avg < best_loss {
+        // Save best (writes both best_model.axonml and checkpoint_best.axonml).
+        let prev_best = best_loss;
+        if lifecycle.save_if_best(&model, &training_state, epoch, epoch_avg, prev_best) {
             best_loss = epoch_avg;
             training_state.update_best("loss", epoch_avg, false);
-            let best_path = cfg.output_dir.join("best_model.axonml");
-            if let Err(e) = save_model(&model, &best_path) {
-                eprintln!("  Error saving best model: {e}");
-            } else {
-                println!("  ★ new best loss {:.4} → {}", epoch_avg, best_path.display());
-            }
-            // Also save full best checkpoint so we can resume from it
-            let best_ckpt = cfg.output_dir.join("checkpoint_best.axonml");
-            let cp = Checkpoint::builder()
-                .model_state(StateDict::from_module(&model))
-                .training_state(training_state.clone())
-                .epoch(epoch)
-                .build();
-            save_checkpoint(&cp, &best_ckpt).ok();
+            println!("  ★ new best loss {:.4}", epoch_avg);
         }
 
-        // Always save latest (so --resume latest always works)
-        let latest_ckpt = cfg.output_dir.join("checkpoint_latest.axonml");
-        let cp = Checkpoint::builder()
-            .model_state(StateDict::from_module(&model))
-            .training_state(training_state.clone())
-            .epoch(epoch)
-            .build();
-        if let Err(e) = save_checkpoint(&cp, &latest_ckpt) {
-            eprintln!("  Error saving latest checkpoint: {e}");
-        }
-
-        // Periodic epoch checkpoint
-        let epoch_ckpt = cfg.output_dir.join(format!("checkpoint_epoch_{epoch:04}.axonml"));
-        let cp = Checkpoint::builder()
-            .model_state(StateDict::from_module(&model))
-            .training_state(training_state.clone())
-            .epoch(epoch)
-            .build();
-        save_checkpoint(&cp, &epoch_ckpt).ok();
+        // Save latest + numbered epoch checkpoints.
+        lifecycle.save_epoch(&model, &training_state, epoch);
 
         println!(
             "  epoch {} done in {:.1}s | loss {:.4} | ppl {:.2}",
@@ -420,7 +432,10 @@ fn main() {
         training_state.next_epoch();
     }
 
-    monitor.set_status("complete");
+    if stopped_early {
+        lifecycle.set_status("stopped");
+    }
+    lifecycle.finish();
     let total_time = global_start.elapsed();
 
     println!();

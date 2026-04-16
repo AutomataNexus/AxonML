@@ -104,6 +104,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "axonml-quant"
+version = "0.6.1"
+dependencies = [
+ "axonml-autograd",
+ "axonml-core",
+ "axonml-nn",
+ "axonml-tensor",
+ "bytemuck",
+ "half",
+ "rayon",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "axonml-serialize"
 version = "0.6.1"
 dependencies = [
@@ -120,6 +134,7 @@ name = "axonml-tensor"
 version = "0.6.1"
 dependencies = [
  "axonml-core",
+ "cudarc",
  "half",
  "num-traits",
  "rand 0.8.5",
@@ -1263,10 +1278,12 @@ dependencies = [
  "axonml-core",
  "axonml-llm",
  "axonml-nn",
+ "axonml-quant",
  "axonml-serialize",
  "axonml-tensor",
  "axum",
  "byteorder",
+ "cudarc",
  "futures",
  "memmap2",
  "rand 0.8.5",

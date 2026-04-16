@@ -5,8 +5,13 @@
 //! - [`TextDataset`] — sliding-window dataset for next-token prediction
 //! - [`lcg_range`] — simple seedable RNG for batch sampling (no external dep)
 //! - Checkpoint resume helpers that work with any AxonML `Module`
+//! - [`lifecycle`] — pause/resume/stop/checkpoint + always-on monitor (hard rule;
+//!   every training binary must adopt it — see `feedback_training_control.md`)
 //!
 //! Each LLM has its own binary under `src/bin/train_<name>.rs`.
+
+pub mod lifecycle;
+pub use lifecycle::{LoopAction, TrainingLifecycle, TrainingLifecycleBuilder};
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;

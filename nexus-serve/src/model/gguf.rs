@@ -118,6 +118,10 @@ pub enum GgmlType {
     F64 = 28,
     IQ1M = 29,
     BF16 = 30,
+    /// BitNet b1.58 ternary weights (Microsoft bitnet.cpp, dtype 36).
+    /// 256-element blocks × (f16 scale + 64 data bytes) = 66 bytes per block.
+    /// See `axonml_quant::bitnet` for the dequant + fused-matmul kernels.
+    I2S = 36,
     Unknown = 255,
 }
 
@@ -144,6 +148,7 @@ impl GgmlType {
             27 => Self::I64,
             28 => Self::F64,
             30 => Self::BF16,
+            36 => Self::I2S,
             _ => Self::Unknown,
         }
     }
@@ -166,6 +171,7 @@ impl GgmlType {
             Self::Q5K => 176,
             Self::Q6K => 210,
             Self::Q8K => 292,
+            Self::I2S => 32, // 128 × 2-bit trits, no per-block scale (one f32 per tensor at tail)
             Self::I8 => 1,
             Self::I16 => 2,
             Self::I32 => 4,
@@ -184,6 +190,7 @@ impl GgmlType {
             | Self::Q8_0 | Self::Q8_1 => 32,
             Self::Q2K | Self::Q3K | Self::Q4K | Self::Q5K
             | Self::Q6K | Self::Q8K => 256,
+            Self::I2S => 128,
             _ => 1,
         }
     }

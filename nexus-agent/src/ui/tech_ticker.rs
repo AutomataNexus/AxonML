@@ -29,11 +29,6 @@ const HEIGHT: f32 = 480.0;
 const TAILSCALE_POLL_SECS: u64 = 10;
 const RATE_LIMITS_POLL_SECS: u64 = 30;
 
-const SERVER_SSH: &str = "devops@100.67.227.31";
-const SERVER_HOST: &str = "100.67.227.31";
-const SERVER_USER: &str = "devops";
-const SERVER_RATE_LIMITS_PATH: &str = "/home/devops/.nexusoracle/rate_limits.json";
-const LOCAL_CACHE_COPY: &str = "/tmp/.tech-ticker-rate-limits.json";
 const MONITOR_CACHE_DIR: &str = "/var/lib/tailscale-monitor";
 const MONITOR_CACHE_DIR_ALT: &str = "/home/devops/.tailscale-monitor";
 const SRC_EXE: &str = "/opt/NexusOracle/apps/oracle-chat/src-tauri/target/x86_64-pc-windows-gnu/release/oracle-chat-tauri.exe";
@@ -65,7 +60,7 @@ const OWNER_API_KEY: &str = "qUUlVoumbb3xXQFqv3jNdr-8wAiDt_oT6IYiw6D6ogw";
 const TECHS: &[(&str, &str, &str)] = &[
     ("Nick",   "nick",     "getac"),
     ("Leon",   "leon-wsl", "ulvenr"),
-    ("John",   "john",     ""),
+    ("John",   "john",     "jdtur"),
     ("Keenan", "keenan",   ""),
     ("Denior", "denior",   ""),
 ];
@@ -395,7 +390,10 @@ impl TechApp {
         runtime.spawn(async move {
             loop {
                 refresh_tailscale(&s1).await;
-                refresh_update_pending(&s1).await;
+                // refresh_update_pending was the old /var/lib/tailscale-monitor
+                // cache reader — now stale-always since the server-side relay
+                // took over pushing. Relay's /push-state is authoritative for
+                // last_pushed_build_mtime, so we don't poll it here anymore.
                 tokio::time::sleep(std::time::Duration::from_secs(TAILSCALE_POLL_SECS)).await;
             }
         });
@@ -601,60 +599,38 @@ async fn refresh_tech_overrides(state: &Arc<Mutex<Shared>>) {
 }
 
 async fn refresh_rate_limits(state: &Arc<Mutex<Shared>>) {
-    // scp the JSON down (SSH key auth — same as used elsewhere in this
-    // workspace). Fallback: if scp fails, we leave the data stale but record
-    // the error for display.
-    let scp = tokio::process::Command::new("scp")
-        .args([
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "ConnectTimeout=10",
-            &format!("{SERVER_SSH}:{SERVER_RATE_LIMITS_PATH}"),
-            LOCAL_CACHE_COPY,
-        ])
-        .output()
-        .await;
+    // Fetch rate_limits.json + daemon config from the server-side relay's
+    // HTTP API. This replaces the old scp+ssh pair that was firing every 30s
+    // and drowning the auth log in login events.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
 
-    // Treat "file doesn't exist yet" as a clean zero-state, not an error —
-    // the daemon only writes rate_limits.json after the first rate-limited
-    // request, so an empty state is expected on a fresh install.
-    let scp_err = match scp {
-        Ok(o) if o.status.success() => None,
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            let first_line = stderr.lines().next().unwrap_or("scp failed").trim();
-            let missing = stderr.to_lowercase().contains("no such file")
-                || stderr.to_lowercase().contains("does not exist");
-            if missing {
-                None
-            } else {
-                Some(first_line.to_string())
-            }
-        }
-        Err(e) => Some(e.to_string()),
+    let (json_result, scp_err) = match client
+        .get(format!("{RELAY_URL}/rate_limits"))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => match r.text().await {
+            Ok(raw) => (
+                serde_json::from_str::<HashMap<String, Vec<String>>>(&raw).ok(),
+                None,
+            ),
+            Err(e) => (None, Some(format!("read body: {e}"))),
+        },
+        Ok(r) => (None, Some(format!("relay {}", r.status()))),
+        Err(e) => (None, Some(format!("relay unreachable: {e}"))),
     };
 
-    let json_result = std::fs::read_to_string(LOCAL_CACHE_COPY)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<HashMap<String, Vec<String>>>(&raw).ok());
-
-    // Also fetch daemon config for each tech's max/window, via ssh cat.
-    let cfg_out = tokio::process::Command::new("ssh")
-        .args([
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "ConnectTimeout=10",
-            SERVER_SSH,
-            "cat ~/.nexusoracle/config.toml",
-        ])
-        .output()
-        .await;
-    let cfg_text = cfg_out
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .unwrap_or_default();
+    let cfg_text = match client
+        .get(format!("{RELAY_URL}/daemon_config"))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
+        _ => String::new(),
+    };
     let overrides = parse_tech_overrides(&cfg_text);
 
     let Ok(mut s) = state.lock() else { return };
@@ -1031,7 +1007,6 @@ impl eframe::App for TechApp {
                 let is_disabled = disabled_techs.contains_key(&name.to_lowercase());
                 self.draw_tech_row(ui, name, wsl, t, is_disabled);
             }
-
             // Footer: legend
             ui.add_space(6.0);
             ui.horizontal(|ui| {
