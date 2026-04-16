@@ -109,3 +109,6 @@ oracleresponses.md
 
 # Papers / academic artifacts — tracked in /opt/Publications snapshots, not here
 papers/
+
+# Media artifacts (YouTube scripts, narration mp3s, etc.) — not project code
+media/
