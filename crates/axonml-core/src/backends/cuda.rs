@@ -2534,6 +2534,73 @@ impl CudaBackend {
         }
         Ok(())
     }
+
+    /// Fused flash-decode attention for inference: one CTA = one warp = one
+    /// attention head, online softmax over the KV cache. See
+    /// `attention.cu::fused_attn_decode_f32` for the algorithm.
+    ///
+    /// Shapes:
+    ///   `q`       : `[n_heads,    head_dim]` f32
+    ///   `k_cache` : `[kv_len, n_kv_heads, head_dim]` f32
+    ///   `v_cache` : `[kv_len, n_kv_heads, head_dim]` f32
+    ///   `out`     : `[n_heads,    head_dim]` f32
+    ///
+    /// `swa_window = 0` ⇒ full causal attention. Otherwise positions
+    /// `< kv_len - swa_window` are masked out.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fused_attn_decode_f32(
+        &self,
+        q: &CudaSlice<f32>,
+        k_cache: &CudaSlice<f32>,
+        v_cache: &CudaSlice<f32>,
+        out: &mut CudaSlice<f32>,
+        kv_len: usize,
+        n_heads: usize,
+        n_kv_heads: usize,
+        head_dim: usize,
+        swa_window: usize,
+        scale: f32,
+    ) -> Result<(), CudaError> {
+        debug_assert!(
+            head_dim <= 512,
+            "fused_attn_decode_f32: head_dim {head_dim} exceeds kernel MAX_DIMS budget"
+        );
+        debug_assert!(
+            n_kv_heads > 0 && n_heads % n_kv_heads == 0,
+            "fused_attn_decode_f32: n_heads ({n_heads}) must be a multiple of n_kv_heads ({n_kv_heads})"
+        );
+
+        let func = self
+            .kernels
+            .get("fused_attn_decode_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("fused_attn_decode_f32".to_string()))?;
+
+        // One warp per head. n_heads CTAs, 32 threads each.
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (n_heads as u32, 1, 1),
+            block_dim: (32, 1, 1),
+            shared_mem_bytes: 0,
+        };
+
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(q)
+                .arg(k_cache)
+                .arg(v_cache)
+                .arg(out)
+                .arg(&(kv_len as u32))
+                .arg(&(n_heads as u32))
+                .arg(&(n_kv_heads as u32))
+                .arg(&(head_dim as u32))
+                .arg(&(swa_window as u32))
+                .arg(&scale)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
 }
 
 // =============================================================================
