@@ -296,7 +296,7 @@ impl LlmBackend for AnthropicBackend {
         // config field if needed.
         let request = MessagesRequest {
             model,
-            max_tokens: 256,
+            max_tokens: 512,
             temperature,
             messages: wire_messages,
             system,
