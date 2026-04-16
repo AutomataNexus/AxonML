@@ -2535,6 +2535,58 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Fused flash-PREFILL attention: one CTA = one warp = one (query_row, head).
+    /// Single launch handles all query rows with causal masking.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fused_attn_prefill_f32(
+        &self,
+        q: &CudaSlice<f32>,
+        k_cache: &CudaSlice<f32>,
+        v_cache: &CudaSlice<f32>,
+        out: &mut CudaSlice<f32>,
+        seq_len: usize,
+        total_kv_len: usize,
+        n_heads: usize,
+        n_kv_heads: usize,
+        head_dim: usize,
+        pos_offset: usize,
+        swa_window: usize,
+        scale: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("fused_attn_prefill_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("fused_attn_prefill_f32".to_string()))?;
+
+        let total_ctas = seq_len * n_heads;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (total_ctas as u32, 1, 1),
+            block_dim: (32, 1, 1),
+            shared_mem_bytes: 0,
+        };
+
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(q)
+                .arg(k_cache)
+                .arg(v_cache)
+                .arg(out)
+                .arg(&(seq_len as u32))
+                .arg(&(total_kv_len as u32))
+                .arg(&(n_heads as u32))
+                .arg(&(n_kv_heads as u32))
+                .arg(&(head_dim as u32))
+                .arg(&(pos_offset as u32))
+                .arg(&(swa_window as u32))
+                .arg(&scale)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Fused flash-decode attention for inference: one CTA = one warp = one
     /// attention head, online softmax over the KV cache. See
     /// `attention.cu::fused_attn_decode_f32` for the algorithm.

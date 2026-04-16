@@ -251,6 +251,120 @@ extern "C" __global__ void fused_attn_decode_f32(
 }
 
 // =============================================================================
+// Fused Flash-Prefill Attention (batched causal, GQA-aware)
+// =============================================================================
+//
+// One CTA = one warp = one (query_row, head) pair. Same online-softmax
+// algorithm as fused_attn_decode_f32, but launches all rows in one go:
+//
+//   grid  = (seq_len * n_heads, 1, 1)
+//   block = (32,                1, 1)
+//
+// Causal masking: row i sees positions [window_start, pos_offset + i]
+// in the KV cache. `pos_offset` is the number of previously-cached
+// tokens (for incremental prefill); pass 0 for the first prefill call.
+//
+// Shapes:
+//   q       : [seq_len, n_heads,    head_dim]
+//   k_cache : [total_kv_len, n_kv_heads, head_dim]
+//   v_cache : [total_kv_len, n_kv_heads, head_dim]
+//   out     : [seq_len, n_heads,    head_dim]
+extern "C" __global__ void fused_attn_prefill_f32(
+    const float* __restrict__ q,
+    const float* __restrict__ k_cache,
+    const float* __restrict__ v_cache,
+    float* __restrict__       out,
+    unsigned int seq_len,
+    unsigned int total_kv_len,
+    unsigned int n_heads,
+    unsigned int n_kv_heads,
+    unsigned int head_dim,
+    unsigned int pos_offset,
+    unsigned int swa_window,  // 0 ⇒ full causal
+    float scale
+) {
+    const unsigned int cta_id = blockIdx.x;
+    const unsigned int lane   = threadIdx.x;
+    if (cta_id >= seq_len * n_heads) return;
+
+    const unsigned int row = cta_id / n_heads;   // query position index
+    const unsigned int h   = cta_id % n_heads;   // head index
+
+    const unsigned int gqa_ratio = n_heads / n_kv_heads;
+    const unsigned int kv_h      = h / gqa_ratio;
+    const unsigned int kv_dim    = n_kv_heads * head_dim;
+    const unsigned int q_stride  = n_heads * head_dim;
+
+    // Causal: this query row can see KV positions [window_start, causal_end).
+    unsigned int causal_end = pos_offset + row + 1;
+    if (causal_end > total_kv_len) causal_end = total_kv_len;
+    unsigned int window_start = (swa_window > 0u && causal_end > swa_window)
+        ? (causal_end - swa_window) : 0u;
+
+    constexpr int MAX_DIMS = 16;
+    const unsigned int DIMS = (head_dim + 31u) / 32u;
+    float q_reg[MAX_DIMS];
+    float o_reg[MAX_DIMS];
+    #pragma unroll
+    for (int d = 0; d < MAX_DIMS; ++d) {
+        if ((unsigned int)d < DIMS) {
+            unsigned int di = lane + (unsigned int)d * 32u;
+            q_reg[d] = (di < head_dim) ? q[row * q_stride + h * head_dim + di] : 0.0f;
+        } else {
+            q_reg[d] = 0.0f;
+        }
+        o_reg[d] = 0.0f;
+    }
+
+    float m = -FLT_MAX;
+    float l = 0.0f;
+
+    for (unsigned int t = window_start; t < causal_end; ++t) {
+        const float* k_row = k_cache + t * kv_dim + kv_h * head_dim;
+        float partial = 0.0f;
+        #pragma unroll
+        for (int d = 0; d < MAX_DIMS; ++d) {
+            if ((unsigned int)d < DIMS) {
+                unsigned int di = lane + (unsigned int)d * 32u;
+                if (di < head_dim) partial += q_reg[d] * k_row[di];
+            }
+        }
+        #pragma unroll
+        for (int off = 16; off > 0; off >>= 1) {
+            partial += __shfl_xor_sync(0xffffffffu, partial, off);
+        }
+        float s = partial * scale;
+
+        float m_new = fmaxf(m, s);
+        float alpha = expf(m - m_new);
+        float beta  = expf(s - m_new);
+
+        const float* v_row = v_cache + t * kv_dim + kv_h * head_dim;
+        #pragma unroll
+        for (int d = 0; d < MAX_DIMS; ++d) {
+            if ((unsigned int)d < DIMS) {
+                unsigned int di = lane + (unsigned int)d * 32u;
+                float vv = (di < head_dim) ? v_row[di] : 0.0f;
+                o_reg[d] = o_reg[d] * alpha + vv * beta;
+            }
+        }
+        l = l * alpha + beta;
+        m = m_new;
+    }
+
+    float inv_l = (l > 0.0f) ? (1.0f / l) : 0.0f;
+    #pragma unroll
+    for (int d = 0; d < MAX_DIMS; ++d) {
+        if ((unsigned int)d < DIMS) {
+            unsigned int di = lane + (unsigned int)d * 32u;
+            if (di < head_dim) {
+                out[row * q_stride + h * head_dim + di] = o_reg[d] * inv_l;
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Fused Attention Backward Kernel (recomputation-based, memory-efficient)
 // =============================================================================
 //

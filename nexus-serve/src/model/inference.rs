@@ -2025,41 +2025,35 @@ fn try_gpu_prefill_attn(
     swa_window: usize,
 ) -> Option<Vec<f32>> {
     let scale = 1.0f32 / (head_dim as f32).sqrt();
-    let q_stride = n_heads * head_dim;
-    let out_total = seq_len * q_stride;
+    let out_total = seq_len * n_heads * head_dim;
 
-    // Upload K/V cache once; Q rows are small enough to upload per-iteration.
+    let q_gpu = cuda.htod_copy(q).ok()?;
     let k_gpu = cuda.htod_copy(k_cache).ok()?;
     let v_gpu = cuda.htod_copy(v_cache).ok()?;
-    let mut out = vec![0.0f32; out_total];
+    let mut out_gpu = cuda.alloc_uninit::<f32>(out_total).ok()?;
 
-    for i in 0..seq_len {
-        let kv_len = pos_offset + i + 1;
-        let q_start = i * q_stride;
-        let q_row = &q[q_start..q_start + q_stride];
-
-        let q_gpu = cuda.htod_copy(q_row).ok()?;
-        let mut o_gpu = cuda.alloc_uninit::<f32>(q_stride).ok()?;
-
-        cuda.fused_attn_decode_f32(
-            &q_gpu,
-            &k_gpu,
-            &v_gpu,
-            &mut o_gpu,
-            kv_len,
-            n_heads,
-            n_kv_heads,
-            head_dim,
-            swa_window,
-            scale,
-        )
-        .ok()?;
-
-        let row_out = cuda.dtoh_copy(&o_gpu).ok()?;
-        out[q_start..q_start + q_stride].copy_from_slice(&row_out);
+    if let Err(e) = cuda.fused_attn_prefill_f32(
+        &q_gpu,
+        &k_gpu,
+        &v_gpu,
+        &mut out_gpu,
+        seq_len,
+        total_len,
+        n_heads,
+        n_kv_heads,
+        head_dim,
+        pos_offset,
+        swa_window,
+        scale,
+    ) {
+        eprintln!(
+            "[attn-prefill] GPU kernel failed (seq_len={seq_len} total_kv={total_len} \
+             n_heads={n_heads} n_kv_heads={n_kv_heads} hd={head_dim}): {e:?} — falling back to CPU"
+        );
+        return None;
     }
 
-    Some(out)
+    cuda.dtoh_copy(&out_gpu).ok()
 }
 
 fn single_query_attention(

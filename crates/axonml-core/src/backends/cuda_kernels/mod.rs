@@ -3738,6 +3738,7 @@ impl CudaKernels {
                 "fused_attention_fwd_f32",
                 "fused_attention_bwd_f32",
                 "fused_attn_decode_f32",
+                "fused_attn_prefill_f32",
             ],
         )?;
 
