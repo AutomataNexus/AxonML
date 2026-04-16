@@ -611,21 +611,31 @@ pub async fn download_version(
         .map_err(|e| AuthError::Internal(e.to_string()))?
         .ok_or(AuthError::Internal("Version not found".to_string()))?;
 
-    // Find the model file
-    let version_dir = state
-        .config
-        .models_dir()
-        .join(&id)
-        .join(format!("v{}", version));
+    // Find the model file. `validate_path_id` above rejects `..`, `/`, `\`,
+    // and null bytes in `id`, which blocks the textual path-traversal
+    // attack. Additionally canonicalize the composed path and require it to
+    // be under `models_dir` so a symlink inside `models_dir/<id>/` cannot
+    // escape the root at filesystem-resolution time either.
+    let models_root = state.config.models_dir();
+    let version_dir = models_root.join(&id).join(format!("v{}", version));
     let mut file_path: Option<PathBuf> = None;
 
     if version_dir.exists() {
-        for entry in std::fs::read_dir(&version_dir)
+        let canon_root = std::fs::canonicalize(&models_root)
+            .map_err(|e| AuthError::Internal(e.to_string()))?;
+        let canon_dir = std::fs::canonicalize(&version_dir)
+            .map_err(|e| AuthError::Internal(e.to_string()))?;
+        if !canon_dir.starts_with(&canon_root) {
+            return Err(AuthError::InvalidInput(
+                "version_dir escapes models root".to_string(),
+            ));
+        }
+        for entry in std::fs::read_dir(&canon_dir)
             .map_err(|e| AuthError::Internal(e.to_string()))?
             .flatten()
         {
             let path = entry.path();
-            if path.is_file() {
+            if path.is_file() && path.starts_with(&canon_root) {
                 file_path = Some(path);
                 break;
             }

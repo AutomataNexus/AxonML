@@ -213,15 +213,11 @@ pub fn execute_login(username: &str, key: &str) -> Result<(), String> {
         "✓".green(),
         kaggle_credentials_path()
     );
-    println!("  Username: {}", username);
-    println!(
-        "  Key: ****{}",
-        if key.len() > 4 {
-            &key[key.len() - 4..]
-        } else {
-            "****"
-        }
-    );
+    // Don't echo the username or any portion of the key back to stdout.
+    // Credentials just got written; the user already knows what they typed,
+    // and the log lines persist in shell history / CI output where they
+    // shouldn't. Run `axonml kaggle status` afterward to confirm.
+    let _ = key; // silence unused-var lint without echoing
 
     Ok(())
 }
