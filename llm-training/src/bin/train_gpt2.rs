@@ -8,9 +8,8 @@
 //! - Graceful pause / resume / stop via `train_ctl` (Unix socket + signals)
 //! - In-flight text sampling to watch the model learn
 //!
-//! Golden-path reference for Phase 0 lifecycle controls (see
-//! `feedback_training_control.md`): every other `train_*` binary in this
-//! crate is retrofitted to match this pattern.
+//! Golden-path reference for Phase 0 lifecycle controls: every other
+//! `train_*` binary in this crate is retrofitted to match this pattern.
 //!
 //! Usage:
 //!   cargo run --release --bin train_gpt2 -p llm-training --features cuda

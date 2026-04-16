@@ -1,8 +1,7 @@
 //! Training lifecycle controls — pause / resume / stop / checkpoint / monitor.
 //!
-//! Shared by every `train_*.rs` binary. Adopting this module is a hard rule
-//! (see `feedback_training_control.md` in the auto-memory): weeks-long runs
-//! must never lose progress to Ctrl+C or an orphaned shell.
+//! Shared by every `train_*.rs` binary. Adopting this module is a hard rule:
+//! weeks-long runs must never lose progress to Ctrl+C or an orphaned shell.
 //!
 //! # What it provides
 //!
@@ -329,7 +328,7 @@ impl TrainingLifecycleBuilder {
             eprintln!("[lifecycle] WARN: could not install signal handlers: {e}");
         }
 
-        // Monitor is always on — no opt-out flag. See feedback_monitor.md.
+        // Monitor is always on — no opt-out flag.
         let monitor = axonml::TrainingMonitor::new(&self.model_name, self.param_count)
             .total_epochs(self.total_epochs)
             .batch_size(self.batch_size)
