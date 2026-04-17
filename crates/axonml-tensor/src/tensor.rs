@@ -1068,6 +1068,115 @@ impl<T: Float> Tensor<T> {
         crate::ops::silu(self)
     }
 
+    /// RMSNorm with a per-element weight scale: `out = x * w / sqrt(mean(x²) + eps)`.
+    ///
+    /// Decode-step kernel — one CTA, suitable for single-token activations of
+    /// any hidden size up to ~16K. CPU fallback uses a serial reduction.
+    #[must_use]
+    pub fn rms_norm(&self, weight: &Self, eps: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).rms_norm_cuda(gpu_ref(weight), eps))
+            };
+        }
+        // CPU fallback — kept correct, not fast (decode-only paths use GPU).
+        let x = self.to_vec();
+        let w = weight.to_vec();
+        assert_eq!(x.len(), w.len(), "rms_norm: weight length must match input");
+        let n = x.len();
+        // x² accumulator in f64 to avoid catastrophic cancellation on large hiddens.
+        let mut sum_sq = 0.0f64;
+        for v in &x {
+            let f: f64 = v.to_f32().unwrap_or(0.0).into();
+            sum_sq += f * f;
+        }
+        let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+        let mut out: Vec<T> = Vec::with_capacity(n);
+        for i in 0..n {
+            let v = x[i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+            out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+        }
+        Self::from_vec(out, &self.shape).expect("rms_norm: build output tensor")
+    }
+
+    /// Rotary position embedding in the LLaMA / Qwen / Mistral split-halves
+    /// layout. Returns a new tensor with the rotation applied; original is
+    /// unchanged. Input is `[n_heads * head_dim]` (single-token, all heads
+    /// flattened).
+    #[must_use]
+    pub fn apply_rope_split_halves(
+        &self,
+        n_heads: usize,
+        head_dim: usize,
+        theta: f32,
+        pos: usize,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).rope_split_halves_cuda(n_heads, head_dim, theta, pos))
+            };
+        }
+        // CPU fallback.
+        let mut x = self.to_vec();
+        let half = head_dim / 2;
+        for h in 0..n_heads {
+            for d in 0..half {
+                let base = h * head_dim + d;
+                let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                let angle = pos as f32 * theta.powf(exponent);
+                let (s, c) = angle.sin_cos();
+                let a = x[base].to_f32().unwrap_or(0.0);
+                let b = x[base + half].to_f32().unwrap_or(0.0);
+                x[base] = num_traits::cast(c * a - s * b).unwrap_or_else(T::zero);
+                x[base + half] = num_traits::cast(s * a + c * b).unwrap_or_else(T::zero);
+            }
+        }
+        Self::from_vec(x, &self.shape).expect("apply_rope: build output tensor")
+    }
+
+    /// Fused SwiGLU: `out = SiLU(self) * up`. `self` is the gate.
+    #[must_use]
+    pub fn swiglu(&self, up: &Self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe { gpu_into(gpu_ref(self).swiglu_cuda(gpu_ref(up))) };
+        }
+        // CPU fallback: silu(gate) * up.
+        let g = self.to_vec();
+        let u = up.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(g.len());
+        for i in 0..g.len() {
+            let gi = g[i].to_f32().unwrap_or(0.0);
+            let silu = gi / (1.0 + (-gi).exp());
+            out.push(num_traits::cast(silu * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero));
+        }
+        Self::from_vec(out, &self.shape).expect("swiglu: build output tensor")
+    }
+
+    /// BitNet b1.58 fused gate: `out = ReLU(self)² * up`. `self` is the gate.
+    #[must_use]
+    pub fn relu2_gate(&self, up: &Self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe { gpu_into(gpu_ref(self).relu2_gate_cuda(gpu_ref(up))) };
+        }
+        // CPU fallback.
+        let g = self.to_vec();
+        let u = up.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(g.len());
+        for i in 0..g.len() {
+            let gi = g[i].to_f32().unwrap_or(0.0).max(0.0);
+            out.push(num_traits::cast(gi * gi * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero));
+        }
+        Self::from_vec(out, &self.shape).expect("relu2_gate: build output tensor")
+    }
+
     /// Softmax along specified dimension.
     #[must_use]
     pub fn softmax(&self, dim: i32) -> Self {
