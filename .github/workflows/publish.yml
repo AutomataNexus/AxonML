@@ -1,0 +1,211 @@
+name: Publish to crates.io
+
+# Publishes all 23 publishable workspace crates to crates.io in strict
+# topological dependency order, sleeping 10 minutes between each so every
+# upload is fully propagated through crates.io's sparse index before the
+# next crate references it. 23 crates × ~10 min = ~3.8h total wall time,
+# which fits inside the 6-hour GitHub Actions job limit.
+#
+# Trigger rules:
+#   * Tag push matching `v*.*.*` — runs automatically.
+#   * Pre-release tags (containing `-`, e.g. `v0.7.0-rc1`) — skipped;
+#     the Release workflow still builds binaries + SLSA for them.
+#   * `workflow_dispatch` — manual trigger, useful for re-running after
+#     a transient crates.io failure (resume-from argument lets you skip
+#     the crates that already landed).
+#
+# Required secret: CARGO_REGISTRY_TOKEN — generate at
+#   https://crates.io/settings/tokens (scope: publish-new + publish-update).
+#
+# If a single crate fails mid-run:
+#   1. Find the last successful crate in the job log.
+#   2. Re-run via `workflow_dispatch` with `resume_from=<next crate>`.
+#   3. Every crate before `resume_from` is skipped; the rest retry with
+#      full sleep spacing.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag to publish (e.g. v0.7.0)'
+        required: true
+      resume_from:
+        description: 'Crate name to resume from (optional — skips earlier crates in the order)'
+        required: false
+      dry_run:
+        description: 'Dry run (uses --dry-run, no uploads, no sleep)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Guard: skip pre-release tags and missing-secret runs up front so we don't
+  # eat a 4-hour slot before discovering we can't actually publish.
+  # ---------------------------------------------------------------------------
+  guard:
+    name: Eligibility check
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.decide.outputs.tag }}
+      version: ${{ steps.decide.outputs.version }}
+      should_publish: ${{ steps.decide.outputs.should_publish }}
+      resume_from: ${{ steps.decide.outputs.resume_from }}
+      dry_run: ${{ steps.decide.outputs.dry_run }}
+    steps:
+      - id: decide
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "resume_from=${{ github.event.inputs.resume_from }}" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${{ github.event.inputs.dry_run || 'false' }}" >> "$GITHUB_OUTPUT"
+
+          if [[ "$TAG" == *"-"* ]] && [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+            echo "::notice::Pre-release tag '$TAG' — skipping crates.io publish."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ] && [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN secret is not configured."
+            exit 1
+          fi
+
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Publish. Strict topological order; 10-min sleep between each crate to let
+  # the sparse index pick up the new version. `resume_from` lets manual re-runs
+  # skip crates already published.
+  #
+  # Order (computed from [dependencies] sections, dev-deps excluded):
+  #   Tier 0: axonml-core
+  #   Tier 1: axonml-tensor
+  #   Tier 2: axonml-autograd, axonml-data, axonml-fusion, axonml-jit,
+  #           axonml-profile
+  #   Tier 3: axonml-nn, axonml-audio
+  #   Tier 4: axonml-serialize, axonml-distributed, axonml-hvac, axonml-llm,
+  #           axonml-optim, axonml-quant, axonml-text
+  #   Tier 5: axonml-onnx, axonml-server, axonml-tui, axonml-vision
+  #   Tier 6: axonml-cli, axonml-train
+  #   Tier 7: axonml (umbrella)
+  # ---------------------------------------------------------------------------
+  publish:
+    name: cargo publish
+    needs: guard
+    if: needs.guard.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350  # safety cap under the 6h runner limit
+    permissions:
+      contents: read
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+          fetch-depth: 1
+
+      - name: Setup Rust (pinned via rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Verify workspace version matches tag
+        run: |
+          set -euo pipefail
+          WS_VERSION=$(awk -F'"' '/^version =/ {print $2; exit}' Cargo.toml)
+          TAG_VERSION="${{ needs.guard.outputs.version }}"
+          if [ "$WS_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Workspace version is '$WS_VERSION' but tag says '$TAG_VERSION'"
+            exit 1
+          fi
+          echo "Publishing axonml v$WS_VERSION"
+
+      - name: Publish in dependency order
+        env:
+          RESUME_FROM: ${{ needs.guard.outputs.resume_from }}
+          DRY_RUN: ${{ needs.guard.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          # 23 publishable crates in topological order. axonml-dashboard is
+          # publish=false (WASM/Leptos app, not a library) and is skipped.
+          CRATES=(
+            axonml-core
+            axonml-tensor
+            axonml-autograd
+            axonml-data
+            axonml-fusion
+            axonml-jit
+            axonml-profile
+            axonml-nn
+            axonml-audio
+            axonml-serialize
+            axonml-distributed
+            axonml-hvac
+            axonml-llm
+            axonml-optim
+            axonml-quant
+            axonml-text
+            axonml-onnx
+            axonml-server
+            axonml-tui
+            axonml-vision
+            axonml-cli
+            axonml-train
+            axonml
+          )
+
+          SLEEP_SECS=600  # 10 minutes between crates
+          TOTAL=${#CRATES[@]}
+          SKIP=1
+          if [ -z "$RESUME_FROM" ]; then SKIP=0; fi
+
+          for i in "${!CRATES[@]}"; do
+            crate="${CRATES[$i]}"
+            idx=$((i + 1))
+
+            if [ "$SKIP" = "1" ]; then
+              if [ "$crate" = "$RESUME_FROM" ]; then
+                SKIP=0
+              else
+                echo "::group::[$idx/$TOTAL] $crate — skipped (resume_from=$RESUME_FROM)"
+                echo "::endgroup::"
+                continue
+              fi
+            fi
+
+            echo "::group::[$idx/$TOTAL] Publishing $crate"
+
+            EXTRA_FLAGS=""
+            if [ "$DRY_RUN" = "true" ]; then
+              EXTRA_FLAGS="--dry-run --allow-dirty"
+              echo "  dry-run mode — no upload, no sleep"
+            fi
+
+            # --no-verify skips the local build-from-scratch cargo normally
+            # does before uploading; the workspace already compiled cleanly in
+            # the Release workflow and on CI for this exact commit, so the
+            # re-verify would just burn another 30-60 min per crate.
+            cargo publish -p "$crate" $EXTRA_FLAGS --no-verify
+
+            echo "::endgroup::"
+
+            if [ "$DRY_RUN" != "true" ] && [ "$idx" -lt "$TOTAL" ]; then
+              echo "Sleeping ${SLEEP_SECS}s before next crate (crates.io sparse-index propagation)..."
+              sleep "$SLEEP_SECS"
+            fi
+          done
+
+          echo "All $TOTAL crates processed."
