@@ -3584,6 +3584,15 @@ pub const Q4K_MATMUL_PTX: &str = include_str!("q4k_matmul.ptx");
 /// it off the CPU dequant path is the biggest single-matmul decode win.
 pub const Q6K_MATMUL_PTX: &str = include_str!("q6k_matmul.ptx");
 
+/// Transformer per-layer ops (rms_norm, RoPE split-halves, SwiGLU, ReLU²).
+///
+/// Compiled from `transformer_ops.cu`. These kernels collectively let the
+/// nexus-serve decode loop keep activations on GPU through the entire
+/// layer instead of round-tripping to CPU after every matmul. Used by
+/// `Tensor::rms_norm`, `Tensor::apply_rope_split_halves`, `Tensor::swiglu`,
+/// and `Tensor::relu2_gate`.
+pub const TRANSFORMER_OPS_PTX: &str = include_str!("transformer_ops.ptx");
+
 /// CUDA Kernel registry for managing loaded kernels
 #[cfg(feature = "cuda")]
 pub struct CudaKernels {
@@ -3767,6 +3776,14 @@ impl CudaKernels {
             "q6k_matmul",
             Q6K_MATMUL_PTX,
             &["q6k_gemv_f32", "q6k_gemm_f32"],
+        )?;
+
+        // Transformer per-layer ops — RMSNorm / RoPE / SwiGLU / ReLU² gate.
+        // Lets nexus-serve keep activations on GPU through the whole layer.
+        kernels.load_module(
+            "transformer_ops",
+            TRANSFORMER_OPS_PTX,
+            &["rms_norm_f32", "rope_split_halves_f32", "swiglu_f32", "relu2_gate_f32"],
         )?;
 
         Ok(kernels)

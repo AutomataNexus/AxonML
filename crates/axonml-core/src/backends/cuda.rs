@@ -2668,6 +2668,160 @@ impl CudaBackend {
 }
 
 // =============================================================================
+// Transformer Per-Layer Ops (rms_norm, RoPE, SwiGLU, ReLU² gate)
+//
+// Decode-step launchers for the kernels in `transformer_ops.cu`. Used by
+// `Tensor::rms_norm` / `apply_rope_split_halves` / `swiglu` / `relu2_gate`
+// to keep activations on GPU through the whole layer in nexus-serve.
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+impl CudaBackend {
+    /// RMSNorm with a per-element weight scale.
+    /// `out[i] = x[i] * weight[i] / sqrt(mean(x²) + eps)`.
+    ///
+    /// One CTA, 256 threads. Suitable for hidden sizes up to ~16 K (warp
+    /// reduction inside the kernel handles arbitrary `n`).
+    pub fn rms_norm_f32(
+        &self,
+        out: &mut CudaSlice<f32>,
+        x: &CudaSlice<f32>,
+        weight: &CudaSlice<f32>,
+        n: usize,
+        eps: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("rms_norm_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("rms_norm_f32".to_string()))?;
+        let block: u32 = 256;
+        let n_warps = (block + 31) / 32;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (1, 1, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: n_warps * 4, // one f32 per warp
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(out)
+                .arg(x)
+                .arg(weight)
+                .arg(&(n as u32))
+                .arg(&eps)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// RoPE in the LLaMA / Qwen / Mistral split-halves layout.
+    ///
+    /// Each query/key vector is laid out as `[head][dim]` and rotated by
+    /// pairing dimension `d` with `d + head_dim/2`. One thread per pair
+    /// per head. Operates in place on `x`.
+    pub fn rope_split_halves_f32(
+        &self,
+        x: &mut CudaSlice<f32>,
+        n_heads: usize,
+        head_dim: usize,
+        theta: f32,
+        pos: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(head_dim % 2 == 0, "head_dim must be even for split-halves RoPE");
+        let func = self
+            .kernels
+            .get("rope_split_halves_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("rope_split_halves_f32".to_string()))?;
+        let half = (head_dim / 2) as u32;
+        let block: u32 = half.min(128); // small enough to fit; pairs are independent
+        let grid_y = (half + block - 1) / block;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (n_heads as u32, grid_y, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(x)
+                .arg(&(n_heads as u32))
+                .arg(&(head_dim as u32))
+                .arg(&theta)
+                .arg(&(pos as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Fused SwiGLU FFN gate: `out[i] = SiLU(gate[i]) * up[i]`.
+    /// Eliminates the silu+mul kernel pair the unfused path runs.
+    pub fn swiglu_f32(
+        &self,
+        out: &mut CudaSlice<f32>,
+        gate: &CudaSlice<f32>,
+        up: &CudaSlice<f32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("swiglu_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("swiglu_f32".to_string()))?;
+        let block: u32 = 256;
+        let grid: u32 = ((n as u32) + block - 1) / block;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(out)
+                .arg(gate)
+                .arg(up)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// BitNet b1.58 fused gate: `out[i] = ReLU(gate[i])² * up[i]`.
+    pub fn relu2_gate_f32(
+        &self,
+        out: &mut CudaSlice<f32>,
+        gate: &CudaSlice<f32>,
+        up: &CudaSlice<f32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("relu2_gate_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("relu2_gate_f32".to_string()))?;
+        let block: u32 = 256;
+        let grid: u32 = ((n as u32) + block - 1) / block;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(out)
+                .arg(gate)
+                .arg(up)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+}
+
+// =============================================================================
 // Fused Attention Backward (recomputation-based, memory-efficient)
 // =============================================================================
 
