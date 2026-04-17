@@ -237,3 +237,195 @@ extern "C" __global__ void q4k_gemv_f32(
 
     if (lane == 0) c[j] = sum;
 }
+
+// ============================================================================
+// Q4_K GEMV (fused QKV): one kernel launch produces Q, K, V projections.
+//
+// Q, K, V all share the same activation input `a` ([1, in_dim]) but each has
+// its own Q4_K weight blob and output dimension. In the unfused path we
+// launch three separate `q4k_gemv_f32` kernels back-to-back. For GQA where
+// k_out = v_out << q_out (e.g. Qwen 7B has q_out=3584, k/v_out=512) the
+// smaller kernels still pay a full launch + sync overhead and actually
+// dominate their own runtime. Fusing collapses all three into a single grid.
+//
+// Layout in the global warp index space:
+//   warp_id ∈ [0, q_out)                            → Q output row
+//   warp_id ∈ [q_out, q_out + k_out)                → K output row (row = idx - q_out)
+//   warp_id ∈ [q_out + k_out, q_out + k_out + v_out) → V output row
+//
+// Block: 4 warps × 32 threads = 128 threads → 4 output rows per CTA.
+// Grid: ceil((q_out + k_out + v_out) / 4).
+extern "C" __global__ void q4k_gemv_fused_qkv_f32(
+    const unsigned char* __restrict__ q_w,
+    const unsigned char* __restrict__ k_w,
+    const unsigned char* __restrict__ v_w,
+    const float* __restrict__ a,
+    float* __restrict__ q_c,
+    float* __restrict__ k_c,
+    float* __restrict__ v_c,
+    unsigned int q_out,
+    unsigned int k_out,
+    unsigned int v_out,
+    unsigned int in_dim
+) {
+    const unsigned int tid     = threadIdx.x;
+    const unsigned int lane    = tid & 31u;
+    const unsigned int warp_id = tid >> 5;
+    const unsigned int global_warp = blockIdx.x * (blockDim.x >> 5) + warp_id;
+    const unsigned int total_out = q_out + k_out + v_out;
+    if (global_warp >= total_out) return;
+
+    // Dispatch to Q / K / V lane based on the global warp index.
+    const unsigned char* w;
+    float* c;
+    unsigned int j;
+    if (global_warp < q_out) {
+        w = q_w;
+        c = q_c;
+        j = global_warp;
+    } else if (global_warp < q_out + k_out) {
+        w = k_w;
+        c = k_c;
+        j = global_warp - q_out;
+    } else {
+        w = v_w;
+        c = v_c;
+        j = global_warp - q_out - k_out;
+    }
+
+    const unsigned int n_blocks = in_dim / 256;
+    const unsigned int row_bytes = n_blocks * 144;
+    const unsigned char* row = w + (size_t)j * row_bytes;
+
+    float sum = 0.0f;
+
+    for (unsigned int b = 0; b < n_blocks; ++b) {
+        const unsigned char* block = row + b * 144;
+
+        unsigned short d_bits    = (unsigned short)block[0] | ((unsigned short)block[1] << 8);
+        unsigned short dmin_bits = (unsigned short)block[2] | ((unsigned short)block[3] << 8);
+        float d    = f16_bits_to_f32(d_bits);
+        float dmin = f16_bits_to_f32(dmin_bits);
+
+        const unsigned char* scales = block + 4;
+        const unsigned char* qs     = block + 16;
+
+        #pragma unroll
+        for (int chunk = 0; chunk < 4; ++chunk) {
+            unsigned int is = (unsigned int)(chunk * 2);
+
+            unsigned char sc1, m1, sc2, m2;
+            get_scale_min_k4(is,     scales, &sc1, &m1);
+            get_scale_min_k4(is + 1, scales, &sc2, &m2);
+            float d1   = d    * (float)sc1;
+            float min1 = dmin * (float)m1;
+            float d2   = d    * (float)sc2;
+            float min2 = dmin * (float)m2;
+
+            unsigned int q_base = (unsigned int)chunk * 32u + lane;
+            unsigned int a_base = b * 256u + (unsigned int)chunk * 64u + lane;
+
+            unsigned int byte = qs[q_base];
+            float w_lo = d1 * (float)(byte & 0x0Fu) - min1;
+            float w_hi = d2 * (float)(byte >> 4)    - min2;
+
+            sum += a[a_base]      * w_lo;
+            sum += a[a_base + 32] * w_hi;
+        }
+    }
+
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1) {
+        sum += __shfl_xor_sync(0xffffffffu, sum, off);
+    }
+
+    if (lane == 0) c[j] = sum;
+}
+
+// ============================================================================
+// Q4_K GEMV (fused gate/up): one kernel launch produces gate and up
+// projections of the SwiGLU / ReLU² FFN. Same input, two different
+// weight matrices, same output dim (intermediate_size). Collapses the
+// gate and up kernel launches into a single grid.
+//
+// Layout in global warp index space:
+//   warp_id ∈ [0, inter)        → gate output row
+//   warp_id ∈ [inter, 2*inter)  → up   output row (row = idx - inter)
+// ============================================================================
+extern "C" __global__ void q4k_gemv_fused_gate_up_f32(
+    const unsigned char* __restrict__ gate_w,
+    const unsigned char* __restrict__ up_w,
+    const float* __restrict__ a,
+    float* __restrict__ gate_c,
+    float* __restrict__ up_c,
+    unsigned int inter,
+    unsigned int in_dim
+) {
+    const unsigned int tid     = threadIdx.x;
+    const unsigned int lane    = tid & 31u;
+    const unsigned int warp_id = tid >> 5;
+    const unsigned int global_warp = blockIdx.x * (blockDim.x >> 5) + warp_id;
+    const unsigned int total_out = inter + inter;
+    if (global_warp >= total_out) return;
+
+    const unsigned char* w;
+    float* c;
+    unsigned int j;
+    if (global_warp < inter) {
+        w = gate_w;
+        c = gate_c;
+        j = global_warp;
+    } else {
+        w = up_w;
+        c = up_c;
+        j = global_warp - inter;
+    }
+
+    const unsigned int n_blocks = in_dim / 256;
+    const unsigned int row_bytes = n_blocks * 144;
+    const unsigned char* row = w + (size_t)j * row_bytes;
+
+    float sum = 0.0f;
+
+    for (unsigned int b = 0; b < n_blocks; ++b) {
+        const unsigned char* block = row + b * 144;
+
+        unsigned short d_bits    = (unsigned short)block[0] | ((unsigned short)block[1] << 8);
+        unsigned short dmin_bits = (unsigned short)block[2] | ((unsigned short)block[3] << 8);
+        float d    = f16_bits_to_f32(d_bits);
+        float dmin = f16_bits_to_f32(dmin_bits);
+
+        const unsigned char* scales = block + 4;
+        const unsigned char* qs     = block + 16;
+
+        #pragma unroll
+        for (int chunk = 0; chunk < 4; ++chunk) {
+            unsigned int is = (unsigned int)(chunk * 2);
+
+            unsigned char sc1, m1, sc2, m2;
+            get_scale_min_k4(is,     scales, &sc1, &m1);
+            get_scale_min_k4(is + 1, scales, &sc2, &m2);
+            float d1   = d    * (float)sc1;
+            float min1 = dmin * (float)m1;
+            float d2   = d    * (float)sc2;
+            float min2 = dmin * (float)m2;
+
+            unsigned int q_base = (unsigned int)chunk * 32u + lane;
+            unsigned int a_base = b * 256u + (unsigned int)chunk * 64u + lane;
+
+            unsigned int byte = qs[q_base];
+            float w_lo = d1 * (float)(byte & 0x0Fu) - min1;
+            float w_hi = d2 * (float)(byte >> 4)    - min2;
+
+            sum += a[a_base]      * w_lo;
+            sum += a[a_base + 32] * w_hi;
+        }
+    }
+
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1) {
+        sum += __shfl_xor_sync(0xffffffffu, sum, off);
+    }
+
+    if (lane == 0) c[j] = sum;
+}

@@ -3768,7 +3768,12 @@ impl CudaKernels {
         kernels.load_module(
             "q4k_matmul",
             Q4K_MATMUL_PTX,
-            &["q4k_gemv_f32", "q4k_gemm_f32"],
+            &[
+                "q4k_gemv_f32",
+                "q4k_gemm_f32",
+                "q4k_gemv_fused_qkv_f32",
+                "q4k_gemv_fused_gate_up_f32",
+            ],
         )?;
 
         // Q6_K dequant-in-shader matmul — LM head + higher-precision weights.
