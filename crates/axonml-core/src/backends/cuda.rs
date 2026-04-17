@@ -870,6 +870,107 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Fused Q4_K GEMV for QKV projections — one kernel launch produces
+    /// Q, K, and V outputs from a shared input activation. Each weight
+    /// matrix has the same input dimension but its own output dimension.
+    /// Used by the nexus-serve decode path to collapse the three Q/K/V
+    /// kernel launches per layer into a single grid.
+    #[allow(clippy::too_many_arguments)]
+    pub fn q4k_gemv_fused_qkv_f32(
+        &self,
+        q_w: &CudaSlice<u8>,
+        k_w: &CudaSlice<u8>,
+        v_w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        q_c: &mut CudaSlice<f32>,
+        k_c: &mut CudaSlice<f32>,
+        v_c: &mut CudaSlice<f32>,
+        q_out: usize,
+        k_out: usize,
+        v_out: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "fused QKV GEMV requires in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q4k_gemv_fused_qkv_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q4k_gemv_fused_qkv_f32".to_string()))?;
+
+        const WARPS_PER_CTA: u32 = 4;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let total_out = (q_out + k_out + v_out) as u32;
+        let grid = (total_out + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(q_w)
+                .arg(k_w)
+                .arg(v_w)
+                .arg(a)
+                .arg(q_c)
+                .arg(k_c)
+                .arg(v_c)
+                .arg(&(q_out as u32))
+                .arg(&(k_out as u32))
+                .arg(&(v_out as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Fused Q4_K GEMV for SwiGLU / ReLU² gate+up projections — one kernel
+    /// launch produces both outputs from a shared input activation. Both
+    /// projections have the same `intermediate_size` output dimension.
+    pub fn q4k_gemv_fused_gate_up_f32(
+        &self,
+        gate_w: &CudaSlice<u8>,
+        up_w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        gate_c: &mut CudaSlice<f32>,
+        up_c: &mut CudaSlice<f32>,
+        inter: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "fused gate/up GEMV requires in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q4k_gemv_fused_gate_up_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q4k_gemv_fused_gate_up_f32".to_string()))?;
+
+        const WARPS_PER_CTA: u32 = 4;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let total_out = (inter * 2) as u32;
+        let grid = (total_out + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(gate_w)
+                .arg(up_w)
+                .arg(a)
+                .arg(gate_c)
+                .arg(up_c)
+                .arg(&(inter as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Q6_K GEMM: `c = a @ B^T` where B is stored on-device as Q6_K super-blocks.
     /// Mirrors the Q4_K GEMM launcher — see `q6k_matmul.cu`.
     pub fn q6k_gemm_f32(

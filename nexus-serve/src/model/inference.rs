@@ -1695,9 +1695,16 @@ impl InferenceEngine {
             // ----- Attention sub-layer ---------------------------------------
             let normed = x.rms_norm(&lc.attn_norm, eps);
 
-            let mut q = layer.q_weight.matmul(&normed);
-            let mut k = layer.k_weight.matmul(&normed);
-            let mut v = layer.v_weight.matmul(&normed);
+            let (mut q, mut k, mut v) = match crate::model::weight::fused_qkv_q4k_matmul_gpu(
+                &layer.q_weight, &layer.k_weight, &layer.v_weight, &normed,
+            ) {
+                Some(triple) => triple,
+                None => (
+                    layer.q_weight.matmul(&normed),
+                    layer.k_weight.matmul(&normed),
+                    layer.v_weight.matmul(&normed),
+                ),
+            };
 
             if let Some(b) = &lc.q_bias { q = q.add(b).expect("q bias add"); }
             if let Some(b) = &lc.k_bias { k = k.add(b).expect("k bias add"); }
@@ -1782,8 +1789,15 @@ impl InferenceEngine {
 
             // ----- FFN sub-layer ---------------------------------------------
             let normed2 = x.rms_norm(&lc.ffn_norm, eps);
-            let gate = layer.gate_weight.matmul(&normed2);
-            let up = layer.up_weight.matmul(&normed2);
+            let (gate, up) = match crate::model::weight::fused_gate_up_q4k_matmul_gpu(
+                &layer.gate_weight, &layer.up_weight, &normed2,
+            ) {
+                Some(pair) => pair,
+                None => (
+                    layer.gate_weight.matmul(&normed2),
+                    layer.up_weight.matmul(&normed2),
+                ),
+            };
 
             let mut ffn = if is_bitnet { gate.relu2_gate(&up) } else { gate.swiglu(&up) };
             if let Some(sub) = &lc.ffn_sub_norm {

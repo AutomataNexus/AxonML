@@ -661,3 +661,214 @@ fn dequantize_blocks_par(
             blocks += 0;
         });
 }
+
+// =============================================================================
+// Fused Q4_K GPU Matmuls for the Decode Path
+//
+// Collapses the Q/K/V (three) and gate/up (two) separate GEMV launches per
+// layer into single fused launches. Each reduces the kernel-launch overhead
+// that dominates at single-token decode, where the actual arithmetic per
+// output column is tiny compared to the launch + sync cost.
+//
+// Per token: saves (3 - 1) + (2 - 1) = 3 launches per layer × num_layers.
+// On Qwen-7B (28 layers) that's 84 fewer launches per decoded token.
+// =============================================================================
+
+/// One-shot diagnostic — prints the first time each fused dispatch succeeds.
+#[cfg(feature = "cuda")]
+static FUSED_QKV_FIRED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+#[cfg(feature = "cuda")]
+static FUSED_GATE_UP_FIRED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Fused Q4_K GEMV for Q/K/V projections. Returns `Some((q, k, v))` on the
+/// GPU fast path; returns `None` if any of the three weights isn't a
+/// GPU-compatible Q4_K `Quantized` variant, the input isn't on GPU, or the
+/// shapes don't fit the `in_dim % 256 == 0` kernel requirement — in which
+/// case the caller must fall back to three separate `Weight::matmul` calls.
+#[cfg(feature = "cuda")]
+pub fn fused_qkv_q4k_matmul_gpu(
+    q_weight: &Weight,
+    k_weight: &Weight,
+    v_weight: &Weight,
+    input: &Tensor<f32>,
+) -> Option<(Tensor<f32>, Tensor<f32>, Tensor<f32>)> {
+    use axonml_core::backends::cuda::get_cuda_backend;
+    use axonml_core::storage::Storage;
+
+    if !input.device().is_gpu() {
+        return None;
+    }
+    let cuda = get_cuda_backend()?;
+
+    // Unpack and validate all three weights.
+    let (q_data, q_dims) = q4k_quantized_bytes(q_weight)?;
+    let (k_data, k_dims) = q4k_quantized_bytes(k_weight)?;
+    let (v_data, v_dims) = q4k_quantized_bytes(v_weight)?;
+
+    // All three must share `in_dim`; outputs may differ (GQA makes K/V smaller).
+    let in_dim = q_dims[0];
+    if k_dims[0] != in_dim || v_dims[0] != in_dim || in_dim % 256 != 0 {
+        return None;
+    }
+    let q_out = q_dims[1];
+    let k_out = k_dims[1];
+    let v_out = v_dims[1];
+
+    let (q_gpu, k_gpu, v_gpu) = match (q_weight, k_weight, v_weight) {
+        (
+            Weight::Quantized { gpu_cache: qc, .. },
+            Weight::Quantized { gpu_cache: kc, .. },
+            Weight::Quantized { gpu_cache: vc, .. },
+        ) => {
+            let qg = qc.get_or_init(|| {
+                cuda.htod_copy(q_data.as_slice())
+                    .expect("fused QKV: q gpu_cache htod_copy failed")
+            });
+            let kg = kc.get_or_init(|| {
+                cuda.htod_copy(k_data.as_slice())
+                    .expect("fused QKV: k gpu_cache htod_copy failed")
+            });
+            let vg = vc.get_or_init(|| {
+                cuda.htod_copy(v_data.as_slice())
+                    .expect("fused QKV: v gpu_cache htod_copy failed")
+            });
+            (qg, kg, vg)
+        }
+        _ => return None,
+    };
+
+    // Read the input's GPU slice, allocate three output buffers, launch the
+    // fused kernel, wrap each output as a Tensor on the same GPU device.
+    use axonml_core::backends::cuda_pool::pool_alloc;
+    let in_guard = input.as_cuda_slice_read();
+    // Allocate through the pool so the bucket-rounded backing slice matches
+    // what later pool_alloc callers expect when they reuse these buckets.
+    // (Raw alloc_uninit produces an exact-size slice that, once pool_free'd,
+    // poisons the next_power_of_2 bucket with an undersized block, causing
+    // a length-mismatch panic in Storage::to_vec_f32 on subsequent reuse.)
+    let mut q_out_buf = pool_alloc(q_out).ok()?;
+    let mut k_out_buf = pool_alloc(k_out).ok()?;
+    let mut v_out_buf = pool_alloc(v_out).ok()?;
+
+    cuda.q4k_gemv_fused_qkv_f32(
+        q_gpu,
+        k_gpu,
+        v_gpu,
+        in_guard.slice(),
+        &mut q_out_buf,
+        &mut k_out_buf,
+        &mut v_out_buf,
+        q_out,
+        k_out,
+        v_out,
+        in_dim,
+    )
+    .ok()?;
+    drop(in_guard);
+
+    if !FUSED_QKV_FIRED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!(
+            "[W18-dispatch] fused Q4_K QKV kernel FIRED (first time) \
+             in={in_dim} q_out={q_out} k_out={k_out} v_out={v_out}"
+        );
+    }
+
+    let dev = input.device();
+    let q_t = Tensor::from_storage(Storage::from_cuda_slice(q_out_buf, q_out, dev.clone()), &[1, q_out]).ok()?;
+    let k_t = Tensor::from_storage(Storage::from_cuda_slice(k_out_buf, k_out, dev.clone()), &[1, k_out]).ok()?;
+    let v_t = Tensor::from_storage(Storage::from_cuda_slice(v_out_buf, v_out, dev), &[1, v_out]).ok()?;
+    Some((q_t, k_t, v_t))
+}
+
+/// Fused Q4_K GEMV for gate+up projections (SwiGLU / ReLU² FFN). Returns
+/// `Some((gate, up))` on the GPU fast path; returns `None` if either weight
+/// isn't a GPU-compatible Q4_K variant — caller falls back to two matmuls.
+#[cfg(feature = "cuda")]
+pub fn fused_gate_up_q4k_matmul_gpu(
+    gate_weight: &Weight,
+    up_weight: &Weight,
+    input: &Tensor<f32>,
+) -> Option<(Tensor<f32>, Tensor<f32>)> {
+    use axonml_core::backends::cuda::get_cuda_backend;
+    use axonml_core::storage::Storage;
+
+    if !input.device().is_gpu() {
+        return None;
+    }
+    let cuda = get_cuda_backend()?;
+
+    let (gate_data, gate_dims) = q4k_quantized_bytes(gate_weight)?;
+    let (up_data, up_dims) = q4k_quantized_bytes(up_weight)?;
+
+    let in_dim = gate_dims[0];
+    if up_dims[0] != in_dim
+        || gate_dims[1] != up_dims[1]
+        || in_dim % 256 != 0
+    {
+        return None;
+    }
+    let inter = gate_dims[1];
+
+    let (gate_gpu, up_gpu) = match (gate_weight, up_weight) {
+        (
+            Weight::Quantized { gpu_cache: gc, .. },
+            Weight::Quantized { gpu_cache: uc, .. },
+        ) => {
+            let gg = gc.get_or_init(|| {
+                cuda.htod_copy(gate_data.as_slice())
+                    .expect("fused gate/up: gate gpu_cache htod_copy failed")
+            });
+            let ug = uc.get_or_init(|| {
+                cuda.htod_copy(up_data.as_slice())
+                    .expect("fused gate/up: up gpu_cache htod_copy failed")
+            });
+            (gg, ug)
+        }
+        _ => return None,
+    };
+
+    use axonml_core::backends::cuda_pool::pool_alloc;
+    let in_guard = input.as_cuda_slice_read();
+    // Pool-allocated so the bucket-rounded slice matches later pool_alloc
+    // reuse — see note in fused_qkv_q4k_matmul_gpu.
+    let mut gate_out_buf = pool_alloc(inter).ok()?;
+    let mut up_out_buf = pool_alloc(inter).ok()?;
+
+    cuda.q4k_gemv_fused_gate_up_f32(
+        gate_gpu,
+        up_gpu,
+        in_guard.slice(),
+        &mut gate_out_buf,
+        &mut up_out_buf,
+        inter,
+        in_dim,
+    )
+    .ok()?;
+    drop(in_guard);
+
+    if !FUSED_GATE_UP_FIRED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!(
+            "[W18-dispatch] fused Q4_K gate/up kernel FIRED (first time) \
+             in={in_dim} inter={inter}"
+        );
+    }
+
+    let dev = input.device();
+    let gate_t = Tensor::from_storage(Storage::from_cuda_slice(gate_out_buf, inter, dev.clone()), &[1, inter]).ok()?;
+    let up_t = Tensor::from_storage(Storage::from_cuda_slice(up_out_buf, inter, dev), &[1, inter]).ok()?;
+    Some((gate_t, up_t))
+}
+
+/// Helper — extract the `(data bytes, dims)` from a `Weight::Quantized` if
+/// it's Q4_K. Returns `None` for every other variant / dtype.
+#[cfg(feature = "cuda")]
+fn q4k_quantized_bytes(w: &Weight) -> Option<(&Vec<u8>, &Vec<usize>)> {
+    match w {
+        Weight::Quantized { data, dims, dtype, .. } if *dtype == GgmlType::Q4K && dims.len() == 2 => {
+            Some((data, dims))
+        }
+        _ => None,
+    }
+}
