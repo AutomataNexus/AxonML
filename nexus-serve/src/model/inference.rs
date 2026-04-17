@@ -741,7 +741,94 @@ impl InferenceEngine {
     }
 }
 
+/// Per-layer GPU-resident KV buffers. Pre-allocated to `capacity` tokens
+/// at load time so decode steps only need a small H2D for the single new
+/// K/V row (n_kv_heads × head_dim f32s) rather than re-uploading the
+/// whole cache each step.
+///
+/// The buffers are overallocated (sized to the entire `capacity`) and the
+/// attention kernel bounds its iteration with `kv_len`, so the extra
+/// trailing space is never read. This avoids per-step reallocation and
+/// keeps pointer arithmetic simple.
+#[cfg(feature = "cuda")]
+pub struct GpuKvCache {
+    /// Per-layer K buffer, each [capacity * row_stride] f32s.
+    pub k: Vec<cudarc::driver::CudaSlice<f32>>,
+    /// Per-layer V buffer, same shape as K.
+    pub v: Vec<cudarc::driver::CudaSlice<f32>>,
+    /// Width of one token's K (or V) row: `n_kv_heads * head_dim`.
+    pub row_stride: usize,
+    /// Max tokens the buffer can hold before we fall back to host-only.
+    pub capacity: usize,
+}
+
+#[cfg(feature = "cuda")]
+impl GpuKvCache {
+    /// Allocate per-layer GPU K/V buffers. Returns `None` if allocation
+    /// fails for any layer (caller falls back to host-only KV cache).
+    pub fn try_new(
+        cuda: &axonml_core::backends::CudaBackend,
+        num_layers: usize,
+        n_kv_heads: usize,
+        head_dim: usize,
+        capacity: usize,
+    ) -> Option<Self> {
+        let row_stride = n_kv_heads * head_dim;
+        let per_layer = capacity * row_stride;
+        let mut k = Vec::with_capacity(num_layers);
+        let mut v = Vec::with_capacity(num_layers);
+        for _ in 0..num_layers {
+            k.push(cuda.alloc_uninit::<f32>(per_layer).ok()?);
+            v.push(cuda.alloc_uninit::<f32>(per_layer).ok()?);
+        }
+        Some(Self { k, v, row_stride, capacity })
+    }
+
+    /// Copy a single token's K and V row into position `pos` of the
+    /// given layer's GPU buffers. `k_row` and `v_row` must each be
+    /// exactly `row_stride` f32s on the host. Returns `false` if the
+    /// position exceeds pre-allocated capacity (caller must fall back).
+    pub fn append_row(
+        &mut self,
+        cuda: &axonml_core::backends::CudaBackend,
+        layer: usize,
+        pos: usize,
+        k_row: &[f32],
+        v_row: &[f32],
+    ) -> bool {
+        if pos >= self.capacity
+            || k_row.len() != self.row_stride
+            || v_row.len() != self.row_stride
+        {
+            return false;
+        }
+        let offset = pos * self.row_stride;
+        let end = offset + self.row_stride;
+        let k_ok = {
+            let mut view = self.k[layer].slice_mut(offset..end);
+            cuda.stream().memcpy_htod(k_row, &mut view).is_ok()
+        };
+        if !k_ok {
+            return false;
+        }
+        let v_ok = {
+            let mut view = self.v[layer].slice_mut(offset..end);
+            cuda.stream().memcpy_htod(v_row, &mut view).is_ok()
+        };
+        v_ok
+    }
+}
+
 /// KV cache for incremental decoding.
+///
+/// Holds two parallel representations: a host-resident `Vec<Vec<f32>>`
+/// (always maintained, used by the CPU attention fallback and still
+/// populated on CUDA builds for correctness/debuggability), and an
+/// optional GPU-resident [`GpuKvCache`] that the CUDA decode path reads
+/// from directly. When the GPU cache is present, the decode attention
+/// step skips the per-call htod_copy of the full K/V history — it just
+/// reads from the pre-allocated GPU buffers with only a single
+/// row-sized H2D per token (performed in [`GpuKvCache::append_row`]).
 pub struct KvCache {
     /// Per-layer key cache: Vec<f32> growing as [position, n_kv_heads * head_dim]
     pub k_cache: Vec<Vec<f32>>,
@@ -749,6 +836,11 @@ pub struct KvCache {
     pub v_cache: Vec<Vec<f32>>,
     /// Number of cached positions
     pub len: usize,
+    /// GPU-resident mirror of K/V, lazily allocated on the first forward
+    /// that has a CUDA backend available. None on CPU-only builds or if
+    /// allocation failed (we then fall back to re-uploading per step).
+    #[cfg(feature = "cuda")]
+    pub gpu: Option<GpuKvCache>,
 }
 
 impl KvCache {
@@ -757,6 +849,8 @@ impl KvCache {
             k_cache: (0..num_layers).map(|_| Vec::new()).collect(),
             v_cache: (0..num_layers).map(|_| Vec::new()).collect(),
             len: 0,
+            #[cfg(feature = "cuda")]
+            gpu: None,
         }
     }
 
@@ -768,6 +862,9 @@ impl KvCache {
             v.clear();
         }
         self.len = 0;
+        // Leave the GPU buffers allocated — they'll be overwritten on the
+        // next forward pass. Dropping + reallocating on every clear would
+        // defeat the whole point of pre-allocation.
     }
 }
 
@@ -1288,6 +1385,34 @@ impl InferenceEngine {
             kv_cache.k_cache[li].extend_from_slice(&k_data);
             kv_cache.v_cache[li].extend_from_slice(&v_data);
 
+            // Lazy-allocate the GPU-resident mirror on first layer of the
+            // first forward pass, and copy this token's new K/V row into
+            // it at position `pos`. Eliminates the per-call re-upload of
+            // the entire KV history that dominated decode latency.
+            #[cfg(feature = "cuda")]
+            let gpu_cache_ref = {
+                if kv_cache.gpu.is_none() {
+                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                        // Cap at 4096 tokens regardless of model's advertised
+                        // context_length — a 131072 Qwen context would need
+                        // 131072 × 4 × 128 × 4B × 28 layers × 2 ≈ 15 GB just
+                        // for KV, which is impractical. 4096 is comfortable
+                        // for agent use and fits alongside the model in 12 GB.
+                        let cap = self.config.max_seq_len.min(4096);
+                        kv_cache.gpu = GpuKvCache::try_new(cuda, self.layers.len(), n_kv_heads, head_dim, cap);
+                    }
+                }
+                let mut r: Option<(&GpuKvCache, usize)> = None;
+                if let Some(ref mut g) = kv_cache.gpu {
+                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                        if g.append_row(cuda, li, pos, &k_data, &v_data) {
+                            r = Some((&*g, li));
+                        }
+                    }
+                }
+                r
+            };
+
             // Attention: query [1] against all cached [pos+1] K/V. Dispatches
             // to the fused GPU flash-decode kernel when CUDA is available;
             // falls back to the CPU triple loop otherwise.
@@ -1295,6 +1420,8 @@ impl InferenceEngine {
             let attn_out = gpu_single_query_attention(
                 &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
                 total_len, n_heads, n_kv_heads, head_dim, 0,
+                #[cfg(feature = "cuda")]
+                gpu_cache_ref,
             );
             // BitNet b1.58 attn sub-norm (pre output projection).
             let attn_out = if let Some(ref sub) = layer.attn_sub_norm {
@@ -1631,6 +1758,27 @@ impl InferenceEngine {
             kv_cache.k_cache[li].extend_from_slice(&k_data);
             kv_cache.v_cache[li].extend_from_slice(&v_data);
 
+            // Mirror to the GPU-resident KV buffer (lazy-allocated on first
+            // layer). See forward_one for the full rationale.
+            #[cfg(feature = "cuda")]
+            let gpu_cache_ref = {
+                if kv_cache.gpu.is_none() {
+                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                        let cap = self.config.max_seq_len.min(4096);
+                        kv_cache.gpu = GpuKvCache::try_new(cuda, self.layers.len(), n_kv_heads, head_dim, cap);
+                    }
+                }
+                let mut r: Option<(&GpuKvCache, usize)> = None;
+                if let Some(ref mut g) = kv_cache.gpu {
+                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                        if g.append_row(cuda, li, pos, &k_data, &v_data) {
+                            r = Some((&*g, li));
+                        }
+                    }
+                }
+                r
+            };
+
             // Single-query attention (SWA or full). GPU-accelerated via
             // the fused flash-decode kernel when CUDA is available.
             let total_len = pos + 1;
@@ -1638,6 +1786,8 @@ impl InferenceEngine {
             let attn_out = gpu_single_query_attention(
                 &q_data, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
                 total_len, n_heads, n_kv_heads, head_dim, swa_window,
+                #[cfg(feature = "cuda")]
+                gpu_cache_ref,
             );
 
             // Output projection
@@ -1963,11 +2113,20 @@ fn apply_altup_to_hidden(
 /// `swa_window = 0` ⇒ full causal attention. Otherwise positions
 /// `< kv_len - swa_window` are masked out (sliding window).
 ///
-/// This is the decode hot path. We upload q, k_cache, v_cache to GPU,
-/// run `fused_attn_decode_f32` (warp-per-head flash-decode), and copy the
-/// `[n_heads, head_dim]` output back to the host. The KV cache lives on
-/// the host today; a follow-up will keep it resident on GPU and skip the
-/// per-call H2D copies.
+/// Two GPU paths:
+/// 1. **Resident-cache path** (when `gpu_cache` is `Some`): reads K and V
+///    straight from the pre-allocated GPU buffers. Only a single tiny
+///    H2D for `q` (a few KB) per call. This is the fast decode path.
+/// 2. **Re-upload path** (when `gpu_cache` is `None`): uploads q, k_cache,
+///    v_cache to GPU each call. Kept for CPU-only environments and as a
+///    safety fallback if GPU allocation failed at load time.
+///
+/// Both paths run the same `fused_attn_decode_f32` kernel and copy the
+/// `[n_heads, head_dim]` output back to the host. Keeping the result on
+/// GPU would require a larger refactor (all downstream ops would need
+/// GPU inputs); for now the D2H boundary stays at the attention output.
+#[cfg_attr(not(feature = "cuda"), allow(clippy::too_many_arguments))]
+#[cfg_attr(not(feature = "cuda"), allow(unused_variables))]
 fn gpu_single_query_attention(
     q: &[f32],
     k_cache: &[f32],
@@ -1977,11 +2136,21 @@ fn gpu_single_query_attention(
     n_kv_heads: usize,
     head_dim: usize,
     swa_window: usize,
+    #[cfg(feature = "cuda")] gpu_cache: Option<(&GpuKvCache, usize)>,
 ) -> Vec<f32> {
     #[cfg(feature = "cuda")]
     {
         if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
-            if let Some(out) = try_gpu_attn(
+            // Fast path: KV cache already resident on GPU.
+            if let Some((gpu, layer)) = gpu_cache {
+                if let Some(out) = try_gpu_attn_resident(
+                    cuda, q, gpu, layer, kv_len, n_heads, n_kv_heads, head_dim, swa_window,
+                ) {
+                    return out;
+                }
+            }
+            // Fallback: re-upload K/V per call.
+            if let Some(out) = try_gpu_attn_reupload(
                 cuda, q, k_cache, v_cache, kv_len, n_heads, n_kv_heads, head_dim, swa_window,
             ) {
                 return out;
@@ -1998,9 +2167,57 @@ fn gpu_single_query_attention(
     }
 }
 
+/// Resident-KV-cache GPU attention. Assumes the caller has already
+/// written the current token's K and V rows into `gpu[layer]` at
+/// position `kv_len - 1`, so we can pass the pre-allocated buffers
+/// directly to the kernel with no additional H2D for the cache.
 #[cfg(feature = "cuda")]
 #[allow(clippy::too_many_arguments)]
-fn try_gpu_attn(
+fn try_gpu_attn_resident(
+    cuda: &axonml_core::backends::CudaBackend,
+    q: &[f32],
+    gpu: &GpuKvCache,
+    layer: usize,
+    kv_len: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    swa_window: usize,
+) -> Option<Vec<f32>> {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        eprintln!(
+            "[W18-dispatch] resident KV cache attn FIRED (first time, row_stride={} capacity={})",
+            gpu.row_stride, gpu.capacity
+        );
+    });
+    let scale = 1.0f32 / (head_dim as f32).sqrt();
+    let out_len = n_heads * head_dim;
+    let q_gpu = cuda.htod_copy(q).ok()?;
+    let mut out_gpu = cuda.alloc_uninit::<f32>(out_len).ok()?;
+    cuda.fused_attn_decode_f32(
+        &q_gpu,
+        &gpu.k[layer],
+        &gpu.v[layer],
+        &mut out_gpu,
+        kv_len,
+        n_heads,
+        n_kv_heads,
+        head_dim,
+        swa_window,
+        scale,
+    )
+    .ok()?;
+    cuda.dtoh_copy(&out_gpu).ok()
+}
+
+/// Fallback GPU attention that re-uploads the full K/V cache each call.
+/// Used when no GPU-resident cache is available (allocation failed, or
+/// the caller didn't wire one up). Strictly slower than the resident
+/// path; kept for correctness.
+#[cfg(feature = "cuda")]
+#[allow(clippy::too_many_arguments)]
+fn try_gpu_attn_reupload(
     cuda: &axonml_core::backends::CudaBackend,
     q: &[f32],
     k_cache: &[f32],
