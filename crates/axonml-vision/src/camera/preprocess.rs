@@ -1,13 +1,22 @@
 //! Frame Preprocessing — Color Conversion, Resize, Normalize
 //!
+//! Frame preprocessing utilities for the camera pipeline. `yuyv_to_rgb()` converts
+//! YUYV 4:2:2 packed format to RGB using BT.601 coefficients. `frame_to_rgb()`
+//! dispatches format conversion based on `PixelFormat` (RGB passthrough, YUYV
+//! decode, grayscale replication, MJPEG stub). `resize_bilinear()` performs
+//! bilinear interpolation on raw RGB bytes. `normalize_imagenet()` converts HWC
+//! u8 to NCHW f32 Variable with per-channel normalization. `preprocess_frame()`
+//! chains format conversion, resize, and ImageNet normalization end-to-end.
+//!
 //! # File
 //! `crates/axonml-vision/src/camera/preprocess.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

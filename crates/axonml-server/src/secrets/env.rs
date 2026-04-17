@@ -1,13 +1,21 @@
-//! Environment variable backend for secrets management.
+//! Environment Backend — Secrets from Environment Variables
+//!
+//! Implements the `SecretsBackend` trait via `EnvBackend`, which reads secrets
+//! from environment variables with a configurable prefix (default `AXONML_`).
+//! Maps well-known `SecretKey` constants (JWT_SECRET, DB_USERNAME, DB_PASSWORD,
+//! RESEND_API_KEY) to their corresponding env var names, and falls back to
+//! uppercased key conversion for unknown keys. Empty values are treated as
+//! missing; invalid UTF-8 is logged and ignored.
 //!
 //! # File
 //! `crates/axonml-server/src/secrets/env.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -62,6 +70,10 @@ impl Default for EnvBackend {
         Self::new("AXONML")
     }
 }
+
+// =============================================================================
+// SecretsBackend Implementation
+// =============================================================================
 
 #[async_trait::async_trait]
 impl SecretsBackend for EnvBackend {

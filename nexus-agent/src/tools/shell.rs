@@ -1,4 +1,28 @@
-//! Shell command execution tool.
+//! Shell Tool — Bash Command Execution with Timeout
+//!
+//! Single-tool module providing `ShellTool` (name `shell`). Accepts a
+//! `command` string, an optional `working_dir`, and a `timeout_secs` (default
+//! 30). Internally spawns `bash -c <command>` via tokio, applies the timeout
+//! via `tokio::time::timeout`, and returns a formatted result containing the
+//! exit code plus stdout and stderr sections.
+//!
+//! Used by all agents for cargo builds, tests, system checks, and process
+//! management.
+//!
+//! # File
+//! `nexus-agent/src/tools/shell.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -6,7 +30,15 @@ use serde_json::json;
 
 use crate::Tool;
 
+// =============================================================================
+// ShellTool
+// =============================================================================
+
 pub struct ShellTool;
+
+// -----------------------------------------------------------------------------
+// Input Types
+// -----------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 struct ShellArgs {
@@ -20,6 +52,10 @@ struct ShellArgs {
 fn default_timeout() -> u64 {
     30
 }
+
+// -----------------------------------------------------------------------------
+// Tool Implementation
+// -----------------------------------------------------------------------------
 
 #[async_trait]
 impl Tool for ShellTool {

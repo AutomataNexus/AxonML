@@ -1,13 +1,23 @@
-//! CIFAR Datasets - Object Recognition
+//! CIFAR Datasets — CIFAR-10/100 Object Recognition
+//!
+//! Loaders and synthetic generators for CIFAR-10 and CIFAR-100. `CIFAR10`
+//! reads binary batch files (data_batch_N.bin / test_batch.bin), returning
+//! 3x32x32 f32 tensors with one-hot labels over 10 classes. `CIFAR100` parses
+//! the two-label format (coarse + fine) from train.bin/test.bin, supporting
+//! 100 fine classes and 20 coarse superclasses via `get_with_coarse()`.
+//! `SyntheticCIFAR` generates deterministic color-patterned 3x32x32 images
+//! with class-specific base colors and pseudo-random noise for testing without
+//! disk I/O. All implement `Dataset<Item = (Tensor<f32>, Tensor<f32>)>`.
 //!
 //! # File
 //! `crates/axonml-vision/src/datasets/cifar.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

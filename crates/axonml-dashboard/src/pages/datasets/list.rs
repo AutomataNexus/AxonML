@@ -1,18 +1,36 @@
-//! Datasets List Page
+//! Datasets List Page — Searchable Grid Of Uploaded Datasets
+//!
+//! Primary management view for user-uploaded datasets. `DatasetsListPage`
+//! loads `Vec<Dataset>` from `api::datasets::list`, filters it against a
+//! case-insensitive search signal (matching against `name`, `dataset_type`,
+//! and optional `description`), and renders the result as a grid of
+//! `DatasetCard` tiles or an empty-state prompt linking to `/datasets/upload`.
+//! A refresh button re-fetches the list; per-card delete flows surface a
+//! shared `ConfirmDialog` modal that calls `api::datasets::delete` and
+//! toasts success/failure through `use_app_state`. `DatasetCard` displays the
+//! dataset name, type badge, optional description, sample/feature/size stats,
+//! and `created_at` date, with a dropdown "Delete" action wired via a
+//! `Callback<()>`. A local `format_file_size` helper renders byte counts as
+//! B/KB/MB/GB.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/datasets/list.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,11 +40,18 @@ use crate::components::{icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// Datasets List Page
+// =============================================================================
+
 /// Datasets list page
 #[component]
 pub fn DatasetsListPage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (datasets, set_datasets) = create_signal::<Vec<Dataset>>(Vec::new());
     let (search, set_search) = create_signal(String::new());
@@ -37,6 +62,9 @@ pub fn DatasetsListPage() -> impl IntoView {
     let state_for_refresh = state.clone();
     let state_for_delete = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Data Fetch
+    // -------------------------------------------------------------------------
     // Initial fetch
     create_effect(move |_| {
         let state = state_for_effect.clone();
@@ -54,6 +82,9 @@ pub fn DatasetsListPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Derived / Filtered View
+    // -------------------------------------------------------------------------
     // Filtered datasets
     let filtered_datasets = move || {
         let search_term = search.get().to_lowercase();
@@ -72,6 +103,9 @@ pub fn DatasetsListPage() -> impl IntoView {
             .collect::<Vec<_>>()
     };
 
+    // -------------------------------------------------------------------------
+    // Event Handlers
+    // -------------------------------------------------------------------------
     // Refresh handler
     let on_refresh = move |_| {
         let state = state_for_refresh.clone();
@@ -112,6 +146,9 @@ pub fn DatasetsListPage() -> impl IntoView {
         set_dataset_to_delete.set(None);
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page datasets-list-page">
             <div class="page-header">
@@ -197,6 +234,10 @@ pub fn DatasetsListPage() -> impl IntoView {
     }
 }
 
+// =============================================================================
+// Dataset Card
+// =============================================================================
+
 /// Dataset card component
 #[component]
 fn DatasetCard(dataset: Dataset, #[prop(into)] on_delete: Callback<()>) -> impl IntoView {
@@ -265,6 +306,10 @@ fn DatasetCard(dataset: Dataset, #[prop(into)] on_delete: Callback<()>) -> impl 
         </div>
     }
 }
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
 
 fn format_file_size(bytes: u64) -> String {
     const KB: u64 = 1024;

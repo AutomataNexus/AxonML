@@ -1,13 +1,20 @@
-//! Nexus Detector — Predictive Dual-Pathway Object Detection
+//! Nexus Detector — Predictive Dual-Pathway Object Detection Pipeline
+//!
+//! Implements `Nexus`, the complete detection pipeline combining `DualPathBackbone`,
+//! `MultiScalePredictiveCoding`, `MultiScaleFusion`, detection heads, and
+//! `ObjectMemoryBank`. Provides `forward_train()` for raw per-scale outputs,
+//! `forward_detect()` with NMS for inference, and `process_frame()` for
+//! temporal processing with memory bank updates and predictive coding.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/nexus/detector.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

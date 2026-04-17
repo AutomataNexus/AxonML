@@ -1,18 +1,37 @@
-//! Notebook Import Page
+//! Notebook Import Page — Upload and Convert .ipynb Files
+//!
+//! Leptos page component `NotebookImportPage` that accepts a Jupyter
+//! `.ipynb` file from the user and imports it as a `TrainingNotebook`.
+//! Uses `gloo_file::callbacks::read_as_text` to read the selected file
+//! into memory (holding the `FileReader` alive in an `Rc<RefCell<_>>`
+//! so the async callback can fire), validates the `.ipynb` extension,
+//! and on import submits the raw JSON to `api::notebooks::import_notebook`
+//! with format tag `"ipynb"`. On success the user is navigated to the
+//! newly-created notebook's editor at `/training/notebooks/{id}`.
+//!
+//! The view includes a file drop zone, a selected-file status card with
+//! "Reading file..." / "Ready to import" indicator, inline error alert,
+//! and an informational panel listing supported features (code cells,
+//! markdown cells, cell outputs, notebook metadata/kernel info).
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/training/notebook_import.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use gloo_file::callbacks::FileReader;
 use leptos::*;
@@ -24,9 +43,16 @@ use crate::api;
 use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 
+// =============================================================================
+// NotebookImportPage Component
+// =============================================================================
+
 /// Notebook import page
 #[component]
 pub fn NotebookImportPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Signals and State
+    // -------------------------------------------------------------------------
     let state = use_app_state();
     let navigate = use_navigate();
 
@@ -38,6 +64,9 @@ pub fn NotebookImportPage() -> impl IntoView {
     // Store the file reader to keep it alive
     let reader_ref: Rc<RefCell<Option<FileReader>>> = Rc::new(RefCell::new(None));
 
+    // -------------------------------------------------------------------------
+    // Event Handlers
+    // -------------------------------------------------------------------------
     let on_file_select = {
         let reader_ref = reader_ref.clone();
         move |ev: web_sys::Event| {
@@ -104,6 +133,9 @@ pub fn NotebookImportPage() -> impl IntoView {
         }
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page notebook-import-page">
             <div class="page-header">

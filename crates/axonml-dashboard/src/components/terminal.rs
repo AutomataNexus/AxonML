@@ -1,18 +1,48 @@
-//! Terminal Component
+//! Terminal Panel — WebSocket-Backed Shell Embedded in the Dashboard
+//!
+//! A collapsible terminal widget that proxies a shell over a WebSocket
+//! (`/api/terminal?token=...`) so an authenticated user can run commands
+//! without leaving the dashboard.
+//!
+//! `TerminalState` (`Closed`/`Open`/`Minimized`) drives the panel's
+//! visual mode. `Terminal` owns four signals: `terminal_state`,
+//! `connected` (live socket indicator), `output` (accumulated lines
+//! joined into a `<pre>`), and `input` (current command buffer). The
+//! actual `WebSocket` is held in a `StoredValue<Option<WebSocket>>`.
+//!
+//! `connect` picks `ws`/`wss` from `location.protocol`, targets
+//! `localhost:3021` when the page is served from the known dev ports
+//! (8083/8081), otherwise reuses the current host, and opens the
+//! socket with the current access token as a query parameter. It wires
+//! `onopen`/`onmessage`/`onclose`/`onerror` closures via `wasm_bindgen`
+//! and `.forget()` to persist them. `disconnect` closes the socket.
+//! `send_input` pushes the input plus `\n` on Enter; Ctrl+C sends
+//! `\\x03` to the remote shell.
+//!
+//! `toggle` is the floating button action (connect on first click,
+//! minimize/restore thereafter); `minimize` and `close` are the header
+//! controls (close also clears output). The rendered panel has a header
+//! with a connection badge, an output `<pre>`, and a disabled-when-
+//! disconnected input row with a `$ ` prompt.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/terminal.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use wasm_bindgen::JsCast;
@@ -21,11 +51,19 @@ use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 
 use crate::state::use_app_state;
 
+// =============================================================================
+// JS Interop
+// =============================================================================
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
     fn log(s: &str);
 }
+
+// =============================================================================
+// TerminalState
+// =============================================================================
 
 /// Terminal panel state
 #[derive(Clone, Copy, PartialEq)]
@@ -34,6 +72,10 @@ pub enum TerminalState {
     Open,
     Minimized,
 }
+
+// =============================================================================
+// Terminal Component
+// =============================================================================
 
 /// Terminal component
 #[component]
@@ -44,6 +86,10 @@ pub fn Terminal() -> impl IntoView {
     let (output, set_output) = create_signal(Vec::<String>::new());
     let (input, set_input) = create_signal(String::new());
     let ws: StoredValue<Option<WebSocket>> = store_value(None);
+
+    // -------------------------------------------------------------------------
+    // WebSocket Lifecycle
+    // -------------------------------------------------------------------------
 
     // Connect to terminal WebSocket
     let connect = move |_| {
@@ -133,6 +179,10 @@ pub fn Terminal() -> impl IntoView {
         set_connected.set(false);
     };
 
+    // -------------------------------------------------------------------------
+    // Input & Keyboard
+    // -------------------------------------------------------------------------
+
     // Send input
     let send_input = move |_| {
         let text = input.get();
@@ -160,6 +210,10 @@ pub fn Terminal() -> impl IntoView {
         }
     };
 
+    // -------------------------------------------------------------------------
+    // Panel State Handlers
+    // -------------------------------------------------------------------------
+
     // Toggle terminal (for main button)
     let toggle = move |_| match terminal_state.get() {
         TerminalState::Closed => {
@@ -184,6 +238,10 @@ pub fn Terminal() -> impl IntoView {
         set_terminal_state.set(TerminalState::Closed);
         set_output.set(Vec::new());
     };
+
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
 
     view! {
         // Terminal toggle button (always visible)

@@ -1,14 +1,40 @@
-//! Tailscale network monitoring tool.
+//! Tailscale Tools — Network Status and Ping
 //!
-//! Queries `tailscale status` for device list, online/offline state,
-//! IP addresses, and OS info. Used by the fieldtech agent for monitoring
-//! HVAC controllers and tech laptops on the Tailscale mesh.
+//! Two tools for the fieldtech agent's HVAC controller / tech laptop
+//! monitoring on the Tailscale mesh:
+//!
+//! * `TailscaleStatusTool` (tailscale_status) runs `tailscale status --json`
+//!   and formats Self + Peer entries into aligned
+//!   `HOSTNAME / IP / STATUS / OS` rows, falling back to plain
+//!   `tailscale status` text if the JSON path fails. Supports an optional
+//!   `filter` substring that matches against hostnames case-insensitively.
+//! * `TailscalePingTool` (tailscale_ping) runs `tailscale ping --c=3 <host>`
+//!   with a 10-second tokio timeout for reachability and latency.
+//!
+//! # File
+//! `nexus-agent/src/tools/tailscale.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::Tool;
+
+// =============================================================================
+// TailscaleStatusTool
+// =============================================================================
 
 pub struct TailscaleStatusTool;
 
@@ -115,6 +141,10 @@ impl Tool for TailscaleStatusTool {
         }
     }
 }
+
+// =============================================================================
+// TailscalePingTool
+// =============================================================================
 
 pub struct TailscalePingTool;
 

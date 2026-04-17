@@ -1,13 +1,22 @@
 //! Aegis3D — Octree-Adaptive Neural Implicit Surface Reconstruction
 //!
+//! End-to-end 3D reconstruction pipeline combining monocular depth estimation,
+//! adaptive octree spatial indexing, per-node neural implicit SDF networks, and
+//! sphere-tracing differentiable rendering. `Aegis3DConfig` controls scene bounds,
+//! octree depth, SDF hidden dimensions, Fourier frequency count, and loss weights
+//! (eikonal + smoothness). `Aegis3D` orchestrates multi-view depth back-projection,
+//! octree initialization, SDF optimization with depth/eikonal losses, and mesh
+//! extraction via marching cubes at configurable LOD levels.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/aegis3d/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -27,7 +36,7 @@ pub use renderer::{Camera, DifferentiableRenderer, RayHit, RenderOutput, SphereT
 use axonml_nn::Parameter;
 
 // =============================================================================
-// Aegis3D Pipeline
+// Configuration
 // =============================================================================
 
 /// Configuration for Aegis3D reconstruction.
@@ -69,6 +78,10 @@ impl Default for Aegis3DConfig {
     }
 }
 
+// =============================================================================
+// Stored View
+// =============================================================================
+
 /// Stored view for multi-view reconstruction.
 struct StoredView {
     /// Depth map from this viewpoint
@@ -78,6 +91,10 @@ struct StoredView {
     /// Which octree nodes are affected by this view
     _affected_nodes: Vec<usize>,
 }
+
+// =============================================================================
+// Aegis3D Pipeline
+// =============================================================================
 
 /// Aegis3D — Complete 3D reconstruction pipeline.
 ///
@@ -121,6 +138,10 @@ impl Aegis3D {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Single-Image Reconstruction
+    // -------------------------------------------------------------------------
+
     /// Single-image 3D reconstruction.
     ///
     /// Uses the depth map to initialize the octree structure, then
@@ -143,6 +164,10 @@ impl Aegis3D {
         self.octree.extract_mesh(self.config.mesh_resolution)
     }
 
+    // -------------------------------------------------------------------------
+    // Multi-View Reconstruction
+    // -------------------------------------------------------------------------
+
     /// Add a view for multi-view reconstruction.
     ///
     /// The depth map and camera are stored for subsequent optimization.
@@ -161,6 +186,10 @@ impl Aegis3D {
             _affected_nodes: affected,
         });
     }
+
+    // -------------------------------------------------------------------------
+    // Optimization
+    // -------------------------------------------------------------------------
 
     /// Optimize the octree SDF networks to match observed depth maps.
     ///
@@ -236,6 +265,10 @@ impl Aegis3D {
         loss / num_samples as f32
     }
 
+    // -------------------------------------------------------------------------
+    // Depth Back-Projection
+    // -------------------------------------------------------------------------
+
     /// Back-project a depth map to 3D world-space points.
     fn backproject_depth(&self, depth_map: &[f32], camera: &Camera) -> Vec<[f32; 3]> {
         let w = camera.width;
@@ -265,6 +298,10 @@ impl Aegis3D {
         points
     }
 
+    // -------------------------------------------------------------------------
+    // Mesh Extraction
+    // -------------------------------------------------------------------------
+
     /// Extract mesh at current state.
     pub fn extract_mesh(&self, resolution: usize) -> Mesh {
         self.octree.extract_mesh(resolution)
@@ -274,6 +311,10 @@ impl Aegis3D {
     pub fn extract_mesh_lod(&self, resolution: usize, max_lod: usize) -> Mesh {
         self.octree.extract_mesh_lod(resolution, max_lod)
     }
+
+    // -------------------------------------------------------------------------
+    // Refinement & Introspection
+    // -------------------------------------------------------------------------
 
     /// Refine octree by subdividing high-error nodes.
     pub fn refine(&mut self, error_threshold: f32) {
@@ -295,6 +336,10 @@ impl Aegis3D {
         self.octree.num_nodes()
     }
 }
+
+// =============================================================================
+// Loss Helpers
+// =============================================================================
 
 /// Compute MSE depth loss between rendered and observed depths.
 fn compute_depth_loss(rendered: &[f32], observed: &[f32], mask: &[f32]) -> f32 {

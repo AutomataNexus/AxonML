@@ -1,13 +1,19 @@
-//! LAMB Optimizer - Layer-wise Adaptive Moments
+//! `LAMB` — Layer-wise Adaptive Moments for large-batch training.
+//!
+//! Extends Adam with a per-layer trust ratio: `phi(||w||) / ||adam_update||`
+//! scales the step size per parameter group, enabling stable training at
+//! batch sizes of 32k+ without warmup hacks. Config mirrors Adam
+//! (beta1/beta2/epsilon/weight_decay) plus optional trust_ratio clipping.
 //!
 //! # File
 //! `crates/axonml-optim/src/lamb.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

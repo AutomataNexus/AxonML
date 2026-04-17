@@ -1,13 +1,22 @@
-//! Tensor Operations - Mathematical and Structural Operations
+//! Higher-level tensor operations — activations, comparisons, clamping.
+//!
+//! 1133 lines. Free functions operating on `Tensor<T>` references:
+//! comparisons (eq, lt, gt, eq_mask, lt_mask, gt_mask), softmax /
+//! log_softmax (numerically stable, with dim parameter), activations
+//! (gelu, leaky_relu, elu, silu, mish), clamping (clamp, clamp_min,
+//! clamp_max), `var_dim` (Welford single-pass variance along a dim),
+//! `where_cond` (ternary select), `stack` (new dim), `dropout` (train/eval
+//! aware), `layer_norm`, and `batch_norm` (running mean/var + affine).
 //!
 //! # File
 //! `crates/axonml-tensor/src/ops/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,29 +1,52 @@
-//! Helios YOLO Training Example — Synthetic Detection Data
+//! Helios YOLO Training Example — Anchor-Free Detector Verification on Synthetic Data
+//!
+//! Smoke-test / demo binary for the Helios anchor-free detector (a YOLO-competitive
+//! architecture with DFL bbox regression). Drives the model end-to-end on
+//! synthetic detection batches: forward, multi-scale shape verification,
+//! parameter reachability check, loss computation, backward pass, optimizer step,
+//! a short training loop, and a final inference run.
+//!
+//! Pieces:
+//! - `detect_device()` — probes CUDA, falls back to CPU.
+//! - `generate_batch()` — deterministic LCG-based synthetic image batches with
+//!   1–3 random GT boxes per image; returns `(images [B,3,H,W], gt_boxes,
+//!   gt_classes)`. Boxes are clamped to image bounds with a 32px minimum size.
+//! - `main()` — eight-step verification flow:
+//!     1. device detection
+//!     2. build `Helios::new(HeliosConfig::nano(NUM_CLASSES))`
+//!     3. forward-pass shape asserts on each FPN scale (P3/P4/P5 with strides
+//!        and `4*reg_max=64` DFL channels)
+//!     4. parameter reachability accounting
+//!     5. loss computation via `HeliosLoss::new(NUM_CLASSES, 16)` with finiteness
+//!        assertion
+//!     6. single backward + Adam step
+//!     7. `NUM_EPOCHS`-iteration training loop with optional `TrainingMonitor`
+//!     8. inference via `model.detect(&input, 0.25, 0.45)`
+//!
+//! Usage:
+//! ```bash
+//! cargo run -p axonml-vision --example train_helios
+//! cargo run -p axonml-vision --example train_helios -- --monitor
+//! ```
 //!
 //! # File
 //! `crates/axonml-vision/examples/train_helios.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 19, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
-//!
-//! # Description
-//! Demonstrates the Helios (YOLO-competitive) anchor-free detector on synthetic
-//! data. Verifies model construction, forward pass shapes, parameter count,
-//! loss computation, backward pass, and optimizer convergence.
-//!
-//! # Usage
-//! ```bash
-//! cargo run -p axonml-vision --example train_helios
-//! cargo run -p axonml-vision --example train_helios -- --monitor
-//! ```
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml::monitor::TrainingMonitor;
 use axonml_autograd::Variable;
@@ -137,12 +160,16 @@ fn main() {
     println!("=== Helios YOLO Training Example (Synthetic Data) ===");
     println!();
 
-    // ── Step 1: Device detection ──
+    // -------------------------------------------------------------------------
+    // Step 1: Device detection
+    // -------------------------------------------------------------------------
     let device = detect_device();
     println!("Device: {:?}", device);
     println!();
 
-    // ── Step 2: Build model ──
+    // -------------------------------------------------------------------------
+    // Step 2: Build model
+    // -------------------------------------------------------------------------
     let t0 = Instant::now();
     let mut config = HeliosConfig::nano(NUM_CLASSES);
     config.input_size = INPUT_SIZE;
@@ -162,7 +189,9 @@ fn main() {
     println!("Built in:   {build_ms}ms");
     println!();
 
-    // ── Step 3: Verify forward pass shapes ──
+    // -------------------------------------------------------------------------
+    // Step 3: Verify forward pass shapes
+    // -------------------------------------------------------------------------
     println!("--- Forward Pass Verification ---");
     let dummy = Variable::new(
         Tensor::from_vec(
@@ -200,7 +229,9 @@ fn main() {
     println!("All output shapes verified.");
     println!();
 
-    // ── Step 4: Verify all parameters are reachable by optimizer ──
+    // -------------------------------------------------------------------------
+    // Step 4: Verify all parameters are reachable by optimizer
+    // -------------------------------------------------------------------------
     println!("--- Parameter Reachability ---");
     let all_params = model.parameters();
     let mut has_grad_params = 0;
@@ -224,7 +255,9 @@ fn main() {
         println!("Model moved to {:?}", device);
     }
 
-    // ── Step 5: Loss computation test ──
+    // -------------------------------------------------------------------------
+    // Step 5: Loss computation test
+    // -------------------------------------------------------------------------
     println!("--- Loss Computation Test ---");
     let loss_fn = HeliosLoss::new(NUM_CLASSES, 16);
 
@@ -256,7 +289,9 @@ fn main() {
     println!("Loss is finite and computable.");
     println!();
 
-    // ── Step 6: Backward pass + optimizer step test ──
+    // -------------------------------------------------------------------------
+    // Step 6: Backward pass + optimizer step test
+    // -------------------------------------------------------------------------
     println!("--- Backward Pass Test ---");
     let params_for_opt = model.parameters();
     let mut optimizer = Adam::new(params_for_opt, LR);
@@ -286,7 +321,9 @@ fn main() {
     println!("Loss before step: {loss_before:.4}");
     println!();
 
-    // ── Step 7: Training loop ──
+    // -------------------------------------------------------------------------
+    // Step 7: Training loop
+    // -------------------------------------------------------------------------
     println!("--- Training Loop ({NUM_EPOCHS} epochs x {STEPS_PER_EPOCH} steps) ---");
 
     let monitor = if use_monitor {
@@ -381,7 +418,9 @@ fn main() {
         mon.set_status("complete");
     }
 
-    // ── Step 8: Inference test ──
+    // -------------------------------------------------------------------------
+    // Step 8: Inference test
+    // -------------------------------------------------------------------------
     println!();
     println!("--- Inference Test ---");
     model.eval();
@@ -407,7 +446,9 @@ fn main() {
         );
     }
 
-    // ── Summary ──
+    // =========================================================================
+    // Summary
+    // =========================================================================
     println!();
     println!("=== Summary ===");
     println!("Model:          Helios-Nano");

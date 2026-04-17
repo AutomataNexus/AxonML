@@ -1,7 +1,39 @@
 //! NightVision Backbone — CSP-based Thermal Feature Extraction
 //!
-//! Cross-Stage Partial (CSP) backbone optimized for infrared imagery.
-//! Handles single-channel thermal and multi-band IR inputs.
+//! Cross-Stage Partial (CSP) backbone tuned for infrared imagery that
+//! produces the multi-scale feature maps (P3, P4, P5) consumed by the
+//! NightVision FPN neck and detection head. The building blocks are:
+//!
+//! - `silu` — SiLU/Swish activation (`x * sigmoid(x)`).
+//! - `ConvBNSiLU` — `Conv2d` + `BatchNorm2d` + SiLU with parameter, named-
+//!   parameter, and train/eval plumbing.
+//! - `Bottleneck` — 1×1 → 3×3 residual bottleneck with an optional skip
+//!   connection (enabled only when `in_ch == out_ch`).
+//! - `CSPBlock` — Cross-Stage Partial block: stride-2 downsample, channel
+//!   split into two 1×1 branches, a bottleneck stack on branch 1,
+//!   concatenation, and a 1×1 merge.
+//! - `ThermalBackbone` — top-level wrapper with an adaptive 1→3 channel
+//!   adapter for single-channel IR, a stride-2 stem, and three CSP stages
+//!   emitting 64/128/256-channel features at 1/4, 1/8, and 1/16 resolution.
+//!
+//! Unit tests validate output shapes for each component and verify that the
+//! 1-channel backbone has strictly more parameters than the 3-channel one
+//! thanks to the channel adapter.
+//!
+//! # File
+//! `crates/axonml-vision/src/models/nightvision/backbone.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

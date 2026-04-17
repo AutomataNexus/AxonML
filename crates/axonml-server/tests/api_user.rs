@@ -1,13 +1,21 @@
-//! Integration tests for user profile/settings API endpoints
+//! User Profile and Settings API — Integration Tests
+//!
+//! Tests for the user account management API endpoints on the AxonML server.
+//! Covers profile retrieval and update, password change (valid and invalid
+//! current password), MFA lifecycle (TOTP setup, verification with invalid
+//! code, recovery code generation and retrieval), session management (list
+//! and revoke), and API key CRUD (list and create). Uses the `require_server!`
+//! macro to skip gracefully when the server or admin DB is unavailable.
 //!
 //! # File
 //! `crates/axonml-server/tests/api_user.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -17,6 +25,10 @@
 mod common;
 
 use common::*;
+
+// =============================================================================
+// Test Helpers
+// =============================================================================
 
 macro_rules! require_server {
     () => {
@@ -31,6 +43,10 @@ macro_rules! require_server {
         }
     };
 }
+
+// =============================================================================
+// Profile Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_get_profile() {
@@ -77,6 +93,10 @@ async fn test_update_profile() {
         status
     );
 }
+
+// =============================================================================
+// Password Change Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_change_password() {
@@ -133,6 +153,10 @@ async fn test_change_password_wrong_current() {
         status
     );
 }
+
+// =============================================================================
+// MFA (Multi-Factor Authentication) Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_get_mfa_status() {
@@ -205,6 +229,10 @@ async fn test_verify_totp_invalid() {
     );
 }
 
+// -----------------------------------------------------------------------------
+// Recovery Codes
+// -----------------------------------------------------------------------------
+
 #[tokio::test]
 async fn test_get_recovery_codes() {
     require_server!();
@@ -248,6 +276,10 @@ async fn test_generate_recovery_codes() {
     );
 }
 
+// =============================================================================
+// Session Management Tests
+// =============================================================================
+
 #[tokio::test]
 async fn test_get_sessions() {
     require_server!();
@@ -285,6 +317,10 @@ async fn test_revoke_session() {
         status
     );
 }
+
+// =============================================================================
+// API Key Management Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_get_api_keys() {

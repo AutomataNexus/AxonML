@@ -1,26 +1,55 @@
-//! User database operations for AxonML
+//! User Database Operations — Account Management and MFA
+//!
+//! Provides document-store-backed persistence for user accounts via
+//! `UserRepository`. Users are stored in the `axonml_users` Aegis-DB
+//! document collection.
+//!
+//! Key types:
+//! - `User` — full account record with id, email, name, password hash,
+//!   role (Admin/User/Viewer), MFA state (TOTP secret, WebAuthn
+//!   credentials, recovery codes), email verification status, and
+//!   timestamps.
+//! - `NewUser` — creation payload with email uniqueness check.
+//! - `UpdateUser` — partial-update payload with all fields optional.
+//! - `UserRole` — role enum defaulting to User.
+//! - `UserRepository` — CRUD operations plus specialized MFA helpers:
+//!   `enable_totp()`, `disable_mfa()`, `set_recovery_codes()`, and
+//!   `use_recovery_code()` (single-use code consumption).
 //!
 //! # File
 //! `crates/axonml-server/src/db/users.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use super::{Database, DbError, DocumentQuery};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// =============================================================================
+// Constants
+// =============================================================================
+
 /// Collection name for users
 const COLLECTION: &str = "axonml_users";
+
+// =============================================================================
+// Types — User Role
+// =============================================================================
 
 /// User role enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -32,6 +61,10 @@ pub enum UserRole {
     User,
     Viewer,
 }
+
+// =============================================================================
+// Types — User Record
+// =============================================================================
 
 /// User data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +96,10 @@ pub struct User {
 fn default_email_pending() -> bool {
     true
 }
+
+// =============================================================================
+// Types — Creation and Update Payloads
+// =============================================================================
 
 /// New user creation data
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +138,10 @@ pub struct UpdateUser {
     pub verification_token: Option<String>,
 }
 
+// =============================================================================
+// Repository
+// =============================================================================
+
 /// User repository for database operations
 pub struct UserRepository<'a> {
     db: &'a Database,
@@ -111,6 +152,10 @@ impl<'a> UserRepository<'a> {
     pub fn new(db: &'a Database) -> Self {
         Self { db }
     }
+
+    // -------------------------------------------------------------------------
+    // User CRUD
+    // -------------------------------------------------------------------------
 
     /// Create a new user
     pub async fn create(&self, new_user: NewUser) -> Result<User, DbError> {
@@ -165,6 +210,10 @@ impl<'a> UserRepository<'a> {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Lookup by Field
+    // -------------------------------------------------------------------------
+
     /// Find user by email
     pub async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
         // Use document store filter with $eq operator
@@ -200,6 +249,10 @@ impl<'a> UserRepository<'a> {
             None => Ok(None),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // User Updates
+    // -------------------------------------------------------------------------
 
     /// Update user
     pub async fn update(&self, id: &str, update: UpdateUser) -> Result<User, DbError> {
@@ -253,6 +306,10 @@ impl<'a> UserRepository<'a> {
         Ok(user)
     }
 
+    // -------------------------------------------------------------------------
+    // User Deletion
+    // -------------------------------------------------------------------------
+
     /// Delete user
     pub async fn delete(&self, id: &str) -> Result<(), DbError> {
         // Check if user exists first
@@ -265,6 +322,10 @@ impl<'a> UserRepository<'a> {
 
         Ok(())
     }
+
+    // -------------------------------------------------------------------------
+    // Listing and Counts
+    // -------------------------------------------------------------------------
 
     /// List all users
     pub async fn list(
@@ -304,6 +365,10 @@ impl<'a> UserRepository<'a> {
         Ok(docs.len() as u64)
     }
 
+    // =========================================================================
+    // MFA Operations
+    // =========================================================================
+
     /// Enable TOTP for user
     pub async fn enable_totp(&self, id: &str, secret: &str) -> Result<User, DbError> {
         self.update(
@@ -336,6 +401,10 @@ impl<'a> UserRepository<'a> {
 
         Ok(user)
     }
+
+    // -------------------------------------------------------------------------
+    // Recovery Codes
+    // -------------------------------------------------------------------------
 
     /// Set recovery codes for user
     pub async fn set_recovery_codes(&self, id: &str, codes: Vec<String>) -> Result<User, DbError> {
@@ -372,6 +441,10 @@ impl<'a> UserRepository<'a> {
         Ok(true)
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

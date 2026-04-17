@@ -1,9 +1,25 @@
-//! Anthropic Messages API — `POST /v1/messages`
+//! messages — Anthropic Messages API (`POST /v1/messages`)
 //!
 //! Implements the request/response shape of Anthropic's Messages API so
 //! nexus-agent (and any Claude-SDK-compatible client) can talk to nexus-serve
-//! with one URL swap. Key shape differences from OpenAI's
-//! `/v1/chat/completions`:
+//! with one URL swap.
+//!
+//! Types: [`MessagesRequest`], [`MessagesMessage`], [`MessageContent`]
+//! (untagged enum: plain string or list of [`ContentBlock`]s), [`SystemField`]
+//! (same untagged shape for the system field), [`ToolDefinition`],
+//! [`MessagesResponse`], [`MessagesUsage`], and [`ToolCallJson`] (internal
+//! deserializer for tool call bodies).
+//!
+//! Handlers and helpers: [`messages`] (axum handler),
+//! [`build_messages_stream`] (SSE streaming via `UnboundedReceiverStream`),
+//! [`build_prompt`] / [`render_llama3`] / [`render_chatml`] (prompt shaping),
+//! [`tool_use_system_preamble`] (tool instruction injection),
+//! [`flatten_message_content`] (content-block → string reducer),
+//! [`parse_assistant_output`] (the core text → `ContentBlock` vec + stop
+//! reason parser, with a `</think>` guard for reasoning models),
+//! [`resolve_model_id`], and [`err_response`].
+//!
+//! Key shape differences from OpenAI's `/v1/chat/completions`:
 //!
 //! - Response `content` is an **array of content blocks**
 //!   (`{"type":"text"}` or `{"type":"tool_use"}`), not a single string.
@@ -61,6 +77,25 @@
 //! - `input_json_delta` streaming for tool_use blocks — emit a
 //!   `content_block_start { tool_use }` when we detect `<tool_use>` in
 //!   the stream, then partial-JSON deltas until `</tool_use>`.
+//!
+//! # File
+//! `nexus-serve/src/api/messages.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::convert::Infallible;
 use std::sync::Arc;

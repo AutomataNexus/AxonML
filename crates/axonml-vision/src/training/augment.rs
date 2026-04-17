@@ -1,13 +1,28 @@
-//! Detection Augmentations — Mosaic, MixUp, HSV Jitter, Random Affine
+//! Detection Augmentations — Mosaic, MixUp, HSV, Affine, HFlip, LetterBox
+//!
+//! YOLO-style data augmentation for object-detection samples. `DetSample`
+//! carries an image tensor `[C,H,W]` plus pixel-coord boxes and class ids.
+//! Implements `Mosaic` (4-image quadrant mosaic with bbox remapping),
+//! `MixUp` (alpha blending of two samples with concatenated annotations),
+//! `DetRandomHFlip` (horizontal flip with x-coordinate mirroring), `HSVJitter`
+//! (RGB to HSV with random hue / saturation / value gain, then back to RGB),
+//! `DetRandomAffine` (rotation + scale + translation + shear via inverse
+//! warp; bounding boxes transformed by warping all 4 corners then re-clipping),
+//! and `LetterBox` (aspect-preserving resize with grey padding). These are
+//! orchestrated by `DetAugPipeline`, which exposes `yolo` and `simple`
+//! presets and an `apply` entry point that runs Mosaic → MixUp → HSV →
+//! Affine → HFlip → LetterBox in sequence. Internal helpers `rgb_to_hsv`,
+//! `hsv_to_rgb`, and `resize_chw` round out the file.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/augment.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

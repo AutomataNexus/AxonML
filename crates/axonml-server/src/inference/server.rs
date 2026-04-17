@@ -1,18 +1,40 @@
-//! Inference server for AxonML
+//! Inference Server — Model Loading, Architecture Detection, and Prediction
+//!
+//! In-process inference runtime used by the AxonML server. Holds a map of
+//! endpoint id -> `ModelEntry` (instance metadata plus an optional
+//! `LoadedModel` with `StateDict` + `ModelArchitecture`) behind a `tokio`
+//! `RwLock`. Loads AxonML state dicts via `axonml_serialize::load_state_dict`
+//! and infers architecture from parameter names/shapes using
+//! `detect_architecture` (recognizes sequential prefixes like `0.`,
+//! `layer_0.`, `linear_0.`, `fc_0.`, `activation_0.`, `act_0.`, and activation
+//! hints for `sigmoid`, `tanh`, `softmax`, defaulting hidden layers to ReLU).
+//! `build_model` materializes the detected architecture as an
+//! `axonml_nn::Sequential` with `Linear::from_weights`, applying shape
+//! validation for weights `[out, in]` and biases `[out]`. `predict` parses
+//! batch, single-vector, scalar, or raw-array JSON payloads, runs a
+//! gradient-free `Variable` forward pass, and returns predictions + output
+//! shape. Also exposes `load_model` / `unload_model` / `is_loaded` /
+//! `has_weights` / `loaded_count` / `get_model_info` plus accessors for the
+//! `InferenceConfig` (port, batch size, timeout, queue size).
 //!
 //! # File
 //! `crates/axonml-server/src/inference/server.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml_autograd::Variable;
 use axonml_nn::{Linear, Module, ReLU, Sequential, Sigmoid, Softmax, Tanh};
@@ -22,6 +44,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+// =============================================================================
+// Model Types
+// =============================================================================
 
 /// Loaded model with its architecture and weights
 pub struct LoadedModel {
@@ -66,6 +92,10 @@ pub struct ModelEntry {
     pub model: Option<LoadedModel>,
 }
 
+// =============================================================================
+// Server Configuration
+// =============================================================================
+
 /// Inference server configuration
 #[derive(Debug, Clone)]
 pub struct InferenceConfig {
@@ -86,6 +116,10 @@ impl Default for InferenceConfig {
     }
 }
 
+// =============================================================================
+// Inference Server
+// =============================================================================
+
 /// Inference server for serving models
 pub struct InferenceServer {
     models: Arc<RwLock<HashMap<String, ModelEntry>>>,
@@ -100,6 +134,10 @@ impl InferenceServer {
             config,
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Model Loading and File I/O
+    // -------------------------------------------------------------------------
 
     /// Load a model for serving
     pub async fn load_model(
@@ -158,6 +196,10 @@ impl InferenceServer {
             architecture,
         })
     }
+
+    // -------------------------------------------------------------------------
+    // Architecture Detection
+    // -------------------------------------------------------------------------
 
     /// Detect model architecture from state dict
     fn detect_architecture(state_dict: &StateDict) -> Result<ModelArchitecture, String> {
@@ -271,6 +313,10 @@ impl InferenceServer {
         index_str.parse::<usize>().ok()
     }
 
+    // -------------------------------------------------------------------------
+    // Model Construction
+    // -------------------------------------------------------------------------
+
     /// Build a Sequential model from architecture and load weights
     fn build_model(loaded: &LoadedModel) -> Result<Sequential, String> {
         let mut seq = Sequential::new();
@@ -346,6 +392,10 @@ impl InferenceServer {
         Ok(seq)
     }
 
+    // -------------------------------------------------------------------------
+    // Model Unload
+    // -------------------------------------------------------------------------
+
     /// Unload a model
     pub async fn unload_model(&self, endpoint_id: &str) -> Result<(), String> {
         let mut models = self.models.write().await;
@@ -356,6 +406,10 @@ impl InferenceServer {
             Err(format!("Model not found for endpoint {}", endpoint_id))
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Prediction Path
+    // -------------------------------------------------------------------------
 
     /// Run inference on a model
     pub async fn predict(
@@ -434,6 +488,10 @@ impl InferenceServer {
         }))
     }
 
+    // -------------------------------------------------------------------------
+    // Input Parsing
+    // -------------------------------------------------------------------------
+
     /// Parse input JSON into array of f32 vectors
     fn parse_input(inputs: &serde_json::Value) -> Result<Vec<Vec<f32>>, String> {
         // Support multiple input formats:
@@ -483,6 +541,10 @@ impl InferenceServer {
             Err("Invalid input format: expected array or number".to_string())
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Status and Introspection
+    // -------------------------------------------------------------------------
 
     /// Check if a model is loaded
     pub async fn is_loaded(&self, endpoint_id: &str) -> bool {
@@ -548,6 +610,10 @@ impl InferenceServer {
     }
 }
 
+// =============================================================================
+// Model Info DTO
+// =============================================================================
+
 /// Model information
 #[derive(Debug, Clone)]
 pub struct ModelInfo {
@@ -559,6 +625,10 @@ pub struct ModelInfo {
     pub has_weights: bool,
     pub architecture: Option<ModelArchitecture>,
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

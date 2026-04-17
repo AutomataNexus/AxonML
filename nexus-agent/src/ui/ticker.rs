@@ -1,22 +1,58 @@
-//! nexus-ticker — always-on-top desktop widget that actively monitors and
-//! fixes CI, git state, and infrastructure across all AutomataNexus repos.
+//! nexus-ticker — Always-On-Top CI Monitor and Auto-Fix Widget
 //!
-//! This is NOT a passive status display. The ticker:
-//! 1. Polls GitHub CI every 5 minutes for all monitored repos
-//! 2. When it finds failures, runs a **ralph loop** (up to 5 passes): apply
-//!    `cargo fmt --all` + `cargo clippy --fix` + targeted unused-import removal,
-//!    then verify locally via `cargo fmt --check` and `cargo clippy -- -D warnings`.
-//!    Only commits + auto-pushes once the local verify is green. If the loop
-//!    exhausts 5 passes without verifying, it toasts the user for manual fix
-//!    instead of pushing a broken "fix" commit.
-//! 3. Monitors Tailscale for offline controllers
-//! 4. Checks for uncommitted changes across repos
-//! 5. Accepts manual commands via the input bar
+//! eframe-based frameless desktop widget that actively monitors and fixes
+//! CI, git state, and infrastructure across all AutomataNexus repos. NOT a
+//! passive status display — it intervenes.
+//!
+//! Architecture:
+//! * `TickerApp` owns a shared `SharedState` (log, repo LEDs, pending
+//!   pushes, backend health) behind `Arc<Mutex>`, plus a tokio runtime that
+//!   spawns three background tasks: nexus-serve `/health` poll every 10s,
+//!   `ci_check_and_fix` every 5 minutes, and `git_dirty_check` every 10
+//!   minutes.
+//! * `ci_check_and_fix` iterates the `REPOS` list, calls `gh run list` for
+//!   each, and on failure runs the ralph loop (up to `MAX_RALPH_ITER = 5`
+//!   passes): apply `cargo fmt --all` + `cargo clippy --fix` + targeted
+//!   unused-import removal (see `extract_file_line` / `remove_unused_import`),
+//!   then verify locally via `cargo fmt --check` and
+//!   `cargo clippy -- -D warnings`. Only commits + auto-pushes once the
+//!   local verify is green. Handles chattr-immutable `/opt/AxonML/crates`
+//!   via `unlock-crates.sh` / `lock-crates.sh`. If ralph exhausts without
+//!   verifying, delegates to the `ci-fixer` agent; if that fails too,
+//!   toasts via PowerShell instead of pushing a broken fix.
+//! * UI paints a rounded transparent outer frame with a custom titlebar
+//!   (drag region, close, minimize), status LED, per-repo LED strip,
+//!   scrolling log with copy/clear, pending-push approval bar, and an
+//!   input row with an agent picker (knowledge, retrain, fieldtech,
+//!   research, orchestrator).
+//! * Theme system (`Theme::Dark` / `Theme::Light`) persists to
+//!   `/tmp/.nexus-ticker-theme`; LED semantics stay fixed (TEAL = pass,
+//!   TERRACOTTA = fail) across themes so pass/fail never becomes
+//!   ambiguous.
 //!
 //! Launch: nexus-ticker &
+//!
+//! # File
+//! `nexus-agent/src/ui/ticker.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use eframe::egui;
 use std::sync::{Arc, Mutex};
+
+// =============================================================================
+// Constants and Monitored Repos
+// =============================================================================
 
 const NEXUS_SERVE_URL: &str = "http://127.0.0.1:11435";
 const TICKER_WIDTH: f32 = 480.0;
@@ -36,6 +72,10 @@ const REPOS: &[(&str, &str)] = &[
     ("AutomataNexus/FerumWebmail", "/opt/FerumWebmail"),
     ("AutomataNexus/NexusOracle", "/opt/NexusOracle"),
 ];
+
+// =============================================================================
+// Entry Point
+// =============================================================================
 
 fn main() -> eframe::Result {
     // Frameless + transparent — we paint our own rounded background and a
@@ -246,7 +286,7 @@ impl TickerApp {
 }
 
 // =============================================================================
-// Background: CI check + auto-fix
+// Background Probe — CI Check + Ralph Loop Auto-Fix
 // =============================================================================
 
 async fn ci_check_and_fix(state: Arc<Mutex<SharedState>>) {
@@ -751,7 +791,7 @@ async fn remove_unused_import(file: &str, line_num: usize) -> bool {
 }
 
 // =============================================================================
-// Background: git dirty check
+// Background Probe — Git Dirty Check
 // =============================================================================
 
 async fn git_dirty_check(state: Arc<Mutex<SharedState>>) {
@@ -781,7 +821,7 @@ async fn git_dirty_check(state: Arc<Mutex<SharedState>>) {
 }
 
 // =============================================================================
-// UI
+// UI — eframe::App Implementation
 // =============================================================================
 
 impl eframe::App for TickerApp {
@@ -1082,7 +1122,7 @@ impl eframe::App for TickerApp {
 }
 
 // =============================================================================
-// NexusStratum palette + LED rendering
+// Theme — NexusStratum Palette + LED Rendering
 // =============================================================================
 
 // ─── Theme system (mirrors tech_ticker.rs) ───────────────────────────────────
@@ -1221,7 +1261,7 @@ fn status_led_color(status: &str) -> egui::Color32 {
 }
 
 // =============================================================================
-// Helpers
+// Helpers and Snapshot
 // =============================================================================
 
 fn now() -> String { chrono::Local::now().format("%H:%M:%S").to_string() }

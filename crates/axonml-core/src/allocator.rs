@@ -1,13 +1,20 @@
-//! Allocator - Memory Allocation Traits and Implementations
+//! Memory allocation traits and the default CPU allocator.
+//!
+//! `DefaultAllocator` provides 64-byte-aligned host allocations via the
+//! system allocator, with `allocate<T>`, `deallocate<T>`, `copy<T>`,
+//! `zero<T>`, and `total_memory()` / `free_memory()` via sysinfo.
+//! The `Allocator` trait is the extension point for custom allocators
+//! (arena-based, pool-based, or device-specific).
 //!
 //! # File
 //! `crates/axonml-core/src/allocator.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

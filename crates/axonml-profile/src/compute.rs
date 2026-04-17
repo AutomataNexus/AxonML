@@ -1,22 +1,53 @@
-//! Compute Profiling Module
+//! Compute Profiling — Per-Operation Timing, FLOPs, and Bandwidth
+//!
+//! Profiles per-operation execution using `Instant::now()` timestamps.
+//! `OperationStats` is the aggregate record (name, `call_count`,
+//! `total_time_ns`, `min_time_ns`, `max_time_ns`, optional total `flops`, and
+//! optional total `bytes_processed`), with derived accessors: `avg_time` /
+//! `total_time` / `min_time` / `max_time` (as `Duration`), `gflops`
+//! (`flops / 1e9`), `gflops_per_sec` (total FLOPs divided by elapsed
+//! seconds, in GFLOPS/s), and `bandwidth_gbps` (bytes processed per second
+//! in GB/s). `ProfiledOp` is the in-flight record (name, `start: Instant`,
+//! optional FLOPs and bytes). `ComputeProfiler` maintains a
+//! `HashMap<String, OperationStats>` plus a `HashMap<String, Vec<ProfiledOp>>`
+//! stack per-name so nested / re-entrant starts and stops interleave
+//! correctly. Public API: `start` / `start_with_flops` / `start_with_bytes`
+//! push an active op; `stop(name)` pops the most recent one, computes elapsed,
+//! and folds it into min/max/total/count and accumulates FLOPs and bytes.
+//! Query helpers include `get_stats`, `all_stats` (clone), `total_time`,
+//! `avg_time`, `top_by_time(n)`, `top_by_calls(n)`, `reset`, and a
+//! `format_duration` pretty-printer that chooses ns/us/ms/s.
+//! `TimingGuard<'a>` is the RAII wrapper that calls `start` on `new` and
+//! `stop` on `Drop`. Tests cover single-op timing, five-call aggregation,
+//! nested outer/inner ops, `top_by_time` ordering, and the format-duration
+//! unit suffixes.
 //!
 //! # File
 //! `crates/axonml-profile/src/compute.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+// =============================================================================
+// OperationStats
+// =============================================================================
 
 /// Statistics for a single profiled operation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -96,6 +127,10 @@ impl OperationStats {
     }
 }
 
+// =============================================================================
+// ProfiledOp
+// =============================================================================
+
 /// A profiled operation with timing.
 #[derive(Debug, Clone)]
 pub struct ProfiledOp {
@@ -108,6 +143,10 @@ pub struct ProfiledOp {
     /// Bytes processed (optional)
     pub bytes: Option<usize>,
 }
+
+// =============================================================================
+// ComputeProfiler
+// =============================================================================
 
 /// Compute profiler for tracking operation execution times.
 #[derive(Debug)]
@@ -132,6 +171,10 @@ impl ComputeProfiler {
             active: HashMap::new(),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Start/Stop Timing
+    // -------------------------------------------------------------------------
 
     /// Starts profiling an operation.
     pub fn start(&mut self, name: &str) {
@@ -207,6 +250,10 @@ impl ComputeProfiler {
         };
     }
 
+    // -------------------------------------------------------------------------
+    // Queries
+    // -------------------------------------------------------------------------
+
     /// Gets statistics for a specific operation.
     pub fn get_stats(&self, name: &str) -> Option<&OperationStats> {
         self.stats.get(name)
@@ -253,6 +300,10 @@ impl ComputeProfiler {
         self.active.clear();
     }
 
+    // -------------------------------------------------------------------------
+    // Formatting
+    // -------------------------------------------------------------------------
+
     /// Formats a duration for display.
     pub fn format_duration(d: Duration) -> String {
         let nanos = d.as_nanos();
@@ -267,6 +318,10 @@ impl ComputeProfiler {
         }
     }
 }
+
+// =============================================================================
+// TimingGuard (RAII)
+// =============================================================================
 
 /// RAII guard for automatic operation timing.
 pub struct TimingGuard<'a> {
@@ -290,6 +345,10 @@ impl<'a> Drop for TimingGuard<'a> {
         self.profiler.stop(&self.name);
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

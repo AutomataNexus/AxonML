@@ -1,13 +1,23 @@
-//! WebGPU Backend - Cross-Platform GPU Operations via wgpu
+//! WebGPU backend — cross-platform GPU compute via the `wgpu` crate.
+//!
+//! 1700 lines, 30 public functions. Full wgpu implementation: adapter
+//! enumeration across all wgpu backends (Vulkan/DX12/Metal/GL), device +
+//! queue request, tracked buffer management (create, create_init, read via
+//! staging buffer + map, write, destroy), WGSL compute pipeline creation +
+//! cache, command encoder recording + dispatch, bind group layout/pool,
+//! `DeviceCapabilities` query from `AdapterInfo`, device counting, and
+//! `Backend` trait implementation. Designed for both native (desktop) and
+//! WASM (browser) targets. Feature-gated behind `wgpu`.
 //!
 //! # File
 //! `crates/axonml-core/src/backends/wgpu_backend.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

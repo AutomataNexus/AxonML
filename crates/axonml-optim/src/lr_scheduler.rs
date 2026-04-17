@@ -1,13 +1,21 @@
-//! Learning Rate Schedulers
+//! Learning rate schedulers — seven strategies for LR annealing.
+//!
+//! `StepLR` (decay every N epochs), `MultiStepLR` (decay at milestones),
+//! `ExponentialLR` (multiplicative decay per epoch), `CosineAnnealingLR`
+//! (cosine anneal to eta_min), `OneCycleLR` (1-cycle super-convergence
+//! with warmup/annealing), `WarmupLR` (linear warmup then constant),
+//! `ReduceLROnPlateau` (reduce on metric stall, with cooldown + min_lr).
+//! Each `.step()` updates the optimizer's LR.
 //!
 //! # File
 //! `crates/axonml-optim/src/lr_scheduler.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

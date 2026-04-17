@@ -1,45 +1,78 @@
-//! Train Phi on Shakespeare
+//! Train Phi — AxonML Shakespeare Trainer (Partial RoPE + GQA + LayerNorm)
 //!
-//! End-to-end training of the AxonML `PhiForCausalLM` on real text, with:
-//! - Rotary position embeddings (defaults to full RoPE — see note below)
-//! - Grouped-query attention (GQA)
-//! - LayerNorm (Phi uses LayerNorm, not RMSNorm)
-//! - Optional bias in Linear layers (Phi-1 / Phi-2 style)
-//! - GPU acceleration (`--features cuda`)
+//! End-to-end training binary for the AxonML [`PhiForCausalLM`] on a text
+//! corpus. Phi distinguishes itself from LLaMA/Mistral with:
+//! - Partial RoPE — only the first `rotary_dim = head_dim * partial_rotary`
+//!   channels get rotated (the rest pass through).
+//! - Grouped-query attention (GQA) via `num_key_value_heads`.
+//! - LayerNorm (not RMSNorm).
+//! - Optional bias in Linear layers (`use_bias` — Phi-1 / Phi-2 style).
+//!
+//! Like LLaMA and Mistral, `PhiForCausalLM` does not expose a
+//! `forward_with_loss` method, so the shifted cross-entropy is computed via
+//! the shared [`shifted_cross_entropy`] helper.
 //!
 //! ## Partial RoPE is currently broken in the framework
 //!
-//! Phi's signature feature is "partial RoPE" (only the first `rotary_dim`
-//! channels of each head get rotated). Running with `--partial-rotary 0.5`
-//! (or any value < 1.0) panics inside `axonml-llm/src/llama.rs:426` with
+//! Running with `--partial-rotary 0.5` (or any value < 1.0) panics inside
+//! `axonml-llm/src/llama.rs:426` with
 //! `ShapeMismatch { expected: [B*H*S*head_dim], actual: [B,H,S,rotary_dim] }`.
 //!
-//! Root cause: `PhiAttention::apply_partial_rotary` calls `q.narrow(3, 0, rotary_dim)`
-//! to slice the head dimension. That returns a non-contiguous view with the
-//! smaller logical shape, but `RotaryEmbedding::apply` then calls
-//! `x.data().to_vec()` which returns the *underlying* unsliced buffer, and
-//! finally `Tensor::from_vec(output, shape)` rejects the length mismatch.
-//! The fix would be for phi.rs to call `.contiguous()` on the narrowed view
-//! before passing it to `rotary_emb.apply`, but that requires editing the
-//! locked framework crate.
+//! Root cause: `PhiAttention::apply_partial_rotary` calls
+//! `q.narrow(3, 0, rotary_dim)` to slice the head dimension. That returns a
+//! non-contiguous view with the smaller logical shape, but
+//! `RotaryEmbedding::apply` then calls `x.data().to_vec()` which returns the
+//! *underlying* unsliced buffer, and finally
+//! `Tensor::from_vec(output, shape)` rejects the length mismatch. The fix
+//! would be for phi.rs to call `.contiguous()` on the narrowed view before
+//! passing it to `rotary_emb.apply`, but that requires editing the locked
+//! framework crate.
 //!
 //! **Workaround:** default `--partial-rotary 1.0` so we take the
 //! `self.rotary_emb.apply(&q, &k, ...)` branch at phi.rs:239 (which runs on
 //! the contiguous full-head tensor). This matches Phi-3-Mini's config
-//! exactly, which legitimately uses `partial_rotary_factor: 1.0`.
-//! - Live browser training monitor
-//! - Periodic best-model + full-checkpoint saving
-//! - Resume from latest / best / specific path
-//! - In-flight greedy text sampling
+//! exactly, which legitimately uses `partial_rotary_factor: 1.0`. A warning
+//! banner is printed when `--partial-rotary < 1.0` so operators know to
+//! expect the panic.
+//!
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser and `print_help`,
+//!   covering Phi-specific flags `--partial-rotary` and `--no-bias` on top
+//!   of the LLaMA-style hyperparameter set.
+//! - `generate` — greedy auto-regressive sampler that re-feeds the tail of
+//!   the running id buffer into `PhiForCausalLM::forward_ids` and picks
+//!   `argmax` on the last-step logits.
+//! - `pick_device` / `device_name` — CUDA-feature-gated device detection.
+//! - `main` — validates head / GQA / partial-rotary constraints, prints the
+//!   partial-RoPE warning banner when appropriate, loads the corpus, builds
+//!   tokenizer + dataset, constructs [`PhiConfig`] / [`PhiForCausalLM`],
+//!   resumes from a checkpoint, migrates params to GPU, wires the
+//!   `TrainingLifecycle`, and runs the Adam-optimized training loop with
+//!   periodic greedy samples and a 400-char final generation.
 //!
 //! Usage:
 //!   cargo run --release --bin train_phi -p llm-training --features cuda
 //!   cargo run --release --bin train_phi -p llm-training --features cuda -- \
 //!       --epochs 10 --bs 16 --seq-len 128 --partial-rotary 0.5 --resume latest
 //!
-//! Like LLaMA and Mistral, `PhiForCausalLM` does not expose a
-//! `forward_with_loss` method, so the shifted cross-entropy is computed via
-//! the shared `llm_training::shifted_cross_entropy` helper.
+//! # File
+//! `llm-training/src/bin/train_phi.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -254,7 +287,7 @@ fn generate(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

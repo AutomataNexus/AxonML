@@ -1,13 +1,26 @@
 //! AegisIdentity — Unified Biometric API + Identity Bank
 //!
+//! Implements `IdentityBank` (HashMap-backed in-memory store of per-subject
+//! `IdentityRecord` entries with per-modality embeddings, uncertainty, GRU hidden
+//! state for face crystallization, original-enrollment snapshots for drift
+//! detection, and observation counts) and `AegisIdentity` (the top-level system
+//! wrapping optional Mnemosyne/Ariadne/Echo/Argus models plus ThemisFusion).
+//! `AegisIdentity` provides enroll (with incremental crystallization), verify
+//! (1:1 with Themis fusion), identify (1:N ranked candidates), forensic
+//! verification (per-modality breakdown, cross-modal consistency, dimension
+//! contributions), batch operations, identity drift detection, quality
+//! assessment, temporal liveness analysis, secure-verify pipeline (quality +
+//! liveness + verify), and FAR/FRR operating curve computation.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/biometric/identity.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

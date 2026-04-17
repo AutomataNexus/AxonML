@@ -1,4 +1,40 @@
-//! Request/response types for OpenAI and Ollama-compatible APIs.
+//! types — OpenAI-Compatible Request/Response DTOs
+//!
+//! Pure-data structs (no logic, just serde derives) shared between the axum
+//! handlers in `routes.rs` and any external client. Groups:
+//!
+//! - Chat Completions: [`ChatCompletionRequest`], [`ChatMessage`],
+//!   [`ChatCompletionResponse`], [`ChatChoice`].
+//! - SSE streaming chunks: [`ChatCompletionChunk`], [`ChatChunkChoice`],
+//!   [`ChunkDelta`] — emitted one-per-token as `data: {json}\n\n` with a
+//!   terminal `data: [DONE]\n\n`.
+//! - Text completions: [`CompletionRequest`], [`CompletionResponse`],
+//!   [`TextChoice`].
+//! - Shared: [`Usage`] (token accounting), [`ModelListResponse`] /
+//!   [`ModelObject`] for `GET /v1/models`.
+//! - Errors: [`ApiError`], [`ApiErrorBody`] with OpenAI's `{message, type,
+//!   code}` envelope.
+//! - Private defaults: [`default_max_tokens`] = 256, [`default_temperature`] =
+//!   0.7 for serde `#[serde(default = "...")]` attributes.
+//!
+//! # File
+//! `nexus-serve/src/api/types.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use serde::{Deserialize, Serialize};
 

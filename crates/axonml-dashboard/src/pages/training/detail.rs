@@ -1,18 +1,44 @@
-//! Training Run Detail Page with Real-time Metrics
+//! Training Run Detail Page — Real-time Metrics via WebSocket
+//!
+//! Leptos page component `TrainingDetailPage` that inspects a single
+//! training run identified by the `id` route parameter. On mount it
+//! fetches the run record (`api::training::get_run`), metrics history
+//! (`api::training::get_metrics`), and the last 100 log entries
+//! (`api::training::get_logs`). For runs in `RunStatus::Running`, it
+//! opens a `WebSocket` to `api::training::stream_url(&id)` and dispatches
+//! incoming `WsMessage::Metrics` / `WsMessage::Status` / `WsMessage::Log`
+//! frames into signals, giving a live-updating view.
+//!
+//! The view shows a header with status badge and live indicator,
+//! training progress (via `TrainingProgress`), stat cards for current
+//! loss / accuracy / epoch / GPU utilization, and three tabs:
+//!
+//! - **Metrics** — `LineChart` for loss and (when present) accuracy.
+//! - **Configuration** — learning rate, batch size, epochs, optimizer,
+//!   loss function, start timestamp.
+//! - **Logs** — colored log viewer with per-entry level styling.
+//!
+//! Also provides Stop and Delete actions backed by `ConfirmDialog`s that
+//! call `api::training::stop_run` / `api::training::delete_run`.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/training/detail.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -27,9 +53,16 @@ use crate::components::{
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// TrainingDetailPage Component
+// =============================================================================
+
 /// Training run detail page
 #[component]
 pub fn TrainingDetailPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Params and Signals
+    // -------------------------------------------------------------------------
     let params = use_params_map();
     let state = use_app_state();
     let navigate = use_navigate();
@@ -52,6 +85,9 @@ pub fn TrainingDetailPage() -> impl IntoView {
     let state_for_delete = state.clone();
     let navigate_for_delete = navigate.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Data Fetch
+    // -------------------------------------------------------------------------
     // Fetch initial data
     create_effect(move |_| {
         let id = run_id();
@@ -88,6 +124,9 @@ pub fn TrainingDetailPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // WebSocket Streaming
+    // -------------------------------------------------------------------------
     // Set up WebSocket for real-time updates
     create_effect(move |_| {
         let id = run_id();
@@ -164,6 +203,9 @@ pub fn TrainingDetailPage() -> impl IntoView {
         }
     });
 
+    // -------------------------------------------------------------------------
+    // Event Handlers
+    // -------------------------------------------------------------------------
     // Stop run handler
     let stop_run = move |_| {
         let id = run_id();
@@ -201,6 +243,9 @@ pub fn TrainingDetailPage() -> impl IntoView {
         delete_modal.set(false);
     };
 
+    // -------------------------------------------------------------------------
+    // Chart Series
+    // -------------------------------------------------------------------------
     // Chart data
     let loss_series = move || {
         let history = metrics_history.get();
@@ -240,6 +285,9 @@ pub fn TrainingDetailPage() -> impl IntoView {
         }]
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page training-detail-page">
             <Show when=move || loading.get()>

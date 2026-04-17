@@ -1,13 +1,23 @@
-//! Backward Pass - Gradient Computation
+//! Backward pass — reverse-mode gradient computation.
+//!
+//! 360 lines. `backward(variable)` topologically sorts the computation graph
+//! from the loss node to all leaf Variables via BFS, then walks the sorted
+//! list in reverse order calling each `GradFn::backward()` to propagate
+//! gradients. Leaf Variable gradients accumulate into their `GradAccumulator`.
+//! Optional `AXONML_PROFILE_BACKWARD=1` env var prints per-node timing and
+//! gradient norm diagnostics for debugging vanishing/exploding gradients.
+//! Also exposes `backward_with_grad(variable, initial_grad)` for non-scalar
+//! loss backward.
 //!
 //! # File
 //! `crates/axonml-autograd/src/backward.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

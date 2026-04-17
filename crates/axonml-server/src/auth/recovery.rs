@@ -1,18 +1,34 @@
-//! Recovery codes for AxonML
+//! Recovery Codes — MFA Backup Authentication
+//!
+//! Generates and verifies one-time recovery codes for MFA fallback. Each code
+//! is a 10-digit string formatted as `XXXXX-XXXXX`, generated from 8 bytes of
+//! `OsRng` entropy. Codes are Argon2-hashed (with dashes stripped) before
+//! storage; verification normalizes input by removing dashes and spaces.
+//!
+//! Key types:
+//! - `RecoveryAuth` — stateless handler with `generate_codes`, `verify_code`,
+//!   and `format_for_display` associated functions.
+//! - `RecoveryCodes` — holds both the plaintext codes (shown once to the user)
+//!   and their Argon2 hashes (persisted to the database).
 //!
 //! # File
 //! `crates/axonml-server/src/auth/recovery.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use super::AuthError;
 use argon2::{
@@ -22,6 +38,10 @@ use argon2::{
         rand_core::RngCore,
     },
 };
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /// Recovery code authentication handler
 pub struct RecoveryAuth;
@@ -34,6 +54,10 @@ pub struct RecoveryCodes {
     /// The hashed codes to store in database
     pub hashed_codes: Vec<String>,
 }
+
+// =============================================================================
+// Implementation
+// =============================================================================
 
 impl RecoveryAuth {
     /// Generate a new set of recovery codes
@@ -53,6 +77,10 @@ impl RecoveryAuth {
             hashed_codes,
         })
     }
+
+    // -------------------------------------------------------------------------
+    // Code Generation and Hashing
+    // -------------------------------------------------------------------------
 
     /// Generate a single recovery code
     /// SECURITY: Uses cryptographically secure OsRng for recovery codes
@@ -77,6 +105,10 @@ impl RecoveryAuth {
             .map(|hash| hash.to_string())
             .map_err(|e| AuthError::Internal(format!("Code hashing failed: {}", e)))
     }
+
+    // -------------------------------------------------------------------------
+    // Verification and Display
+    // -------------------------------------------------------------------------
 
     /// Verify a recovery code against stored hashes
     pub fn verify_code(code: &str, stored_hashes: &[String]) -> Result<Option<usize>, AuthError> {
@@ -107,6 +139,10 @@ impl RecoveryAuth {
             .join("\n")
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

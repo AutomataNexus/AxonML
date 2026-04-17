@@ -1,18 +1,33 @@
-//! JIT Error Types
+//! JIT Error Types — Compilation and Runtime Failures
+//!
+//! Defines `JitError`, the compilation/runtime error enum for the AxonML JIT
+//! with variants for invalid graph structure, type mismatch (expected/found
+//! string pair), shape mismatch (expected/found `Vec<usize>`), unsupported op,
+//! codegen error, runtime error, input-not-found, output-not-found, and
+//! compilation-failed messages. Implements `Display` with formatted messages,
+//! `std::error::Error`, and `From<String>` that wraps unstructured strings as
+//! `RuntimeError`. `JitResult<T>` is the corresponding `Result` alias. Tests
+//! verify that the `TypeMismatch` and `ShapeMismatch` formatters produce the
+//! expected prose.
 //!
 //! # File
 //! `crates/axonml-jit/src/error.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Error Types
+// =============================================================================
 
 use std::fmt;
 
@@ -52,6 +67,10 @@ pub enum JitError {
     CompilationFailed(String),
 }
 
+// =============================================================================
+// Trait Implementations
+// =============================================================================
+
 impl fmt::Display for JitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -79,6 +98,10 @@ impl From<String> for JitError {
         Self::RuntimeError(msg)
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

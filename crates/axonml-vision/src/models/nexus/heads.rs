@@ -1,13 +1,20 @@
-//! Nexus Detection Heads — Proposals, Classification, Uncertainty
+//! Nexus Detection Heads — Proposals, Classification, and Uncertainty
+//!
+//! Implements per-scale detection heads for the Nexus detector with separate
+//! classification, bounding-box regression, and centerness branches. Each branch
+//! uses Conv2d + BatchNorm blocks with a final 1x1 projection. The centerness
+//! branch provides a spatial prior for proposal quality, and an optional
+//! uncertainty head estimates prediction confidence via learned log-variance.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/nexus/heads.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

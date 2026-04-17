@@ -1,13 +1,22 @@
-//! Views and Slicing - Tensor Indexing Operations
+//! Views, slicing, and advanced indexing operations on `Tensor<T>`.
+//!
+//! 486 lines. `narrow` (sub-range along a dim), `select` (index one dim
+//! away), `index_select` (gather along a dim by index tensor), `chunk`
+//! (split into N equal parts), `split` (split by explicit size), `gather`
+//! (index into data along a dim), `scatter` (write values at indexed
+//! positions), `nonzero` (coordinates of non-zero elements), `unique`
+//! (sorted deduplicated values). All return new `Tensor<T>` instances;
+//! narrow/select use strided zero-copy views when possible.
 //!
 //! # File
 //! `crates/axonml-tensor/src/view.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

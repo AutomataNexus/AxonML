@@ -1,13 +1,22 @@
-//! Graph Inspection and Visualization
+//! Computation graph inspection and visualization — a novel AxonML feature.
+//!
+//! 892 lines. `trace_backward(variable)` walks the autograd graph and returns
+//! a `GraphSnapshot` (Vec of `SnapshotNode` with name, depth, input count,
+//! output shape, requires_grad). `to_dot(snapshot)` exports the snapshot as a
+//! Graphviz DOT string for rendering. `node_count`, `depth`, `leaf_count`,
+//! `operation_names`, and `gradient_flow_summary` provide structural analysis
+//! of the graph. Unlike PyTorch, this is built-in — no external torchviz /
+//! tensorboard dependency needed.
 //!
 //! # File
 //! `crates/axonml-autograd/src/inspect.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

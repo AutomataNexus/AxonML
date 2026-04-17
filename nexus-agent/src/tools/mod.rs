@@ -1,4 +1,33 @@
-//! Tool implementations for nexus-agent.
+//! Tool Module Root — Registry Population
+//!
+//! Declares the tool submodules (file, git, github, shell, obsidian,
+//! tailscale, email, training) and exposes `register_all` which registers
+//! all 22 built-in tools into a `ToolRegistry`.
+//!
+//! The tool set covers: shell execution, filesystem read/write/search/grep,
+//! git status/log/diff/commit, Obsidian vault read/write/search,
+//! FerumMailSaaS email, Tailscale status/ping, training lifecycle
+//! (start/check/list checkpoints), and GitHub CLI wrappers (list PRs,
+//! list issues, CI status, view PR).
+//!
+//! # File
+//! `nexus-agent/src/tools/mod.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Submodule Declarations
+// =============================================================================
 
 pub mod email;
 pub mod file;
@@ -10,6 +39,10 @@ pub mod tailscale;
 pub mod training;
 
 use crate::ToolRegistry;
+
+// =============================================================================
+// Registry Population
+// =============================================================================
 
 /// Register all built-in tools into a registry.
 pub fn register_all(registry: &mut ToolRegistry) {

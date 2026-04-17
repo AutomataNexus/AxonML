@@ -1,18 +1,39 @@
-//! Terminal WebSocket API
+//! Terminal WebSocket API — Admin-Only PTY Shell Over WebSocket
+//!
+//! Exposes an admin-gated PTY terminal via WebSocket. `terminal_ws` validates
+//! a JWT passed as the `token` query parameter (since browsers cannot set
+//! `Authorization` on a WebSocket upgrade), rejects non-admin roles, and
+//! upgrades to `handle_terminal`. `handle_terminal` uses `portable_pty` to
+//! open a native PTY pair at 24x80, spawns the user's `$SHELL` (or
+//! `powershell.exe` on Windows) with `TERM=xterm-256color`, then bridges
+//! data bidirectionally: a blocking thread reads the PTY master into an
+//! `mpsc::channel<Vec<u8>>` (4 KiB buffer), a `send_task` forwards bytes as
+//! text frames, and a `recv_task` writes client frames to the PTY writer
+//! while intercepting `ESC[8;rows;colst` resize sequences parsed by
+//! `parse_resize_sequence` and applied via `master.resize`. The session
+//! ends when any task or the child process exits. `terminal_info` is a
+//! companion REST endpoint exposing the resolved shell and capabilities
+//! (`pty`, `resize`, `colors`) for admins. `WsAuthQuery` is the shared
+//! query-params DTO.
 //!
 //! # File
 //! `crates/axonml-server/src/api/terminal.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axum::{
     extract::{
@@ -32,11 +53,19 @@ use tracing::{error, info, warn};
 
 use crate::api::AppState;
 
+// =============================================================================
+// Query Parameter DTO
+// =============================================================================
+
 /// Query params for WebSocket auth
 #[derive(Debug, Deserialize)]
 pub struct WsAuthQuery {
     pub token: Option<String>,
 }
+
+// =============================================================================
+// WebSocket Upgrade Handler
+// =============================================================================
 
 /// WebSocket handler for terminal
 /// Authenticates via query param since WebSocket can't use Authorization header.
@@ -75,9 +104,17 @@ pub async fn terminal_ws(
     Ok(ws.on_upgrade(handle_terminal))
 }
 
+// =============================================================================
+// PTY Session Driver
+// =============================================================================
+
 /// Handle terminal WebSocket connection with proper PTY
 async fn handle_terminal(socket: WebSocket) {
     let (mut ws_sender, mut ws_receiver) = socket.split();
+
+    // -------------------------------------------------------------------------
+    // PTY Allocation
+    // -------------------------------------------------------------------------
 
     // Get the PTY system
     let pty_system = native_pty_system();
@@ -101,6 +138,10 @@ async fn handle_terminal(socket: WebSocket) {
             return;
         }
     };
+
+    // -------------------------------------------------------------------------
+    // Shell Spawn
+    // -------------------------------------------------------------------------
 
     // Determine shell
     let shell = if cfg!(target_os = "windows") {
@@ -130,6 +171,10 @@ async fn handle_terminal(socket: WebSocket) {
         }
     };
 
+    // -------------------------------------------------------------------------
+    // Reader/Writer Wiring
+    // -------------------------------------------------------------------------
+
     // Get reader for the PTY master
     let mut reader = match pair.master.try_clone_reader() {
         Ok(r) => r,
@@ -154,6 +199,10 @@ async fn handle_terminal(socket: WebSocket) {
 
     // Channel for PTY output -> WebSocket
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(256);
+
+    // -------------------------------------------------------------------------
+    // PTY -> WebSocket Pump
+    // -------------------------------------------------------------------------
 
     // Task to read from PTY and send to channel
     let read_handle = std::thread::spawn(move || {
@@ -189,6 +238,10 @@ async fn handle_terminal(socket: WebSocket) {
             }
         }
     });
+
+    // -------------------------------------------------------------------------
+    // WebSocket -> PTY Pump (and Resize Handling)
+    // -------------------------------------------------------------------------
 
     // Task to receive from WebSocket and write to PTY
     let master_clone = master.clone();
@@ -228,6 +281,10 @@ async fn handle_terminal(socket: WebSocket) {
         }
     });
 
+    // -------------------------------------------------------------------------
+    // Join and Cleanup
+    // -------------------------------------------------------------------------
+
     // Wait for tasks or child process to end
     tokio::select! {
         _ = send_task => {
@@ -250,6 +307,10 @@ async fn handle_terminal(socket: WebSocket) {
 
     info!("Terminal session ended");
 }
+
+// =============================================================================
+// Resize Sequence Parser
+// =============================================================================
 
 /// Parse terminal resize sequence ESC[8;rows;colst
 fn parse_resize_sequence(s: &str) -> Option<PtySize> {
@@ -275,6 +336,10 @@ fn parse_resize_sequence(s: &str) -> Option<PtySize> {
         pixel_height: 0,
     })
 }
+
+// =============================================================================
+// Terminal Info REST Handler
+// =============================================================================
 
 /// Get terminal info (admin only)
 pub async fn terminal_info(

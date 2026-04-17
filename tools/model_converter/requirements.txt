@@ -1,0 +1,22 @@
+# AxonML Model Converter — Python dependencies
+#
+# Install into a dedicated venv:
+#   python3 -m venv /opt/AxonML/tools/converter-venv
+#   /opt/AxonML/tools/converter-venv/bin/pip install -r requirements.txt
+#
+# Then point the CLI at it:
+#   export AXONML_CONVERTER_PYTHON=/opt/AxonML/tools/converter-venv/bin/python
+#   axonml export model.axonml --format onnx --output model.onnx
+
+# PyTorch — model reconstruction + onnx export backend.
+# Pin to 2.4+ for the stable TorchScript onnx exporter (dynamo=False).
+torch>=2.4,<3.0
+
+# ONNX — protobuf encoder + `onnx.checker` for post-export validation.
+onnx>=1.16,<2.0
+
+# ONNX Runtime — parity check (PyTorch vs ORT max-diff).
+onnxruntime>=1.18,<2.0
+
+# Numeric core (already a torch dep, but listed explicitly for clarity).
+numpy>=1.24,<3.0

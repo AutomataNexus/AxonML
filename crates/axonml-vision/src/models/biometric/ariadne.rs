@@ -1,13 +1,24 @@
-//! Ariadne — Fingerprint via Ridge Event Fields (~65K params)
+//! Ariadne — Fingerprint Identity via Ridge Event Fields (~65K params)
+//!
+//! Implements `AriadneFingerprint`, a fingerprint recognition model that applies
+//! Gabor-initialized orientation filters (8 directions, learnable weights) to
+//! extract a 2-channel ridge event field (dominant orientation + magnitude), then
+//! encodes through three depthwise-separable residual blocks (`DWSepBlock`), a
+//! spatial hash conv, adaptive pooling, and a 2-layer projection head to produce
+//! an L2-normalized embedding with uncertainty. Provides ridge density mapping
+//! over 8x8 cells, Poincare-index singularity detection (core/delta), partial
+//! fingerprint matching via sub-region cosine similarity, and orientation
+//! consistency scoring for quality assessment.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/biometric/ariadne.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,10 +1,25 @@
-//! `train_ctl` — operator CLI for any running llm-training binary.
+//! train_ctl — Operator CLI for Running AxonML Training Jobs
 //!
-//! Every `train_*` binary that uses [`llm_training::TrainingLifecycle`]
-//! (all of them, once Phase 0 is propagated) binds a Unix control socket at
-//! `/tmp/axonml-train-<pid>.sock` with a convenience symlink at
-//! `/tmp/axonml-train-latest.sock`. This tool is a thin client over that
-//! socket so you don't have to `nc -U` by hand.
+//! Thin Unix-socket client that sits in front of every `train_*` binary's
+//! [`llm_training::TrainingLifecycle`] control socket. Each training process
+//! binds `/tmp/axonml-train-<pid>.sock` with a convenience symlink at
+//! `/tmp/axonml-train-latest.sock`; this tool wraps the plaintext protocol
+//! (`pause`, `resume`, `stop`, `checkpoint`, `status`) so operators don't
+//! have to `nc -U` by hand.
+//!
+//! ## What this file contains
+//! - `main` — minimal handwritten argv parser that recognizes `--socket`,
+//!   `--pid`, `--help`/`-h`, the five remote commands, and the local `list`
+//!   command. Defaults to `status` when no command is given and to the
+//!   `/tmp/axonml-train-latest.sock` symlink when no target is specified.
+//! - `send_command` — connects to a socket with 3-second read/write
+//!   timeouts, writes a single-line command, and reads back the one-line
+//!   reply.
+//! - `list_jobs` — scans `/tmp` for `axonml-train-<pid>.sock` files
+//!   (skipping the `latest` symlink), probes each with `status`, and prints
+//!   a per-PID block.
+//! - `send_status` — convenience wrapper used by `list_jobs`.
+//! - `print_help` — prints the usage reference and exits.
 //!
 //! Usage:
 //!   train_ctl                  # same as `status`
@@ -16,15 +31,42 @@
 //!   train_ctl list             # list every running training job on this box
 //!   train_ctl --socket PATH <cmd>   # target a specific socket (multi-run)
 //!   train_ctl --pid PID <cmd>       # target /tmp/axonml-train-<PID>.sock
+//!
+//! # File
+//! `llm-training/src/bin/train_ctl.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+// =============================================================================
+// Socket Path Constants
+// =============================================================================
+
 const LATEST: &str = "/tmp/axonml-train-latest.sock";
 const TMP_PREFIX: &str = "axonml-train-";
 const TMP_SUFFIX: &str = ".sock";
+
+// =============================================================================
+// Help Text
+// =============================================================================
 
 fn print_help() -> ! {
     println!(
@@ -50,6 +92,10 @@ If no target is given, uses /tmp/axonml-train-latest.sock."
     );
     std::process::exit(0);
 }
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -111,6 +157,10 @@ fn main() {
     }
 }
 
+// =============================================================================
+// Socket Client
+// =============================================================================
+
 fn send_command(path: &Path, cmd: &str) -> std::io::Result<String> {
     let mut stream = UnixStream::connect(path)?;
     stream.set_read_timeout(Some(Duration::from_secs(3)))?;
@@ -124,6 +174,10 @@ fn send_command(path: &Path, cmd: &str) -> std::io::Result<String> {
     reader.read_line(&mut line)?;
     Ok(line)
 }
+
+// =============================================================================
+// List Jobs
+// =============================================================================
 
 fn list_jobs() {
     let dir = Path::new("/tmp");

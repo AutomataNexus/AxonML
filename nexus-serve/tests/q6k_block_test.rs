@@ -1,7 +1,38 @@
-//! Standalone test for Q6_K dequantization using a known block
-//! from the Qwen2.5 Coder 1.5B token_embd.weight, block 0.
+//! q6k_block_test — Q6_K Dequant Golden-Block Test
+//!
+//! Single integration test [`test_dequantize_q6_k_block_0`] that feeds a
+//! hard-coded 210-byte Q6_K super-block (block 0 of
+//! `token_embd.weight` from Qwen2.5 Coder 1.5B) into [`dequantize_q6_k`] and
+//! asserts that the first 10 output values and the block-wide max-abs match
+//! a Python reference. Protects the ql / qh / sc / d unpacking order from
+//! regressions — Q6_K stores the 6-bit quants as 4 low bits + 2 high bits
+//! across two separate byte regions plus per-16-element int8 scales and a
+//! super-block-wide f16 scale at byte offset 208.
+//!
+//! # File
+//! `nexus-serve/tests/q6k_block_test.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use nexus_serve::model::gguf::dequantize_q6_k;
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[test]
 fn test_dequantize_q6_k_block_0() {

@@ -1,17 +1,73 @@
-//! Weight abstraction supporting both pre-dequantized f32 and lazy quantized storage.
+//! weight — Matrix-Weight Abstraction + CUDA Dispatch
 //!
-//! A `Weight` holds either:
-//! - `F32(Tensor<f32>)` — fully dequantized, pre-transposed, optionally on GPU.
-//!   Fast matmul, high memory.
-//! - `Quantized { data, shape, dtype }` — raw GGUF bytes on CPU. Dequantized
-//!   on every matmul call (to scratch memory, then dropped). Slower but
-//!   keeps a 27B model to ~10GB instead of ~50GB.
+//! The [`Weight`] enum wraps every shape a single matmul-weight can take in
+//! nexus-serve:
+//! - [`Weight::F32`]: fully dequantized, pre-transposed `Tensor<f32>` — fast
+//!   matmul, high memory. Can live on CPU or GPU via `to_device`.
+//! - [`Weight::Quantized`]: raw GGUF-packed bytes on CPU (Q4_0, Q4_K, Q6_K,
+//!   Q8_0, F16, BF16, I2S/BitNet). Stores `dims[0]=in, dims[1]=out` + the
+//!   `GgmlType`. On CUDA builds carries an `OnceLock<CudaSlice<u8>>`
+//!   `gpu_cache` that lazily holds the one-time H2D upload of `data` —
+//!   reused on every GEMV/GEMM dispatch, eliminates the per-matmul ~15-80
+//!   MB H2D copy that dominated decode bandwidth (see WORK_STATE W17).
+//! - [`Weight::QuantizedGpu`]: (reserved) GPU-resident quantized bytes. Not
+//!   used in session 2 — construction panics to catch accidents.
+//!
+//! Matmul dispatch ([`Weight::matmul`]):
+//! 1. `F32`: direct `Tensor::matmul`.
+//! 2. `Quantized` + Q4_K + GPU input → cache-upload + `q4k_gemv_cuda` /
+//!    `q4k_gemm_cuda` (dequant-in-shader).
+//! 3. `Quantized` + Q6_K + GPU input → cache-upload + `q6k_gemv_cuda` /
+//!    `q6k_gemm_cuda`.
+//! 4. `Quantized` + I2S (BitNet) → fused CPU [`i2s_matmul`] (ternary
+//!    add-only, never materializes f32 weights).
+//! 5. Fallback: [`Weight::cpu_dequant_matmul`] — dequantize into `[out, in]`
+//!    then `CpuBackend::matmul_f32_bt` (parallel GEMV at m=1, zero-copy
+//!    stride-transposed sgemm at m>1). Avoids the old `transpose(0,1).
+//!    contiguous()` memcpy that pegged one core.
+//!
+//! Support helpers:
+//! - [`dequantize_into`]: dispatches per-dtype to the block kernels in
+//!   `super::gguf` (`dequantize_q4_k`, `dequantize_q6_k`, etc.) via
+//!   [`dequantize_blocks_par`] — a BATCH=64 rayon parallel block driver that
+//!   amortizes task-scheduling overhead across all cores.
+//! - [`i2s_matmul`]: pulls the trailing 4-byte f32 tensor-wide scale that
+//!   `MappedGguf::load_tensor_raw` appends, then calls
+//!   `axonml_quant::bitnet::matmul_i2s`.
+//!
+//! Instrumentation (env-gated, zero cost when off):
+//! - `I2S_TRACE=1` → prints avg total / kernel / overhead every 100 I2S
+//!   calls (via `I2S_CALLS` / `I2S_KERNEL_NS` / `I2S_TOTAL_NS`).
+//! - `MM_TRACE=1` → same for general CPU dequant+matmul (via `MM_CALLS` /
+//!   `MM_DEQUANT_NS` / `MM_KERNEL_NS` / `MM_TOTAL_NS`).
+//! - W17 one-shot dispatch markers (`Q4K_GPU_FIRED`, `CPU_DEQUANT_FIRED`,
+//!   `Q4K_GPU_SKIPPED_CPU_INPUT`, `Q6K_GPU_FIRED`, `Q6K_GPU_SKIPPED_CPU_INPUT`)
+//!   print the first time each branch fires during a request.
 //!
 //! The transpose is applied implicitly: quantized data is stored as the
 //! physical GGUF layout (rows=out, cols=in) and dequantized into a
 //! [out, in] scratch buffer, which is then used as an f32 tensor that
 //! gets transposed to [in, out] for the matmul (same convention as the
 //! pre-dequantized path).
+//!
+//! # File
+//! `nexus-serve/src/model/weight.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -21,6 +77,10 @@ use axonml_tensor::Tensor;
 use rayon::prelude::*;
 
 use super::gguf::{self, GgmlType};
+
+// =============================================================================
+// Instrumentation
+// =============================================================================
 
 // Instrumentation for BitNet ternary matmul — prints stats every N calls so
 // we can see per-call wall time and identify whether the kernel or the
@@ -61,6 +121,10 @@ static Q4K_GPU_SKIPPED_CPU_INPUT: AtomicBool = AtomicBool::new(false);
 static Q6K_GPU_FIRED: AtomicBool = AtomicBool::new(false);
 #[cfg(feature = "cuda")]
 static Q6K_GPU_SKIPPED_CPU_INPUT: AtomicBool = AtomicBool::new(false);
+
+// =============================================================================
+// Weight Enum
+// =============================================================================
 
 /// A weight matrix: either pre-dequantized (fast, big) or lazily dequantized (slow, small).
 pub enum Weight {
@@ -411,6 +475,10 @@ impl Weight {
     }
 }
 
+// =============================================================================
+// Dequantization Helpers
+// =============================================================================
+
 /// Dequantize `n_elements` values from `raw_data` using the given `dtype`.
 /// Block-based dequantization (Q4_0, Q4_K, Q6_K, Q8_0, I2S) is parallelized via rayon.
 fn dequantize_into(output: &mut [f32], raw_data: &[u8], n_elements: usize, dtype: GgmlType) {
@@ -444,6 +512,10 @@ fn dequantize_into(output: &mut [f32], raw_data: &[u8], n_elements: usize, dtype
         }
     }
 }
+
+// =============================================================================
+// BitNet I2_S Matmul
+// =============================================================================
 
 /// BitNet I2_S matmul: `input [m, in]` @ ternary-weights `[in, out]` → `[m, out]`.
 ///
@@ -528,6 +600,10 @@ fn i2s_matmul(data: &[u8], dims: &[usize], input: &Tensor<f32>) -> Tensor<f32> {
 
     result
 }
+
+// =============================================================================
+// Parallel Block Dequantization
+// =============================================================================
 
 /// Dequantize a block-based quantization in parallel using rayon.
 /// `block_size` = elements per block. `type_size` = bytes per block.

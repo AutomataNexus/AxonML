@@ -1,13 +1,24 @@
 //! Echo — Voice Identity via Predictive Speaker Residuals (~68K params)
 //!
+//! Implements `EchoSpeaker`, a speaker recognition model that trains a speech
+//! predictor (Conv1d + frame-wise GRU + Conv1d decoder) to learn generic temporal
+//! speech structure, then extracts prediction residuals as the speaker-specific
+//! signal. Residuals are encoded through two Conv1d layers with statistics pooling
+//! (mean + std) and projected to an L2-normalized embedding with uncertainty.
+//! Provides prediction error as a novelty/impostor score, spectral-flatness-based
+//! replay/spoofing detection, energy-based voice activity detection with adaptive
+//! thresholding, temporal consistency measurement across overlapping segments, and
+//! syllable-rate estimation via envelope autocorrelation.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/biometric/echo.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

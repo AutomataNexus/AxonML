@@ -1,18 +1,34 @@
-//! Commands - CLI Command Implementations
+//! Commands — CLI Subcommand Aggregator
+//!
+//! Declares every subcommand implementation module for the `axonml` CLI.
+//! Always-on modules cover project lifecycle (`new`, `init`, `scaffold`),
+//! training and evaluation (`train`, `resume`, `eval`, `predict`), model
+//! tooling (`convert`, `export`, `inspect`, `report`, `quant`, `load`,
+//! `rename`, `zip`, `upload`), data/compute (`data`, `analyze`, `bench`,
+//! `gpu`), discovery (`hub`, `kaggle`, `dataset`), and UI
+//! (`dashboard`, `tui`). Feature-gated: `wandb` + `wandb_client` under
+//! `wandb`, `serve` under `serve`, and `sync` under `server-sync`. The
+//! crate-visible `utils` module holds shared helpers for the command
+//! implementations.
 //!
 //! # File
 //! `crates/axonml-cli/src/commands/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Sub-Modules
+// =============================================================================
 
 pub mod analyze;
 pub mod bench;
@@ -40,6 +56,10 @@ pub mod tui;
 pub mod upload;
 pub mod zip;
 
+// -----------------------------------------------------------------------------
+// Feature-Gated Modules
+// -----------------------------------------------------------------------------
+
 #[cfg(feature = "wandb")]
 pub mod wandb;
 #[cfg(feature = "wandb")]
@@ -50,6 +70,10 @@ pub mod serve;
 
 #[cfg(feature = "server-sync")]
 pub mod sync;
+
+// -----------------------------------------------------------------------------
+// Internal Utilities
+// -----------------------------------------------------------------------------
 
 // Re-export common utilities for commands
 pub(crate) mod utils;

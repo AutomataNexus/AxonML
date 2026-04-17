@@ -1,12 +1,41 @@
-//! GitHub tools — issues, PRs, CI status via the `gh` CLI.
+//! GitHub Tools — Issues, PRs, and CI via the `gh` CLI
+//!
+//! Four tools that shell out to the `gh` GitHub CLI: `GhListPrsTool`
+//! (gh_list_prs) runs `gh pr list` with state + limit; `GhListIssuesTool`
+//! (gh_list_issues) runs `gh issue list`; `GhCiStatusTool` (gh_ci_status)
+//! runs `gh run list` to surface recent Actions workflow runs;
+//! `GhViewPrTool` (gh_view_pr) runs `gh pr view <number>` for full PR
+//! details including reviews and checks.
+//!
+//! All four route through the private `gh()` helper which captures
+//! stdout/stderr and `bail!`s on non-zero exit.
 //!
 //! Requires `gh` to be installed and authenticated (`gh auth login`).
+//!
+//! # File
+//! `nexus-agent/src/tools/github.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::Tool;
+
+// =============================================================================
+// Shared gh Runner
+// =============================================================================
 
 async fn gh(args: &[&str]) -> anyhow::Result<String> {
     let output = tokio::process::Command::new("gh")
@@ -22,7 +51,7 @@ async fn gh(args: &[&str]) -> anyhow::Result<String> {
 }
 
 // =============================================================================
-// List PRs
+// GhListPrsTool — List PRs
 // =============================================================================
 
 pub struct GhListPrsTool;
@@ -70,7 +99,7 @@ impl Tool for GhListPrsTool {
 }
 
 // =============================================================================
-// List issues
+// GhListIssuesTool — List Issues
 // =============================================================================
 
 pub struct GhListIssuesTool;
@@ -116,7 +145,7 @@ impl Tool for GhListIssuesTool {
 }
 
 // =============================================================================
-// CI / workflow run status
+// GhCiStatusTool — CI / Workflow Run Status
 // =============================================================================
 
 pub struct GhCiStatusTool;
@@ -159,7 +188,7 @@ impl Tool for GhCiStatusTool {
 }
 
 // =============================================================================
-// View a specific PR
+// GhViewPrTool — View a Specific PR
 // =============================================================================
 
 pub struct GhViewPrTool;

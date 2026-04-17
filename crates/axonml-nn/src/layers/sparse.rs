@@ -1,13 +1,22 @@
-//! Sparse Layers - Differentiable Structured Sparsity
+//! Differentiable structured sparsity — a novel AxonML feature.
+//!
+//! 1147 lines. `SparseLinear` (Linear layer with a learnable soft-threshold
+//! pruning mask — the mask is differentiable via straight-through estimation,
+//! enabling end-to-end learning of which weights to prune). `GroupSparsity`
+//! (L2,1 regularization that drives entire rows/columns to zero for structured
+//! pruning). `LotteryTicket` (implements the lottery ticket hypothesis:
+//! train → prune → rewind to init → retrain the sparse subnetwork, with
+//! iterative magnitude pruning and score tracking).
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/sparse.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

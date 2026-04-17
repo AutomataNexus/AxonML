@@ -1,13 +1,20 @@
-//! CSPDarknet Backbone for Helios
+//! CSPDarknet Backbone — Feature Extraction for Helios
+//!
+//! Implements `CBS` (Conv2d + BatchNorm2d + SiLU activation block), `Bottleneck`
+//! (residual bottleneck with optional shortcut), `C2f` (CSP-style cross-stage
+//! partial block with configurable depth), `SPPF` (spatial pyramid pooling with
+//! cascaded MaxPool2d), and `CSPDarknet` (the full 5-stage backbone producing
+//! multi-scale feature maps P3/P4/P5 from `HeliosConfig` channel/depth settings).
 //!
 //! # File
 //! `crates/axonml-vision/src/models/helios/backbone.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

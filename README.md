@@ -24,7 +24,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ pas
 
 ## Features
 
-### Core (v0.6.0)
+### Core (v0.6.1)
 
 - **Tensor Operations** (`axonml-tensor`)
   - N-dimensional tensors with arbitrary shapes
@@ -74,8 +74,8 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ pas
 
 - **Computer Vision** (`axonml-vision`)
   - Image transforms (Resize, Crop, Flip, Normalize)
-  - SyntheticMNIST, SyntheticCIFAR datasets
-  - LeNet, SimpleCNN, ResNet, VGG, ViT architectures
+  - MNIST/CIFAR loaders (real data + synthetic), COCO + WIDER FACE
+  - LeNet, SimpleCNN, ResNet-18/34, VGG-11/13/16/19, Vision Transformer
   - **Aegis Identity** *(novel)* — Unified biometric framework (~362K params, <2MB) with 5 novel architectures:
     - **Mnemosyne** - Face identity via temporal crystallization (GRU attractor convergence, liveness detection)
     - **Ariadne** - Fingerprint via ridge event fields (Gabor wavelet banks, singularity detection)
@@ -127,10 +127,11 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ pas
   - ONNX opset version 17
 
 - **Model Quantization** (`axonml-quant`)
-  - INT8 (Q8_0), INT4 (Q4_0, Q4_1), INT5 (Q5_0, Q5_1) formats
+  - INT8 (Q8_0), INT4 (Q4_0, Q4_1, Q4_K), INT5 (Q5_0, Q5_1), INT6 (Q6_K) formats
   - Half-precision (F16) support
   - Block-based quantization with calibration
-  - ~8x model size reduction with Q4
+  - **BitNet I2_S 1.58-bit ternary** *(novel)* — `matmul_i2s_i8` with AVX-VNNI fused dequant, int8 activation quantizer, 128-weight blocks; powers the Trident sub-2-bit LLM stack
+  - ~8x model size reduction with Q4, ~16x with I2_S
 
 - **Kernel Fusion** (`axonml-fusion`)
   - Automatic fusion pattern detection
@@ -324,7 +325,7 @@ axonml tui --model model.axonml --data ./data/
 | Key | Action |
 |-----|--------|
 | `Tab` / `Shift+Tab` | Switch between tabs |
-| `1-5` | Jump directly to tab |
+| `1-6` | Jump directly to tab |
 | `↑/k`, `↓/j` | Navigate up/down in lists |
 | `←/h`, `→/l` | Navigate between panels |
 | `Enter` | Select / Open |
@@ -416,13 +417,18 @@ axon logs -f
   - TimelineProfiler with Chrome trace export
   - BottleneckAnalyzer for automatic issue detection
 
-- **LLM Architectures** (`axonml-llm`)
-  - BERT encoder (BertConfig, Bert, BertLayer)
-  - BertForSequenceClassification, BertForMaskedLM
-  - GPT-2 decoder (GPT2Config, GPT2, GPT2Block)
-  - GPT2LMHead for language modeling
+- **LLM Architectures** (`axonml-llm`) — 9 full architectures
+  - **BERT** encoder + `BertForSequenceClassification` / `BertForMaskedLM`
+  - **GPT-2** decoder + `GPT2LMHead` for language modeling
+  - **LLaMA** (2-7B, 2-13B, 3-8B configs) with GQA + RoPE + RMSNorm
+  - **Mistral** (7B, Mixtral 8×7B configs) with sliding-window attention
+  - **Phi** (1/2/3-mini configs); full-RoPE workaround for partial-RoPE framework bug documented in `train_phi`
+  - **SSM / Mamba** + `SSMForCausalLM` wrapper
+  - **Hydra** *(novel)* — hybrid SSM + windowed-attention interleaved layers
+  - **Chimera** *(novel)* — sparse MoE (top-2 of 4 experts, load-balance loss) + Differential Attention
+  - **Trident** *(novel)* — 1.58-bit ternary transformer with GQA + BitNet STE; training + inference fully wired
+  - Shared infra: `FlashAttention`, `KVCache` / `LayerKVCache`, HuggingFace loader, state-dict mapping, `HFTokenizer`
   - Text generation with top-k, top-p, temperature sampling
-  - **Pretrained Model Hub** - LLaMA, Mistral, Phi, Qwen model configs
 
 - **GPU Backends** (`axonml-core`)
   - **CUDA** - Full NVIDIA GPU support with cuBLAS, PTX kernels
@@ -585,18 +591,20 @@ Each daemon runs pure-tensor inference (no autograd overhead), polls local Nexus
 +------------------------------------------------------------------+
 |                        axonml (main crate)                       |
 +------------------------------------------------------------------+
-|  axonml-vision | axonml-audio | axonml-text | axonml-distributed |
-+-----------------+---------------+--------------+--------------------+
-|    axonml-llm   |  axonml-jit  | axonml-profile                   |
-+-----------------+--------------+-----------------------------------+
-|         axonml-serialize       |         axonml-onnx             |
-+---------------------------------+----------------------------------+
-|         axonml-quant           |         axonml-fusion           |
-+---------------------------------+----------------------------------+
+|  axonml-hvac   |  axonml-train  |  axonml-vision  |  axonml-audio |
++----------------+----------------+-----------------+----------------+
+|  axonml-text   | axonml-distributed |  axonml-llm  |  axonml-jit  |
++----------------+--------------------+--------------+---------------+
+|         axonml-profile         |         axonml-serialize         |
++--------------------------------+-----------------------------------+
+|         axonml-onnx            |         axonml-quant             |
++--------------------------------+-----------------------------------+
+|                          axonml-fusion                            |
++--------------------------------------------------------------------+
 |                           axonml-data                             |
-+---------------------------------+----------------------------------+
-|          axonml-optim          |           axonml-nn             |
-+---------------------------------+----------------------------------+
++--------------------------------------------------------------------+
+|          axonml-optim          |           axonml-nn              |
++--------------------------------+-----------------------------------+
 |                          axonml-autograd                          |
 +--------------------------------------------------------------------+
 |                          axonml-tensor                            |
@@ -619,13 +627,22 @@ Each daemon runs pure-tensor inference (no autograd overhead), polls local Nexus
 |                         axonml-server                              |
 |  Axum REST API: Auth, Training Runs, Model Registry, Metrics       |
 +--------------------------------------------------------------------+
+
++----------------+----------------+----------------+----------------+
+|  llm-training  | biometric-     |  nexus-serve   |  nexus-agent   |
+|                | training       |                |                |
+|  9 LM train    | Aegis biometric| Pure-Rust LLM  | 8 agents × 22  |
+|  binaries      | GPU pipelines  | inference svr  | tools (Anthrop.|
+|  + lifecycle   | (argus/ariadne | (GGUF + CUDA + | Messages API)  |
+|  (pause/resume)| /mnemosyne)    | Anthropic SSE) |                |
++----------------+----------------+----------------+----------------+
 ```
 
 ## Building from Source
 
 ### Requirements
 
-- Rust 1.75 or later
+- Rust 1.85 or later
 - Cargo
 - Node.js (for PM2 process management)
 - Aegis-DB (document store database)
@@ -692,9 +709,11 @@ AxonML uses Aegis-DB as its document store.
 ./AxonML_DB_Init.sh                        # Basic setup with admin user
 ./AxonML_DB_Init.sh --with-user            # Also creates DevOps admin user
 
-# Default Users
-# Admin:  admin@axonml.local / admin
-# DevOps: DevOps@automatanexus.com / Invertedskynet2$
+# Default Users (0.6.1+)
+# Admin:  admin@axonml.local  — password is a 24-char cryptographic random,
+#         written to $TMPDIR/axonml-admin-password.txt at first boot.
+#         Check the server log for the exact path and rotate it ASAP.
+# DevOps: DevOps@automatanexus.com — only created if AXONML_DEVOPS_PASSWORD is set.
 ```
 
 ### Environment Variables
@@ -704,6 +723,9 @@ AxonML uses Aegis-DB as its document store.
 | `RUST_LOG` | `info` | Log level (trace, debug, info, warn, error) |
 | `AEGIS_URL` | `http://127.0.0.1:7001` | Aegis-DB connection URL |
 | `RESEND_API_KEY` | - | Email service API key |
+| `AXONML_JWT_SECRET` | - | JWT signing secret (**required**, must be ≥32 chars; server refuses to boot otherwise) |
+| `AXONML_DEVOPS_PASSWORD` | - | If set, seeds the DevOps@automatanexus.com admin on first boot |
+| `VAULT_ADDR` | - | If set, enables HashiCorp Vault secrets backend (takes precedence over env) |
 
 ## Project Structure
 
@@ -718,33 +740,40 @@ Axonml/
 ├── COMMERCIAL.md           # Commercial licensing info
 ├── Axonml_Architecture.md # Architecture documentation
 ├── crates/
-│   ├── axonml-core/       # Device, storage, dtypes
-│   ├── axonml-tensor/     # Tensor operations
-│   ├── axonml-autograd/   # Automatic differentiation
-│   ├── axonml-nn/         # Neural network modules
-│   ├── axonml-optim/      # Optimizers & schedulers
+│   ├── axonml-core/       # Device, storage, dtypes, GPU backends (CPU/CUDA/Vulkan/Metal/WebGPU)
+│   ├── axonml-tensor/     # Tensor ops (+ lazy tensor, sparse COO, CUDA ops)
+│   ├── axonml-autograd/   # Automatic differentiation (+ AMP, checkpointing, graph inspection)
+│   ├── axonml-nn/         # Neural network modules (+ TernaryLinear, MoE, sparse, graph, FFT)
+│   ├── axonml-optim/      # Optimizers & schedulers (+ LAMB, GradScaler, health monitor)
 │   ├── axonml-data/       # Data loading
-│   ├── axonml-vision/     # Computer vision
-│   ├── axonml-audio/      # Audio processing
-│   ├── axonml-text/       # NLP utilities
-│   ├── axonml-distributed/# Distributed training
-│   ├── axonml-serialize/  # Model serialization
+│   ├── axonml-vision/     # Computer vision (ResNet/VGG/ViT/Aegis biometric/Helios/Nexus/Phantom/NightVision/Aegis3D)
+│   ├── axonml-audio/      # Audio processing (MelSpectrogram, MFCC, pitch/time stretch)
+│   ├── axonml-text/       # NLP utilities (BPE / WordPiece / Unigram tokenizers)
+│   ├── axonml-distributed/# Distributed training (DDP, FSDP, tensor + pipeline parallel, NCCL)
+│   ├── axonml-serialize/  # Model serialization (+ safetensors)
 │   ├── axonml-onnx/       # ONNX import/export
-│   ├── axonml-quant/      # Model quantization
+│   ├── axonml-quant/      # Model quantization (+ BitNet I2_S 1.58-bit)
 │   ├── axonml-fusion/     # Kernel fusion optimization
-│   ├── axonml-jit/        # JIT compilation
+│   ├── axonml-jit/        # JIT compilation (Cranelift)
 │   ├── axonml-profile/    # Profiling tools
-│   ├── axonml-llm/        # LLM architectures (BERT, GPT-2)
+│   ├── axonml-llm/        # 9 LLM architectures (BERT, GPT-2, LLaMA, Mistral, Phi, SSM, Hydra, Chimera, Trident)
+│   ├── axonml-hvac/       # HVAC predictive models (Panoptes)
+│   ├── axonml-train/      # Training glue (Trainer, callbacks, benchmarks)
 │   ├── axonml-cli/        # Command line interface
 │   ├── axonml-tui/        # Terminal user interface
 │   ├── axonml-dashboard/  # Leptos/WASM web dashboard
 │   ├── axonml-server/     # Axum API server
 │   └── axonml/            # Main umbrella crate
-├── docs/                   # Per-module documentation
-└── examples/               # Working examples
-    ├── simple_training.rs  # XOR with MLP
-    ├── mnist_training.rs   # CNN on MNIST
-    └── nlp_audio_test.rs   # Text & audio demo
+├── llm-training/          # 9 LM training binaries + train_ctl + TrainingLifecycle (pause/resume/stop)
+├── biometric-training/    # Aegis biometric GPU training (argus, ariadne, mnemosyne)
+├── nexus-serve/           # Pure-Rust LLM inference server (GGUF, CUDA Q4_K/Q6_K, Anthropic SSE)
+├── nexus-agent/           # 8 AI agents × 22 tools (Anthropic Messages API) + 3 desktop tickers
+├── papers/trident-blog/   # Trident 1.58-bit LLM companion code (train, generate, compare, bench)
+├── docs/                  # Per-module documentation (Jekyll-rendered)
+└── crates/axonml/examples/# Working examples
+    ├── simple_training.rs # XOR with MLP
+    ├── mnist_training.rs  # CNN on MNIST
+    └── nlp_audio_test.rs  # Text & audio demo
 ```
 
 ## Documentation
@@ -809,3 +838,5 @@ at your option.
 ---
 
 **Axonml** - Forging the future of ML in Rust.
+
+_Last updated: 2026-04-16 (v0.6.1)_

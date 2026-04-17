@@ -1,13 +1,23 @@
-//! Gradient Checkpointing - Memory-Efficient Training
+//! Gradient checkpointing — trade compute for memory during training.
+//!
+//! 428 lines. `checkpoint(func, input)` runs `func` forward without recording
+//! intermediate activations, then recomputes them during backward — reduces
+//! peak memory from O(layers) to O(sqrt(layers)) at the cost of one extra
+//! forward pass. `checkpoint_sequential(funcs, segments, input)` applies
+//! checkpointing to a sequence of layers with configurable segment count.
+//! `checkpoint_rng_seed()` handles deterministic RNG replay across the
+//! recompute pass. `estimate_memory_savings` and `suggest_segments` help
+//! choose the optimal segment count for a given model.
 //!
 //! # File
 //! `crates/axonml-autograd/src/checkpoint.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

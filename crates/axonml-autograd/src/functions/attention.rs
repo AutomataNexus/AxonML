@@ -1,13 +1,20 @@
-//! Fused Attention Gradient Functions
+//! Backward function for fused scaled dot-product attention.
+//!
+//! 343 lines. `FusedAttentionBackward` recomputes the attention matrix from
+//! saved Q/K/V and the forward-pass row-max/row-sum, then computes grad_Q,
+//! grad_K, grad_V without materializing the full N×N attention matrix in
+//! memory. Supports causal masking. GPU-accelerated via the
+//! `fused_attention_bwd_f32` CUDA kernel when the `cuda` feature is enabled.
 //!
 //! # File
 //! `crates/axonml-autograd/src/functions/attention.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 18, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

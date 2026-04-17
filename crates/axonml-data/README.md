@@ -7,32 +7,32 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust"></a>
-  <a href="https://crates.io/crates/axonml-data"><img src="https://img.shields.io/badge/crates.io-0.1.0-green.svg" alt="Version"></a>
+  <a href="https://crates.io/crates/axonml-data"><img src="https://img.shields.io/badge/crates.io-0.6.1-green.svg" alt="Version"></a>
   <a href="https://github.com/axonml/axonml"><img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML"></a>
 </p>
 
 ## Overview
 
-**axonml-data** provides data loading infrastructure for training neural networks in the AxonML framework. It includes the `Dataset` trait, efficient `DataLoader` with batching and shuffling, various sampling strategies, and composable data transforms.
+**axonml-data** provides data-loading infrastructure for training neural networks in the AxonML framework. It includes the `Dataset` trait, a `DataLoader` with rayon-backed parallel sample collection, a GPU prefetch iterator that overlaps host loading with device compute, sampling strategies, composable data transforms, and collate utilities.
 
 ## Features
 
-- **Dataset Trait** - Core abstraction for indexed data access with `TensorDataset`, `MapDataset`, `ConcatDataset`, and `SubsetDataset` implementations
-- **DataLoader** - Efficient batched iteration with configurable batch size, shuffling, and drop-last behavior
-- **Samplers** - Flexible sampling strategies including `SequentialSampler`, `RandomSampler`, `SubsetRandomSampler`, `WeightedRandomSampler`, and `BatchSampler`
-- **Transforms** - Composable data augmentation with `Normalize`, `RandomNoise`, `RandomCrop`, `RandomFlip`, `Scale`, `Clamp`, and more
-- **Collate Functions** - Batch assembly with `DefaultCollate` and `StackCollate` for tensor stacking
-- **Generic DataLoader** - Flexible loader that works with any `Dataset` and `Collate` combination
+- **Dataset trait** — `TensorDataset` (caches flat data for O(row_size) access), `MapDataset`, `ConcatDataset`, `SubsetDataset` (with `random_split`), and `InMemoryDataset<T>` for arbitrary cloneable items.
+- **DataLoader** — batched iteration with `shuffle`, `drop_last`, and `num_workers` (rayon-parallel sample collection per batch when `num_workers > 0`).
+- **GPU prefetch** — `DataLoader::prefetch_to_gpu(device)` returns a `GpuPrefetchIter` that streams batches from a background thread through a bounded channel (2 batches buffered) so CPU loading overlaps with GPU compute.
+- **Samplers** — `SequentialSampler`, `RandomSampler` (with/without replacement), `SubsetRandomSampler`, `WeightedRandomSampler` (O(log n) per sample via cumulative-sum binary search, swap-remove without replacement), and `BatchSampler`.
+- **Transforms** — `Compose`, `ToTensor`, `Normalize` (scalar, per-channel, ImageNet preset), `RandomNoise` (Box-Muller Gaussian), `RandomCrop` (1D/2D/3D/4D), `RandomFlip` (generic N-d flip along any dim), `Scale`, `Clamp`, `Flatten`, `Reshape`, `DropoutTransform` (train/eval aware), `Lambda`.
+- **Collate** — `DefaultCollate` and `StackCollate` (with `with_dim` for stacking along any axis), `GenericDataLoader` for arbitrary `Dataset` + `Collate` pairings, plus `stack_tensors` and `concat_tensors` helpers.
 
 ## Modules
 
 | Module | Description |
 |--------|-------------|
-| `dataset` | Core `Dataset` trait and implementations (`TensorDataset`, `MapDataset`, `ConcatDataset`, `SubsetDataset`, `InMemoryDataset`) |
-| `dataloader` | `DataLoader` for batched iteration with shuffling support |
-| `sampler` | Sampling strategies for controlling data access patterns |
-| `transforms` | Composable data transformations for preprocessing and augmentation |
-| `collate` | Batch assembly functions for combining samples into tensors |
+| `dataset` | `Dataset` trait, `TensorDataset`, `MapDataset`, `ConcatDataset`, `SubsetDataset`, `InMemoryDataset` |
+| `dataloader` | `DataLoader`, `DataLoaderIter`, `Batch`, `GpuPrefetchIter`, `GenericDataLoader`, `GenericDataLoaderIter` |
+| `sampler` | `Sampler` trait, `SequentialSampler`, `RandomSampler`, `SubsetRandomSampler`, `WeightedRandomSampler`, `BatchSampler` |
+| `transforms` | `Transform` trait, `Compose`, `ToTensor`, `Normalize`, `RandomNoise`, `RandomCrop`, `RandomFlip`, `Scale`, `Clamp`, `Flatten`, `Reshape`, `DropoutTransform`, `Lambda` |
+| `collate` | `Collate` trait, `DefaultCollate`, `StackCollate`, `stack_tensors`, `concat_tensors` |
 
 ## Usage
 
@@ -40,7 +40,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-data = "0.1.0"
+axonml-data = "0.6.1"
 ```
 
 ### Creating a Dataset
@@ -48,7 +48,6 @@ axonml-data = "0.1.0"
 ```rust
 use axonml_data::prelude::*;
 
-// From tensors
 let x = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2]).unwrap();
 let y = Tensor::from_vec(vec![0.0, 1.0, 0.0], &[3]).unwrap();
 let dataset = TensorDataset::new(x, y);
@@ -64,16 +63,31 @@ use axonml_data::{DataLoader, TensorDataset};
 
 let dataset = TensorDataset::new(x_data, y_data);
 
-// Create loader with batch size 32
 let loader = DataLoader::new(dataset, 32)
     .shuffle(true)
-    .drop_last(false);
+    .drop_last(false)
+    .num_workers(4); // rayon-parallel sample collection per batch
 
-// Iterate over batches
 for batch in loader.iter() {
     let inputs = batch.data;
     let targets = batch.targets;
     // ... process batch ...
+}
+```
+
+### GPU Prefetch
+
+```rust
+use axonml_core::Device;
+use axonml_data::DataLoader;
+
+let loader = DataLoader::new(dataset, 64).shuffle(true).num_workers(4);
+
+// Background thread produces batches and transfers to GPU;
+// bounded to 2 batches in flight.
+for batch in loader.prefetch_to_gpu(Device::Cuda(0)) {
+    // batch.data and batch.targets are already on the GPU
+    let output = model.forward(&batch.data);
 }
 ```
 
@@ -90,9 +104,7 @@ struct MyDataset {
 impl Dataset for MyDataset {
     type Item = (Tensor<f32>, Tensor<f32>);
 
-    fn len(&self) -> usize {
-        self.data.len()
-    }
+    fn len(&self) -> usize { self.data.len() }
 
     fn get(&self, index: usize) -> Option<Self::Item> {
         self.data.get(index).cloned()
@@ -105,9 +117,8 @@ impl Dataset for MyDataset {
 ```rust
 use axonml_data::{Compose, Normalize, RandomNoise, Scale, Transform};
 
-// Compose multiple transforms
 let transform = Compose::empty()
-    .add(Normalize::new(0.5, 0.5))
+    .add(Normalize::imagenet())          // per-channel ImageNet stats
     .add(RandomNoise::new(0.01))
     .add(Scale::new(2.0));
 
@@ -119,17 +130,13 @@ let output = transform.apply(&input_tensor);
 ```rust
 use axonml_data::{RandomSampler, WeightedRandomSampler, BatchSampler, Sampler};
 
-// Random sampling without replacement
 let sampler = RandomSampler::new(1000);
-for idx in sampler.iter() {
-    // Process sample at idx
-}
+for idx in sampler.iter() { /* ... */ }
 
-// Weighted sampling for imbalanced datasets
+// Weighted sampling for class-imbalanced datasets (O(log n) per sample)
 let weights = vec![1.0, 2.0, 0.5, 3.0];
 let sampler = WeightedRandomSampler::new(weights, 100, true);
 
-// Batch sampling
 let base_sampler = RandomSampler::new(1000);
 let batch_sampler = BatchSampler::new(base_sampler, 32, false);
 for batch_indices in batch_sampler.iter() {
@@ -144,7 +151,7 @@ use axonml_data::{TensorDataset, SubsetDataset};
 
 let dataset = TensorDataset::new(x_data, y_data);
 
-// Random split: 80% train, 20% validation
+// Shuffled random split (requires Dataset: Clone)
 let splits = SubsetDataset::random_split(dataset, &[800, 200]);
 let train_dataset = &splits[0];
 let val_dataset = &splits[1];
@@ -155,18 +162,28 @@ let val_dataset = &splits[1];
 ```rust
 use axonml_data::{TensorDataset, ConcatDataset, MapDataset};
 
-// Concatenate datasets
 let combined = ConcatDataset::new(vec![dataset1, dataset2, dataset3]);
 
-// Apply transform to dataset
 let mapped = MapDataset::new(dataset, |(x, y)| {
     (x.mul_scalar(2.0), y)
 });
 ```
 
-## Tests
+### Generic DataLoader
 
-Run the test suite:
+Flexible loader that works with any `Dataset<Item = T>` and any `Collate<T>`:
+
+```rust
+use axonml_data::{GenericDataLoader, DefaultCollate};
+
+let loader = GenericDataLoader::new(dataset, DefaultCollate::new(), 32)
+    .shuffle(true)
+    .num_workers(4);
+
+for batch in loader.iter() { /* ... */ }
+```
+
+## Tests
 
 ```bash
 cargo test -p axonml-data
@@ -180,3 +197,7 @@ Licensed under either of:
 - MIT License ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+---
+
+_Last updated: 2026-04-16 (v0.6.1)_

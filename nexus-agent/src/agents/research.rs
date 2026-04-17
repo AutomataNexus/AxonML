@@ -1,9 +1,46 @@
-//! Research agent — literature review, paper drafting, and citation management.
+//! Research Agent — Literature Review, Paper Drafting, Citation Management
 //!
-//! Reads the AxonML papers directory, searches for related work,
-//! and helps draft or revise paper sections.
+//! Defines the `research` agent configuration: assists with academic
+//! paper writing for the AxonML publication pipeline — the AxonML
+//! framework paper, the Aegis biometric suite paper, the Trident
+//! 1.58-bit LLM paper, the TMC HVAC controller paper, and the planned
+//! Mnemosyne standalone paper. Verifies cited numbers against actual
+//! code and logs to prevent fabrication.
+//!
+//! Exports:
+//! - `SYSTEM_PROMPT` — lists the active papers, the author identity
+//!   (Andrew Jewell Sr., ORCID `0009-0005-2158-7060`), the IEEEtran
+//!   format convention, the "companion preprint" boilerplate rule
+//!   (LESSONS.md L13), the pdflatex error-filtering rule (L06), and
+//!   the tool set (`read_file`, `write_file`, `grep`, `search_files`,
+//!   `shell`, `vault_read`, `vault_write`).
+//! - `config()` — returns an `AgentConfig` with
+//!   `max_iterations = 25`, `model = "qwen3"`, `temperature = 0.3`.
+//!
+//! # File
+//! `nexus-agent/src/agents/research.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use crate::AgentConfig;
+
+// =============================================================================
+// System Prompt
+// =============================================================================
 
 pub const SYSTEM_PROMPT: &str = r#"You are a research assistant for Andrew Jewell Sr. at AutomataNexus LLC.
 
@@ -41,6 +78,10 @@ Your job is to help with academic paper writing, literature review, and citation
 5. Author: Andrew Jewell Sr., ORCID: 0009-0005-2158-7060, AutomataNexus LLC
 6. pdflatex errors: only lines starting with ! or containing 'error:' are real errors (LESSONS.md L06)
 "#;
+
+// =============================================================================
+// Agent Configuration
+// =============================================================================
 
 pub fn config() -> AgentConfig {
     AgentConfig {

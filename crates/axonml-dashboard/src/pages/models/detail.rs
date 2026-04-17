@@ -1,18 +1,33 @@
-//! Model Detail Page
+//! Model Detail Page — Versions Table, Deploy, Download, and Deletion
+//!
+//! Leptos page component `ModelDetailPage` for viewing a single model from
+//! the registry. Reads the model id from the route params, fetches the model
+//! record via `api::models::get()` and its version list via
+//! `api::models::list_versions()`. Displays a header with model type badge,
+//! a stats grid (version count / latest version / creation date), and a
+//! versions table offering per-version download, deploy (creating an
+//! inference endpoint with a user-supplied name via `api::models::deploy_version`),
+//! and delete actions. Deletion of the model itself redirects back to `/models`.
+//! Also contains a private `format_file_size` helper rendering KB/MB/GB.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/models/detail.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,9 +37,16 @@ use crate::components::{forms::*, icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// ModelDetailPage Component
+// =============================================================================
+
 /// Model detail page
 #[component]
 pub fn ModelDetailPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Params and Signals
+    // -------------------------------------------------------------------------
     let params = use_params_map();
     let state = use_app_state();
     let navigate = use_navigate();
@@ -51,6 +73,9 @@ pub fn ModelDetailPage() -> impl IntoView {
     let state_for_deploy = state.clone();
     let navigate_for_deploy = navigate.clone();
 
+    // -------------------------------------------------------------------------
+    // Data Fetch Effect
+    // -------------------------------------------------------------------------
     // Fetch model data on ID changes
     create_effect(move |_| {
         let id = model_id();
@@ -83,6 +108,9 @@ pub fn ModelDetailPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Event Handlers
+    // -------------------------------------------------------------------------
     // Delete model
     let delete_model = move |_| {
         let id = model_id();
@@ -168,6 +196,9 @@ pub fn ModelDetailPage() -> impl IntoView {
     let delete_version_stored = store_value(delete_version);
     let deploy_version_stored = store_value(deploy_version);
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page model-detail-page">
             <Show when=move || loading.get()>
@@ -393,6 +424,10 @@ pub fn ModelDetailPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 fn format_file_size(bytes: u64) -> String {
     const KB: u64 = 1024;

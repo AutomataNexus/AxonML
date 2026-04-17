@@ -1,12 +1,45 @@
-//! Knowledge agent — reads codebases and maintains the Obsidian vault.
+//! Knowledge Agent — Codebase Reader And Obsidian Vault Maintainer
 //!
-//! This is the first working agent for the beta. It:
-//! 1. Scans a project directory for README, WORK_STATE, Cargo.toml, source files
-//! 2. Understands what the project does and its current state
-//! 3. Updates the Obsidian vault with accurate, current documentation
-//! 4. Cross-links related projects and keeps PROJECTS.md / LESSONS.md in sync
+//! Defines the `knowledge` agent configuration: scans project directories
+//! (README, WORK_STATE, Cargo.toml, source), infers current project
+//! state, and keeps the Obsidian vault at `/opt/Vault/` in sync — the
+//! master hub `GRAPH.md`, the index files `PROJECTS.md`, `LESSONS.md`,
+//! `RESOURCES.md`, and the per-project `projects/*-workstate.md` notes.
+//!
+//! Exports:
+//! - `SYSTEM_PROMPT` — lists the tool set (`read_file`, `write_file`,
+//!   `search_files`, `grep`, `git_status`, `git_log`, `vault_read`,
+//!   `vault_write`, `vault_search`), the vault layout, the projects it
+//!   maintains (AxonML, Ferrum, NexusEdge_Rust, NexusOracle, Aegis-DB),
+//!   and the read-before-write / no-inline-secrets rules.
+//! - `config()` — returns an `AgentConfig` with
+//!   `max_iterations = 30` (knowledge tasks often need many reads),
+//!   `model = "qwen3"`, `temperature = 0.2`.
+//!
+//! # File
+//! `nexus-agent/src/agents/knowledge.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use crate::AgentConfig;
+
+// =============================================================================
+// System Prompt
+// =============================================================================
 
 /// System prompt for the knowledge agent.
 pub const SYSTEM_PROMPT: &str = r#"You are a knowledge management agent for the AutomataNexus engineering workspace.
@@ -48,6 +81,10 @@ Your job is to read codebases, understand their state, and maintain accurate doc
 6. The vault uses symlinks. vault_write writes to the real source file through the symlink.
 7. Read before you write. Never overwrite a file you haven't read first.
 "#;
+
+// =============================================================================
+// Agent Configuration
+// =============================================================================
 
 /// Build the agent config for the knowledge agent.
 pub fn config() -> AgentConfig {

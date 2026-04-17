@@ -1,13 +1,21 @@
-//! Decoupled Detection Head for Helios
+//! Decoupled Detection Head — Classification and Regression Branches
+//!
+//! Implements `HeliosHead` with separate classification and bounding-box
+//! regression branches per scale level. Each branch uses CBS blocks followed
+//! by a 1x1 Conv2d projection. The classification branch outputs per-class
+//! logits `[N, num_classes, H, W]` and the regression branch outputs DFL
+//! distributions `[N, 4*reg_max, H, W]` for anchor-free bbox prediction.
+//! Supports multi-scale processing through `HeliosScaleOutput`.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/helios/head.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

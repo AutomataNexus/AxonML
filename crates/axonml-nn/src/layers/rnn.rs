@@ -1,13 +1,21 @@
-//! Recurrent Neural Network Layers - RNN, LSTM, GRU
+//! Recurrent layers — `RNN`, `LSTM`, `GRU` and their cell variants.
+//!
+//! 1490 lines. `RNNCell` / `RNN` (tanh or relu nonlinearity, multi-layer,
+//! bidirectional), `LSTMCell` / `LSTM` (forget/input/output/cell gates,
+//! multi-layer, returns (output, (h_n, c_n))), `GRUCell` / `GRU`
+//! (update/reset gates, multi-layer). All support `forward_step` (single
+//! timestep) and sequence-level `forward` (all timesteps). Cell variants
+//! expose gate-level state for custom sequence handling.
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/rnn.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,23 +1,54 @@
-//! Embedding Module
+//! Embedding Module — Token, Position, Segment, and Sinusoidal Embeddings
+//!
+//! Embedding-layer building blocks for the transformer models in `axonml-llm`.
+//! `TokenEmbedding` wraps `axonml_nn::Embedding` and casts `Tensor<u32>` token
+//! IDs into the `f32` embedding lookup. `PositionalEmbedding` is the learned
+//! variant with `forward_positions(seq_len, batch_size)` generating a
+//! `[batch, seq, embed]` tensor via `Variable::expand`.
+//! `SinusoidalPositionalEncoding` precomputes the classic sin/cos table with
+//! `div_term = 10000^(2i/d)`, uses `Tensor::narrow` to slice `seq_len` rows
+//! when the request is shorter than the table, and falls back to the full
+//! tensor otherwise. `BertEmbedding` combines word, position, and token-type
+//! (segment) `Embedding` layers, runs them through a local `LayerNorm`
+//! (weight/bias `Parameter`, `mean_dim`/`var_dim` over the last axis, scale +
+//! shift), then applies `Dropout`; `forward_with_ids` supports optional
+//! `token_type_ids` and `position_ids` with auto-generated defaults.
+//! `GPT2Embedding` is the GPT-style sibling with `wte` (token) + `wpe`
+//! (position) lookups, no segment embedding, and no layer norm. The `Module`
+//! impls route through the embedding dim, auto-build position/type tensors
+//! from the batch/seq shape, and thread `train()` / `eval()` into the
+//! `Dropout`. A private `u32_to_f32_tensor` helper does the index cast. Tests
+//! cover token embedding shape `[2, 2, 64]`, learned positional embedding
+//! shape `[2, 16, 64]`, sinusoidal slice shape `[16, 64]`, and GPT-2
+//! embedding shape `[2, 2, 64]`.
 //!
 //! # File
 //! `crates/axonml-llm/src/embedding.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use axonml_autograd::Variable;
 use axonml_nn::{Dropout, Embedding, Module, Parameter};
 use axonml_tensor::Tensor;
 use axonml_tensor::creation::{ones, zeros};
+
+// =============================================================================
+// TokenEmbedding
+// =============================================================================
 
 /// Token embedding layer.
 #[derive(Debug)]
@@ -53,6 +84,10 @@ impl Module for TokenEmbedding {
         self.embedding.parameters()
     }
 }
+
+// =============================================================================
+// PositionalEmbedding (Learned)
+// =============================================================================
 
 /// Learned positional embedding.
 #[derive(Debug)]
@@ -103,6 +138,10 @@ impl Module for PositionalEmbedding {
     }
 }
 
+// =============================================================================
+// SinusoidalPositionalEncoding (Fixed)
+// =============================================================================
+
 /// Sinusoidal positional encoding (fixed, not learned).
 #[derive(Debug)]
 pub struct SinusoidalPositionalEncoding {
@@ -149,6 +188,10 @@ impl SinusoidalPositionalEncoding {
     }
 }
 
+// =============================================================================
+// BertEmbedding and LayerNorm
+// =============================================================================
+
 /// BERT-style embeddings (token + position + segment).
 #[derive(Debug)]
 pub struct BertEmbedding {
@@ -173,6 +216,10 @@ pub struct LayerNorm {
     bias: Parameter,
     eps: f32,
 }
+
+// -----------------------------------------------------------------------------
+// LayerNorm (local to embedding module)
+// -----------------------------------------------------------------------------
 
 impl LayerNorm {
     fn new(dim: usize, eps: f32) -> Self {
@@ -203,6 +250,10 @@ impl LayerNorm {
         vec![self.weight.clone(), self.bias.clone()]
     }
 }
+
+// -----------------------------------------------------------------------------
+// BertEmbedding
+// -----------------------------------------------------------------------------
 
 impl BertEmbedding {
     /// Creates BERT embeddings.
@@ -327,6 +378,10 @@ impl Module for BertEmbedding {
     }
 }
 
+// =============================================================================
+// GPT2Embedding
+// =============================================================================
+
 /// GPT-2 style embeddings (token + position).
 #[derive(Debug)]
 pub struct GPT2Embedding {
@@ -415,6 +470,10 @@ impl Module for GPT2Embedding {
         self.dropout.eval();
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -1,28 +1,58 @@
-//! HVAC Multi-Horizon Predictor Inference Example
+//! HVAC Multi-Horizon Predictor — ONNX Inference Smoke Test
+//!
+//! End-to-end inference harness for the HVAC multi-horizon failure predictor
+//! exported to ONNX. The example loads
+//! `hvac_multi_horizon_predictor.onnx` from disk via `axonml::onnx::import_onnx`,
+//! prints the model metadata (name, producer, opset, inputs, outputs), then
+//! constructs a synthetic `[1, 120, 28]` sensor window representing a healthy
+//! steady-state HVAC plant (pump currents, hot/chilled water supply temps,
+//! 2-pipe loops, outdoor/mech-room/space temps, pressures, VFD speeds, valve
+//! positions, seasonal mode, and lead-pump IDs, each normalized to the range
+//! recorded in `model_info.json`).
+//!
+//! The tensor is fed to `model.forward` under the `sensor_sequence` input name,
+//! and each output whose name contains `class` is decoded against the 20-class
+//! failure taxonomy ("normal", pump/pressure/temp/valve/VFD faults, sensor
+//! drift, chiller fault, interlock violation) and labeled with its prediction
+//! horizon (5 min imminent, 15 min warning, 30 min early). A healthy input is
+//! expected to yield "normal" across all horizons.
 //!
 //! # File
 //! `crates/axonml-hvac/examples/hvac_inference.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use axonml::onnx::import_onnx;
 use axonml::tensor::Tensor;
 use std::collections::HashMap;
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
 
 fn main() {
     println!("╔════════════════════════════════════════════════════════════╗");
     println!("║     HVAC Multi-Horizon Predictor - Inference Test          ║");
     println!("╚════════════════════════════════════════════════════════════╝");
     println!();
+
+    // -------------------------------------------------------------------------
+    // Model Loading
+    // -------------------------------------------------------------------------
 
     let model_path =
         "/opt/EdgeModels/warren/innis/output/realtime/hvac_multi_horizon_predictor.onnx";
@@ -58,6 +88,10 @@ fn main() {
     println!();
     println!("Running inference with sample data...");
     println!();
+
+    // -------------------------------------------------------------------------
+    // Synthetic Sensor Window Construction
+    // -------------------------------------------------------------------------
 
     // Create sample input: [1, 120, 28] - batch=1, seq_len=120, features=28
     // Simulating normal HVAC operation
@@ -111,6 +145,10 @@ fn main() {
         .expect("Failed to create input tensor");
 
     println!("Input shape: {:?}", input_tensor.shape());
+
+    // -------------------------------------------------------------------------
+    // Inference and Prediction Decoding
+    // -------------------------------------------------------------------------
 
     // Run inference
     let mut inputs = HashMap::new();

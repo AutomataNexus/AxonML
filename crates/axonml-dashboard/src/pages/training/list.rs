@@ -1,18 +1,35 @@
-//! Training Runs List Page
+//! Training Runs List Page — Browse, Filter, and Delete Training Runs
+//!
+//! Leptos page component `TrainingListPage` that renders the training-run
+//! history view. Fetches runs via `api::training::list_runs` with an
+//! optional `RunStatus` filter (All / Running / Completed / Failed) and
+//! supports client-side search over name and model type. Deletion uses a
+//! `ConfirmDialog` and `api::training::delete_run`. Each run is rendered
+//! by the private `TrainingRunCard`, which shows the run name, status
+//! badge, model type, start time, latest epoch/loss/accuracy metrics,
+//! an in-progress bar for running jobs, a config summary (learning rate,
+//! batch size, optimizer), and a dropdown menu offering view, stop (if
+//! running), and delete actions. Includes a local `format_time` helper
+//! that formats `chrono::DateTime<Utc>` as `"%b %d, %H:%M"`.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/training/list.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,9 +39,16 @@ use crate::components::{icons::*, modal::*, spinner::*, table::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// TrainingListPage Component
+// =============================================================================
+
 /// Training runs list page
 #[component]
 pub fn TrainingListPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Signals and State
+    // -------------------------------------------------------------------------
     let state = use_app_state();
 
     let (loading, set_loading) = create_signal(true);
@@ -39,6 +63,9 @@ pub fn TrainingListPage() -> impl IntoView {
     let state_for_refresh = state.clone();
     let state_for_delete = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Data Fetch Effect
+    // -------------------------------------------------------------------------
     // Initial fetch on filter changes
     create_effect(move |_| {
         filter.get(); // Subscribe to filter changes
@@ -57,6 +84,9 @@ pub fn TrainingListPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Derived Data and Event Handlers
+    // -------------------------------------------------------------------------
     // Filtered runs based on search
     let filtered_runs = move || {
         let search_term = search.get().to_lowercase();
@@ -111,6 +141,9 @@ pub fn TrainingListPage() -> impl IntoView {
         set_run_to_delete.set(None);
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page training-list-page">
             <div class="page-header">
@@ -222,6 +255,10 @@ pub fn TrainingListPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// TrainingRunCard Component
+// =============================================================================
 
 /// Training run card component
 #[component]
@@ -339,6 +376,10 @@ fn TrainingRunCard(run: TrainingRun, #[prop(into)] on_delete: Callback<()>) -> i
         </div>
     }
 }
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 fn format_time(dt: &chrono::DateTime<chrono::Utc>) -> String {
     dt.format("%b %d, %H:%M").to_string()

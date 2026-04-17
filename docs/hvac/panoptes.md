@@ -28,10 +28,12 @@ understands that when a boiler's pressure drops, downstream steam bundles should
 respond — and flags it as anomalous when they don't.
 
 ```
-File:   crates/axonml/src/hvac/panoptes.rs
-Author: Andrew Jewell Sr - AutomataNexus
+File:   crates/axonml-hvac/src/panoptes.rs
+Author: Andrew Jewell Sr — AutomataNexus LLC (ORCID 0009-0005-2158-7060)
 Params: ~47K (edge-deployable)
 ```
+
+*The HVAC models were split out of the `axonml` umbrella into a dedicated `axonml-hvac` crate in April 2026 (v0.6.1) to reduce the umbrella's dep fan-out.*
 
 ---
 
@@ -639,10 +641,21 @@ Inject known fault patterns and train with positive anomaly scores:
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `Panoptes::new` | `(num_equipment) → Panoptes` | Create model |
-| `encode_snapshot` | `(&snapshot) → Variable [1,N,32]` | Encode raw sensors |
-| `forward_snapshot` | `(&snapshot) → (equip, facility)` | Single-point inference |
-| `forward_temporal` | `(&[snapshots]) → (equip, facility)` | Sequence inference |
-| `parameters` | `() → Vec<Parameter>` | All trainable params |
-| `FacilityConfig::warren` | `() → FacilityConfig` | Pre-built Warren config |
-| `PanoptesOutput::from_scores` | `(&scores, fac, &config, thresh)` | Structure output |
+| `Panoptes::new` | `(num_equipment: usize) -> Panoptes` | Create model |
+| `Panoptes::num_parameters` | `() -> usize` | Total trainable param count (~47K for 59 equip) |
+| `Panoptes::encode_snapshot` | `(&FacilitySnapshot) -> Variable` | Encode raw sensors to `[1, N, 32]` |
+| `Panoptes::forward_snapshot` | `(&FacilitySnapshot) -> (Variable, Variable)` | Single-point inference → (equip_scores, facility_score) |
+| `Panoptes::forward_temporal` | `(&[FacilitySnapshot]) -> (Variable, Variable)` | Sequence inference via LSTM |
+| `Panoptes::parameters` | `() -> Vec<Parameter>` | All trainable params |
+| `FacilityConfig::warren` | `() -> FacilityConfig` | Pre-built Warren config (59 equipment) |
+| `FacilityConfig::new` | `(Vec<(String, usize)>) -> FacilityConfig` | Custom facility from (id, equip_type) pairs |
+| `FacilitySnapshot::new` | `(num_equipment: usize) -> FacilitySnapshot` | Empty snapshot |
+| `FacilitySnapshot::for_warren` | `(&FacilityConfig) -> FacilitySnapshot` | Empty snapshot sized for Warren |
+| `FacilitySnapshot::set_equipment` | `(slot, id, equip_type, &[Option<f32>])` | Set sensors for one equipment slot |
+| `PanoptesOutput::from_scores` | `(&[f32], f32, &FacilityConfig, threshold: f32) -> PanoptesOutput` | Structure output into alerts |
+| `PanoptesOutput::summary` | `() -> String` | Human-readable summary |
+
+---
+
+*Last updated: 2026-04-16 (v0.6.1)*
+

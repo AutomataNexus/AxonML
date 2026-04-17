@@ -1,8 +1,26 @@
-//! BitNet b1.58 — ternary weight dequant + fused add-only matmul.
+//! BitNet b1.58 I2_S Ternary Quantization — Dequant + Fused Add-Only Matmul
 //!
 //! Implements Microsoft's `I2_S` quant type (GGUF dtype 36), used by the
 //! `bitnet.cpp` reference kernels and by every official BitNet b1.58 GGUF
 //! release (including `microsoft/bitnet-b1.58-2B-4T-gguf`).
+//!
+//! Contents:
+//! - Constants `I2S_BLOCK_SIZE`, `I2S_BYTES_PER_BLOCK`, `I2S_GROUP_SIZE`
+//!   mirroring Microsoft's `QK_I2_S` / group-strided layout.
+//! - Trit ↔ 2-bit code converters `decode_trit` / `encode_trit`.
+//! - `I2sBlock` struct with `pack` / `unpack` / `to_bytes` / `from_bytes`
+//!   implementing the group-strided byte layout.
+//! - `dequantize_i2s_block` and rayon-parallel `dequantize_i2s` for
+//!   recovering f32 weights from packed bytes.
+//! - `matmul_i2s` — fused add-only ternary matmul (f32 activations).
+//! - `matmul_i2s_i8` — int8-activation fused path with runtime AVX-VNNI
+//!   dispatch, scalar fallback `matmul_i2s_i8_scalar`, and an in-progress
+//!   `matmul_i2s_i8_avxvnni` unsafe target-feature stub.
+//! - `quantize_row_to_int8` per-row absmax int8 quantization for
+//!   activations entering the int8 fast path.
+//! - `bytes_for_elements` size helper and a test module covering
+//!   trit encode/decode, block roundtrip, layout correctness, reference
+//!   matmul agreement, int8 vs f32 agreement, and misaligned-`k` rejection.
 //!
 //! # Format (verified against `microsoft/BitNet` reference, 2026-04-14)
 //!
@@ -45,6 +63,21 @@
 //! # References
 //! - Microsoft BitNet paper ("The Era of 1-bit LLMs"): <https://arxiv.org/abs/2402.17764>
 //! - `microsoft/BitNet` on GitHub (bitnet.cpp reference kernels)
+//!
+//! # File
+//! `crates/axonml-quant/src/bitnet.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use rayon::prelude::*;
 

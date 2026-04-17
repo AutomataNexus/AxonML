@@ -1,13 +1,24 @@
-//! DETR - DEtection TRansformer
+//! DETR — DEtection TRansformer for End-to-End Object Detection
+//!
+//! Implements DETR: end-to-end object detection without anchors or NMS.
+//! `DETRTransformer` contains encoder layers (self-attention + FFN) and decoder
+//! layers (self-attention + cross-attention + FFN). `DETR` projects backbone
+//! features via 1x1 conv, adds 2D sinusoidal positional encoding, and feeds
+//! through the transformer with learned object queries (`query_embed_data`).
+//! Class head (Linear) and bbox head (3-layer MLP + sigmoid) produce
+//! [N, num_queries, num_classes+1] logits and [N, num_queries, 4] normalized
+//! boxes (cx,cy,w,h). `postprocess()` applies softmax and threshold filtering.
+//! Factory methods: `for_coco()` (91 classes, 100 queries), `small()` for testing.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/detr.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

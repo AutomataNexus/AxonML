@@ -1,13 +1,20 @@
-//! Inference Pipeline — Generic capture → preprocess → detect loop
+//! Inference Pipeline — Generic Capture-Preprocess-Detect Loop
+//!
+//! Connects a `CaptureBackend` to a `DetectionModel` in a frame-by-frame inference
+//! loop. `DetectionModel` trait defines `detect()` and `input_size()` for any
+//! detection architecture. `PipelineStats` tracks frames processed, cumulative
+//! preprocess/inference time, FPS, and per-frame averages. `InferencePipeline<M, B>`
+//! orchestrates start/step/run_n/stop with automatic timing and statistics collection.
 //!
 //! # File
 //! `crates/axonml-vision/src/camera/pipeline.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

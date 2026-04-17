@@ -1,13 +1,19 @@
 //! Phantom Backbone — BlazeBlock-based Lightweight Feature Extractor
 //!
+//! Implements a lightweight backbone for the Phantom face detector using
+//! depthwise-separable BlazeBlock residual convolutions with BatchNorm and
+//! ReLU activation. Designed for real-time face detection at low resolution
+//! (128x128), producing multi-scale feature maps for the detection head.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/phantom/backbone.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

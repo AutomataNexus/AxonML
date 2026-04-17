@@ -7,6 +7,7 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.85%2B-orange.svg" alt="Rust: 1.85+"></a>
+  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1"/>
   <a href="https://github.com/AutomataNexus/AxonML"><img src="https://img.shields.io/badge/part%20of-AxonML-teal.svg" alt="Part of AxonML"></a>
 </p>
 
@@ -14,9 +15,11 @@
 
 ## Overview
 
-**axonml-train** is the high-level training infrastructure sub-crate for the AxonML framework. It provides reusable training utilities, a unified model hub/registry, benchmarking helpers, and adversarial training support — all factored out of the `axonml` umbrella crate in April 2026 to keep the umbrella focused on pure re-exports.
+**axonml-train** is the high-level training infrastructure sub-crate for the AxonML framework. It provides reusable training utilities, a unified model hub / registry, benchmarking helpers, and adversarial-training support — all factored out of the `axonml` umbrella crate in 0.6.1 (April 2026) to keep the umbrella focused on pure re-exports.
 
 The **live browser training dashboard** (`TrainingMonitor`) stays in the umbrella crate at `axonml::monitor::TrainingMonitor` since it has no heavy dependencies of its own.
+
+Last updated: 2026-04-16 — version 0.6.1.
 
 ---
 
@@ -24,10 +27,37 @@ The **live browser training dashboard** (`TrainingMonitor`) stays in the umbrell
 
 | Module | Purpose |
 |--------|---------|
-| `trainer` | `TrainingConfig`, `Callback`, `EarlyStopping`, `ProgressLogger`, `TrainingHistory`, `TrainingMetrics`, `clip_grad_norm`, `compute_accuracy` |
-| `hub` | Unified model hub / registry — `UnifiedModelInfo`, `BenchmarkResult`, `ModelCategory`, `search_models`, `list_all_models`, `recommended_models`, `compare_benchmarks` |
-| `benchmark` | `benchmark_model`, `throughput_test`, `profile_model_memory`, `compare_models`, `MemorySnapshot`, `ThroughputConfig`/`ThroughputResult` |
+| `trainer` | `TrainingConfig`, `TrainingState`, `TrainingMetrics`, `TrainingHistory`, `Callback`, `EarlyStopping`, `ProgressLogger`, `clip_grad_norm`, `compute_accuracy` |
+| `hub` | Unified model hub / registry — `UnifiedModelInfo`, `BenchmarkResult`, `ModelCategory`; with `full` feature adds `search_models`, `list_all_models`, `models_by_category`, `models_by_max_params`, `models_by_max_size_mb`, `recommended_models`, `compare_benchmarks` |
+| `benchmark` | `benchmark_model`, `benchmark_model_named`, `throughput_test`, `warmup_model`, `profile_model_memory`, `print_memory_profile`, `print_throughput_results`, `compare_models`, `MemorySnapshot`, `ThroughputConfig`, `ThroughputResult` |
 | `adversarial` | `AdversarialTrainer`, `fgsm_attack`, `pgd_attack`, `adversarial_training_step` |
+
+## Public Re-exports
+
+`lib.rs` re-exports the full surface directly at the crate root:
+
+```rust
+pub use trainer::{
+    Callback, EarlyStopping, ProgressLogger, TrainingConfig, TrainingHistory,
+    TrainingMetrics, TrainingState, clip_grad_norm, compute_accuracy,
+};
+
+pub use hub::{BenchmarkResult, ModelCategory, UnifiedModelInfo};
+
+#[cfg(all(feature = "vision", feature = "llm"))]
+pub use hub::{
+    compare_benchmarks, list_all_models, models_by_category, models_by_max_params,
+    models_by_max_size_mb, recommended_models, search_models,
+};
+
+pub use benchmark::{
+    MemorySnapshot, ThroughputConfig, ThroughputResult, benchmark_model, benchmark_model_named,
+    compare_models, print_memory_profile, print_throughput_results, profile_model_memory,
+    throughput_test, warmup_model,
+};
+
+pub use adversarial::{AdversarialTrainer, adversarial_training_step, fgsm_attack, pgd_attack};
+```
 
 ## Usage
 
@@ -52,23 +82,23 @@ let early_stop = EarlyStopping::new(5);  // patience = 5 epochs
 |---------|-------------|
 | `vision` | Include `axonml-vision` models in the hub registry |
 | `llm` | Include `axonml-llm` models in the hub registry |
-| `full` | Both `vision` + `llm` — required for `compare_benchmarks`, `list_all_models`, `search_models` |
-| `cuda` | GPU acceleration (forwarded to upstream crates) |
+| `full` | Both `vision` + `llm` — required for `compare_benchmarks`, `list_all_models`, `search_models`, `recommended_models`, and the `models_by_*` helpers |
+| `cuda` | GPU acceleration (forwarded to `axonml-core`, `axonml-tensor`, `axonml-nn`, `axonml-autograd`) |
 
 ```toml
 [dependencies]
-axonml-train = { path = "../axonml-train", features = ["full"] }
+axonml-train = { version = "0.6.1", features = ["full"] }
 ```
 
 ## Dependencies
 
 | Crate | Always | Notes |
 |-------|--------|-------|
-| `axonml-core` | ✓ | Error types, Device, DType |
-| `axonml-tensor` | ✓ | Tensor operations |
-| `axonml-autograd` | ✓ | Automatic differentiation |
-| `axonml-nn` | ✓ | Model / Module trait |
-| `axonml-optim` | ✓ | Optimizer trait for gradient clipping |
+| `axonml-core` | yes | Error types, Device, DType |
+| `axonml-tensor` | yes | Tensor operations |
+| `axonml-autograd` | yes | Automatic differentiation |
+| `axonml-nn` | yes | Model / Module trait |
+| `axonml-optim` | yes | Optimizer trait for gradient clipping |
 | `axonml-vision` | optional | `vision` feature — hub entries for vision models |
 | `axonml-llm` | optional | `llm` feature — hub entries for LLM models |
 

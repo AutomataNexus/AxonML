@@ -1,23 +1,62 @@
-//! WebAuthn utility functions for WASM
+//! WebAuthn Helpers — FIDO2 Credential Create + Assertion Ceremonies
+//!
+//! Thin async wrappers around `navigator.credentials.create()` and
+//! `navigator.credentials.get()` used by the MFA enrollment and challenge
+//! components. Builds the `publicKey` options object dynamically via
+//! `js_sys::Reflect::set` calls against plain JS `Object`s (avoiding the
+//! generated `web_sys::PublicKeyCredentialCreationOptions` bindings), then
+//! awaits the returned credential through `JsFuture`.
+//!
+//! Error surface: `WebAuthnError` enum covers `NotSupported`,
+//! `UserCancelled` (matched on `NotAllowedError` strings),
+//! `SecurityError`, `NetworkError`, and `InvalidResponse`. `Display` is
+//! implemented so the error bubbles up as a human-readable string.
+//!
+//! `is_webauthn_available` probes `navigator.credentials` via `Reflect`.
+//! `create_credential` performs the WebAuthn *registration* ceremony —
+//! it decodes the base64url challenge + user id, advertises ES256 (-7)
+//! and RS256 (-257) algorithms, sets a 60 s timeout, and serialises the
+//! resulting `PublicKeyCredential` / `AuthenticatorAttestationResponse`
+//! into `WebAuthnRegistrationResponse` (id + raw_id +
+//! attestation_object + client_data_json, all base64url).
+//! `get_assertion` performs the *authentication* ceremony, decoding each
+//! entry in `allow_credentials` and returning
+//! `WebAuthnAuthenticationResponse` (id + raw_id + authenticator_data +
+//! client_data_json + signature + optional user_handle).
+//!
+//! Helpers: `js_array_buffer_to_vec` copies an `ArrayBuffer` into a
+//! `Vec<u8>` via `Uint8Array::to_vec`; `base64_url_decode` /
+//! `base64_url_encode` convert between padded standard base64 (what the
+//! `base64` crate consumes) and URL-safe unpadded base64 (what the
+//! WebAuthn protocol expects).
 //!
 //! # File
 //! `crates/axonml-dashboard/src/utils/webauthn.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::*;
+
+// =============================================================================
+// Error Type
+// =============================================================================
 
 /// WebAuthn error types
 #[derive(Debug, Clone)]
@@ -41,6 +80,10 @@ impl std::fmt::Display for WebAuthnError {
     }
 }
 
+// =============================================================================
+// Availability Probe
+// =============================================================================
+
 /// Check if WebAuthn is available in the current browser
 pub fn is_webauthn_available() -> bool {
     if let Some(window) = web_sys::window() {
@@ -50,6 +93,10 @@ pub fn is_webauthn_available() -> bool {
     }
     false
 }
+
+// =============================================================================
+// Response Types
+// =============================================================================
 
 /// WebAuthn credential response from registration
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -70,6 +117,10 @@ pub struct WebAuthnAuthenticationResponse {
     pub signature: String,
     pub user_handle: Option<String>,
 }
+
+// =============================================================================
+// Registration Ceremony
+// =============================================================================
 
 /// Start WebAuthn registration (credential creation)
 ///
@@ -196,6 +247,10 @@ pub async fn create_credential(
     })
 }
 
+// =============================================================================
+// Authentication (Assertion) Ceremony
+// =============================================================================
+
 /// Authenticate with WebAuthn (credential assertion)
 ///
 /// # Arguments
@@ -297,7 +352,9 @@ pub async fn get_assertion(
     })
 }
 
-// Helper functions
+// =============================================================================
+// Base64url + ArrayBuffer Helpers
+// =============================================================================
 
 fn js_array_buffer_to_vec(buffer: &js_sys::ArrayBuffer) -> Vec<u8> {
     let array = Uint8Array::new(buffer);

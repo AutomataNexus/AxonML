@@ -1,10 +1,55 @@
-//! GGUF Model File Parser
+//! gguf — GGUF Container Parser + Block Dequant Helpers
 //!
-//! Parses the GGUF (GGML Universal Format) container used by llama.cpp,
-//! ollama, and most local LLM tools. Supports reading tensor metadata,
-//! model hyperparameters, and quantized weight data.
+//! Parses the GGUF (GGML Universal Format) v2/v3 container — the on-disk
+//! shape used by nexus-serve, llama.cpp, ollama, and most local LLM tools.
+//! Streams the header only (metadata KV + tensor directory); weight bytes
+//! stay on disk for later mmap in `inference::MappedGguf`.
+//!
+//! Types:
+//! - [`GgufFile`]: parsed header (`version`, `n_tensors`, `metadata`,
+//!   `tensors`, `data_offset`, `path`) plus helpers like `architecture`,
+//!   `model_name`, `get_meta`, `total_tensor_bytes`, `summary`.
+//! - [`GgufValue`]: tagged-union for every GGUF scalar/array value with
+//!   coercion helpers (`as_u32`, `as_u64`, `as_f32`, `as_str`, `as_bool`).
+//! - [`GgmlType`]: every GGML quant code including Q4_0/Q4_1, Q5_0/Q5_1,
+//!   Q8_0/Q8_1, Q2K/Q3K/Q4K/Q5K/Q6K/Q8K, IQ* family, F16/BF16, and the
+//!   BitNet b1.58 ternary `I2S` (dtype 36, 66-byte / 256-elem blocks).
+//!   `type_size()` and `block_size()` report the on-disk layout.
+//! - [`GgufTensorInfo`]: one tensor's name, shape, dtype, and byte offset;
+//!   `n_elements()` and `total_bytes()` for size math.
+//!
+//! Private helpers [`read_gguf_string`] and [`read_gguf_value`] implement
+//! the recursive string/scalar/array decoder.
+//!
+//! Dequantization kernels (CPU, scalar, used for both non-quantized weight
+//! baking and reference checks against the CUDA kernels in
+//! `axonml_quant`): [`dequantize_q4_0`], [`dequantize_q8_0`],
+//! [`dequantize_q4_k`] (exact port of llama.cpp's `dequantize_row_q4_K` with
+//! the `get_scale_min_k4` 6-bit packed scales), [`dequantize_q6_k`] (port
+//! of `dequantize_row_q6_K` with ql/qh/sc unpacking), [`dequantize_f16`],
+//! and the IEEE `f16_to_f32` converter (subnormal-safe, which was GGUF
+//! inference bug #1 from memory — see `reference_gguf_inference_gotchas`).
 //!
 //! Reference: https://github.com/ggerganov/ggml/blob/master/docs/gguf.md
+//!
+//! # File
+//! `nexus-serve/src/model/gguf.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::collections::HashMap;
 use std::fs::File;

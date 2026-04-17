@@ -1,13 +1,20 @@
-//! Axonml TUI - Terminal User Interface for ML Framework
+//! Terminal user interface for AxonML — interactive ratatui/crossterm dashboard.
+//!
+//! `App` state machine with 6 tab views (`ModelView`, `DataView`, `TrainingView`,
+//! `GraphsView`, `FilesView`, `HelpView`), `AxonmlTheme` NexusForge color
+//! palette, crossterm `EventHandler` for keyboard/mouse input, and `run()`
+//! entry point that launches the full-screen TUI with optional model/data
+//! path arguments.
 //!
 //! # File
 //! `crates/axonml-tui/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

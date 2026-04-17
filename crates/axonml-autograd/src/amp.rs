@@ -1,13 +1,21 @@
-//! Automatic Mixed Precision (AMP) Support
+//! Automatic Mixed Precision (AMP) — F16 autocast for faster training.
+//!
+//! 321 lines. Thread-local autocast state (enabled flag, target DType,
+//! nesting depth). `AutocastGuard` RAII scope that enables F16 downcasting
+//! for matmul/conv ops and restores the prior state on drop. `autocast(dtype,
+//! closure)` and `disable_autocast(closure)` convenience wrappers. Query
+//! functions: `is_autocast_enabled()`, `autocast_dtype()`, `autocast_depth()`.
+//! Pairs with `GradScaler` in `axonml-optim` for loss scaling.
 //!
 //! # File
 //! `crates/axonml-autograd/src/amp.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

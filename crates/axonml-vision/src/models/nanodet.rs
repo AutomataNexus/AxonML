@@ -1,13 +1,23 @@
 //! NanoDet — Lightweight Anchor-Free Object Detection for Edge
 //!
+//! Sub-1M-parameter anchor-free detector: ShuffleNet V2 backbone + Ghost PAN
+//! neck + anchor-free detection head. `ShuffleNetBackbone` uses `ShuffleBlock`
+//! (channel split, DW+PW, channel shuffle) with 0.5x channel config [48,96,192].
+//! `channel_shuffle()` has a custom `ChannelShuffleBackward` for autograd. `GhostPAN`
+//! fuses multi-scale features with depthwise separable convolutions in top-down
+//! then bottom-up pathways. `NanoDetHead` predicts per-pixel class scores and
+//! bbox offsets. `NanoDet::detect()` decodes (center + exp(size)) predictions
+//! at 3 stride levels (8, 16, 32) and applies per-class NMS.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/nanodet.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

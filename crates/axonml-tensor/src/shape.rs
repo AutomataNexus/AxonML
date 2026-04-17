@@ -1,13 +1,21 @@
-//! Shape and Strides - Tensor Dimension Management
+//! Shape and stride utilities for tensor dimension management.
+//!
+//! 528 lines. `Shape` (SmallVec-backed dim list) and `Strides` types,
+//! contiguous stride computation, `broadcast_shape` / `broadcast_strides`
+//! (NumPy rules), `reshape` (with -1 inference), `transpose_shape` /
+//! `transpose_strides`, `squeeze` / `unsqueeze`, `normalize_dim` (negative
+//! index), `linear_index` (multi-dim → flat offset via strides), `numel`,
+//! and `is_contiguous` check.
 //!
 //! # File
 //! `crates/axonml-tensor/src/shape.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

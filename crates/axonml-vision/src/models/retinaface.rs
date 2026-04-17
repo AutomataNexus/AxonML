@@ -1,13 +1,23 @@
-//! RetinaFace - Single-Stage Face Detection
+//! RetinaFace — Single-Stage Face Detection with Landmarks
+//!
+//! Multi-scale face detector using ResNet34 backbone + FPN + SSH-style context
+//! modules + per-level detection heads. `ContextModule` enriches features via
+//! three parallel 3x3 conv branches (C/2 + C/4 + C/4 channels concatenated).
+//! `DetectionHead` predicts classification (2 anchors x 2 classes), bounding box
+//! (2 anchors x 4 coords), and 5-point facial landmarks (2 anchors x 10 coords)
+//! per pyramid level. `RetinaFace::detect()` decodes anchor-relative predictions
+//! with exp-based width/height, computes softmax confidence, and applies NMS.
+//! Returns `FaceDetection` with bbox, confidence, and landmark coordinates.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/retinaface.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

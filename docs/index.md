@@ -19,47 +19,64 @@ A complete, PyTorch-equivalent machine learning framework written in pure Rust.
 
 ## Overview
 
-AxonML (named after axons - the nerve fibers that transmit signals between neurons) is an ambitious open-source project to create a complete machine learning framework in Rust. Our goal is to provide the same comprehensive functionality as PyTorch while leveraging Rust's performance, safety, and concurrency guarantees.
+AxonML (named after axons — the nerve fibers that transmit signals between neurons) is a complete machine learning framework written in pure Rust. The goal is PyTorch-equivalent functionality while leveraging Rust's performance, safety, and concurrency guarantees.
 
-### PyTorch Parity: ~92-95%
+### PyTorch Parity: ~92–95%
 
-AxonML provides comprehensive PyTorch-equivalent functionality with **1076+ passing tests**.
+AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ passing tests** across 24 workspace crates.
 
 ### Key Features
 
 | Category | Features |
 |:---------|:---------|
-| **Tensor Operations** | N-dimensional tensors, broadcasting, views, slicing, matmul, reductions |
-| **Automatic Differentiation** | Dynamic computational graph, reverse-mode autodiff, AMP, checkpointing |
-| **Neural Networks** | Linear, Conv1d/2d, BatchNorm, LayerNorm, GroupNorm, Attention, LSTM/GRU |
-| **Optimizers** | SGD, Adam, AdamW, RMSprop, LAMB with LR schedulers |
-| **Distributed Training** | DDP, FSDP (ZeRO-2/3), Pipeline Parallelism |
-| **Model Formats** | ONNX import/export (40+ operators), SafeTensors |
-| **Vision Models** | ResNet, ViT, Helios, NightVision (IR detection), Biometric Suite (Argus, Echo, Mnemosyne) |
-| **GPU Backends** | CUDA, Vulkan, Metal, WebGPU |
+| **Tensor Operations** | N-dimensional tensors, NumPy-style broadcasting, zero-copy views, matmul (with cuBLAS + Q4_K/Q6_K in-shader dequant GEMV), reductions, lazy tensors with algebraic optimization |
+| **Automatic Differentiation** | Dynamic computational graph, reverse-mode autodiff, AMP autocast (F16), gradient checkpointing, graph inspection/DOT export |
+| **Neural Networks** | Linear, Conv1d/2d, BatchNorm1d/2d, LayerNorm, GroupNorm, RMSNorm, MultiHead/Cross/Differential attention, LSTM/GRU/RNN, Transformer encoder/decoder, MoE, GCN/GAT, TernaryLinear, differentiable structured sparsity |
+| **Optimizers** | SGD (+ momentum, Nesterov), Adam, AdamW, RMSprop, LAMB; schedulers (Step, MultiStep, Cosine, OneCycle, Warmup, ReduceLROnPlateau, Exponential); `GradScaler`; training health monitor |
+| **Distributed Training** | DDP, FSDP (ZeRO-2/ZeRO-3 + HybridShard + CPU offload), Pipeline (GPipe / 1F1B), column/row tensor parallel, NCCL backend |
+| **Model Formats** | ONNX import/export (opset 17, 40+ ops), SafeTensors, StateDict |
+| **Vision Models** | LeNet, ResNet, VGG, ViT, DETR, NanoDet, BlazeFace, RetinaFace, FPN, Nexus, Phantom, NightVision, Aegis Biometric Suite (Mnemosyne, Ariadne, Echo, Argus, Themis), Aegis3D |
+| **LLM Architectures** | BERT, GPT-2, LLaMA, Mistral, Phi, Chimera, Hydra, SSM (Mamba), Trident (1.58-bit) |
+| **Inference Stack** | `nexus-serve` — pure-Rust LLM inference with Anthropic Messages API, SSE streaming, Q4_K/Q6_K CUDA GEMV, fused prefill + flash-decode attention kernels |
+| **GPU Backends** | CUDA (cuBLAS + PTX kernels), Vulkan, Metal, WebGPU — all full implementations |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                           AxonML Suite                               │
-├─────────────────────────────────────────────────────────────────────┤
-│  axonml-cli    │  axonml-server  │  axonml-tui  │  axonml-dashboard │
-├────────────────┴─────────────────┴──────────────┴───────────────────┤
-│                              axonml                                  │
-│                        (Umbrella Crate)                              │
-├──────────────┬──────────────┬──────────────┬────────────────────────┤
-│ axonml-vision│ axonml-audio │ axonml-text  │ axonml-llm             │
-├──────────────┴──────────────┴──────────────┴────────────────────────┤
-│ axonml-nn   │ axonml-optim │ axonml-data  │ axonml-distributed     │
-├─────────────┴──────────────┴──────────────┴─────────────────────────┤
-│           axonml-autograd          │         axonml-serialize       │
-├────────────────────────────────────┴────────────────────────────────┤
-│                          axonml-tensor                               │
-├─────────────────────────────────────────────────────────────────────┤
-│                           axonml-core                                │
-│              (Device, DType, Storage, Memory)                        │
-└─────────────────────────────────────────────────────────────────────┘
++-------------------------------------------------------------------------+
+|                        Application Layer                                |
++------------+--------------+-------------+-----------------+---------+
+| axonml-cli | axonml-server| axonml-tui  | axonml-dashboard|nexus-serve|
+|   (CLI)    | (REST API)   | (Terminal)  | (WASM Web UI)   |(inference)|
++------------+--------------+-------------+-----------------+---------+
+|                             axonml                                      |
+|                   (Umbrella Crate / Feature Flags)                     |
++-------------------------------------------------------------------------+
+|                            Domain Layer                                 |
++-------------+-------------+-------------+----------------+--------------+
+|axonml-vision|axonml-audio |axonml-text  | axonml-llm     | axonml-hvac  |
++-------------+-------------+-------------+----------------+--------------+
+|                          Training Layer                                 |
++-------------+-------------+-------------+----------------+
+|  axonml-nn  |axonml-optim |axonml-data  |axonml-train    |axonml-distributed|
++-------------+-------------+-------------+----------------+-------------+
+|                         Optimization Layer                              |
++-------------+-------------+-------------+----------------+
+| axonml-quant|axonml-fusion| axonml-jit  | axonml-profile |
++-------------+-------------+-------------+----------------+
+|                        Serialization Layer                              |
++-------------------------+-----------------------------------------------+
+|    axonml-serialize     |                axonml-onnx                    |
++-------------------------+-----------------------------------------------+
+|                        Computation Layer                                |
++-------------------------------------------------------------------------+
+|                          axonml-autograd                                |
++-------------------------------------------------------------------------+
+|                           axonml-tensor                                 |
++-------------------------------------------------------------------------+
+|                           axonml-core                                   |
+|               CPU | CUDA | Vulkan | Metal | WebGPU                      |
++-------------------------------------------------------------------------+
 ```
 
 ## Quick Links
@@ -71,7 +88,9 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **1076+ pass
 | [Neural Networks]({% link neural-networks.md %}) | Building models |
 | [Training]({% link training.md %}) | Training loops and optimization |
 | [Distributed]({% link distributed.md %}) | Multi-GPU and distributed training |
-| [Crate Documentation]({% link crates/index.md %}) | All 22 crates |
+| [Detection]({% link detection.md %}) | Object / face / thermal detection |
+| [ONNX]({% link onnx.md %}) | ONNX import and export |
+| [Crate Documentation]({% link crates/index.md %}) | All 24 crates |
 
 ## Installation
 
@@ -79,60 +98,60 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = "0.2.8"
+axonml = "0.6"
 ```
 
 Or with specific features:
 
 ```toml
 [dependencies]
-axonml = { version = "0.2.8", features = ["cuda", "vision", "llm"] }
+axonml = { version = "0.6", features = ["cuda", "vision", "llm"] }
 ```
 
 ## Quick Example
 
 ```rust
 use axonml::prelude::*;
+use axonml_nn::{Linear, ReLU, Sequential, CrossEntropyLoss, Module};
+use axonml_optim::{Adam, Optimizer};
 
 fn main() {
-    // Create tensors
-    let x = Tensor::randn(&[32, 784]);
-    let y = Tensor::randn(&[32, 10]);
-
     // Build a simple MLP
     let model = Sequential::new()
         .add(Linear::new(784, 256))
         .add(ReLU)
         .add(Linear::new(256, 10));
 
-    // Create optimizer
+    // Optimizer
     let mut optimizer = Adam::new(model.parameters(), 0.001);
+    let loss_fn = CrossEntropyLoss::new();
 
-    // Training loop
-    for epoch in 0..100 {
-        let output = model.forward(&Variable::new(x.clone(), false));
-        let loss = output.mse_loss(&Variable::new(y.clone(), false));
+    // Training step (assuming `inputs: Variable`, `targets: Variable`)
+    let output = model.forward(&inputs);
+    let loss = loss_fn.compute(&output, &targets);
 
-        optimizer.zero_grad();
-        loss.backward();
-        optimizer.step();
+    optimizer.zero_grad();
+    loss.backward();
+    optimizer.step();
 
-        println!("Epoch {}: Loss = {:.4}", epoch, loss.data().item());
-    }
+    println!("Loss = {:.4}", loss.data().to_vec()[0]);
 }
 ```
 
-## Benchmarks
+For a complete end-to-end runnable example, see
+[`crates/axonml/examples/simple_training.rs`](https://github.com/AutomataNexus/AxonML/blob/main/crates/axonml/examples/simple_training.rs)
+which trains a 2-layer MLP on the XOR problem with Adam.
 
-| Operation | AxonML | PyTorch | Ratio |
-|:----------|:-------|:--------|:------|
-| MatMul (1024x1024) | 2.1ms | 1.8ms | 1.17x |
-| Conv2d (224x224) | 4.3ms | 3.9ms | 1.10x |
-| LSTM (seq=128) | 8.2ms | 7.1ms | 1.15x |
-| Adam step | 0.8ms | 0.7ms | 1.14x |
+## Production Deployment
 
-*Benchmarks on AMD Ryzen 9 5900X, single-threaded CPU*
+AxonML powers real-time predictive maintenance on HVAC systems across commercial buildings. 12 models (6 LSTM autoencoders for anomaly detection + 6 GRU failure predictors, total 105K–416K params per site) run live inference on Raspberry Pi edge controllers, cross-compiled to `armv7-unknown-linux-musleabihf`, polling sensor data at 1 Hz.
+
+The `nexus-serve` pure-Rust LLM inference server reaches 9–10 tok/s decode on a quantized 7B model (Q4_K_M) on RTX 3090, via custom CUDA kernels for Q4_K/Q6_K dequant-in-shader GEMV and fused flash-decode attention.
 
 ## License
 
 AxonML is dual-licensed under [MIT](https://github.com/AutomataNexus/AxonML/blob/main/LICENSE-MIT) and [Apache 2.0](https://github.com/AutomataNexus/AxonML/blob/main/LICENSE-APACHE).
+
+---
+
+*Last updated: 2026-04-16 (v0.6.1)*

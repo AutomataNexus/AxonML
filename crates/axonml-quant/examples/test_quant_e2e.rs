@@ -1,4 +1,42 @@
-//! End-to-end quantization test with a real model
+//! End-to-End Quantization Test — Real Multi-Layer Model Roundtrip
+//!
+//! Example binary that exercises the quantized inference stack against a real
+//! three-layer `Linear` model. It runs five sequential tests:
+//!
+//! 1. `QuantizedModel::from_module` path — quantizes all parameters via
+//!    `axonml_quant::inference::quantize_parameters` at `Q8_0` and reports
+//!    block counts and the compression ratio versus raw f32.
+//! 2. `QuantizedLinear` forward accuracy — builds a `QuantizedLinear` from the
+//!    first layer for each of `Q8_0`, `Q4_0`, and `F16`, calls `forward_f32`
+//!    on a single sample, and prints max error, RMSE, and compression ratio
+//!    against the reference `Linear::forward`.
+//! 3. Variable forward — calls `QuantizedLinear::forward_var` and prints the
+//!    output shape and first values.
+//! 4. Serialization roundtrip — constructs a `QuantizedModel`, runs
+//!    `serialize_quantized` / `deserialize_quantized`, and asserts shape and
+//!    block-count equality per tensor.
+//! 5. `Q4_0` quantization — repeats the quantize/serialize/deserialize loop
+//!    at `Q4_0`.
+//!
+//! # File
+//! `crates/axonml-quant/examples/test_quant_e2e.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
+
 use axonml_autograd::Variable;
 use axonml_nn::{Linear, Module};
 use axonml_quant::{
@@ -6,8 +44,16 @@ use axonml_quant::{
 };
 use axonml_tensor::Tensor;
 
+// =============================================================================
+// Entry Point
+// =============================================================================
+
 fn main() {
     println!("=== Quantized Inference E2E Test ===\n");
+
+    // -------------------------------------------------------------------------
+    // Model Construction and F32 Reference
+    // -------------------------------------------------------------------------
 
     // Build a real multi-layer model
     let l1 = Linear::new(64, 128);
@@ -28,7 +74,9 @@ fn main() {
     let ref_data = ref_output.data().to_vec();
     println!("F32 output (first 5): {:?}", &ref_data[..5]);
 
-    // === Test 1: QuantizedModel from Module ===
+    // =========================================================================
+    // Test 1: QuantizedModel from Module
+    // =========================================================================
     println!("\n--- Test 1: QuantizedModel::from_module ---");
 
     // Collect all params from all layers
@@ -54,7 +102,9 @@ fn main() {
         f32_bytes as f32 / q8_bytes as f32
     );
 
-    // === Test 2: QuantizedLinear forward accuracy ===
+    // =========================================================================
+    // Test 2: QuantizedLinear Forward Accuracy
+    // =========================================================================
     println!("\n--- Test 2: QuantizedLinear accuracy ---");
 
     let w1_data = l1.parameters()[0].data().to_vec();
@@ -93,7 +143,9 @@ fn main() {
         );
     }
 
-    // === Test 3: Variable forward ===
+    // =========================================================================
+    // Test 3: Variable Forward
+    // =========================================================================
     println!("\n--- Test 3: Variable forward ---");
     let ql =
         QuantizedLinear::from_linear_params(&w1_data, Some(&b1_data), 64, 128, QuantType::Q8_0);
@@ -104,7 +156,9 @@ fn main() {
         &var_out.data().to_vec()[..5]
     );
 
-    // === Test 4: Serialize/deserialize roundtrip ===
+    // =========================================================================
+    // Test 4: Serialize/Deserialize Roundtrip
+    // =========================================================================
     println!("\n--- Test 4: Serialization roundtrip ---");
     let qmodel = QuantizedModel {
         quantized_params: q8_params.clone(),
@@ -140,7 +194,9 @@ fn main() {
     }
     println!("Roundtrip verification: PASS");
 
-    // === Test 5: Q4 quantization ===
+    // =========================================================================
+    // Test 5: Q4 Quantization
+    // =========================================================================
     println!("\n--- Test 5: Q4 quantization ---");
     let q4_params = axonml_quant::inference::quantize_parameters(&all_params, QuantType::Q4_0);
     let q4_bytes: usize = q4_params.iter().map(|q| q.size_bytes()).sum();

@@ -1,7 +1,36 @@
 //! NightVision Neck — Thermal Feature Pyramid Network
 //!
-//! Top-down + bottom-up FPN for fusing multi-scale thermal features.
-//! Handles thermal-specific challenges: bloom artifacts, low contrast edges.
+//! Top-down + bottom-up FPN for fusing the multi-scale features produced by
+//! `ThermalBackbone`. Implements `ThermalFPN`, which takes the P3/P4/P5
+//! feature maps from the backbone (default 64/128/256 channels) and projects
+//! each through 1×1 lateral `ConvBNSiLU` layers to a common output channel
+//! count (default 128). A top-down pass upsamples deeper features (via
+//! `interpolate_var` with `InterpolateMode::Nearest`) and fuses them into
+//! shallower levels, followed by a bottom-up pass using stride-2
+//! `ConvBNSiLU` layers to re-inject high-resolution detail. The end result
+//! is a triplet `(fpn3, fpn4, fpn5)` of equal-channel, multi-scale feature
+//! maps ready for the detection head.
+//!
+//! Also provides:
+//! - `ThermalFPN::default_config` — the 64/128/256 → 128 default.
+//! - `parameters`, `named_parameters`, and `set_training` for optimizer and
+//!   checkpoint integration.
+//! - Tests verifying output shape and channel count.
+//!
+//! # File
+//! `crates/axonml-vision/src/models/nightvision/neck.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

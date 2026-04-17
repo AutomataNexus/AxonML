@@ -1,13 +1,19 @@
-//! Adam Optimizer - Adaptive Moment Estimation
+//! `Adam` and `AdamW` — adaptive moment estimation optimizers.
+//!
+//! `Adam::new(params, lr)` with beta1/beta2/epsilon/weight_decay config.
+//! `AdamW` variant implements decoupled weight decay (applies decay to
+//! parameters directly, not through the gradient). Both track first/second
+//! moment estimates per parameter with bias correction.
 //!
 //! # File
 //! `crates/axonml-optim/src/adam.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

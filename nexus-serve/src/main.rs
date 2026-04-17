@@ -1,4 +1,19 @@
-//! nexus-serve — Pure-Rust LLM inference server
+//! nexus-serve — Server Binary Entry Point
+//!
+//! Command-line launcher for the nexus-serve LLM inference daemon. Parses CLI
+//! flags (`--model`, `--alias`, `--port`, `--host`, `--quantized`, `--threads`,
+//! `--config`), merges them with a TOML config file at
+//! `~/.config/nexus-serve/config.toml` (or `--config PATH`), echoes the
+//! resolved settings with per-key source tags, loads every GGUF model given
+//! (detected by magic bytes, not extension — ollama blobs have no extension),
+//! registers friendly aliases, wires up `Tokenizer`s (priority:
+//! `tokenizer.json` → GGUF-embedded → char-level fallback), optionally uploads
+//! weights to GPU when `cuda` feature is enabled, then serves the axum
+//! `Router` with `/health`, `/v1/models`, `/v1/chat/completions`,
+//! `/v1/completions`, and `/v1/messages` (Anthropic Messages API) endpoints.
+//!
+//! Contains the [`Config`] struct, [`Source`] enum for per-field origin
+//! tracking, [`print_help`], [`is_gguf`], and the `#[tokio::main]` entry.
 //!
 //! Usage:
 //!   nexus-serve --model /path/to/model.gguf
@@ -9,6 +24,25 @@
 //!   curl http://localhost:11435/v1/chat/completions \
 //!     -H "Content-Type: application/json" \
 //!     -d '{"model":"mymodel","messages":[{"role":"user","content":"Hello"}]}'
+//!
+//! # File
+//! `nexus-serve/src/main.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -29,8 +63,12 @@ use nexus_serve::model::registry::{ModelInfo, ModelRegistry};
 use nexus_serve::tokenizer::Tokenizer;
 
 // =============================================================================
-// CLI
+// CLI Configuration
 // =============================================================================
+
+// -----------------------------------------------------------------------------
+// Source Tracking
+// -----------------------------------------------------------------------------
 
 /// Which input source produced a given config value.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -49,6 +87,10 @@ impl Source {
         }
     }
 }
+
+// -----------------------------------------------------------------------------
+// Config Struct
+// -----------------------------------------------------------------------------
 
 struct Config {
     model_paths: Vec<PathBuf>,
@@ -334,6 +376,10 @@ impl Config {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Help Text
+// -----------------------------------------------------------------------------
+
 fn print_help() {
     println!(r#"nexus-serve — Pure-Rust LLM inference server
 
@@ -381,7 +427,7 @@ API ENDPOINTS (OpenAI-compatible):
 }
 
 // =============================================================================
-// Main
+// GGUF Detection
 // =============================================================================
 
 /// Check if a file starts with GGUF magic bytes (0x46475547).
@@ -394,6 +440,10 @@ fn is_gguf(path: &std::path::Path) -> bool {
     f.read_exact(&mut magic).is_ok() && magic == [0x47, 0x47, 0x55, 0x46]  // "GGUF"
 }
 
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -405,6 +455,10 @@ async fn main() {
     println!(" Powered by AxonML");
     println!("═══════════════════════════════════════════════════════════");
     println!();
+
+    // -------------------------------------------------------------------------
+    // Config Echo + Thread Pool Setup
+    // -------------------------------------------------------------------------
 
     // Echo resolved config with source tags and run sanity validation.
     cfg.echo_and_validate();
@@ -427,6 +481,10 @@ async fn main() {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Registry + Engine Maps
+    // -------------------------------------------------------------------------
+
     let registry = ModelRegistry::new();
     let mut engines: std::collections::HashMap<String, Arc<InferenceEngine>> = std::collections::HashMap::new();
     let mut tokenizer_map: std::collections::HashMap<String, Arc<Tokenizer>> = std::collections::HashMap::new();
@@ -446,6 +504,10 @@ async fn main() {
         println!("Server will start with empty registry (models can be added at runtime).");
         println!();
     }
+
+    // -------------------------------------------------------------------------
+    // Model Loading Loop
+    // -------------------------------------------------------------------------
 
     for path in &unique_paths {
         println!("Loading: {}", path.display());
@@ -600,6 +662,10 @@ async fn main() {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Alias Registration
+    // -------------------------------------------------------------------------
+
     // Register aliases after all models are loaded
     if !cfg.aliases.is_empty() {
         println!("Registering aliases:");
@@ -613,6 +679,10 @@ async fn main() {
         }
         println!();
     }
+
+    // -------------------------------------------------------------------------
+    // Router + Listener
+    // -------------------------------------------------------------------------
 
     // Build router
     let state = Arc::new(AppState {

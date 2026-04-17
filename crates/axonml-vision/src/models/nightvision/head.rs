@@ -1,8 +1,40 @@
 //! NightVision Detection Head — Decoupled Classification + Regression
 //!
-//! YOLOX-style decoupled head: separate branches for classification,
-//! bounding box regression, and objectness scoring.
-//! Optional domain classification head for multi-domain deployment.
+//! YOLOX-style decoupled detection head for a single FPN level. Implements
+//! `DecoupledHead`, which routes features through a shared 1×1 `ConvBNSiLU`
+//! stem and then into four branches:
+//!
+//! - Classification: `cls_conv` (`ConvBNSiLU` 3×3) followed by a 1×1
+//!   `cls_pred` `Conv2d` producing `[B, num_classes, H, W]` logits.
+//! - Regression: `reg_conv` (`ConvBNSiLU` 3×3) feeding `reg_pred` (1×1
+//!   `Conv2d`) to produce `[B, 4, H, W]` bbox outputs (x, y, w, h).
+//! - Objectness: `obj_pred` (1×1 `Conv2d`) sharing the regression features
+//!   for a `[B, 1, H, W]` objectness map.
+//! - Optional domain: `domain_pred` (1×1 `Conv2d`) branches off the
+//!   classification features when `num_domains > 0` for multi-domain
+//!   deployment and is otherwise `None`.
+//!
+//! Decoupled classification/regression prevents task interference (a key
+//! finding from YOLOX). The struct exposes `num_classes` and `num_domains`
+//! as public fields, and provides `parameters`, `named_parameters`, and
+//! `set_training` (only propagated to the BN-bearing sub-blocks). Tests
+//! cover the 0-domain and 3-domain configurations and verify that the
+//! domain tensor is present or absent as expected.
+//!
+//! # File
+//! `crates/axonml-vision/src/models/nightvision/head.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

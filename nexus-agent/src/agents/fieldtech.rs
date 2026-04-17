@@ -1,10 +1,44 @@
-//! Field technician agent — HVAC fault detection + alerting.
+//! Field Technician Agent — HVAC Fault Detection And Alerting
 //!
-//! Monitors NexusEdge controllers on the Tailscale network, detects
-//! equipment faults via ML models (Panoptes/Zephyr), and alerts
-//! field techs (Nick, Leon) via email when action is needed.
+//! Defines the `fieldtech` agent configuration: monitors NexusEdge
+//! controllers on the Tailscale mesh network, detects equipment faults
+//! (via the Panoptes / Zephyr models and log inspection), and alerts field
+//! techs (Nick, Leon) and the owner (Andrew) by email when intervention
+//! is needed.
+//!
+//! Exports:
+//! - `SYSTEM_PROMPT` — responsibilities, alert rules, SSH credentials
+//!   (Automata / Invertedskynet2), restricted-device filter for Nick,
+//!   and the set of tools (`tailscale_status`, `tailscale_ping`, `shell`,
+//!   `send_email`, `vault_write`).
+//! - `config()` — returns an `AgentConfig` with
+//!   `max_iterations = 20`, `model = "gemma4"`, `temperature = 0.1`
+//!   (factual, safety-critical).
+//!
+//! # File
+//! `nexus-agent/src/agents/fieldtech.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use crate::AgentConfig;
+
+// =============================================================================
+// System Prompt
+// =============================================================================
 
 pub const SYSTEM_PROMPT: &str = r#"You are an HVAC field operations agent for Current Mechanical, Fort Wayne, Indiana.
 
@@ -48,6 +82,10 @@ You monitor NexusEdge controllers deployed across 16+ commercial facilities (60+
 4. Log every alert you send so we can track fault history
 5. Be concise in alert emails — tech name, unit ID, fault type, recommended action
 "#;
+
+// =============================================================================
+// Agent Configuration
+// =============================================================================
 
 pub fn config() -> AgentConfig {
     AgentConfig {

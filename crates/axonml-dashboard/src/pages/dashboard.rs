@@ -1,18 +1,35 @@
-//! Main Dashboard Page
+//! Main Dashboard Page — Overview Landing After Authentication
+//!
+//! The post-login home screen. `DashboardPage` loads recent training runs,
+//! registered models, and live inference endpoints through the `crate::api`
+//! modules (`training::list_runs`, `models::list`,
+//! `inference::list_endpoints`), tallies counts into a local `DashboardStats`
+//! struct, and renders four `StatsCard` tiles (active runs, completed runs,
+//! model count, active endpoint count) above a three-card layout of recent
+//! runs, active endpoints, and quick-action shortcuts. Private components
+//! `StatsCard`, `RunListItem`, and `EndpointListItem` render the repeating
+//! rows; `AppShell` is exported here as the outer layout wrapper that composes
+//! `Navbar`, `Sidebar`, `ToastContainer`, and `Terminal` around its children
+//! and toggles the `sidebar-collapsed` class from `use_app_state`.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/dashboard.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,17 +39,27 @@ use crate::components::{icons::*, spinner::*, table::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// Dashboard Page
+// =============================================================================
+
 /// Main dashboard overview page
 #[component]
 pub fn DashboardPage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (stats, set_stats) = create_signal(DashboardStats::default());
     let (recent_runs, set_recent_runs) = create_signal::<Vec<TrainingRun>>(Vec::new());
     let (active_endpoints, set_active_endpoints) =
         create_signal::<Vec<InferenceEndpoint>>(Vec::new());
 
+    // -------------------------------------------------------------------------
+    // API Calls / Data Fetch
+    // -------------------------------------------------------------------------
     // Fetch dashboard data
     create_effect(move |_| {
         spawn_local(async move {
@@ -84,6 +111,9 @@ pub fn DashboardPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="dashboard-page">
             <div class="page-header">
@@ -240,6 +270,10 @@ pub fn DashboardPage() -> impl IntoView {
     }
 }
 
+// =============================================================================
+// Stats State
+// =============================================================================
+
 /// Dashboard stats state
 #[derive(Clone, Default)]
 struct DashboardStats {
@@ -249,6 +283,10 @@ struct DashboardStats {
     total_models: u32,
     active_endpoints: u32,
 }
+
+// =============================================================================
+// Helper Components
+// =============================================================================
 
 /// Stats card component
 #[component]
@@ -318,6 +356,10 @@ fn EndpointListItem(endpoint: InferenceEndpoint) -> impl IntoView {
         </A>
     }
 }
+
+// =============================================================================
+// Application Shell
+// =============================================================================
 
 /// Application shell with sidebar and navbar
 #[component]

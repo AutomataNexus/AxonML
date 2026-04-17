@@ -1,14 +1,69 @@
-//! Tokenizer loading — GGUF-embedded BPE, HuggingFace tokenizer.json, or char-level fallback.
+//! tokenizer — Encode / Decode Dispatcher Across Three Backends
 //!
-//! Priority order:
-//! 1. HuggingFace tokenizer.json (if found alongside model file)
-//! 2. GGUF-embedded vocabulary (tokenizer.ggml.tokens + tokenizer.ggml.merges)
-//! 3. Char-level fallback (last resort — produces garbage for real models)
+//! Unified [`Tokenizer`] enum with three variants chosen at load time:
+//! - `HuggingFace(tokenizers::Tokenizer)`: from a `tokenizer.json` file
+//!   ([`Tokenizer::from_file`]) — first-choice backend, delegates to the
+//!   upstream `tokenizers` crate.
+//! - `GgufBpe { id_to_token, token_to_id, merges }`: built from the
+//!   GGUF-embedded `tokenizer.ggml.tokens` / `.merges` metadata
+//!   ([`Tokenizer::from_gguf`]). Used as the authoritative path for LLaMA-3
+//!   / BitNet-2B / Qwen2 GGUFs that don't ship a sidecar `tokenizer.json`.
+//! - `CharLevel { chars, char_to_id }`: last-resort fallback built from a
+//!   printable ASCII corpus ([`Tokenizer::char_level`]). Produces garbage
+//!   against a real model but keeps the server from failing to start.
+//!
+//! Priority when loading: `tokenizer.json` > GGUF-embedded > char-level.
+//!
+//! Encoding path:
+//! - HuggingFace: `tok.encode(text, true)` — `add_special_tokens=true` so
+//!   ChatML `<|im_start|>` and LLaMA-3 header ids resolve to their single
+//!   token ID rather than being broken into byte fragments.
+//! - GgufBpe: [`collect_special_tokens`] + [`split_on_specials`] pre-split
+//!   exact `<|…|>` / `<s>` / `</s>` markers so the BPE merges see only
+//!   non-special chunks. Each chunk goes through [`bpe_encode`] (byte-level
+//!   GPT-2 remapping via [`byte_encode_map`] so `0x20 → Ġ` before merges
+//!   run) or [`greedy_encode`] if merges are absent.
+//! - CharLevel: direct char → id table lookup.
+//!
+//! Decoding path:
+//! - HuggingFace: `tok.decode(ids, true)`.
+//! - GgufBpe: reverses the byte-level permutation via [`byte_decode_map`],
+//!   handles `<0xNN>` sentinels for raw bytes, strips known special
+//!   markers, and SentencePiece `▁ → space`. Concatenates byte output and
+//!   `String::from_utf8_lossy`s it.
+//! - CharLevel: direct id → char.
+//!
+//! [`decode_bpe_token`] is a legacy per-token helper (referenced by tests);
+//! production decoding uses the byte-bundle path above because it's the only
+//! way to correctly stitch multi-byte UTF-8 glyphs that span multiple tokens.
+//!
+//! # File
+//! `nexus-serve/src/tokenizer/mod.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use crate::model::gguf::{GgufFile, GgufValue};
+
+// =============================================================================
+// Tokenizer Enum + Core Impl
+// =============================================================================
 
 /// A loaded tokenizer that can encode/decode text.
 pub enum Tokenizer {
@@ -427,6 +482,10 @@ fn split_on_specials<'a>(text: &'a str, specials: &[(String, u32)]) -> Vec<Segme
     }
     out
 }
+
+// =============================================================================
+// Byte-Level Maps + Per-Token Decode
+// =============================================================================
 
 /// Inverse of [`byte_decode_map`] — byte → char forward map used by BPE
 /// encode so space (`0x20`) becomes `Ġ` (U+0120) before merges run.

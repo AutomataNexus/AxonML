@@ -8,41 +8,66 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/rust-1.75%2B-orange.svg" alt="Rust 1.75+">
-  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust 1.85+">
+  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
   <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
 ## Overview
 
-**axonml-nn** provides neural network building blocks for the AxonML framework. It includes layers, activation functions, loss functions, and utilities for constructing and training deep learning models with a PyTorch-like API.
+**axonml-nn** provides neural network building blocks for the AxonML framework: the `Module` trait, the `Parameter` wrapper, the `Sequential` container, and a broad catalog of layers (dense, conv, pooling, norm, recurrent, attention, transformer, MoE, ternary, sparse, graph, FFT/STFT), activations, losses, and weight initializers.
 
 ## Features
 
-- **Module Trait** - Core interface for all neural network components with parameter management and train/eval modes.
+- **Module Trait** - Core interface for all neural network components with parameter collection, train/eval mode, and `zero_grad`.
 
-- **Comprehensive Layers** - Linear, Conv1d/Conv2d, RNN/LSTM/GRU, Embedding, BatchNorm, LayerNorm, Dropout, and MultiHeadAttention. RNN/LSTM/GRU layers use batched matmul to process all timesteps efficiently, avoiding per-step allocation overhead.
+- **Dense and Conv Layers** - `Linear`, `Conv1d`, `Conv2d`, `ConvTranspose2d`, `MaxPool1d`, `MaxPool2d`, `AvgPool1d`, `AvgPool2d`, `AdaptiveAvgPool2d`.
 
-- **Activation Functions** - ReLU, Sigmoid, Tanh, GELU, SiLU, ELU, LeakyReLU, Softmax, and LogSoftmax.
+- **Normalization** - `BatchNorm1d`, `BatchNorm2d`, `LayerNorm`, `GroupNorm`, `InstanceNorm2d`.
 
-- **Loss Functions** - MSELoss, CrossEntropyLoss, BCELoss, BCEWithLogitsLoss, NLLLoss, L1Loss, and SmoothL1Loss.
+- **Recurrent Networks** - `RNN`, `LSTM`, `GRU` plus single-step cell variants (`RNNCell`, `LSTMCell`, `GRUCell`). Timesteps processed with batched matmul to avoid per-step allocation overhead.
 
-- **Weight Initialization** - Xavier/Glorot, Kaiming/He, orthogonal, sparse, and custom initialization schemes.
+- **Attention and Transformers** - `MultiHeadAttention`, `CrossAttention`, `DifferentialAttention`, `TransformerEncoderLayer` / `TransformerDecoderLayer`, `TransformerEncoder` / `TransformerDecoder`, and `Seq2SeqTransformer` end-to-end.
 
-- **Sequential Container** - Easy model composition by chaining layers together.
+- **Mixture of Experts** - `MoELayer`, `MoERouter`, and `Expert` for sparse expert routing.
+
+- **Ternary Weights** - `TernaryLinear` with `PackedTernaryWeights` for 1.58-bit weight quantization.
+
+- **Graph Neural Networks** - `GCNConv` and `GATConv` for graph convolution / attention.
+
+- **Spectral Layers** - `FFT1d` and `STFT` via rustfft for frequency-domain processing.
+
+- **Differentiable Structured Sparsity** - `SparseLinear` (soft-thresholded magnitude pruning), `GroupSparsity` (row/col L1 regularization), `LotteryTicket` (snapshot/prune/rewind).
+
+- **Other Building Blocks** - `Embedding`, `Dropout`, `Dropout2d`, `ResidualBlock`.
+
+- **Activations** - `ReLU`, `LeakyReLU`, `Sigmoid`, `Tanh`, `GELU`, `SiLU`, `ELU`, `Softmax`, `LogSoftmax`, `Identity`, `Flatten`.
+
+- **Losses** - `MSELoss`, `L1Loss`, `SmoothL1Loss`, `CrossEntropyLoss`, `NLLLoss`, `BCELoss`, `BCEWithLogitsLoss`, with `Reduction` (`Mean` / `Sum` / `None`).
+
+- **Weight Initialization** - `xavier_uniform`, `xavier_normal`, `glorot_uniform`, `glorot_normal`, `kaiming_uniform`, `kaiming_normal`, `he_uniform`, `he_normal`, `orthogonal`, `sparse`, `uniform`, `uniform_range`, `normal`, `constant`, `zeros`, `ones`, `eye`, `diag`, plus the `InitMode` enum.
+
+- **Sequential Container** - `Sequential::new().add(...)` for quick model composition; also `ModuleList` for heterogeneous collections.
 
 ## Modules
 
 | Module | Description |
 |--------|-------------|
-| `module` | Core `Module` trait and `ModuleList` container for neural network components |
+| `module` | `Module` trait and `ModuleList` container |
 | `parameter` | `Parameter` wrapper for learnable weights with gradient tracking |
-| `sequential` | `Sequential` container for chaining modules in order |
-| `layers` | Neural network layers (Linear, Conv, RNN, Attention, Norm, Pooling, Embedding, Dropout) |
-| `activation` | Activation function modules (ReLU, Sigmoid, Tanh, GELU, etc.) |
-| `loss` | Loss function modules (MSE, CrossEntropy, BCE, etc.) |
-| `init` | Weight initialization functions (Xavier, Kaiming, orthogonal, etc.) |
-| `functional` | Stateless functional versions of operations |
+| `sequential` | `Sequential` container for chaining modules |
+| `layers` | All layer types (see `layers/` submodules: `linear`, `conv`, `pooling`, `norm`, `rnn`, `attention`, `diff_attention`, `transformer`, `embedding`, `dropout`, `residual`, `moe`, `ternary`, `sparse`, `graph`, `fft`) |
+| `activation` | Activation function modules |
+| `loss` | Loss function modules and `Reduction` enum |
+| `init` | Weight initialization functions and `InitMode` |
+| `functional` | Stateless functional versions of common operations |
+
+## Cargo Features
+
+| Feature | Purpose |
+|---------|---------|
+| `cuda` | Forwards CUDA support to tensor / core |
+| `cudnn` | Forwards cuDNN support (implies `cuda`) |
 
 ## Usage
 
@@ -50,7 +75,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-nn = "0.1.0"
+axonml-nn = "0.6.1"
 ```
 
 ### Building a Simple MLP
@@ -217,7 +242,7 @@ assert!(!model.is_training());
 model.zero_grad();
 ```
 
-### Differentiable Structured Sparsity *(novel)*
+### Differentiable Structured Sparsity
 
 Learn which weights to prune end-to-end — the pruning mask is differentiable.
 
@@ -247,9 +272,32 @@ ticket.prune(0.2); // prune bottom 20% by magnitude
 ticket.rewind(&mut sparse); // rewind to initial weights with discovered mask
 ```
 
+### Ternary Weights
+
+```rust
+use axonml_nn::layers::ternary::TernaryLinear;
+
+// 1.58-bit ternary linear layer ({-1, 0, +1})
+let layer = TernaryLinear::new(512, 512);
+```
+
+### Mixture of Experts
+
+```rust
+use axonml_nn::layers::moe::MoELayer;
+
+// Sparse top-k expert routing
+let moe = MoELayer::new(
+    /* in_features */   512,
+    /* out_features */  512,
+    /* num_experts */    8,
+    /* top_k */          2,
+);
+```
+
 ## Tests
 
-Run the test suite (171 tests):
+Run the test suite:
 
 ```bash
 cargo test -p axonml-nn
@@ -263,3 +311,7 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+---
+
+_Last updated: 2026-04-16 (v0.6.1)_

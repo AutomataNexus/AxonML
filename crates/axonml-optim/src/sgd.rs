@@ -1,13 +1,18 @@
-//! SGD Optimizer - Stochastic Gradient Descent
+//! `SGD` — Stochastic Gradient Descent with optional momentum and Nesterov.
+//!
+//! `SGD::new(params, lr)`, `.momentum(m)`, `.nesterov(true)`,
+//! `.weight_decay(wd)`, `.dampening(d)`. Standard PyTorch-equivalent
+//! update rule with velocity buffer for momentum variants.
 //!
 //! # File
 //! `crates/axonml-optim/src/sgd.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

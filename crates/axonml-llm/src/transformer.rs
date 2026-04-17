@@ -1,18 +1,43 @@
-//! Transformer Building Blocks
+//! Transformer Building Blocks — Layer Norm, FFN, Encoder / Decoder Blocks
+//!
+//! Provides the per-layer transformer modules shared by BERT and GPT-2.
+//! `LayerNorm` keeps `weight`/`bias` `Parameter`s and normalizes over the last
+//! dim using `mean_dim` / `var_dim`, then rescales and biases; parameter
+//! tensors are wrapped with `Variable::from_tensor_with_grad` so they
+//! participate in autograd. `FeedForward` is the canonical two-Linear
+//! `fc1 -> activation -> dropout -> fc2` MLP, with `activate` dispatching on
+//! the activation string across `gelu`, `relu`, `silu`/`swish`, and `tanh`
+//! (defaulting to GELU). `TransformerEncoderBlock` bundles a
+//! `MultiHeadSelfAttention`, two `LayerNorm`s, a `FeedForward`, and a residual
+//! `Dropout`, switching between pre-norm and post-norm orderings via
+//! `pre_norm`; `forward_with_mask` threads an optional `attention_mask`
+//! through attention. `TransformerDecoderBlock` is the GPT-2-style pre-norm
+//! block with `CausalSelfAttention` and a 4x-expansion FFN (`intermediate =
+//! 4 * n_embd`). `TransformerEncoder` and `TransformerDecoder` stack these
+//! blocks; the decoder additionally applies a final `ln_f` after the stack.
+//! `TransformerBlock` is an enum that dispatches `Module` calls to either
+//! variant. Tests cover shape preservation (`[2, 8, 64]`) through the layer
+//! norm, feed-forward, each block type, and the multi-layer encoder / decoder
+//! stacks.
 //!
 //! # File
 //! `crates/axonml-llm/src/transformer.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml_autograd::Variable;
 use axonml_nn::{Dropout, Linear, Module, Parameter};
@@ -20,6 +45,10 @@ use axonml_tensor::Tensor;
 use axonml_tensor::creation::{ones, zeros};
 
 use crate::attention::{CausalSelfAttention, MultiHeadSelfAttention};
+
+// =============================================================================
+// LayerNorm
+// =============================================================================
 
 /// Layer normalization.
 #[derive(Debug)]
@@ -69,6 +98,10 @@ impl Module for LayerNorm {
         vec![self.weight.clone(), self.bias.clone()]
     }
 }
+
+// =============================================================================
+// FeedForward (MLP)
+// =============================================================================
 
 /// Feed-forward network (MLP) used in transformers.
 #[derive(Debug)]
@@ -134,6 +167,10 @@ impl Module for FeedForward {
         self.dropout.eval();
     }
 }
+
+// =============================================================================
+// TransformerEncoderBlock
+// =============================================================================
 
 /// Transformer encoder block (BERT-style).
 #[derive(Debug)]
@@ -236,6 +273,10 @@ impl Module for TransformerEncoderBlock {
     }
 }
 
+// =============================================================================
+// TransformerDecoderBlock
+// =============================================================================
+
 /// Transformer decoder block (GPT-style with causal attention).
 #[derive(Debug)]
 pub struct TransformerDecoderBlock {
@@ -305,6 +346,10 @@ impl Module for TransformerDecoderBlock {
         self.ffn.eval();
     }
 }
+
+// =============================================================================
+// TransformerEncoder Stack
+// =============================================================================
 
 /// Stack of transformer encoder blocks.
 #[derive(Debug)]
@@ -378,6 +423,10 @@ impl Module for TransformerEncoder {
     }
 }
 
+// =============================================================================
+// TransformerDecoder Stack
+// =============================================================================
+
 /// Stack of transformer decoder blocks.
 #[derive(Debug)]
 pub struct TransformerDecoder {
@@ -446,6 +495,10 @@ impl Module for TransformerDecoder {
     }
 }
 
+// =============================================================================
+// TransformerBlock Enum
+// =============================================================================
+
 /// Generic transformer block type selection.
 #[derive(Debug)]
 pub enum TransformerBlock {
@@ -484,6 +537,10 @@ impl Module for TransformerBlock {
         }
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -1,13 +1,30 @@
-//! Axonml CLI - Command Line Interface for Axonml ML Framework
+//! AxonML CLI — Command Dispatcher and Entry Point
+//!
+//! Binary entry point for the `axonml` command-line tool. Sets a broad
+//! lint profile (pedantic Clippy with CLI-specific allowances), parses the
+//! top-level `Cli` struct via `clap`, and dispatches to per-subcommand
+//! `execute` functions under `commands::*`. Supports: project scaffolding
+//! (`New`, `Init`, `Scaffold`), training lifecycle (`Train`, `Resume`,
+//! `Eval`, `Predict`), model tooling (`Convert`, `Export`, `Inspect`,
+//! `Report`, `Quant`, `Load`, `Rename`, `Zip`, `Upload`), data/compute
+//! (`Data`, `Analyze`, `Bench`, `Gpu`), UI (`Tui`), feature-gated `Wandb`
+//! and `Serve`, dashboard control (`Start`/`Stop`/`Status`/`Logs`), and
+//! three grouped subcommands — Kaggle, Hub, Dataset — routed through
+//! `execute_kaggle`, `execute_hub`, `execute_dataset`. Feature
+//! `server-sync` adds `Login`/`Logout`/`Sync` driven through
+//! `execute_async` (wraps a `tokio::runtime::Runtime::block_on`). Errors
+//! bubble up as `CliResult`, print in red via `colored`, and exit with
+//! status 1.
 //!
 //! # File
 //! `crates/axonml-cli/src/main.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -62,6 +79,10 @@
 #![allow(clippy::assigning_clones)]
 #![allow(clippy::needless_range_loop)]
 
+// =============================================================================
+// Imports and Modules
+// =============================================================================
+
 use clap::Parser;
 use colored::Colorize;
 
@@ -75,12 +96,20 @@ mod error;
 use cli::{Cli, Commands};
 use error::CliResult;
 
+// =============================================================================
+// Entry Point
+// =============================================================================
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("{} {}", "error:".red().bold(), e);
         std::process::exit(1);
     }
 }
+
+// =============================================================================
+// Command Dispatch
+// =============================================================================
 
 fn run() -> CliResult<()> {
     let cli = Cli::parse();
@@ -132,12 +161,24 @@ fn run() -> CliResult<()> {
     }
 }
 
+// =============================================================================
+// Async Runtime Helper
+// =============================================================================
+
 #[cfg(feature = "server-sync")]
 fn execute_async<F: std::future::Future<Output = CliResult<()>>>(future: F) -> CliResult<()> {
     tokio::runtime::Runtime::new()
         .map_err(|e| error::CliError::Other(e.to_string()))?
         .block_on(future)
 }
+
+// =============================================================================
+// Grouped Subcommand Dispatchers
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Kaggle
+// -----------------------------------------------------------------------------
 
 fn execute_kaggle(args: cli::KaggleArgs) -> CliResult<()> {
     use cli::KaggleSubcommand;
@@ -162,6 +203,10 @@ fn execute_kaggle(args: cli::KaggleArgs) -> CliResult<()> {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Hub
+// -----------------------------------------------------------------------------
+
 fn execute_hub(args: cli::HubArgs) -> CliResult<()> {
     use cli::HubSubcommand;
 
@@ -181,6 +226,10 @@ fn execute_hub(args: cli::HubArgs) -> CliResult<()> {
         }
     }
 }
+
+// -----------------------------------------------------------------------------
+// Dataset
+// -----------------------------------------------------------------------------
 
 fn execute_dataset(args: cli::DatasetArgs) -> CliResult<()> {
     use cli::DatasetSubcommand;

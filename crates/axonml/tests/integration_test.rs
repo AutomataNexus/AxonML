@@ -1,13 +1,27 @@
-//! End-to-end integration test for the entire Axonml framework.
+//! Framework Integration Tests — End-to-End AxonML Validation
+//!
+//! Comprehensive integration tests covering the full AxonML framework stack.
+//! Test 1: basic `Tensor` add/matmul operations. Test 2: `Variable` autograd
+//! forward/backward with `mul_scalar` and `mse_loss`, verifying gradient
+//! existence. Test 3: `Sequential` model with `Linear`/`ReLU` layers forward
+//! pass. Test 4: `Adam` optimizer weight update after a training step on
+//! `Linear`. Test 5: `DataLoader` batching with `InMemoryDataset` (100
+//! samples, batch 10). Test 6: full XOR training loop with `Sequential`
+//! (Linear -> ReLU -> Linear -> Sigmoid) converging to loss < 0.01.
+//! Test 7: vision transforms (`Resize`, `CenterCrop`, `ImageNormalize`).
+//! Test 8: `WhitespaceTokenizer` + `Vocab` encode/decode round-trip.
+//! Test 9: `SimpleCNN` on `SyntheticMNIST` with `DataLoader` forward pass.
+//! Test 10: `StepLR` scheduler decreasing learning rate over 15 epochs.
 //!
 //! # File
 //! `crates/axonml/tests/integration_test.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -15,6 +29,10 @@
 //! liable for any damages arising from the use of this software.
 
 use axonml::prelude::*;
+
+// =============================================================================
+// Tensor Operations
+// =============================================================================
 
 /// Test 1: Basic tensor operations work
 #[test]
@@ -33,6 +51,10 @@ fn test_tensor_operations() {
 
     println!("✓ Tensor operations work");
 }
+
+// =============================================================================
+// Autograd
+// =============================================================================
 
 /// Test 2: Autograd works (forward + backward)
 #[test]
@@ -61,6 +83,10 @@ fn test_autograd_training_step() {
     println!("✓ Autograd forward/backward works");
 }
 
+// =============================================================================
+// Neural Network Modules
+// =============================================================================
+
 /// Test 3: Neural network module works
 #[test]
 fn test_neural_network() {
@@ -80,6 +106,10 @@ fn test_neural_network() {
     assert_eq!(output.data().shape(), &[1, 2]);
     println!("✓ Neural network forward pass works");
 }
+
+// =============================================================================
+// Optimizer
+// =============================================================================
 
 /// Test 4: Optimizer updates weights
 #[test]
@@ -124,6 +154,10 @@ fn test_optimizer() {
     println!("  Updated weight[0]: {:.4}", updated_weight[0]);
 }
 
+// =============================================================================
+// DataLoader
+// =============================================================================
+
 /// Test 5: DataLoader batches data correctly
 #[test]
 fn test_dataloader() {
@@ -151,6 +185,10 @@ fn test_dataloader() {
 
     println!("✓ DataLoader batching works");
 }
+
+// =============================================================================
+// Full Training Loop (XOR)
+// =============================================================================
 
 /// Test 6: Full training loop (XOR problem)
 #[test]
@@ -206,6 +244,10 @@ fn test_full_training_loop() {
     println!("✓ Full training loop works (final loss: {:.4})", final_loss);
 }
 
+// =============================================================================
+// Vision Transforms
+// =============================================================================
+
 /// Test 7: Vision transforms work
 #[test]
 fn test_vision_transforms() {
@@ -227,6 +269,10 @@ fn test_vision_transforms() {
 
     println!("✓ Vision transforms work");
 }
+
+// =============================================================================
+// Text Tokenization
+// =============================================================================
 
 /// Test 8: Text tokenization works
 #[test]
@@ -255,6 +301,10 @@ fn test_text_tokenization() {
     println!("✓ Text tokenization works");
 }
 
+// =============================================================================
+// CNN on Synthetic MNIST
+// =============================================================================
+
 /// Test 9: Complete CNN on synthetic MNIST
 #[test]
 fn test_cnn_mnist() {
@@ -280,6 +330,10 @@ fn test_cnn_mnist() {
     assert_eq!(output.data().shape()[1], 10);
     println!("✓ CNN on MNIST works");
 }
+
+// =============================================================================
+// Learning Rate Scheduler
+// =============================================================================
 
 /// Test 10: Learning rate scheduler works
 #[test]

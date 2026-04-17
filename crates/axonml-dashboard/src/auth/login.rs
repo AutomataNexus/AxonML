@@ -1,18 +1,41 @@
-//! Login Page Component
+//! Login & Registration — Credentials Entry + MFA Challenge Flow
+//!
+//! Houses the three auth-entry components the router mounts at `/login` and
+//! `/register`: `LoginPage`, the internal `MfaVerificationForm` it falls
+//! through to when the backend returns `requires_mfa`, and `RegisterPage`.
+//!
+//! `LoginPage` drives `email`, `password`, `loading`, `error`, `mfa_required`,
+//! and `mfa_token` signals, POSTs to `api::auth::login`, and on success either
+//! stores the access/refresh token pair via `state.set_auth` and navigates to
+//! `/dashboard` or swaps the form for the MFA challenge.
+//! `MfaVerificationForm` accepts an `mfa_token` + `on_success` / `on_back`
+//! callbacks, collects a 6-digit TOTP code (via `CodeInput`) or a recovery
+//! string, dispatches `api::auth::verify_mfa` or `api::auth::use_recovery_code`
+//! depending on the `use_recovery` toggle, and forwards the resulting
+//! `TokenPair` to the caller.
+//! `RegisterPage` performs client-side password-match and min-length
+//! validation, calls `api::auth::register`, and auto-signs the user in on
+//! success. Shared styling comes from the crate's `forms`, `icons`, and
+//! `spinner` component modules.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/auth/login.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -21,6 +44,10 @@ use crate::api;
 use crate::components::{forms::*, icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
+
+// =============================================================================
+// Login Page
+// =============================================================================
 
 /// Login page component
 #[component]
@@ -165,6 +192,10 @@ pub fn LoginPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// MFA Verification Form
+// =============================================================================
 
 /// MFA verification form component
 #[component]
@@ -312,6 +343,10 @@ fn MfaVerificationForm(
         </div>
     }
 }
+
+// =============================================================================
+// Register Page
+// =============================================================================
 
 /// Registration page component
 #[component]

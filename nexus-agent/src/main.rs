@@ -1,10 +1,39 @@
-//! nexus-agent — CLI entry point
+//! nexus-agent — CLI Entry Point
+//!
+//! Command-line driver for the nexus-agent framework. Parses flags with clap
+//! (`--url` for the nexus-serve endpoint, `--model` to override the per-agent
+//! default, `--anthropic` to route through the native Anthropic Messages API
+//! instead of the OpenAI-compatible `/v1/chat/completions` path), then
+//! dispatches to one of the specialized agent subcommands: knowledge,
+//! retrain, fieldtech, research, orchestrator, ci-fixer, shield, code,
+//! models, and health.
+//!
+//! Each agent subcommand loads a pre-tuned `AgentConfig` from `agents::*`,
+//! registers all tools via `tools::register_all`, and invokes `react_loop`.
+//! The `Health` command pings the backend's `health_check`, and `Models`
+//! lists loaded models. The backend is selected at runtime as a trait object
+//! (`AnthropicBackend` vs `LocalBackend`) so both paths share one dispatcher.
 //!
 //! Usage:
 //!   nexus-agent knowledge "Scan /opt/AxonML and update its Obsidian vault docs"
 //!   nexus-agent knowledge "Check all 15 project WORK_STATE files for staleness"
 //!   nexus-agent --model gemma4 knowledge "Review NexusEdge_Rust CI status"
 //!   nexus-agent --url http://localhost:11435 knowledge "..."
+//!
+//! # File
+//! `nexus-agent/src/main.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use clap::Parser;
 use nexus_agent::{
@@ -12,6 +41,10 @@ use nexus_agent::{
     backend::{anthropic::AnthropicBackend, local::LocalBackend, LlmBackend},
     react_loop, tools, ToolRegistry,
 };
+
+// =============================================================================
+// CLI Argument Parsing
+// =============================================================================
 
 #[derive(Parser)]
 #[command(name = "nexus-agent")]
@@ -41,6 +74,10 @@ struct Args {
     agent: AgentCommand,
 }
 
+// -----------------------------------------------------------------------------
+// Agent Subcommands
+// -----------------------------------------------------------------------------
+
 #[derive(clap::Subcommand)]
 enum AgentCommand {
     /// Knowledge agent — reads codebases, maintains Obsidian vault documentation
@@ -67,6 +104,10 @@ enum AgentCommand {
     /// Health check — verify nexus-serve is reachable
     Health,
 }
+
+// =============================================================================
+// Entry Point
+// =============================================================================
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -148,6 +189,10 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// =============================================================================
+// Agent Runner
+// =============================================================================
 
 async fn run_agent(
     name: &str,

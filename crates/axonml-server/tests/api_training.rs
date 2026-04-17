@@ -1,13 +1,22 @@
-//! Integration tests for training API endpoints
+//! Training API — Integration Tests
+//!
+//! Tests for the training run management API endpoints on the AxonML server.
+//! Covers CRUD operations on training runs: listing (authenticated and
+//! unauthenticated), creating a run with model/config, fetching run metrics
+//! and logs, stopping a run, deleting a run (404 for nonexistent), and
+//! query features like pagination (`limit`/`offset`) and status filtering.
+//! Uses the `require_server!` macro to skip gracefully when the server or
+//! admin DB is unavailable.
 //!
 //! # File
 //! `crates/axonml-server/tests/api_training.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -18,6 +27,10 @@ mod common;
 
 use common::*;
 use serde_json::Value;
+
+// =============================================================================
+// Test Helpers
+// =============================================================================
 
 macro_rules! require_server {
     () => {
@@ -32,6 +45,10 @@ macro_rules! require_server {
         }
     };
 }
+
+// =============================================================================
+// Training Run Listing Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_list_training_runs_authenticated() {
@@ -67,6 +84,10 @@ async fn test_list_training_runs_unauthenticated() {
         "Should return 401 without auth"
     );
 }
+
+// =============================================================================
+// Training Run CRUD Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_get_training_run_not_found() {
@@ -120,6 +141,52 @@ async fn test_create_training_run() {
         status
     );
 }
+
+#[tokio::test]
+async fn test_stop_training_run() {
+    require_server!();
+
+    let client = test_client();
+    let token = login_as_admin(&client).await.expect("Login failed");
+
+    // Try to stop a nonexistent run
+    let response = auth_post(
+        &client,
+        "/api/training/runs/nonexistent-run-id/stop",
+        &token,
+        serde_json::json!({}),
+    )
+    .await
+    .expect("Request failed");
+
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "Should return 404 for nonexistent run"
+    );
+}
+
+#[tokio::test]
+async fn test_delete_training_run_not_found() {
+    require_server!();
+
+    let client = test_client();
+    let token = login_as_admin(&client).await.expect("Login failed");
+
+    let response = auth_delete(&client, "/api/training/runs/nonexistent-run-id", &token)
+        .await
+        .expect("Request failed");
+
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "Should return 404 for nonexistent run"
+    );
+}
+
+// =============================================================================
+// Training Run Metrics and Logs Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_training_run_metrics() {
@@ -204,47 +271,9 @@ async fn test_training_run_logs() {
     }
 }
 
-#[tokio::test]
-async fn test_stop_training_run() {
-    require_server!();
-
-    let client = test_client();
-    let token = login_as_admin(&client).await.expect("Login failed");
-
-    // Try to stop a nonexistent run
-    let response = auth_post(
-        &client,
-        "/api/training/runs/nonexistent-run-id/stop",
-        &token,
-        serde_json::json!({}),
-    )
-    .await
-    .expect("Request failed");
-
-    assert_eq!(
-        response.status().as_u16(),
-        404,
-        "Should return 404 for nonexistent run"
-    );
-}
-
-#[tokio::test]
-async fn test_delete_training_run_not_found() {
-    require_server!();
-
-    let client = test_client();
-    let token = login_as_admin(&client).await.expect("Login failed");
-
-    let response = auth_delete(&client, "/api/training/runs/nonexistent-run-id", &token)
-        .await
-        .expect("Request failed");
-
-    assert_eq!(
-        response.status().as_u16(),
-        404,
-        "Should return 404 for nonexistent run"
-    );
-}
+// =============================================================================
+// Pagination and Filtering Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_training_run_pagination() {

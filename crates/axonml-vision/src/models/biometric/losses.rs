@@ -1,13 +1,26 @@
-//! Biometric Loss Functions
+//! Biometric Loss Functions — Per-Modality and Fusion Training Objectives
+//!
+//! Provides graph-tracked and raw-f32 loss functions for all Aegis biometric
+//! modalities. `CrystallizationLoss` (triplet + convergence regularization for
+//! Mnemosyne face), `ContrastiveLoss` (margin-based contrastive for Ariadne
+//! fingerprint), `EchoLoss` (prediction MSE + speaker triplet for Echo voice),
+//! `ArgusLoss` (triplet + phase consistency for Argus iris), `ThemisLoss` (BCE +
+//! triplet + calibration for Themis fusion), `CenterLoss` (uncertainty-weighted
+//! center pull), `AngularMarginLoss` (uncertainty-adaptive ArcFace),
+//! `DiversityRegularization` (anti-collapse pairwise similarity penalty), and
+//! `LivenessLoss` (trajectory smoothness + temporal variance + BCE for anti-
+//! spoofing). Each loss supports both `compute()` (raw f32) and `compute_var()`
+//! (autograd Variable) paths.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/biometric/losses.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

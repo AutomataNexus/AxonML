@@ -1,13 +1,23 @@
-//! Model Hub - Pretrained Weights Management
+//! Model Hub — Pretrained Weights Registry and Download
+//!
+//! Manages pretrained model weights: download, cache, save, and load. `HubError`
+//! and `HubResult` handle network, I/O, and checksum errors. `PretrainedModel`
+//! stores metadata (URL, size, accuracy, dataset) for each registered model.
+//! `model_registry()` returns a HashMap of ~25 models (ResNet, VGG, MobileNet,
+//! EfficientNet, DenseNet, ViT, Swin, ConvNeXt, detection, depth, anomaly).
+//! `download_weights()` fetches from HuggingFace with caching. `save_state_dict()`
+//! and `load_state_dict()` serialize/deserialize `StateDict` (HashMap<String, Tensor>)
+//! in a simple binary format.
 //!
 //! # File
 //! `crates/axonml-vision/src/hub.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,18 +1,45 @@
-//! VGG-11 Training on CIFAR-10 (Synthetic)
+//! VGG-11 Training on Synthetic CIFAR-10 — BatchNorm-Equipped CIFAR-Adapted VGG
+//!
+//! Training script demonstrating the VGG-11 architecture (with BatchNorm) on
+//! `SyntheticCIFAR`. Defines a CIFAR-adapted variant `CifarVGG11` that wires
+//! `VggFeatures` (configured via `vgg11_config()` with batchnorm enabled) into
+//! a `VggClassifier::with_input_size(512, num_classes)` — VGG's five 2x2
+//! max-pools collapse 32x32 inputs to 1x1 spatial, leaving a 512-feature vector
+//! for the classifier head.
+//!
+//! Pieces:
+//! - `CifarVGG11` — wrapper struct holding `features: VggFeatures` and
+//!   `classifier: VggClassifier`. Implements `Module`: forward flattens the
+//!   `[N, 512, 1, 1]` feature map to `[N, 512]` before the classifier;
+//!   `parameters()` concatenates feature + classifier params; `train()` /
+//!   `eval()` propagate to both submodules.
+//! - `detect_device()` — CUDA probe with CPU fallback.
+//! - `argmax_batch()` / `onehot_to_indices()` — batched argmax helpers reused
+//!   for predictions and one-hot decoding.
+//! - `main()` — builds train/test datasets, `DataLoader`s, the `CifarVGG11`
+//!   model, an `Adam` optimizer, and `CrossEntropyLoss`; runs `NUM_EPOCHS`
+//!   iterations of forward/backward/step with a `no_grad` test pass after each
+//!   epoch; persists best-test-accuracy and final checkpoints; optionally
+//!   streams metrics to a browser `TrainingMonitor`.
 //!
 //! # File
 //! `crates/axonml-vision/examples/train_vgg.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 19, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml::monitor::TrainingMonitor;
 use axonml_autograd::{Variable, no_grad};
@@ -61,6 +88,10 @@ impl CifarVGG11 {
         }
     }
 }
+
+// -----------------------------------------------------------------------------
+// Module impl: forward + parameter aggregation + train/eval mode
+// -----------------------------------------------------------------------------
 
 impl Module for CifarVGG11 {
     fn forward(&self, x: &Variable) -> Variable {
@@ -149,6 +180,10 @@ fn main() {
 
     println!("=== AxonML - VGG-11 Training on CIFAR-10 ===\n");
 
+    // -------------------------------------------------------------------------
+    // Setup: device, dataset, model, optimizer
+    // -------------------------------------------------------------------------
+
     // Device
     let device = detect_device();
     println!("Device: {:?}", device);
@@ -210,6 +245,10 @@ fn main() {
 
     // Checkpoint dir
     std::fs::create_dir_all(CHECKPOINT_DIR).ok();
+
+    // -------------------------------------------------------------------------
+    // Training loop
+    // -------------------------------------------------------------------------
 
     // Training
     println!("5. Training for {} epochs...\n", NUM_EPOCHS);
@@ -283,6 +322,10 @@ fn main() {
         let avg_loss = total_loss / batch_count as f32;
         let train_acc = 100.0 * correct as f32 / total as f32;
         let samples_per_sec = total as f64 / epoch_time.as_secs_f64();
+
+        // ---------------------------------------------------------------------
+        // Per-epoch test evaluation
+        // ---------------------------------------------------------------------
 
         // Test evaluation
         model.eval();
@@ -360,6 +403,10 @@ fn main() {
     }
 
     let total_time = train_start.elapsed();
+
+    // =========================================================================
+    // Finalization
+    // =========================================================================
 
     // Final checkpoint
     let final_path = format!("{}/final_model.axonml", CHECKPOINT_DIR);

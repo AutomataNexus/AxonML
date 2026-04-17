@@ -1,13 +1,21 @@
-//! WIDER FACE Dataset — Face Detection Benchmark
+//! WIDER FACE Dataset — Face Detection Benchmark Loader
+//!
+//! Parser and loader for the WIDER FACE face detection dataset. `WiderFaceEntry`
+//! stores an image path with its face bounding boxes in (x1,y1,x2,y2) pixel
+//! coordinates. `WiderFaceDataset` reads the WIDER FACE annotation format
+//! (image path, num_faces, per-face bbox lines with blur/expression/occlusion
+//! attributes), filtering out zero-area boxes. `get()` returns resized image
+//! tensors with bounding boxes normalized to [0,1]. Supports train and val splits.
 //!
 //! # File
 //! `crates/axonml-vision/src/datasets/wider_face.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

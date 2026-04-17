@@ -1,13 +1,20 @@
-//! No-Grad Context - Disable Gradient Computation
+//! No-grad context — disable gradient tracking for inference / eval.
+//!
+//! 343 lines. Thread-local `GRAD_ENABLED` flag (default true). `NoGradGuard`
+//! RAII scope sets it to false on construction, restores on drop. `no_grad(f)`
+//! convenience closure. `is_grad_enabled()` query used by `Variable` ops to
+//! skip graph recording. Also `enable_grad(f)` to re-enable inside a no_grad
+//! scope (for second-order gradient computation).
 //!
 //! # File
 //! `crates/axonml-autograd/src/no_grad.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 25, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

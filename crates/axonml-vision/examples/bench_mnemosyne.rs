@@ -1,9 +1,24 @@
-//! Benchmark Mnemosyne — Face Verification Evaluation
+//! Benchmark Mnemosyne — Face Verification Evaluation Harness
 //!
-//! Loads the trained model and evaluates face verification accuracy
-//! on LFW pairs: same-identity vs different-identity classification.
+//! Loads a trained `MnemosyneIdentity` checkpoint and evaluates face verification
+//! accuracy on an LFW-style dataset laid out as `identity_*` binary files. For
+//! each verification pair this binary streams a `seq_len`-long sub-sequence of
+//! a subject's faces through `crystallize_step`, calls `extract_identity` to
+//! produce an L2-normalized embedding, and scores pairs with cosine similarity.
 //!
-//! Reports: accuracy, ROC-AUC, EER, FAR/FRR at multiple thresholds.
+//! Contents:
+//! * `IdentityData` + `load_identities` — binary loader for the 16-byte header
+//!   (num, C, H, W) + f32 face tensor format used by the training pipeline.
+//! * `crystallize_to_embedding` — sequential recurrent rollout of the identity
+//!   crystallization model into a single embedding vector.
+//! * `generate_pairs` — deterministic LCG-driven sampling of same-identity and
+//!   different-identity verification pairs.
+//! * `compute_metrics` / `compute_auc` / `compute_eer` — Wilcoxon–Mann–Whitney
+//!   ROC-AUC, threshold sweep (accuracy, FAR, FRR, F1), and equal-error rate.
+//! * `load_model` — checkpoint or raw state-dict loader with shape-first
+//!   parameter matching (first unused saved tensor of a matching shape wins).
+//! * `main` — CLI entry point with `--data-dir`, `--model`, `--pairs`, and
+//!   `--seq-len` flags.
 //!
 //! ```bash
 //! cargo run --example bench_mnemosyne --release -p axonml-vision
@@ -11,6 +26,25 @@
 //!   --model /opt/AxonML/checkpoints/mnemosyne/best_model.axonml \
 //!   --pairs 3000
 //! ```
+//!
+//! # File
+//! `crates/axonml-vision/examples/bench_mnemosyne.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::fs;
 use std::io::Read;

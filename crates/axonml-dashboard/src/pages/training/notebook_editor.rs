@@ -1,18 +1,45 @@
-//! Training Notebook Editor Page
+//! Training Notebook Editor Page — Cell Editor with AI Assist
+//!
+//! Leptos page component `NotebookEditorPage` providing a Jupyter-style
+//! editor for `TrainingNotebook` documents. When the `id` route param is
+//! "new" or empty, it bootstraps an in-memory notebook seeded with six
+//! default cells (markdown intro, AxonML imports + training config,
+//! model-definition scaffold, training-loop scaffold) to show users the
+//! expected structure. Otherwise it loads via `api::notebooks::get_notebook`.
+//!
+//! Features:
+//! - Add / delete code and markdown cells, tracking the selected cell.
+//! - Per-cell textarea editing with cell-type-aware auto-format on blur
+//!   (brace-based 4-space indent for code, trailing-whitespace cleanup
+//!   for markdown) via the private `format_code` and `format_markdown`
+//!   helpers.
+//! - Execution-count gutter, cell outputs (including error styling).
+//! - Save dispatch — creates via `api::notebooks::create_notebook` when
+//!   id is empty, otherwise updates via `api::notebooks::update_notebook`;
+//!   navigates to the new id after first save.
+//! - AI Assist modal that sends `AiAssistRequest` to
+//!   `api::notebooks::ai_assist`, renders the returned suggestion with
+//!   model / token metadata and apply/discard actions. Requires the
+//!   notebook to be saved first so the backend has full context.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/training/notebook_editor.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,9 +49,16 @@ use crate::components::{StatusBadge, icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// NotebookEditorPage Component
+// =============================================================================
+
 /// Notebook editor page
 #[component]
 pub fn NotebookEditorPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Params and Signals
+    // -------------------------------------------------------------------------
     let params = use_params_map();
     let state = use_app_state();
     let navigate = use_navigate();
@@ -41,6 +75,9 @@ pub fn NotebookEditorPage() -> impl IntoView {
     let state_for_effect = state.clone();
     let state_for_save = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Load Notebook (New or Existing)
+    // -------------------------------------------------------------------------
     // Fetch notebook on mount
     create_effect(move |_| {
         let id = params.get().get("id").cloned().unwrap_or_default();
@@ -199,6 +236,9 @@ for epoch in 0..epochs {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Save Action
+    // -------------------------------------------------------------------------
     // Save notebook action
     let save_action = create_action(move |_: &()| {
         let state = state_for_save.clone();
@@ -251,6 +291,9 @@ for epoch in 0..epochs {
         }
     });
 
+    // -------------------------------------------------------------------------
+    // Cell Mutation Handlers
+    // -------------------------------------------------------------------------
     // Add new cell
     let add_cell = move |cell_type: CellType| {
         if let Some(mut nb) = notebook.get() {
@@ -320,6 +363,9 @@ for epoch in 0..epochs {
         }
     };
 
+    // -------------------------------------------------------------------------
+    // AI Assist Handlers
+    // -------------------------------------------------------------------------
     // Request AI assist
     let request_ai_assist = {
         let state = state.clone();
@@ -399,6 +445,9 @@ for epoch in 0..epochs {
         }
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page notebook-editor-page">
             // Loading state
@@ -651,6 +700,10 @@ for epoch in 0..epochs {
         </div>
     }
 }
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
 
 /// Format code with basic auto-formatting
 fn format_code(source: &str) -> String {

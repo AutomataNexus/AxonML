@@ -1,13 +1,21 @@
-//! Training Health Monitor - Real-time Training Diagnostics
+//! Training Health Monitor — a novel AxonML feature for real-time diagnostics.
+//!
+//! Attaches to any optimizer and monitors gradient norms, loss trends, and
+//! parameter statistics each step. Detects: NaN/Inf gradients, gradient
+//! explosion (norm > threshold), vanishing gradients (norm < epsilon), dead
+//! neurons (zero activation percentage), loss trend classification
+//! (decreasing/stable/increasing/oscillating), and convergence scoring.
+//! Provides automatic learning rate suggestions based on the detected issues.
 //!
 //! # File
 //! `crates/axonml-optim/src/health.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

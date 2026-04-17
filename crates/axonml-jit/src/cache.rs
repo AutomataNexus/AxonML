@@ -1,18 +1,37 @@
-//! Function Cache
+//! Function Cache — Hash-Keyed Reuse of Compiled JIT Graphs
+//!
+//! Implements `FunctionCache`, a bounded `FxHashMap<u64, CompiledFunction>`
+//! guarded by a `parking_lot::RwLock` that memoizes codegen output keyed by a
+//! structural hash of the IR graph. `hash_graph` walks every `Node`, hashing
+//! op discriminant, dtype, shape dims, and per-op payload (input name,
+//! constant bit-pattern, scalar bit-pattern for `AddScalar` / `MulScalar`,
+//! reshape / transpose / reduction / squeeze / broadcast / cast arguments,
+//! and left/right/condition node indices for binary and ternary ops), with a
+//! fallback that hashes all inputs for unary ops. Provides capacity-bounded
+//! first-key eviction on insert, graph-keyed `get_by_graph` /
+//! `insert_for_graph` helpers, a `CacheStats` view (`entries`, `max_size`,
+//! `utilization`), `Default` constructing a 1000-entry cache, and tests
+//! covering structural hash equality, insert/get round-trip, LRU-style
+//! eviction, and stats reporting.
 //!
 //! # File
 //! `crates/axonml-jit/src/cache.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
@@ -21,6 +40,10 @@ use std::hash::{Hash, Hasher};
 
 use crate::codegen::CompiledFunction;
 use crate::ir::Graph;
+
+// =============================================================================
+// FunctionCache
+// =============================================================================
 
 /// Cache for compiled functions.
 pub struct FunctionCache {
@@ -41,6 +64,10 @@ impl FunctionCache {
     pub fn default_size() -> Self {
         Self::new(1000)
     }
+
+    // -------------------------------------------------------------------------
+    // Graph Hashing
+    // -------------------------------------------------------------------------
 
     /// Computes a hash key for a graph.
     pub fn hash_graph(graph: &Graph) -> u64 {
@@ -148,6 +175,10 @@ impl FunctionCache {
         hasher.finish()
     }
 
+    // -------------------------------------------------------------------------
+    // Lookup and Insertion
+    // -------------------------------------------------------------------------
+
     /// Gets a cached function or returns None.
     pub fn get(&self, key: u64) -> Option<CompiledFunction> {
         self.cache.read().get(&key).cloned()
@@ -180,6 +211,10 @@ impl FunctionCache {
         self.insert(key, func);
     }
 
+    // -------------------------------------------------------------------------
+    // Introspection and Maintenance
+    // -------------------------------------------------------------------------
+
     /// Returns the number of cached functions.
     pub fn len(&self) -> usize {
         self.cache.read().len()
@@ -210,6 +245,10 @@ impl Default for FunctionCache {
     }
 }
 
+// =============================================================================
+// CacheStats
+// =============================================================================
+
 /// Cache statistics.
 #[derive(Debug, Clone)]
 pub struct CacheStats {
@@ -229,6 +268,10 @@ impl CacheStats {
         }
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

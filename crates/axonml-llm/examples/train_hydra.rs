@@ -1,13 +1,41 @@
-//! Hydra Hybrid SSM + Attention Language Model Training Example
+//! Hydra Hybrid SSM + Attention LM Training Example — Interleaved S6 / Windowed-Attn
 //!
-//! Trains a small Hydra model on synthetic next-token prediction data.
-//! Demonstrates interleaved SSM (Mamba-style S6) and windowed local attention
-//! layers with CrossEntropyLoss and Adam optimizer, reporting loss and
-//! perplexity per epoch.
+//! Trains a small `HydraModel` on synthetic next-token prediction data to
+//! exercise interleaved SSM (Mamba-style S6) and windowed local attention
+//! layers end-to-end with `model.forward_with_loss` and Adam.
+//!
+//! Contents:
+//! - Hyperparameter constants (`VOCAB_SIZE=1000`, `D_MODEL=64`,
+//!   `NUM_LAYERS=4` = 2 SSM + 2 Attn, `BATCH_SIZE=4`, `NUM_EPOCHS=5`,
+//!   `LEARNING_RATE=0.0003`).
+//! - `generate_sequences` — random token IDs in `[1, VOCAB_SIZE)` reserving
+//!   token 0 as padding; the model's `forward_with_loss` handles the
+//!   shift internally.
+//! - `main` — parses a `--monitor` flag, builds `HydraConfig` /
+//!   `HydraModel` with `d_state=8`, `d_conv=4`, `ssm_expansion=2`,
+//!   `window_size=16`, prints a per-layer architecture summary
+//!   ("SSMBlock" / "WindowedAttn" + SwiGLU MLP), optionally launches
+//!   an `axonml::TrainingMonitor`, and runs the per-epoch training
+//!   loop reporting loss and perplexity.
 //!
 //! Usage:
 //!   cargo run --release --example train_hydra -p axonml-llm
 //!   cargo run --release --example train_hydra -p axonml-llm -- --monitor
+//!
+//! # File
+//! `crates/axonml-llm/examples/train_hydra.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::env;
 use std::time::Instant;
@@ -21,7 +49,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 // =============================================================================
-// Configuration
+// Hyperparameters / Configuration
 // =============================================================================
 
 const VOCAB_SIZE: usize = 1000;
@@ -56,7 +84,7 @@ fn generate_sequences(num_samples: usize, seq_len: usize, rng: &mut StdRng) -> V
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {
@@ -150,7 +178,9 @@ fn main() {
     // ---- Optimizer ----
     let mut optimizer = Adam::new(model.parameters(), LEARNING_RATE);
 
-    // ---- Training loop ----
+    // -----------------------------------------------------------------------------
+    // Training Loop
+    // -----------------------------------------------------------------------------
     let total_start = Instant::now();
 
     for epoch in 1..=NUM_EPOCHS {

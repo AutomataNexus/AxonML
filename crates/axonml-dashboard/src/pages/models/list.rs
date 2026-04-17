@@ -1,18 +1,32 @@
-//! Models Registry List Page
+//! Models Registry List Page — Browse, Search, and Delete Trained Models
+//!
+//! Leptos page component `ModelsListPage` that renders the model registry
+//! landing view. Fetches the full model list via `api::models::list()`,
+//! provides a client-side search filter across name/type/description, and
+//! supports delete with confirmation through `ConfirmDialog`. Displays each
+//! entry via the private `ModelCard` component, which shows the model name,
+//! type badge, description, version count, latest version badge, creation
+//! date, and a dropdown menu linking to detail, upload-version, and delete
+//! actions. Empty state links to the upload page.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/models/list.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,9 +36,16 @@ use crate::components::{icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// ModelsListPage Component
+// =============================================================================
+
 /// Models list page
 #[component]
 pub fn ModelsListPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Signals and State
+    // -------------------------------------------------------------------------
     let state = use_app_state();
 
     let (loading, set_loading) = create_signal(true);
@@ -38,6 +59,9 @@ pub fn ModelsListPage() -> impl IntoView {
     let state_for_refresh = state.clone();
     let state_for_delete = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Fetch
+    // -------------------------------------------------------------------------
     // Initial fetch
     create_effect(move |_| {
         let state = state_for_effect.clone();
@@ -55,6 +79,9 @@ pub fn ModelsListPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Derived Data and Event Handlers
+    // -------------------------------------------------------------------------
     // Filtered models
     let filtered_models = move || {
         let search_term = search.get().to_lowercase();
@@ -114,6 +141,9 @@ pub fn ModelsListPage() -> impl IntoView {
         set_model_to_delete.set(None);
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page models-list-page">
             <div class="page-header">
@@ -198,6 +228,10 @@ pub fn ModelsListPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// ModelCard Component
+// =============================================================================
 
 /// Model card component
 #[component]

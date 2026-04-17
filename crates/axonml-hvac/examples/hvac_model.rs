@@ -1,18 +1,52 @@
-//! HVAC Multi-Horizon Predictor - Native AxonML Implementation
+//! HVAC Multi-Horizon Predictor — Native AxonML Implementation
+//!
+//! Pure-AxonML reference implementation of the HVAC multi-horizon failure
+//! predictor used as the source-of-truth model behind the ONNX export driven
+//! by `hvac_inference.rs`. The architecture is a stack of:
+//!
+//! - `HvacConfig`: hyperparameters (28 sensor features, 120-step window,
+//!   128-dim hidden state, 2 GRU layers, 20 failure classes, 0.1 dropout).
+//! - Input projection: `Linear` -> `LayerNorm` -> `ReLU` mapping raw sensor
+//!   readings into the hidden space, applied after flattening
+//!   `[batch, seq, features]` to `[batch * seq, features]` then reshaping back.
+//! - Temporal encoder: a multi-layer `GRU` consuming the projected sequence.
+//! - Mean pooling: a manual reduction over the time axis (`mean_pool`) yielding
+//!   a single hidden vector per batch element.
+//! - Three independent `PredictionHead`s (FC128 -> ReLU -> Dropout -> FC64 ->
+//!   ReLU -> Dropout -> FC[num_classes]) producing logits at 5-minute
+//!   (imminent), 15-minute (warning), and 30-minute (early) horizons, returned
+//!   bundled in `HvacOutput`.
+//!
+//! `HvacPredictor::predict` runs the full forward path, applies `Softmax`, and
+//! returns argmax class indices per horizon via the `argmax_batch` helper.
+//! Constants `FAILURE_TYPES` (20 fault labels) and `FEATURE_NAMES` (28 sensor
+//! channel names) document the I/O semantics. `HvacPredictor` also implements
+//! the `Module` trait so it composes with the rest of the AxonML training
+//! stack; its `Module::forward` returns the imminent-horizon logits as the
+//! single-output convention.
+//!
+//! `main` instantiates the model with default config, prints the parameter
+//! count, builds a synthetic batch of 2 healthy 120-step sensor windows, and
+//! prints the predicted failure label for each horizon.
 //!
 //! # File
 //! `crates/axonml-hvac/examples/hvac_model.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml::autograd::Variable;
 use axonml::nn::{Dropout, GRU, LayerNorm, Linear, Module, Parameter, ReLU, Softmax};
@@ -360,7 +394,7 @@ pub const FEATURE_NAMES: [&str; 28] = [
 ];
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

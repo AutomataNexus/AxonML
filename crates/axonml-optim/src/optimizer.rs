@@ -1,13 +1,19 @@
-//! Optimizer Trait - Core Optimizer Interface
+//! `Optimizer` trait — the core interface for all gradient-based optimizers.
+//!
+//! Requires `step()` (apply one update), `zero_grad()` (clear accumulated
+//! gradients), `get_lr()` / `set_lr()` (learning rate access), and
+//! `parameters()` (list of tracked Parameter refs). Also `clip_grad_norm`
+//! utility for gradient clipping before the step.
 //!
 //! # File
 //! `crates/axonml-optim/src/optimizer.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

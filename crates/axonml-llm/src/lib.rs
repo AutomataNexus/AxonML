@@ -1,13 +1,25 @@
-//! axonml-llm - Large Language Model Architectures
+//! Nine LLM architectures for the AxonML framework.
+//!
+//! Complete pure-Rust implementations: GPT-2 (decoder-only), LLaMA (split-
+//! halves RoPE + GQA + SwiGLU), Mistral (sliding-window attention), Phi
+//! (partial RoPE + GELU), BERT (bidirectional encoder + classification/MLM),
+//! SSM/Mamba (selective S6 scan + depthwise conv + SSMForCausalLM), Hydra
+//! (hybrid SSM + windowed attention), Chimera (sparse MoE + differential
+//! attention), Trident (1.58-bit ternary TernaryLinear, RoPE + GQA +
+//! ReLU²-gated FFN + SubLN, graph-preserving RepeatKVBackward, configs for
+//! 1B/3B/smoke). Shared building blocks: attention, RMSNorm, RotaryEmbedding,
+//! embedding, text generation (top-k/top-p/temperature), HuggingFace weight
+//! loader, and pretrained model hub.
 //!
 //! # File
 //! `crates/axonml-llm/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,18 +1,63 @@
-//! HVAC Multi-Horizon Predictor - Training with Synthetic Data
+//! HVAC Multi-Horizon Predictor — Synthetic-Data Training Pipeline
+//!
+//! End-to-end training driver for the HVAC failure predictor (the same
+//! architecture defined in `hvac_model.rs`) using a fully synthetic data
+//! generator that simulates a realistic 4-pipe + 2-pipe hydronic plant. The
+//! file contains:
+//!
+//! - `TrainingConfig`: batch size, epoch count, learning rate, weight decay,
+//!   validation split, and printing cadence (with `Default` matching the
+//!   production training run; `HVAC_QUICK` env var swaps to a smoke-test
+//!   config).
+//! - `HvacConfig`: the model hyperparameters (28 features, 120-step window,
+//!   128-dim hidden, 2 GRU layers, 20 classes, 0.1 dropout).
+//! - `OperatingConditions`: scenario knobs (outdoor temp, season, lead-pump
+//!   selection per loop) used to drive `HvacDataGenerator`.
+//! - `HvacDataGenerator`: a deterministic LCG-seeded simulator with `randn`
+//!   (Box-Muller) noise. Generates physically plausible time series for pump
+//!   currents, supply/return temperatures (including OA-reset on the 2-pipe
+//!   loop), pressures, VFD speeds (linked to current draw), valve positions
+//!   (modulated by heating load), and discrete system-state channels. Includes
+//!   `inject_pump_failure`, `inject_pressure_anomaly`, and
+//!   `inject_temperature_anomaly` to overlay degradation patterns and label
+//!   them as one of the 20 fault classes.
+//! - `generate_training_dataset`: composes thousands of normal samples across
+//!   seasons and outdoor temperatures with explicit pump/pressure/temperature
+//!   failure scenarios, then prints the label distribution.
+//! - `generate_multi_horizon_sequences`: slides a window over the raw stream
+//!   and assigns three forward-looking labels (5/15/30-minute horizons) by
+//!   taking the max fault class observed in each prediction window.
+//! - `PredictionHead` and `HvacPredictor`: model components mirroring
+//!   `hvac_model.rs`, but using `GRU::forward_mean` for proper gradient flow
+//!   through the temporal pooling step.
+//! - `normalize_data`: per-feature min/max scaling using documented sensor
+//!   ranges so each channel lands in [0, 1].
+//! - `calculate_accuracy`: argmax-vs-label accuracy over a batch of logits.
+//! - `train_epoch`: one-epoch training loop using `Adam` and
+//!   `CrossEntropyLoss::compute`. Currently backprops only through the
+//!   imminent-horizon loss (warning/early heads are still measured for
+//!   accuracy but not yet weighted into the loss).
+//! - `main`: wires the generator, normalization, sequence builder, optimizer,
+//!   and loss together, printing per-epoch loss and per-horizon accuracy.
 //!
 //! # File
 //! `crates/axonml-hvac/examples/hvac_training.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml::autograd::Variable;
 use axonml::nn::{CrossEntropyLoss, Dropout, GRU, LayerNorm, Linear, Module, Parameter, ReLU};
@@ -541,6 +586,10 @@ impl HvacDataGenerator {
 // Model Components (same as hvac_model.rs)
 // =============================================================================
 
+// -----------------------------------------------------------------------------
+// Prediction Head
+// -----------------------------------------------------------------------------
+
 pub struct PredictionHead {
     fc1: Linear,
     fc2: Linear,
@@ -579,6 +628,10 @@ impl Module for PredictionHead {
         params
     }
 }
+
+// -----------------------------------------------------------------------------
+// HVAC Predictor (GRU + Multi-Horizon Heads)
+// -----------------------------------------------------------------------------
 
 pub struct HvacPredictor {
     config: HvacConfig,
@@ -665,6 +718,10 @@ impl Module for HvacPredictor {
 // Training Loop
 // =============================================================================
 
+// -----------------------------------------------------------------------------
+// Data Normalization
+// -----------------------------------------------------------------------------
+
 /// Normalize data to [0, 1] range based on sensor ranges
 fn normalize_data(data: &mut [f32], n_samples: usize) {
     let sensor_ranges: [(f32, f32); 28] = [
@@ -707,6 +764,10 @@ fn normalize_data(data: &mut [f32], n_samples: usize) {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Metrics
+// -----------------------------------------------------------------------------
+
 /// Calculate accuracy
 fn calculate_accuracy(logits: &Variable, labels: &[i64]) -> f32 {
     let data = logits.data();
@@ -732,6 +793,10 @@ fn calculate_accuracy(logits: &Variable, labels: &[i64]) -> f32 {
     }
     correct as f32 / batch_size as f32
 }
+
+// -----------------------------------------------------------------------------
+// Epoch Training Step
+// -----------------------------------------------------------------------------
 
 /// Training function
 fn train_epoch(
@@ -813,7 +878,7 @@ fn train_epoch(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

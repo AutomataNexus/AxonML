@@ -1,13 +1,19 @@
-//! Axonml ONNX - ONNX Import/Export for ML Models
+//! ONNX import/export for AxonML.
+//!
+//! Load ONNX models for inference (`import_onnx` / `import_onnx_bytes`),
+//! export AxonML models to ONNX format (`export_onnx`). 40+ ONNX operators
+//! supported (opset 17). Protobuf parsing via prost (`proto` module).
+//! `OnnxModel` wraps the loaded graph for feedforward execution.
 //!
 //! # File
 //! `crates/axonml-onnx/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

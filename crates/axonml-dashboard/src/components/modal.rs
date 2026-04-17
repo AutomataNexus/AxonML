@@ -1,22 +1,57 @@
-//! Modal Dialog Components
+//! Modal Dialogs — Modal, ConfirmDialog, AlertDialog, Drawer
+//!
+//! Overlay-style UI primitives driven by an external `RwSignal<bool>` `show`
+//! signal. All four components render nothing when the signal is false and
+//! mount a backdrop + content pane when true.
+//!
+//! `ModalSize` enum maps to `modal-sm`/`modal-md`/`modal-lg`/`modal-fullscreen`
+//! class names. `Modal` is the generic dialog: it supports an optional
+//! `title`, a close-button toggle, backdrop click-to-close and `Escape`
+//! key-to-close (registered via a document `keydown` listener inside a
+//! `create_effect`), a `children` slot for the body, and an optional
+//! `footer: ChildrenFn` slot for action buttons. Clicks inside the modal
+//! stop propagation so they don't trigger backdrop close.
+//!
+//! `ConfirmDialog` wraps `Modal` with a small-size, icon + title + message
+//! layout and `Confirm`/`Cancel` action buttons; pass `danger=true` to
+//! swap to `IconAlertTriangle` + `btn-danger` styling. On confirm it
+//! invokes the `on_confirm: Callback<()>` and hides itself; cancel fires
+//! an optional `on_cancel`.
+//!
+//! `AlertDialog` is a single-button informational dialog with
+//! `IconInfo` / `IconXCircle` styling based on the `is_error` flag.
+//!
+//! `Drawer` is a side-slide panel (default `position="right"`) that shares
+//! the same backdrop/close semantics as `Modal` but uses
+//! `drawer-{position}` classes and a dedicated `drawer-header` /
+//! `drawer-body` skeleton.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/modal.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use crate::components::icons::*;
 use leptos::*;
 use wasm_bindgen::JsCast;
+
+// =============================================================================
+// ModalSize
+// =============================================================================
 
 /// Modal size variants
 #[derive(Debug, Clone, Copy, Default)]
@@ -38,6 +73,10 @@ impl ModalSize {
         }
     }
 }
+
+// =============================================================================
+// Modal
+// =============================================================================
 
 /// Modal component
 #[component]
@@ -128,6 +167,10 @@ pub fn Modal(
     }
 }
 
+// =============================================================================
+// ConfirmDialog
+// =============================================================================
+
 /// Confirmation dialog
 #[component]
 pub fn ConfirmDialog(
@@ -185,6 +228,10 @@ pub fn ConfirmDialog(
     }
 }
 
+// =============================================================================
+// AlertDialog
+// =============================================================================
+
 /// Alert dialog (just displays message with OK button)
 #[component]
 pub fn AlertDialog(
@@ -220,6 +267,10 @@ pub fn AlertDialog(
         </Modal>
     }
 }
+
+// =============================================================================
+// Drawer
+// =============================================================================
 
 /// Drawer component (slides in from side)
 #[component]

@@ -1,13 +1,21 @@
-//! Mesh Generation and Export
+//! Mesh Generation and Export — Marching Cubes Iso-Surface Extraction
+//!
+//! Defines `Vertex`, `Triangle`, and `Mesh` types for triangle mesh representation.
+//! `Mesh` supports per-vertex normal computation, OBJ export (text), and binary STL
+//! export with file-save helpers. `MarchingCubes` extracts zero-level-set surfaces
+//! from 3D SDF scalar fields using the classic 256-entry edge/triangle lookup tables
+//! with edge-vertex deduplication via HashMap. Supports both functional SDF evaluation
+//! and pre-computed grid extraction.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/aegis3d/mesh.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -20,7 +28,7 @@ use std::collections::HashMap;
 use std::io::Write;
 
 // =============================================================================
-// Types
+// Vertex & Triangle Types
 // =============================================================================
 
 /// 3D vertex position.
@@ -89,6 +97,10 @@ impl Triangle {
     }
 }
 
+// =============================================================================
+// Mesh
+// =============================================================================
+
 /// Triangle mesh with vertices and faces.
 #[derive(Debug, Clone)]
 pub struct Mesh {
@@ -122,6 +134,10 @@ impl Mesh {
         self.triangles.len()
     }
 
+    // -------------------------------------------------------------------------
+    // Normal Computation
+    // -------------------------------------------------------------------------
+
     /// Compute per-vertex normals by averaging face normals.
     pub fn compute_normals(&mut self) {
         self.normals = vec![Vertex::new(0.0, 0.0, 0.0); self.vertices.len()];
@@ -150,6 +166,10 @@ impl Mesh {
             *n = n.normalize();
         }
     }
+
+    // -------------------------------------------------------------------------
+    // OBJ Export
+    // -------------------------------------------------------------------------
 
     /// Export to OBJ format.
     pub fn to_obj(&self) -> String {
@@ -189,6 +209,10 @@ impl Mesh {
 
         s
     }
+
+    // -------------------------------------------------------------------------
+    // STL Export
+    // -------------------------------------------------------------------------
 
     /// Export to binary STL format.
     pub fn to_stl_binary(&self) -> Vec<u8> {
@@ -234,6 +258,10 @@ impl Mesh {
 
         buf
     }
+
+    // -------------------------------------------------------------------------
+    // File I/O
+    // -------------------------------------------------------------------------
 
     /// Write OBJ to a file.
     pub fn save_obj(&self, path: &str) -> std::io::Result<()> {

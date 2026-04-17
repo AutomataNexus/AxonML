@@ -1,13 +1,22 @@
-//! Camera Capture and Inference Pipeline
+//! Camera Capture and Inference Pipeline — Core Types
+//!
+//! Defines the camera capture abstraction layer. `PixelFormat` enumerates supported
+//! pixel formats (RGB, YUYV, MJPEG, Grayscale). `CaptureConfig` holds capture
+//! parameters (width, height, format, fps). `FrameBuffer` stores raw captured frame
+//! data with dimensions and timestamps. `CaptureError` covers device, format, and
+//! I/O failures. `CaptureBackend` is the trait for camera backends (open, grab_frame,
+//! close, resolution). Re-exports `FileBackend`, `V4L2Backend`, `InferencePipeline`,
+//! `DetectionModel`, and preprocessing functions.
 //!
 //! # File
 //! `crates/axonml-vision/src/camera/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

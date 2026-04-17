@@ -1,19 +1,56 @@
 //! Train Ariadne — Fingerprint Identity via Ridge Event Fields
 //!
-//! Trains on the FVC2000 DB4_B preprocessed dataset with ContrastiveLoss
+//! End-to-end training binary for the AxonML [`AriadneFingerprint`] model
+//! on the FVC2000 DB4_B preprocessed dataset, using [`ContrastiveLoss`]
 //! (margin-based: same-identity → minimize distance, different → push
-//! beyond margin). Input is 128x128 grayscale fingerprint images; the
+//! beyond margin). Input is 128×128 grayscale fingerprint images; the
 //! model's 8 learnable Gabor orientation filters extract ridge event
 //! fields that feed depthwise separable convolution blocks.
 //!
-//! Note: FVC2000 DB4_B only has 10 identities × 80 samples. That's small —
-//! useful for smoke-testing the architecture and pipeline but not enough
-//! for a competitive model. See the Aegis paper's limitations section.
+//! Note: FVC2000 DB4_B only has 10 identities × 80 samples — useful for
+//! smoke-testing the architecture and pipeline but not enough for a
+//! competitive model (see the Aegis paper's limitations section).
+//!
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser and `print_help`,
+//!   covering data dir, output dir, pair batch size, batches per epoch,
+//!   learning-rate + warmup, checkpoint cadence, seed, and resume mode.
+//! - `cosine_lr` — linear warmup then cosine decay to 1% of `base_lr`.
+//! - `main` — asserts the dataset shape (1×128×128 grayscale), builds the
+//!   [`AriadneFingerprint`] model, resumes from a checkpoint, launches the
+//!   browser [`axonml::TrainingMonitor`], wires up [`AdamW`] +
+//!   [`ContrastiveLoss`], and runs the contrastive training loop. Mines a
+//!   50/50 same/different pair batch via [`mine_pair_batch`], does a
+//!   single batched `model.forward_full`, narrows per-pair to apply
+//!   `ContrastiveLoss::compute_var` row-by-row, accumulates with
+//!   `add_var`, then averages with `mul_scalar(1/N)`. Saves
+//!   `best_model.axonml`, `checkpoint_best.axonml`,
+//!   `checkpoint_latest.axonml`, and periodic
+//!   `checkpoint_epoch_NNNN.axonml` files.
 //!
 //! Usage:
 //!   cargo run --release --bin train_ariadne -p biometric-training --features cuda
 //!   cargo run --release --bin train_ariadne -p biometric-training --features cuda -- \
 //!       --epochs 30 --bs 16 --batches 150 --resume latest
+//!
+//! # File
+//! `biometric-training/src/bin/train_ariadne.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -134,6 +171,10 @@ Options:
   --help, -h            Show help"#);
 }
 
+// =============================================================================
+// LR Schedule
+// =============================================================================
+
 fn cosine_lr(base_lr: f32, warmup: usize, total: usize, epoch: usize) -> f32 {
     if epoch < warmup {
         base_lr * (epoch + 1) as f32 / warmup as f32
@@ -143,6 +184,10 @@ fn cosine_lr(base_lr: f32, warmup: usize, total: usize, epoch: usize) -> f32 {
         min_lr + 0.5 * (base_lr - min_lr) * (1.0 + (std::f32::consts::PI * progress).cos())
     }
 }
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
 
 fn main() {
     let cfg = Config::from_args();

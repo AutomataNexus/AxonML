@@ -1,28 +1,66 @@
-//! tech-ticker — always-on-top compact widget showing field-tech stats.
+//! tech-ticker — Always-On-Top Field-Tech Monitor
 //!
-//! Per-tech, one row:
-//!   - Online LED (tailscale status on Andrew's machine)
-//!   - Tech name
-//!   - Rate-limit usage bar (X/MAX from server's rate_limits.json)
-//!   - Last-diagnostic relative timestamp
-//!   - Binary-update-pending indicator (source .exe mtime vs last-pushed cache)
+//! eframe-based compact widget showing per-tech status on one row each:
+//! online LED (driven by `tailscale status` + the relay's authoritative
+//! `/push-state`), tech name, rate-limit usage counter `X/MAX` from the
+//! server's `rate_limits.json`, last-diagnostic relative timestamp, a
+//! binary-update-pending amber LED, and per-tech action buttons (Reset
+//! rate-limit counter, SSH to tech's WSL via Windows Terminal, Disable /
+//! Enable tech-access).
 //!
-//! Data sources:
-//!   1. `tailscale status` — local command, polled every 10s
-//!   2. `scp devops@100.67.227.31:~/.nexusoracle/rate_limits.json` — polled every 30s
-//!      (uses SSH key auth — same creds we use elsewhere)
-//!   3. /var/lib/tailscale-monitor/pushed-<name> — local file mtime, read every 10s
+//! Four background pollers via tokio:
+//! * `refresh_tailscale` — runs `tailscale status` every 10s (local fallback
+//!   for relay outage).
+//! * `refresh_rate_limits` — pulls `rate_limits.json` + TOML `daemon_config`
+//!   from the relay every 30s, parses `[[tech_access.api_keys]]` blocks via
+//!   `parse_tech_overrides` to get per-tech `max_diagnostics` and
+//!   `window_hours`, then filters timestamps inside the window.
+//! * `refresh_relay` — every 10s pulls `/push-state` (authoritative online +
+//!   last-pushed-build-mtime) and `/events` JSONL into the
+//!   `RelayEvent` enum (`TechOnline`, `TechOffline`, `PushOk`, `PushFailed`,
+//!   `RateLimitHit`/`Reset`, `AuthError`, `DiagnosticSession`, etc.).
+//! * `refresh_tech_overrides` — every 30s hits
+//!   `/api/v1/tech-access/overrides` to drive the Disable/Enable button
+//!   glyph.
+//!
+//! UI paints a rounded transparent outer frame with custom titlebar (drag,
+//! close, minimize), action header (theme toggle, Build button that runs
+//! `/opt/NexusOracle/restartoracle.sh`), "while you were away" events
+//! banner with collapsible log panel (new_count + `last_seen` persisted to
+//! `/tmp/.tech-ticker-last-seen`), per-tech rows via `draw_tech_row`, and
+//! a legend footer. Theme system (`Theme::Dark` / `Theme::Light`) persists
+//! to `/tmp/.tech-ticker-theme`.
+//!
+//! Trigger actions: `trigger_toggle_disable` POSTs to the daemon, optimistically
+//! updating `disabled_techs` so the UI flips immediately; `trigger_reset`
+//! POSTs to `/api/v1/rate-limits/reset`; `trigger_ssh` spawns `wt.exe` +
+//! `sshpass`; `trigger_build` runs `RESTART_SCRIPT`.
 //!
 //! Launch: tech-ticker &
+//!
+//! # File
+//! `nexus-agent/src/ui/tech_ticker.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use eframe::egui;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Config
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// Config — Constants, Endpoints, Techs
+// =============================================================================
 
 const WIDTH: f32 = 300.0;
 const HEIGHT: f32 = 480.0;
@@ -65,9 +103,9 @@ const TECHS: &[(&str, &str, &str)] = &[
     ("Denior", "denior",   ""),
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Palettes — dark (NexusStratum) + light (Claude browser UI)
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// Theme — Dark (NexusStratum) + Light (Claude Browser UI)
+// =============================================================================
 
 /// Which theme the ticker is currently rendering in. Persisted so it sticks
 /// across restarts.
@@ -192,9 +230,9 @@ fn BG_DARK() -> egui::Color32 { c_bg() }
 #[allow(non_snake_case)]
 fn BG_ROW() -> egui::Color32 { c_bg_row() }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Entry
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// Entry Point
+// =============================================================================
 
 fn main() -> eframe::Result {
     // Restore persisted theme before the first paint so there's no flash.
@@ -221,9 +259,9 @@ fn main() -> eframe::Result {
     )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// State
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// State — TechState, RelayEvent, Shared, TechApp
+// =============================================================================
 
 #[derive(Clone, Default)]
 struct TechState {
@@ -430,9 +468,9 @@ impl TechApp {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Data refresh
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// Polling / Probes — Tailscale, Rate Limits, Relay, Tech Overrides
+// =============================================================================
 
 async fn refresh_tailscale(state: &Arc<Mutex<Shared>>) {
     let output = tokio::process::Command::new("tailscale")
@@ -711,9 +749,9 @@ fn parse_tech_overrides(cfg: &str) -> HashMap<String, (usize, u64)> {
     out
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UI
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// UI — eframe::App Implementation and Per-Tech Row
+// =============================================================================
 
 impl eframe::App for TechApp {
     /// Clear the framebuffer to fully transparent each frame. Without this
@@ -1346,6 +1384,10 @@ impl TechApp {
         });
     }
 }
+
+// =============================================================================
+// Helpers — rel_time, draw_led
+// =============================================================================
 
 /// Relative "Nh ago" / "Nm ago" string.
 fn rel_time(when: chrono::DateTime<chrono::Utc>) -> String {

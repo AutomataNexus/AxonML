@@ -1,9 +1,35 @@
-//! Error Boundary Component
+//! Error Boundary Component — Panic Catching Page Wrapper for WASM
 //!
-//! Wraps page content to catch panics and render errors gracefully
-//! instead of crashing the entire WASM module.
+//! Provides the `PageErrorBoundary` Leptos component which wraps page content
+//! to catch component errors and display a user-friendly fallback UI instead
+//! of crashing the WASM module. The fallback shows the list of error messages
+//! from Leptos' `ErrorBoundary` and includes a "Reload Page" button that calls
+//! `window.location().reload()` via `web_sys` to recover the application.
+//!
+//! # File
+//! `crates/axonml-dashboard/src/components/error_boundary.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
+
+// =============================================================================
+// Page Error Boundary Component
+// =============================================================================
 
 /// A reusable error boundary that catches component errors and displays
 /// a user-friendly fallback instead of crashing the page.

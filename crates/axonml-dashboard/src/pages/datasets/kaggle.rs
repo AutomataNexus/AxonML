@@ -1,18 +1,38 @@
-//! Kaggle Integration Page
+//! Kaggle Integration Page — Search, Download, And Credentials Management
+//!
+//! Front-end for the Kaggle dataset integration. `KagglePage` fetches a
+//! `KaggleStatusResponse` from `api::kaggle::get_status` on mount plus a list
+//! of previously-downloaded archives via `api::kaggle::list_downloaded`, and
+//! displays a status banner (connected/not-configured) above a two-tab
+//! switcher — `KaggleSearchTab` and `DownloadedTab`. `KaggleSearchTab` calls
+//! `api::kaggle::search` (limit 20) on Enter/click and renders the returned
+//! `KaggleSearchResponse` as a grid of dataset cards showing title, ref name,
+//! description, size, download count, and vote count, each with a Download
+//! button that posts a `KaggleDownloadRequest` through `api::kaggle::download`
+//! and refreshes the local list on success. `DownloadedTab` shows the local
+//! archives with filename, on-disk path, and size in MB. `CredentialsModal`
+//! captures Kaggle username and API key inputs, posts a `KaggleCredentials`
+//! payload through `api::kaggle::save_credentials`, and updates the status
+//! signal on success; success/error paths toast through `use_app_state`.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/datasets/kaggle.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 
@@ -21,11 +41,18 @@ use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// Kaggle Page
+// =============================================================================
+
 /// Kaggle integration page
 #[component]
 pub fn KagglePage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (kaggle_status, set_kaggle_status) = create_signal::<Option<KaggleStatusResponse>>(None);
     let (search_query, set_search_query) = create_signal(String::new());
@@ -38,6 +65,9 @@ pub fn KagglePage() -> impl IntoView {
 
     let state_for_fetch = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Data Fetch
+    // -------------------------------------------------------------------------
     // Fetch Kaggle status on mount
     create_effect(move |_| {
         let state = state_for_fetch.clone();
@@ -55,6 +85,9 @@ pub fn KagglePage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page kaggle-page">
             <div class="page-header">
@@ -157,6 +190,10 @@ pub fn KagglePage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// Kaggle Search Tab
+// =============================================================================
 
 /// Kaggle search tab
 #[component]
@@ -345,6 +382,10 @@ fn KaggleSearchTab(
     }
 }
 
+// =============================================================================
+// Downloaded Tab
+// =============================================================================
+
 /// Downloaded datasets tab
 #[component]
 fn DownloadedTab(downloaded: ReadSignal<Vec<KaggleLocalDataset>>) -> impl IntoView {
@@ -384,6 +425,10 @@ fn DownloadedTab(downloaded: ReadSignal<Vec<KaggleLocalDataset>>) -> impl IntoVi
         </div>
     }
 }
+
+// =============================================================================
+// Credentials Modal
+// =============================================================================
 
 /// Credentials modal
 #[component]

@@ -1,13 +1,20 @@
-//! Device Abstraction - Hardware Backend Management
+//! Device abstraction and hardware backend management.
+//!
+//! Defines the `Device` enum (Cpu, Cuda, Vulkan, Metal, Wgpu) with runtime
+//! availability checks via each backend's `is_device_available()`, capability
+//! queries (`DeviceCapabilities` — memory, f16/f64 support, compute
+//! capability), device counting, and the `best_available_backend()` selector
+//! that prefers CUDA > Metal > Vulkan > WebGPU > CPU.
 //!
 //! # File
 //! `crates/axonml-core/src/device.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

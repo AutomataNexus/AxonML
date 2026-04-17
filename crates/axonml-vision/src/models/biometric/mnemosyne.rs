@@ -1,13 +1,25 @@
 //! Mnemosyne — Face Identity via Temporal Crystallization (~115K params)
 //!
+//! Implements `MnemosyneIdentity`, a face recognition model that encodes RGB
+//! face images through depthwise-separable `BlazeBlock` residual convolutions
+//! with batch normalization, adaptive pooling, and a linear projection to
+//! produce face encodings. A GRU-based crystallization mechanism evolves a
+//! hidden state over multiple face observations, converging toward a stable
+//! identity attractor. Provides single-frame encoding, incremental
+//! crystallization steps (with convergence velocity and quality gating),
+//! multi-frame crystallization sequences, L2-normalized identity extraction,
+//! temporal liveness detection via hidden-state trajectory analysis (variance
+//! and autocorrelation), and face quality assessment.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/biometric/mnemosyne.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

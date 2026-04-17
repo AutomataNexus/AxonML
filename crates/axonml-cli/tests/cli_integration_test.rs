@@ -1,13 +1,25 @@
-//! End-to-end integration tests for the Axonml CLI.
+//! CLI Integration Tests — End-to-End Binary Invocations
+//!
+//! End-to-end integration tests for the `axonml` CLI binary. Exercises every
+//! major subcommand through `assert_cmd::Command`: help/version output,
+//! project creation (`new`) and initialization (`init`), GPU listing/info/
+//! status, hub list/info/cached, dataset list/info/sources, hardware
+//! benchmarks, quantization format listing, scaffold template listing and
+//! generation, load/workspace status and clear, model analysis and inspection,
+//! bundle zip create/list, Kaggle status/list, data list/validate, verbose
+//! and quiet flags, subcommand help for train/eval/convert/export, error
+//! handling for invalid commands and missing args, a full project workflow
+//! simulation, and rapid sequential invocations of multiple subcommands.
 //!
 //! # File
 //! `crates/axonml-cli/tests/cli_integration_test.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -29,7 +41,7 @@ fn axonml_cmd() -> Command {
 }
 
 // =============================================================================
-// Test 1: CLI Help and Version
+// CLI Help and Version
 // =============================================================================
 
 #[test]
@@ -53,7 +65,7 @@ fn test_cli_version() {
 }
 
 // =============================================================================
-// Test 2: Project Creation (new command)
+// Project Creation (new command)
 // =============================================================================
 
 #[test]
@@ -108,7 +120,7 @@ fn test_new_project_with_template() {
 }
 
 // =============================================================================
-// Test 3: Project Initialization (init command)
+// Project Initialization (init command)
 // =============================================================================
 
 #[test]
@@ -127,7 +139,7 @@ fn test_init_in_existing_directory() {
 }
 
 // =============================================================================
-// Test 4: GPU Commands
+// GPU Commands
 // =============================================================================
 
 #[test]
@@ -147,7 +159,7 @@ fn test_gpu_status() {
 }
 
 // =============================================================================
-// Test 5: Hub Commands
+// Hub Commands
 // =============================================================================
 
 #[test]
@@ -181,7 +193,7 @@ fn test_hub_cached() {
 }
 
 // =============================================================================
-// Test 6: Dataset Commands
+// Dataset Commands
 // =============================================================================
 
 #[test]
@@ -220,7 +232,7 @@ fn test_dataset_sources() {
 }
 
 // =============================================================================
-// Test 7: Benchmark Commands
+// Benchmark Commands
 // =============================================================================
 
 #[test]
@@ -236,7 +248,7 @@ fn test_bench_hardware() {
 }
 
 // =============================================================================
-// Test 8: Quantization Commands
+// Quantization Commands
 // =============================================================================
 
 #[test]
@@ -252,7 +264,7 @@ fn test_quant_list() {
 }
 
 // =============================================================================
-// Test 9: Scaffold Commands
+// Scaffold Commands
 // =============================================================================
 
 #[test]
@@ -288,7 +300,7 @@ fn test_scaffold_generate() {
 }
 
 // =============================================================================
-// Test 10: Load/Workspace Commands
+// Load / Workspace Commands
 // =============================================================================
 
 #[test]
@@ -302,7 +314,7 @@ fn test_load_clear() {
 }
 
 // =============================================================================
-// Test 11: Analyze Commands
+// Analyze Commands
 // =============================================================================
 
 #[test]
@@ -316,7 +328,7 @@ fn test_analyze_model_without_loaded() {
 }
 
 // =============================================================================
-// Test 12: Inspect Command
+// Inspect Command
 // =============================================================================
 
 #[test]
@@ -329,7 +341,7 @@ fn test_inspect_nonexistent_model() {
 }
 
 // =============================================================================
-// Test 13: Zip Commands
+// Zip / Bundle Commands
 // =============================================================================
 
 #[test]
@@ -364,7 +376,7 @@ fn test_zip_create_and_list() {
 }
 
 // =============================================================================
-// Test 14: Kaggle Commands (without credentials)
+// Kaggle Commands (without credentials)
 // =============================================================================
 
 #[test]
@@ -378,7 +390,7 @@ fn test_kaggle_list() {
 }
 
 // =============================================================================
-// Test 15: Data Commands
+// Data Commands
 // =============================================================================
 
 #[test]
@@ -405,7 +417,7 @@ fn test_data_validate_nonexistent() {
 }
 
 // =============================================================================
-// Test 16: Verbose and Quiet Flags
+// Verbose and Quiet Flags
 // =============================================================================
 
 #[test]
@@ -429,7 +441,7 @@ fn test_quiet_flag() {
 }
 
 // =============================================================================
-// Test 17: Help for Subcommands
+// Help for Subcommands
 // =============================================================================
 
 #[test]
@@ -478,7 +490,7 @@ fn test_export_help() {
 }
 
 // =============================================================================
-// Test 18: Error Handling
+// Error Handling
 // =============================================================================
 
 #[test]
@@ -496,7 +508,7 @@ fn test_missing_required_args() {
 }
 
 // =============================================================================
-// Test 19: Full Workflow Simulation
+// Full Workflow Simulation
 // =============================================================================
 
 #[test]
@@ -548,7 +560,7 @@ fn test_full_project_workflow() {
 }
 
 // =============================================================================
-// Test 20: Concurrent Command Execution
+// Concurrent Command Execution
 // =============================================================================
 
 #[test]

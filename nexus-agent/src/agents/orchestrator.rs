@@ -1,10 +1,46 @@
-//! Orchestrator agent — training queue manager.
+//! Orchestrator Agent — Cross-Project Training Queue Manager
 //!
-//! Manages a queue of training jobs across projects, schedules them
-//! based on GPU availability, and reports results. Prevents resource
-//! conflicts between concurrent training runs.
+//! Defines the `orchestrator` agent configuration: manages training-job
+//! queues across projects (llm-training, BirdCLEF, Mnemosyne, Argus,
+//! Nexus_Models), schedules them based on single-GPU availability, and
+//! reports results. Exists to prevent two large training runs fighting
+//! for the same VRAM.
+//!
+//! Exports:
+//! - `SYSTEM_PROMPT` — the projects under management, the single-GPU
+//!   resource constraint, the priority order (deadline-driven →
+//!   paper-blocking → exploratory), the scheduling workflow
+//!   (`nvidia-smi` + `ps aux | grep cargo | grep train` probe), and the
+//!   tools available (`shell`, `start_training`, `check_training`,
+//!   `list_checkpoints`, `vault_read`, `vault_write`, `send_email`).
+//! - `config()` — returns an `AgentConfig` with
+//!   `max_iterations = 15`, `model = "qwen3"`, `temperature = 0.1`
+//!   (deterministic scheduling decisions).
+//!
+//! # File
+//! `nexus-agent/src/agents/orchestrator.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use crate::AgentConfig;
+
+// =============================================================================
+// System Prompt
+// =============================================================================
 
 pub const SYSTEM_PROMPT: &str = r#"You are a training orchestrator for the AxonML workspace.
 
@@ -45,6 +81,10 @@ Your job is to manage training job queues across projects, schedule them based o
 - vault_read / vault_write: Read and update WORK_STATE
 - send_email: Notify Andrew when training completes or fails
 "#;
+
+// =============================================================================
+// Agent Configuration
+// =============================================================================
 
 pub fn config() -> AgentConfig {
     AgentConfig {

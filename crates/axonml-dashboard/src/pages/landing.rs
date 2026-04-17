@@ -1,23 +1,42 @@
-//! Public Landing Page
+//! Public Landing Page — Marketing Shell For Unauthenticated Visitors
+//!
+//! Leptos component tree for the anonymous landing experience rendered at the
+//! site root. `LandingPage` composes the `PublicNavbar` with a hero section,
+//! a features grid, a stats block, a CTA banner, and a multi-column footer.
+//! Two private helper components, `FeatureCard` and `StatCard`, render the
+//! repeating card layouts for the features grid and stats section respectively.
+//! Icons are pulled from `crate::components::icons` (`IconArrowRight`,
+//! `IconActivity`, `IconBox`, `IconServer`, `IconShield`, `IconZap`,
+//! `IconDatabase`, `IconGithub`) and routing uses `leptos_router::A` for the
+//! register CTAs.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/landing.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use leptos::*;
 use leptos_router::*;
 
 use crate::components::{icons::*, navbar::PublicNavbar};
+
+// =============================================================================
+// Landing Page Component
+// =============================================================================
 
 /// Landing page for non-authenticated users
 #[component]
@@ -26,7 +45,9 @@ pub fn LandingPage() -> impl IntoView {
         <div class="landing-page">
             <PublicNavbar />
 
+            // -----------------------------------------------------------------
             // Hero Section
+            // -----------------------------------------------------------------
             <section class="hero">
                 <div class="hero-content">
                     <h1 class="hero-title">
@@ -54,7 +75,9 @@ pub fn LandingPage() -> impl IntoView {
                 </div>
             </section>
 
+            // -----------------------------------------------------------------
             // Features Section
+            // -----------------------------------------------------------------
             <section id="features" class="features-section">
                 <div class="section-header">
                     <h2>"Everything You Need"</h2>
@@ -95,7 +118,9 @@ pub fn LandingPage() -> impl IntoView {
                 </div>
             </section>
 
+            // -----------------------------------------------------------------
             // Stats Section
+            // -----------------------------------------------------------------
             <section class="stats-section">
                 <div class="stats-grid">
                     <StatCard value="<1ms" label="Dashboard Latency" />
@@ -105,7 +130,9 @@ pub fn LandingPage() -> impl IntoView {
                 </div>
             </section>
 
+            // -----------------------------------------------------------------
             // CTA Section
+            // -----------------------------------------------------------------
             <section class="cta-section">
                 <div class="cta-content">
                     <h2>"Ready to Get Started?"</h2>
@@ -117,7 +144,9 @@ pub fn LandingPage() -> impl IntoView {
                 </div>
             </section>
 
+            // -----------------------------------------------------------------
             // Footer
+            // -----------------------------------------------------------------
             <footer class="landing-footer">
                 <div class="footer-content">
                     <div class="footer-grid">
@@ -180,6 +209,10 @@ pub fn LandingPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// Helper Components
+// =============================================================================
 
 /// Feature card component
 #[component]

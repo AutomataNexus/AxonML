@@ -1,5 +1,12 @@
-//! Standalone test for Q4_K dequantization using a known block
-//! from the Qwen2.5 Coder 1.5B model (blk.0.attn_q.weight, block 8987).
+//! q4k_block_test — Q4_K Dequant Golden-Block Test
+//!
+//! Single integration test [`test_dequantize_q4_k_block_8987`] that feeds a
+//! hard-coded 144-byte Q4_K super-block (block 8987 from Qwen2.5 Coder 1.5B's
+//! `blk.0.attn_q.weight`) into [`dequantize_q4_k`] and asserts that the first
+//! 10 output values and the block-wide max-abs match a Python reference (via
+//! ggml's canonical dequantize_row_q4_K). Guards against regressions in the
+//! 6-bit packed scales/mins unpacking (`get_scale_min_k4`) and the
+//! 64-element-chunk low/high nibble routing.
 //!
 //! Python reference values (from the same block bytes):
 //!   First 10 values: [-0.01314712, 0.00270653, -0.0004642, 0.01221871,
@@ -7,8 +14,31 @@
 //!                      0.00270653, 0.00270653]
 //!   Block max abs: 0.036473
 //!   Block mag: 0.2012
+//!
+//! # File
+//! `nexus-serve/tests/q4k_block_test.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use nexus_serve::model::gguf::dequantize_q4_k;
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[test]
 fn test_dequantize_q4_k_block_8987() {

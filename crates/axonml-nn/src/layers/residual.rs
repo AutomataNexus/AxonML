@@ -1,13 +1,19 @@
-//! Residual Block - Generic Skip Connection Layer
+//! `ResidualBlock` — generic skip connection wrapper.
+//!
+//! 334 lines. Wraps any `Module` sub-block and adds the input to its
+//! output: `forward(x) = x + sub_block(x)`. Optionally applies a
+//! projection Linear if input/output dims differ. Used by ResNet,
+//! transformer layers, and other architectures with residual connections.
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/residual.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

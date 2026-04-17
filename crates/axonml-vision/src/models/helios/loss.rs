@@ -1,13 +1,21 @@
-//! Helios Training Losses — CIoU, DFL Loss, Task-Aligned Assigner
+//! Helios Training Losses — CIoU, DFL, and Task-Aligned Assignment
+//!
+//! Implements `CIoULoss` (Complete IoU with distance, aspect ratio, and overlap
+//! penalties), DFL (Distribution Focal Loss) for bounding-box regression,
+//! `TaskAlignedAssigner` (dynamic label assignment using alignment metric from
+//! classification score and IoU), and `HeliosLoss` (combined classification BCE +
+//! CIoU bbox + DFL regression loss with configurable per-component weights).
+//! Provides both raw-f32 `compute()` and autograd `compute_var()` paths.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/helios/loss.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

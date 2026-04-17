@@ -1,22 +1,49 @@
-//! Memory Profiling Module
+//! Memory Profiling — Named Allocation Tracking and Leak Detection
+//!
+//! Tracks tensor-style named allocations with microsecond timestamps.
+//! `AllocationRecord` captures per-allocation metadata (name, size bytes,
+//! microsecond-resolution timestamp since profiler start, and a `freed`
+//! flag). `MemoryStats` is the snapshot summary (current / peak / total
+//! allocated / total freed byte counts, allocation and deallocation counts,
+//! and a `per_name_usage` map of currently-live bytes keyed by name).
+//! `MemoryProfiler` maintains a `HashMap<String, Vec<AllocationRecord>>` plus
+//! running totals; `record_alloc` appends a new record, bumps
+//! current/total/count, and updates `peak_usage` if exceeded;
+//! `record_free` locates the first un-freed record with matching size (FIFO
+//! per name), marks it freed, and uses `saturating_sub` on current usage to
+//! guard underflow. Accessors expose current/peak/total counters; `stats`
+//! builds the `MemoryStats` snapshot by summing un-freed sizes per name; and
+//! `leaks` returns all still-unfreed `AllocationRecord`s. `format_bytes` is
+//! the human-readable B/KB/MB/GB pretty-printer. Tests cover sequential
+//! allocation tracking (including peak calculation), free-then-zero behavior,
+//! leak detection for unmatched allocations, and the byte formatter.
 //!
 //! # File
 //! `crates/axonml-profile/src/memory.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
+
+// =============================================================================
+// Record Types
+// =============================================================================
 
 /// Record of a single memory allocation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +76,10 @@ pub struct MemoryStats {
     /// Per-name memory usage
     pub per_name_usage: HashMap<String, usize>,
 }
+
+// =============================================================================
+// MemoryProfiler
+// =============================================================================
 
 /// Memory profiler for tracking allocations and usage.
 #[derive(Debug)]
@@ -92,6 +123,10 @@ impl MemoryProfiler {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Record Allocation / Free
+    // -------------------------------------------------------------------------
+
     /// Records a memory allocation.
     pub fn record_alloc(&mut self, name: &str, bytes: usize) {
         let timestamp = self.start_time.elapsed().as_micros() as u64;
@@ -133,6 +168,10 @@ impl MemoryProfiler {
         self.total_freed += bytes;
         self.deallocation_count += 1;
     }
+
+    // -------------------------------------------------------------------------
+    // Accessors
+    // -------------------------------------------------------------------------
 
     /// Returns current memory usage in bytes.
     pub fn current_usage(&self) -> usize {
@@ -198,6 +237,10 @@ impl MemoryProfiler {
         self.start_time = Instant::now();
     }
 
+    // -------------------------------------------------------------------------
+    // Formatting
+    // -------------------------------------------------------------------------
+
     /// Formats bytes into human-readable string.
     pub fn format_bytes(bytes: usize) -> String {
         const KB: usize = 1024;
@@ -215,6 +258,10 @@ impl MemoryProfiler {
         }
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

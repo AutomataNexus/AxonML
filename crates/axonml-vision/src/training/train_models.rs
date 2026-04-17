@@ -1,13 +1,44 @@
-//! COCO Training Pipeline — Train All Detection Models
+//! Detection Model Training Suite — COCO val2017 + WIDER FACE Pipelines
+//!
+//! Test-only end-to-end training tests for the axonml-vision detector zoo.
+//! All tests are `#[ignore]` (opt in with `--ignored`) and write JSON
+//! results to `release-artifacts/benchmark_results/`. Hard-coded paths point
+//! at `/opt/datasets/coco/val2017` and `/opt/datasets/wider_face`. Helpers
+//! `ensure_dirs` creates output directories, `load_coco_split` loads
+//! `CocoDataset` and partitions indices into 80/20 train/eval slices,
+//! `annos_to_gt` converts normalized COCO annotations to pixel-space GT,
+//! `save_results` writes a pretty-printed JSON, and `evaluate_detections`
+//! returns `(mAP@50, mAP@75, COCO mAP)`. The BlazeFace pipeline adds
+//! `assign_anchors_to_gt` (IoU-based positive / negative / ignore label
+//! assignment with force-assigned best anchor per GT and offset / log-ratio
+//! encoding) and `ohem_select` (online hard negative mining at a fixed
+//! neg:pos ratio).
+//!
+//! Per-model tests train, evaluate, and dump per-epoch loss history plus
+//! mAP / latency / FPS:
+//!
+//! - `train_helios_nano` / `train_helios_small` use `HeliosTrainer` over a
+//!   COCO subset.
+//! - `train_nanodet` runs a custom backbone+neck+head loop with focal +
+//!   smooth-L1 losses and grid-cell target encoding.
+//! - `train_nexus` and `train_phantom` reuse the per-step training functions
+//!   from the parent module.
+//! - `train_blazeface` trains on WIDER FACE with full caching, anchor
+//!   assignment, focal classification, masked box regression, gradient
+//!   accumulation, warmup + cosine LR, random horizontal flip, and periodic
+//!   mid-training mAP evaluation.
+//! - `train_retinaface` uses person annotations from COCO as a face proxy and
+//!   computes per-FPN-level focal classification loss.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/train_models.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

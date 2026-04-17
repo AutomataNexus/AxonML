@@ -1,13 +1,20 @@
 //! Object Memory Bank — GRU-based Persistent Object Tracking
 //!
+//! Implements `ObjectMemoryBank` which maintains a GRU hidden state per tracked
+//! object across video frames. Each detection is matched to existing memory slots
+//! via feature similarity, and the GRU evolves the object's latent representation
+//! over time. Supports slot creation for new objects, eviction of stale tracks,
+//! and feature-based re-identification after occlusion.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/nexus/memory.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

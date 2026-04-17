@@ -18,246 +18,226 @@ description: "Building neural networks with AxonML"
 
 ## Module Trait
 
-All neural network layers implement the `Module` trait:
+All neural network layers implement the `Module` trait in `axonml_nn::module`:
 
 ```rust
-pub trait Module {
+use axonml_autograd::Variable;
+use axonml_nn::Parameter;
+use std::collections::HashMap;
+
+pub trait Module: Send + Sync {
     fn forward(&self, input: &Variable) -> Variable;
-    fn parameters(&self) -> Vec<Parameter>;
-    fn train(&mut self);
-    fn eval(&mut self);
-    fn is_training(&self) -> bool;
+    fn parameters(&self) -> Vec<Parameter> { Vec::new() }
+    fn named_parameters(&self) -> HashMap<String, Parameter> { HashMap::new() }
+    fn num_parameters(&self) -> usize { /* sum of requires_grad params */ 0 }
+    fn train(&mut self) { self.set_training(true); }
+    fn eval(&mut self) { self.set_training(false); }
+    fn set_training(&mut self, _training: bool) { /* no-op by default */ }
+    fn is_training(&self) -> bool { true }
+    fn zero_grad(&self) { /* zero all parameter grads */ }
 }
 ```
+
+Stateless modules (Linear, Conv, activations) leave `set_training` / `is_training` at their defaults. Dropout and BatchNorm override both to track the mode.
 
 ## Linear Layers
 
 ### Linear (Fully Connected)
 
 ```rust
-use axonml::nn::Linear;
+use axonml_nn::{Linear, Module};
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
 
-// Create linear layer: input=784, output=256
+// in_features=784, out_features=256 (with bias)
 let linear = Linear::new(784, 256);
 
-// With bias disabled
-let linear = Linear::new(784, 256).bias(false);
+// No bias — note: the method is `with_bias`, not a `.bias(false)` builder
+let linear_no_bias = Linear::with_bias(784, 256, false);
 
-// Forward pass
-let x = Variable::new(Tensor::randn(&[32, 784]), false);
-let y = linear.forward(&x);  // Shape: [32, 256]
+// From pre-computed weights (e.g. loaded from a checkpoint)
+// let linear_loaded = Linear::from_weights(weight_tensor, Some(bias_tensor));
+
+let x = Variable::new(Tensor::<f32>::randn(&[32, 784]), false);
+let y = linear.forward(&x);                        // [32, 256]
 ```
 
 ## Convolutional Layers
 
+`Conv1d`, `Conv2d`, and `ConvTranspose2d` all follow the same shape: `new(in, out, kernel)` for sensible defaults, or `with_options(...)` for stride / padding / bias.
+
 ### Conv1d
 
 ```rust
-use axonml::nn::Conv1d;
+use axonml_nn::Conv1d;
 
-// 1D convolution: in_channels=32, out_channels=64, kernel_size=3
+// in=32, out=64, kernel=3 (stride=1, padding=0, bias=true)
 let conv = Conv1d::new(32, 64, 3);
 
-// With options
-let conv = Conv1d::new(32, 64, 3)
-    .stride(2)
-    .padding(1)
-    .dilation(1)
-    .groups(1)
-    .bias(true);
-
-let x = Variable::new(Tensor::randn(&[16, 32, 100]), false);
-let y = conv.forward(&x);  // Shape: [16, 64, 50]
+// All options (stride=2, padding=1, bias=true)
+let conv = Conv1d::with_options(32, 64, 3, 2, 1, true);
 ```
 
 ### Conv2d
 
 ```rust
-use axonml::nn::Conv2d;
+use axonml_nn::Conv2d;
 
-let conv = Conv2d::new(3, 64, 3)
-    .stride(1)
-    .padding(1);
+let conv = Conv2d::new(3, 64, 3);
+let conv_padded = Conv2d::with_options(3, 64, 3, /*stride=*/1, /*padding=*/1, /*bias=*/true);
 
-let x = Variable::new(Tensor::randn(&[16, 3, 224, 224]), false);
-let y = conv.forward(&x);  // Shape: [16, 64, 224, 224]
+let x = Variable::new(Tensor::<f32>::randn(&[16, 3, 224, 224]), false);
+let y = conv_padded.forward(&x);                   // [16, 64, 224, 224]
 ```
+
+`Conv2d` has a GPU-resident cuDNN / cuBLAS convolution fast path when the `cuda` feature is enabled and inputs / weights live on a GPU device.
 
 ## Pooling Layers
 
 ```rust
-use axonml::nn::{MaxPool2d, AvgPool2d, AdaptiveAvgPool2d};
+use axonml_nn::{MaxPool2d, AvgPool2d, AdaptiveAvgPool2d};
 
-// Max pooling
-let pool = MaxPool2d::new(2).stride(2);
+// Max pool kernel=2 (stride=kernel, padding=0)
+let pool = MaxPool2d::new(2);
+let pool_full = MaxPool2d::with_options(2, /*stride=*/2, /*padding=*/0);
 
-// Average pooling
-let pool = AvgPool2d::new(2).stride(2);
+// Avg pool
+let avg = AvgPool2d::new(2);
 
-// Adaptive average pooling (output size)
-let pool = AdaptiveAvgPool2d::new(1, 1);
+// Adaptive — output size (H, W)
+let gap = AdaptiveAvgPool2d::new((1, 1));
+let square_gap = AdaptiveAvgPool2d::square(1);
 ```
+
+`MaxPool1d`, `AvgPool1d` exist as well.
 
 ## Normalization Layers
 
-### BatchNorm
-
 ```rust
-use axonml::nn::{BatchNorm1d, BatchNorm2d};
+use axonml_nn::{BatchNorm1d, BatchNorm2d, LayerNorm, GroupNorm, InstanceNorm2d};
 
-// For 1D inputs (e.g., after Linear)
-let bn = BatchNorm1d::new(256);
+let bn1 = BatchNorm1d::new(256);
+let bn1_opts = BatchNorm1d::with_options(256, /*eps=*/1e-5, /*momentum=*/0.1);
 
-// For 2D inputs (e.g., after Conv2d)
-let bn = BatchNorm2d::new(64);
+let bn2 = BatchNorm2d::new(64);
 
-// With custom momentum and epsilon
-let bn = BatchNorm2d::new(64)
-    .momentum(0.1)
-    .eps(1e-5);
-```
-
-### LayerNorm
-
-```rust
-use axonml::nn::LayerNorm;
-
-// Normalize over last dimension
-let ln = LayerNorm::new(256);
-
-// Normalize over multiple dimensions
-let ln = LayerNorm::new_dims(&[256, 256]);
-```
-
-### GroupNorm
-
-```rust
-use axonml::nn::GroupNorm;
+// LayerNorm takes the shape it normalizes over
+let ln = LayerNorm::new(vec![256]);
+let ln_multidim = LayerNorm::new(vec![256, 256]);
 
 // 32 groups, 256 channels
 let gn = GroupNorm::new(32, 256);
-```
+let gn_opts = GroupNorm::with_options(32, 256, /*eps=*/1e-5, /*affine=*/true);
 
-### InstanceNorm
-
-```rust
-use axonml::nn::InstanceNorm2d;
-
-// Instance normalization for style transfer
 let in_norm = InstanceNorm2d::new(64);
 ```
 
+`RMSNorm` is also available (used by LLaMA / Mistral / Trident).
+
 ## Activation Layers
 
-```rust
-use axonml::nn::{ReLU, Sigmoid, Tanh, Softmax, GELU, SiLU, LeakyReLU, ELU};
+Activations are constructed with `new()` (or a variant that takes parameters). They are unit structs in some cases and stateful configs in others, so construct them with `::new()` rather than just the bare name.
 
-let relu = ReLU;
-let sigmoid = Sigmoid;
-let tanh = Tanh;
-let softmax = Softmax::new(1);  // dim=1
-let gelu = GELU;
-let silu = SiLU;
-let leaky = LeakyReLU::new(0.01);
-let elu = ELU::new(1.0);
+```rust
+use axonml_nn::{ReLU, Sigmoid, Tanh, Softmax, LogSoftmax, GELU, SiLU, LeakyReLU, ELU, Flatten, Identity};
+
+let relu   = ReLU;                     // unit struct — available bare too
+let sig    = Sigmoid;
+let tanh   = Tanh;
+let gelu   = GELU;
+let silu   = SiLU;
+let id     = Identity;
+let flat   = Flatten::new();
+
+let leaky  = LeakyReLU::new();                    // default slope
+let leaky2 = LeakyReLU::with_slope(0.01);
+
+let elu    = ELU::new();                          // default alpha=1.0
+let elu2   = ELU::with_alpha(0.5);
+
+let sm     = Softmax::new(1);                     // dim 1 (i64)
+let lsm    = LogSoftmax::new(1);
 ```
+
+Activations are also available as methods on `Variable` (e.g. `x.relu()`, `x.gelu()`, `x.softmax(1)`).
 
 ## Dropout
 
 ```rust
-use axonml::nn::{Dropout, Dropout2d};
+use axonml_nn::Dropout;
 
-// Standard dropout
 let dropout = Dropout::new(0.5);
 
-// Spatial dropout (for conv layers)
-let dropout2d = Dropout2d::new(0.5);
-
-// Only active during training
-model.train();
-let y = dropout.forward(&x);  // Dropout applied
-
-model.eval();
-let y = dropout.forward(&x);  // Dropout disabled
+// Training / eval mode switches are on the Module trait
+// dropout.train();
+// dropout.eval();
 ```
+
+`Dropout2d` (spatial) lives in the `axonml_nn::layers::dropout` module.
 
 ## Recurrent Layers
 
-### LSTM
+`RNN`, `LSTM`, `GRU` all take `(input_size, hidden_size, num_layers)` for the multi-layer constructor, with a single-layer `Cell` variant also available.
 
 ```rust
-use axonml::nn::LSTM;
+use axonml_nn::{LSTM, GRU, Module};
 
-// LSTM: input_size=256, hidden_size=512
-let lstm = LSTM::new(256, 512);
+let lstm = LSTM::new(256, 512, /*num_layers=*/2);
+let gru = GRU::new(256, 512, 1);
 
-// With options
-let lstm = LSTM::new(256, 512)
-    .num_layers(2)
-    .bidirectional(true)
-    .dropout(0.1)
-    .batch_first(true);
+// batch_first / bidirectional toggles live on `with_options`
+// (see crates/axonml-nn/src/layers/rnn.rs)
 
-let x = Variable::new(Tensor::randn(&[32, 100, 256]), false);
-let (output, (h_n, c_n)) = lstm.forward_with_state(&x, None);
+let x = Variable::new(Tensor::<f32>::randn(&[32, 100, 256]), false);
+let y = lstm.forward(&x);                          // default `Module::forward`: hidden states
 ```
 
-### GRU
+The Cell types (`LSTMCell`, `GRUCell`, `RNNCell`) step one timestep at a time.
+
+## Attention
 
 ```rust
-use axonml::nn::GRU;
+use axonml_nn::{MultiHeadAttention, CrossAttention, DifferentialAttention};
 
-let gru = GRU::new(256, 512)
-    .num_layers(2)
-    .bidirectional(false);
-
-let (output, h_n) = gru.forward_with_state(&x, None);
-```
-
-## Attention Mechanism
-
-### Multi-Head Attention
-
-```rust
-use axonml::nn::MultiHeadAttention;
-
-// embed_dim=512, num_heads=8
+// Self-attention — embed_dim=512, num_heads=8
 let attn = MultiHeadAttention::new(512, 8);
 
-// With options
-let attn = MultiHeadAttention::new(512, 8)
-    .dropout(0.1)
-    .bias(true);
+// Cross-attention (separate Q vs K/V projections)
+let cross = CrossAttention::new(512, 8);
 
-let q = Variable::new(Tensor::randn(&[32, 100, 512]), false);
-let k = q.clone();
-let v = q.clone();
-
-let (output, weights) = attn.forward(&q, &k, &v, None);
+// Differential attention (DiffTransformer variant)
+let diff = DifferentialAttention::new(512, 8);
 ```
 
-### Transformer Layers
+## Transformer Blocks
 
 ```rust
-use axonml::nn::{TransformerEncoderLayer, TransformerDecoderLayer};
+use axonml_nn::{TransformerEncoder, TransformerEncoderLayer, TransformerDecoder, TransformerDecoderLayer, Seq2SeqTransformer};
 
-// Encoder layer
-let encoder_layer = TransformerEncoderLayer::new(512, 8)
-    .dim_feedforward(2048)
-    .dropout(0.1);
-
-// Decoder layer
-let decoder_layer = TransformerDecoderLayer::new(512, 8)
-    .dim_feedforward(2048)
-    .dropout(0.1);
+let enc_layer = TransformerEncoderLayer::new(/*d_model=*/512, /*nhead=*/8);
+let dec_layer = TransformerDecoderLayer::new(512, 8);
 ```
+
+## Advanced Layers
+
+The `axonml_nn::layers` module also provides:
+
+- `Embedding` — lookup table
+- `TernaryLinear`, `PackedTernaryWeights` — 1.58-bit quantized Linear (Trident / BitNet)
+- `SparseLinear`, `GroupSparsity`, `LotteryTicket` — differentiable structured sparsity (novel to AxonML)
+- `MoELayer`, `MoERouter`, `Expert` — mixture-of-experts
+- `GCNConv`, `GATConv` — graph neural networks
+- `ResidualBlock`
+- `FFT1d`, `STFT` — spectral layers
 
 ## Building Models
 
 ### Sequential
 
+`Sequential` can hold mixed module types and is built via `.add(...)`:
+
 ```rust
-use axonml::nn::Sequential;
+use axonml_nn::{Sequential, Linear, ReLU, Dropout};
 
 let model = Sequential::new()
     .add(Linear::new(784, 256))
@@ -266,15 +246,13 @@ let model = Sequential::new()
     .add(Linear::new(256, 128))
     .add(ReLU)
     .add(Linear::new(128, 10));
-
-let x = Variable::new(Tensor::randn(&[32, 784]), false);
-let y = model.forward(&x);  // Shape: [32, 10]
 ```
 
-### Custom Models
+### Custom Modules
 
 ```rust
-use axonml::nn::{Module, Linear, ReLU, BatchNorm1d};
+use axonml_nn::{Module, Linear, BatchNorm1d, Parameter};
+use axonml_autograd::Variable;
 
 struct MyMLP {
     fc1: Linear,
@@ -285,12 +263,12 @@ struct MyMLP {
 }
 
 impl MyMLP {
-    fn new(in_features: usize, hidden: usize, out_features: usize) -> Self {
+    fn new(in_features: usize, hidden: usize, out: usize) -> Self {
         Self {
             fc1: Linear::new(in_features, hidden),
             bn1: BatchNorm1d::new(hidden),
             fc2: Linear::new(hidden, hidden),
-            fc3: Linear::new(hidden, out_features),
+            fc3: Linear::new(hidden, out),
             training: true,
         }
     }
@@ -301,66 +279,52 @@ impl Module for MyMLP {
         let h = self.fc1.forward(x);
         let h = self.bn1.forward(&h);
         let h = h.relu();
-        let h = self.fc2.forward(&h);
-        let h = h.relu();
+        let h = self.fc2.forward(&h).relu();
         self.fc3.forward(&h)
     }
 
     fn parameters(&self) -> Vec<Parameter> {
-        let mut params = Vec::new();
-        params.extend(self.fc1.parameters());
-        params.extend(self.bn1.parameters());
-        params.extend(self.fc2.parameters());
-        params.extend(self.fc3.parameters());
-        params
+        let mut p = self.fc1.parameters();
+        p.extend(self.bn1.parameters());
+        p.extend(self.fc2.parameters());
+        p.extend(self.fc3.parameters());
+        p
     }
 
-    fn train(&mut self) {
-        self.training = true;
-        self.bn1.train();
+    fn set_training(&mut self, training: bool) {
+        self.training = training;
+        self.bn1.set_training(training);
     }
 
-    fn eval(&mut self) {
-        self.training = false;
-        self.bn1.eval();
-    }
-
-    fn is_training(&self) -> bool {
-        self.training
-    }
+    fn is_training(&self) -> bool { self.training }
 }
 ```
 
 ## Loss Functions
 
+All losses are in `axonml_nn::loss` and re-exported:
+
 ```rust
-use axonml::nn::{MSELoss, CrossEntropyLoss, BCELoss, BCEWithLogitsLoss, L1Loss};
+use axonml_nn::{MSELoss, CrossEntropyLoss, BCELoss, BCEWithLogitsLoss, L1Loss, SmoothL1Loss, NLLLoss, Reduction};
 
-// Mean Squared Error
-let loss_fn = MSELoss::new();
-let loss = loss_fn.compute(&predictions, &targets);
+let mse = MSELoss::new();
+let loss = mse.compute(&predictions, &targets);
 
-// Cross Entropy (for classification)
-let loss_fn = CrossEntropyLoss::new();
-
-// Binary Cross Entropy
-let loss_fn = BCELoss::new();
-
-// BCE with Logits (includes sigmoid)
-let loss_fn = BCEWithLogitsLoss::new();
-
-// L1 Loss (MAE)
-let loss_fn = L1Loss::new();
+let ce = CrossEntropyLoss::new();                  // classification
+let bce = BCELoss::new();                          // binary
+let bcel = BCEWithLogitsLoss::new();               // binary, numerically-stable
+let l1 = L1Loss::new();                            // MAE
+let s1 = SmoothL1Loss::new();                      // Huber, beta=1.0
+let s1b = SmoothL1Loss::with_beta(0.1);
+let nll = NLLLoss::new();
 ```
+
+Specialty losses live in `axonml-vision::losses` (`FocalLoss`, `GIoULoss`, `UncertaintyLoss`, etc.) and `axonml-vision::models::biometric::losses` (`ArgusLoss`, `EchoLoss`, `ThemisLoss`, `CrystallizationLoss`, etc.). See [Object Detection Training]({% link detection.md %}) and [Training]({% link training.md %}).
 
 ## Saving and Loading
 
-```rust
-use axonml::serialize::{save_model, load_model};
+Model serialization lives in the `axonml-serialize` crate (StateDict + SafeTensors). See the crate-level docs and [ONNX]({% link onnx.md %}) for interchange with external frameworks.
 
-// Save model
-save_model(&model, "model.safetensors")?;
+---
 
-// Load model
-let loaded_model = load_model::<MyMLP>("model.safetensors")?;
-```
+*Last updated: 2026-04-16 (v0.6.1)*

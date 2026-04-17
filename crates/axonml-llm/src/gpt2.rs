@@ -1,18 +1,47 @@
-//! GPT-2 Model Implementation
+//! GPT-2 Model — Decoder-Only Transformer with LM Head
+//!
+//! Implements the GPT-2 family of decoder-only transformer language models.
+//! `GPT2` pairs a `GPT2Embedding` (word + position) with a
+//! `TransformerDecoder` stack (`self.h`), exposing size-preset constructors
+//! `small`, `medium`, `large`, `xl`, and `tiny` plus `forward_ids` for the
+//! full `[batch, seq, n_embd]` pipeline and `forward_with_past` returning
+//! `(Variable, Vec<KVCacheEntry>)` for incremental decoding. `GPT2LMHead`
+//! adds a `Linear(n_embd, vocab_size)` head (not weight-tied in this impl),
+//! with `forward_ids` producing vocab-sized logits. `forward_with_loss`
+//! implements the canonical LM shift: slicing logits to positions `0..seq-1`
+//! via `Variable::narrow`, gathering the `1..seq` `u32` labels manually, and
+//! delegating to `axonml_nn::loss::CrossEntropyLoss::compute` after flattening
+//! to `[batch*seq, vocab]` and clamping out-of-range label indices to 0 for
+//! safety. `generate` is the temperature/top-k sampler — it applies
+//! `1/temperature` scaling, keeps only tokens above the k-th largest logit,
+//! softmaxes the remainder, draws via cumulative probability threshold against
+//! `rand::thread_rng()`, and stops at the configured `n_ctx`.
+//! `generate_greedy` is the argmax counterpart. Both preserve the input
+//! batch dimension. The `Module` impl wires embeddings + decoder parameters
+//! and threads `train()` / `eval()` state. Tests cover tiny-model forward
+//! shape `[2, 4, 128]`, LM head logits shape `[2, 4, vocab_size]`, greedy
+//! generation extending length by `max_new_tokens`, temperature-sampling
+//! length equivalence, positive cross-entropy loss, and nonzero parameter
+//! count.
 //!
 //! # File
 //! `crates/axonml-llm/src/gpt2.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml_autograd::Variable;
 use axonml_nn::{Linear, Module, Parameter};
@@ -23,6 +52,10 @@ use crate::attention::KVCacheEntry;
 use crate::config::GPT2Config;
 use crate::embedding::GPT2Embedding;
 use crate::transformer::TransformerDecoder;
+
+// =============================================================================
+// GPT2 Core Model
+// =============================================================================
 
 /// GPT-2 model (decoder-only transformer).
 #[derive(Debug)]
@@ -62,6 +95,10 @@ impl GPT2 {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Size Presets
+    // -------------------------------------------------------------------------
+
     /// Creates a GPT-2 Small model.
     pub fn small() -> Self {
         Self::new(&GPT2Config::small())
@@ -86,6 +123,10 @@ impl GPT2 {
     pub fn tiny() -> Self {
         Self::new(&GPT2Config::tiny())
     }
+
+    // -------------------------------------------------------------------------
+    // Forward Pass
+    // -------------------------------------------------------------------------
 
     /// Forward pass with token IDs.
     pub fn forward_ids(&self, input_ids: &Tensor<u32>) -> Variable {
@@ -142,6 +183,10 @@ impl Module for GPT2 {
     }
 }
 
+// =============================================================================
+// GPT2LMHead
+// =============================================================================
+
 /// GPT-2 with language modeling head.
 #[derive(Debug)]
 pub struct GPT2LMHead {
@@ -166,6 +211,10 @@ impl GPT2LMHead {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Size Presets
+    // -------------------------------------------------------------------------
+
     /// Creates a GPT-2 Small LM model.
     pub fn small() -> Self {
         Self::new(&GPT2Config::small())
@@ -185,6 +234,10 @@ impl GPT2LMHead {
     pub fn tiny() -> Self {
         Self::new(&GPT2Config::tiny())
     }
+
+    // -------------------------------------------------------------------------
+    // Forward and Loss
+    // -------------------------------------------------------------------------
 
     /// Forward pass returning logits.
     pub fn forward_ids(&self, input_ids: &Tensor<u32>) -> Variable {
@@ -265,6 +318,10 @@ impl GPT2LMHead {
         use axonml_nn::loss::CrossEntropyLoss;
         CrossEntropyLoss::new().compute(&logits_flat, &target_var)
     }
+
+    // -------------------------------------------------------------------------
+    // Autoregressive Generation
+    // -------------------------------------------------------------------------
 
     /// Generates text autoregressively.
     pub fn generate(
@@ -434,6 +491,10 @@ impl Module for GPT2LMHead {
         self.transformer.eval();
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -1,16 +1,16 @@
 # axonml-optim Documentation
 
-> Optimization algorithms for the Axonml ML framework.
+> Optimization algorithms for the AxonML ML framework.
 
 ## Overview
 
-`axonml-optim` provides gradient-based optimization algorithms for training neural networks. It includes popular optimizers like SGD, Adam, and AdamW, along with learning rate schedulers.
+`axonml-optim` ships the gradient-based optimizers and learning-rate
+schedulers used to train AxonML models, plus a `GradScaler` for mixed
+precision and a built-in training-health monitor.
 
 ## Core Concepts
 
-### Optimizer Trait
-
-All optimizers implement the `Optimizer` trait:
+### `Optimizer` trait
 
 ```rust
 pub trait Optimizer {
@@ -22,21 +22,17 @@ pub trait Optimizer {
 }
 ```
 
-### Training Loop Pattern
+### Training loop
 
 ```rust
 let mut optimizer = Adam::new(model.parameters(), lr);
 
 for epoch in 0..num_epochs {
     for batch in dataloader.iter() {
-        // Forward pass
         let output = model.forward(&batch.data);
-        let loss = loss_fn.forward(&output, &batch.targets);
+        let loss = loss_fn.compute(&output, &batch.targets);
 
-        // Backward pass
         loss.backward();
-
-        // Update weights
         optimizer.step();
         optimizer.zero_grad();
     }
@@ -45,249 +41,119 @@ for epoch in 0..num_epochs {
 
 ## Optimizers
 
-### sgd.rs - Stochastic Gradient Descent
+### `SGD` — `sgd.rs`
 
-Classic SGD with optional momentum and weight decay.
+Classic SGD with optional momentum, weight decay, dampening, and Nesterov.
 
 ```rust
-// Basic SGD
-let optimizer = SGD::new(params, lr);
-
-// With momentum
-let optimizer = SGD::with_momentum(params, lr, momentum);
-
-// Full options
-let optimizer = SGD::with_options(SGDConfig {
-    lr: 0.01,
-    momentum: 0.9,
-    weight_decay: 1e-4,
-    dampening: 0.0,
-    nesterov: true,
-});
+let opt = SGD::new(params, lr);
+let opt = SGD::with_momentum(params, lr, momentum);
 ```
 
-**Update Rule:**
+Update rule:
+
 ```
 v_t = momentum * v_{t-1} + grad
 param = param - lr * v_t
 ```
 
-With Nesterov:
-```
-v_t = momentum * v_{t-1} + grad
-param = param - lr * (grad + momentum * v_t)
-```
+Nesterov variant: `param = param - lr * (grad + momentum * v_t)`.
 
-### adam.rs - Adam Optimizer
+### `Adam` — `adam.rs`
 
 Adaptive moment estimation with bias correction.
 
 ```rust
-// Default Adam
-let optimizer = Adam::new(params, lr);
-
-// Custom betas
-let optimizer = Adam::with_options(AdamConfig {
-    lr: 0.001,
-    betas: (0.9, 0.999),
-    eps: 1e-8,
-    weight_decay: 0.0,
-});
+let opt = Adam::new(params, lr);
 ```
 
-**Update Rule:**
+Update rule:
+
 ```
-m_t = β₁ * m_{t-1} + (1 - β₁) * grad
-v_t = β₂ * v_{t-1} + (1 - β₂) * grad²
-m̂_t = m_t / (1 - β₁^t)  // Bias correction
-v̂_t = v_t / (1 - β₂^t)
-param = param - lr * m̂_t / (√v̂_t + ε)
+m_t = b1*m_{t-1} + (1-b1)*g
+v_t = b2*v_{t-1} + (1-b2)*g^2
+m_hat = m_t / (1 - b1^t)
+v_hat = v_t / (1 - b2^t)
+param = param - lr * m_hat / (sqrt(v_hat) + eps)
 ```
 
-### adamw.rs - AdamW Optimizer
+### `AdamW` — `adam.rs`
 
-Adam with decoupled weight decay (recommended for transformers).
+Adam with decoupled weight decay — preferred for transformers.
 
 ```rust
-let optimizer = AdamW::new(params, lr);
-
-let optimizer = AdamW::with_options(AdamWConfig {
-    lr: 0.001,
-    betas: (0.9, 0.999),
-    eps: 1e-8,
-    weight_decay: 0.01,
-});
+let opt = AdamW::new(params, lr);
 ```
 
-**Difference from Adam:**
-- Weight decay is applied directly to weights, not through gradient
-- Better generalization in practice
-
-### rmsprop.rs - RMSprop
-
-Root mean square propagation.
+### `RMSprop` — `rmsprop.rs`
 
 ```rust
-let optimizer = RMSprop::new(params, lr);
-
-let optimizer = RMSprop::with_options(RMSpropConfig {
-    lr: 0.01,
-    alpha: 0.99,  // Smoothing constant
-    eps: 1e-8,
-    weight_decay: 0.0,
-    momentum: 0.0,
-    centered: false,
-});
+let opt = RMSprop::new(params, lr);
 ```
 
-## Learning Rate Schedulers
+Supports `alpha` smoothing constant, `eps`, `weight_decay`, `momentum`,
+`centered` variant.
 
-### StepLR
+### `LAMB` — `lamb.rs`
 
-Decay learning rate by gamma every step_size epochs.
+Layer-wise adaptive moments optimizer for large-batch training (BERT / ViT
+scale).
 
 ```rust
-let scheduler = StepLR::new(&optimizer, step_size, gamma);
+let opt = LAMB::new(params, lr);
+```
+
+### `GradScaler` — `grad_scaler.rs`
+
+Loss scaling for AMP training with F16 autocast (pairs with `axonml-autograd`
+`amp`). Exposes `scale`, `unscale`, `step`, `update`, and `GradScalerState`
+for serialization.
+
+## Learning Rate Schedulers (`lr_scheduler.rs`)
+
+Shared `LRScheduler` trait. All schedulers take `&mut optimizer` in
+`step(...)`.
+
+| Scheduler            | Description                                                          |
+|----------------------|----------------------------------------------------------------------|
+| `StepLR`             | Decay by gamma every `step_size` epochs                              |
+| `MultiStepLR`        | Decay by gamma at explicit milestone epochs                          |
+| `ExponentialLR`      | `lr_t = lr_0 * gamma^t`                                              |
+| `CosineAnnealingLR`  | `lr_t = eta_min + 0.5*(lr_0 - eta_min)*(1 + cos(pi*t/T_max))`        |
+| `OneCycleLR`         | One-cycle super-convergence schedule                                 |
+| `WarmupLR`           | Linear or polynomial warmup from zero                                |
+| `ReduceLROnPlateau`  | Reduce when a monitored metric stops improving                       |
+
+Example:
+
+```rust
+let mut opt = SGD::with_momentum(model.parameters(), 0.1, 0.9);
+let mut sched = StepLR::new(&opt, 30, 0.1);
 
 for epoch in 0..100 {
-    train_one_epoch();
-    scheduler.step();
+    train_one_epoch(&model, &mut opt);
+    sched.step(&mut opt);
 }
 ```
 
-### ExponentialLR
-
-Decay learning rate by gamma every epoch.
+`ReduceLROnPlateau`:
 
 ```rust
-let scheduler = ExponentialLR::new(&optimizer, gamma);
-
-// lr_t = lr_0 * gamma^t
-```
-
-### CosineAnnealingLR
-
-Cosine annealing schedule.
-
-```rust
-let scheduler = CosineAnnealingLR::new(&optimizer, T_max, eta_min);
-
-// lr_t = eta_min + 0.5 * (lr_0 - eta_min) * (1 + cos(π * t / T_max))
-```
-
-### ReduceLROnPlateau
-
-Reduce learning rate when a metric stops improving.
-
-```rust
-let scheduler = ReduceLROnPlateau::new(&optimizer)
-    .mode("min")      // Minimize the metric
-    .factor(0.1)      // Multiply lr by this on reduction
-    .patience(10)     // Wait this many epochs
-    .threshold(1e-4); // Minimum improvement
+let mut sched = ReduceLROnPlateau::new(&opt)
+    .mode("min")
+    .factor(0.1)
+    .patience(10)
+    .threshold(1e-4);
 
 for epoch in 0..100 {
     let val_loss = validate();
-    scheduler.step(val_loss);
+    sched.step(val_loss, &mut opt);
 }
 ```
 
-## Usage Examples
+## Training Health Monitor — `health.rs`
 
-### Basic Training
-
-```rust
-use axonml::prelude::*;
-
-let model = create_model();
-let mut optimizer = Adam::new(model.parameters(), 0.001);
-
-for epoch in 0..epochs {
-    for batch in train_loader.iter() {
-        let output = model.forward(&batch.data);
-        let loss = cross_entropy(&output, &batch.targets);
-
-        loss.backward();
-        optimizer.step();
-        optimizer.zero_grad();
-    }
-
-    println!("Epoch {}: Loss = {:.4}", epoch, avg_loss);
-}
-```
-
-### With Learning Rate Scheduling
-
-```rust
-use axonml::prelude::*;
-
-let model = create_model();
-let mut optimizer = SGD::with_momentum(model.parameters(), 0.1, 0.9);
-let mut scheduler = StepLR::new(&optimizer, 30, 0.1);
-
-for epoch in 0..100 {
-    train_one_epoch(&model, &mut optimizer);
-
-    // Step scheduler at end of epoch
-    scheduler.step();
-
-    println!("Epoch {}: LR = {:.6}", epoch, optimizer.get_lr());
-}
-```
-
-### Gradient Clipping
-
-```rust
-use axonml::prelude::*;
-
-let mut optimizer = Adam::new(model.parameters(), 0.001);
-
-for batch in train_loader.iter() {
-    let loss = compute_loss(&model, &batch);
-    loss.backward();
-
-    // Clip gradients before stepping
-    clip_grad_norm(model.parameters(), max_norm);
-
-    optimizer.step();
-    optimizer.zero_grad();
-}
-```
-
-### Parameter Groups
-
-```rust
-use axonml::prelude::*;
-
-// Different learning rates for different parts
-let optimizer = Adam::with_param_groups(vec![
-    ParamGroup {
-        params: encoder.parameters(),
-        lr: 0.0001,
-        ..Default::default()
-    },
-    ParamGroup {
-        params: decoder.parameters(),
-        lr: 0.001,
-        ..Default::default()
-    },
-]);
-```
-
-## Optimizer Selection Guide
-
-| Optimizer | Best For | Typical LR |
-|-----------|----------|------------|
-| SGD+Momentum | CNNs, well-tuned models | 0.01 - 0.1 |
-| Adam | General purpose, quick convergence | 0.001 |
-| AdamW | Transformers, large models | 0.0001 - 0.001 |
-| RMSprop | RNNs, non-stationary objectives | 0.001 |
-
-### Training Health Monitor *(novel)*
-
-#### health.rs - Self-Monitoring Training
-
-`TrainingMonitor` watches your training run and detects problems automatically:
+Built-in real-time training monitor. No external tool required.
 
 ```rust
 use axonml_optim::health::{TrainingMonitor, MonitorConfig};
@@ -299,37 +165,47 @@ for step in 0..1000 {
     let grad_norm = compute_grad_norm(&model);
     monitor.record_step(loss, grad_norm, optimizer.get_lr());
 
-    // Check for problems
     for alert in monitor.alerts_since_last_check() {
         eprintln!("[{:?}] {}", alert.severity, alert.message);
     }
 }
 
-// Training summary
 let report = monitor.health_report();
 println!("Loss trend: {:?}", report.loss_trend);
 println!("Convergence: {:.2}", monitor.convergence_score());
 println!("Suggested LR: {:?}", monitor.suggest_lr());
 ```
 
-**Detects:**
-| Alert | Severity | Description |
-|-------|----------|-------------|
-| NaN Loss | Critical | Loss became NaN — likely LR too high |
-| Gradient Explosion | Critical | Grad norm > threshold — clip gradients |
-| Gradient Vanishing | Warning | Grad norm near zero — check architecture |
-| Loss Plateau | Warning | No improvement for N steps — reduce LR |
-| Loss Oscillation | Warning | Loss swinging up/down — LR too high |
-| Dead Neurons | Info | Neurons with zero gradient — check activation |
-| Divergence | Critical | Loss increasing consistently — training failing |
+Exported types: `TrainingMonitor`, `MonitorConfig`, `TrainingAlert`,
+`AlertKind`, `AlertSeverity`, `HealthReport`, `LossTrend`.
 
-**Why novel:** No ML framework has a built-in training health monitor. PyTorch users rely on external tools (W&B, TensorBoard) or manual checks. AxonML's monitor is integrated into the optimizer itself.
+Detectors:
+
+| Alert              | Severity  | Meaning                                          |
+|--------------------|-----------|--------------------------------------------------|
+| NaN Loss           | Critical  | Loss became NaN — LR likely too high             |
+| Gradient Explosion | Critical  | Grad norm > threshold — clip gradients           |
+| Gradient Vanishing | Warning   | Grad norm near zero — check architecture         |
+| Loss Plateau       | Warning   | No improvement for N steps — reduce LR           |
+| Loss Oscillation   | Warning   | Loss swinging — LR too high                      |
+| Dead Neurons       | Info      | Neurons with zero gradient — check activation    |
+| Divergence         | Critical  | Loss rising consistently — training failing      |
+
+## Optimizer Selection Guide
+
+| Optimizer      | Best For                           | Typical LR     |
+|----------------|------------------------------------|----------------|
+| SGD+Momentum   | CNNs, well-tuned models            | 0.01 – 0.1     |
+| Adam           | General purpose, quick convergence | 0.001          |
+| AdamW          | Transformers, large models         | 0.0001 – 0.001 |
+| RMSprop        | RNNs, non-stationary objectives    | 0.001          |
+| LAMB           | Large batch (BERT, ViT)            | 1e-3 – 1e-2    |
 
 ## Related Modules
 
-- [Neural Networks](../nn/README.md) - Models to optimize
-- [Autograd](../autograd/README.md) - Gradient computation
-- [Data](../data/README.md) - Data loading for training
+- [Neural Networks](../nn/README.md) — models to optimize
+- [Autograd](../autograd/README.md) — gradient computation (+ `amp` for AMP)
 
-@version 0.4.1
-@author AutomataNexus Development Team
+## Last updated
+
+0.6.1 (2026-04-16)

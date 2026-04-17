@@ -1,14 +1,45 @@
 //! Chimera Training Example — MoE + Differential Attention SLM
 //!
-//! Trains a small Chimera model on synthetic next-token prediction data.
-//! Demonstrates sparse MoE routing with load balancing loss and differential
-//! attention noise cancellation.
+//! Trains a small `ChimeraModel` on synthetic next-token prediction data to
+//! exercise sparse MoE routing with a load-balancing loss and differential
+//! attention noise cancellation end-to-end.
+//!
+//! Contents:
+//! - Hyperparameter constants (`VOCAB_SIZE=1000`, `D_MODEL=64`,
+//!   `NUM_EXPERTS=4` top-2, `INTERMEDIATE_SIZE=256`, `NUM_EPOCHS=8`,
+//!   `LEARNING_RATE=0.0003`).
+//! - `generate_patterned_sequences` — emits arithmetic-progression token
+//!   sequences `(start + offset * i) % vocab_size` so the model has a
+//!   learnable systematic signal across MoE + DiffAttn.
+//! - `main` — builds `ChimeraConfig` + `ChimeraModel`, prints architecture
+//!   and total-vs-active param counts, runs an Adam training loop using
+//!   `model.forward_with_loss`, and prints a tabular per-epoch report
+//!   (loss, perplexity, time, layer-0 expert utilization, lambda[0]).
+//! - Final statistics section — per-layer expert utilization with balance
+//!   ratio, per-layer learned lambda values vs `lambda_init` with a
+//!   "(increased / decreased / stable)" tag, and a sparsity summary of
+//!   compute savings from top-k routing.
 //!
 //! Reports: loss, perplexity, expert utilization, active params per token,
 //! and lambda evolution across training.
 //!
 //! Usage:
 //!   cargo run --release --example train_chimera -p axonml-llm
+//!
+//! # File
+//! `crates/axonml-llm/examples/train_chimera.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::time::Instant;
 
@@ -21,7 +52,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 // =============================================================================
-// Configuration
+// Hyperparameters / Configuration
 // =============================================================================
 
 const VOCAB_SIZE: usize = 1000;
@@ -39,7 +70,7 @@ const NUM_EPOCHS: usize = 8;
 const LEARNING_RATE: f32 = 0.0003;
 
 // =============================================================================
-// Synthetic Data
+// Synthetic Data Generation
 // =============================================================================
 
 /// Generate synthetic token sequences with simple patterns.
@@ -65,7 +96,7 @@ fn generate_patterned_sequences(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {
@@ -121,7 +152,9 @@ fn main() {
     // ---- Optimizer ----
     let mut optimizer = Adam::new(model.parameters(), LEARNING_RATE);
 
-    // ---- Training loop ----
+    // -----------------------------------------------------------------------------
+    // Training Loop
+    // -----------------------------------------------------------------------------
     let total_start = Instant::now();
 
     println!(
@@ -195,7 +228,9 @@ fn main() {
     println!();
     println!("Training complete in {:.1}s", total_time.as_secs_f32());
 
-    // ---- Final statistics ----
+    // -----------------------------------------------------------------------------
+    // Final Statistics / Sparsity Summary
+    // -----------------------------------------------------------------------------
     println!();
     println!("=== Final Model Statistics ===");
     println!();

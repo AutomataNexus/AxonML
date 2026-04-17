@@ -1,14 +1,51 @@
 //! Train Argus — Iris Identity via Radial Phase Encoding
 //!
-//! Trains on the pre-computed CASIA-Iris-Syn polar cache. Polar unwrap is
-//! an expensive Cartesian→polar transform, so we cache it once at
-//! `/opt/datasets/iris/polar_cache/` and load [1, 32, 256] strips directly
-//! into `ArgusIris::encode_polar` — roughly 5× faster than `forward_full`.
+//! End-to-end training binary for the AxonML [`ArgusIris`] iris-identity
+//! model on the pre-computed CASIA-Iris-Syn polar cache. Polar unwrap is an
+//! expensive Cartesian→polar transform, so we cache it once at
+//! `/opt/datasets/iris/polar_cache/` as `[1, 32, 256]` strips and feed them
+//! straight into `ArgusIris::encode_polar` — roughly 5× faster than
+//! `forward_full`. The trainer asserts the cache shape
+//! (channels=1, height=32 radial bins, width=256 angular bins) at startup.
+//!
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser and `print_help`,
+//!   covering data dir, output dir, triplet batch size, batches per epoch,
+//!   learning-rate + warmup, checkpoint cadence, seed, and resume mode.
+//! - `cosine_lr` — linear warmup then cosine decay to 1% of `base_lr`.
+//! - `main` — asserts cache shape, builds the [`ArgusIris`] model, resumes
+//!   from a checkpoint, launches the browser [`axonml::TrainingMonitor`],
+//!   wires up [`AdamW`] + [`ArgusLoss`], and runs the triplet training loop
+//!   (mining with [`mine_triplet_batch`], encoding anchors/positives/
+//!   negatives via `encode_polar`, using [`l2_normalize_var`] on the
+//!   anchor/positive pair as rotation-consistency codes, and computing
+//!   `ArgusLoss::compute_var`). Saves `best_model.axonml`,
+//!   `checkpoint_best.axonml`, `checkpoint_latest.axonml`, and periodic
+//!   `checkpoint_epoch_NNNN.axonml` files.
 //!
 //! Usage:
 //!   cargo run --release --bin train_argus -p biometric-training --features cuda
 //!   cargo run --release --bin train_argus -p biometric-training --features cuda -- \
 //!       --epochs 30 --bs 32 --batches 150 --resume latest
+//!
+//! # File
+//! `biometric-training/src/bin/train_argus.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -129,6 +166,10 @@ Options:
   --help, -h            Show help"#);
 }
 
+// =============================================================================
+// LR Schedule
+// =============================================================================
+
 fn cosine_lr(base_lr: f32, warmup: usize, total: usize, epoch: usize) -> f32 {
     if epoch < warmup {
         base_lr * (epoch + 1) as f32 / warmup as f32
@@ -138,6 +179,10 @@ fn cosine_lr(base_lr: f32, warmup: usize, total: usize, epoch: usize) -> f32 {
         min_lr + 0.5 * (base_lr - min_lr) * (1.0 + (std::f32::consts::PI * progress).cos())
     }
 }
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
 
 fn main() {
     let cfg = Config::from_args();

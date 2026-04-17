@@ -1,13 +1,20 @@
 //! Nexus Backbone — Dual-Pathway Feature Extraction
 //!
+//! Implements the `DualPathBackbone` with a detail pathway (high-resolution,
+//! shallow convolutions preserving spatial detail) and a context pathway
+//! (deeper convolutions with aggressive downsampling for semantic features).
+//! Both pathways produce multi-scale feature maps that feed into the Nexus
+//! fusion and detection heads.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/nexus/backbone.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

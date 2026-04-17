@@ -1,28 +1,49 @@
-//! Train Panoptes — Facility-Wide Anomaly Detection Model
+//! Train Panoptes — Facility-Wide Anomaly Detection Training Driver
+//!
+//! Three-phase training pipeline for the Panoptes facility-wide anomaly
+//! detection model on physics-informed synthetic data from the Heritage Pointe
+//! of Warren BAS control logic. The crate-internal `WarrenSimulator` produces
+//! `FacilitySnapshot`s for 59 equipment slots; this binary drives them through
+//! `Panoptes::forward_snapshot` and `Panoptes::forward_temporal` while training
+//! against equipment-level fault target vectors via `MSELoss`.
+//!
+//! Phases:
+//! 1. **Normal-only** (`PHASE1_EPOCHS`): teach the model that healthy snapshots
+//!    map to all-zero equipment scores, using `Adam` at `LR`.
+//! 2. **Normal + faults** (`PHASE2_EPOCHS`): interleave normal snapshots with
+//!    faulted ones whose `affected` indices set their target to 1.0
+//!    (`PanoptesTrainingData::fault_target`). LR is halved for finer fitting.
+//! 3. **Temporal** (`PHASE3_EPOCHS`): generate `TEMPORAL_WINDOW`-length
+//!    sequences of snapshots (1 hour at 5-minute spacing) covering normal
+//!    drift trajectories and fault sequences with mid-window onset, and train
+//!    the temporal head via `forward_temporal`. LR scaled to 0.3x.
+//!
+//! Validation is run with a different random seed via `evaluate_normal`,
+//! `evaluate_mixed`, and `evaluate_temporal_mixed`. After training, the script
+//! prints per-sample facility scores plus affected-vs-unaffected score gaps and
+//! the alert count produced by `PanoptesOutput::from_scores` against the
+//! Warren `FacilityConfig` at threshold 0.3.
+//!
+//! Run with: `cargo run --release -p axonml-hvac --example train_panoptes`.
 //!
 //! # File
 //! `crates/axonml-hvac/examples/train_panoptes.rs`
 //!
-//! # Description
-//! Trains the Panoptes model on physics-informed synthetic data generated
-//! from Heritage Pointe of Warren BAS control logic. Two-phase training:
-//! Phase 1 learns normal operation patterns, Phase 2 learns fault signatures.
-//!
-//! # Usage
-//! ```bash
-//! cargo run --release -p axonml-hvac --example train_panoptes
-//! ```
-//!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 9, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml_autograd::Variable;
 use axonml_hvac::panoptes::*;
@@ -50,7 +71,7 @@ const LR: f32 = 1e-3;
 const SEED: u64 = 42;
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {
@@ -60,9 +81,9 @@ fn main() {
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
 
-    // =========================================================================
+    // -------------------------------------------------------------------------
     // Generate training data
-    // =========================================================================
+    // -------------------------------------------------------------------------
     println!("[data] Generating physics-informed training data...");
     let t0 = Instant::now();
 
@@ -82,9 +103,9 @@ fn main() {
     println!("  Generated in {:.1}s", t0.elapsed().as_secs_f32());
     println!();
 
-    // =========================================================================
+    // -------------------------------------------------------------------------
     // Create model
-    // =========================================================================
+    // -------------------------------------------------------------------------
     let model = Panoptes::new(NUM_EQUIPMENT);
     println!("[model] Panoptes created");
     println!("  Equipment slots: {NUM_EQUIPMENT}");
@@ -100,9 +121,9 @@ fn main() {
         false,
     );
 
-    // =========================================================================
+    // -------------------------------------------------------------------------
     // Phase 1: Learn normal operation
-    // =========================================================================
+    // -------------------------------------------------------------------------
     println!("═══════════════════════════════════════════════════════════════");
     println!(" PHASE 1: Learning Normal Operation ({PHASE1_EPOCHS} epochs)");
     println!("═══════════════════════════════════════════════════════════════");
@@ -154,9 +175,9 @@ fn main() {
 
     println!();
 
-    // =========================================================================
+    // -------------------------------------------------------------------------
     // Phase 2: Learn fault signatures
-    // =========================================================================
+    // -------------------------------------------------------------------------
     println!("═══════════════════════════════════════════════════════════════");
     println!(" PHASE 2: Learning Fault Signatures ({PHASE2_EPOCHS} epochs)");
     println!("═══════════════════════════════════════════════════════════════");
@@ -235,9 +256,9 @@ fn main() {
 
     println!();
 
-    // =========================================================================
+    // -------------------------------------------------------------------------
     // Phase 3: Temporal training
-    // =========================================================================
+    // -------------------------------------------------------------------------
     println!("═══════════════════════════════════════════════════════════════");
     println!(" PHASE 3: Temporal Training ({PHASE3_EPOCHS} epochs, window={TEMPORAL_WINDOW})");
     println!("═══════════════════════════════════════════════════════════════");
@@ -368,9 +389,9 @@ fn main() {
 
     println!();
 
-    // =========================================================================
+    // -------------------------------------------------------------------------
     // Final evaluation
-    // =========================================================================
+    // -------------------------------------------------------------------------
     println!("═══════════════════════════════════════════════════════════════");
     println!(" FINAL EVALUATION");
     println!("═══════════════════════════════════════════════════════════════");

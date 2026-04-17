@@ -1,20 +1,52 @@
-//! Loading Spinner Components
+//! Loading States — Spinners, Dots, Pulse, Overlays, Skeletons
+//!
+//! Collection of loading indicators and skeleton placeholders used while
+//! data is fetching or views are mounting.
+//!
+//! `SpinnerSize` enum (`Xs`..`Xl`) exposes both a CSS class (`spinner-xs`
+//! ..`spinner-xl`) and a pixel dimension (16/20/32/48/64).
+//!
+//! `Spinner` is the default animated loader: an SVG with a dim background
+//! ring and a coloured arc driven by CSS to rotate via the `spinner-arc`
+//! class and a 31.4/31.4 dasharray.
+//!
+//! `DotsLoader` renders three pulsing dots scaled per `SpinnerSize`.
+//! `PulseLoader` renders two expanding rings around a central dot.
+//! `LoadingOverlay` blocks its children with a spinner + optional text
+//! when its `loading: MaybeSignal<bool>` is true.
+//! `PageLoader` is a full-screen loader with the AxonML logo, large
+//! spinner, and optional caption — reused by `PublicOrDashboard` and
+//! `ProtectedRoute`.
+//!
+//! Skeleton primitives: `Skeleton` (single rectangular placeholder),
+//! `SkeletonText` (N stacked lines with the last line narrower),
+//! `SkeletonCard` (title + text + button placeholder), and `SkeletonTable`
+//! (header row + N×M grid of cell placeholders).
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/spinner.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use leptos::*;
+
+// =============================================================================
+// SpinnerSize
+// =============================================================================
 
 /// Spinner size variants
 #[derive(Debug, Clone, Copy, Default)]
@@ -48,6 +80,10 @@ impl SpinnerSize {
         }
     }
 }
+
+// =============================================================================
+// Spinner
+// =============================================================================
 
 /// Basic spinning loader
 #[component]
@@ -89,6 +125,10 @@ pub fn Spinner(
     }
 }
 
+// =============================================================================
+// DotsLoader
+// =============================================================================
+
 /// Dots loading animation
 #[component]
 pub fn DotsLoader(
@@ -113,6 +153,10 @@ pub fn DotsLoader(
     }
 }
 
+// =============================================================================
+// PulseLoader
+// =============================================================================
+
 /// Pulse loading animation
 #[component]
 pub fn PulseLoader(
@@ -133,6 +177,10 @@ pub fn PulseLoader(
         </div>
     }
 }
+
+// =============================================================================
+// LoadingOverlay
+// =============================================================================
 
 /// Loading overlay for sections
 #[component]
@@ -163,6 +211,10 @@ pub fn LoadingOverlay(
     }
 }
 
+// =============================================================================
+// PageLoader
+// =============================================================================
+
 /// Full page loading state
 #[component]
 pub fn PageLoader(#[prop(optional, into)] text: String) -> impl IntoView {
@@ -182,6 +234,14 @@ pub fn PageLoader(#[prop(optional, into)] text: String) -> impl IntoView {
     }
 }
 
+// =============================================================================
+// Skeletons
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Skeleton
+// -----------------------------------------------------------------------------
+
 /// Skeleton loading placeholder
 #[component]
 pub fn Skeleton(
@@ -197,6 +257,10 @@ pub fn Skeleton(
         />
     }
 }
+
+// -----------------------------------------------------------------------------
+// SkeletonText
+// -----------------------------------------------------------------------------
 
 /// Skeleton text lines
 #[component]
@@ -214,6 +278,10 @@ pub fn SkeletonText(
     }
 }
 
+// -----------------------------------------------------------------------------
+// SkeletonCard
+// -----------------------------------------------------------------------------
+
 /// Skeleton card
 #[component]
 pub fn SkeletonCard(#[prop(optional, into)] class: String) -> impl IntoView {
@@ -229,6 +297,10 @@ pub fn SkeletonCard(#[prop(optional, into)] class: String) -> impl IntoView {
         </div>
     }
 }
+
+// -----------------------------------------------------------------------------
+// SkeletonTable
+// -----------------------------------------------------------------------------
 
 /// Skeleton table
 #[component]

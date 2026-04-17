@@ -1,18 +1,36 @@
-//! Inference Metrics Page
+//! Inference Metrics Page — Per-Endpoint Latency And Throughput Charts
+//!
+//! Metrics explorer for a selected inference endpoint.
+//! `InferenceMetricsPage` fetches the available `InferenceEndpoint` list via
+//! `api::inference::list_endpoints`, auto-selects the first entry, and then
+//! pulls `Vec<InferenceMetrics>` through `api::inference::get_metrics` each
+//! time the selection changes. From that data it derives two
+//! `Vec<ChartSeries>` shapes for the `LineChart` component: a latency series
+//! with P50, P95, and P99 tracks (colored teal/terracotta/error) and a
+//! request-volume series with success and error tracks. Above the charts a
+//! three-card stats strip shows total requests, average P50 latency, and
+//! the error rate as a percentage of total requests. An endpoint `<select>`
+//! drives the `selected_endpoint` signal, and empty-endpoint state renders a
+//! CTA linking to `/models` for deployment.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/inference/metrics.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,11 +40,18 @@ use crate::components::{charts::*, icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// Inference Metrics Page
+// =============================================================================
+
 /// Inference metrics page
 #[component]
 pub fn InferenceMetricsPage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (endpoints, set_endpoints) = create_signal::<Vec<InferenceEndpoint>>(Vec::new());
     let (selected_endpoint, set_selected_endpoint) = create_signal::<Option<String>>(None);
@@ -35,6 +60,9 @@ pub fn InferenceMetricsPage() -> impl IntoView {
     // Clone state for the effect
     let state_for_effect = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Data Fetch
+    // -------------------------------------------------------------------------
     // Fetch endpoints
     create_effect(move |_| {
         let state = state_for_effect.clone();
@@ -65,6 +93,9 @@ pub fn InferenceMetricsPage() -> impl IntoView {
         }
     });
 
+    // -------------------------------------------------------------------------
+    // Derived Chart Data
+    // -------------------------------------------------------------------------
     // Chart data
     let latency_series = move || {
         let m = metrics.get();
@@ -143,6 +174,9 @@ pub fn InferenceMetricsPage() -> impl IntoView {
         ]
     };
 
+    // -------------------------------------------------------------------------
+    // Aggregate Stats
+    // -------------------------------------------------------------------------
     // Aggregate stats
     let total_requests = move || metrics.get().iter().map(|m| m.requests_total).sum::<u64>();
 
@@ -166,6 +200,9 @@ pub fn InferenceMetricsPage() -> impl IntoView {
         }
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page inference-metrics-page">
             <div class="page-header">

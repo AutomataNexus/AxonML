@@ -1,13 +1,25 @@
-//! End-to-end user flow tests
+//! End-to-End User Flow — Integration Tests
+//!
+//! Full lifecycle integration tests that exercise multi-step workflows across
+//! the AxonML server API. Includes: complete user registration/login/logout
+//! flow with email verification handling, model CRUD lifecycle (create, get,
+//! update, list versions, delete, verify deletion), training run lifecycle
+//! (create, get, record metrics, stop, delete), inference endpoint lifecycle
+//! (create, get, start, stop, delete), hub browse and cache flow, system info
+//! and GPU listing, admin operations (user list, stats), dataset operations
+//! with analysis, a complete ML pipeline simulation (datasets -> model ->
+//! training -> inference -> cleanup), concurrent API request stress testing,
+//! and error handling for invalid JSON, missing fields, and 404 responses.
 //!
 //! # File
 //! `crates/axonml-server/tests/e2e_user_flows.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -19,6 +31,10 @@ mod common;
 use common::*;
 use serde_json::Value;
 use std::time::Duration;
+
+// =============================================================================
+// Test Helpers
+// =============================================================================
 
 /// Skip test if server not running or DB not initialized
 macro_rules! require_server {
@@ -35,9 +51,9 @@ macro_rules! require_server {
     };
 }
 
-// ============================================================================
+// =============================================================================
 // Complete User Registration and Login Flow
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_complete_registration_login_flow() {
@@ -115,9 +131,9 @@ async fn test_complete_registration_login_flow() {
     );
 }
 
-// ============================================================================
+// =============================================================================
 // Model Upload and Management Flow
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_model_lifecycle_flow() {
@@ -217,9 +233,9 @@ async fn test_model_lifecycle_flow() {
     }
 }
 
-// ============================================================================
+// =============================================================================
 // Training Run Flow
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_training_run_lifecycle() {
@@ -336,9 +352,9 @@ async fn test_training_run_lifecycle() {
     }
 }
 
-// ============================================================================
+// =============================================================================
 // Inference Endpoint Flow
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_inference_endpoint_lifecycle() {
@@ -440,9 +456,9 @@ async fn test_inference_endpoint_lifecycle() {
     }
 }
 
-// ============================================================================
+// =============================================================================
 // Hub Browse and Download Flow
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_hub_browse_flow() {
@@ -488,9 +504,9 @@ async fn test_hub_browse_flow() {
     );
 }
 
-// ============================================================================
+// =============================================================================
 // System Info Flow
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_system_info_flow() {
@@ -523,9 +539,9 @@ async fn test_system_info_flow() {
     assert!(gpus_response.status().is_success(), "Should list GPUs");
 }
 
-// ============================================================================
+// =============================================================================
 // Admin Operations Flow
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_admin_operations_flow() {
@@ -558,9 +574,9 @@ async fn test_admin_operations_flow() {
     );
 }
 
-// ============================================================================
+// =============================================================================
 // Dataset Operations Flow
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_dataset_operations_flow() {
@@ -612,9 +628,9 @@ async fn test_dataset_operations_flow() {
     }
 }
 
-// ============================================================================
+// =============================================================================
 // Complete ML Pipeline Flow
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_complete_ml_pipeline_flow() {
@@ -722,9 +738,9 @@ async fn test_complete_ml_pipeline_flow() {
     // Pipeline completed successfully
 }
 
-// ============================================================================
+// =============================================================================
 // Concurrent Operations Test
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_concurrent_api_requests() {
@@ -775,9 +791,9 @@ async fn test_concurrent_api_requests() {
     );
 }
 
-// ============================================================================
+// =============================================================================
 // Error Handling Tests
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_invalid_json_handling() {

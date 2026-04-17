@@ -1,13 +1,22 @@
-//! Neural Implicit Surfaces
+//! Neural Implicit Surfaces — SDF Networks with Fourier Positional Encoding
+//!
+//! Provides `FourierFeatures` for sinusoidal positional encoding of 3D coordinates,
+//! `LocalSDF` for per-octree-cell signed distance function networks (3-layer MLP
+//! mapping Fourier-encoded xyz to scalar distance), and `GlobalSDF` as a single
+//! larger MLP baseline for whole-scene SDF. Both implement the `Module` trait for
+//! forward pass and parameter collection. `LocalSDF` supports coordinate
+//! normalization, single-point evaluation, and finite-difference gradient estimation
+//! for eikonal regularization and surface normal computation.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/aegis3d/implicit.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -146,6 +155,10 @@ impl LocalSDF {
         Self::new(64, 4, center, extent)
     }
 
+    // -------------------------------------------------------------------------
+    // Evaluation
+    // -------------------------------------------------------------------------
+
     /// Evaluate SDF at given world-space coordinates.
     ///
     /// Coordinates are normalized to [-1, 1] relative to the local cell.
@@ -189,6 +202,10 @@ impl LocalSDF {
         result.data().to_vec()[0]
     }
 
+    // -------------------------------------------------------------------------
+    // Gradient Estimation
+    // -------------------------------------------------------------------------
+
     /// Compute the approximate gradient of SDF (∇SDF) via finite differences.
     ///
     /// Used for eikonal loss (|∇SDF| = 1) and surface normal estimation.
@@ -222,6 +239,10 @@ impl LocalSDF {
         )
     }
 }
+
+// -------------------------------------------------------------------------
+// Module Impl — LocalSDF
+// -------------------------------------------------------------------------
 
 impl Module for LocalSDF {
     fn forward(&self, x: &Variable) -> Variable {
@@ -293,6 +314,10 @@ impl GlobalSDF {
         x
     }
 }
+
+// -------------------------------------------------------------------------
+// Module Impl — GlobalSDF
+// -------------------------------------------------------------------------
 
 impl Module for GlobalSDF {
     fn forward(&self, x: &Variable) -> Variable {

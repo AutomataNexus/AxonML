@@ -1,16 +1,56 @@
-//! Anthropic Messages API backend — calls nexus-serve's `/v1/messages`
-//! (or the real Anthropic API) using the content-block / `tool_use`
-//! schema.
+//! Anthropic Messages API Backend — /v1/messages Content-Block Wire Format
 //!
-//! Internally nexus-agent represents messages in an OpenAI-shaped
+//! Implements `AnthropicBackend`, an `LlmBackend` that talks to
+//! nexus-serve's `/v1/messages` endpoint (or the real Anthropic API at
+//! `https://api.anthropic.com`) using the content-block / `tool_use`
+//! schema. Internally nexus-agent represents messages in an OpenAI-shaped
 //! `Message { role, content, tool_calls, tool_call_id }`. This backend
-//! is the translation layer: we convert outbound to Anthropic content
-//! blocks, and convert inbound `tool_use` blocks back into our internal
-//! `ToolCall` form so the existing ReAct loop doesn't need to change.
+//! is the translation layer: outbound messages are converted to
+//! Anthropic content blocks, and inbound `tool_use` blocks are unpacked
+//! back into our internal `ToolCall` form so the existing ReAct loop
+//! does not need to change.
+//!
+//! Key items:
+//! - `AnthropicBackend` — reqwest-based client with `new()`, `with_url`,
+//!   `with_api_key` builders; defaults to `http://127.0.0.1:11435`.
+//! - Wire types: `MessagesRequest`, `WireMessage`, `WireContent` (Text |
+//!   Blocks), `WireBlock` (`text` | `tool_use` | `tool_result`),
+//!   `MessagesResponse`, `ResponseBlock` (with `#[serde(other)]` for
+//!   forward-compat).
+//! - `to_wire` — peels system turns, folds role="tool" messages into
+//!   `user` `tool_result` blocks (appending to a previous user block
+//!   batch when adjacent), and converts assistant `tool_calls` into
+//!   `tool_use` blocks.
+//! - `tools_to_wire` — converts `ToolDefinition` to `WireTool`.
+//! - `response_to_message` — concatenates `text` blocks with `\n` and
+//!   maps `tool_use` blocks to `ToolCall` with `type = "function"`.
+//! - `LlmBackend` impl — POSTs to `/v1/messages` (adds `x-api-key` and
+//!   `anthropic-version: 2023-06-01` when an API key is set), uses
+//!   `max_tokens = 512`, lists models via nexus-serve's
+//!   OpenAI-shaped `/v1/models`, and pings `/health`.
 //!
 //! Hard rule: any nexus-agent ↔ nexus-serve tool call uses this format
 //! end-to-end. The OpenAI backend (`backend::local::LocalBackend`) is
-//! kept for legacy agents that were written against `/v1/chat/completions`.
+//! kept for legacy agents written against `/v1/chat/completions`.
+//!
+//! # File
+//! `nexus-agent/src/backend/anthropic.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -20,7 +60,15 @@ use crate::{FunctionCall, Message, ToolCall, ToolDefinition};
 
 use super::LlmBackend;
 
+// =============================================================================
+// Constants
+// =============================================================================
+
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:11435";
+
+// =============================================================================
+// Backend Struct And Constructors
+// =============================================================================
 
 /// Backend that speaks Anthropic's Messages API (`/v1/messages`).
 ///
@@ -241,6 +289,10 @@ fn tools_to_wire(tools: &[ToolDefinition]) -> Vec<WireTool> {
         })
         .collect()
 }
+
+// -----------------------------------------------------------------------------
+// Response → internal Message
+// -----------------------------------------------------------------------------
 
 fn response_to_message(resp: MessagesResponse) -> Message {
     let mut text_buf = String::new();

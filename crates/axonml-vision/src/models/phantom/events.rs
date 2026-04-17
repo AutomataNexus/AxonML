@@ -1,13 +1,21 @@
 //! Pseudo-Event Generation — Frame Differencing on Standard Cameras
 //!
+//! Implements `EventConfig` (threshold, polarity, temporal decay parameters) and
+//! `EventEncoder` which generates pseudo-events from consecutive video frames by
+//! computing per-pixel intensity changes, thresholding to produce positive/negative
+//! polarity events, and encoding the result as a multi-channel event tensor. This
+//! enables event-camera-style processing on standard frame-based cameras for
+//! efficient motion-driven face detection in the Phantom pipeline.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/phantom/events.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

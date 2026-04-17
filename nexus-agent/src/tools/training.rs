@@ -1,8 +1,34 @@
-//! Training management tools — kick off, monitor, and evaluate training runs.
+//! Training Tools — Start, Monitor, List Checkpoints
 //!
-//! Works with the llm-training crate and any cargo-based training binary.
-//! The agent can start a training run in the background, poll its output,
-//! and check checkpoint files when done.
+//! Three tools that drive cargo-based training binaries (works with the
+//! llm-training crate and any `cargo run --release --features cuda` target):
+//!
+//! * `StartTrainingTool` (start_training) builds a `cd <working_dir> &&
+//!   cargo run --release --bin <binary> --features cuda -- <args> > <log> 2>&1 &`
+//!   shell pipeline, captures the backgrounded PID via `echo $!`, and
+//!   returns the binary / pid / log tuple. Default log is
+//!   `/tmp/nexus-agent-training.log`.
+//! * `CheckTrainingTool` (check_training) tails the log file (default 30
+//!   lines) via `tail -n` so the agent can follow loss values, epoch
+//!   progress, and errors.
+//! * `ListCheckpointsTool` (list_checkpoints) shells out to
+//!   `ls -lhtr <directory>` to enumerate checkpoint files ordered by
+//!   modification time with human-readable sizes.
+//!
+//! # File
+//! `nexus-agent/src/tools/training.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -11,7 +37,7 @@ use serde_json::json;
 use crate::Tool;
 
 // =============================================================================
-// Start a training run
+// StartTrainingTool — Launch a Training Run
 // =============================================================================
 
 pub struct StartTrainingTool;
@@ -77,7 +103,7 @@ impl Tool for StartTrainingTool {
 }
 
 // =============================================================================
-// Check training progress
+// CheckTrainingTool — Tail Training Log
 // =============================================================================
 
 pub struct CheckTrainingTool;
@@ -130,7 +156,7 @@ impl Tool for CheckTrainingTool {
 }
 
 // =============================================================================
-// List checkpoints
+// ListCheckpointsTool — Enumerate Checkpoint Files
 // =============================================================================
 
 pub struct ListCheckpointsTool;

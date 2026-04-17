@@ -20,12 +20,13 @@ description: "Installation and setup guide for AxonML"
 
 Before using AxonML, ensure you have:
 
-- **Rust** 1.75+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
+- **Rust** 1.85+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
 - **Cargo** (included with Rust)
 
 Optional for GPU acceleration:
 - **CUDA Toolkit** 12.0+ (for NVIDIA GPUs)
 - **Vulkan SDK** (for cross-platform GPU)
+- **Metal** (macOS, built into the OS)
 
 ## Installation
 
@@ -35,31 +36,42 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = "0.2.8"
+axonml = "0.6"
 ```
 
 ### Feature Flags
 
-AxonML uses feature flags to control what gets compiled:
+The `axonml` umbrella crate is a thin re-export layer plus the live browser training monitor. Each sub-crate is gated behind a feature flag:
 
-| Feature | Description | Default |
-|:--------|:------------|:--------|
-| `full` | All features enabled | Yes |
-| `core` | Core tensor operations | Yes |
-| `nn` | Neural network modules | Yes |
-| `vision` | Computer vision (MNIST, CIFAR, ResNet, NightVision, Biometrics) | Yes |
-| `audio` | Audio processing (MelSpectrogram, MFCC) | Yes |
-| `text` | Text processing (Tokenizers, BPE) | Yes |
-| `llm` | Large language models (BERT, GPT-2) | Yes |
-| `distributed` | Distributed training (DDP, FSDP) | Yes |
-| `cuda` | CUDA GPU backend | No |
-| `wgpu` | WebGPU/Vulkan backend | No |
+| Feature | Pulls in | Default |
+|:--------|:---------|:--------|
+| `full` | Everything below | Yes |
+| `core` | `axonml-core`, `axonml-tensor`, `axonml-autograd` | Yes |
+| `nn`   | `core` + `axonml-nn`, `axonml-optim` | Yes |
+| `data` | `core` + `axonml-data` | Yes |
+| `vision` | `nn` + `data` + `axonml-vision` | Yes |
+| `text` | `nn` + `data` + `axonml-text` | Yes |
+| `audio` | `nn` + `data` + `axonml-audio` | Yes |
+| `llm` | `nn` + `axonml-llm` | Yes |
+| `hvac` | `nn` + `axonml-hvac` | Yes |
+| `train` | `nn` + `axonml-train` (`TrainingConfig`, `EarlyStopping`, benchmarking, adversarial) | Yes |
+| `distributed` | `nn` + `axonml-distributed` | Yes |
+| `serialize` | `core` + `axonml-serialize` | Yes |
+| `onnx` | `core` + `axonml-onnx` | Yes |
+| `quant` | `nn` + `axonml-quant` | Yes |
+| `fusion` | `core` + `axonml-fusion` | Yes |
+| `jit` | `core` + `axonml-jit` | Yes |
+| `profile` | `core` + `axonml-profile` | Yes |
+| `cuda` | NVIDIA CUDA backend (cuBLAS + PTX kernels) | No |
+| `cudnn` | `cuda` + cuDNN dispatch | No |
+| `wgpu` | WebGPU / Vulkan via wgpu | No |
+| `nccl` | `distributed` + NCCL backend | No |
 
 Example with specific features:
 
 ```toml
 [dependencies]
-axonml = { version = "0.2.8", default-features = false, features = ["core", "nn", "cuda"] }
+axonml = { version = "0.6", default-features = false, features = ["core", "nn", "cuda"] }
 ```
 
 ### CLI Installation
@@ -67,10 +79,12 @@ axonml = { version = "0.2.8", default-features = false, features = ["core", "nn"
 Install the AxonML CLI:
 
 ```bash
-cargo install axonml-cli
+cargo install --path crates/axonml-cli
 ```
 
 ## Your First Model
+
+The canonical runnable introduction is `crates/axonml/examples/simple_training.rs` — a two-layer MLP (`Linear(2,4)` → sigmoid → `Linear(4,1)` → sigmoid) learning XOR with Adam (lr=0.1) over 1000 epochs, manual MSE loss.
 
 ### 1. Create a New Project
 
@@ -85,55 +99,68 @@ Edit `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = "0.2.8"
+axonml = "0.6"
 ```
 
 ### 3. Write Your Model
 
-Edit `src/main.rs`:
+Edit `src/main.rs`. This mirrors the shipped `simple_training.rs` example:
 
 ```rust
 use axonml::prelude::*;
+use axonml_nn::{Linear, Module};
+use axonml_optim::{Adam, Optimizer};
 
 fn main() {
-    // Create random training data
-    let x_train = Tensor::randn(&[100, 2]);  // 100 samples, 2 features
-    let y_train = Tensor::randn(&[100, 1]);  // 100 labels
+    println!("Version: {}", axonml::version());
+    println!("Features: {}\n", axonml::features());
 
-    // Define a simple neural network
-    let model = Sequential::new()
-        .add(Linear::new(2, 16))
-        .add(ReLU)
-        .add(Linear::new(16, 1));
+    // XOR dataset
+    let inputs = vec![
+        vec![0.0, 0.0],
+        vec![0.0, 1.0],
+        vec![1.0, 0.0],
+        vec![1.0, 1.0],
+    ];
+    let targets = vec![0.0, 1.0, 1.0, 0.0];
 
-    // Create optimizer
-    let mut optimizer = Adam::new(model.parameters(), 0.01);
+    // Model: 2 -> 4 -> 1
+    let linear1 = Linear::new(2, 4);
+    let linear2 = Linear::new(4, 1);
 
-    // Loss function
-    let loss_fn = MSELoss::new();
+    // Optimizer
+    let params = [linear1.parameters(), linear2.parameters()].concat();
+    let mut optimizer = Adam::new(params, 0.1);
 
-    // Training loop
-    println!("Training...");
-    for epoch in 0..100 {
-        // Forward pass
-        let x = Variable::new(x_train.clone(), false);
-        let y = Variable::new(y_train.clone(), false);
-        let pred = model.forward(&x);
+    // Train
+    for epoch in 0..1000 {
+        let mut total_loss = 0.0;
 
-        // Compute loss
-        let loss = loss_fn.compute(&pred, &y);
+        for (input, &target) in inputs.iter().zip(targets.iter()) {
+            let x = Variable::new(
+                Tensor::from_vec(input.clone(), &[1, 2]).unwrap(), true,
+            );
+            let h = linear1.forward(&x).sigmoid();
+            let output = linear2.forward(&h).sigmoid();
 
-        // Backward pass
-        optimizer.zero_grad();
-        loss.backward();
-        optimizer.step();
+            let y = Variable::new(
+                Tensor::from_vec(vec![target], &[1, 1]).unwrap(), false,
+            );
 
-        if epoch % 10 == 0 {
-            println!("Epoch {}: Loss = {:.6}", epoch, loss.data().item());
+            // Manual MSE: (output - target)^2
+            let diff = output.sub_var(&y);
+            let loss = diff.mul_var(&diff);
+            total_loss += loss.data().to_vec()[0];
+
+            loss.backward();
+            optimizer.step();
+            optimizer.zero_grad();
+        }
+
+        if epoch % 200 == 0 {
+            println!("Epoch {}: Loss = {:.6}", epoch, total_loss / 4.0);
         }
     }
-
-    println!("Training complete!");
 }
 ```
 
@@ -143,96 +170,7 @@ fn main() {
 cargo run --release
 ```
 
-Expected output:
-```
-Training...
-Epoch 0: Loss = 1.234567
-Epoch 10: Loss = 0.567890
-Epoch 20: Loss = 0.234567
-...
-Epoch 90: Loss = 0.012345
-Training complete!
-```
-
-## MNIST Example
-
-A complete MNIST digit classification example:
-
-```rust
-use axonml::prelude::*;
-use axonml::vision::{MNIST, transforms};
-use axonml::data::DataLoader;
-
-fn main() {
-    // Load MNIST dataset
-    let train_dataset = MNIST::new("./data", true)
-        .transform(transforms::Normalize::new(0.1307, 0.3081));
-
-    let test_dataset = MNIST::new("./data", false)
-        .transform(transforms::Normalize::new(0.1307, 0.3081));
-
-    let train_loader = DataLoader::new(train_dataset, 64, true);
-    let test_loader = DataLoader::new(test_dataset, 64, false);
-
-    // Define CNN model
-    let model = Sequential::new()
-        .add(Conv2d::new(1, 32, 3).padding(1))
-        .add(ReLU)
-        .add(MaxPool2d::new(2))
-        .add(Conv2d::new(32, 64, 3).padding(1))
-        .add(ReLU)
-        .add(MaxPool2d::new(2))
-        .add(Flatten)
-        .add(Linear::new(64 * 7 * 7, 128))
-        .add(ReLU)
-        .add(Linear::new(128, 10));
-
-    let mut optimizer = Adam::new(model.parameters(), 0.001);
-    let loss_fn = CrossEntropyLoss::new();
-
-    // Training
-    for epoch in 0..10 {
-        model.train();
-        let mut total_loss = 0.0;
-
-        for (batch_idx, (images, labels)) in train_loader.iter().enumerate() {
-            let x = Variable::new(images, false);
-            let y = labels;
-
-            let output = model.forward(&x);
-            let loss = loss_fn.compute(&output, &y);
-
-            optimizer.zero_grad();
-            loss.backward();
-            optimizer.step();
-
-            total_loss += loss.data().item();
-        }
-
-        // Evaluation
-        model.eval();
-        let mut correct = 0;
-        let mut total = 0;
-
-        for (images, labels) in test_loader.iter() {
-            let x = Variable::new(images, false);
-            let output = model.forward(&x);
-            let predictions = output.data().argmax(1);
-
-            for (pred, label) in predictions.iter().zip(labels.iter()) {
-                if pred == label {
-                    correct += 1;
-                }
-                total += 1;
-            }
-        }
-
-        let accuracy = 100.0 * correct as f32 / total as f32;
-        println!("Epoch {}: Loss = {:.4}, Accuracy = {:.2}%",
-                 epoch, total_loss, accuracy);
-    }
-}
-```
+You will see the loss decrease over epochs until the MLP learns the XOR function.
 
 ## GPU Acceleration
 
@@ -241,41 +179,50 @@ fn main() {
 Enable CUDA in `Cargo.toml`:
 
 ```toml
-axonml = { version = "0.2.8", features = ["cuda"] }
+axonml = { version = "0.6", features = ["cuda"] }
 ```
 
-Use GPU in code:
+Use GPU in code. `Tensor::to_device(...)` returns a `Result<Self>` and transfers data across backends:
 
 ```rust
-use axonml::core::Device;
+use axonml::prelude::*;
+use axonml_tensor::Tensor;
 
-// Move tensor to GPU
-let x = Tensor::randn(&[1000, 1000]);
-let x_gpu = x.to(Device::CUDA(0));
+// Create on CPU, then transfer to GPU
+let x: Tensor<f32> = Tensor::randn(&[1000, 1000]);
+let x_gpu = x.to_device(Device::Cuda(0)).unwrap();
 
-// Operations run on GPU
-let y_gpu = x_gpu.matmul(&x_gpu.t());
+// Matmul dispatches to cuBLAS for GPU tensors
+let y_gpu = x_gpu.matmul(&x_gpu).unwrap();
 
 // Move back to CPU
-let y_cpu = y_gpu.to(Device::CPU);
+let y_cpu = y_gpu.cpu().unwrap();
 ```
 
-### WebGPU (Cross-platform)
+Note: When training on GPU, move **both** model parameters and input tensors to the same device — forgetting to move inputs is the single most common cause of `Error::DeviceMismatch`.
+
+### WebGPU / Vulkan
 
 ```toml
-axonml = { version = "0.2.8", features = ["wgpu"] }
+axonml = { version = "0.6", features = ["wgpu"] }
 ```
 
 ```rust
-let device = Device::WebGPU(0);
-let x = Tensor::randn(&[1000, 1000]).to(device);
+let device = Device::Wgpu(0);
+let x = Tensor::<f32>::randn(&[1000, 1000]).to_device(device).unwrap();
 ```
+
+Vulkan, Metal, and WebGPU each have their own feature flag in `axonml-core` (`vulkan`, `metal`, `wgpu`). All four GPU backends are full implementations — not stubs — with 975/769/1710 lines of kernel code respectively.
 
 ## Next Steps
 
-- [Tensor Operations]({% link tensors.md %}) - Deep dive into tensor API
-- [Neural Networks]({% link neural-networks.md %}) - Building complex models
-- [Training]({% link training.md %}) - Optimizers, schedulers, mixed precision, biometric training
-- [Vision Models]({% link vision/README.md %}) - Detection (Helios, NightVision), biometrics (Argus, Echo, Mnemosyne)
-- [Distributed]({% link distributed.md %}) - Multi-GPU training
-- [ONNX]({% link onnx.md %}) - Import/export models
+- [Tensor Operations]({% link tensors.md %}) — tensor API reference
+- [Neural Networks]({% link neural-networks.md %}) — building models
+- [Training]({% link training.md %}) — optimizers, schedulers, AMP, checkpoint
+- [Detection]({% link detection.md %}) — Nexus, Phantom, NightVision detection training
+- [Distributed]({% link distributed.md %}) — DDP, FSDP, Pipeline parallelism
+- [ONNX]({% link onnx.md %}) — import / export
+
+---
+
+*Last updated: 2026-04-16 (v0.6.1)*

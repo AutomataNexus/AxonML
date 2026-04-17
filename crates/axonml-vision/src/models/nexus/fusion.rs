@@ -1,13 +1,20 @@
 //! Pathway Fusion — Attention-Gated Cross-Pathway Merge
 //!
+//! Implements `MultiScaleFusion` which merges detail and context pathway features
+//! at each scale level using learned attention gates. Attention weights are
+//! computed from concatenated features via Conv2d + BatchNorm + sigmoid, then
+//! applied element-wise to blend the two pathways. Produces fused multi-scale
+//! feature maps for the detection heads.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/nexus/fusion.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

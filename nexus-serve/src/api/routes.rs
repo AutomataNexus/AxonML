@@ -1,4 +1,41 @@
-//! HTTP route handlers for the OpenAI-compatible API.
+//! routes — OpenAI-Compatible HTTP Handlers
+//!
+//! Axum route handlers backing the OpenAI-compatible surface of nexus-serve:
+//! `GET /health`, `GET /v1/models`, `POST /v1/chat/completions`, and
+//! `POST /v1/completions`. Also holds the shared [`AppState`] container
+//! (registry + engines + tokenizers) and the chat-template dispatcher
+//! ([`format_prompt`], [`format_llama3`], [`format_chatml`], [`format_gemma`])
+//! that picks per-architecture turn syntax — Gemma 3/4 need
+//! `<start_of_turn>…<end_of_turn>`, BitNet needs LLaMA-3 header ids, and
+//! everything else gets ChatML.
+//!
+//! `chat_completions` resolves a model alias via [`ModelRegistry::resolve`],
+//! pulls the `Arc<InferenceEngine>` + `Arc<Tokenizer>` from `AppState`, and
+//! either runs `engine.generate(..)` to completion or hands off to
+//! [`build_chat_stream`] for SSE streaming (generation runs on a blocking
+//! task, tokens stream through an `UnboundedReceiverStream`, terminating with
+//! the OpenAI `[DONE]` sentinel). `list_models` emits both canonical model
+//! IDs and aliases. `api_error` constructs the standard error response
+//! envelope.
+//!
+//! # File
+//! `nexus-serve/src/api/routes.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -14,6 +51,10 @@ use super::types::*;
 use crate::model::inference::InferenceEngine;
 use crate::model::registry::ModelRegistry;
 use crate::tokenizer::Tokenizer;
+
+// =============================================================================
+// App State
+// =============================================================================
 
 /// Shared server state passed to all handlers.
 pub struct AppState {
@@ -182,6 +223,10 @@ pub async fn chat_completions(
         Ok(body.into_response())
     }
 }
+
+// -----------------------------------------------------------------------------
+// SSE Streaming
+// -----------------------------------------------------------------------------
 
 /// Build an SSE stream that runs generation in a blocking task and yields
 /// one chunk per token, following the OpenAI chat.completion.chunk format.

@@ -1,23 +1,55 @@
-//! Train LLaMA on Shakespeare
+//! Train LLaMA — AxonML Shakespeare Trainer (RoPE + GQA + SwiGLU + RMSNorm)
 //!
-//! End-to-end training of the AxonML `LLaMAForCausalLM` on real text, with:
-//! - RoPE rotary positional embeddings
-//! - Grouped-query attention (GQA)
-//! - SwiGLU MLP with RMSNorm
-//! - GPU acceleration (`--features cuda`)
-//! - Live browser training monitor
-//! - Periodic best-model + full-checkpoint saving
-//! - Resume from latest / best / specific path
-//! - In-flight text sampling to watch the model learn
+//! End-to-end training binary for the AxonML [`LLaMAForCausalLM`] on a text
+//! corpus. The model includes:
+//! - RoPE rotary positional embeddings (with configurable `rope_theta`).
+//! - Grouped-query attention (GQA) via `num_key_value_heads` that must
+//!   divide `num_attention_heads`.
+//! - SwiGLU MLP with RMSNorm.
+//!
+//! Unlike GPT-2, the LLaMA crate does not expose a `forward_with_loss`
+//! method, so this binary computes the shifted cross-entropy loss via the
+//! shared [`shifted_cross_entropy`] helper (same shift-then-flatten pattern
+//! GPT-2 uses internally).
+//!
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser and `print_help`
+//!   covering LLaMA-specific knobs: `num_kv_heads` for GQA plus the standard
+//!   transformer hyperparameters.
+//! - `generate` — greedy auto-regressive sampler that runs
+//!   `LLaMAForCausalLM::forward_ids` on the tail of the running id buffer
+//!   and picks `argmax` on the last-step logits.
+//! - `pick_device` / `device_name` — CUDA-feature-gated device detection.
+//! - `main` — validates `num_heads % num_kv_heads == 0` and
+//!   `d_model % num_heads == 0`, loads the corpus, builds the tokenizer +
+//!   dataset, constructs [`LLaMAConfig`] / [`LLaMAForCausalLM`], resumes
+//!   from a checkpoint, migrates params to GPU when available, wires up
+//!   the `TrainingLifecycle`, and runs the Adam-optimized training loop
+//!   with periodic greedy samples and a 400-char final generation.
 //!
 //! Usage:
 //!   cargo run --release --bin train_llama -p llm-training --features cuda
 //!   cargo run --release --bin train_llama -p llm-training --features cuda -- \
 //!       --epochs 10 --bs 16 --seq-len 128 --resume latest
 //!
-//! Unlike GPT-2, the LLaMA crate does not expose a `forward_with_loss` method,
-//! so this binary computes the shifted cross-entropy loss locally via
-//! `axonml_nn::loss::CrossEntropyLoss` (same pattern GPT-2 uses internally).
+//! # File
+//! `llm-training/src/bin/train_llama.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -223,7 +255,7 @@ fn generate(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

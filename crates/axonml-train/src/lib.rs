@@ -4,7 +4,11 @@
 //! `crates/axonml-train/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Overview
 //!

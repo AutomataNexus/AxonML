@@ -1,13 +1,25 @@
-//! Variable - Tensor with Gradient Tracking
+//! `Variable` — tensor with automatic gradient tracking.
+//!
+//! 1577 lines, 67 public methods. Wraps `Arc<RwLock<Tensor<f32>>>` with a
+//! `GradAccumulator` and optional `GradFn` recording the operation that
+//! produced it. Provides differentiable versions of all tensor ops: arithmetic
+//! (add_var, sub_var, mul_var, div_var, neg, add_scalar, mul_scalar, pow),
+//! activations (relu, sigmoid, tanh, gelu, silu, elu, leaky_relu, softmax,
+//! log_softmax), reductions (sum, mean, sum_dim, mean_dim, var_dim), shape
+//! (reshape, transpose, t, narrow, select, unsqueeze, expand, cat), matmul,
+//! and `from_operation` (custom GradFn attachment). `backward()` triggers
+//! reverse-mode autodiff from this variable. `detach()` / `requires_grad_()`
+//! control tracking. `data()` gives read access to the underlying tensor.
 //!
 //! # File
 //! `crates/axonml-autograd/src/variable.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

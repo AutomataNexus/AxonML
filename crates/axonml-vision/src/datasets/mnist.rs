@@ -1,13 +1,22 @@
-//! MNIST Dataset - Handwritten Digit Recognition
+//! MNIST Dataset — Handwritten Digit and Fashion Recognition
+//!
+//! Loaders for MNIST and Fashion-MNIST in IDX binary format with gzip support.
+//! `MNIST` reads train/test image and label files, producing 1x28x28 f32 tensors
+//! normalized to [0,1] with one-hot labels over 10 digit classes. `FashionMNIST`
+//! wraps `MNIST` with clothing-item class names (T-shirt, Trouser, etc.).
+//! `SyntheticMNIST` generates deterministic pseudo-random 1x28x28 images with
+//! Gaussian-like center patterns modulated by class index, for testing without
+//! disk I/O. All implement `Dataset<Item = (Tensor<f32>, Tensor<f32>)>`.
 //!
 //! # File
 //! `crates/axonml-vision/src/datasets/mnist.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

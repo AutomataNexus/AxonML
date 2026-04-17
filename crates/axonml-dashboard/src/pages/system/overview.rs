@@ -1,18 +1,41 @@
-//! System Overview Page
+//! System Overview Page — Hardware, GPU Devices, and Benchmark Results
+//!
+//! Leptos page component `SystemOverviewPage` that loads and displays
+//! hardware info and GPU diagnostics from the backend:
+//!
+//! - `SystemInfoCard` — shows platform, architecture, CPU core count,
+//!   total/available memory, AxonML version, and Rust version pulled
+//!   via `api::system::get_info()`.
+//! - `GpuListCard` / `GpuListCardInner` / `GpuCard` — renders the list
+//!   of GPU devices returned by `api::system::list_gpus()` with CUDA
+//!   availability badge, per-GPU details (id, vendor, device type,
+//!   backend, driver, memory), and a "Run Benchmark" button gated on
+//!   GPUs being present.
+//! - `BenchmarkResultsCard` / `BenchmarkResultCard` — after the user
+//!   triggers `api::system::run_benchmark()`, displays buffer copy
+//!   latency / effective bandwidth at 1 MB, 16 MB, 64 MB plus compute
+//!   dispatch time, per GPU.
+//!
+//! Also contains a local `format_bytes` helper for KB/MB/GB formatting.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/system/overview.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 
@@ -21,9 +44,16 @@ use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// SystemOverviewPage Component
+// =============================================================================
+
 /// System overview page
 #[component]
 pub fn SystemOverviewPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Signals and State
+    // -------------------------------------------------------------------------
     let state = use_app_state();
 
     let (loading, set_loading) = create_signal(true);
@@ -35,6 +65,9 @@ pub fn SystemOverviewPage() -> impl IntoView {
 
     let state_for_effect = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Fetch
+    // -------------------------------------------------------------------------
     // Initial fetch
     create_effect(move |_| {
         let state = state_for_effect.clone();
@@ -56,6 +89,9 @@ pub fn SystemOverviewPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page system-overview-page">
             <div class="page-header">
@@ -92,6 +128,10 @@ pub fn SystemOverviewPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// SystemInfoCard Component
+// =============================================================================
 
 /// System Info Card component
 #[component]
@@ -141,6 +181,10 @@ fn SystemInfoCard(info: ReadSignal<Option<SystemInfo>>) -> impl IntoView {
         })}
     }
 }
+
+// =============================================================================
+// GpuListCard Components
+// =============================================================================
 
 /// GPU List Card component
 #[component]
@@ -265,6 +309,10 @@ fn GpuListCardInner(
     }
 }
 
+// =============================================================================
+// BenchmarkResultsCard Component
+// =============================================================================
+
 /// Benchmark Results Card component
 #[component]
 fn BenchmarkResultsCard(results: ReadSignal<Option<BenchmarkResponse>>) -> impl IntoView {
@@ -292,6 +340,10 @@ fn BenchmarkResultsCard(results: ReadSignal<Option<BenchmarkResponse>>) -> impl 
         })}
     }
 }
+
+// =============================================================================
+// GpuCard Component
+// =============================================================================
 
 /// GPU Card component
 #[component]
@@ -334,6 +386,10 @@ fn GpuCard(gpu: GpuInfo) -> impl IntoView {
     }
 }
 
+// =============================================================================
+// BenchmarkResultCard Component
+// =============================================================================
+
 /// Benchmark Result Card component
 #[component]
 fn BenchmarkResultCard(result: BenchmarkResult) -> impl IntoView {
@@ -373,6 +429,10 @@ fn BenchmarkResultCard(result: BenchmarkResult) -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;

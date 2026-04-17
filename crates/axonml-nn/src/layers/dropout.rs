@@ -1,13 +1,18 @@
-//! Dropout Layers - Regularization via Random Zeroing
+//! Dropout regularization — `Dropout` and `Dropout2d`.
+//!
+//! 441 lines. `Dropout` randomly zeros elements with probability `p` during
+//! training and scales by `1/(1-p)` (inverted dropout). `Dropout2d` zeros
+//! entire channels for spatial data. Both are no-ops during eval mode.
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/dropout.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

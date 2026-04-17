@@ -1,13 +1,25 @@
-//! CUDA Backend - NVIDIA GPU Operations
+//! CUDA backend — 106 public methods for NVIDIA GPU tensor operations.
+//!
+//! Global `CudaBackend` singleton (via OnceLock) wrapping a cudarc
+//! `CudaContext` + `CudaStream`. Exposes cuBLAS GEMM (regular + strided-
+//! batched), 15 custom PTX kernel modules (loaded at init via
+//! `CudaKernels::load`), elementwise ops (add/mul/scalar/neg/abs),
+//! activations (relu/sigmoid/tanh/gelu/silu/elu/leaky_relu/softmax),
+//! layernorm, RMSNorm, transpose, embedding gather, dropout, Q4_K/Q6_K
+//! dequant-in-shader GEMV+GEMM (cooperative warp reduction), fused flash-
+//! decode attention (online softmax, one warp per head, GQA + SWA aware),
+//! fused flash-prefill attention (batched causal, one CTA per query×head),
+//! and memory management (htod_copy, dtoh_copy, alloc, alloc_uninit).
 //!
 //! # File
 //! `crates/axonml-core/src/backends/cuda.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

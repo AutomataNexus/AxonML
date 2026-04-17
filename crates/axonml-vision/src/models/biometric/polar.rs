@@ -1,13 +1,23 @@
-//! Polar Unwrap Utilities for Iris Processing
+//! Polar Unwrap Utilities — Cartesian-to-Polar Iris Transformation
+//!
+//! Provides `PolarUnwrapConfig` (radial/angular bin counts, pupil center, inner/
+//! outer radius with presets for high-res, low-res, and detected boundaries) and
+//! the `polar_unwrap` function that transforms a raw iris image `[B, 1, H, W]`
+//! into a polar strip `[B, 1, radial_bins, angular_bins]` via bilinear
+//! interpolation. Also provides `multi_scale_unwrap` (coarse/medium/fine polar
+//! strips at different resolutions), `circular_shift` for rotation-invariant
+//! testing, and `assess_polar_quality` (radial contrast, angular coverage, and
+//! non-zero pixel ratio scoring).
 //!
 //! # File
 //! `crates/axonml-vision/src/models/biometric/polar.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

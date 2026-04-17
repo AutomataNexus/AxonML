@@ -1,13 +1,28 @@
-//! axonml-nn - Neural Network Module Library
+//! Neural network building blocks for AxonML.
+//!
+//! `Module` trait (forward, parameters, train/eval, zero_grad), `Parameter`
+//! (named gradient-tracked weight), `Sequential` container, 40+ layer types
+//! in `layers` (Linear, Conv1d/2d, ConvTranspose2d, MaxPool/AvgPool/
+//! AdaptiveAvgPool, BatchNorm1d/2d, LayerNorm, GroupNorm, InstanceNorm2d,
+//! RMSNorm, Dropout/Dropout2d, RNN/LSTM/GRU + cell variants, MultiHead/
+//! Cross/DifferentialAttention, Embedding, TernaryLinear, Transformer
+//! encoder/decoder, Seq2SeqTransformer, ResidualBlock, MoE, GCN/GAT,
+//! FFT/STFT), activations (ReLU, Sigmoid, Tanh, GELU, SiLU, ELU,
+//! LeakyReLU, Mish, Softmax, LogSoftmax), losses (MSE, CrossEntropy, BCE,
+//! BCEWithLogits, L1, SmoothL1, NLL, CTC, Focal, Triplet, ArcFace),
+//! initialization (Xavier, Kaiming, Glorot, He, orthogonal, sparse),
+//! differentiable structured sparsity (SparseLinear, GroupSparsity,
+//! LotteryTicket), and `functional` helpers.
 //!
 //! # File
 //! `crates/axonml-nn/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

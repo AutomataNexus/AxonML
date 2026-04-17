@@ -1,13 +1,23 @@
 //! Argus — Iris Identity via Radial Phase Encoding (~65K params)
 //!
+//! Implements `ArgusIris`, a lightweight iris recognition model that encodes polar-
+//! unwrapped iris strips through separate radial and angular 1D convolution branches,
+//! extracts angular phase gradients as soft-threshold event features, then reduces
+//! through a 1x1 conv + adaptive pool + linear projection to an L2-normalized
+//! embedding with learned uncertainty. Supports raw-iris input (automatic polar
+//! unwrap via `polar` module), multi-resolution encoding at coarse/medium/fine
+//! scales, rotation-invariant circular-shift matching, Hamming distance matching
+//! with fragile-bit masking, and polar-domain quality assessment.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/biometric/argus.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

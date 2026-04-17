@@ -1,45 +1,39 @@
 # Trident-Coder BPE Tokenizer
 
-32,000-vocab byte-level BPE tokenizer for a 1B-parameter 1.58-bit Trident code LLM
-(Trident-Coder). GPT-2-style byte-level encoding: lossless round-trip on any UTF-8
-input, 256-glyph base alphabet, no `<unk>`.
+32,000-vocab byte-level BPE tokenizer for the 1B-parameter 1.58-bit Trident-Coder LLM. GPT-2-style byte-level encoding: lossless round-trip on any UTF-8 input, 256-glyph base alphabet, no `<unk>`.
 
-Built on 2026-04-13 23:58:51 EDT in 0.0 minutes of corpus-build wall time
-(training runs separately).
+**Version:** 0.6.1 — updated 2026-04-16. Tokenizer artifacts themselves were built 2026-04-13 23:58:51 EDT.
 
 ## Special tokens (stable IDs)
 
+From `eval_metrics.json` → `special_token_ids` (source of truth):
+
 | id | token |
 |----|-------|
-| 0 | `<|endoftext|>` |
-| 1 | `<|pad|>` |
-| 2 | `<|user|>` |
-| 3 | `<|assistant|>` |
-| 4 | `<|system|>` |
-| 5 | `<|tool_use|>` |
-| 6 | `<|tool_result|>` |
-| 7 | `<|tool_end|>` |
+| 0  | `<|endoftext|>` |
+| 1  | `<|pad|>` |
+| 2  | `<|user|>` |
+| 3  | `<|assistant|>` |
+| 4  | `<|system|>` |
+| 5  | `<|tool_use|>` |
+| 6  | `<|tool_result|>` |
+| 7  | `<|tool_end|>` |
 
-(Replace `Z` → `|` and un-escape `|` → `|` when reading above — rendered to
-dodge markdown table cell escaping. In the actual vocab they appear as e.g.
-`<|endoftext|>`.)
+`tokenizer_config.json` maps these into the HF `PreTrainedTokenizerFast` slots: `eos_token = <|endoftext|>`, `pad_token = <|pad|>`, and the remaining six listed under `additional_special_tokens`. `bos_token` and `unk_token` are null by design — the byte-level alphabet handles any UTF-8 input losslessly so an `<unk>` slot is unnecessary.
 
 The last four tokens back Anthropic Messages API tool-call delivery:
 
 - `<|tool_use|>` … `<|tool_end|>` wraps an assistant-emitted tool-use block
 - `<|tool_result|>` … `<|tool_end|>` wraps the user-turn tool_result block
 
-The model is fine-tuned to emit these sequences verbatim so that nexus-serve's
-`/v1/messages` endpoint can parse the stream into Anthropic-format
-`content[*].type == "tool_use"` blocks.
+The plan is for Trident-Coder to be fine-tuned to emit these sequences verbatim so that nexus-serve's `/v1/messages` endpoint can parse the stream into Anthropic-format `content[*].type == "tool_use"` blocks natively (replacing the `<tool_use>` / `</tool_use>` prompt-template parser used for BitNet b1.58 today — see `nexus-serve/src/api/messages.rs`).
 
 ## Training corpus
 
-Sources: `codeparrot/github-code-clean` (public, ungated) — parquet shards
-streamed one at a time, filtered to 7 target languages, then deleted from
-disk. Local `.rs` sources under `/opt/` supplemented the Rust corpus because
-`the-stack-smol` and `the-stack-v2` were gated behind an access-request gate
-that HF's fine-grained tokens cannot satisfy automatically.
+Sources:
+
+- `codeparrot/github-code-clean` (public, ungated) — parquet shards streamed one at a time, filtered to 7 target languages, then deleted from disk.
+- Local `.rs` sources under `/opt/` to supplement Rust, because `the-stack-smol` and `the-stack-v2` were gated behind an access-request flow that HF fine-grained tokens cannot satisfy automatically.
 
 Filter rules (applied to every source file before it hits the BPE trainer):
 
@@ -49,34 +43,27 @@ Filter rules (applied to every source file before it hits the BPE trainer):
 - No `@generated` / `DO NOT EDIT` marker in the first 10 lines
 - Non-empty, non-whitespace-only
 
-| language | files accepted | GB post-filter |
-|----------|---------------:|---------------:|
-(not available)
+Per-language cap: 700 MB post-filter. Rust hits its natural ceiling well below the cap because only ~2.9 MB of Rust appears per 360 MB github-code-clean shard. The filesystem scrape tops Rust up with source from `/opt/AxonML`, `/opt/trident-blog`, `/opt/Prometheus`, `/opt/NexusOracle`, and `/opt/FerumMail`.
 
-Per-language cap: 700 MB post-filter. Rust hits its natural ceiling below the
-cap because only ~2.9 MB of Rust appears per 360 MB github-code-clean shard.
-The filesystem scrape tops Rust up with source from `/opt/AxonML`,
-`/opt/trident-blog`, `/opt/Prometheus`, `/opt/NexusOracle`, and `/opt/FerumMail`.
-
-Filter rejection counts: see `training_corpus_stats.json`.
+Note: the shipped `training_corpus_stats.json` is currently an empty JSON object (`{}`) — per-language file counts and filter-rejection counts were not persisted at build time. Only the eval metrics below are authoritative.
 
 ## Evaluation
 
-Held-out samples from the local filesystem that **never** appear in the
-training corpus (eval uses `/opt/AxonML/crates` which is Rust and was capped
-out during corpus build anyway; ~60 MB of local Rust is dominated by the corpus
-already, but the evaluator draws from a file-ordering that is deliberately
-shuffled differently from the build-time walk, so it's representative of
-in-distribution performance).
+Held-out samples drawn from the local filesystem using a shuffle-ordering deliberately different from the build-time walk. The evaluator reports bytes-per-token (B/tok) and chars-per-token (C/tok) per language — lower is better compression.
 
-| language | MB | tokens | **B/tok** | C/tok |
-|----------|---:|-------:|----------:|------:|
-| python | 3.52 | 1,037,666 | **3.3876** | 3.3845 |
-| rust | 7.43 | 2,132,964 | **3.4822** | 3.4775 |
-| typescript | 5.24 | 1,412,654 | **3.7114** | 3.7057 |
+| language | tokens | B/tok | C/tok |
+|----------|-------:|------:|------:|
+| python | 1,037,666 | **3.3876** | 3.3845 |
+| rust | 2,132,964 | **3.4822** | 3.4775 |
+| typescript | 1,412,654 | **3.7114** | 3.7057 |
 
-Target: ≤ 3.6 bytes/token on Rust (good), ideal ≤ 3.3. See `eval_metrics.json`
-for the raw numbers and `round_trip_ok_on_samples`.
+Target: ≤ 3.6 B/tok on Rust (good), ideal ≤ 3.3 — Rust hits 3.48 at this build.
+
+**Round-trip caveat:** `eval_metrics.json` currently reports `round_trip_ok_on_samples: false`. The byte-level BPE is in principle lossless on arbitrary UTF-8, so this is an open item to investigate (sample-level round-trip check failing on at least one eval sample — possibly an evaluator bug rather than a tokenizer bug). Treat the encoder as compression-verified but not yet round-trip-verified at sample level until this flips to `true`.
+
+## Model max length
+
+`tokenizer_config.json` sets `model_max_length = 8192`. The Trident-Coder-1B training config uses `seq_len = 4096` at 1B scale (see `llm-training/src/bin/train_trident_code.rs`).
 
 ## Loading
 
@@ -106,20 +93,18 @@ let tk = Tokenizer::from_file(
 let enc = tk.encode("fn main() {}", false).unwrap();
 ```
 
+The Trident-Coder trainer (`llm-training/src/bin/train_trident_code.rs`) and its Python pre-tokenizer (`llm-training/tools/pretokenize_stack_v2.py`) both load this exact file.
+
 ## Files
 
 - `tokenizer.json` — the tokenizer model (load with `Tokenizer::from_file`)
-- `tokenizer_config.json` — HF `PreTrainedTokenizerFast` config
-- `training_corpus_stats.json` — per-language byte/file counts + filter rejections
-- `eval_metrics.json` — held-out bytes-per-token metrics
+- `tokenizer_config.json` — HF `PreTrainedTokenizerFast` config (eos / pad / additional special tokens, `model_max_length = 8192`)
+- `eval_metrics.json` — vocab size, special-token IDs, per-language B/tok + C/tok, round-trip flag
+- `training_corpus_stats.json` — placeholder (currently `{}`)
 - `README.md` — this file
 
 ## Build reproduction
 
-```bash
-# scripts are kept alongside the tokenizer for provenance even though _workdir/
-# is deleted at end; see git history of /opt/AxonML/tokenizers/trident-coder-bpe/
-# for the exact build scripts used.
-```
+The full BPE-training scripts are not checked into this directory — only the materialized tokenizer artifacts. Tokenizer-build provenance lives in the git history of this directory. The `_workdir/` scratch space used during the build was deleted at end of run.
 
 Author: Andrew Jewell Sr. (AutomataNexus LLC), 2026.

@@ -1,22 +1,52 @@
-//! Toast Notification Components
+//! Toast Notifications — Container, Item, Standalone, Banner
+//!
+//! Rendering surface for transient `Toast` notifications stored in app
+//! state, plus self-contained variants for out-of-band use.
+//!
+//! `ToastContainer` mounts at the router root (alongside the `Router`)
+//! and iterates `state.toasts` with a keyed `<For>`, rendering each entry
+//! as a `ToastItem`; dismissing an item calls `state.remove_toast(id)`.
+//!
+//! `ToastItem` handles the enter/exit animation: on close it flips an
+//! `exiting` signal to swap the CSS class to `toast-exit`, waits 300 ms,
+//! then hides the element and fires `on_close`. The icon is chosen from
+//! `ToastType` (`Success`/`Error`/`Warning`/`Info`).
+//!
+//! `StandaloneToast` is the self-contained variant for ad-hoc usage
+//! without the global container — it owns its own auto-close timer (`duration_ms`,
+//! default 5 s) plus the same 300 ms exit animation.
+//!
+//! `NotificationBanner` is a stationary inline banner (not a floating
+//! toast) with optional message body and an optional dismiss button that
+//! invokes `on_dismiss`. Styling uses `banner-{success|error|warning|info}`
+//! classes.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/toast.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use crate::components::icons::*;
 use crate::state::{Toast, ToastType, use_app_state};
 use leptos::*;
+
+// =============================================================================
+// ToastContainer
+// =============================================================================
 
 /// Toast container component - renders all active toasts
 #[component]
@@ -37,6 +67,10 @@ pub fn ToastContainer() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// ToastItem
+// =============================================================================
 
 /// Individual toast item
 #[component]
@@ -87,6 +121,10 @@ fn ToastItem(toast: Toast, on_close: Callback<()>) -> impl IntoView {
         </Show>
     }
 }
+
+// =============================================================================
+// StandaloneToast
+// =============================================================================
 
 /// Standalone toast function (for use without context)
 #[component]
@@ -158,6 +196,10 @@ pub fn StandaloneToast(
         </Show>
     }
 }
+
+// =============================================================================
+// NotificationBanner
+// =============================================================================
 
 /// Inline notification banner (not a toast, stays in place)
 #[component]

@@ -1,13 +1,22 @@
 //! Helios — High-Efficiency Lightweight Inference Object Sentinel
 //!
+//! Top-level module for the Helios object detector. Re-exports `Helios` (full
+//! detection pipeline), `HeliosLoss`, `CIoULoss`, and `TaskAlignedAssigner`.
+//! Defines `HeliosSize` (Nano/Small/Medium/Large/XLarge variants with width and
+//! depth multipliers), `HeliosConfig` (num_classes, input_size, DFL reg_max,
+//! score/NMS thresholds, strides, and computed stage channels/depths), and
+//! training output types `HeliosScaleOutput` (per-scale cls logits + bbox DFL
+//! distributions) and `HeliosTrainOutput` (3-scale P3/P4/P5 outputs).
+//!
 //! # File
 //! `crates/axonml-vision/src/models/helios/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

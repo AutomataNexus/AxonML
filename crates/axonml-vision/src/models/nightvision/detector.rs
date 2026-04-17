@@ -1,7 +1,50 @@
 //! NightVision Detector — Multi-Domain Infrared Object Detection
 //!
-//! Complete detection model: backbone + FPN neck + decoupled head.
-//! Configurable for wildlife, human, and interstellar detection.
+//! End-to-end YOLOX-inspired thermal detector that composes
+//! `ThermalBackbone` (CSP), `ThermalFPN` (feature pyramid neck), and three
+//! per-scale `DecoupledHead` instances (one each for the P3, P4, P5 FPN
+//! levels). Input thermal frames produce per-scale classification,
+//! bounding-box, objectness, and optional domain outputs.
+//!
+//! Provides:
+//!
+//! - `ThermalDomain` — enum over Wildlife / Human / Interstellar / Vehicle /
+//!   General with `index`, `from_index`, `name`, and `count` helpers used
+//!   by the optional domain head.
+//! - `NightVisionConfig` — public `in_channels`, `num_classes`,
+//!   `num_domains`, `fpn_channels`, `img_size` knobs plus ready-made
+//!   presets: `wildlife`, `human`, `interstellar(bands)`, `multi_domain`,
+//!   and `edge` (compact for edge deployment). `Default` is
+//!   `multi_domain(10)`.
+//! - `NightVision` — the full detector. `forward_detection` returns a `Vec`
+//!   of `(cls, bbox, obj, Option<domain>)` per FPN level;
+//!   `forward_flat` reshapes and concatenates them along the anchor axis
+//!   into `[B, total_anchors, ·]` tensors. Implements `Module::forward`
+//!   (which returns just the flattened classification logits), along with
+//!   `parameters`, `named_parameters`, and `set_training`.
+//! - `NightVisionLoss` — combined detection-loss coefficients
+//!   (`cls_weight=1.0`, `bbox_weight=5.0`, `obj_weight=1.0`,
+//!   `domain_weight=0.5`) covering BCE classification, CIoU bbox, BCE
+//!   objectness, and optional CE domain components.
+//!
+//! Tests exercise the wildlife, human, multi-domain, and interstellar
+//! presets and assert that the wildlife model's parameter count falls in
+//! `(100k, 5M)`.
+//!
+//! # File
+//! `crates/axonml-vision/src/models/nightvision/detector.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
 

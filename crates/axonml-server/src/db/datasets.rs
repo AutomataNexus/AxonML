@@ -1,26 +1,52 @@
-//! Dataset database operations for AxonML
+//! Dataset Database Operations — CRUD for ML Dataset Metadata
+//!
+//! Provides document-store-backed persistence for ML dataset records via
+//! `DatasetRepository`. Datasets are stored in the `axonml_datasets`
+//! Aegis-DB document collection.
+//!
+//! Key types:
+//! - `Dataset` — full dataset record with id, owner, file path, size,
+//!   sample/feature/class counts, and timestamps.
+//! - `NewDataset` — creation payload (no id or timestamps yet).
+//! - `DatasetType` — enum of supported modalities: Image, Tabular, Text,
+//!   Audio, Custom (defaults to Tabular).
+//! - `DatasetRepository` — borrows a `Database` reference and exposes
+//!   `create()`, `find_by_id()`, `find_by_user()`, and `delete()`.
 //!
 //! # File
 //! `crates/axonml-server/src/db/datasets.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use super::{Database, DbError, DocumentQuery};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// =============================================================================
+// Constants
+// =============================================================================
+
 /// Collection name for datasets
 const COLLECTION: &str = "axonml_datasets";
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /// Dataset type enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,6 +92,10 @@ pub struct NewDataset {
     pub num_classes: Option<u64>,
 }
 
+// =============================================================================
+// Repository
+// =============================================================================
+
 /// Dataset repository for database operations
 pub struct DatasetRepository<'a> {
     db: &'a Database,
@@ -76,6 +106,10 @@ impl<'a> DatasetRepository<'a> {
     pub fn new(db: &'a Database) -> Self {
         Self { db }
     }
+
+    // -------------------------------------------------------------------------
+    // CRUD Operations
+    // -------------------------------------------------------------------------
 
     /// Create a new dataset
     pub async fn create(&self, new_dataset: NewDataset) -> Result<Dataset, DbError> {
@@ -115,6 +149,10 @@ impl<'a> DatasetRepository<'a> {
             None => Ok(None),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Queries
+    // -------------------------------------------------------------------------
 
     /// Find all datasets for a user
     pub async fn find_by_user(&self, user_id: &str) -> Result<Vec<Dataset>, DbError> {

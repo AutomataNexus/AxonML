@@ -1,13 +1,22 @@
-//! Gradient Function Traits - Differentiable Operation Interface
+//! Gradient function traits — the differentiable operation interface.
+//!
+//! 213 lines. `GradientFunction` trait: `backward(&self, grad_output) ->
+//! Vec<Option<Tensor<f32>>>` computes input gradients from the output
+//! gradient, `inputs() -> &[GradFn]` links to parent nodes. `GradFn` is
+//! `Arc<dyn GradientFunction>` for cheap cloning in the graph. `GradFnId`
+//! provides stable identity for topo-sort dedup. `AccumulateGrad` is the
+//! leaf-node GradFn that writes into a `GradAccumulator`
+//! (`Arc<RwLock<Option<Tensor<f32>>>>`).
 //!
 //! # File
 //! `crates/axonml-autograd/src/grad_fn.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

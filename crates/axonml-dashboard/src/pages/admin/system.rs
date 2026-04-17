@@ -1,18 +1,43 @@
-//! Enhanced System Stats Admin Page with Advanced Visualizations
+//! System Stats Admin Page — Live Host Telemetry With Advanced Visualizations
+//!
+//! Admin-only analytics screen that polls `api::system` endpoints and renders
+//! live host metrics in a card grid. `SystemStatsPage` fetches static
+//! `SystemInfo`, `GpuListResponse`, `RealtimeMetrics`, `SystemMetricsHistory`,
+//! and `CorrelationData` on mount via `futures::join!`, then sets up a
+//! `gloo_timers::callback::Interval` that re-fetches `RealtimeMetrics` every
+//! two seconds for live updates. The view hosts a row of five `QuickStatCard`
+//! tiles (CPU, memory, disk, process count, uptime) above eight chart cards
+//! rendered by private components: `RadarChart` (Chart.js radar of aggregate
+//! resources), `CpuCoresChart` (per-core vertical bars), `WaveformChart`
+//! (Chart.js dual-line CPU/memory timeline), `ScatterPlot3D` (Three.js
+//! `OrbitControls` scene of CPU×Runtime×Memory points built via
+//! `js_sys::eval`), `GpuMonitoringPanel` (per-GPU utilization/memory/
+//! temperature/power bars keyed by id), `NetworkChart` (RX/TX Chart.js lines),
+//! `SystemInfoPanel` (platform/arch/cores/memory/versions), and
+//! `LoadAverageChart` (1/5/15-minute load averages). Chart.js is bound via
+//! `wasm_bindgen` to the `ChartJs` extern type with `new`/`update`/`destroy`
+//! constructors, and a `create_line_dataset` helper builds styled line
+//! datasets. Local helpers `format_bytes` (B/KB/MB/GB/TB) and
+//! `format_uptime` (days/hours/mins) format info-panel values.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/admin/system.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use wasm_bindgen::prelude::*;
@@ -22,6 +47,10 @@ use crate::components::icons::*;
 use crate::components::spinner::*;
 use crate::state::use_app_state;
 use crate::types::*;
+
+// =============================================================================
+// JavaScript Bindings (Chart.js / Three.js)
+// =============================================================================
 
 // JavaScript bindings for Chart.js and Three.js
 #[wasm_bindgen]
@@ -45,10 +74,17 @@ extern "C" {
     fn log(s: &str);
 }
 
+// =============================================================================
+// System Stats Page
+// =============================================================================
+
 #[component]
 pub fn SystemStatsPage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (realtime_metrics, set_realtime_metrics) = create_signal::<Option<RealtimeMetrics>>(None);
     let (metrics_history, set_metrics_history) =
@@ -57,6 +93,9 @@ pub fn SystemStatsPage() -> impl IntoView {
     let (system_info, set_system_info) = create_signal::<Option<SystemInfo>>(None);
     let (gpu_list, set_gpu_list) = create_signal::<Option<GpuListResponse>>(None);
 
+    // -------------------------------------------------------------------------
+    // Initial Data Fetch
+    // -------------------------------------------------------------------------
     // Initial data fetch
     let state_clone = state.clone();
     create_effect(move |_| {
@@ -92,6 +131,9 @@ pub fn SystemStatsPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Realtime Auto-Refresh
+    // -------------------------------------------------------------------------
     // Auto-refresh metrics every 2 seconds
     let _state_for_interval = state.clone();
     create_effect(move |_| {
@@ -108,6 +150,9 @@ pub fn SystemStatsPage() -> impl IntoView {
         on_cleanup(move || drop(interval));
     });
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="admin-system-page">
             <div class="page-header">
@@ -289,6 +334,10 @@ pub fn SystemStatsPage() -> impl IntoView {
     }
 }
 
+// =============================================================================
+// Quick Stat Card
+// =============================================================================
+
 #[component]
 fn QuickStatCard(
     icon: &'static str,
@@ -322,6 +371,10 @@ fn QuickStatCard(
         </div>
     }
 }
+
+// =============================================================================
+// Radar Chart (Chart.js)
+// =============================================================================
 
 #[component]
 fn RadarChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
@@ -439,6 +492,10 @@ fn RadarChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
     }
 }
 
+// =============================================================================
+// CPU Cores Chart
+// =============================================================================
+
 #[component]
 fn CpuCoresChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
     view! {
@@ -459,6 +516,10 @@ fn CpuCoresChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView 
         </div>
     }
 }
+
+// =============================================================================
+// Waveform Chart (Chart.js Timeline)
+// =============================================================================
 
 #[component]
 fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoView {
@@ -562,6 +623,10 @@ fn WaveformChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl Into
     }
 }
 
+// -----------------------------------------------------------------------------
+// Chart.js Dataset Builder
+// -----------------------------------------------------------------------------
+
 fn create_line_dataset(label: &str, data: &[f64], border_color: &str, bg_color: &str) -> JsValue {
     let dataset = js_sys::Object::new();
     js_sys::Reflect::set(&dataset, &"label".into(), &label.into()).ok();
@@ -574,6 +639,10 @@ fn create_line_dataset(label: &str, data: &[f64], border_color: &str, bg_color: 
     js_sys::Reflect::set(&dataset, &"pointRadius".into(), &JsValue::from_f64(0.0)).ok();
     dataset.into()
 }
+
+// =============================================================================
+// 3D Scatter Plot (Three.js)
+// =============================================================================
 
 #[component]
 fn ScatterPlot3D(data: ReadSignal<Option<CorrelationData>>) -> impl IntoView {
@@ -723,6 +792,10 @@ fn ScatterPlot3D(data: ReadSignal<Option<CorrelationData>>) -> impl IntoView {
     }
 }
 
+// =============================================================================
+// GPU Monitoring Panel
+// =============================================================================
+
 #[component]
 fn GpuMonitoringPanel(
     metrics: ReadSignal<Option<RealtimeMetrics>>,
@@ -802,6 +875,10 @@ fn GpuMonitoringPanel(
         </div>
     }
 }
+
+// =============================================================================
+// Network I/O Chart
+// =============================================================================
 
 #[component]
 fn NetworkChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoView {
@@ -891,6 +968,10 @@ fn NetworkChart(history: ReadSignal<Option<SystemMetricsHistory>>) -> impl IntoV
     }
 }
 
+// =============================================================================
+// System Info Panel
+// =============================================================================
+
 #[component]
 fn SystemInfoPanel(
     info: ReadSignal<Option<SystemInfo>>,
@@ -946,6 +1027,10 @@ fn SystemInfoPanel(
     }
 }
 
+// =============================================================================
+// Load Average Chart
+// =============================================================================
+
 #[component]
 fn LoadAverageChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoView {
     view! {
@@ -969,6 +1054,10 @@ fn LoadAverageChart(metrics: ReadSignal<Option<RealtimeMetrics>>) -> impl IntoVi
         </div>
     }
 }
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
 
 fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;

@@ -1,13 +1,21 @@
-//! Edge Deployment Pipeline
+//! Edge Deployment Pipeline — Model Profiling and Edge Registry
+//!
+//! Provides model profiling via `ModelProfile` and `profile_model()` to estimate
+//! parameter counts, memory footprint (f32 and INT8), and deployment suitability.
+//! `DeployTarget` classifies models as Edge, Server, or Both. `EdgeModelInfo`
+//! catalogs edge-suitable models (BlazeFace, NanoDet, FastDepth, Aegis biometrics)
+//! and server-grade models (RetinaFace, DETR, DPT, PatchCore, VQA). Deployment
+//! configs for Raspberry Pi, ARM64, and WASM are provided via `EdgeDeployConfig`.
 //!
 //! # File
 //! `crates/axonml-vision/src/edge.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

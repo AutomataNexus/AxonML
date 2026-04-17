@@ -1,20 +1,51 @@
-//! SVG Icon Components
+//! SVG Icon Library — Lucide-Style Icon Components
+//!
+//! Dependency-free icon set rendered as Leptos `#[component]` wrappers
+//! around a shared `IconBase`. Every icon accepts an `IconSize` variant
+//! (`Xs`..`Xl` mapping to 12/16/20/24/32 px) and an optional `class`
+//! string; `IconBase` emits a 24×24 `<svg>` whose `inner_html` is the
+//! supplied SVG path/shape fragment.
+//!
+//! Security: `IconBase` rejects any `path` containing `<script`,
+//! `javascript:`, `onerror`, `onload`, `onclick`, or `onmouseover` to
+//! guard against XSS in the (currently hardcoded) inner_html slot, logging
+//! via `console.error` and falling back to an empty path.
+//!
+//! The file groups icons into navigation (Home, Dashboard, Activity, Box,
+//! Server, Settings, User, Users, Logout), action (Plus, Minus, X, Check,
+//! Edit, Trash, Download, Upload, Search, Refresh, Copy), status
+//! (CheckCircle, XCircle, AlertCircle, AlertTriangle, Info), direction
+//! (ChevronLeft/Right/Up/Down, ArrowLeft/Right), and a miscellaneous set
+//! covering Menu, Eye/EyeOff, Clock, Calendar, Play/Pause/Stop, Key,
+//! Shield, Lock/Unlock, ExternalLink, Github, MoreVertical/Horizontal,
+//! Terminal, Code, Cpu, Database, Brain, Layers, Zap, TrendingUp/Down,
+//! BarChart, LineChart, QrCode, Smartphone, Fingerprint, Grid, Globe,
+//! Image, FileText, Volume, Folder, Star, and Alert.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/icons.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use leptos::*;
+
+// =============================================================================
+// Icon Size
+// =============================================================================
 
 /// Icon size variants
 #[derive(Debug, Clone, Copy, Default)]
@@ -48,6 +79,10 @@ impl IconSize {
         }
     }
 }
+
+// =============================================================================
+// IconBase
+// =============================================================================
 
 /// Base icon component.
 ///
@@ -99,7 +134,9 @@ fn IconBase(
     }
 }
 
+// =============================================================================
 // Navigation Icons
+// =============================================================================
 
 #[component]
 pub fn IconHome(
@@ -173,7 +210,9 @@ pub fn IconLogout(
     view! { <IconBase path=r#"<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>"#.to_string() size=size class=class /> }
 }
 
+// =============================================================================
 // Action Icons
+// =============================================================================
 
 #[component]
 pub fn IconPlus(
@@ -263,7 +302,9 @@ pub fn IconCopy(
     view! { <IconBase path=r#"<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>"#.to_string() size=size class=class /> }
 }
 
+// =============================================================================
 // Status Icons
+// =============================================================================
 
 #[component]
 pub fn IconCheckCircle(
@@ -305,7 +346,9 @@ pub fn IconInfo(
     view! { <IconBase path=r#"<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/>"#.to_string() size=size class=class /> }
 }
 
+// =============================================================================
 // Direction Icons
+// =============================================================================
 
 #[component]
 pub fn IconChevronLeft(
@@ -355,7 +398,9 @@ pub fn IconArrowRight(
     view! { <IconBase path=r#"<line x1="5" x2="19" y1="12" y2="12"/><polyline points="12 5 19 12 12 19"/>"#.to_string() size=size class=class /> }
 }
 
+// =============================================================================
 // Misc Icons
+// =============================================================================
 
 #[component]
 pub fn IconMenu(

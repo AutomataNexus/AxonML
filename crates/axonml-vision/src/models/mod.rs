@@ -1,13 +1,23 @@
-//! Vision Models
+//! Vision Models — Model Module Re-exports and Smoke Tests
+//!
+//! Module hub for all vision model architectures. Re-exports classification
+//! models (LeNet, MLP, SimpleCNN, ResNet, VGG, VisionTransformer), detection
+//! models (BlazeFace, RetinaFace, DETR, NanoDet, Helios, Nexus, Phantom),
+//! infrastructure (FPN), anomaly detectors (PatchCore, StudentTeacher), depth
+//! estimators (DPT, FastDepth), VQA (VQAModel), 3D reconstruction (Aegis3D),
+//! night vision (NightVision), and biometric identity (AegisIdentity and all
+//! modality-specific sub-models). Includes detection smoke tests that verify
+//! parameter counts and output shapes for all detection-family models.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

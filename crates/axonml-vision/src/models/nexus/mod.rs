@@ -1,18 +1,32 @@
 //! Nexus — Predictive Dual-Pathway Object Detection
 //!
+//! Top-level module for the Nexus detector. Re-exports `Nexus` (full pipeline),
+//! `MultiScaleFusion`, `ObjectMemoryBank`, and `MultiScalePredictiveCoding`.
+//! Defines `NexusConfig` (input size, num_classes, GRU memory hidden dimension,
+//! proposal/NMS thresholds), `NexusScaleOutput` (per-scale cls logits, bbox
+//! predictions, and centerness), and `NexusTrainOutput` (3-scale raw outputs
+//! for loss computation). The Nexus architecture combines a dual-pathway
+//! backbone, predictive coding surprise gating, attention-gated fusion, and
+//! GRU-based object memory for temporal object tracking.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/nexus/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Sub-Modules and Re-Exports
+// =============================================================================
 
 pub mod backbone;
 pub mod detector;
@@ -27,6 +41,10 @@ pub use memory::ObjectMemoryBank;
 pub use predictive::MultiScalePredictiveCoding;
 
 use axonml_autograd::Variable;
+
+// =============================================================================
+// Training Output Types
+// =============================================================================
 
 /// Per-scale training outputs from Nexus.
 pub struct NexusScaleOutput {
@@ -43,6 +61,10 @@ pub struct NexusTrainOutput {
     /// Per-scale outputs (3 scales).
     pub scales: Vec<NexusScaleOutput>,
 }
+
+// =============================================================================
+// Configuration
+// =============================================================================
 
 /// Configuration for the Nexus detector.
 #[derive(Debug, Clone)]

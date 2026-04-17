@@ -1,13 +1,23 @@
-//! Axonml Distributed - Distributed Training Utilities
+//! Distributed training for AxonML — data, model, pipeline, and tensor parallelism.
+//!
+//! `DDP` (DistributedDataParallel with gradient bucketing), `FSDP` (Fully
+//! Sharded Data Parallel — ZeRO-2/ZeRO-3 + HybridShard + CPU offload),
+//! `Pipeline` (GPipe/1F1B/Interleaved microbatch scheduling), collective ops
+//! (all-reduce with 5 strategies, broadcast, all-gather, reduce-scatter,
+//! gather, scatter, reduce, send/recv, barrier), `ProcessGroup` / `World`
+//! abstraction, `NcclBackend` (dynamic libcudart/libnccl loading, multi-node
+//! init via NcclUniqueId), and `MockBackend` (shared-state in-process
+//! simulation for deterministic testing).
 //!
 //! # File
 //! `crates/axonml-distributed/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

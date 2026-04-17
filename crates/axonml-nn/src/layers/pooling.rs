@@ -1,13 +1,19 @@
-//! Pooling Layers - Max and Average Pooling
+//! Pooling layers — Max, Average, and AdaptiveAvgPool for 1D and 2D.
+//!
+//! 707 lines. `MaxPool1d` / `MaxPool2d` (strided window max with padding),
+//! `AvgPool1d` / `AvgPool2d` (strided window mean), `AdaptiveAvgPool2d`
+//! (output-size-driven pooling that auto-computes kernel/stride). All
+//! implement `Module` (stateless — no parameters, no train/eval difference).
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/pooling.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

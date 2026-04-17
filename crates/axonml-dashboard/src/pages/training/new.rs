@@ -1,18 +1,44 @@
-//! New Training Run Page
+//! New Training Run Page — Configure Model, Dataset, and Hyperparameters
+//!
+//! Leptos page component `NewTrainingPage` that lets a user compose and
+//! launch a training run. Loads available models via `api::models::list`
+//! and datasets via `api::datasets::list`, and when a model is selected
+//! fetches its version list via `api::models::get_with_versions` and
+//! auto-selects the latest version.
+//!
+//! The form is organized into sections: model selection (with cascading
+//! version dropdown), dataset selection, run-configuration basics
+//! (run name, model type), hyperparameters (learning rate, batch size,
+//! epochs, optimizer, loss function), and a live configuration summary.
+//!
+//! Dropdown options include nine model-type presets (neural_network,
+//! transformer, cnn, rnn, lstm, gpt, vae, gan, custom), five optimizers
+//! (adam, adamw, sgd, rmsprop, adagrad), and five loss functions
+//! (cross_entropy, mse, mae, binary_cross_entropy, huber).
+//!
+//! On submit it constructs a `CreateRunRequest` with a `TrainingConfig`
+//! (steps_per_epoch defaults to 100) and calls
+//! `api::training::create_run`, navigating to the new run's detail page
+//! on success.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/training/new.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,9 +48,16 @@ use crate::components::{forms::*, icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// NewTrainingPage Component
+// =============================================================================
+
 /// New training run form page
 #[component]
 pub fn NewTrainingPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // App State and Form Signals
+    // -------------------------------------------------------------------------
     let state = use_app_state();
     let navigate = use_navigate();
 
@@ -42,6 +75,9 @@ pub fn NewTrainingPage() -> impl IntoView {
     let (loading, set_loading) = create_signal(false);
     let error = create_rw_signal::<Option<String>>(None);
 
+    // -------------------------------------------------------------------------
+    // Data Fetch: Models, Versions, Datasets
+    // -------------------------------------------------------------------------
     // Load available models
     let (models, set_models) = create_signal::<Vec<Model>>(vec![]);
     let (versions, set_versions) = create_signal::<Vec<ModelVersion>>(vec![]);
@@ -93,6 +129,9 @@ pub fn NewTrainingPage() -> impl IntoView {
         }
     });
 
+    // -------------------------------------------------------------------------
+    // Dropdown Option Lists
+    // -------------------------------------------------------------------------
     // Store option lists for use in closures
     let model_types = store_value(vec![
         ("neural_network".to_string(), "Neural Network".to_string()),
@@ -128,6 +167,9 @@ pub fn NewTrainingPage() -> impl IntoView {
         ("huber".to_string(), "Huber Loss".to_string()),
     ]);
 
+    // -------------------------------------------------------------------------
+    // Submit Handler
+    // -------------------------------------------------------------------------
     let on_submit = move |e: web_sys::SubmitEvent| {
         e.prevent_default();
 
@@ -171,6 +213,9 @@ pub fn NewTrainingPage() -> impl IntoView {
         });
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page new-training-page">
             <div class="page-header">

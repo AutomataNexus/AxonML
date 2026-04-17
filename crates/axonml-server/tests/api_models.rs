@@ -1,13 +1,21 @@
-//! Integration tests for models API endpoints
+//! Models API — Integration Tests
+//!
+//! Tests for the model management API endpoints on the AxonML server. Covers
+//! CRUD operations: listing models (authenticated and unauthenticated), creating
+//! a model with name/description/framework/architecture, updating an existing
+//! model's description via PUT, deleting a model (404 for nonexistent), and
+//! querying model version history. Uses the `require_server!` macro to skip
+//! gracefully when the server or admin DB is unavailable.
 //!
 //! # File
 //! `crates/axonml-server/tests/api_models.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -18,6 +26,10 @@ mod common;
 
 use common::*;
 use serde_json::Value;
+
+// =============================================================================
+// Test Helpers
+// =============================================================================
 
 macro_rules! require_server {
     () => {
@@ -32,6 +44,10 @@ macro_rules! require_server {
         }
     };
 }
+
+// =============================================================================
+// Model Listing Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_list_models_authenticated() {
@@ -68,6 +84,10 @@ async fn test_list_models_unauthenticated() {
         "Should return 401 without auth"
     );
 }
+
+// =============================================================================
+// Model CRUD Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_get_model_not_found() {
@@ -182,6 +202,10 @@ async fn test_delete_model_not_found() {
         "Should return 404 for nonexistent model"
     );
 }
+
+// =============================================================================
+// Model Version Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_model_versions() {

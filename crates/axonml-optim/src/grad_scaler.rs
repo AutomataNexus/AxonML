@@ -1,13 +1,19 @@
-//! Gradient Scaler for Mixed Precision Training
+//! `GradScaler` — dynamic loss scaling for AMP (mixed-precision) training.
+//!
+//! Scales the loss before backward to prevent F16 underflow, then unscales
+//! gradients before the optimizer step. Adaptive scale factor doubles
+//! every N steps if no NaN/Inf is detected, halves on overflow. Pairs
+//! with `AutocastGuard` in `axonml-autograd::amp`.
 //!
 //! # File
 //! `crates/axonml-optim/src/grad_scaler.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

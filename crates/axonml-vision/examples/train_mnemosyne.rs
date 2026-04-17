@@ -1,12 +1,54 @@
 //! Train Mnemosyne — Face Identity via Temporal Crystallization
 //!
-//! Trains on LFW (Labeled Faces in the Wild) dataset.
-//! Uses triplet loss with convergence regularization.
+//! Training binary for the `MnemosyneIdentity` recurrent face-identity model on
+//! LFW-style datasets. Sequences of `seq_len` faces are crystallized step-by-step
+//! through `crystallize_step`, and the final hidden state is L2-normalized into
+//! an identity embedding supervised with `CrystallizationLoss` (triplet loss +
+//! convergence/velocity regularization).
+//!
+//! Contents:
+//! * `IdentityData` + `load_lfw_identities` — loader for the `[num, C, H, W]`
+//!   LFW binary format (12288 floats per 3×64×64 face).
+//! * `mine_batch` — per-step batched triplet mining: `seq_len` groups of
+//!   `(anchor, positive, negative)` tensors sharing the same triplet identity
+//!   across steps, driven by `lcg_range`.
+//! * `crystallize_batched` — rolls `MnemosyneIdentity::crystallize_step` across
+//!   a batched sequence and returns the final hidden state plus mean velocity
+//!   used by the velocity term of the loss.
+//! * `l2_normalize_var` — autograd-safe embedding normalization.
+//! * `cosine_lr` — warmup-then-cosine LR schedule floored at 1%% of base LR.
+//! * `TrainConfig` / `TrainConfig::from_args` — CLI parser supporting
+//!   `--data-dir`, `--output-dir`, `--epochs`, `--lr`, `--batch-size`/`--bs`,
+//!   `--seq-len`, `--batches`, `--save-every`, `--resume`, `--fresh`.
+//! * `find_checkpoint` / `load_model_weights` — resume path resolution and
+//!   named-parameter state-dict / checkpoint loading.
+//! * `main` — GPU detection (under `cuda` feature), AdamW training loop,
+//!   `TrainingMonitor` progress logging, best + latest + periodic numbered
+//!   checkpointing.
 //!
 //! ```bash
 //! cargo run --example train_mnemosyne --release -p axonml-vision
 //! cargo run --example train_mnemosyne --release -p axonml-vision --features cuda
 //! ```
+//!
+//! # File
+//! `crates/axonml-vision/examples/train_mnemosyne.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::fs;
 use std::io::Read;

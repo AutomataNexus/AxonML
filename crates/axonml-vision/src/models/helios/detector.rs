@@ -1,13 +1,21 @@
-//! Helios Detector — Full Detection Pipeline
+//! Helios Detector — Full Object Detection Pipeline
+//!
+//! Implements `Helios`, the complete detection pipeline combining `CSPDarknet`
+//! backbone, `PANet` neck, and `HeliosHead` into a single model. Provides
+//! `forward_train()` returning raw per-scale outputs for loss computation,
+//! `forward_detect()` with DFL bbox decoding + NMS for inference, anchor-free
+//! grid generation, and DFL distribution-to-offset conversion. Implements the
+//! `Module` trait for standard forward pass returning decoded `Detection` results.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/helios/detector.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

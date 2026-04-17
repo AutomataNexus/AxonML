@@ -1,13 +1,20 @@
-//! Tensor Creation Functions
+//! Tensor factory functions.
+//!
+//! 372 lines. `zeros`, `ones`, `full`, `zeros_like`, `ones_like`, `full_like`,
+//! `eye`, `diag`, `rand` (uniform [0,1)), `randn` (standard normal), `uniform`
+//! (range), `normal` (parameterised), `randint`, `arange` (start/end/step),
+//! `linspace` (inclusive endpoints), `logspace`. All return CPU `Tensor<T>`;
+//! use `.to_device()` afterward for GPU.
 //!
 //! # File
 //! `crates/axonml-tensor/src/creation.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

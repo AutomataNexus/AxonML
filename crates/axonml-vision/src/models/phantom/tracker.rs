@@ -1,13 +1,21 @@
 //! Face State Tracker — GRU-based Persistent Face Identity
 //!
+//! Implements `FaceStateTracker` which maintains a GRU hidden state per tracked
+//! face across video frames, evolving face identity representations over time.
+//! Provides slot-based face tracking with feature-based matching, creation of
+//! new track slots, and eviction of stale tracks. Linear projection heads map
+//! GRU hidden states to face embeddings for re-identification and temporal
+//! identity consistency.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/phantom/tracker.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

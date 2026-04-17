@@ -1,18 +1,33 @@
-//! Profile Settings Page
+//! Profile Settings Page — Personal Information and Account Details
+//!
+//! Leptos page component `ProfileSettingsPage` that lets a signed-in user
+//! view and edit their profile. Loads current user data from the shared
+//! app state (`use_app_state`) into `name` / `email` signals on mount.
+//! Renders a personal-information form (name editable, email disabled
+//! pending support ticket), an avatar preview placeholder built from the
+//! first character of the name, and a read-only account-information card
+//! showing role, creation date, and user id. The submit handler currently
+//! fakes a 500ms save via `set_timeout` and shows a success toast — the
+//! real update-profile API call is not yet wired up.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/settings/profile.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -20,9 +35,16 @@ use leptos_router::*;
 use crate::components::{forms::*, icons::*, spinner::*};
 use crate::state::use_app_state;
 
+// =============================================================================
+// ProfileSettingsPage Component
+// =============================================================================
+
 /// Profile settings page
 #[component]
 pub fn ProfileSettingsPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Signals and State
+    // -------------------------------------------------------------------------
     let state = use_app_state();
 
     let name = create_rw_signal(String::new());
@@ -35,6 +57,9 @@ pub fn ProfileSettingsPage() -> impl IntoView {
     let state_for_submit = state.clone();
     let state_for_view = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Load Current User
+    // -------------------------------------------------------------------------
     // Load current user data
     create_effect(move |_| {
         if let Some(user) = state_for_effect.user.get() {
@@ -43,6 +68,9 @@ pub fn ProfileSettingsPage() -> impl IntoView {
         }
     });
 
+    // -------------------------------------------------------------------------
+    // Event Handlers
+    // -------------------------------------------------------------------------
     let on_submit = move |e: web_sys::SubmitEvent| {
         e.prevent_default();
         saving.set(true);
@@ -60,6 +88,9 @@ pub fn ProfileSettingsPage() -> impl IntoView {
         );
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page settings-profile-page">
             <div class="page-header">

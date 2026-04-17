@@ -1,20 +1,30 @@
 # nexus-serve
 
-Pure-Rust LLM inference server. Replaces ollama with native AxonML inference over an OpenAI-compatible REST API.
+Pure-Rust LLM inference server built on AxonML. Loads GGUF blobs directly, runs decoder-only transformers across multiple architecture dialects, and serves both the OpenAI-compatible REST surface and the Anthropic Messages API from the same process.
 
-**Status:** Working on Qwen2.5 Coder 1.5B (CUDA + CPU). Tested end-to-end: `"What is 2+2?"` → `"2 + 2 equals 4."`
+**Version:** 0.6.1 — updated 2026-04-16.
+
+nexus-serve is **its own Rust LLM inference stack**, not a llama.cpp port. GGUF is just a file format it shares. It pulls `axonml-core` / `axonml-tensor` / `axonml-autograd` / `axonml-nn` / `axonml-llm` / `axonml-serialize` / `axonml-quant` from `/opt/AxonML/crates/` via path dependency, runs custom CUDA kernels for Q4_K / Q6_K GEMV and fused flash-decode + prefill attention, and mmap-loads weights so cold-start is measured in seconds.
+
+**Status:** Serves Qwen2 / LLaMA / Mistral / Phi, Gemma 2/3/4, and BitNet b1.58 at this point. The DeepSeek-R1-Distill-Qwen-7B "bridge" runs ~9–10 tok/s on an RTX 3090 with the fused flash-decode kernel.
 
 ---
 
 ## Features
 
-- **GGUF model loading** — reads ollama's quantized model blobs directly (Q4_K, Q6_K, Q8_0, Q4_0, F16, F32)
-- **LLaMA-family architectures** — LLaMA, Qwen2, Mistral (split-halves RoPE, GQA, optional Q/K/V biases)
-- **KV cache** for fast incremental decoding
-- **HuggingFace tokenizer** (`tokenizer.json`) + GGUF-embedded BPE fallback
-- **CUDA GPU acceleration** via `--features cuda`
-- **Multi-model registry** — load multiple GGUF files, serve them from one endpoint
-- **OpenAI-compatible API** — drop-in replacement for OpenAI/ollama clients
+- **GGUF model loading** — reads ollama's mmap-mapped quantized blobs directly. Dequant kernels ported verbatim from `ggml-quants.c` (F32, F16, BF16, Q8_0, Q4_0, Q4_K with 6-bit packed scales+mins, Q6_K 4-way split) plus BitNet's I2S ternary dtype (code 36, 66-byte / 256-elem blocks via `axonml-quant`).
+- **Multiple architecture dialects, dispatched at runtime by GGUF `architecture` string:**
+  - **LLaMA-family** (LLaMA, Qwen2, Mistral, Phi) — RMSNorm → QKV (with optional Q/K/V biases) → split-halves RoPE → GQA attention → FFN(SiLU).
+  - **Gemma 2 / 3 / 4** — sandwich RMSNorm (pre+post attn, pre+post FFN), per-head Q/K RMSNorm before RoPE, per-layer sliding-window vs full-attention pattern (every 6th layer is full for Gemma 4), dual RoPE bases (1e6 full / 1e4 SWA), final logit softcap, and Gemma 3n altup (per-layer input embedding table added into the hidden state).
+  - **BitNet b1.58** — I2S ternary weights via `axonml_quant::bitnet`, plus the `attn_sub_norm` / `ffn_sub_norm` stabilizer RMSNorms.
+- **KV cache** for incremental decoding, with `OnceLock`-cached GPU uploads per `Weight`.
+- **Fused CUDA kernels** — flash-decode + prefill attention from `axonml_kernels::flash_attention` (SWA-aware variant picks masked vs full per-layer on Gemma), Q4_K / Q6_K GEMV with dequant-in-shader.
+- **Pre-transposed weights at load** — no per-forward allocation.
+- **HuggingFace tokenizer** (`tokenizer.json`) with GGUF-embedded BPE and a char-level fallback.
+- **CUDA GPU acceleration** via `--features cuda`.
+- **Multi-model registry** — load multiple GGUF files and serve them from one endpoint.
+- **OpenAI-compatible API** + **Anthropic Messages API** (`/v1/messages`) in the same process.
+- **SSE streaming** on both APIs.
 
 ## Quick Start
 
@@ -28,7 +38,7 @@ target/release/nexus-serve \
   --alias oracle /usr/share/ollama/.ollama/models/blobs/sha256-4c27e0f5b5adf02ac956c7322bd2ee7636fe3f45a8512c9aba5385242cb6e09a \
   --port 11435
 
-# Query using the alias
+# Query using the alias (OpenAI shape)
 curl http://localhost:11435/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -39,9 +49,11 @@ curl http://localhost:11435/v1/chat/completions \
   }'
 ```
 
+GGUF files are identified by magic bytes, **not** extension — ollama's `sha256-...` blob paths with no extension load fine.
+
 ## Model Aliases
 
-Use `--alias NAME PATH` to load a model AND register a friendly name for it. Requests for `NAME` will route to the canonical GGUF model name.
+Use `--alias NAME PATH` to load a model AND register a friendly name for it. Requests for `NAME` are resolved through `ModelRegistry::resolve` to the canonical GGUF model name.
 
 ```bash
 nexus-serve --alias sage /path/to/qwen.gguf --alias oracle /path/to/gemma.gguf
@@ -96,9 +108,59 @@ Resolved config:
   hardware  = Intel Core Ultra 9 275HX
 ```
 
-## Streaming
+## Endpoints
 
-`POST /v1/chat/completions` with `"stream": true` returns an OpenAI-compatible Server-Sent Events (SSE) stream. The server emits:
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Server health check — returns `{ status, server, version }` |
+| `GET` | `/v1/models` | List loaded models (including aliases, `object: "model-alias"`) |
+| `POST` | `/v1/chat/completions` | OpenAI chat — per-arch template auto-applied |
+| `POST` | `/v1/completions` | OpenAI raw text completion |
+| `POST` | `/v1/messages` | **Anthropic Messages API** — content blocks, `stop_reason: "tool_use"`, tool calls via prompt-template tagging |
+
+## Chat Templates
+
+`/v1/chat/completions` and `/v1/messages` dispatch per-architecture prompt formatting:
+
+- **Gemma 3/4** — `<start_of_turn>…<end_of_turn>` markers (`format_gemma`).
+- **BitNet** — LLaMA-3 header ids (`format_llama3`).
+- **Everything else** — ChatML (`<|im_start|>role\n…<|im_end|>`).
+
+For custom templates, use `/v1/completions` and format the prompt yourself.
+
+## Anthropic Messages API (`/v1/messages`)
+
+`nexus-agent` and any Claude-SDK-compatible client can talk to nexus-serve with one URL swap. Key shape differences from `/v1/chat/completions`:
+
+- Response `content` is an array of content blocks (`{"type":"text"}` or `{"type":"tool_use"}`) — not a single string.
+- `stop_reason` uses `"end_turn" | "max_tokens" | "stop_sequence" | "tool_use"`.
+- `tools[]` carries `{name, description, input_schema}`.
+- Assistant turns with tool calls come back as `[{type:"text",…}, {type:"tool_use", id, name, input}]` with `stop_reason: "tool_use"`.
+
+### Tool-call delivery (prompt-template)
+
+BitNet b1.58-2B was not fine-tuned on Anthropic's tool-use tokens, so nexus-serve uses **prompt-template tool calling**: a system preamble teaches the model to emit a recognisable tag sequence, and the server parses it back into proper `tool_use` content blocks.
+
+Model-emitted format:
+
+```text
+I'll read the file first.
+<tool_use>
+{"name": "read_file", "input": {"path": "/etc/hosts"}}
+</tool_use>
+```
+
+Parsing rules:
+- Text before the first `<tool_use>` becomes a `text` block.
+- Each `<tool_use>...</tool_use>` pair becomes a `tool_use` block; the inner body is parsed as JSON `{name, input}`.
+- Generation halts after the first `</tool_use>` so the client can run the tool and return a `tool_result`. If the model never emits a tool call, we fall through to `stop_reason: "end_turn"`.
+- A `</think>` guard is applied for reasoning-model output (DeepSeek-R1, QwQ) so the chain-of-thought isn't returned as a tool call.
+
+When we ship a BitNet fine-tune with dedicated `<|tool_use|>` / `<|tool_end|>` tokens (the Trident-Coder BPE already reserves them at IDs 5–7), we'll swap the tag parser for a stop-token parser on the wire.
+
+## Streaming (SSE)
+
+`POST /v1/chat/completions` with `"stream": true` returns an OpenAI-compatible SSE stream. The server emits:
 
 1. An initial `role` chunk (`delta.role = "assistant"`) so clients can render an empty assistant bubble immediately.
 2. One `content` chunk per generated token (`delta.content = "<piece>"`), emitted the moment the token callback fires — not after generation completes.
@@ -106,90 +168,71 @@ Resolved config:
 4. A final chunk carrying `finish_reason = "stop"` or `"length"`.
 5. An OpenAI-spec `data: [DONE]` terminator line.
 
+`POST /v1/messages` with `stream: true` emits Anthropic-shaped events in order: `message_start`, `content_block_start` (text, index=0), many `content_block_delta` (one per decoded token), `content_block_stop`, `message_delta` (final `stop_reason` + `usage`), `message_stop`. Tool-use parsing still runs server-side **after** the stream completes — clients that need structured tool_use blocks should either collect the text deltas and re-parse, or re-request non-streamed when `stop_reason` indicates a tool call.
+
 Generation runs on a `tokio::task::spawn_blocking` thread so the tokio runtime stays responsive; each token flows through an unbounded `mpsc` channel into the SSE response body. Client disconnects are detected by the `tx.send(...).is_ok()` return value — generation stops early if the receiver drops.
-
-Example:
-
-```bash
-curl -N http://localhost:11435/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "sage",
-    "messages": [{"role":"user","content":"Count to 3."}],
-    "max_tokens": 20,
-    "stream": true
-  }'
-```
-
-Throughput depends heavily on backend:
-
-| Model | Build | Throughput |
-|---|---|---|
-| Sage (Qwen2.5 Coder 1.5B) f32 | CPU (24 threads) | ~0.05–0.3 tok/s |
-| Sage f32 | `--features cuda` | ~10–50× the CPU rate |
-
-On CPU, prefill of even a short prompt can take a minute or more. That's a raw compute bottleneck, not a streaming bug — the first token chunk is sent the instant the model emits it.
-
-## Endpoints
-
-All OpenAI-compatible:
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/v1/chat/completions` | Chat with ChatML template auto-applied |
-| `POST` | `/v1/completions` | Raw text completion |
-| `GET` | `/v1/models` | List loaded models |
-| `GET` | `/health` | Server health check |
-
-The server always applies the ChatML template (`<|im_start|>role\n...<|im_end|>`) for `/v1/chat/completions`. For models using a different template, use `/v1/completions` and format the prompt yourself.
 
 ## Architecture
 
 ```
 src/
-├── main.rs              CLI + server startup
-├── lib.rs               Module exports
+├── main.rs                 CLI + TOML config + server startup
+├── lib.rs                  Module exports
 ├── api/
-│   ├── types.rs         OpenAI request/response types
-│   └── routes.rs        HTTP handlers + ChatML formatter
+│   ├── types.rs            OpenAI request/response types
+│   ├── routes.rs           OpenAI handlers + per-arch chat template dispatcher
+│   ├── messages.rs         Anthropic /v1/messages handler (tool-use tag parser,
+│   │                       SSE streaming, content blocks)
+│   └── mod.rs
 ├── model/
-│   ├── gguf.rs          GGUF parser + quantized dequantization
-│   │                      (Q4_K, Q6_K, Q8_0, Q4_0, F16 — ported from ggml-quants.c)
-│   ├── inference.rs     Transformer forward pass + KV cache
-│   │                      (LLaMA-family: RMSNorm → QKV → split-halves RoPE →
-│   │                       attention → FFN(SiLU))
-│   └── registry.rs      Multi-model registry
-└── tokenizer/
-    └── mod.rs           HuggingFace / GGUF BPE / char-level fallback
+│   ├── gguf.rs             GGUF parser (v2/v3), metadata KV, tensor directory,
+│   │                       scalar dequant kernels (Q4_0, Q8_0, Q4_K, Q6_K, F16)
+│   ├── weight.rs           Weight wrapper: keep-packed vs eager-dequant,
+│   │                       OnceLock-cached GPU upload
+│   ├── inference.rs        Transformer forward pass + KV cache + sampling
+│   │                       (LLaMA-family, Gemma 2/3/4, BitNet b1.58)
+│   ├── registry.rs         Multi-model registry + alias resolution
+│   └── mod.rs
+├── tokenizer/
+│   └── mod.rs              HuggingFace / GGUF BPE / char-level fallback
+└── bin/
+    └── gguf_inspect.rs     GGUF file inspector (header + tensor list)
 ```
 
-### Inference pipeline
+Tests in `tests/`:
+- `q4k_block_test.rs`, `q6k_block_test.rs` — standalone block-level dequant tests against Python reference.
+- `inspect_gemma.rs` — Gemma metadata / tensor-shape sanity check.
+
+### Inference pipeline (LLaMA-family)
 
 For each layer:
 
-1. RMS Norm (CPU — element-wise, fast)
-2. Move normed input to weight device (CUDA)
-3. QKV projections via `Tensor::matmul` on GPU
+1. RMS Norm
+2. Move normed input to weight device (CUDA when enabled)
+3. QKV projections via pre-transposed matmul
 4. Add Q/K/V biases (Qwen2 has all three; LLaMA has none)
-5. Split-halves RoPE (`(x[i], x[i+d/2])` pairs, not interleaved)
+5. Split-halves RoPE (`(x[i], x[i+d/2])` pairs — **not** interleaved)
 6. Append K/V to KV cache
-7. Attention (GQA: `n_heads / n_kv_heads` queries share each KV head)
+7. Attention (GQA: `n_heads / n_kv_heads` queries share each KV head) — fused flash-decode kernel on CUDA
 8. Output projection + residual
 9. FFN (gate/up SiLU + down) + residual
 
+Gemma 4 swaps this for a distinct per-layer layout (sandwich norms, Q/K norm, per-layer input embedding table from `add_per_layer_input_embed`, SWA-variant decode attention on sliding-window layers). BitNet inserts `attn_sub_norm` / `ffn_sub_norm` stabilizer norms and replaces QKV / output / FFN matmuls with BitLinear via `axonml_quant::bitnet`.
+
 ## Quantization Support
 
-Dequantization is ported verbatim from `ggml-quants.c` to guarantee compatibility with any GGUF file produced by llama.cpp / ollama.
+Dequant is ported from `ggml-quants.c` to guarantee compatibility with any GGUF file produced by llama.cpp / ollama.
 
 | Type | Block size | Block bytes | Supported |
 |---|---|---|---|
-| F32 | 1 | 4 | ✓ |
-| F16 | 1 | 2 | ✓ |
-| BF16 | 1 | 2 | ✓ |
-| Q8_0 | 32 | 34 | ✓ |
-| Q4_0 | 32 | 18 | ✓ |
-| Q4_K | 256 | 144 | ✓ (with 6-bit scales+mins, `get_scale_min_k4`) |
-| Q6_K | 256 | 210 | ✓ (4-way split per 128 elements) |
+| F32 | 1 | 4 | Yes |
+| F16 | 1 | 2 | Yes |
+| BF16 | 1 | 2 | Yes |
+| Q8_0 | 32 | 34 | Yes |
+| Q4_0 | 32 | 18 | Yes |
+| Q4_K | 256 | 144 | Yes (6-bit packed scales+mins via `get_scale_min_k4`) |
+| Q6_K | 256 | 210 | Yes (4-way split per 128 elements) |
+| I2_S (BitNet) | 256 | 66 | Yes (ternary weights + trailing scale, via `axonml-quant`) |
 
 Verified with standalone block tests against Python reference:
 
@@ -204,29 +247,28 @@ The lazy-dequant path (rayon-parallel block dequant into per-matmul scratch, see
 
 | Prompt | Eager f32 output | `--quantized` output | Match |
 |---|---|---|---|
-| "What is 2+2?" | `2 + 2 equals 4.` | `2 + 2 equals 4.` | ✓ |
-| "Name a color." | `Blue` | `Blue` | ✓ |
-| "Say the word hello." | `Hello` | `Hello` | ✓ |
+| "What is 2+2?" | `2 + 2 equals 4.` | `2 + 2 equals 4.` | Yes |
+| "Name a color." | `Blue` | `Blue` | Yes |
+| "Say the word hello." | `Hello` | `Hello` | Yes |
 
-Performance cost on CPU (24 threads, same machine, same prompt): ~22 % slower in `--quantized` mode — the per-matmul dequant pass is added work even when rayon-parallelized. Memory cost: Sage drops from 6.2 GB RAM (eager) to ~1.0 GB (lazy), so the trade is worth it on RAM-constrained systems and for multi-model setups. No accuracy penalty.
+Performance cost on CPU (24 threads, same machine, same prompt): roughly 22% slower in `--quantized` mode — the per-matmul dequant is added work even when rayon-parallelized. Memory cost: Sage drops from 6.2 GB RAM (eager) to ~1.0 GB (lazy), so the trade is worth it on RAM-constrained systems and for multi-model setups. No accuracy penalty.
 
 ## Known Limitations
 
-- **Gemma architecture** — not yet supported (requires different attention + rotary)
-- **Phi, Mamba, MoE** — not yet supported
-- **Concurrent requests** — correctness is fine (each `generate_stream()` call allocates its own `KvCache` on the stack; two requests return correct, prompt-specific answers in parallel). The shared `Arc<InferenceEngine>` only holds read-only weights. **Throughput, however, is not additive**: concurrent requests share the rayon CPU pool (and, for GPU, the CUDA context), so two simultaneous generations each run at roughly half the speed of a solo one. If you need real concurrent throughput, horizontal-scale by running multiple `nexus-serve` processes behind a load balancer.
-- **Oracle (Gemma 4, 9.6 GB GGUF → ~20 GB f32)** — needs 20 GB+ RAM for eager dequant, or Gemma architecture support for lazy dequant (see above). Works in neither mode today.
+- **Mamba / SSM** — not yet supported.
+- **MoE architectures** — not yet supported.
+- **Concurrent requests** — correctness is fine (each `generate_stream()` allocates its own `KvCache` on the stack; two requests return correct, prompt-specific answers in parallel; `Arc<InferenceEngine>` only holds read-only weights). Throughput is **not additive** — concurrent requests share the rayon CPU pool and, for GPU, the CUDA context, so two simultaneous generations each run at roughly half the speed of a solo one. Horizontal-scale with multiple `nexus-serve` processes behind a load balancer if you need real concurrency.
 
 ## Historical Bugs (for reference)
 
-Six distinct bugs had to be fixed for Qwen2 to produce coherent output:
+Six distinct bugs had to be fixed for the Qwen2 bridge to produce coherent output — documented in `~/.claude/projects/-opt-AxonML/memory/reference_gguf_inference_gotchas.md`:
 
-1. **F16 subnormal dequantization** — initial exponent was `-1` instead of `-14` (1000x scale error)
-2. **Q4_K dequantization** — wrong sub-block loop structure; each 64-element chunk uses two different scales
-3. **Q6_K dequantization** — wrong per-element approach; ggml uses 128-element 4-way split
-4. **Split-halves RoPE** — our RoPE was interleaved (GPT-NeoX style); LLaMA/Qwen2/Mistral use split-halves
-5. **V bias missing** — Qwen2 has Q/K/V biases; only Q/K were being applied
-6. **ChatML template** — was passing raw `"role: content\n"` instead of proper `<|im_start|>` markers
+1. **F16 subnormal dequantization** — initial exponent was `-1` instead of `-14` (1000× scale error).
+2. **Q4_K dequantization** — wrong sub-block loop structure; each 64-element chunk uses two different scales.
+3. **Q6_K dequantization** — wrong per-element approach; ggml uses 128-element 4-way split.
+4. **Split-halves RoPE** — our RoPE was interleaved (GPT-NeoX style); LLaMA/Qwen2/Mistral use split-halves.
+5. **V bias missing** — Qwen2 has Q/K/V biases; only Q/K were being applied.
+6. **ChatML template** — was passing raw `"role: content\n"` instead of proper `<|im_start|>` markers.
 
 ## Port
 

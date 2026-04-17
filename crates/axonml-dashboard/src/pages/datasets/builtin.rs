@@ -1,18 +1,37 @@
-//! Built-in Datasets Browser Page
+//! Built-in Datasets Browser Page — Curated Dataset Library
+//!
+//! Browser for preconfigured datasets pulled from the AxonML data hub and
+//! external sources. `BuiltinDatasetsPage` loads `DatasetSource` filter pills
+//! and a `Vec<BuiltinDataset>` via `api::builtin_datasets::list_sources` and
+//! `api::builtin_datasets::list`, refetching whenever the selected source
+//! changes. A `SearchBar` child fires `api::builtin_datasets::search` on
+//! Enter/click (scoped to `selected_source`, limit 50) and swaps the main
+//! layout between `DatasetsGrid` (tile cards with source badge, data-type
+//! icon, sample/class/size stats, task/data-type tags, and a Prepare button
+//! that calls `api::builtin_datasets::prepare`) and `SearchResultsGrid`
+//! (compact rows with View and Prepare buttons). Clicking a card opens
+//! `DatasetDetailModal`, which shows full metadata, an optional
+//! `loading_code` snippet, and a Prepare action. A local `format_number`
+//! helper renders large counts as K/M abbreviations.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/datasets/builtin.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 
@@ -21,11 +40,18 @@ use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// Builtin Datasets Page
+// =============================================================================
+
 /// Built-in datasets browser page
 #[component]
 pub fn BuiltinDatasetsPage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (datasets, set_datasets) = create_signal::<Vec<BuiltinDataset>>(vec![]);
     let (sources, set_sources) = create_signal::<Vec<DatasetSource>>(vec![]);
@@ -39,6 +65,9 @@ pub fn BuiltinDatasetsPage() -> impl IntoView {
 
     let state_for_fetch = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Data Fetch
+    // -------------------------------------------------------------------------
     // Fetch initial data
     create_effect(move |_| {
         let state = state_for_fetch.clone();
@@ -59,6 +88,9 @@ pub fn BuiltinDatasetsPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Source Filter Refetch
+    // -------------------------------------------------------------------------
     // Refetch when source changes
     let state_for_source = state.clone();
     create_effect(move |_| {
@@ -75,6 +107,9 @@ pub fn BuiltinDatasetsPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page builtin-datasets-page">
             <div class="page-header">
@@ -166,6 +201,10 @@ pub fn BuiltinDatasetsPage() -> impl IntoView {
     }
 }
 
+// =============================================================================
+// Search Bar
+// =============================================================================
+
 /// Search bar component
 #[component]
 fn SearchBar(
@@ -249,6 +288,10 @@ fn SearchBar(
         </div>
     }
 }
+
+// =============================================================================
+// Datasets Grid
+// =============================================================================
 
 /// Datasets grid component
 #[component]
@@ -364,6 +407,10 @@ fn DatasetsGrid(
     }
 }
 
+// =============================================================================
+// Search Results Grid
+// =============================================================================
+
 /// Search results grid
 #[component]
 fn SearchResultsGrid(
@@ -457,6 +504,10 @@ fn SearchResultsGrid(
         </div>
     }
 }
+
+// =============================================================================
+// Dataset Detail Modal
+// =============================================================================
 
 /// Dataset detail modal
 #[component]
@@ -574,6 +625,10 @@ fn DatasetDetailModal(
         })}
     }
 }
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
 
 fn format_number(n: u64) -> String {
     if n >= 1_000_000 {

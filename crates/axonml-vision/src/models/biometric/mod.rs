@@ -1,13 +1,27 @@
 //! Aegis Identity — Novel Unified Biometric Framework
 //!
+//! Top-level module for the Aegis biometric suite. Re-exports all four modality
+//! models (`MnemosyneIdentity` for face, `AriadneFingerprint` for fingerprint,
+//! `EchoSpeaker` for voice, `ArgusIris` for iris) plus the `ThemisFusion`
+//! uncertainty-aware fusion layer and `AegisIdentity`/`IdentityBank` for
+//! enrollment, verification, and identification. Defines core types including
+//! `BiometricModality`, `BiometricEvidence` (optional per-modality tensors with
+//! metadata), `BiometricConfig` (embedding dims, thresholds, crystallization
+//! steps), result structs for enrollment/verification/identification, liveness
+//! detection, quality assessment, forensic analysis, identity drift tracking,
+//! and FAR/FRR operating curves. Also provides utility functions for cosine
+//! similarity, L2 normalization, Euclidean distance, weighted cosine similarity,
+//! and distribution entropy.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/biometric/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

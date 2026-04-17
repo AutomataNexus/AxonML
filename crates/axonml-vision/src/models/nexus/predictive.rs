@@ -1,13 +1,21 @@
 //! Predictive Coding Module — Surprise-Gated Adaptive Compute
 //!
+//! Implements `MultiScalePredictiveCoding` which predicts the next frame's
+//! feature maps from the previous frame's features, computes prediction errors
+//! (surprise signals), and uses learned surprise gates to route additional
+//! compute to regions where predictions failed. This enables efficient temporal
+//! processing by skipping computation in predictable (static) regions and
+//! focusing on dynamic scene changes.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/nexus/predictive.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,22 +1,58 @@
-//! Form Input Components
+//! Form Input Components — Text, Select, Checkbox, Toggle, Radio, File, Code
+//!
+//! The dashboard's reusable form-control library. Every component is a
+//! Leptos `#[component]` that binds to an `RwSignal`, accepts an optional
+//! `error: MaybeSignal<Option<String>>` for inline validation, and renders
+//! the same `form-group` / `form-label` / `form-helper` / `form-error`
+//! CSS skeleton.
+//!
+//! Surface:
+//! - `InputType` enum + `as_str()` — maps to HTML `<input type="...">`.
+//! - `TextInput` — text/email/password/number/etc with icon slot, required/
+//!   disabled/readonly, password show/hide toggle, optional `on_blur` callback.
+//! - `TextArea` — multi-line variant sharing the same error/helper treatment.
+//! - `Select<T>` — generic typed select; maps option index to the associated
+//!   value when the `<select>` fires `change`.
+//! - `Checkbox` — styled checkbox with custom box + `IconCheck`.
+//! - `Toggle` — sliding toggle-switch variant backed by a checkbox.
+//! - `RadioGroup<T>` — named radio set over a `(T, String)` list.
+//! - `FileInput` — drag-and-drop dropzone with optional `accept` filter,
+//!   `multiple` support, and an `on_select: Callback<FileList>` that fires
+//!   on both native change and drop events. Generates a unique input id
+//!   via `js_sys::Math::random` so the visual `<label>` targets its hidden
+//!   `<input type="file">`.
+//! - `NumberInput` — `f64` with increment/decrement buttons clamped to
+//!   optional `min`/`max` and a configurable `step`.
+//! - `CodeInput` — N-digit MFA code entry: each slot is a single-char input
+//!   that auto-advances on digit entry and walks back on `Backspace`; when
+//!   the full code is present, an optional `on_complete` callback fires.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/forms.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use crate::components::icons::*;
 use leptos::*;
 use wasm_bindgen::JsCast;
+
+// =============================================================================
+// InputType Enum
+// =============================================================================
 
 /// Input field types
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -50,6 +86,10 @@ impl InputType {
         }
     }
 }
+
+// =============================================================================
+// TextInput
+// =============================================================================
 
 /// Text input component
 #[component]
@@ -151,6 +191,10 @@ pub fn TextInput(
     }
 }
 
+// =============================================================================
+// TextArea
+// =============================================================================
+
 /// Textarea component
 #[component]
 pub fn TextArea(
@@ -207,6 +251,10 @@ pub fn TextArea(
         </div>
     }
 }
+
+// =============================================================================
+// Select
+// =============================================================================
 
 /// Select dropdown component
 #[component]
@@ -278,6 +326,10 @@ pub fn Select<T: Clone + PartialEq + 'static>(
     }
 }
 
+// =============================================================================
+// Checkbox
+// =============================================================================
+
 /// Checkbox component
 #[component]
 pub fn Checkbox(
@@ -313,6 +365,10 @@ pub fn Checkbox(
         </div>
     }
 }
+
+// =============================================================================
+// Toggle
+// =============================================================================
 
 /// Toggle switch component
 #[component]
@@ -351,6 +407,10 @@ pub fn Toggle(
         </div>
     }
 }
+
+// =============================================================================
+// RadioGroup
+// =============================================================================
 
 /// Radio button group
 #[component]
@@ -405,6 +465,10 @@ pub fn RadioGroup<T: Clone + PartialEq + 'static>(
         </div>
     }
 }
+
+// =============================================================================
+// FileInput
+// =============================================================================
 
 /// File input component
 #[component]
@@ -514,6 +578,10 @@ pub fn FileInput(
     }
 }
 
+// =============================================================================
+// NumberInput
+// =============================================================================
+
 /// Number input with increment/decrement buttons
 #[component]
 pub fn NumberInput(
@@ -605,6 +673,10 @@ pub fn NumberInput(
         </div>
     }
 }
+
+// =============================================================================
+// CodeInput (TOTP / MFA)
+// =============================================================================
 
 /// Code input for TOTP codes
 #[component]

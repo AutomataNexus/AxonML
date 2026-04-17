@@ -1,29 +1,56 @@
-//! Ollama Client for Local LLM Inference
+//! Ollama Client — Local LLM Inference for AI Assistance
+//!
+//! HTTP client for a local Ollama service (default
+//! `http://127.0.0.1:11434`, default model `qwen2.5-coder:7b`). Defines
+//! `OllamaClient` (built on `reqwest::Client`) and the wire-level
+//! `GenerateRequest` / `GenerateOptions` / `GenerateResponse` structs.
+//! `generate_code` wraps prompts with a framework-aware system prompt and
+//! parses code-fence blocks out of the response via
+//! `extract_code_and_explanation`. `generate_markdown` is the docs variant.
+//! `is_available` pings `/api/tags`; `generate` posts to `/api/generate` and
+//! maps a 404 to `OllamaError::ModelNotFound`. `with_config` +
+//! `validate_internal_url` enforce SSRF protection by restricting the base
+//! URL to loopback or RFC1918 private networks over http/https. Errors flow
+//! through the `OllamaError` enum (Request/ServiceUnavailable/ModelNotFound/
+//! GenerationFailed/InvalidUrl). `CodeSuggestion` is the public result DTO.
 //!
 //! # File
 //! `crates/axonml-server/src/llm/ollama.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;
+
+// =============================================================================
+// Constants
+// =============================================================================
 
 /// Default Ollama endpoint
 pub const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434";
 
 /// Default model for code generation
 pub const DEFAULT_CODE_MODEL: &str = "qwen2.5-coder:7b";
+
+// =============================================================================
+// Error Type
+// =============================================================================
 
 #[derive(Error, Debug)]
 pub enum OllamaError {
@@ -43,6 +70,10 @@ pub enum OllamaError {
     #[error("Invalid URL: {0}")]
     InvalidUrl(String),
 }
+
+// =============================================================================
+// Wire Types — Requests and Responses
+// =============================================================================
 
 /// Ollama generate request
 #[derive(Debug, Serialize)]
@@ -101,6 +132,10 @@ pub struct GenerateResponse {
     pub eval_duration: Option<u64>,
 }
 
+// =============================================================================
+// Client
+// =============================================================================
+
 /// Ollama client for LLM inference
 #[derive(Clone)]
 pub struct OllamaClient {
@@ -110,6 +145,10 @@ pub struct OllamaClient {
 }
 
 impl OllamaClient {
+    // -------------------------------------------------------------------------
+    // Construction
+    // -------------------------------------------------------------------------
+
     /// Create a new Ollama client with default settings
     pub fn new() -> Self {
         Self {
@@ -131,6 +170,10 @@ impl OllamaClient {
         })
     }
 
+    // -------------------------------------------------------------------------
+    // Health Check
+    // -------------------------------------------------------------------------
+
     /// Check if Ollama service is available
     pub async fn is_available(&self) -> bool {
         let url = match Url::parse(&self.base_url).and_then(|u| u.join("/api/tags")) {
@@ -139,6 +182,10 @@ impl OllamaClient {
         };
         self.client.get(url).send().await.is_ok()
     }
+
+    // -------------------------------------------------------------------------
+    // High-Level Generation Helpers
+    // -------------------------------------------------------------------------
 
     /// Generate code based on a prompt
     pub async fn generate_code(
@@ -215,6 +262,10 @@ Be concise but comprehensive."#
         })
     }
 
+    // -------------------------------------------------------------------------
+    // Low-Level Generate Call
+    // -------------------------------------------------------------------------
+
     /// Raw generate call to Ollama
     pub async fn generate(
         &self,
@@ -252,6 +303,10 @@ impl Default for OllamaClient {
     }
 }
 
+// =============================================================================
+// Result DTOs
+// =============================================================================
+
 /// Result of code generation
 #[derive(Debug)]
 pub struct CodeSuggestion {
@@ -260,6 +315,10 @@ pub struct CodeSuggestion {
     pub model: String,
     pub tokens_generated: u32,
 }
+
+// =============================================================================
+// URL Validation (SSRF Protection)
+// =============================================================================
 
 /// SECURITY: Validate that a URL points to a loopback or private network address.
 /// Prevents SSRF by ensuring we only connect to internal services.
@@ -298,6 +357,10 @@ fn validate_internal_url(url_str: &str) -> Result<(), OllamaError> {
 
     Ok(())
 }
+
+// =============================================================================
+// Prompt Construction and Response Parsing
+// =============================================================================
 
 /// Build system prompt for code generation
 fn build_code_system_prompt(include_imports: bool) -> String {
@@ -373,6 +436,10 @@ fn extract_code_and_explanation(response: &str) -> (String, Option<String>) {
         (response.to_string(), None)
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

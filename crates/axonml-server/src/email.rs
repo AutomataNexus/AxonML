@@ -1,22 +1,46 @@
-//! Email service using Resend
+//! Email Service — Resend API Transactional Mail
+//!
+//! Wraps the Resend REST API (`https://api.resend.com/emails`) behind an
+//! `EmailService` struct that holds an optional API key and a `reqwest::Client`.
+//! Provides four HTML email templates used throughout the signup/approval flow:
+//!
+//! - `send_verification_email` — email-verification link for new registrations.
+//! - `send_admin_signup_notification` — notifies `devops@automatanexus.com`
+//!   when a user signs up.
+//! - `send_admin_approval_request` — sends an approval-action link to the
+//!   admin after a user verifies their email (includes location/IP metadata).
+//! - `send_welcome_email` — post-approval welcome with dashboard link.
+//!
+//! All emails are sent from `noreply@automatanexus.com`. The private
+//! `send_email` method POSTs a `ResendEmailRequest` JSON body with Bearer
+//! auth and logs the returned message ID via `tracing`.
 //!
 //! # File
 //! `crates/axonml-server/src/email.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+// =============================================================================
+// Error Types
+// =============================================================================
 
 #[derive(Error, Debug)]
 pub enum EmailError {
@@ -27,6 +51,10 @@ pub enum EmailError {
     #[error("Email service not configured - RESEND_API_KEY not set")]
     NotConfigured,
 }
+
+// =============================================================================
+// Resend API Types
+// =============================================================================
 
 #[derive(Debug, Serialize)]
 struct ResendEmailRequest {
@@ -40,6 +68,10 @@ struct ResendEmailRequest {
 struct ResendEmailResponse {
     id: String,
 }
+
+// =============================================================================
+// Email Service
+// =============================================================================
 
 pub struct EmailService {
     api_key: Option<String>,
@@ -60,6 +92,10 @@ impl EmailService {
     pub fn is_configured(&self) -> bool {
         self.api_key.is_some()
     }
+
+    // -------------------------------------------------------------------------
+    // User-Facing Emails
+    // -------------------------------------------------------------------------
 
     /// Send verification email to user
     pub async fn send_verification_email(
@@ -129,6 +165,82 @@ impl EmailService {
         self.send_email(to_email, "Verify Your Email - AxonML", &html)
             .await
     }
+
+    /// Send welcome email after approval
+    pub async fn send_welcome_email(
+        &self,
+        to_email: &str,
+        user_name: &str,
+        dashboard_url: &str,
+    ) -> Result<(), EmailError> {
+        let html = format!(
+            r#"
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Welcome to AxonML</title>
+            </head>
+            <body style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #111827; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #faf9f6;">
+                <div style="background-color: #ffffff; border-radius: 12px; padding: 40px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #14b8a6; font-size: 32px; margin: 0;">AxonML</h1>
+                    </div>
+
+                    <h2 style="color: #111827; font-size: 24px; margin-bottom: 16px;">Welcome, {}!</h2>
+
+                    <p style="color: #6b7280; font-size: 16px; margin-bottom: 24px;">
+                        Your account has been approved! You can now access the AxonML platform and start
+                        building amazing ML models.
+                    </p>
+
+                    <div style="text-align: center; margin: 32px 0;">
+                        <a href="{}" style="display: inline-block; background-color: #14b8a6; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                            Access Dashboard
+                        </a>
+                    </div>
+
+                    <div style="background-color: #f0fdfa; border-left: 4px solid #14b8a6; padding: 16px; margin: 24px 0; border-radius: 4px;">
+                        <h3 style="color: #111827; font-size: 16px; margin-top: 0;">Getting Started</h3>
+                        <ul style="color: #6b7280; font-size: 14px; margin: 0; padding-left: 20px;">
+                            <li>Explore the training dashboard</li>
+                            <li>Upload your first model</li>
+                            <li>Deploy inference endpoints</li>
+                            <li>Monitor metrics and performance</li>
+                        </ul>
+                    </div>
+
+                    <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">
+                        If you have any questions, feel free to reach out to our support team.
+                    </p>
+
+                    <div style="text-align: center; margin-top: 32px; padding-top: 24px; border-top: 1px solid #e5e7eb;">
+                        <p style="color: #9ca3af; font-size: 12px; margin: 4px 0;">
+                            Secured by AutomataNexus
+                        </p>
+                        <p style="color: #9ca3af; font-size: 12px; margin: 4px 0;">
+                            © 2026 AxonML. All rights reserved.
+                        </p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            "#,
+            user_name, dashboard_url
+        );
+
+        self.send_email(
+            to_email,
+            "Welcome to AxonML - Your Account is Active!",
+            &html,
+        )
+        .await
+    }
+
+    // -------------------------------------------------------------------------
+    // Admin Notification Emails
+    // -------------------------------------------------------------------------
 
     /// Send notification to admin about new user signup
     pub async fn send_admin_signup_notification(
@@ -275,77 +387,9 @@ impl EmailService {
         .await
     }
 
-    /// Send welcome email after approval
-    pub async fn send_welcome_email(
-        &self,
-        to_email: &str,
-        user_name: &str,
-        dashboard_url: &str,
-    ) -> Result<(), EmailError> {
-        let html = format!(
-            r#"
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Welcome to AxonML</title>
-            </head>
-            <body style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #111827; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #faf9f6;">
-                <div style="background-color: #ffffff; border-radius: 12px; padding: 40px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
-                    <div style="text-align: center; margin-bottom: 30px;">
-                        <h1 style="color: #14b8a6; font-size: 32px; margin: 0;">AxonML</h1>
-                    </div>
-
-                    <h2 style="color: #111827; font-size: 24px; margin-bottom: 16px;">Welcome, {}!</h2>
-
-                    <p style="color: #6b7280; font-size: 16px; margin-bottom: 24px;">
-                        Your account has been approved! You can now access the AxonML platform and start
-                        building amazing ML models.
-                    </p>
-
-                    <div style="text-align: center; margin: 32px 0;">
-                        <a href="{}" style="display: inline-block; background-color: #14b8a6; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
-                            Access Dashboard
-                        </a>
-                    </div>
-
-                    <div style="background-color: #f0fdfa; border-left: 4px solid #14b8a6; padding: 16px; margin: 24px 0; border-radius: 4px;">
-                        <h3 style="color: #111827; font-size: 16px; margin-top: 0;">Getting Started</h3>
-                        <ul style="color: #6b7280; font-size: 14px; margin: 0; padding-left: 20px;">
-                            <li>Explore the training dashboard</li>
-                            <li>Upload your first model</li>
-                            <li>Deploy inference endpoints</li>
-                            <li>Monitor metrics and performance</li>
-                        </ul>
-                    </div>
-
-                    <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">
-                        If you have any questions, feel free to reach out to our support team.
-                    </p>
-
-                    <div style="text-align: center; margin-top: 32px; padding-top: 24px; border-top: 1px solid #e5e7eb;">
-                        <p style="color: #9ca3af; font-size: 12px; margin: 4px 0;">
-                            Secured by AutomataNexus
-                        </p>
-                        <p style="color: #9ca3af; font-size: 12px; margin: 4px 0;">
-                            © 2026 AxonML. All rights reserved.
-                        </p>
-                    </div>
-                </div>
-            </body>
-            </html>
-            "#,
-            user_name, dashboard_url
-        );
-
-        self.send_email(
-            to_email,
-            "Welcome to AxonML - Your Account is Active!",
-            &html,
-        )
-        .await
-    }
+    // -------------------------------------------------------------------------
+    // Internal Send
+    // -------------------------------------------------------------------------
 
     /// Internal method to send email via Resend API
     async fn send_email(&self, to: &str, subject: &str, html: &str) -> Result<(), EmailError> {

@@ -1,13 +1,21 @@
-//! Parameter - Learnable Parameter Wrapper
+//! `Parameter` — named, gradient-tracked learnable weight.
+//!
+//! 208 lines. Wraps a `Variable` with a `name` string and `requires_grad` flag.
+//! `from_variable(name, variable)` is the primary constructor; `data()` /
+//! `set_data()` access the underlying tensor; `grad()` returns the accumulated
+//! gradient after `backward()`; `zero_grad()` clears it; `numel()` for
+//! parameter counting; `to_device()` for GPU migration. Implements `Clone`
+//! (shares the same `Variable` reference).
 //!
 //! # File
 //! `crates/axonml-nn/src/parameter.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

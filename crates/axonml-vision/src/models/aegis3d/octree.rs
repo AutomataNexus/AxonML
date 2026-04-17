@@ -1,13 +1,21 @@
-//! Adaptive Octree for Spatial Acceleration
+//! Adaptive Octree — Spatial Acceleration for Neural Implicit Surfaces
+//!
+//! Implements `AABB` (axis-aligned bounding box with subdivision, containment, and
+//! octant queries), `OctreeNode` (leaf/internal/empty enum carrying per-node `LocalSDF`
+//! networks), and `AdaptiveOctree` which manages depth-guided initialization from
+//! surface points, recursive SDF queries with optional LOD capping, leaf parameter
+//! collection for optimization, error-driven refinement, and marching-cubes mesh
+//! extraction at configurable resolution.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/aegis3d/octree.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -22,7 +30,7 @@ use super::mesh::{MarchingCubes, Mesh};
 use axonml_nn::{Module, Parameter};
 
 // =============================================================================
-// Octree Node
+// AABB (Axis-Aligned Bounding Box)
 // =============================================================================
 
 /// Axis-aligned bounding box for an octree node.
@@ -92,6 +100,10 @@ impl AABB {
         idx
     }
 }
+
+// =============================================================================
+// Octree Node
+// =============================================================================
 
 /// Octree node — either a leaf with an SDF network, or an internal node.
 pub enum OctreeNode {
@@ -170,6 +182,10 @@ impl AdaptiveOctree {
             sdf_num_freq: 4,
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Depth-Guided Initialization
+    // -------------------------------------------------------------------------
 
     /// Initialize octree using depth map predictions.
     ///
@@ -270,6 +286,10 @@ impl AdaptiveOctree {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // SDF Queries
+    // -------------------------------------------------------------------------
+
     /// Query SDF value at a point.
     ///
     /// Traverses the octree to find the leaf containing the point,
@@ -299,6 +319,10 @@ impl AdaptiveOctree {
             OctreeNode::Empty { .. } => 1.0, // Empty = far from surface
         }
     }
+
+    // -------------------------------------------------------------------------
+    // LOD-Limited Queries
+    // -------------------------------------------------------------------------
 
     /// Query SDF with level-of-detail limit.
     ///
@@ -344,6 +368,10 @@ impl AdaptiveOctree {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Parameter Collection
+    // -------------------------------------------------------------------------
+
     /// Collect all leaf SDF parameters for optimization.
     pub fn parameters(&self) -> Vec<Parameter> {
         let mut params = Vec::new();
@@ -364,6 +392,10 @@ impl AdaptiveOctree {
             OctreeNode::Empty { .. } => {}
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Counting
+    // -------------------------------------------------------------------------
 
     /// Count total leaf nodes.
     pub fn num_leaves(&self) -> usize {
@@ -391,6 +423,10 @@ impl AdaptiveOctree {
             }
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Affected Leaf Tracking
+    // -------------------------------------------------------------------------
 
     /// Returns indices of leaf nodes that contain any of the given points.
     ///
@@ -427,6 +463,10 @@ impl AdaptiveOctree {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Mesh Extraction
+    // -------------------------------------------------------------------------
+
     /// Extract a mesh from the octree SDF using marching cubes.
     pub fn extract_mesh(&self, resolution: usize) -> Mesh {
         let bounds = self.root.bounds();
@@ -444,6 +484,10 @@ impl AdaptiveOctree {
             bounds.max,
         )
     }
+
+    // -------------------------------------------------------------------------
+    // Refinement
+    // -------------------------------------------------------------------------
 
     /// Refine the octree by subdividing high-error leaves.
     ///

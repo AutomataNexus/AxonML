@@ -1,13 +1,27 @@
-//! Tensor - Core N-Dimensional Array Type
+//! Core `Tensor<T>` struct — 2170 lines, 76 public methods.
+//!
+//! Constructors (from_vec, from_slice, scalar, zeros, ones, randn, rand, full),
+//! properties (shape, numel, ndim, device, is_contiguous, strides, offset),
+//! shape ops (reshape, transpose, t, squeeze, unsqueeze, expand, permute,
+//! contiguous, narrow, select, index_select, cat, chunk, split, flip, roll),
+//! arithmetic (add, sub, mul, div, neg, abs, pow, add_scalar, mul_scalar,
+//! where_cond, clamp, clamp_min), reductions (sum, mean, max, min, prod,
+//! argmax, argmin, sum_dim, mean_dim, var_dim), activations (relu, sigmoid,
+//! tanh, softmax, log_softmax, gelu, silu, elu, leaky_relu), matmul (CPU
+//! via CpuBackend::matmul with GEMV fast path, GPU via cuBLAS + quantized
+//! Q4_K/Q6_K dispatch), indexing (gather, scatter, nonzero, unique, sort,
+//! argsort, topk), comparison (eq, gt, lt), cast (to, to_device), data
+//! access (to_vec, get, item), map/zip_map/zip_map3, and Display.
 //!
 //! # File
 //! `crates/axonml-tensor/src/tensor.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,20 +1,51 @@
-//! Intermediate Representation
+//! Intermediate Representation — Typed Tensor Graph for JIT
+//!
+//! Defines the JIT's typed graph IR. `NodeId` is a newtyped `usize` referencing
+//! a position in the node vector. `DataType` enumerates F32/F64/I32/I64/Bool
+//! with `size_bytes` accessor and an `F32` default. `Shape` wraps `Vec<usize>`
+//! and provides `dims`, `ndim`, `numel`, NumPy-style `broadcast_compatible`
+//! right-aligned dimension checking, and `broadcast_shape` computing the
+//! broadcast result, with `From<&[usize]>` and `From<Vec<usize>>` conversions.
+//! The `Op` enum covers inputs/outputs/constants, binary arithmetic
+//! (Add/Sub/Mul/Div/Pow/Max/Min), unary math (Neg/Abs/Sqrt/Exp/Log/Sin/Cos/Tanh),
+//! activations (Relu/Sigmoid/Gelu/Silu), scalar biases (AddScalar/MulScalar),
+//! reductions (Sum/SumAxis/Mean/MeanAxis/MaxAxis) with keepdim and negative axis
+//! support, shape manipulation (Reshape/Transpose/Squeeze/Unsqueeze/Broadcast),
+//! MatMul, comparisons (Gt/Lt/Eq), Where selection, and Cast/Contiguous. `Op`
+//! helpers `inputs()`, `is_elementwise()`, and `is_reduction()` classify nodes
+//! for optimizer passes. `Node` carries id, op, dtype, and shape. `Graph`
+//! stores the node vector plus `FxHashMap` input/output name tables, offering
+//! `add_node`, `register_input`/`register_output`, accessors, `topological_order`
+//! (simple id-order traversal since nodes are added in topo order), and
+//! `validate` that checks input references exist, respects DAG ordering, and
+//! confirms registered inputs actually point at `Op::Input` nodes. Tests cover
+//! shape numel/broadcast, graph creation with a ReLU pipeline, and `Op::inputs`
+//! across binary/unary/leaf variants.
 //!
 //! # File
 //! `crates/axonml-jit/src/ir.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use rustc_hash::FxHashMap;
+
+// =============================================================================
+// NodeId
+// =============================================================================
 
 /// Unique identifier for a node in the graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -26,6 +57,10 @@ impl NodeId {
         self.0
     }
 }
+
+// =============================================================================
+// DataType
+// =============================================================================
 
 /// Data type for tensor elements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -53,6 +88,10 @@ impl DataType {
         }
     }
 }
+
+// =============================================================================
+// Shape
+// =============================================================================
 
 /// Shape of a tensor (dimensions).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -139,6 +178,10 @@ impl From<Vec<usize>> for Shape {
         Self(dims)
     }
 }
+
+// =============================================================================
+// Op
+// =============================================================================
 
 /// Operations supported by the JIT compiler.
 #[derive(Debug, Clone, PartialEq)]
@@ -364,6 +407,10 @@ impl Op {
     }
 }
 
+// =============================================================================
+// Node and Graph
+// =============================================================================
+
 /// A node in the computation graph.
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -398,6 +445,10 @@ impl Graph {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Construction
+    // -------------------------------------------------------------------------
+
     /// Adds a node to the graph.
     pub fn add_node(&mut self, op: Op, dtype: DataType, shape: Shape) -> NodeId {
         let id = NodeId(self.nodes.len());
@@ -419,6 +470,10 @@ impl Graph {
     pub fn register_output(&mut self, name: &str, id: NodeId) {
         self.outputs.insert(name.to_string(), id);
     }
+
+    // -------------------------------------------------------------------------
+    // Accessors
+    // -------------------------------------------------------------------------
 
     /// Returns the node for an ID.
     pub fn node(&self, id: NodeId) -> &Node {
@@ -465,6 +520,10 @@ impl Graph {
         self.outputs.get(name).copied()
     }
 
+    // -------------------------------------------------------------------------
+    // Traversal and Validation
+    // -------------------------------------------------------------------------
+
     /// Returns nodes in topological order.
     pub fn topological_order(&self) -> Vec<NodeId> {
         // Simple topological sort since nodes are already added in order
@@ -508,6 +567,10 @@ impl Default for Graph {
         Self::new()
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

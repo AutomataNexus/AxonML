@@ -1,16 +1,77 @@
-//! Inference engine — dequantize GGUF weights, run transformer forward pass,
-//! sample tokens. No autograd graph — pure inference.
+//! inference — Transformer Forward Pass + KV Cache + Sampling
 //!
-//! Supports LLaMA-family architectures (LLaMA, Qwen2, Mistral, Gemma, Phi)
-//! which all share the same decoder-only transformer structure:
-//!   token_embd → N × (attn_norm → QKV → RoPE → attention → attn_output →
-//!                      ffn_norm → gate/up → SiLU → down) → output_norm → lm_head
+//! The inference engine proper for nexus-serve. Loads GGUF weights through an
+//! mmap-backed [`MappedGguf`], dequantizes or keeps-packed per [`Weight`],
+//! runs decoder-only forward passes across multiple architecture dialects,
+//! maintains a per-session KV cache, and samples tokens. No autograd graph —
+//! pure inference.
 //!
-//! Key optimizations:
-//! - **Pre-transposed weights** at load time (no per-forward allocation)
-//! - **KV cache** for incremental decoding (only process new token each step)
-//! - **Tensor::matmul** for BLAS-accelerated matrix multiplication
-//! - Element-wise ops stay as raw loops (already fast for 1D data)
+//! Top-level types and responsibilities:
+//! - [`InferenceConfig`]: hyperparameters extracted from GGUF metadata
+//!   (vocab_size, hidden_size, num_heads, head_dim, RoPE theta, RMSNorm eps,
+//!   and per-family [`GemmaConfig`] for dual-RoPE / SWA / softcap / altup).
+//! - [`MappedGguf`]: mmap + tensor directory + `load_tensor_f32` (dequant
+//!   to f32) and `load_tensor_raw` (keep-packed, with the I2_S +4-byte
+//!   trailing scale trick for BitNet).
+//! - [`InferenceEngine`]: canonical engine with `token_embed`, per-layer
+//!   [`LayerWeights`] (LLaMA-family) OR [`Gemma4Weights`] + [`Gemma4LayerWeights`]
+//!   (sandwich norms, Q/K norm, per-layer input embedding table), shared
+//!   `output_norm` + `lm_head`, and a `compute_device` for CUDA dispatch.
+//! - Generation: [`InferenceEngine::generate`] (block) and
+//!   [`InferenceEngine::generate_stream`] (per-token callback), both
+//!   running the architecture-dispatched forward with KV cache + sampling
+//!   (argmax when temperature ≈ 0, else top-p softmax sampling).
+//!
+//! Supported architectures (dispatched at runtime by `config.architecture`):
+//! - LLaMA-family (LLaMA, Qwen2, Mistral, Phi): `token_embd → N × (attn_norm
+//!   → QKV → split-halves RoPE → attention → attn_output → ffn_norm →
+//!   gate/up → SiLU → down) → output_norm → lm_head`.
+//! - Gemma 2/3/4: sandwich RMSNorm (pre+post attn, pre+post FFN), per-head
+//!   Q/K RMSNorm before RoPE, per-layer sliding-window vs full attention
+//!   pattern, dual RoPE bases (1e6 full / 1e4 SWA), final logit softcap,
+//!   Gemma 3n altup (per-layer input embeddings added into the hidden
+//!   state — see [`add_per_layer_input_embed`]).
+//! - BitNet b1.58: I2S ternary weights via `axonml_quant::bitnet`, plus the
+//!   `attn_sub_norm` / `ffn_sub_norm` stabilizer RMSNorms.
+//!
+//! Optimizations:
+//! - **Pre-transposed weights** at load time (no per-forward allocation).
+//! - **KV cache** for incremental decoding (only process the new token each
+//!   step), with CUDA-cached GPU uploads via `OnceLock` inside [`Weight`].
+//! - **Fused flash-decode attention** and **prefill attention** kernels
+//!   (see `axonml_kernels::flash_attention`) dispatched when the CUDA
+//!   feature is on. SWA-aware variant picks masked vs full per-layer.
+//! - **`Tensor::matmul`** for BLAS-accelerated CPU matmul; CUDA GEMV with
+//!   dequant-in-shader for Q4_K / Q6_K weights; element-wise ops stay as
+//!   raw loops (already fast for 1D data).
+//!
+//! Section map (already present as `=====` banners in this file):
+//! - Config extracted from GGUF metadata
+//! - Weight loading: GGUF → f32 tensors via mmap + dequantization
+//! - Inference Engine — PRE-TRANSPOSED weights + KV cache
+//! - Gemma 4 — distinct per-layer layout (sandwich norms, Q/K norm, etc.)
+//! - Math helpers
+//! - Gemma 3n altup (per-layer input embeddings)
+//! - Tensor loading helpers
+//!
+//! # File
+//! `nexus-serve/src/model/inference.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::collections::HashMap;
 use std::path::Path;

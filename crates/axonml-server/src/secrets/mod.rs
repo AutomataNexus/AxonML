@@ -1,18 +1,30 @@
-//! Secrets management with HashiCorp Vault integration.
+//! Secrets Management — Multi-Backend Secret Retrieval with Priority Fallback
+//!
+//! Defines the `SecretsBackend` trait for pluggable secret storage, `SecretKey`
+//! constants for well-known keys (JWT_SECRET, DB_USERNAME, DB_PASSWORD,
+//! RESEND_API_KEY), and the `SecretsManager` which tries multiple backends in
+//! priority order until a value is found. Includes `SecretsError` variants for
+//! not-found, Vault errors, config errors, and auth failures. Sub-modules `env`
+//! and `vault` provide the environment-variable and HashiCorp Vault backends.
 //!
 //! # File
 //! `crates/axonml-server/src/secrets/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Sub-modules
+// =============================================================================
 
 pub mod env;
 pub mod vault;

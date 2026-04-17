@@ -1,13 +1,20 @@
-//! Phantom Detector — Temporal Event-Driven Face Detection
+//! Phantom Detector — Temporal Event-Driven Face Detection Pipeline
+//!
+//! Implements `Phantom`, the complete face detection pipeline combining the
+//! BlazeBlock backbone, event encoder, Conv2d detection heads, and GRU-based
+//! face state tracker. Provides `forward_train()` for raw outputs, `detect()`
+//! for inference with bbox decoding and score thresholding, and `process_frame()`
+//! for temporal video processing with event-driven inter-keyframe updates.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/phantom/detector.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

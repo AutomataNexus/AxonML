@@ -1,340 +1,242 @@
 # axonml-profile Documentation
 
-> Performance profiling and bottleneck analysis for Axonml.
+> Performance profiling and bottleneck analysis for AxonML.
 
 ## Overview
 
-`axonml-profile` provides comprehensive profiling tools for understanding and optimizing ML workloads. It includes memory profiling, compute profiling, timeline analysis, and automatic bottleneck detection.
+`axonml-profile` is a unified profiler combining memory, compute, and
+timeline tracking, with automatic bottleneck analysis and multi-format
+report export. A RAII `ProfileGuard` and the `profile_scope!` macro give
+zero-overhead-when-disabled instrumentation. A global singleton
+(`global_profiler()`) is available for cross-module use.
+
+## Architecture
+
+```
+Profiler
++-- memory:  MemoryProfiler   (AllocationRecord, MemoryStats)
++-- compute: ComputeProfiler  (ProfiledOp, OperationStats)
++-- timeline: TimelineProfiler (Event, EventType)
+
+ProfileReport  -> Text / JSON / Markdown / HTML
+BottleneckAnalyzer -> Bottleneck (BottleneckType, severity)
+```
 
 ## Modules
 
-### profiler.rs
-
-Core profiling infrastructure.
-
-**Types:**
+### `lib` — unified `Profiler`
 
 ```rust
 pub struct Profiler {
-    // Central profiler collecting all metrics
-}
-
-pub struct ProfileGuard {
-    // RAII guard for timed sections
-}
-
-pub struct ProfileReport {
-    pub total_time: Duration,
-    pub operations: Vec<OperationProfile>,
-    pub memory_peak: usize,
-    pub memory_timeline: Vec<MemorySnapshot>,
-}
-
-pub struct OperationProfile {
-    pub name: String,
-    pub duration: Duration,
-    pub memory_used: usize,
-    pub call_count: usize,
+    pub memory:   Arc<RwLock<MemoryProfiler>>,
+    pub compute:  Arc<RwLock<ComputeProfiler>>,
+    pub timeline: Arc<RwLock<TimelineProfiler>>,
+    // + enabled flag (atomic)
 }
 ```
 
-**Key methods:**
+Key methods:
+
+- `new()`, `Default::default()`
+- `set_enabled(bool)`, `is_enabled()`
+- `start(name)`, `stop(name)` — wraps compute + timeline in one call
+- `record_alloc(name, bytes)`, `record_free(name, bytes)`
+- `peak_memory()`, `current_memory()`
+- `total_time(name)`, `avg_time(name)`
+- `reset()`, `summary() -> ProfileReport`, `print_summary()`
+- `analyze_bottlenecks() -> Vec<Bottleneck>`
+
+### `memory` — `MemoryProfiler`
+
+Tracks allocations and deallocations per name. Exposes `record_alloc`,
+`record_free`, `current_usage`, `peak_usage`, `reset`, `stats`, and
+per-name `AllocationRecord`. `MemoryStats` summarizes current / peak /
+per-name statistics.
+
+### `compute` — `ComputeProfiler`
+
+Per-op timing. `start(name)`, `stop(name)`, `total_time(name)`,
+`avg_time(name)`, `all_stats() -> Vec<OperationStats>`, `reset`.
+`ProfiledOp` captures a single timed op; `OperationStats` aggregates.
+
+### `timeline` — `TimelineProfiler`
+
+Event-based recording.
 
 ```rust
-impl Profiler {
-    pub fn new() -> Self;
-    pub fn start(&mut self);
-    pub fn stop(&mut self) -> ProfileReport;
-    pub fn scope(&self, name: &str) -> ProfileGuard;
-    pub fn record_op(&mut self, name: &str, duration: Duration);
+pub enum EventType { Start, End, Instant }
+pub struct Event { name, event_type, timestamp, /* ... */ }
+```
+
+`record(name, event_type)`, `events() -> &[Event]`, `reset`. Events can be
+exported via `ProfileReport` to timeline-compatible formats.
+
+### `report` — `ProfileReport` + `ReportFormat`
+
+```rust
+pub enum ReportFormat { Text, Json, Markdown, Html }
+pub struct ProfileReport { /* aggregated memory + compute + timeline */ }
+
+impl ProfileReport {
+    pub fn generate(profiler: &Profiler) -> Self;
+    pub fn render(&self, format: ReportFormat) -> String;
 }
 ```
 
-### memory.rs
-
-Memory profiling and tracking.
+### `bottleneck` — `BottleneckAnalyzer`
 
 ```rust
-pub struct MemoryProfiler {
-    // Tracks memory allocations and usage
-}
-
-pub struct MemorySnapshot {
-    pub timestamp: Instant,
-    pub allocated: usize,
-    pub peak: usize,
-    pub device: Device,
-}
-
-pub struct AllocationInfo {
-    pub size: usize,
-    pub device: Device,
-    pub tensor_id: Option<usize>,
-    pub timestamp: Instant,
-}
-
-impl MemoryProfiler {
-    pub fn new() -> Self;
-    pub fn track_allocation(&mut self, size: usize, device: Device);
-    pub fn track_deallocation(&mut self, size: usize, device: Device);
-    pub fn current_usage(&self) -> usize;
-    pub fn peak_usage(&self) -> usize;
-    pub fn snapshot(&self) -> MemorySnapshot;
-    pub fn timeline(&self) -> Vec<MemorySnapshot>;
-}
-```
-
-### compute.rs
-
-Compute operation profiling.
-
-```rust
-pub struct ComputeProfiler {
-    // Tracks compute operations
-}
-
-pub struct ComputeStats {
-    pub operation: String,
-    pub total_time: Duration,
-    pub call_count: usize,
-    pub avg_time: Duration,
-    pub min_time: Duration,
-    pub max_time: Duration,
-    pub flops: Option<u64>,
-}
-
-impl ComputeProfiler {
-    pub fn new() -> Self;
-    pub fn start_op(&mut self, name: &str) -> OpHandle;
-    pub fn end_op(&mut self, handle: OpHandle);
-    pub fn time_op<F, R>(&mut self, name: &str, f: F) -> R
-        where F: FnOnce() -> R;
-    pub fn stats(&self) -> Vec<ComputeStats>;
-    pub fn hotspots(&self, top_n: usize) -> Vec<ComputeStats>;
-}
-```
-
-### timeline.rs
-
-Timeline-based profiling with events.
-
-```rust
-pub struct TimelineProfiler {
-    // Records events on a timeline
-}
-
-pub struct TimelineEvent {
-    pub name: String,
-    pub category: EventCategory,
-    pub start: Instant,
-    pub duration: Duration,
-    pub metadata: HashMap<String, String>,
-}
-
-pub enum EventCategory {
-    Compute,
-    Memory,
-    DataLoad,
-    Sync,
-    Custom(String),
-}
-
-impl TimelineProfiler {
-    pub fn new() -> Self;
-    pub fn begin_event(&mut self, name: &str, category: EventCategory) -> EventId;
-    pub fn end_event(&mut self, id: EventId);
-    pub fn add_instant_event(&mut self, name: &str, category: EventCategory);
-    pub fn events(&self) -> &[TimelineEvent];
-    pub fn export_chrome_trace(&self) -> String;  // Chrome trace format
-}
-```
-
-### bottleneck.rs
-
-Automatic bottleneck detection and analysis.
-
-```rust
-pub struct BottleneckAnalyzer {
-    // Analyzes profiles for bottlenecks
+pub enum BottleneckType {
+    MemoryBound,
+    ComputeBound,
+    IOBound,
+    LaunchOverhead,
+    Synchronization,
+    // ...
 }
 
 pub struct Bottleneck {
-    pub kind: BottleneckKind,
-    pub severity: Severity,
+    pub kind: BottleneckType,
     pub description: String,
     pub suggestion: String,
-    pub affected_ops: Vec<String>,
-}
-
-pub enum BottleneckKind {
-    MemoryBound,
-    ComputeBound,
-    DataLoadBound,
-    SyncBound,
-    SmallBatches,
-    FragmentedMemory,
-    UnoptimizedOp,
-}
-
-pub enum Severity {
-    Low,
-    Medium,
-    High,
-    Critical,
+    // severity + affected ops
 }
 
 impl BottleneckAnalyzer {
     pub fn new() -> Self;
-    pub fn analyze(&self, report: &ProfileReport) -> Vec<Bottleneck>;
-    pub fn suggest_optimizations(&self, bottlenecks: &[Bottleneck]) -> Vec<String>;
+    pub fn analyze(&self, compute: &[OperationStats], memory: &MemoryStats) -> Vec<Bottleneck>;
 }
+```
+
+### `error` — `ProfileError`, `ProfileResult<T>`
+
+### `ProfileGuard` and `profile_scope!`
+
+RAII scope-based profiling:
+
+```rust
+use axonml_profile::{Profiler, ProfileGuard, profile_scope};
+
+let profiler = Profiler::new();
+
+{
+    let _guard = ProfileGuard::new(&profiler, "forward");
+    // ... forward pass ...
+} // auto stop on drop
+
+profile_scope!(&profiler, "backward");
+// ... backward pass ...
+```
+
+### Global profiler
+
+```rust
+use axonml_profile::{global_profiler, start, stop, record_alloc, record_free};
+
+start("op");
+// ... work ...
+stop("op");
+
+record_alloc("tensor_a", 1024);
+record_free("tensor_a", 1024);
+
+global_profiler().print_summary();
 ```
 
 ## Usage
 
-### Basic Profiling
+### Basic profiling
 
 ```rust
 use axonml_profile::{Profiler, ProfileGuard};
 
-let mut profiler = Profiler::new();
-profiler.start();
+let profiler = Profiler::new();
 
-// Your ML code here
 {
-    let _guard = profiler.scope("forward_pass");
-    // ... forward pass
+    let _g = ProfileGuard::new(&profiler, "forward");
+    // forward pass
 }
 
 {
-    let _guard = profiler.scope("backward_pass");
-    // ... backward pass
+    let _g = ProfileGuard::new(&profiler, "backward");
+    // backward pass
 }
 
-let report = profiler.stop();
-println!("Total time: {:?}", report.total_time);
-println!("Peak memory: {} bytes", report.memory_peak);
+profiler.print_summary();
+println!("peak memory: {} bytes", profiler.peak_memory());
 ```
 
-### Memory Profiling
-
-```rust
-use axonml_profile::MemoryProfiler;
-
-let mut mem_profiler = MemoryProfiler::new();
-
-// Track allocations
-mem_profiler.track_allocation(1024 * 1024, Device::Cpu);  // 1MB
-
-println!("Current: {} bytes", mem_profiler.current_usage());
-println!("Peak: {} bytes", mem_profiler.peak_usage());
-
-// Get timeline
-for snapshot in mem_profiler.timeline() {
-    println!("{:?}: {} bytes", snapshot.timestamp, snapshot.allocated);
-}
-```
-
-### Compute Profiling
-
-```rust
-use axonml_profile::ComputeProfiler;
-
-let mut compute_profiler = ComputeProfiler::new();
-
-// Time operations
-let result = compute_profiler.time_op("matmul", || {
-    matrix_a.matmul(&matrix_b)
-});
-
-// Get hotspots
-for stat in compute_profiler.hotspots(5) {
-    println!("{}: {:?} ({} calls)",
-        stat.operation, stat.avg_time, stat.call_count);
-}
-```
-
-### Timeline Export
-
-```rust
-use axonml_profile::{TimelineProfiler, EventCategory};
-
-let mut timeline = TimelineProfiler::new();
-
-let id = timeline.begin_event("batch_process", EventCategory::Compute);
-// ... process batch
-timeline.end_event(id);
-
-// Export for Chrome trace viewer
-let trace_json = timeline.export_chrome_trace();
-std::fs::write("trace.json", trace_json).unwrap();
-// Open chrome://tracing and load trace.json
-```
-
-### Bottleneck Analysis
-
-```rust
-use axonml_profile::{Profiler, BottleneckAnalyzer};
-
-let mut profiler = Profiler::new();
-// ... run profiled code
-let report = profiler.stop();
-
-let analyzer = BottleneckAnalyzer::new();
-let bottlenecks = analyzer.analyze(&report);
-
-for bottleneck in &bottlenecks {
-    println!("[{:?}] {}: {}",
-        bottleneck.severity,
-        bottleneck.kind,
-        bottleneck.description);
-    println!("  Suggestion: {}", bottleneck.suggestion);
-}
-```
-
-## Integration with Training
+### Memory tracking
 
 ```rust
 use axonml_profile::Profiler;
 
-let mut profiler = Profiler::new();
+let profiler = Profiler::new();
+profiler.record_alloc("tensor_a", 1024 * 1024);
+profiler.record_alloc("tensor_b", 2 * 1024 * 1024);
 
-for epoch in 0..num_epochs {
-    profiler.start();
+assert_eq!(profiler.current_memory(), 3 * 1024 * 1024);
+profiler.record_free("tensor_a", 1024 * 1024);
+```
+
+### Bottleneck analysis
+
+```rust
+use axonml_profile::Profiler;
+
+let profiler = Profiler::new();
+// ... run workload ...
+
+for bottleneck in profiler.analyze_bottlenecks() {
+    println!("[{:?}] {}", bottleneck.kind, bottleneck.description);
+    println!("  -> {}", bottleneck.suggestion);
+}
+```
+
+### Report export
+
+```rust
+use axonml_profile::{Profiler, ReportFormat};
+
+let profiler = Profiler::new();
+// ... run workload ...
+
+let report = profiler.summary();
+std::fs::write("profile.md", report.render(ReportFormat::Markdown)).unwrap();
+std::fs::write("profile.html", report.render(ReportFormat::Html)).unwrap();
+std::fs::write("profile.json", report.render(ReportFormat::Json)).unwrap();
+```
+
+### Integration with training
+
+```rust
+use axonml_profile::{Profiler, ProfileGuard};
+
+let profiler = Profiler::new();
+
+for _ in 0..num_epochs {
+    profiler.reset();
 
     for batch in dataloader.iter() {
-        let _data = profiler.scope("data_load");
-        // ... load data
-
-        let _forward = profiler.scope("forward");
-        let output = model.forward(&batch);
-
-        let _loss = profiler.scope("loss");
-        let loss = criterion.forward(&output, &targets);
-
-        let _backward = profiler.scope("backward");
-        loss.backward();
-
-        let _optim = profiler.scope("optimizer");
-        optimizer.step();
+        { let _g = ProfileGuard::new(&profiler, "data_load"); /* ... */ }
+        let out = { let _g = ProfileGuard::new(&profiler, "forward");  model.forward(&batch) };
+        let loss = { let _g = ProfileGuard::new(&profiler, "loss");    criterion.forward(&out, &targets) };
+        {            let _g = ProfileGuard::new(&profiler, "backward"); loss.backward() };
+        {            let _g = ProfileGuard::new(&profiler, "optimizer"); optimizer.step() };
     }
 
-    let report = profiler.stop();
-    println!("Epoch {} - Time: {:?}, Peak Memory: {}MB",
-        epoch, report.total_time, report.memory_peak / 1024 / 1024);
+    profiler.print_summary();
 }
 ```
 
 ## Best Practices
 
-1. **Profile representative workloads**: Use realistic batch sizes and data
-2. **Warm up before profiling**: Run a few iterations to stabilize JIT, caches
-3. **Profile incrementally**: Start with coarse granularity, then drill down
-4. **Compare configurations**: Profile different batch sizes, model sizes
-5. **Use bottleneck analyzer**: Let it identify issues automatically
+1. Profile representative workloads (realistic batch sizes and data).
+2. Warm up before profiling — first iterations hit cold JIT / GPU caches.
+3. Profile coarse first, then drill down into hotspots.
+4. Compare configurations side-by-side (batch size / AMP on/off / FSDP on/off).
+5. Let `BottleneckAnalyzer` flag memory/compute/IO issues automatically.
 
-## Feature Flags
+## Last updated
 
-- Default: Basic profiling
-- `detailed` - Enable detailed per-operation tracking
-- `timeline` - Enable timeline export
+0.6.1 (2026-04-16)

@@ -1,20 +1,55 @@
-//! SVG Chart Components
+//! SVG Chart Components — Line, Bar, Sparkline, Donut, Gauge
+//!
+//! Pure-SVG, dependency-free chart primitives used across the dashboard.
+//! Every chart is a Leptos `#[component]` that renders a single `<svg>`
+//! element and derives its geometry from reactive signal props.
+//!
+//! Data model: `DataPoint` (`x`, `y`, optional `label`), `ChartSeries`
+//! (`name`, `data`, `color`), and `ChartConfig` (width/height/padding,
+//! grid/legend/axis toggles, y-range overrides, and axis labels) with a
+//! `Default` impl suitable for a 600×300 card. `calculate_bounds` scans all
+//! series to produce the x/y extents and applies optional overrides and 5%
+//! padding on y; `map_to_svg` does the affine map from data space to SVG
+//! pixel space.
+//!
+//! Components:
+//! - `LineChart` — multi-series line plot with optional dashed grid,
+//!   point markers (with `<title>` tooltips), per-series area fill at
+//!   opacity 0.1, and a legend strip along the bottom.
+//! - `BarChart` — single-series vertical bar chart with rounded corners,
+//!   computed bar/gap widths, x-axis labels under each bar.
+//! - `Sparkline` — minimal inline mini-chart (100×30 by default) drawing
+//!   a single path across a normalized range.
+//! - `DonutChart` — arc-segment donut driven by `(label, value, color)`
+//!   tuples, each arc labeled via `<title>`, centred total label in the
+//!   middle.
+//! - `GaugeChart` — 270° sweep gauge with background arc, value arc,
+//!   centred numeric readout, and optional sub-label.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/charts.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use leptos::*;
+
+// =============================================================================
+// Data Model
+// =============================================================================
 
 /// Data point for charts
 #[derive(Debug, Clone)]
@@ -63,6 +98,10 @@ impl Default for ChartConfig {
         }
     }
 }
+
+// =============================================================================
+// Coordinate Helpers
+// =============================================================================
 
 /// Calculate min and max values from series
 fn calculate_bounds(series: &[ChartSeries], config: &ChartConfig) -> (f64, f64, f64, f64) {
@@ -133,6 +172,10 @@ fn map_to_svg(
 
     (svg_x, svg_y)
 }
+
+// =============================================================================
+// LineChart
+// =============================================================================
 
 /// Line chart component
 #[component]
@@ -371,6 +414,10 @@ pub fn LineChart(
     }
 }
 
+// =============================================================================
+// BarChart
+// =============================================================================
+
 /// Bar chart component
 #[component]
 pub fn BarChart(
@@ -455,6 +502,10 @@ pub fn BarChart(
     }
 }
 
+// =============================================================================
+// Sparkline
+// =============================================================================
+
 /// Sparkline chart (small inline chart)
 #[component]
 pub fn Sparkline(
@@ -508,6 +559,10 @@ pub fn Sparkline(
         </svg>
     }
 }
+
+// =============================================================================
+// DonutChart
+// =============================================================================
 
 /// Donut chart component
 #[component]
@@ -601,6 +656,10 @@ pub fn DonutChart(
         </svg>
     }
 }
+
+// =============================================================================
+// GaugeChart
+// =============================================================================
 
 /// Gauge chart component
 #[component]

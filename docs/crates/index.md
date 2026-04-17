@@ -9,54 +9,60 @@ description: "Rust crate architecture and documentation"
 # Crate Documentation
 {: .no_toc }
 
-AxonML is built as a Rust workspace with **22 specialized crates**.
+AxonML is built as a Rust workspace with **24 specialized crates**.
+{: .fs-6 .fw-300 }
 
 ---
 
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Application Layer                             │
-├─────────────┬─────────────┬─────────────┬───────────────────────────┤
-│ axonml-cli  │axonml-server│ axonml-tui  │    axonml-dashboard       │
-│  (Binary)   │  (REST API) │ (Terminal)  │      (WASM Web UI)        │
-├─────────────┴─────────────┴─────────────┴───────────────────────────┤
-│                           axonml                                     │
-│                    (Umbrella Crate - Feature Flags)                  │
-├─────────────────────────────────────────────────────────────────────┤
-│                         Domain Layer                                 │
-├─────────────┬─────────────┬─────────────┬───────────────────────────┤
-│axonml-vision│ axonml-audio│ axonml-text │      axonml-llm           │
-│  (CV/CNN)   │   (MFCC)    │(Tokenizers) │    (BERT, GPT-2)          │
-├─────────────┴─────────────┴─────────────┴───────────────────────────┤
-│                       Training Layer                                 │
-├─────────────┬─────────────┬─────────────┬───────────────────────────┤
-│  axonml-nn  │axonml-optim │ axonml-data │   axonml-distributed      │
-│  (Modules)  │(Adam, LAMB) │(DataLoader) │    (DDP, FSDP)            │
-├─────────────┴─────────────┴─────────────┴───────────────────────────┤
-│                      Optimization Layer                              │
-├─────────────┬─────────────┬─────────────┬───────────────────────────┤
-│axonml-quant │axonml-fusion│axonml-jit   │    axonml-profile         │
-│ (INT8/INT4) │(Kernel Fuse)│(Cranelift)  │     (Profiling)           │
-├─────────────┴─────────────┴─────────────┴───────────────────────────┤
-│                     Serialization Layer                              │
-├─────────────────────────────┬───────────────────────────────────────┤
-│      axonml-serialize       │           axonml-onnx                  │
-│    (SafeTensors, Bincode)   │       (ONNX Import/Export)            │
-├─────────────────────────────┴───────────────────────────────────────┤
-│                      Computation Layer                               │
-├─────────────────────────────────────────────────────────────────────┤
-│                        axonml-autograd                               │
-│           (Dynamic Computational Graph, AMP, Checkpointing)          │
-├─────────────────────────────────────────────────────────────────────┤
-│                        axonml-tensor                                 │
-│        (N-dimensional Arrays, Broadcasting, BLAS Operations)         │
-├─────────────────────────────────────────────────────────────────────┤
-│                         axonml-core                                  │
-│         (Device Abstraction, DType, Storage, Memory Management)      │
-│              CPU │ CUDA │ Vulkan │ Metal │ WebGPU                    │
-└─────────────────────────────────────────────────────────────────────┘
++---------------------------------------------------------------------+
+|                        Application Layer                            |
++-------------+--------------+--------------+------------------------+
+| axonml-cli  | axonml-server| axonml-tui   | axonml-dashboard        |
+|  (Binary)   | (REST API)   | (Terminal)   | (WASM Web UI)           |
++-------------+--------------+--------------+------------------------+
+|                              axonml                                 |
+|               (Umbrella Crate — Feature Flags + Monitor)            |
++---------------------------------------------------------------------+
+|                           Domain Layer                              |
++-------------+-------------+-------------+--------------+------------+
+|axonml-vision|axonml-audio |axonml-text  | axonml-llm   |axonml-hvac |
+|   (CV/CNN)  |(MFCC/Mel)   |(Tokenizers) |(BERT/GPT/    |(Panoptes,  |
+|             |             |             | LLaMA/Trident|  Apollo,   |
+|             |             |             | /Phi/Mistral)|  etc.)     |
++-------------+-------------+-------------+--------------+------------+
+|                         Training Layer                              |
++-------------+-------------+-------------+--------------+------------+
+|  axonml-nn  |axonml-optim |axonml-data  |axonml-train  |axonml-dist |
+|  (Modules)  |(Adam/LAMB)  |(DataLoader) |(Trainer/     |(DDP, FSDP) |
+|             |             |             |Benchmark/Adv)|            |
++-------------+-------------+-------------+--------------+------------+
+|                       Optimization Layer                            |
++-------------+-------------+-------------+--------------+
+|axonml-quant |axonml-fusion|axonml-jit   |axonml-profile|
+| (INT8/INT4/ |(Kernel Fuse)|(Cranelift / |(Profiler/    |
+|  Q4_K/Q6_K) |             | IR + trace) | Timeline)    |
++-------------+-------------+-------------+--------------+
+|                      Serialization Layer                            |
++------------------------------+--------------------------------------+
+|     axonml-serialize         |            axonml-onnx               |
+|  (SafeTensors, Bincode,      |  (ONNX Import/Export, Opset 17,      |
+|   StateDict, Checkpoint)     |   40+ operators)                     |
++------------------------------+--------------------------------------+
+|                       Computation Layer                             |
++---------------------------------------------------------------------+
+|                        axonml-autograd                              |
+|        (Dynamic Graph, AMP, Checkpointing, Graph Inspect)           |
++---------------------------------------------------------------------+
+|                         axonml-tensor                               |
+|     (N-D Arrays, Broadcasting, Matmul, Lazy Tensors, Sparse)        |
++---------------------------------------------------------------------+
+|                         axonml-core                                 |
+|         (Device, DType, Storage, Memory, Backends)                  |
+|              CPU | CUDA | Vulkan | Metal | WebGPU                   |
++---------------------------------------------------------------------+
 ```
 
 ## Crate Summary
@@ -65,80 +71,103 @@ AxonML is built as a Rust workspace with **22 specialized crates**.
 
 | Crate | Description | Key Types |
 |:------|:------------|:----------|
-| [axonml-core](https://docs.rs/axonml-core) | Device abstraction, data types, storage | `Device`, `DType`, `Storage` |
-| [axonml-tensor](https://docs.rs/axonml-tensor) | N-dimensional tensor operations | `Tensor`, `TensorView` |
+| [axonml-core](https://docs.rs/axonml-core) | Device abstraction, dtypes, storage, backends | `Device`, `DType`, `Error`, `Scalar`, `Numeric`, `Float` |
+| [axonml-tensor](https://docs.rs/axonml-tensor) | N-dimensional tensor operations | `Tensor<T>`, `LazyTensor`, `Shape`, `Strides` |
 
 ### Computation Layer
 
 | Crate | Description | Key Types |
 |:------|:------------|:----------|
-| [axonml-autograd](https://docs.rs/axonml-autograd) | Automatic differentiation engine | `Variable`, `GradFn`, `ComputationGraph` |
+| [axonml-autograd](https://docs.rs/axonml-autograd) | Automatic differentiation | `Variable`, `GradFn`, `no_grad`, `autocast`, `checkpoint` |
 
 ### Training Layer
 
 | Crate | Description | Key Types |
 |:------|:------------|:----------|
-| [axonml-nn](https://docs.rs/axonml-nn) | Neural network modules | `Module`, `Linear`, `Conv2d`, `Attention` |
-| [axonml-optim](https://docs.rs/axonml-optim) | Optimizers and LR schedulers | `Adam`, `SGD`, `LAMB`, `CosineAnnealingLR` |
-| [axonml-data](https://docs.rs/axonml-data) | Data loading and batching | `DataLoader`, `Dataset`, `Sampler` |
-| [axonml-distributed](https://docs.rs/axonml-distributed) | Distributed training | `DDP`, `FSDP`, `ProcessGroup` |
+| [axonml-nn](https://docs.rs/axonml-nn) | Neural network modules | `Module`, `Linear`, `Conv2d`, `MultiHeadAttention`, `LSTM`, `TernaryLinear`, `SparseLinear`, `MoELayer` |
+| [axonml-optim](https://docs.rs/axonml-optim) | Optimizers + LR schedulers + health monitor | `SGD`, `Adam`, `AdamW`, `LAMB`, `RMSprop`, `CosineAnnealingLR`, `OneCycleLR`, `GradScaler`, `TrainingMonitor` |
+| [axonml-data](https://docs.rs/axonml-data) | Data loading and batching | `DataLoader`, `Dataset`, `RandomSampler`, `SequentialSampler`, `Transform` |
+| [axonml-train](https://docs.rs/axonml-train) | High-level training glue | `TrainingConfig`, `EarlyStopping`, `ProgressLogger`, `benchmark_model`, `AdversarialTrainer` |
+| [axonml-distributed](https://docs.rs/axonml-distributed) | Distributed training | `DDP`, `FSDP`, `Pipeline`, `ProcessGroup`, `World`, `ColumnParallelLinear`, `NcclBackend` |
 
 ### Domain Layer
 
 | Crate | Description | Key Types |
 |:------|:------------|:----------|
-| [axonml-vision](https://docs.rs/axonml-vision) | Computer vision, detection, biometrics | `MNIST`, `CIFAR10`, `ResNet`, `Nexus`, `Phantom`, `NightVision`, `Argus`, `Echo`, `Mnemosyne`, `CocoDataset`, `FocalLoss` |
-| [axonml-audio](https://docs.rs/axonml-audio) | Audio processing | `MelSpectrogram`, `MFCC` |
-| [axonml-text](https://docs.rs/axonml-text) | Text processing | `Tokenizer`, `BPE`, `Vocabulary` |
-| [axonml-llm](https://docs.rs/axonml-llm) | Large language models | `BERT`, `GPT2`, `Transformer` |
+| [axonml-vision](https://docs.rs/axonml-vision) | Computer vision, detection, biometrics | `LeNet`, `ResNet`, `ViT`, `DETR`, `NanoDet`, `BlazeFace`, `RetinaFace`, `Nexus`, `Phantom`, `NightVision`, `AegisIdentity`, `Argus*`, `Echo*`, `Mnemosyne*`, `Aegis3D`, `CocoDataset`, `WiderFaceDataset`, `FocalLoss`, `GIoULoss` |
+| [axonml-audio](https://docs.rs/axonml-audio) | Audio processing | `MelSpectrogram`, `MFCC`, `Resample`, `AddNoise`, `SyntheticCommandDataset` |
+| [axonml-text](https://docs.rs/axonml-text) | NLP utilities | `WhitespaceTokenizer`, `CharTokenizer`, `BasicBPETokenizer`, `Vocab`, `TextDataset` |
+| [axonml-llm](https://docs.rs/axonml-llm) | Large language models | `Bert`, `GPT2`, `LLaMA`, `Mistral`, `Phi`, `ChimeraModel`, `HydraModel`, `SSMBlock`, `TridentModel`, `TextGenerator`, `HFLoader` |
+| [axonml-hvac](https://docs.rs/axonml-hvac) | HVAC fault-detection models | `Panoptes`, `Apollo`, `Aquilo`, `Boreas`, `Colossus`, `Gaia`, `Naiad`, `Vulcan`, `Zephyrus` |
 
 ### Serialization Layer
 
 | Crate | Description | Key Types |
 |:------|:------------|:----------|
-| [axonml-serialize](https://docs.rs/axonml-serialize) | Model serialization | `StateDict`, `SafeTensors` |
-| [axonml-onnx](https://docs.rs/axonml-onnx) | ONNX import/export | `OnnxModel`, `OnnxGraph` |
+| [axonml-serialize](https://docs.rs/axonml-serialize) | Model serialization | `StateDict`, `TensorData`, SafeTensors, Bincode |
+| [axonml-onnx](https://docs.rs/axonml-onnx) | ONNX import/export (opset 17) | `OnnxModel`, `OnnxExporter`, `import_onnx`, `export_onnx` |
 
 ### Optimization Layer
 
 | Crate | Description | Key Types |
 |:------|:------------|:----------|
-| [axonml-quant](https://docs.rs/axonml-quant) | Model quantization | `QuantizedTensor`, `INT8`, `INT4` |
-| [axonml-fusion](https://docs.rs/axonml-fusion) | Kernel fusion optimization | `FusedOp`, `FusionPass` |
-| [axonml-jit](https://docs.rs/axonml-jit) | JIT compilation | `JitContext`, `CompiledKernel` |
-| [axonml-profile](https://docs.rs/axonml-profile) | Profiling tools | `Profiler`, `MemoryStats` |
+| [axonml-quant](https://docs.rs/axonml-quant) | Model quantization | INT8 (Q8_0), INT4 (Q4_0 / Q4_1), INT5 (Q5_0 / Q5_1), Q4_K / Q6_K GGUF blocks, F16 |
+| [axonml-fusion](https://docs.rs/axonml-fusion) | Kernel fusion | `FusedLinear` (MatMul + Bias + Act), `FusedElementwise` |
+| [axonml-jit](https://docs.rs/axonml-jit) | JIT compilation | `JitCompiler`, `Graph`, `CompiledFunction`, `trace`, Cranelift codegen |
+| [axonml-profile](https://docs.rs/axonml-profile) | Profiling | `Profiler`, `MemoryProfiler`, `ComputeProfiler`, `TimelineProfiler`, `BottleneckAnalyzer` |
 
 ### Application Layer
 
-| Crate | Description | Binary |
-|:------|:------------|:-------|
-| [axonml](https://docs.rs/axonml) | Umbrella crate (re-exports) | - |
-| [axonml-cli](https://docs.rs/axonml-cli) | Command-line interface | `axonml` |
-| [axonml-server](https://docs.rs/axonml-server) | REST API server | `axonml-server` |
-| [axonml-tui](https://docs.rs/axonml-tui) | Terminal UI dashboard | - |
-| axonml-dashboard | Web dashboard (WASM) | - |
+| Crate | Description | Notes |
+|:------|:------------|:------|
+| [axonml](https://docs.rs/axonml) | Umbrella crate | Feature-gated re-exports, `TrainingMonitor` (live browser monitor) |
+| [axonml-cli](https://docs.rs/axonml-cli) | Command-line interface | Binary `axonml` — scaffolding, training, eval, hub, kaggle, W&B, dataset mgmt |
+| [axonml-server](https://docs.rs/axonml-server) | REST API server | Axum + JWT + PTY WebSocket; Binary `axonml-server` |
+| [axonml-tui](https://docs.rs/axonml-tui) | Terminal UI | Model/data/training/graph views |
+| axonml-dashboard | Leptos/WASM web UI | Dashboard served by `axon start` |
 
-## Dependency Graph
+## Workspace
+
+All 24 crates (from `Cargo.toml`):
+
+```
+axonml-core          axonml-llm
+axonml-tensor        axonml-hvac
+axonml-autograd      axonml-train
+axonml-nn            axonml-distributed
+axonml-optim         axonml-serialize
+axonml-data          axonml-onnx
+axonml-vision        axonml-quant
+axonml-audio         axonml-fusion
+axonml-text          axonml-jit
+axonml-profile       axonml-cli
+axonml-tui           axonml-server
+axonml-dashboard     axonml               (umbrella)
+```
+
+## Dependency Graph (simplified)
 
 ```
 axonml (umbrella)
 ├── axonml-core
-├── axonml-tensor ─────────────────┬── axonml-core
-├── axonml-autograd ───────────────┼── axonml-tensor
-├── axonml-nn ─────────────────────┼── axonml-autograd
-├── axonml-optim ──────────────────┼── axonml-nn
-├── axonml-data ───────────────────┼── axonml-tensor
-├── axonml-vision ─────────────────┼── axonml-nn, axonml-data
-├── axonml-audio ──────────────────┼── axonml-data
-├── axonml-text ───────────────────┼── axonml-nn, axonml-data
-├── axonml-distributed ────────────┼── axonml-nn
-├── axonml-serialize ──────────────┼── axonml-nn
-├── axonml-onnx ───────────────────┼── axonml-nn, axonml-serialize
-├── axonml-llm ────────────────────┼── axonml-nn
-├── axonml-jit ────────────────────┼── axonml-tensor
-├── axonml-quant ──────────────────┼── axonml-tensor
-├── axonml-fusion ─────────────────┼── axonml-tensor
-└── axonml-profile ────────────────┴── axonml-tensor
+├── axonml-tensor         — axonml-core
+├── axonml-autograd       — axonml-tensor
+├── axonml-nn             — axonml-autograd
+├── axonml-optim          — axonml-nn
+├── axonml-data           — axonml-tensor
+├── axonml-vision         — axonml-nn, axonml-data
+├── axonml-audio          — axonml-data
+├── axonml-text           — axonml-nn, axonml-data
+├── axonml-llm            — axonml-nn
+├── axonml-hvac           — axonml-nn
+├── axonml-train          — axonml-nn (+ axonml-vision, axonml-llm via features)
+├── axonml-distributed    — axonml-nn
+├── axonml-serialize      — axonml-nn
+├── axonml-onnx           — axonml-nn, axonml-serialize
+├── axonml-jit            — axonml-tensor
+├── axonml-quant          — axonml-tensor
+├── axonml-fusion         — axonml-tensor
+└── axonml-profile        — axonml-tensor
 ```
 
 ## Building Individual Crates
@@ -150,11 +179,12 @@ cargo build -p axonml-nn
 # Test a specific crate
 cargo test -p axonml-nn
 
-# Generate docs for a crate
+# Generate docs
 cargo doc -p axonml-nn --open
 
 # Build with features
 cargo build -p axonml-core --features "cuda"
+cargo build -p axonml --features "cuda,nccl"
 ```
 
 ## Feature Flags by Crate
@@ -164,33 +194,40 @@ cargo build -p axonml-core --features "cuda"
 | Feature | Description |
 |:--------|:------------|
 | `std` | Standard library (default) |
-| `cuda` | NVIDIA CUDA backend |
-| `vulkan` | Vulkan backend |
+| `cuda` | NVIDIA CUDA backend (cuBLAS + PTX kernels) |
+| `cudnn` | cuDNN dispatch (requires `cuda`) |
+| `vulkan` | Vulkan compute shaders |
 | `metal` | Apple Metal backend |
-| `wgpu` | WebGPU backend |
+| `wgpu` | WebGPU (WGSL via `wgpu` crate) |
 
 ### axonml (umbrella)
 
-| Feature | Description |
-|:--------|:------------|
-| `full` | All features (default) |
-| `core` | Core tensor operations |
-| `nn` | Neural networks |
-| `vision` | Computer vision |
-| `audio` | Audio processing |
-| `text` | Text processing |
-| `llm` | Large language models |
-| `distributed` | Distributed training |
-| `onnx` | ONNX import/export |
-| `jit` | JIT compilation |
-| `cuda` | CUDA acceleration |
-| `wgpu` | WebGPU acceleration |
+| Feature | Pulls in |
+|:--------|:---------|
+| `full` (default) | Everything listed below |
+| `core` | core + tensor + autograd |
+| `nn` | core + nn + optim |
+| `data` | core + data |
+| `vision` | nn + data + vision |
+| `text` | nn + data + text |
+| `audio` | nn + data + audio |
+| `llm` | nn + llm |
+| `hvac` | nn + hvac |
+| `train` | nn + train |
+| `distributed` | nn + distributed |
+| `nccl` | distributed + NCCL backend |
+| `profile`, `serialize`, `quant`, `fusion`, `jit`, `onnx` | matching sub-crate |
+| `cuda`, `cudnn`, `wgpu` | GPU backend passthrough |
 
 ## API Documentation
 
-Full API documentation is available on docs.rs:
+Per-crate rustdoc is published to docs.rs:
 
-- [axonml](https://docs.rs/axonml) - Main crate
-- [axonml-tensor](https://docs.rs/axonml-tensor) - Tensor operations
-- [axonml-nn](https://docs.rs/axonml-nn) - Neural networks
-- [All crates](https://crates.io/search?q=axonml) - Search on crates.io
+- [axonml](https://docs.rs/axonml) — umbrella re-exports
+- [axonml-tensor](https://docs.rs/axonml-tensor) — tensor ops
+- [axonml-nn](https://docs.rs/axonml-nn) — modules
+- [All crates](https://crates.io/search?q=axonml)
+
+---
+
+*Last updated: 2026-04-16 (v0.6.1)*

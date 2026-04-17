@@ -1,13 +1,24 @@
-//! Data Types - Axonml Type System
+//! Type system for AxonML's generic tensor operations.
+//!
+//! `DType` runtime enum covers F16, F32, F64, I8, I16, I32, I64, U8, U32,
+//! U64, Bool with size/name/category queries. Three compile-time trait
+//! hierarchies enable zero-cost generic dispatch:
+//!   - `Scalar` — any storable element (requires Pod + Zeroable + Send + Sync)
+//!   - `Numeric` — adds arithmetic (Num + NumCast + Zero + One + PartialOrd)
+//!   - `Float` — adds exp/ln/pow/sqrt/sin/cos/tanh, NaN/Inf constants, epsilon
+//!
+//! Implementations cover f32, f64, i8..i64, u8/u32/u64, plus wrapper types
+//! `F16Wrapper` (half::f16 with Pod) and `BoolWrapper` (u8-backed).
 //!
 //! # File
 //! `crates/axonml-core/src/dtype.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

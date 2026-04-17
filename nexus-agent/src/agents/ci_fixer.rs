@@ -1,17 +1,46 @@
-//! CI Fixer agent — invoked by the nexus-ticker ralph loop when a CI
-//! failure is not something `cargo fmt` / `cargo clippy --fix` can handle
-//! (e.g. test assertions, flaky tests, actual logic bugs).
+//! CI Fixer Agent — Ralph-Loop Test / Logic Failure Repair
 //!
-//! The agent is given the repo path + the CI error log excerpt, and is
-//! expected to:
-//!   1. Reproduce the failure locally.
-//!   2. Identify the root cause.
-//!   3. Apply the minimum change needed to fix it (edit source, adjust
-//!      tolerances, seed RNG, bump iterations — whatever is correct).
-//!   4. Re-run the failing command to confirm green.
-//!   5. Stop without committing or pushing — the ticker handles that.
+//! Defines the `ci_fixer` agent configuration: invoked by the nexus-ticker
+//! ralph loop when a CI failure is not something `cargo fmt` /
+//! `cargo clippy --fix` can handle (test assertions, flaky tests, real
+//! logic bugs).
+//!
+//! The agent is handed the local repo path and the tail of the CI error
+//! log, and is expected to (1) reproduce locally, (2) identify root cause,
+//! (3) apply the minimum fix, (4) re-run the failing test, and (5) stop
+//! without committing — the ticker handles commit + push.
+//!
+//! Exports:
+//! - `SYSTEM_PROMPT` — role, workflow, and rules prompt that also lists
+//!   the available tools (`shell`, `read_file`, `write_file`, `grep`,
+//!   `list_files`; no `git_commit` / `git_push`).
+//! - `config()` — returns an `AgentConfig` with `max_iterations = 25`,
+//!   `model = "qwen3"`, `temperature = 0.1`.
+//!
+//! # File
+//! `nexus-agent/src/agents/ci_fixer.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use crate::AgentConfig;
+
+// =============================================================================
+// System Prompt
+// =============================================================================
 
 pub const SYSTEM_PROMPT: &str = r#"You are the CI Fixer agent for the AutomataNexus engineering workspace.
 
@@ -48,6 +77,10 @@ A task string containing:
 
 You do NOT have `git_commit` / `git_push` tools for this workflow. That is intentional.
 "#;
+
+// =============================================================================
+// Agent Configuration
+// =============================================================================
 
 pub fn config() -> AgentConfig {
     AgentConfig {

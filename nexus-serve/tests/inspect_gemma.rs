@@ -1,16 +1,52 @@
-//! One-off metadata inspection for the Oracle (Gemma 4) GGUF blob.
+//! inspect_gemma — Oracle (Gemma 4) GGUF Metadata Dump Test
 //!
-//! Run with:
+//! One-off integration test that opens the local Oracle (Gemma 4) GGUF blob
+//! stored in the ollama cache and verifies that [`GgufFile::open`] +
+//! [`InferenceConfig::from_gguf`] parse it correctly. Prints the full
+//! metadata map, every layer-0 tensor name (to see the per-layer weight set),
+//! the inferred block/layer count, and the [`InferenceConfig`] round-trip
+//! result; then asserts on ground-truth Gemma 4 Oracle values
+//! (`architecture="gemma4"`, 42 layers, hidden_size 2560, key_length 512,
+//! sliding_window 512, head_dim_swa 256, rope_theta_swa 10_000, full
+//! rope_theta 1_000_000, final_logit_softcap 30.0, per_layer_input_width 256).
+//!
+//! Marked `#[ignore]` because it depends on a local ollama blob path that
+//! isn't present on every machine. Run with:
+//!
 //!   cargo test --release --test inspect_gemma -- --nocapture --ignored
 //!
-//! The `--ignored` flag is required because the test depends on a local file
-//! that may not exist on all machines (ollama must have pulled Gemma 4).
+//! # File
+//! `nexus-serve/tests/inspect_gemma.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use nexus_serve::model::gguf::GgufFile;
 use nexus_serve::model::inference::InferenceConfig;
 
+// =============================================================================
+// Oracle Blob Path
+// =============================================================================
+
 const ORACLE_PATH: &str = "/usr/share/ollama/.ollama/models/blobs/\
     sha256-4c27e0f5b5adf02ac956c7322bd2ee7636fe3f45a8512c9aba5385242cb6e09a";
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[test]
 #[ignore]

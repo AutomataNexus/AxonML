@@ -1,13 +1,22 @@
-//! Differentiable Renderer
+//! Differentiable Renderer — Sphere-Tracing Through Octree SDF Fields
+//!
+//! Provides `Camera` (pinhole model with look-at construction and per-pixel ray
+//! generation), `SphereTracingConfig` (step count, hit threshold, max distance),
+//! `RayHit` (position, depth, normal, hit flag), and `DifferentiableRenderer` which
+//! traces rays through an `AdaptiveOctree` SDF to produce `RenderOutput` containing
+//! depth maps, normal maps, and hit masks. Supports both full-resolution and
+//! LOD-limited rendering for edge deployment. Surface normals are estimated via
+//! finite-difference SDF gradients at hit points.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/aegis3d/renderer.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -124,6 +133,10 @@ impl Default for SphereTracingConfig {
     }
 }
 
+// =============================================================================
+// Differentiable Renderer
+// =============================================================================
+
 /// Differentiable renderer using sphere tracing through the octree SDF.
 pub struct DifferentiableRenderer {
     pub config: SphereTracingConfig,
@@ -145,6 +158,10 @@ impl DifferentiableRenderer {
     pub fn with_config(config: SphereTracingConfig) -> Self {
         Self { config }
     }
+
+    // -------------------------------------------------------------------------
+    // Ray Tracing
+    // -------------------------------------------------------------------------
 
     /// March a single ray through the SDF field.
     pub fn trace_ray(
@@ -198,6 +215,10 @@ impl DifferentiableRenderer {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Full Rendering
+    // -------------------------------------------------------------------------
+
     /// Render a depth map from the given camera viewpoint.
     ///
     /// # Returns
@@ -238,6 +259,10 @@ impl DifferentiableRenderer {
             height: h,
         }
     }
+
+    // -------------------------------------------------------------------------
+    // LOD-Limited Rendering
+    // -------------------------------------------------------------------------
 
     /// Render with LOD limit for edge deployment.
     pub fn render_lod(
@@ -330,6 +355,10 @@ impl DifferentiableRenderer {
     }
 }
 
+// =============================================================================
+// Render Output
+// =============================================================================
+
 /// Output from rendering.
 #[derive(Debug, Clone)]
 pub struct RenderOutput {
@@ -353,7 +382,7 @@ impl RenderOutput {
 }
 
 // =============================================================================
-// Vector helpers
+// Vector Helpers
 // =============================================================================
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {

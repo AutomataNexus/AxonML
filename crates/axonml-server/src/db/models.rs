@@ -1,18 +1,38 @@
-//! Model registry database operations for AxonML
+//! Model Registry Database Operations — Models, Versions, and Endpoints
+//!
+//! Provides document-store-backed persistence for the AxonML model registry
+//! via `ModelRepository`. Manages three Aegis-DB collections:
+//!
+//! - `axonml_models` — top-level `Model` records (id, owner, name, type).
+//! - `axonml_model_versions` — `ModelVersion` records linked to a model,
+//!   with auto-incrementing version numbers, file paths, metrics, and
+//!   optional training-run linkage.
+//! - `axonml_endpoints` — `Endpoint` records for inference serving, with
+//!   status lifecycle (Starting/Running/Stopped/Error), port, replica
+//!   count, and optional JSON config.
+//!
+//! Also writes inference metrics (request counts, p50/p95/p99 latency) to
+//! the Aegis-DB time series store via `record_inference_metrics()` and
+//! reads them back with `get_inference_metrics()`.
 //!
 //! # File
 //! `crates/axonml-server/src/db/models.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use super::{Database, DbError, DocumentQuery, TimeSeriesQuery};
 use chrono::{DateTime, Utc};
@@ -20,10 +40,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+// =============================================================================
+// Constants
+// =============================================================================
+
 /// Collection names
 const MODELS_COLLECTION: &str = "axonml_models";
 const VERSIONS_COLLECTION: &str = "axonml_model_versions";
 const ENDPOINTS_COLLECTION: &str = "axonml_endpoints";
+
+// =============================================================================
+// Types — Model
+// =============================================================================
 
 /// Model data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +75,10 @@ pub struct NewModel {
     pub description: Option<String>,
     pub model_type: String,
 }
+
+// =============================================================================
+// Types — Model Version
+// =============================================================================
 
 /// Model version data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +106,10 @@ pub struct NewModelVersion {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub training_run_id: Option<String>,
 }
+
+// =============================================================================
+// Types — Inference Endpoint
+// =============================================================================
 
 /// Inference endpoint status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -122,6 +158,10 @@ pub struct NewEndpoint {
     pub config: Option<serde_json::Value>,
 }
 
+// =============================================================================
+// Repository
+// =============================================================================
+
 /// Model repository
 pub struct ModelRepository<'a> {
     db: &'a Database,
@@ -133,9 +173,9 @@ impl<'a> ModelRepository<'a> {
         Self { db }
     }
 
-    // ========================================================================
+    // =========================================================================
     // Model Operations
-    // ========================================================================
+    // =========================================================================
 
     /// Create a new model
     pub async fn create(&self, new_model: NewModel) -> Result<Model, DbError> {
@@ -171,6 +211,10 @@ impl<'a> ModelRepository<'a> {
             None => Ok(None),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Model Listing
+    // -------------------------------------------------------------------------
 
     /// List models for a user
     pub async fn list_by_user(
@@ -225,6 +269,10 @@ impl<'a> ModelRepository<'a> {
         Ok(models)
     }
 
+    // -------------------------------------------------------------------------
+    // Model Update and Delete
+    // -------------------------------------------------------------------------
+
     /// Update model
     pub async fn update(
         &self,
@@ -268,9 +316,9 @@ impl<'a> ModelRepository<'a> {
         Ok(())
     }
 
-    // ========================================================================
+    // =========================================================================
     // Model Version Operations
-    // ========================================================================
+    // =========================================================================
 
     /// Create a new model version
     pub async fn create_version(
@@ -370,9 +418,9 @@ impl<'a> ModelRepository<'a> {
         self.db.doc_delete(VERSIONS_COLLECTION, id).await
     }
 
-    // ========================================================================
+    // =========================================================================
     // Endpoint Operations
-    // ========================================================================
+    // =========================================================================
 
     /// Create an inference endpoint
     pub async fn create_endpoint(&self, new_endpoint: NewEndpoint) -> Result<Endpoint, DbError> {
@@ -458,6 +506,10 @@ impl<'a> ModelRepository<'a> {
         Ok(endpoints)
     }
 
+    // -------------------------------------------------------------------------
+    // Endpoint Status and Configuration Updates
+    // -------------------------------------------------------------------------
+
     /// Update endpoint status
     pub async fn update_endpoint_status(
         &self,
@@ -518,9 +570,9 @@ impl<'a> ModelRepository<'a> {
         self.db.doc_delete(ENDPOINTS_COLLECTION, id).await
     }
 
-    // ========================================================================
+    // =========================================================================
     // Inference Metrics (Time Series)
-    // ========================================================================
+    // =========================================================================
 
     /// Record inference metrics to time series
     pub async fn record_inference_metrics(
@@ -633,6 +685,10 @@ impl<'a> ModelRepository<'a> {
         Ok(metrics)
     }
 
+    // -------------------------------------------------------------------------
+    // Endpoint Counts
+    // -------------------------------------------------------------------------
+
     /// Count running endpoints
     pub async fn count_running_endpoints(&self) -> Result<u64, DbError> {
         let filter = serde_json::json!({
@@ -650,6 +706,10 @@ impl<'a> ModelRepository<'a> {
         Ok(docs.len() as u64)
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -1,18 +1,45 @@
-//! Report Generation Module
+//! Report Generation — Text, JSON, Markdown, and HTML Profile Reports
+//!
+//! Builds aggregated profiling reports from a `Profiler` instance.
+//! `ReportFormat` enumerates the supported export formats (Text, Json,
+//! Markdown, Html). `ProfileReport` is the Serde-serializable top-level
+//! struct that carries `title`, `total_duration_secs`, nested
+//! `MemorySummary` (current/peak/total allocated/freed bytes plus
+//! `allocation_count`), `ComputeSummary` (operation count, total compute
+//! time, top 10 `OperationSummary` entries with total/avg time and time
+//! percentage), and a `Vec<Bottleneck>` produced by
+//! `BottleneckAnalyzer::new().analyze(...)`. `ProfileReport::generate`
+//! reads the three profiler sub-components under their `RwLock`s, sums
+//! operation total times, sorts descending, keeps the top 10, and computes
+//! each operation's percentage of total compute time. Four renderers turn
+//! the struct into: `to_text` (ASCII-box layout with Unicode separators),
+//! `to_json` (pretty-printed via `serde_json`, surfacing serialization
+//! failures as `ProfileError::SerializationError`), `to_markdown` (GitHub-
+//! flavored tables with emoji severity labels), and `to_html` (self-
+//! contained page with inline CSS for severity color coding). `export`
+//! writes any of these to a file. `format_duration_ns` chooses ns / us / ms
+//! / s suffixes. `fmt::Display` delegates to `to_text`. Tests cover report
+//! generation from a profiler run, text/JSON/Markdown/HTML format output
+//! including required headers and titles.
 //!
 //! # File
 //! `crates/axonml-profile/src/report.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -23,6 +50,10 @@ use std::path::Path;
 use crate::error::{ProfileError, ProfileResult};
 use crate::memory::MemoryProfiler;
 use crate::{Bottleneck, BottleneckAnalyzer, Profiler};
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /// Output format for profiling reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +123,10 @@ pub struct OperationSummary {
     /// Percentage of total time
     pub time_percentage: f64,
 }
+
+// =============================================================================
+// Report Generation
+// =============================================================================
 
 impl ProfileReport {
     /// Generates a report from a profiler.
@@ -169,6 +204,10 @@ impl ProfileReport {
 
         Ok(())
     }
+
+    // -------------------------------------------------------------------------
+    // Text Renderer
+    // -------------------------------------------------------------------------
 
     /// Converts report to plain text.
     pub fn to_text(&self) -> String {
@@ -273,11 +312,19 @@ impl ProfileReport {
         output
     }
 
+    // -------------------------------------------------------------------------
+    // JSON Renderer
+    // -------------------------------------------------------------------------
+
     /// Converts report to JSON.
     pub fn to_json(&self) -> ProfileResult<String> {
         serde_json::to_string_pretty(self)
             .map_err(|e| ProfileError::SerializationError(e.to_string()))
     }
+
+    // -------------------------------------------------------------------------
+    // Markdown Renderer
+    // -------------------------------------------------------------------------
 
     /// Converts report to Markdown.
     pub fn to_markdown(&self) -> String {
@@ -362,6 +409,10 @@ impl ProfileReport {
 
         output
     }
+
+    // -------------------------------------------------------------------------
+    // HTML Renderer
+    // -------------------------------------------------------------------------
 
     /// Converts report to HTML.
     pub fn to_html(&self) -> String {
@@ -460,6 +511,10 @@ impl ProfileReport {
         output
     }
 
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
     /// Formats nanoseconds into a human-readable string.
     fn format_duration_ns(ns: u64) -> String {
         if ns >= 1_000_000_000 {
@@ -479,6 +534,10 @@ impl fmt::Display for ProfileReport {
         write!(f, "{}", self.to_text())
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

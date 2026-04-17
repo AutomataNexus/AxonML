@@ -1,13 +1,20 @@
-//! PANet Neck for Helios
+//! PANet Neck — Feature Pyramid Aggregation for Helios
+//!
+//! Implements `PANet` (Path Aggregation Network) which takes the 3-scale backbone
+//! features (P3/P4/P5) and performs top-down upsampling with lateral concatenation
+//! followed by bottom-up downsampling with concatenation, using `C2f` blocks and
+//! `CBS` convolutions at each level. Produces fused multi-scale feature maps for
+//! the detection head with configurable channel widths from `HeliosConfig`.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/helios/neck.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

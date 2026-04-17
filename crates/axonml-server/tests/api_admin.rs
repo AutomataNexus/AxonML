@@ -1,13 +1,22 @@
-//! Integration tests for admin API endpoints
+//! Admin API Integration Tests — User CRUD and System Status Endpoints
+//!
+//! Integration tests against a live AxonML server for the `/api/admin/*` routes.
+//! Tests cover: listing users (authenticated and unauthenticated), getting a user
+//! by ID (found and not found), creating users as admin, updating user roles,
+//! deleting users (including self-deletion prevention), and probing system
+//! endpoints (`/api/admin/stats`, `/api/admin/health`, `/api/admin/database`).
+//! Each test uses the `require_server!` macro to skip gracefully when the server
+//! is offline.
 //!
 //! # File
 //! `crates/axonml-server/tests/api_admin.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -18,6 +27,10 @@ mod common;
 
 use common::*;
 use serde_json::Value;
+
+// =============================================================================
+// Test Skip Macro
+// =============================================================================
 
 macro_rules! require_server {
     () => {
@@ -32,6 +45,10 @@ macro_rules! require_server {
         }
     };
 }
+
+// =============================================================================
+// User List Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_list_users_as_admin() {
@@ -70,6 +87,10 @@ async fn test_list_users_unauthenticated() {
         "Should return 401 without auth"
     );
 }
+
+// =============================================================================
+// User CRUD Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_get_user_by_id() {
@@ -194,6 +215,10 @@ async fn test_update_user_role() {
     }
 }
 
+// =============================================================================
+// User Deletion Tests
+// =============================================================================
+
 #[tokio::test]
 async fn test_delete_user() {
     require_server!();
@@ -233,6 +258,10 @@ async fn test_cannot_delete_self() {
         status
     );
 }
+
+// =============================================================================
+// System Status Endpoint Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_system_stats() {

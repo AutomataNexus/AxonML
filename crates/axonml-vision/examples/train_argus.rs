@@ -1,12 +1,48 @@
 //! Train Argus — Iris Identity via Radial Phase Encoding
 //!
-//! Trains on CASIA-Iris-Syn dataset (1,000 identities, 10 images each).
-//! Uses ArgusLoss (triplet + phase consistency regularization).
+//! End-to-end training binary for the `ArgusIris` biometric model on
+//! CASIA-Iris-Syn style polar strip caches (1,000 identities × 10 images).
+//!
+//! Contents:
+//! * `IdentityData` + `load_iris_identities` — 16-byte-header binary loader
+//!   for `[num, C, H, W]` polar strips (H=32, W=256, C=1).
+//! * `mine_triplet_batch` — random anchor/positive/negative triplet mining
+//!   driven by an inline LCG (`lcg_range`) for deterministic reproducibility.
+//! * `l2_normalize_var` — autograd-safe L2 normalization used to feed the
+//!   phase-consistency term of `ArgusLoss`.
+//! * `cosine_lr` — warmup + cosine LR schedule down to 1% of base LR.
+//! * `TrainConfig` — CLI parser for `--data-dir`, `--output-dir`, `--epochs`,
+//!   `--lr`, `--batch-size`/`--bs`, `--batches`, `--resume`, and `--fresh`.
+//! * `find_checkpoint` / `load_model_weights` — resume logic covering
+//!   `checkpoint_latest`, `checkpoint_best`, and legacy `best_model.axonml`
+//!   files via `Checkpoint` / `StateDict` named-parameter matching.
+//! * `main` — device detection (CUDA under `cuda` feature, else CPU), AdamW
+//!   optimizer, `ArgusLoss::compute_var` forward, `TrainingMonitor`-backed
+//!   progress logging, and periodic + best-model checkpointing.
 //!
 //! ```bash
 //! cargo run --example train_argus --release -p axonml-vision
 //! cargo run --example train_argus --release -p axonml-vision --features cuda
 //! ```
+//!
+//! # File
+//! `crates/axonml-vision/examples/train_argus.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::fs;
 use std::io::Read;

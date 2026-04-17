@@ -1,24 +1,56 @@
-//! Train Mistral on Shakespeare
+//! Train Mistral — AxonML Shakespeare Trainer (SWA + GQA + RoPE + SwiGLU)
 //!
-//! End-to-end training of the AxonML `MistralForCausalLM` on real text, with:
-//! - Sliding-window attention
-//! - Grouped-query attention (GQA)
-//! - RoPE rotary positional embeddings
-//! - SwiGLU MLP with RMSNorm
-//! - GPU acceleration (`--features cuda`)
-//! - Live browser training monitor
-//! - Periodic best-model + full-checkpoint saving
-//! - Resume from latest / best / specific path
-//! - In-flight greedy text sampling
+//! End-to-end training binary for the AxonML [`MistralForCausalLM`] on a
+//! text corpus. Mistral layers the LLaMA stack with:
+//! - **Sliding-window attention** of span `sliding_window` — clamped to
+//!   `seq_len` with a warning when misconfigured.
+//! - Grouped-query attention (GQA) via `num_key_value_heads`.
+//! - RoPE rotary positional embeddings.
+//! - SwiGLU MLP with RMSNorm.
+//!
+//! Like LLaMA, `MistralForCausalLM` does not expose a `forward_with_loss`
+//! method, so shifted cross-entropy is computed through the shared
+//! [`shifted_cross_entropy`] helper.
+//!
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser and `print_help`,
+//!   adding the Mistral-specific `--sliding-window` flag on top of the
+//!   LLaMA-style hyperparameters.
+//! - `generate` — greedy auto-regressive sampler that feeds the tail of
+//!   the running id buffer back into `MistralForCausalLM::forward_ids` and
+//!   picks `argmax` on the last-step logits.
+//! - `pick_device` / `device_name` — CUDA-feature-gated device detection.
+//! - `main` — validates `num_heads % num_kv_heads == 0` and
+//!   `d_model % num_heads == 0`, clamps `sliding_window` to `seq_len` with
+//!   a warning, loads the corpus, builds the tokenizer + dataset,
+//!   constructs [`MistralConfig`] / [`MistralForCausalLM`], resumes from a
+//!   checkpoint, migrates params to GPU when available, wires up the
+//!   `TrainingLifecycle`, and runs the Adam-optimized training loop with
+//!   periodic greedy samples and a 400-char final generation.
 //!
 //! Usage:
 //!   cargo run --release --bin train_mistral -p llm-training --features cuda
 //!   cargo run --release --bin train_mistral -p llm-training --features cuda -- \
 //!       --epochs 10 --bs 16 --seq-len 128 --sliding-window 64 --resume latest
 //!
-//! Like LLaMA, `MistralForCausalLM` does not expose a `forward_with_loss`
-//! method, so the shifted cross-entropy is computed via the shared
-//! `llm_training::shifted_cross_entropy` helper.
+//! # File
+//! `llm-training/src/bin/train_mistral.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -229,7 +261,7 @@ fn generate(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

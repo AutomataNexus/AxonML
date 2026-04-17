@@ -8,39 +8,63 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/rust-1.75%2B-orange.svg" alt="Rust 1.75+">
-  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust 1.85+">
+  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
   <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
 ## Overview
 
-**axonml-core** is the foundational layer of the AxonML machine learning framework. It provides core abstractions for device management, memory storage, data types, and pluggable backend implementations that underpin all tensor operations across CPU and GPU devices.
+**axonml-core** is the foundational layer of the AxonML machine learning framework. It provides the `Device` abstraction, the `Scalar`/`Numeric`/`Float` trait hierarchy, reference-counted `Storage<T>` with pooled GPU allocations, and five compute backends (CPU, CUDA, Vulkan, Metal, WebGPU) that underpin every tensor operation in the framework.
 
 ## Features
 
-- **Device Abstraction** - Unified interface for managing compute devices including CPU, CUDA, Vulkan, Metal, and WebGPU backends with seamless tensor transfer between devices.
+- **Device Abstraction** - `Device` enum (Cpu, Cuda, Vulkan, Metal, Wgpu) with per-variant device index, runtime availability checks, and `best_available_backend()` selector (CUDA > Metal > Vulkan > WebGPU > CPU).
 
-- **Type-Safe Data Types** - Comprehensive type system supporting f16, f32, f64, i8, i16, i32, i64, u8, u32, u64, and bool with automatic type promotion rules.
+- **Type-Safe Data Types** - `DType` runtime enum covering F16, F32, F64, I8, I16, I32, I64, U8, U32, U64, Bool with `size_of` / `is_float` / `is_signed` / `is_integer` queries. Compile-time `Scalar` / `Numeric` / `Float` trait hierarchy for zero-cost generic dispatch.
 
-- **Efficient Memory Storage** - Reference-counted storage with zero-copy slicing, automatic memory cleanup, and device-agnostic operations.
+- **Reference-Counted Storage** - `Storage<T>` wraps either a host `Vec<T>` or a `PooledCudaSlice` behind `Arc<RwLock<...>>`. Supports zero-copy views via offset+len slicing, `to_device()` for CPU<->GPU transfer, deep copy, and RAII `as_slice()` / `as_slice_mut()` guards.
 
-- **Pluggable Backend Architecture** - Extensible backend system with a common `Backend` trait enabling device-agnostic tensor operations.
+- **Five Compute Backends** - CPU (rayon-parallel, matrixmultiply GEMM/GEMV, always available), CUDA (cuBLAS + 15+ custom PTX kernel modules), Vulkan (ash + gpu-allocator, SPIR-V compute), Metal (Apple Silicon, compute pipelines), WebGPU (wgpu for browser/cross-platform).
 
-- **Memory Allocator** - Flexible allocator trait with default CPU implementation and support for custom memory pools.
+- **GPU Memory Pool** - `cuda_pool` returns freed CUDA allocations to a size-bucketed free list instead of calling `cudaFree`, amortising allocator cost across training steps.
 
-- **Device Capabilities** - Query device capabilities including memory, f16/f64 support, and compute capability for optimal resource utilization.
+- **Device Capabilities** - `DeviceCapabilities` exposes name, total/available memory, f16/f64 support, max threads per block, and CUDA compute capability.
+
+- **Allocator Trait** - `Allocator` extension point with a `DefaultAllocator` that performs 64-byte-aligned host allocations and reports system memory via sysinfo.
 
 ## Modules
 
 | Module | Description |
 |--------|-------------|
-| `device` | Device abstraction (CPU, CUDA, Vulkan, Metal, WebGPU) with availability checking and capability queries |
-| `dtype` | Data type definitions with `Scalar`, `Numeric`, and `Float` traits for type-safe operations |
-| `storage` | Reference-counted memory storage with views, slicing, and device transfer |
-| `allocator` | Memory allocation traits and default CPU allocator implementation |
-| `backends` | Device-specific backend implementations for compute operations |
-| `error` | Comprehensive error types for shape mismatches, device errors, and memory allocation failures |
+| `device` | `Device` enum (Cpu, Cuda, Vulkan, Metal, Wgpu) + `DeviceCapabilities` with availability and capability queries |
+| `dtype` | `DType` runtime enum and `Scalar` / `Numeric` / `Float` trait hierarchy; `F16Wrapper` and `BoolWrapper` adapters |
+| `storage` | Reference-counted `Storage<T>` with zero-copy views, device transfer, and pooled GPU slices |
+| `allocator` | `Allocator` trait and `DefaultAllocator` (64-byte-aligned CPU allocator) |
+| `backends` | `Backend` trait, `BackendType`, `GpuMemory`, `GpuStream`, plus CPU/CUDA/Vulkan/Metal/WGPU implementations |
+| `error` | `Error` / `Result` types for shape mismatches, device errors, and allocation failures |
+
+### Backends (under `backends/`)
+
+| Backend | File | Status |
+|---------|------|--------|
+| CPU | `cpu.rs` | Always compiled; rayon-parallel ops, matrixmultiply GEMM |
+| CUDA | `cuda.rs` + `cuda_kernels/` + `cuda_pool.rs` | Feature `cuda`; cuBLAS + PTX kernels for elementwise, activations, attention, Q4_K/Q6_K dequant-in-shader matmul, softmax, layernorm, RMSNorm, transpose, embedding gather |
+| cuDNN | `cudnn_ops.rs` | Feature `cudnn`; conv2d forward/backward via cuDNN |
+| Vulkan | `vulkan.rs` | Feature `vulkan`; ash + gpu-allocator, full buffer/pipeline/dispatch (~982 lines) |
+| Metal | `metal.rs` | Feature `metal`; full buffer/pipeline/dispatch on Apple Silicon (~769 lines) |
+| WebGPU | `wgpu_backend.rs` | Feature `wgpu`; full buffer/pipeline/dispatch via wgpu (~1710 lines) |
+
+## Cargo Features
+
+| Feature | Pulls In | Purpose |
+|---------|----------|---------|
+| `std` (default) | — | Standard library support |
+| `cuda` | `cudarc` | NVIDIA CUDA backend |
+| `cudnn` | `cuda` + cudarc cuDNN | cuDNN conv ops |
+| `vulkan` | `ash`, `gpu-allocator` | Vulkan compute backend |
+| `metal` | `metal`, `objc` (macOS only) | Apple Metal backend |
+| `wgpu` | `wgpu`, `pollster` | WebGPU / cross-platform backend |
 
 ## Usage
 
@@ -48,7 +72,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-core = "0.1.0"
+axonml-core = "0.6.1"
 ```
 
 ### Basic Example
@@ -102,6 +126,18 @@ fn process<T: Float>(data: &[T]) -> T {
 }
 ```
 
+### Picking a Backend
+
+```rust
+use axonml_core::backends::{best_available_backend, gpu_count, BackendType};
+
+let backend = best_available_backend();
+match backend {
+    BackendType::Cpu => println!("Falling back to CPU"),
+    _ => println!("Using {} GPU(s)", gpu_count()),
+}
+```
+
 ## Tests
 
 Run the test suite:
@@ -118,3 +154,7 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+---
+
+_Last updated: 2026-04-16 (v0.6.1)_

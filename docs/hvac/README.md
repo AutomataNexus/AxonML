@@ -9,69 +9,112 @@ description: "HVAC diagnostic and anomaly detection models"
 # HVAC Models
 {: .no_toc }
 
-AxonML's HVAC module provides specialized neural network models for building
-automation, equipment diagnostics, and facility-wide anomaly detection.
+`axonml-hvac` is a domain-specific crate aggregating nine named neural-network
+models for HVAC fault detection and diagnostic reasoning on top of AxonML. It
+covers specialists for each physical subsystem, cross-subsystem aggregation,
+safety validation, and a facility-wide anomaly detector. The full pipeline
+wires these models together in `HvacPipeline`.
 
 ## Models
 
-| Model | Architecture | Purpose | Params |
-|-------|-------------|---------|--------|
-| **Panoptes** | Transformer + LSTM | Facility-wide anomaly detection | ~47K |
-| Aquilo | GRU specialist | Electrical systems diagnostics | ~35K |
-| Boreas | GRU specialist | Refrigeration systems diagnostics | ~35K |
-| Naiad | GRU specialist | Water systems diagnostics | ~35K |
-| Vulcan | GRU specialist | Mechanical systems diagnostics | ~35K |
-| Zephyrus | GRU specialist | Airflow systems diagnostics | ~35K |
-| Colossus | Transformer | Cross-specialist aggregation | ~50K |
-| Gaia | Linear + attention | Safety validation | ~20K |
-| Apollo | Transformer | Master coordinator / final diagnosis | ~45K |
+| Model        | Role                                                                                   |
+|--------------|----------------------------------------------------------------------------------------|
+| **Panoptes** | Facility-wide anomaly detection — per-type encoders + equipment embeddings + cross-equipment transformer + temporal LSTM |
+| **Aquilo**   | Electrical systems specialist (voltage / current / power quality), with FFT1d input    |
+| **Boreas**   | Cold-side / refrigeration specialist                                                   |
+| **Naiad**    | Water-side / hydronic specialist                                                       |
+| **Vulcan**   | Heat-side / mechanical specialist                                                      |
+| **Zephyrus** | Airflow / temporal predictor + autoencoder                                             |
+| **Colossus** | Cross-specialist transformer aggregator                                                |
+| **Gaia**     | Environmental context encoder / safety validator                                       |
+| **Apollo**   | Master coordinator — final fault classification, transformer + multi-head attention    |
+
+Exact parameter counts vary by subsystem and are configured inside each
+module; the lib documentation notes Apollo as approximately 1.8M params and
+Aquilo as approximately 608K params.
 
 ## Architecture Overview
 
 ```
-                    ┌─────────────────────────────┐
-                    │  PANOPTES (facility-wide)    │
-                    │  All 59 equipment at once    │
-                    │  Cross-equip correlations    │
-                    └─────────────────────────────┘
+                    +-----------------------------+
+                    |  PANOPTES (facility-wide)   |
+                    |  All equipment at once      |
+                    |  Cross-equip correlations   |
+                    +-----------------------------+
 
- ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
- │ Aquilo  │ │ Boreas  │ │  Naiad  │ │ Vulcan  │ │Zephyrus │
- │Electric │ │ Refrig  │ │  Water  │ │  Mech   │ │ Airflow │
- └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘
-      │           │           │           │           │
-      └───────────┴───────────┴───────────┴───────────┘
-                              │
-                     ┌────────┴────────┐
-                     │    Colossus     │
-                     │  (aggregator)   │
-                     └────────┬────────┘
-                              │
-                     ┌────────┴────────┐
-                     │      Gaia      │
-                     │ (safety check) │
-                     └────────┬────────┘
-                              │
-                     ┌────────┴────────┐
-                     │     Apollo     │
-                     │ (final diag)   │
-                     └────────────────┘
+ +--------+ +--------+ +--------+ +--------+ +---------+
+ | Aquilo | | Boreas |  | Naiad |  | Vulcan|  |Zephyrus|
+ |Electr. | | Refrig |  | Water |  |  Mech |  |Airflow |
+ +---+----+ +---+----+  +---+---+  +---+---+  +----+---+
+     |          |           |          |            |
+     +----------+-----------+----------+------------+
+                             |
+                     +---------------+
+                     |   Colossus    |
+                     | (aggregator)  |
+                     +-------+-------+
+                             |
+                     +---------------+
+                     |     Gaia      |
+                     | (safety check)|
+                     +-------+-------+
+                             |
+                     +---------------+
+                     |    Apollo     |
+                     | (final diag)  |
+                     +---------------+
 ```
 
-## Module Location
+## Crate Layout
 
 ```
-crates/axonml/src/hvac/
-├── mod.rs          — Module exports
-├── data.rs         — Sensor data structures, fault types, synthetic data
-├── panoptes.rs     — Facility-wide anomaly detection (NEW)
-├── aquilo.rs       — Electrical specialist
-├── boreas.rs       — Refrigeration specialist
-├── naiad.rs        — Water systems specialist
-├── vulcan.rs       — Mechanical specialist
-├── zephyrus.rs     — Airflow specialist
-├── colossus.rs     — Cross-specialist aggregator
-├── gaia.rs         — Safety validator
-├── apollo.rs       — Master coordinator
-└── pipeline.rs     — Full 8-model pipeline orchestration
+crates/axonml-hvac/src/
+├── lib.rs                — Crate root and re-exports
+├── data.rs               — HvacSensorData, HvacLabels, PipelineOutput,
+│                            SyntheticHvacGenerator
+├── panoptes.rs           — Facility-wide Panoptes model
+├── panoptes_datagen.rs   — PanoptesTrainingData + WarrenSimulator HVAC scenario engine
+├── aquilo.rs             — Electrical systems specialist
+├── boreas.rs             — Refrigeration specialist
+├── naiad.rs              — Water systems specialist
+├── vulcan.rs             — Mechanical specialist
+├── zephyrus.rs           — Airflow specialist
+├── colossus.rs           — Cross-specialist aggregator
+├── gaia.rs               — Safety validator / environmental context
+├── apollo.rs             — Master coordinator / final diagnosis
+└── pipeline.rs           — Full HvacPipeline orchestration
 ```
+
+## Public API
+
+Top-level re-exports (`axonml_hvac::*`):
+
+- Models: `Apollo`, `Aquilo`, `Boreas`, `Colossus`, `Gaia`, `Naiad`,
+  `Panoptes`, `Vulcan`, `Zephyrus`
+- Data: `HvacSensorData`, `HvacLabels`, `PipelineOutput`,
+  `SyntheticHvacGenerator`
+- Panoptes training data: `PanoptesTrainingData`, `WarrenSimulator`
+- Pipeline: `HvacPipeline`
+
+Each model struct implements `axonml_nn::Module` so it fits into the standard
+training / inference flow.
+
+## Quick Start
+
+```rust
+use axonml_hvac::{HvacPipeline, SyntheticHvacGenerator};
+
+let mut gen = SyntheticHvacGenerator::new();
+let (sensor_data, labels) = gen.sample_batch(32);
+
+let pipeline = HvacPipeline::new();
+let output = pipeline.forward(&sensor_data);
+```
+
+For facility-wide anomaly training, use `WarrenSimulator` (inside
+`panoptes_datagen`) to produce `PanoptesTrainingData` batches drawn from
+parameterised HVAC scenarios.
+
+## Last updated
+
+0.6.1 (2026-04-16)

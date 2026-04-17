@@ -1,13 +1,22 @@
-//! NightVision — Multi-Domain Infrared Detection
+//! NightVision — Multi-Domain Infrared Object Detection
+//!
+//! A domain-adaptive infrared detection model for wildlife monitoring, human
+//! detection (SAR/security), and astronomical thermal signatures. Uses a thermal
+//! stem (adaptive 1/3-channel input), CSP backbone for multi-scale feature
+//! extraction, a thermal FPN for feature pyramid fusion, and decoupled YOLOX-
+//! style detection heads with optional domain tagging. Handles unique IR
+//! characteristics including inverted contrast, thermal bloom, and varying
+//! emissivity.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/nightvision/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 24, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -56,6 +65,10 @@
 //!     |
 //!  Detections: [class, x, y, w, h, confidence, domain]
 //! ```
+
+// =============================================================================
+// Sub-Modules and Re-Exports
+// =============================================================================
 
 pub mod backbone;
 pub mod detector;

@@ -1,13 +1,20 @@
-//! Functional API - Stateless Neural Network Operations
+//! Functional API — stateless free functions for common nn operations.
+//!
+//! 212 lines. Thin wrappers around `Variable` methods for a PyTorch
+//! `torch.nn.functional`-style API: `relu`, `leaky_relu`, `sigmoid`, `tanh`,
+//! `gelu`, `silu`, `elu`, `softmax`, `log_softmax`, `dropout` (train-aware),
+//! `linear` (matmul + optional bias), `mse_loss`, `cross_entropy`,
+//! `binary_cross_entropy`, `l1_loss`. All graph-tracked and backpropagable.
 //!
 //! # File
 //! `crates/axonml-nn/src/functional.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

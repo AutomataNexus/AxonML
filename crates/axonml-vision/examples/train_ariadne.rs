@@ -1,11 +1,39 @@
 //! Train Ariadne — Fingerprint Identity via Ridge Event Fields
 //!
-//! Trains on FVC2000 DB4_B fingerprint dataset.
-//! Uses ContrastiveLoss (margin-based with orientation regularization).
+//! End-to-end training example for the `AriadneFingerprint` biometric model
+//! on the FVC2000 DB4_B fingerprint dataset. Loads per-identity binary files
+//! (`identity_*`) produced by the dataset preprocessor, mines same/different
+//! pairs each batch via `mine_pair_batch`, and optimizes a `ContrastiveLoss`
+//! (margin-based, with orientation regularization) using AdamW with a
+//! cosine learning-rate schedule and warmup (`cosine_lr`).
+//!
+//! Provides command-line configuration through `TrainConfig::from_args`
+//! (flags: `--data-dir`, `--output-dir`, `--epochs`, `--lr`, `--bs`,
+//! `--batches`, `--resume`, `--fresh`), full checkpoint resume via
+//! `find_checkpoint` / `load_model_weights` (positional parameter loading
+//! because Ariadne has no `named_parameters` impl), optional CUDA device
+//! placement, and a `TrainingMonitor` integration. Saves
+//! `best_model.axonml`, `checkpoint_best.axonml`, `checkpoint_latest.axonml`,
+//! and periodic `checkpoint_epoch_NNNN.axonml` files.
 //!
 //! ```bash
 //! cargo run --example train_ariadne --release -p axonml-vision --features cuda
 //! ```
+//!
+//! # File
+//! `crates/axonml-vision/examples/train_ariadne.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::fs;
 use std::io::Read;
@@ -120,6 +148,10 @@ fn mine_pair_batch(
 
     (data_a, data_b, labels)
 }
+
+// -----------------------------------------------------------------------------
+// RNG and Learning-Rate Helpers
+// -----------------------------------------------------------------------------
 
 fn lcg_range(state: &mut u64, max: usize) -> usize {
     *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);

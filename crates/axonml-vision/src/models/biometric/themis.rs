@@ -1,13 +1,25 @@
 //! Themis — Multimodal Belief Propagation Fusion (~49K params)
 //!
+//! Implements `ThemisFusion`, which fuses biometric evidence from up to four
+//! modalities (face/fingerprint/voice/iris) through per-modality linear
+//! projectors to a common 48-dim space, uncertainty-gated weighting (sigmoid
+//! on negative log-variance), cross-modal consistency checking (2-layer MLP
+//! producing per-modality reliability adjustments), and a belief-accumulating
+//! GRU that crystallizes the fused state over time. Output heads produce a
+//! match probability (decision head) and an L2-normalized fused identity
+//! embedding (identity head). Tracks per-modality historical reliability
+//! scores, detects cross-modal conflicts (`ModalityConflict`), and generates
+//! forensic reports with per-dimension contribution analysis.
+//!
 //! # File
 //! `crates/axonml-vision/src/models/biometric/themis.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

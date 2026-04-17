@@ -1,18 +1,43 @@
-//! Database module for AxonML Server
+//! Database Module — Aegis-DB Client and Multi-Model Data Access
+//!
+//! Top-level database module for the AxonML server, providing a unified async
+//! client for the Aegis-DB backend. Exposes three data-access paradigms through
+//! a single `Database` struct:
+//!
+//! - **SQL queries** via `query()` / `query_with_params()` / `execute()` with
+//!   `QueryRequest` / `QueryResponse` request/response types.
+//! - **Key-value store** via `kv_set()` / `kv_get()` / `kv_delete()`.
+//! - **Document store** via `doc_insert()` / `doc_get()` / `doc_update()` /
+//!   `doc_delete()` / `doc_query()` / `doc_find_one()`, with `DocumentQuery`
+//!   for filtered/sorted/paginated lookups.
+//! - **Time series** via `ts_write_one()` / `ts_query()`, using `DataPoint`,
+//!   `TimeSeriesQuery`, and `TimeSeriesAggregation`.
+//!
+//! Security: `validate_db_host()` restricts connections to loopback and
+//! RFC-1918 private addresses, preventing SSRF. Authentication uses a
+//! bearer-token flow stored in an `Arc<RwLock<Option<String>>>`.
+//!
+//! Re-exports sub-modules: `datasets`, `models`, `notebooks`, `runs`,
+//! `schema`, and `users`.
 //!
 //! # File
 //! `crates/axonml-server/src/db/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Sub-Module Declarations
+// =============================================================================
 
 pub mod datasets;
 pub mod models;
@@ -20,6 +45,10 @@ pub mod notebooks;
 pub mod runs;
 pub mod schema;
 pub mod users;
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use crate::config::AegisConfig;
 use reqwest::Client;
@@ -29,6 +58,10 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use url::Url;
+
+// =============================================================================
+// Error Types
+// =============================================================================
 
 #[derive(Error, Debug)]
 pub enum DbError {
@@ -48,6 +81,10 @@ pub enum DbError {
     JsonError(#[from] serde_json::Error),
 }
 
+// =============================================================================
+// Core Types — Database Connection
+// =============================================================================
+
 /// Database connection wrapper for Aegis-DB
 #[derive(Clone)]
 pub struct Database {
@@ -56,6 +93,10 @@ pub struct Database {
     auth: Option<(String, String)>,
     token: Arc<RwLock<Option<String>>>,
 }
+
+// =============================================================================
+// Types — SQL Query Request / Response
+// =============================================================================
 
 /// Query request body
 #[derive(Debug, Serialize)]
@@ -73,11 +114,19 @@ pub struct QueryResponse {
     pub affected_rows: u64,
 }
 
+// =============================================================================
+// Types — Key-Value Store
+// =============================================================================
+
 /// KV get response
 #[derive(Debug, Deserialize)]
 struct KvGetResponse {
     value: Option<Value>,
 }
+
+// =============================================================================
+// Types — Document Store
+// =============================================================================
 
 /// Document insert response
 #[derive(Debug, Deserialize)]
@@ -114,6 +163,10 @@ pub struct DocumentQuery {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip: Option<u32>,
 }
+
+// =============================================================================
+// Types — Time Series
+// =============================================================================
 
 /// Time series data point
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -156,6 +209,10 @@ struct TimeSeriesResponse {
     points: Vec<DataPoint>,
 }
 
+// =============================================================================
+// Security — Host Validation
+// =============================================================================
+
 /// SECURITY: Validate that a database host is a loopback or private network address.
 /// Prevents SSRF by ensuring we only connect to internal database services.
 fn validate_db_host(host: &str, port: u16) -> Result<(), DbError> {
@@ -183,7 +240,15 @@ fn validate_db_host(host: &str, port: u16) -> Result<(), DbError> {
     Ok(())
 }
 
+// =============================================================================
+// Implementation — Database
+// =============================================================================
+
 impl Database {
+    // -------------------------------------------------------------------------
+    // Connection and Authentication
+    // -------------------------------------------------------------------------
+
     /// Create a new database connection.
     /// SECURITY: Only allows connections to loopback/private network addresses.
     pub async fn new(config: &AegisConfig) -> Result<Self, DbError> {
@@ -250,6 +315,10 @@ impl Database {
             .map_err(|e| DbError::ConnectionFailed(format!("Invalid URL path '{}': {}", path, e)))
     }
 
+    // -------------------------------------------------------------------------
+    // SQL Query Operations
+    // -------------------------------------------------------------------------
+
     /// Execute a query and return results
     pub async fn query(&self, sql: &str) -> Result<QueryResponse, DbError> {
         self.query_with_params(sql, vec![]).await
@@ -303,6 +372,10 @@ impl Database {
         let result = self.query_with_params(sql, params).await?;
         Ok(result.affected_rows)
     }
+
+    // -------------------------------------------------------------------------
+    // Key-Value Store Operations
+    // -------------------------------------------------------------------------
 
     /// Set a key-value pair
     pub async fn kv_set(&self, key: &str, value: Value) -> Result<(), DbError> {
@@ -382,9 +455,9 @@ impl Database {
         Ok(())
     }
 
-    // ========================================================================
+    // -------------------------------------------------------------------------
     // Document Store Operations
-    // ========================================================================
+    // -------------------------------------------------------------------------
 
     /// Create a document collection
     pub async fn create_collection(&self, name: &str) -> Result<(), DbError> {
@@ -596,9 +669,9 @@ impl Database {
         Ok(docs.into_iter().next())
     }
 
-    // ========================================================================
+    // -------------------------------------------------------------------------
     // Time Series Operations
-    // ========================================================================
+    // -------------------------------------------------------------------------
 
     /// Write a single time series data point
     pub async fn ts_write_one(
@@ -663,6 +736,10 @@ impl Database {
         Ok(result.points)
     }
 
+    // -------------------------------------------------------------------------
+    // Health Check
+    // -------------------------------------------------------------------------
+
     /// Check if database is healthy
     pub async fn health_check(&self) -> bool {
         let url = match self.build_url("/health") {
@@ -675,6 +752,10 @@ impl Database {
         }
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

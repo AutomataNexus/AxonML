@@ -1,13 +1,22 @@
-//! CUDA Memory Pool - Reuses freed GPU allocations
+//! CUDA memory pool — reuses freed GPU allocations to avoid cudaFree latency.
+//!
+//! `CudaMemoryPool` maintains per-size-bucket free lists (power-of-2 for sizes
+//! > 256, linear 64-byte increments for smaller). `pool_alloc(len)` checks the
+//! free list first, falls back to `stream.alloc_zeros(bucket)` on miss.
+//! `pool_free(slice)` returns the block's raw device pointer to the bucket,
+//! capped at 64 blocks per bucket to prevent unbounded growth. `clear_pool()`
+//! actually cudaFrees everything. `print_pool_stats()` reports hits/misses/
+//! returns/pooled bytes. Global singleton via `OnceLock`.
 //!
 //! # File
 //! `crates/axonml-core/src/backends/cuda_pool.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,18 +1,32 @@
-//! Authentication module for AxonML Server
+//! Authentication Module — Root and Re-exports
+//!
+//! Top-level module for the AxonML server authentication subsystem. Re-exports
+//! the six sub-modules (`jwt`, `middleware`, `rate_limit`, `recovery`, `totp`,
+//! `webauthn`) and their primary types (`Claims`, `JwtAuth`, `AuthLayer`,
+//! `AuthUser`, `RateLimiter`, `RecoveryAuth`, `TotpAuth`, `WebAuthnAuth`).
+//!
+//! Defines the shared `AuthError` enum used by all auth sub-modules, plus
+//! Argon2-based password hashing (`hash_password`) and verification
+//! (`verify_password`) utilities backed by random salts via `OsRng`.
 //!
 //! # File
 //! `crates/axonml-server/src/auth/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Sub-module Declarations
+// =============================================================================
 
 pub mod jwt;
 pub mod middleware;
@@ -20,6 +34,10 @@ pub mod rate_limit;
 pub mod recovery;
 pub mod totp;
 pub mod webauthn;
+
+// =============================================================================
+// Re-exports
+// =============================================================================
 
 pub use jwt::{Claims, JwtAuth};
 pub use middleware::{
@@ -31,11 +49,19 @@ pub use recovery::RecoveryAuth;
 pub use totp::TotpAuth;
 pub use webauthn::WebAuthnAuth;
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use thiserror::Error;
+
+// =============================================================================
+// Error Types
+// =============================================================================
 
 #[derive(Error, Debug)]
 pub enum AuthError {
@@ -63,6 +89,10 @@ pub enum AuthError {
     Internal(String),
 }
 
+// =============================================================================
+// Password Hashing
+// =============================================================================
+
 /// Hash a password using Argon2
 pub fn hash_password(password: &str) -> Result<String, AuthError> {
     let salt = SaltString::generate(&mut OsRng);
@@ -83,6 +113,10 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, AuthError> {
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

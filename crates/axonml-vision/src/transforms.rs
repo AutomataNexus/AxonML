@@ -1,13 +1,24 @@
-//! Image Transforms - Vision-Specific Data Augmentation
+//! Image Transforms — Vision-Specific Data Augmentation Pipeline
+//!
+//! Image preprocessing and augmentation transforms implementing the `Transform`
+//! trait from axonml-data. `Resize` performs bilinear interpolation on 2D/3D/4D
+//! tensors. `CenterCrop` extracts the central region. `RandomHorizontalFlip` and
+//! `RandomVerticalFlip` apply stochastic mirroring. `RandomRotation` rotates by
+//! 90-degree increments. `ColorJitter` randomly adjusts brightness, contrast, and
+//! saturation. `Grayscale` converts RGB to single-channel via BT.601 coefficients.
+//! `ImageNormalize` applies per-channel (value - mean) / std with presets for
+//! ImageNet, MNIST, and CIFAR-10. `Pad` adds constant-value borders. `ToTensorImage`
+//! rescales [0, 255] to [0, 1].
 //!
 //! # File
 //! `crates/axonml-vision/src/transforms.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

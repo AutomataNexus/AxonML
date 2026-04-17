@@ -1,13 +1,21 @@
-//! Simple Training Example
+//! Simple Training Example — XOR Problem with a Two-Layer MLP
+//!
+//! Minimal end-to-end training demonstration using the AxonML framework.
+//! Prints the framework version and enabled features, constructs a two-layer
+//! MLP (`Linear(2,4)` -> sigmoid -> `Linear(4,1)` -> sigmoid) to learn the
+//! XOR function, trains for 1000 epochs with `Adam` optimizer (lr=0.1) and
+//! manual MSE loss (`(output - target)^2`), logs loss every 200 epochs, and
+//! evaluates all four XOR inputs with rounded prediction vs. expected output.
 //!
 //! # File
 //! `crates/axonml/examples/simple_training.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -16,12 +24,20 @@
 
 use axonml::prelude::*;
 
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
 fn main() {
     println!("=== Axonml ML Framework - Simple Training Example ===\n");
 
     // Print version and features
     println!("Version: {}", axonml::version());
     println!("Features: {}\n", axonml::features());
+
+    // -------------------------------------------------------------------------
+    // Dataset (XOR Problem)
+    // -------------------------------------------------------------------------
 
     // 1. Create a simple dataset (XOR problem)
     println!("1. Creating XOR dataset...");
@@ -36,6 +52,10 @@ fn main() {
     println!("   Inputs: {inputs:?}");
     println!("   Targets: {targets:?}\n");
 
+    // -------------------------------------------------------------------------
+    // Model and Optimizer
+    // -------------------------------------------------------------------------
+
     // 2. Create a simple MLP model
     println!("2. Creating MLP model (2 -> 4 -> 1)...");
     let linear1 = Linear::new(2, 4);
@@ -49,6 +69,10 @@ fn main() {
     let params = [linear1.parameters(), linear2.parameters()].concat();
     let mut optimizer = Adam::new(params, 0.1);
     println!("   Optimizer created!\n");
+
+    // -------------------------------------------------------------------------
+    // Training Loop
+    // -------------------------------------------------------------------------
 
     // 4. Training loop
     println!("4. Training for 1000 epochs...");
@@ -88,6 +112,10 @@ fn main() {
             println!("   Epoch {}: Loss = {:.6}", epoch, total_loss / 4.0);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Evaluation
+    // -------------------------------------------------------------------------
 
     // 5. Test the trained model
     println!("\n5. Testing trained model...");

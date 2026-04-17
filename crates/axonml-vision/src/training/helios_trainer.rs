@@ -1,13 +1,36 @@
-//! Helios Training Loop — Complete Detection Training Pipeline
+//! Helios Trainer — Detection Training Pipeline With EMA, Augmentation, mAP
+//!
+//! End-to-end training driver for the Helios detector. `HeliosTrainConfig`
+//! holds hyperparameters (epochs, batch size, LR, weight decay, warmup,
+//! input size, mosaic / mixup / EMA toggles, log / eval intervals,
+//! close-mosaic schedule, num_classes) and offers `coco` (640x640, 300
+//! epochs, mosaic + mixup + EMA) and `fast` (320x320, 50 epochs, no mosaic)
+//! presets. `EpochResult` reports per-epoch total / cls / box / DFL losses,
+//! current LR, and optional mAP@50.
+//!
+//! `HeliosTrainer` ties together the model, `HeliosLoss`, an `Adam`
+//! optimizer with weight decay, an optional `ModelEMA`, and a
+//! `DetAugPipeline` (`yolo` or `simple`). `new` auto-detects CUDA when the
+//! `cuda` feature is enabled, moves model parameters to the device, and
+//! sizes the loss head from the model's `reg_max`. `train_step` warms LR via
+//! `warmup_lr` (linear ramp then cosine decay to 1% floor), runs forward /
+//! backward / optimizer / EMA-update on a batch, and returns the four
+//! component losses. `evaluate` runs `model.detect` over an eval set —
+//! optionally under EMA weights via `apply_and_restore` — and returns
+//! mAP@50 from `compute_map`. `advance_epoch` increments the counter and
+//! swaps in the simple-augmentation pipeline once `close_mosaic_epochs`
+//! remain. Accessors `parameters`, `ema_parameters`, `augment_mut`, and
+//! `device` expose internals for checkpointing and reconfiguration.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/helios_trainer.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

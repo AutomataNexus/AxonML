@@ -1,26 +1,54 @@
-//! Trident 1.58-bit SLM Training Example
+//! Trident 1.58-bit SLM — Synthetic Training Example
 //!
-//! Trains a small Trident model (BitNet b1.58 ternary weights) on synthetic
-//! next-token prediction data. Reports loss, perplexity, weight sparsity,
-//! and compression ratio per epoch.
+//! End-to-end training driver for a small `TridentModel` (BitNet b1.58 with
+//! ternary `{-1, 0, +1}` weights) on a deterministic synthetic next-token
+//! prediction task. Demonstrates the straight-through-estimator (STE) gradient
+//! path through ternary quantization while reporting loss, perplexity, learned
+//! weight sparsity, and ternary-vs-fp32 compression ratio every epoch.
 //!
-//! Usage:
-//!   cargo run --release --example train_trident -p axonml-llm
-//!   cargo run --release --example train_trident -p axonml-llm -- --monitor
+//! Pipeline:
+//! - `generate_sequences` builds patterned token sequences (cycling base + step
+//!   with small noise) so the model has learnable structure. Token 0 is
+//!   reserved for padding; all generated tokens land in `1..VOCAB_SIZE`.
+//! - `TridentConfig` declares a 2-layer, 4-head, d_model=64 model with vocab
+//!   1000 and seq_len 32 (no RoPE, no squared-ReLU, no sub-LN), and is fed to
+//!   `TridentModel::new`.
+//! - The optimizer is `Adam` over the model parameters; gradients flow through
+//!   the STE path because the shadow weights remain trainable even though the
+//!   forward pass quantizes them.
+//! - For each batch the binary builds `Tensor<u32>` input and label tensors of
+//!   shape `[bs, MAX_SEQ_LEN]`, runs `forward_with_loss`, performs the backward
+//!   step, and accumulates per-token loss. After the epoch, perplexity =
+//!   `exp(loss).min(99999.0)` and `model.average_sparsity()` are printed
+//!   alongside `config.ternary_storage_bytes()` vs `config.fp32_storage_bytes()`
+//!   for the compression ratio.
+//! - When `--monitor` is passed, an `axonml::TrainingMonitor` is launched on a
+//!   local port and per-epoch metrics (loss, perplexity, sparsity, compression
+//!   ratio) are streamed to it; the process parks on completion so the
+//!   dashboard stays reachable.
+//!
+//! Run with:
+//!   `cargo run --release --example train_trident -p axonml-llm`
+//!   `cargo run --release --example train_trident -p axonml-llm -- --monitor`
 //!
 //! # File
 //! `crates/axonml-llm/examples/train_trident.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 19, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::env;
 use std::time::Instant;
@@ -78,7 +106,7 @@ fn generate_sequences(num_samples: usize, seq_len: usize, rng: &mut StdRng) -> V
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {
@@ -89,7 +117,9 @@ fn main() {
     println!("  BitNet b1.58 ternary weights {{-1, 0, +1}}");
     println!();
 
-    // ---- Model configuration ----
+    // -------------------------------------------------------------------------
+    // Model configuration
+    // -------------------------------------------------------------------------
     let config = TridentConfig {
         vocab_size: VOCAB_SIZE,
         d_model: D_MODEL,
@@ -145,7 +175,9 @@ fn main() {
     println!("  optimizer        : Adam (STE for ternary weights)");
     println!();
 
-    // ---- Monitor (optional) ----
+    // -------------------------------------------------------------------------
+    // Monitor (optional)
+    // -------------------------------------------------------------------------
     let monitor = if use_monitor {
         let m = axonml::TrainingMonitor::new("Trident-1.58bit", param_count)
             .total_epochs(NUM_EPOCHS)
@@ -158,14 +190,20 @@ fn main() {
         None
     };
 
-    // ---- Generate synthetic data ----
+    // -------------------------------------------------------------------------
+    // Generate synthetic data
+    // -------------------------------------------------------------------------
     let mut rng = StdRng::seed_from_u64(42);
     let train_seqs = generate_sequences(NUM_TRAIN, MAX_SEQ_LEN, &mut rng);
 
-    // ---- Optimizer (Adam on shadow weights — STE gradient flows through) ----
+    // -------------------------------------------------------------------------
+    // Optimizer (Adam on shadow weights — STE gradient flows through)
+    // -------------------------------------------------------------------------
     let mut optimizer = Adam::new(model.parameters(), LEARNING_RATE);
 
-    // ---- Training loop ----
+    // -------------------------------------------------------------------------
+    // Training loop
+    // -------------------------------------------------------------------------
     let total_start = Instant::now();
 
     println!(
@@ -243,7 +281,9 @@ fn main() {
     println!("Training complete in {:.1}s", total_time.as_secs_f32());
     println!();
 
-    // ---- Final report ----
+    // -------------------------------------------------------------------------
+    // Final report
+    // -------------------------------------------------------------------------
     println!("=== Final Model Statistics ===");
     let final_sparsity = model.average_sparsity();
     println!(

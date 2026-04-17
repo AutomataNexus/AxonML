@@ -1,40 +1,40 @@
 //! Axonml HVAC — Domain-Specific HVAC Diagnostic Models
 //!
+//! Top-level crate module aggregating nine named neural-network models for
+//! HVAC fault detection and diagnostic reasoning on top of the AxonML deep
+//! learning framework. `apollo` hosts the primary fault classifier, `aquilo`
+//! the airflow anomaly detector, `boreas` the cold-side cooling specialist,
+//! `colossus` a large transformer diagnostician, `gaia` an environmental
+//! context encoder, `naiad` the water-side hydronic specialist, `panoptes`
+//! the observability / multi-signal fusion model, `vulcan` the heat-side
+//! specialist, and `zephyrus` the temporal predictor / autoencoder.
+//! Supporting modules are `data` (the `HvacSensorData`, `HvacLabels`,
+//! `PipelineOutput`, and `SyntheticHvacGenerator` types), `panoptes_datagen`
+//! (`PanoptesTrainingData` + the `WarrenSimulator` HVAC scenario engine), and
+//! `pipeline` which wires the models into the end-to-end `HvacPipeline`. The
+//! crate re-exports each model struct alongside these helpers as the public
+//! surface. Clippy lints for the cast, doc, naming, and arity families are
+//! selectively relaxed at the crate root to accommodate the numeric-heavy
+//! training code.
+//!
 //! # File
 //! `crates/axonml-hvac/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
-//! # Overview
-//!
-//! Nine models for HVAC fault detection and diagnostic reasoning, built on
-//! the AxonML deep learning framework:
-//!
-//! | Model | Purpose |
-//! |-------|---------|
-//! | [`apollo`]   | Primary fault classifier |
-//! | [`aquilo`]   | Airflow anomaly detector |
-//! | [`boreas`]   | Cold-side (cooling) specialist |
-//! | [`colossus`] | Large transformer diagnostician |
-//! | [`gaia`]     | Environmental context encoder |
-//! | [`naiad`]    | Water-side (hydronic) specialist |
-//! | [`panoptes`] | Observability / multi-signal fusion |
-//! | [`vulcan`]   | Heat-side specialist |
-//! | [`zephyrus`] | Temporal predictor / autoencoder |
-//!
-//! Plus supporting modules:
-//!
-//! | Module | Purpose |
-//! |--------|---------|
-//! | [`data`]             | Sensor data types, synthetic generator |
-//! | [`panoptes_datagen`] | Warren HVAC simulator for Panoptes training |
-//! | [`pipeline`]         | End-to-end 8-model diagnostic pipeline |
+//! # Updated
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Crate-Level Lints
+// =============================================================================
 
 #![warn(clippy::all)]
 #![allow(clippy::cast_possible_truncation)]
@@ -50,6 +50,10 @@
 #![allow(clippy::similar_names)]
 #![allow(clippy::many_single_char_names)]
 
+// =============================================================================
+// Module Declarations
+// =============================================================================
+
 pub mod apollo;
 pub mod aquilo;
 pub mod boreas;
@@ -63,7 +67,10 @@ pub mod pipeline;
 pub mod vulcan;
 pub mod zephyrus;
 
-// Re-exports
+// =============================================================================
+// Public Re-exports
+// =============================================================================
+
 pub use apollo::Apollo;
 pub use aquilo::Aquilo;
 pub use boreas::Boreas;

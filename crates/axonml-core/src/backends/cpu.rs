@@ -1,13 +1,24 @@
-//! CPU Backend - Host Memory Operations
+//! CPU compute backend — 37 public methods for host-side tensor operations.
+//!
+//! Implements the `Backend` trait (allocate, copy, synchronize) plus static
+//! methods on `CpuBackend` for: rayon-parallel elementwise arithmetic (add,
+//! sub, mul, div, add_scalar, mul_scalar, neg, abs, sign, pow), activations
+//! (relu, sigmoid, tanh, gelu, silu, elu, leaky_relu, softmax, log_softmax),
+//! matrix multiply (`matmul` via matrixmultiply sgemm with rayon GEMV fast
+//! path for m=1 decode, `matmul_f32_bt` for B-transposed layout used by
+//! quantized inference), reductions (sum, mean, max, min, var), comparisons
+//! (gt, lt, eq, clamp), and misc (where_cond, dropout, embedding_gather).
+//! Parallel threshold is 4096 elements; smaller ops run serial.
 //!
 //! # File
 //! `crates/axonml-core/src/backends/cpu.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

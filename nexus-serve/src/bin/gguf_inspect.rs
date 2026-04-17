@@ -1,14 +1,48 @@
-//! `gguf_inspect` — dump GGUF metadata + tensor layout using nexus-serve's own parser.
+//! gguf_inspect — GGUF Header Dump CLI Binary
+//!
+//! Standalone binary (`cargo run --release --bin gguf_inspect --
+//! /path/to/model.gguf`) that opens a GGUF file via [`GgufFile::open`] and
+//! prints:
+//! - File header: `path`, `version`, tensor count, `data_offset`.
+//! - Full `metadata` map sorted alphabetically (via `BTreeMap`), with string
+//!   values truncated to 80 chars.
+//! - Per-dtype tensor summary (count + aggregate bytes).
+//! - First 30 tensor entries with name / dtype / dims / MB.
+//! - A warning line if any tensor uses [`GgmlType::Unknown`] — that's the
+//!   signal that `GgmlType::from_u32` is missing a registration for a new
+//!   GGUF variant.
 //!
 //! Used to verify a new GGUF variant (dtype, architecture, layer names) before
-//! wiring the architecture dispatch. Usage:
+//! wiring the architecture dispatch in `model/inference.rs`. The [`fmt_value`]
+//! helper renders a single [`GgufValue`] as a one-line string.
 //!
-//!   cargo run --release --bin gguf_inspect -- /path/to/model.gguf
+//! # File
+//! `nexus-serve/src/bin/gguf_inspect.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use nexus_serve::model::gguf::{GgmlType, GgufFile, GgufValue};
+
+// =============================================================================
+// Value Formatter
+// =============================================================================
 
 fn fmt_value(v: &GgufValue) -> String {
     match v {
@@ -33,6 +67,10 @@ fn fmt_value(v: &GgufValue) -> String {
         GgufValue::Array(a) => format!("[{} items]", a.len()),
     }
 }
+
+// =============================================================================
+// Main
+// =============================================================================
 
 fn main() {
     let path = std::env::args()

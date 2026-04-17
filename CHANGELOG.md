@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-04-16
+
+### Summary
+Post-0.6.0 productization release focused on (1) the pure-Rust LLM inference stack (`nexus-serve`) reaching a working end-to-end state on a DeepSeek-7B bridge model with custom CUDA kernels, (2) a new `llm-training` crate housing nine LM training binaries, (3) a workspace split that extracted HVAC and training glue out of the `axonml` umbrella, (4) several security fixes (path canonicalization, credential-echo removal, `rand` RUSTSEC bump), and (5) a documentation overhaul where every one of 515 source files received a hand-written doc header + ORCID attribution + section organization.
+
+### Added
+
+#### New Crate — `llm-training`
+- Dedicated training binaries for every LM architecture in `axonml-llm`: `train_gpt2`, `train_llama`, `train_mistral`, `train_phi`, `train_hydra`, `train_chimera`, `train_ssm`, `train_bert`, `train_trident_code`.
+- `lifecycle.rs` — shared pause/resume/stop/checkpoint control plane over a Unix socket + signal handlers, so weeks-long training runs survive process restart and give the operator a `train_ctl` control binary.
+- `train_phi` documents and applies the full-RoPE workaround for the partial-RoPE framework bug inline.
+- `train_chimera` exercises the sparse-MoE + Differential-Attention path end-to-end.
+- `train_hydra` exercises the hybrid SSM + windowed-attention path.
+
+#### `nexus-serve` — Pure-Rust LLM Inference
+- DeepSeek-R1-Distill-Qwen-7B bridge model loader (Q4_K_M GGUF, 4.4 GB). `/v1/messages` Anthropic API with SSE streaming reaches 9–10 tok/s decode end-to-end on RTX 3090.
+- `OnceLock<CudaSlice<u8>>` weight upload cache on `Weight::Quantized` — eliminates the per-matmul `htod_copy` re-upload that was the 0.83 tok/s regression.
+- CUDA kernels: Q4_K and Q6_K dequant-in-shader GEMV/GEMM; fused flash-decode attention kernel; fused prefill attention kernel (one launch for all query rows, replaces CPU O(n²) prefill fallback).
+- Altup per-layer embedding addition (Stage 4b) for Gemma-3/Oracle.
+- Gemma-4 config parsing and weight loading (Stage 3). Oracle metadata inspection test.
+- Anthropic Messages API: tool_use / tool_result content blocks, SSE event protocol (`message_start` → `content_block_start` → `content_block_delta` → `content_block_stop` → `message_delta` → `message_stop`), `stop_reason=tool_use` handling, and `<think>…</think>` stripping for R1-family reasoning models before tool-use parsing.
+
+#### `nexus-agent` — 8 Specialized Agents
+- Eight purpose-built agents (code, fieldtech, research, retrain, shield, knowledge, orchestrator, ci_fixer) with 22 tools total (file, git, github, shell, obsidian, tailscale, email, training). All tool calls use the Anthropic Messages API shape — never OpenAI `function_call`.
+- Two backends: `AnthropicBackend` (remote, `max_tokens=512`), `LocalBackend` (nexus-serve local inference).
+- Three eframe-based desktop tickers: `ticker` (CI monitor + ralph auto-fix loop + ci-fixer agent fallback), `tech_ticker` (field-tech monitor), `ferrum_ticker` (Ferrum Mail / NexusRelay 6-probe uptime monitor).
+- `ci-fixer` agent invoked by nexus-ticker's ralph loop when `cargo fmt` + `cargo clippy --fix` can't resolve a CI failure (test assertions, flaky convergence, logic bugs). Qwen3, temp 0.1, 25 iterations.
+
+#### Workspace Refactor
+- Split `axonml` umbrella into `axonml-hvac` and `axonml-train` sub-crates to reduce the umbrella's dep fan-out for users who only want training or only want HVAC.
+
+### Changed
+
+#### Source-File Documentation Overhaul
+- Every one of **515 Rust source files** under `/opt/AxonML/` received a hand-written `//!` doc header (description derived from reading the actual file), the canonical Author/ORCID block (`Andrew Jewell Sr. — AutomataNexus LLC`, ORCID `0009-0005-2158-7060`), an `Updated` date, and a `Disclaimer` block.
+- **509/515 files** also received `// =====` / `// -----` section organizers (the 6 exceptions are tiny pure-re-export mod.rs files).
+- Two earlier attempts at this (agent fabrication / mechanical two-line swap) were reverted; the final pass required highly-specific parallel-agent prompts that force-read each file before writing.
+
+### Security
+
+- **Path traversal / SSRF** — `axonml-cli` model-download path is now `canonicalize()`d and verified to stay under the intended download root. Kaggle credentials no longer echo into tracing output.
+- **RUSTSEC-2026-XXXX (rand 0.9.2 unsoundness)** — bump `rand` 0.9.2 → 0.9.3.
+- **Ollama SSRF guard** — `OllamaClient::with_config` validates base URL host is loopback or RFC 1918 (rejects external hosts before the request is built).
+- **Repository hygiene** — removed `media/` (video artifacts) and `papers/` (paper sources) from git history via `git filter-repo`; force-pushed scrubbed history. Both added to `.gitignore`.
+- **JWT secret floor** — `axonml-server` now refuses to boot if `JWT_SECRET` is shorter than 32 characters.
+- **Default admin** — `axonml-server` first-run default admin password is now a 24-char cryptographic random, written to `/tmp/axonml-admin-password.txt` with a boot-time warning, instead of a baked-in default.
+
+### Fixed
+
+- `Tensor::item()` on GPU tensors now safely copies device → host rather than dereferencing a device pointer.
+- `axonml-server` Aegis-DB port defaults matched the actual DB listen port; `scripts/init-aegis-db.sh` hardened against re-runs and bad env.
+- `train_trident` example caught up with the new `TridentConfig` fields (`num_kv_heads`, `use_rope`, etc.).
+- Prefill-attention grid-dim bug — was launching `(total_ctas/32, 1, 1)` instead of `(total_ctas, 1, 1)`, causing silent CUDA kernel drop-through to the CPU path (minutes-long prefill on agent-sized prompts).
+- R1-Distill false-positive `<tool_use>` — parser now strips everything before the final `</think>` before looking for tool calls, so reasoning-trace quotes of tool syntax don't trigger spurious tool execution.
+- CI pipeline stabilized — all `cargo fmt` / `cargo clippy -D warnings` / `cargo test` gates green; historical flakes fixed via the ralph loop + ci-fixer agent.
+- CUDA warnings cleared (stale `DeviceSlice` imports, unreachable patterns, unused vars).
+- Clippy: `uninit_vec` on Rust 1.94 — `Vec::with_capacity` + `set_len` replaced with `vec![T::zero(); m * n]`.
+
+### Dependencies
+
+- `rand` 0.9.2 → 0.9.3 (security fix, see Security above).
+- All 24 crates bumped to `v0.6.1` for crates.io republish.
+
 ## [0.6.0] - 2026-04-08
 
 ### Summary
