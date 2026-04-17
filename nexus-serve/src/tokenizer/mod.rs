@@ -239,12 +239,19 @@ impl Tokenizer {
                 for &id in ids {
                     let Some(tok) = id_to_token.get(id as usize) else { continue };
                     // Skip special tokens that shouldn't appear in output.
+                    // Includes DeepSeek R1's full-width-pipe variants
+                    // (`<｜begin▁of▁sentence｜>` etc.) alongside the ASCII
+                    // ChatML / LLaMA-3 specials.
                     if matches!(tok.as_str(),
                         "<s>" | "</s>" | "<|endoftext|>"
                         | "<|im_start|>" | "<|im_end|>"
                         | "<|begin_of_text|>" | "<|end_of_text|>"
                         | "<|start_header_id|>" | "<|end_header_id|>"
-                        | "<|eot_id|>") {
+                        | "<|eot_id|>"
+                        | "<\u{FF5C}begin\u{2581}of\u{2581}sentence\u{FF5C}>"
+                        | "<\u{FF5C}end\u{2581}of\u{2581}sentence\u{FF5C}>"
+                        | "<\u{FF5C}User\u{FF5C}>"
+                        | "<\u{FF5C}Assistant\u{FF5C}>") {
                         continue;
                     }
                     // `<0xNN>` sentinel → one raw byte.
@@ -439,7 +446,18 @@ fn collect_special_tokens(token_to_id: &HashMap<String, u32>) -> Vec<(String, u3
         .iter()
         .filter(|(tok, _)| {
             let s = tok.as_str();
-            (s.starts_with("<|") && s.ends_with("|>")) || s == "<s>" || s == "</s>"
+            // `<|...|>` covers ChatML / LLaMA-3 / Qwen-Instruct specials.
+            // `<｜...｜>` (full-width pipe U+FF5C) covers DeepSeek R1 /
+            // R1-Distill specials: `<｜begin▁of▁sentence｜>`,
+            // `<｜User｜>`, `<｜Assistant｜>`, `<｜end▁of▁sentence｜>`.
+            // Without the full-width variant the BPE encoder falls back
+            // to byte-level encoding for those tags and the model, never
+            // having seen the resulting byte sequence in SFT, emits
+            // degenerate output ("< < < ...").
+            (s.starts_with("<|") && s.ends_with("|>"))
+                || (s.starts_with("<\u{FF5C}") && s.ends_with("\u{FF5C}>"))
+                || s == "<s>"
+                || s == "</s>"
         })
         .map(|(t, &i)| (t.clone(), i))
         .collect();

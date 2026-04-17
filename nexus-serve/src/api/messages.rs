@@ -267,10 +267,12 @@ pub async fn messages(
     })?;
 
     // Build the prompt: system + rendered history + tool-use instruction.
-    let prompt = build_prompt(engine.architecture(), &req);
+    let prompt = build_prompt(engine.architecture(), engine.model_name(), &req);
     let input_ids = tokenizer.encode(&prompt);
     let input_tokens = input_ids.len();
     let msg_id = format!("msg_{now}");
+
+    let stop_strs = compute_stop_strings(&req);
 
     if req.stream {
         let stream = build_messages_stream(
@@ -283,16 +285,39 @@ pub async fn messages(
             req.max_tokens,
             req.temperature,
             req.top_p.unwrap_or(0.9),
+            stop_strs,
         );
         return Ok(Sse::new(stream).keep_alive(KeepAlive::default()).into_response());
     }
-
-    let generated_ids = engine.generate(&input_ids, req.max_tokens, req.temperature, req.top_p.unwrap_or(0.9));
+    let (generated_ids, stop_hit) = generate_with_stop_strings(
+        engine.as_ref(),
+        tokenizer.as_ref(),
+        &input_ids,
+        req.max_tokens,
+        req.temperature,
+        req.top_p.unwrap_or(0.9),
+        &stop_strs,
+    );
     let output_tokens = generated_ids.len();
     let raw = tokenizer.decode(&generated_ids);
 
     // Parse the raw text into content blocks, tool_use-aware.
-    let (content, stop_reason) = parse_assistant_output(&raw, output_tokens, req.max_tokens);
+    let (content, parse_stop_reason) =
+        parse_assistant_output(&raw, output_tokens, req.max_tokens);
+
+    // Stop-reason precedence: tool_use > max_tokens > stop_sequence > end_turn.
+    // The parser already picked tool_use / max_tokens / end_turn. If we
+    // actually tripped a user-supplied stop_sequence (not an auto-stop),
+    // promote to "stop_sequence" and report which string matched. Auto-stops
+    // like `</tool_use>` remain reported as "tool_use".
+    let (stop_reason, stop_sequence) = match (parse_stop_reason.as_str(), &stop_hit) {
+        ("tool_use", _) => ("tool_use".to_string(), None),
+        ("max_tokens", _) => ("max_tokens".to_string(), None),
+        (_, Some(s)) if req.stop_sequences.iter().any(|u| u == s) => {
+            ("stop_sequence".to_string(), Some(s.clone()))
+        }
+        _ => (parse_stop_reason, None),
+    };
 
     let body = Json(MessagesResponse {
         id: msg_id,
@@ -301,10 +326,106 @@ pub async fn messages(
         model: model_id,
         content,
         stop_reason,
-        stop_sequence: None,
+        stop_sequence,
         usage: MessagesUsage { input_tokens, output_tokens },
     });
     Ok(body.into_response())
+}
+
+// =============================================================================
+// Stop-string machinery
+// =============================================================================
+
+/// Build the full list of stop strings to honour for a given request:
+///
+/// 1. The user's `stop_sequences` as-is (preserved so we can report exactly
+///    which one matched in `stop_sequence`).
+/// 2. Auto-stops when the request carries tools. These catch the three
+///    post-tool-call leakage patterns R1-Distill-Qwen emits:
+///       - `</tool_use>` — preamble-taught close tag. Once the JSON body
+///         is delimited the call is complete; further tokens are post-hoc
+///         narration ("Now I'll explain what I did...") or, worse,
+///         hallucinated tool RESULTS.
+///       - ```` ``` ```` — closing fence of the OpenAI-style JSON code
+///         block. Same reason.
+///       - `</{tool_name}>` for each concrete tool in the request — the
+///         Qwen-style named-tag dialect (`<read_file>{...}</read_file>`).
+/// 3. `<|im_start|>` and `<|im_end|>` as a belt-and-suspenders string-level
+///    catch in case those tokens get decoded into the rolling buffer
+///    despite being caught by the token-id stop set (e.g. if the tokenizer
+///    ever decodes a containing super-token that happens to end with them).
+fn compute_stop_strings(req: &MessagesRequest) -> Vec<String> {
+    let mut out = Vec::with_capacity(req.stop_sequences.len() + req.tools.len() + 4);
+    out.extend(req.stop_sequences.iter().cloned());
+    if !req.tools.is_empty() {
+        out.push("</tool_use>".to_string());
+        out.push("```\n".to_string());
+        for t in &req.tools {
+            out.push(format!("</{}>", t.name));
+        }
+    }
+    out.push("<|im_start|>".to_string());
+    out.push("<|im_end|>".to_string());
+    out
+}
+
+/// Trim the rolling window to at most `keep` bytes from the end,
+/// backing up to a valid UTF-8 boundary so we don't slice inside a code
+/// point. Idempotent if the buffer is already small enough.
+fn trim_rolling_window(buf: &mut String, keep: usize) {
+    if buf.len() <= keep {
+        return;
+    }
+    let mut cut = buf.len() - keep;
+    while cut < buf.len() && !buf.is_char_boundary(cut) {
+        cut += 1;
+    }
+    buf.replace_range(..cut, "");
+}
+
+/// Drive `engine.generate_stream` but stop as soon as any of `stop_strings`
+/// appears as a suffix of the decoded-so-far text. Returns the token IDs
+/// generated so far and, if we tripped a stop string, a copy of the string
+/// that matched (for `stop_sequence` reporting).
+///
+/// This is the non-streaming analog of the per-token callback used in
+/// `build_messages_stream`. Keeping both paths going through the same
+/// stop-string rules means a tool-using client gets the same behaviour in
+/// streaming and non-streaming mode.
+fn generate_with_stop_strings(
+    engine: &crate::model::inference::InferenceEngine,
+    tokenizer: &crate::tokenizer::Tokenizer,
+    input_ids: &[u32],
+    max_tokens: usize,
+    temperature: f32,
+    top_p: f32,
+    stop_strings: &[String],
+) -> (Vec<u32>, Option<String>) {
+    let mut ids: Vec<u32> = Vec::with_capacity(max_tokens);
+    let mut rolling = String::new();
+    let mut stop_hit: Option<String> = None;
+    // Window large enough to contain any reasonable stop string plus a
+    // comfortable overlap for multi-byte decoding.
+    const MAX_ROLLING_BYTES: usize = 512;
+    const KEEP_ROLLING_BYTES: usize = 256;
+
+    engine.generate_stream(input_ids, max_tokens, temperature, top_p, |tok_id| {
+        ids.push(tok_id);
+        let piece = tokenizer.decode(&[tok_id]);
+        rolling.push_str(&piece);
+        if rolling.len() > MAX_ROLLING_BYTES {
+            trim_rolling_window(&mut rolling, KEEP_ROLLING_BYTES);
+        }
+        for s in stop_strings {
+            if !s.is_empty() && rolling.contains(s.as_str()) {
+                stop_hit = Some(s.clone());
+                return false;
+            }
+        }
+        true
+    });
+
+    (ids, stop_hit)
 }
 
 // =============================================================================
@@ -331,6 +452,7 @@ fn build_messages_stream(
     max_tokens: usize,
     temperature: f32,
     top_p: f32,
+    stop_strings: Vec<String>,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
 
@@ -360,6 +482,9 @@ fn build_messages_stream(
 
     tokio::task::spawn_blocking(move || {
         let mut token_count = 0usize;
+        let mut rolling = String::new();
+        const MAX_ROLLING_BYTES: usize = 512;
+        const KEEP_ROLLING_BYTES: usize = 256;
 
         engine.generate_stream(
             &input_ids,
@@ -369,11 +494,23 @@ fn build_messages_stream(
             |tok_id| {
                 token_count += 1;
                 let piece = tokenizer.decode(&[tok_id]);
+                // Even empty-decoding tokens (special tokens) extend the
+                // rolling window conceptually, but there's nothing to
+                // contribute to the stop-match buffer. Still keep the
+                // stream alive for them.
                 if piece.is_empty() {
-                    // Still keep the connection alive even if a token
-                    // decoded to an empty byte chunk (special tokens).
                     return true;
                 }
+                rolling.push_str(&piece);
+                if rolling.len() > MAX_ROLLING_BYTES {
+                    trim_rolling_window(&mut rolling, KEEP_ROLLING_BYTES);
+                }
+                // Check stop strings against the rolling window BEFORE
+                // emitting this token. Matching emits the last piece
+                // (which may contain the match tail) then halts — this
+                // matches non-streaming behaviour, where the final
+                // decoded text still carries the stop string and the
+                // tool-use parser strips post-match content.
                 let delta_payload = serde_json::json!({
                     "type": "content_block_delta",
                     "index": 0,
@@ -382,7 +519,15 @@ fn build_messages_stream(
                 let ev = Event::default()
                     .event("content_block_delta")
                     .data(delta_payload.to_string());
-                tx.send(ev).is_ok()
+                if tx.send(ev).is_err() {
+                    return false;
+                }
+                for s in &stop_strings {
+                    if !s.is_empty() && rolling.contains(s.as_str()) {
+                        return false;
+                    }
+                }
+                true
             },
         );
 
@@ -439,15 +584,38 @@ fn tool_use_system_preamble(tools: &[ToolDefinition]) -> Option<String> {
         return None;
     }
     // Minimal surface: one format block, one schema-key requirement, one
+    // anti-hallucination directive, a single one-shot example, and the
     // tool listing. Reasoning models (R1/QwQ) narrate the delimiters if
     // the preamble discusses them at length — the parser strips content
     // before `</think>` to handle what leaks through, but reducing
     // narrative footprint here keeps the false-positive rate low for
     // non-reasoning models too.
+    //
+    // The anti-hallucination line targets R1-Distill-Qwen's habit of
+    // guessing file contents / command output when a task *looks*
+    // predictable ("list the files in /etc" → it writes out a plausible
+    // /etc listing without ever calling the tool). Phrasing it as a hard
+    // rule, immediately before the one-shot, is what got that failure
+    // mode to drop out on the code-agent smoke prompts.
+    //
+    // The one-shot shows a complete three-turn round: assistant emits
+    // `<tool_use>`, user returns `tool_result`, assistant gives the final
+    // answer. Models distilled from chat data often need the
+    // `tool_result` shape demonstrated explicitly before they'll trust
+    // it is a real observation rather than another prompt the user is
+    // showing them.
     let mut s = String::new();
     s.push_str("Tool invocation format (strict):\n\n");
     s.push_str("<tool_use>\n{\"name\": \"<tool_name>\", \"input\": {<args>}}\n</tool_use>\n\n");
-    s.push_str("Rules: the JSON body must have both keys `name` (string) and `input` (object). `name` must be one of the tools below. `input` must match that tool's input_schema. Call at most one tool per turn; stop generating after the closing tag. If no tool is needed, answer normally without the tags.\n\n");
+    s.push_str("Rules:\n");
+    s.push_str("- The JSON body must have both keys `name` (string) and `input` (object). `name` must be one of the tools below. `input` must match that tool's input_schema.\n");
+    s.push_str("- Call at most one tool per turn. Stop generating immediately after the closing `</tool_use>` tag.\n");
+    s.push_str("- NEVER invent the contents of a file, the output of a command, or any other tool result. If the answer depends on data a tool can fetch, call the tool — do not guess.\n");
+    s.push_str("- When you have enough information to answer directly, answer normally with no tags.\n\n");
+    s.push_str("Example (assistant turn that calls a tool, then final answer after the tool_result comes back):\n\n");
+    s.push_str("assistant:\nI'll check the file.\n<tool_use>\n{\"name\": \"read_file\", \"input\": {\"path\": \"/etc/hostname\"}}\n</tool_use>\n\n");
+    s.push_str("user (tool_result): nexus-dev\n\n");
+    s.push_str("assistant:\nThe hostname is `nexus-dev`.\n\n");
     s.push_str("Tools:\n");
     for t in tools {
         s.push_str("- ");
@@ -467,7 +635,7 @@ fn tool_use_system_preamble(tools: &[ToolDefinition]) -> Option<String> {
 
 /// Render the request as a chat-template-shaped prompt. For BitNet we use
 /// LLaMA-3 headers; other architectures fall through to ChatML.
-fn build_prompt(architecture: &str, req: &MessagesRequest) -> String {
+fn build_prompt(architecture: &str, model_name: &str, req: &MessagesRequest) -> String {
     let base_system = req.system.as_ref().map(|s| s.to_text()).unwrap_or_default();
     let tool_system = tool_use_system_preamble(&req.tools);
     let full_system = match (base_system.is_empty(), tool_system) {
@@ -477,14 +645,76 @@ fn build_prompt(architecture: &str, req: &MessagesRequest) -> String {
         (false, Some(t)) => format!("{base_system}\n\n{t}"),
     };
 
+    // R1-Distill was fine-tuned with DeepSeek's own chat template, which
+    // uses full-width-pipe tokens (`<｜User｜>`, `<｜Assistant｜>`,
+    // `<｜begin▁of▁sentence｜>`) on top of the Qwen2 vocab. Rendering it as
+    // ChatML produces degenerate output ("Okay00000..." style loops) because
+    // the `<|im_start|>` / `<|im_end|>` tokens are either never learned or
+    // learned as distractors in the SFT data. `general.architecture` is
+    // plain "qwen2" — indistinguishable from base Qwen2-Instruct — so we
+    // disambiguate on `general.name`.
+    let is_deepseek_r1 = model_name.contains("DeepSeek")
+        && (model_name.contains("R1") || model_name.contains("Distill"));
     let is_llama3 = architecture.starts_with("bitnet")
         || architecture == "llama3"
         || architecture.starts_with("llama-3");
-    if is_llama3 {
+    if is_deepseek_r1 {
+        render_deepseek_r1(&full_system, &req.messages)
+    } else if is_llama3 {
         render_llama3(&full_system, &req.messages)
     } else {
         render_chatml(&full_system, &req.messages)
     }
+}
+
+/// Render a prompt in DeepSeek's R1-family chat template. Mirrors the Jinja
+/// template embedded in R1-Distill-Qwen's `tokenizer_config.json`:
+///
+/// ```text
+/// <｜begin▁of▁sentence｜>{system}<｜User｜>{u1}<｜Assistant｜>{a1}<｜end▁of▁sentence｜>
+/// <｜User｜>{u2}<｜Assistant｜>
+/// ```
+///
+/// Every literal tag uses full-width pipe `｜` (U+FF5C), NOT ASCII `|` —
+/// the tokenizer maps the full-width variant to the single special-token
+/// IDs 151643-151646 and maps ASCII-pipe variants to their raw byte
+/// sequence, which the model was never trained on.
+///
+/// The system prompt (if any) sits inline immediately after BOS rather
+/// than wrapped in its own tag, matching DeepSeek's Jinja template's
+/// `{{ns.system_prompt}}` expansion point.
+///
+/// Assistant turns in history are terminated with `<｜end▁of▁sentence｜>`;
+/// the trailing `<｜Assistant｜>` with no terminator is the generation-
+/// prompt marker (equivalent to `add_generation_prompt=true`).
+fn render_deepseek_r1(system: &str, messages: &[MessagesMessage]) -> String {
+    let mut out = String::new();
+    out.push_str("<｜begin▁of▁sentence｜>");
+    if !system.is_empty() {
+        out.push_str(system);
+    }
+    for m in messages {
+        match m.role.as_str() {
+            "user" => {
+                out.push_str("<｜User｜>");
+                out.push_str(&flatten_message_content(&m.content));
+            }
+            "assistant" => {
+                out.push_str("<｜Assistant｜>");
+                out.push_str(&flatten_message_content(&m.content));
+                out.push_str("<｜end▁of▁sentence｜>");
+            }
+            _ => {
+                // Fold unexpected roles (system already handled inline
+                // above; tool-result style turns are flattened to string
+                // by the caller into the user slot) into user-style.
+                out.push_str("<｜User｜>");
+                out.push_str(&flatten_message_content(&m.content));
+            }
+        }
+    }
+    out.push_str("<｜Assistant｜>");
+    out
 }
 
 fn render_llama3(system: &str, messages: &[MessagesMessage]) -> String {

@@ -103,6 +103,14 @@ pub struct InferenceConfig {
     pub rms_norm_eps: f32,
     pub rope_theta: f32,
     pub architecture: String,
+    /// The GGUF `general.name` string (e.g. "DeepSeek R1 Distill Qwen 7B").
+    /// Distinct from `architecture`, which only identifies the model family
+    /// (e.g. "qwen2"). Needed for chat-template dispatch when the base
+    /// architecture doesn't uniquely identify the fine-tune variant — e.g.
+    /// R1-Distill-Qwen uses the Qwen2 architecture but DeepSeek's own
+    /// chat tokens (`<｜User｜>`, `<｜Assistant｜>`, BOS), so ChatML
+    /// rendering produces garbage.
+    pub model_name: String,
     /// Gemma-family hyperparameters (sliding window, dual RoPE base, softcap,
     /// per-layer token embeddings). `None` for LLaMA/Qwen2/Mistral.
     pub gemma: Option<GemmaConfig>,
@@ -137,6 +145,11 @@ pub struct GemmaConfig {
 impl InferenceConfig {
     pub fn from_gguf(gguf: &GgufFile) -> Self {
         let arch = gguf.architecture().unwrap_or("llama").to_string();
+        let model_name = gguf
+            .get_meta("general.name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let prefix = &arch;
         let is_gemma = arch.starts_with("gemma");
 
@@ -256,6 +269,7 @@ impl InferenceConfig {
             rms_norm_eps,
             rope_theta,
             architecture: arch,
+            model_name,
             gemma,
         }
     }
@@ -746,10 +760,30 @@ impl InferenceEngine {
         &self.config.architecture
     }
 
+    /// The model's `general.name` from the GGUF header. Used by the chat-
+    /// template dispatch to distinguish fine-tunes that share a base
+    /// architecture but use different chat tokens (e.g. R1-Distill-Qwen
+    /// vs Qwen2-Instruct).
+    pub fn model_name(&self) -> &str {
+        &self.config.model_name
+    }
+
     /// Stop-token IDs that terminate generation in `generate_stream`.
     ///
-    /// Qwen2-family: 151643 `<|endoftext|>`, 151645 `<|im_end|>`, 0 (pad — kept
-    /// for backward compat with earlier runs; safe because Qwen never emits 0).
+    /// Qwen2-family IDs 151643-151646 carry different meanings depending on
+    /// which fine-tune's vocab is loaded:
+    ///
+    /// | ID     | Qwen2-Instruct     | R1-Distill-Qwen           |
+    /// |--------|--------------------|---------------------------|
+    /// | 151643 | `<|endoftext|>`    | `<｜end▁of▁sentence｜>`  |
+    /// | 151644 | `<|im_start|>`     | `<｜User｜>`             |
+    /// | 151645 | `<|im_end|>`       | `<｜Assistant｜>`        |
+    /// | 151646 | (unused)           | `<｜begin▁of▁sentence｜>`|
+    ///
+    /// In both vocabs the IDs 151643-151646 signal either a terminator or a
+    /// mid-turn template leak — stopping on any of them is correct. ID 0 is
+    /// the pad token; kept for backward compat because Qwen never emits 0
+    /// naturally but earlier runs depended on it.
     ///
     /// Gemma 3/4: 1 `<eos>`, 106 `<end_of_turn>`. Gemma's pad is 0 but pad is
     /// never emitted — we intentionally omit it so a spurious 0 doesn't end
@@ -761,7 +795,7 @@ impl InferenceEngine {
             // 128001 `<|end_of_text|>`, 128009 `<|eot_id|>`. Include both
             // EOS and EOT so the assistant turn terminates cleanly.
             a if a.starts_with("bitnet") => &[128001, 128009],
-            _ => &[0, 151643, 151645],
+            _ => &[0, 151643, 151644, 151645, 151646],
         }
     }
 
