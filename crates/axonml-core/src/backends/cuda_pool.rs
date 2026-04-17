@@ -1,7 +1,7 @@
 //! CUDA memory pool — reuses freed GPU allocations to avoid cudaFree latency.
 //!
 //! `CudaMemoryPool` maintains per-size-bucket free lists (power-of-2 for sizes
-//! > 256, linear 64-byte increments for smaller). `pool_alloc(len)` checks the
+//! above 256, linear 64-byte increments for smaller). `pool_alloc(len)` checks the
 //! free list first, falls back to `stream.alloc_zeros(bucket)` on miss.
 //! `pool_free(slice)` returns the block's raw device pointer to the bucket,
 //! capped at 64 blocks per bucket to prevent unbounded growth. `clear_pool()`

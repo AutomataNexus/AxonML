@@ -245,8 +245,7 @@ fn export_to_onnx(
     // Locate Python. Priority: AXONML_CONVERTER_PYTHON env var, then `python3`
     // on PATH. Users who keep onnx + torch in a venv should point
     // AXONML_CONVERTER_PYTHON at that interpreter.
-    let python =
-        std::env::var("AXONML_CONVERTER_PYTHON").unwrap_or_else(|_| "python3".to_string());
+    let python = std::env::var("AXONML_CONVERTER_PYTHON").unwrap_or_else(|_| "python3".to_string());
 
     let output = std::process::Command::new(&python)
         .arg(&script)
