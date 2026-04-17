@@ -490,6 +490,7 @@ dependencies = [
  "axonml-autograd",
  "axonml-core",
  "axonml-nn",
+ "axonml-optim",
  "axonml-tensor",
  "libloading 0.8.9",
 ]
