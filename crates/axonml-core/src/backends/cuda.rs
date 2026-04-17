@@ -843,17 +843,19 @@ impl CudaBackend {
             .get("q4k_gemv_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q4k_gemv_f32".to_string()))?;
 
-        // Cooperative warp kernel: 4 warps per CTA (128 threads) = 4 output
-        // rows per CTA. Each warp of 32 threads cooperates on one output row
-        // and reduces to a single f32 via __shfl_xor_sync. Keeps coalesced
-        // loads of qs/a and broadcast of per-block scales.
-        const WARPS_PER_CTA: u32 = 4;
+        // v2 layout: `ROWS_PER_CTA` output rows per CTA × 2 warps/row × 32
+        // threads = 64 * ROWS_PER_CTA threads/CTA. Two warps cooperate on
+        // each output row (each handles half the super-blocks) and combine
+        // their partial sums through shared memory. Vectorized qs (uint32)
+        // and activation (float4) loads inside the warp.
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
-            shared_mem_bytes: 0,
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
         };
         unsafe {
             self.stream
@@ -896,14 +898,15 @@ impl CudaBackend {
             .get("q4k_gemv_fused_qkv_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q4k_gemv_fused_qkv_f32".to_string()))?;
 
-        const WARPS_PER_CTA: u32 = 4;
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
         let total_out = (q_out + k_out + v_out) as u32;
-        let grid = (total_out + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let grid = (total_out + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
-            shared_mem_bytes: 0,
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
         };
         unsafe {
             self.stream
@@ -945,14 +948,15 @@ impl CudaBackend {
             .get("q4k_gemv_fused_gate_up_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q4k_gemv_fused_gate_up_f32".to_string()))?;
 
-        const WARPS_PER_CTA: u32 = 4;
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
         let total_out = (inter * 2) as u32;
-        let grid = (total_out + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let grid = (total_out + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
-            shared_mem_bytes: 0,
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
         };
         unsafe {
             self.stream

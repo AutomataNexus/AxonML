@@ -68,6 +68,96 @@ __device__ __forceinline__ void get_scale_min_k4(
     }
 }
 
+// ----------------------------------------------------------------------------
+// Warp-cooperative Q4_K GEMV partial sum.
+//
+// The warp is split into 4 groups of 8 lanes, one group per super-block chunk:
+//   chunk       = lane / 8     (0..3)
+//   lane_in_ch  = lane & 7     (0..7)
+//
+// Each lane processes its chunk's 8 weights (4 low nibbles + 4 high nibbles)
+// per super-block using a single uint32 load of 4 consecutive qs bytes and
+// two float4 loads for the 4 lo activations and 4 hi activations. Eight FMAs
+// per lane per block, coalesced 128-byte warp transactions on both qs and a.
+//
+// Caller passes the block range [b_start, b_end); this lets two warps split
+// a row's block range (for cross-warp cooperative reduction).
+// ----------------------------------------------------------------------------
+__device__ __forceinline__ float q4k_gemv_partial(
+    const unsigned char* __restrict__ row,
+    const float*         __restrict__ a,
+    unsigned int b_start,
+    unsigned int b_end,
+    unsigned int chunk,
+    unsigned int chunk_byte_off,
+    unsigned int chunk_a_lo,
+    unsigned int chunk_a_hi
+) {
+    float sum = 0.0f;
+    for (unsigned int b = b_start; b < b_end; ++b) {
+        const unsigned char* block = row + (size_t)b * 144u;
+
+        // Broadcast header (4 bytes d+dmin, 12 bytes packed scales).
+        unsigned short d_bits    = (unsigned short)block[0] | ((unsigned short)block[1] << 8);
+        unsigned short dmin_bits = (unsigned short)block[2] | ((unsigned short)block[3] << 8);
+        float d    = f16_bits_to_f32(d_bits);
+        float dmin = f16_bits_to_f32(dmin_bits);
+
+        const unsigned char* scales = block + 4;
+
+        // This lane's chunk-specific scale-min pair (sc1/m1 for lo, sc2/m2 for hi).
+        unsigned int is = chunk * 2u;
+        unsigned char sc1, m1, sc2, m2;
+        get_scale_min_k4(is,     scales, &sc1, &m1);
+        get_scale_min_k4(is + 1, scales, &sc2, &m2);
+        float d1   = d    * (float)sc1;
+        float min1 = dmin * (float)m1;
+        float d2   = d    * (float)sc2;
+        float min2 = dmin * (float)m2;
+
+        // 32 lanes × 4 bytes = 128 bytes of qs in one coalesced transaction.
+        const unsigned int* qs_u32 =
+            (const unsigned int*)(block + 16 + chunk_byte_off);
+        unsigned int packed = __ldg(qs_u32);
+
+        // float4 loads: 4 lo activations + 4 hi activations for this lane.
+        // chunk_a_lo = chunk*64 + lane_in_ch*4   (always 16-byte aligned)
+        // chunk_a_hi = chunk_a_lo + 32           (also 16-byte aligned)
+        const float4* a_lo_vec = (const float4*)(a + (size_t)b * 256u + chunk_a_lo);
+        const float4* a_hi_vec = (const float4*)(a + (size_t)b * 256u + chunk_a_hi);
+        float4 a_lo = __ldg(a_lo_vec);
+        float4 a_hi = __ldg(a_hi_vec);
+
+        unsigned int b0 =  packed        & 0xFFu;
+        unsigned int b1 = (packed >>  8) & 0xFFu;
+        unsigned int b2 = (packed >> 16) & 0xFFu;
+        unsigned int b3 = (packed >> 24) & 0xFFu;
+
+        float w_lo0 = d1 * (float)(b0 & 0x0Fu) - min1;
+        float w_lo1 = d1 * (float)(b1 & 0x0Fu) - min1;
+        float w_lo2 = d1 * (float)(b2 & 0x0Fu) - min1;
+        float w_lo3 = d1 * (float)(b3 & 0x0Fu) - min1;
+
+        float w_hi0 = d2 * (float)(b0 >> 4) - min2;
+        float w_hi1 = d2 * (float)(b1 >> 4) - min2;
+        float w_hi2 = d2 * (float)(b2 >> 4) - min2;
+        float w_hi3 = d2 * (float)(b3 >> 4) - min2;
+
+        sum += a_lo.x * w_lo0 + a_lo.y * w_lo1 + a_lo.z * w_lo2 + a_lo.w * w_lo3;
+        sum += a_hi.x * w_hi0 + a_hi.y * w_hi1 + a_hi.z * w_hi2 + a_hi.w * w_hi3;
+    }
+    return sum;
+}
+
+// Standard 32-lane reduction: lane 0 ends with sum(warp).
+__device__ __forceinline__ float warp_reduce_sum_f32(float sum) {
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1) {
+        sum += __shfl_xor_sync(0xffffffffu, sum, off);
+    }
+    return sum;
+}
+
 // Q4_K GEMM: c = a @ B^T, where a is [m, in] and B is Q4_K-quantized weight
 // with physical shape [out, in] row-major.
 //
@@ -153,28 +243,21 @@ extern "C" __global__ void q4k_gemm_f32(
     c[tid] = sum;
 }
 
-// Q4_K GEMV (cooperative warp reduction): c = a @ B^T.
+// Q4_K GEMV v2 (vectorized + two-warp cooperative): c = a @ B^T.
 //
-// One WARP (32 threads) owns one output element. Within the warp, all 32
-// threads cooperate on every super-block: each lane handles exactly 8 of
-// the 256 weights in the block (2 per chunk × 4 chunks × 1 lane slot).
+// Two warps cooperate on each output row. Each warp owns half of the
+// super-blocks along the in-dim, uses uint32 qs loads (4 bytes per thread
+// per block → 8 weights) and float4 activation loads. Intra-warp reduction
+// via __shfl_xor_sync, then cross-warp combine through shared memory.
 //
-//   lane l, chunk c (0..4):
-//     - reads qs[chunk*32 + l]   → low nibble (weight at offset chunk*64 + l)
-//                                 and high nibble (offset chunk*64 + l + 32)
-//     - reads a[block*256 + chunk*64 + l] and a[block*256 + chunk*64 + l + 32]
-//     - accumulates two FMAs
+// Block: `rows_per_cta` output rows × 2 warps/row × 32 threads = 64 *
+// rows_per_cta threads per CTA. The launcher sets rows_per_cta = 4 by
+// default → 256 threads/CTA, 4 rows/CTA. Shared memory is
+// `rows_per_cta * 2 * sizeof(float)`.
 //
-// Memory pattern: across one warp and one chunk, the 32 lanes read 32
-// consecutive bytes of qs (coalesced 128-byte transaction), and the two
-// reads of `a` are 32-element coalesced slices. The per-block header
-// (d, dmin, scales) is identical across lanes — broadcast.
+// Launch: grid = ((out + rows_per_cta - 1) / rows_per_cta).
 //
-// After walking all (in/256) blocks, threads hold partial sums; a 5-step
-// __shfl_xor_sync reduction collapses to lane 0, which writes c[row].
-//
-// Block: 4 warps × 32 threads = 128 threads per CTA → 4 output rows per CTA.
-// Launch: grid = ((out + 3) / 4), block = 128.
+// Requires in_dim % 256 == 0 (Q4_K block size).
 extern "C" __global__ void q4k_gemv_f32(
     const unsigned char* __restrict__ w,
     const float* __restrict__ a,
@@ -182,60 +265,46 @@ extern "C" __global__ void q4k_gemv_f32(
     unsigned int out_dim,
     unsigned int in_dim
 ) {
-    const unsigned int tid     = threadIdx.x;
-    const unsigned int lane    = tid & 31u;
-    const unsigned int warp_id = tid >> 5;
-    const unsigned int j       = blockIdx.x * (blockDim.x >> 5) + warp_id;
-    if (j >= out_dim) return;
+    extern __shared__ float s_partial[];
 
-    const unsigned int n_blocks = in_dim / 256;
-    const unsigned int row_bytes = n_blocks * 144;
-    const unsigned char* row = w + (size_t)j * row_bytes;
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int j            = blockIdx.x * rows_per_cta + row_in_cta;
+
+    const unsigned int chunk          = lane >> 3;
+    const unsigned int lane_in_ch     = lane & 7u;
+    const unsigned int chunk_byte_off = chunk * 32u + lane_in_ch * 4u;
+    const unsigned int chunk_a_lo     = chunk * 64u + lane_in_ch * 4u;
+    const unsigned int chunk_a_hi     = chunk_a_lo + 32u;
+
+    const unsigned int n_blocks  = in_dim / 256u;
+    const unsigned int row_bytes = n_blocks * 144u;
 
     float sum = 0.0f;
-
-    for (unsigned int b = 0; b < n_blocks; ++b) {
-        const unsigned char* block = row + b * 144;
-
-        unsigned short d_bits    = (unsigned short)block[0] | ((unsigned short)block[1] << 8);
-        unsigned short dmin_bits = (unsigned short)block[2] | ((unsigned short)block[3] << 8);
-        float d    = f16_bits_to_f32(d_bits);
-        float dmin = f16_bits_to_f32(dmin_bits);
-
-        const unsigned char* scales = block + 4;
-        const unsigned char* qs     = block + 16;
-
-        #pragma unroll
-        for (int chunk = 0; chunk < 4; ++chunk) {
-            unsigned int is = (unsigned int)(chunk * 2);
-
-            unsigned char sc1, m1, sc2, m2;
-            get_scale_min_k4(is,     scales, &sc1, &m1);
-            get_scale_min_k4(is + 1, scales, &sc2, &m2);
-            float d1   = d    * (float)sc1;
-            float min1 = dmin * (float)m1;
-            float d2   = d    * (float)sc2;
-            float min2 = dmin * (float)m2;
-
-            unsigned int q_base = (unsigned int)chunk * 32u + lane;
-            unsigned int a_base = b * 256u + (unsigned int)chunk * 64u + lane;
-
-            unsigned int byte = qs[q_base];
-            float w_lo = d1 * (float)(byte & 0x0Fu) - min1;
-            float w_hi = d2 * (float)(byte >> 4)    - min2;
-
-            sum += a[a_base]      * w_lo;
-            sum += a[a_base + 32] * w_hi;
-        }
+    if (j < out_dim) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        sum = q4k_gemv_partial(
+            row, a, b_start, b_end,
+            chunk, chunk_byte_off, chunk_a_lo, chunk_a_hi
+        );
     }
+    sum = warp_reduce_sum_f32(sum);
 
-    // Warp reduction: 32 → 16 → 8 → 4 → 2 → 1.
-    #pragma unroll
-    for (int off = 16; off > 0; off >>= 1) {
-        sum += __shfl_xor_sync(0xffffffffu, sum, off);
+    if (lane == 0u) {
+        s_partial[row_in_cta * 2u + warp_in_row] = sum;
     }
+    __syncthreads();
 
-    if (lane == 0) c[j] = sum;
+    if (warp_in_row == 0u && lane == 0u && j < out_dim) {
+        c[j] = s_partial[row_in_cta * 2u] + s_partial[row_in_cta * 2u + 1u];
+    }
 }
 
 // ============================================================================
@@ -253,8 +322,9 @@ extern "C" __global__ void q4k_gemv_f32(
 //   warp_id ∈ [q_out, q_out + k_out)                → K output row (row = idx - q_out)
 //   warp_id ∈ [q_out + k_out, q_out + k_out + v_out) → V output row
 //
-// Block: 4 warps × 32 threads = 128 threads → 4 output rows per CTA.
-// Grid: ceil((q_out + k_out + v_out) / 4).
+// v2 layout: `rows_per_cta` rows × 2 warps/row × 32 threads = 64 *
+// rows_per_cta threads/CTA. Each row dispatches to Q / K / V based on its
+// global row index. Grid: ceil((q_out+k_out+v_out) / rows_per_cta).
 extern "C" __global__ void q4k_gemv_fused_qkv_f32(
     const unsigned char* __restrict__ q_w,
     const unsigned char* __restrict__ k_w,
@@ -268,78 +338,61 @@ extern "C" __global__ void q4k_gemv_fused_qkv_f32(
     unsigned int v_out,
     unsigned int in_dim
 ) {
-    const unsigned int tid     = threadIdx.x;
-    const unsigned int lane    = tid & 31u;
-    const unsigned int warp_id = tid >> 5;
-    const unsigned int global_warp = blockIdx.x * (blockDim.x >> 5) + warp_id;
-    const unsigned int total_out = q_out + k_out + v_out;
-    if (global_warp >= total_out) return;
+    extern __shared__ float s_partial[];
 
-    // Dispatch to Q / K / V lane based on the global warp index.
-    const unsigned char* w;
-    float* c;
-    unsigned int j;
-    if (global_warp < q_out) {
-        w = q_w;
-        c = q_c;
-        j = global_warp;
-    } else if (global_warp < q_out + k_out) {
-        w = k_w;
-        c = k_c;
-        j = global_warp - q_out;
-    } else {
-        w = v_w;
-        c = v_c;
-        j = global_warp - q_out - k_out;
-    }
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int global_row   = blockIdx.x * rows_per_cta + row_in_cta;
+    const unsigned int total_out    = q_out + k_out + v_out;
 
-    const unsigned int n_blocks = in_dim / 256;
-    const unsigned int row_bytes = n_blocks * 144;
-    const unsigned char* row = w + (size_t)j * row_bytes;
+    const unsigned int chunk          = lane >> 3;
+    const unsigned int lane_in_ch     = lane & 7u;
+    const unsigned int chunk_byte_off = chunk * 32u + lane_in_ch * 4u;
+    const unsigned int chunk_a_lo     = chunk * 64u + lane_in_ch * 4u;
+    const unsigned int chunk_a_hi     = chunk_a_lo + 32u;
 
-    float sum = 0.0f;
+    const unsigned int n_blocks  = in_dim / 256u;
+    const unsigned int row_bytes = n_blocks * 144u;
 
-    for (unsigned int b = 0; b < n_blocks; ++b) {
-        const unsigned char* block = row + b * 144;
-
-        unsigned short d_bits    = (unsigned short)block[0] | ((unsigned short)block[1] << 8);
-        unsigned short dmin_bits = (unsigned short)block[2] | ((unsigned short)block[3] << 8);
-        float d    = f16_bits_to_f32(d_bits);
-        float dmin = f16_bits_to_f32(dmin_bits);
-
-        const unsigned char* scales = block + 4;
-        const unsigned char* qs     = block + 16;
-
-        #pragma unroll
-        for (int chunk = 0; chunk < 4; ++chunk) {
-            unsigned int is = (unsigned int)(chunk * 2);
-
-            unsigned char sc1, m1, sc2, m2;
-            get_scale_min_k4(is,     scales, &sc1, &m1);
-            get_scale_min_k4(is + 1, scales, &sc2, &m2);
-            float d1   = d    * (float)sc1;
-            float min1 = dmin * (float)m1;
-            float d2   = d    * (float)sc2;
-            float min2 = dmin * (float)m2;
-
-            unsigned int q_base = (unsigned int)chunk * 32u + lane;
-            unsigned int a_base = b * 256u + (unsigned int)chunk * 64u + lane;
-
-            unsigned int byte = qs[q_base];
-            float w_lo = d1 * (float)(byte & 0x0Fu) - min1;
-            float w_hi = d2 * (float)(byte >> 4)    - min2;
-
-            sum += a[a_base]      * w_lo;
-            sum += a[a_base + 32] * w_hi;
+    const unsigned char* w = (const unsigned char*)0;
+    float* c = (float*)0;
+    unsigned int j = 0u;
+    bool have_work = global_row < total_out;
+    if (have_work) {
+        if (global_row < q_out) {
+            w = q_w; c = q_c; j = global_row;
+        } else if (global_row < q_out + k_out) {
+            w = k_w; c = k_c; j = global_row - q_out;
+        } else {
+            w = v_w; c = v_c; j = global_row - q_out - k_out;
         }
     }
 
-    #pragma unroll
-    for (int off = 16; off > 0; off >>= 1) {
-        sum += __shfl_xor_sync(0xffffffffu, sum, off);
+    float sum = 0.0f;
+    if (have_work) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        sum = q4k_gemv_partial(
+            row, a, b_start, b_end,
+            chunk, chunk_byte_off, chunk_a_lo, chunk_a_hi
+        );
     }
+    sum = warp_reduce_sum_f32(sum);
 
-    if (lane == 0) c[j] = sum;
+    if (lane == 0u) {
+        s_partial[row_in_cta * 2u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (have_work && warp_in_row == 0u && lane == 0u) {
+        c[j] = s_partial[row_in_cta * 2u] + s_partial[row_in_cta * 2u + 1u];
+    }
 }
 
 // ============================================================================
@@ -361,71 +414,57 @@ extern "C" __global__ void q4k_gemv_fused_gate_up_f32(
     unsigned int inter,
     unsigned int in_dim
 ) {
-    const unsigned int tid     = threadIdx.x;
-    const unsigned int lane    = tid & 31u;
-    const unsigned int warp_id = tid >> 5;
-    const unsigned int global_warp = blockIdx.x * (blockDim.x >> 5) + warp_id;
-    const unsigned int total_out = inter + inter;
-    if (global_warp >= total_out) return;
+    extern __shared__ float s_partial[];
 
-    const unsigned char* w;
-    float* c;
-    unsigned int j;
-    if (global_warp < inter) {
-        w = gate_w;
-        c = gate_c;
-        j = global_warp;
-    } else {
-        w = up_w;
-        c = up_c;
-        j = global_warp - inter;
-    }
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int global_row   = blockIdx.x * rows_per_cta + row_in_cta;
+    const unsigned int total_out    = inter + inter;
 
-    const unsigned int n_blocks = in_dim / 256;
-    const unsigned int row_bytes = n_blocks * 144;
-    const unsigned char* row = w + (size_t)j * row_bytes;
+    const unsigned int chunk          = lane >> 3;
+    const unsigned int lane_in_ch     = lane & 7u;
+    const unsigned int chunk_byte_off = chunk * 32u + lane_in_ch * 4u;
+    const unsigned int chunk_a_lo     = chunk * 64u + lane_in_ch * 4u;
+    const unsigned int chunk_a_hi     = chunk_a_lo + 32u;
 
-    float sum = 0.0f;
+    const unsigned int n_blocks  = in_dim / 256u;
+    const unsigned int row_bytes = n_blocks * 144u;
 
-    for (unsigned int b = 0; b < n_blocks; ++b) {
-        const unsigned char* block = row + b * 144;
-
-        unsigned short d_bits    = (unsigned short)block[0] | ((unsigned short)block[1] << 8);
-        unsigned short dmin_bits = (unsigned short)block[2] | ((unsigned short)block[3] << 8);
-        float d    = f16_bits_to_f32(d_bits);
-        float dmin = f16_bits_to_f32(dmin_bits);
-
-        const unsigned char* scales = block + 4;
-        const unsigned char* qs     = block + 16;
-
-        #pragma unroll
-        for (int chunk = 0; chunk < 4; ++chunk) {
-            unsigned int is = (unsigned int)(chunk * 2);
-
-            unsigned char sc1, m1, sc2, m2;
-            get_scale_min_k4(is,     scales, &sc1, &m1);
-            get_scale_min_k4(is + 1, scales, &sc2, &m2);
-            float d1   = d    * (float)sc1;
-            float min1 = dmin * (float)m1;
-            float d2   = d    * (float)sc2;
-            float min2 = dmin * (float)m2;
-
-            unsigned int q_base = (unsigned int)chunk * 32u + lane;
-            unsigned int a_base = b * 256u + (unsigned int)chunk * 64u + lane;
-
-            unsigned int byte = qs[q_base];
-            float w_lo = d1 * (float)(byte & 0x0Fu) - min1;
-            float w_hi = d2 * (float)(byte >> 4)    - min2;
-
-            sum += a[a_base]      * w_lo;
-            sum += a[a_base + 32] * w_hi;
+    const unsigned char* w = (const unsigned char*)0;
+    float* c = (float*)0;
+    unsigned int j = 0u;
+    bool have_work = global_row < total_out;
+    if (have_work) {
+        if (global_row < inter) {
+            w = gate_w; c = gate_c; j = global_row;
+        } else {
+            w = up_w;   c = up_c;   j = global_row - inter;
         }
     }
 
-    #pragma unroll
-    for (int off = 16; off > 0; off >>= 1) {
-        sum += __shfl_xor_sync(0xffffffffu, sum, off);
+    float sum = 0.0f;
+    if (have_work) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        sum = q4k_gemv_partial(
+            row, a, b_start, b_end,
+            chunk, chunk_byte_off, chunk_a_lo, chunk_a_hi
+        );
     }
+    sum = warp_reduce_sum_f32(sum);
 
-    if (lane == 0) c[j] = sum;
+    if (lane == 0u) {
+        s_partial[row_in_cta * 2u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (have_work && warp_in_row == 0u && lane == 0u) {
+        c[j] = s_partial[row_in_cta * 2u] + s_partial[row_in_cta * 2u + 1u];
+    }
 }
