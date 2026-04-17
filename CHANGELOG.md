@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-04-17
+
+### Summary
+Republish of all 23 workspace crates at a consistent snapshot. The v0.6.1
+tag was cut before the session's work had been uploaded, and `axonml-core`
+v0.6.1 was already present on crates.io at an older pre-session state —
+publishing the remaining 22 crates at v0.6.1 would have left them
+depending on a stale `axonml-core = "0.6.1"` that didn't contain any of
+the new kernels / exports / header overhaul. v0.6.2 re-stamps every
+publishable crate at a coherent point and ships everything listed under
+[0.6.1] below together.
+
+### Changed
+- Workspace version: `0.6.1` → `0.6.2`. No API or behavior changes from
+  0.6.1 (HEAD of main at 2026-04-17); the bump exists solely to re-align
+  all crates on crates.io at the same release.
+- v0.6.1 tag remains in place as a historical marker; the GitHub release
+  at that tag still carries the binaries + SLSA attestation, and those
+  binaries are functionally identical to v0.6.2's binaries (same commit
+  prior to this republish bump).
+
 ## [0.6.1] - 2026-04-16
 
 ### Summary
