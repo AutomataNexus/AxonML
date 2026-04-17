@@ -528,6 +528,55 @@ pub struct InferenceEngine {
     /// live on this device. For quantized weights, dequantization happens on
     /// CPU but the dequantized scratch is moved here for matmul.
     pub compute_device: Device,
+    /// Lazy-cached GPU Tensor copies of per-layer norm + bias weights, so
+    /// the decode hot path can call them repeatedly without re-uploading
+    /// `[hidden]`-sized vectors every token. Populated on first decode step
+    /// when `compute_device.is_gpu()`. Indexed by layer; same length as
+    /// `layers`. Output-norm cache lives separately since it's only used
+    /// at the top of the call stack, not in the inner loop.
+    #[cfg(feature = "cuda")]
+    pub gpu_layer_cache: std::sync::OnceLock<Vec<LayerGpuCache>>,
+    /// Lazy-cached GPU Tensor for the final `output_norm` weight.
+    #[cfg(feature = "cuda")]
+    pub gpu_output_norm: std::sync::OnceLock<Tensor<f32>>,
+}
+
+/// GPU-resident copies of a `LayerWeights`'s CPU `Vec<f32>` members
+/// (norms + biases). Matmul weights live in `LayerWeights::q_weight` etc.
+/// and already have their own caching.
+#[cfg(feature = "cuda")]
+pub struct LayerGpuCache {
+    pub attn_norm: Tensor<f32>,
+    pub ffn_norm: Tensor<f32>,
+    pub q_bias: Option<Tensor<f32>>,
+    pub k_bias: Option<Tensor<f32>>,
+    pub v_bias: Option<Tensor<f32>>,
+    pub attn_sub_norm: Option<Tensor<f32>>,
+    pub ffn_sub_norm: Option<Tensor<f32>>,
+}
+
+#[cfg(feature = "cuda")]
+impl LayerGpuCache {
+    fn new_for(layer: &LayerWeights, device: &Device) -> Self {
+        fn upload(v: &[f32], d: &Device) -> Tensor<f32> {
+            Tensor::from_vec(v.to_vec(), &[v.len()])
+                .expect("cache norm/bias tensor")
+                .to_device(d.clone())
+                .expect("move norm/bias to GPU")
+        }
+        fn upload_opt(v: &Option<Vec<f32>>, d: &Device) -> Option<Tensor<f32>> {
+            v.as_ref().map(|x| upload(x, d))
+        }
+        Self {
+            attn_norm: upload(&layer.attn_norm, device),
+            ffn_norm: upload(&layer.ffn_norm, device),
+            q_bias: upload_opt(&layer.q_bias, device),
+            k_bias: upload_opt(&layer.k_bias, device),
+            v_bias: upload_opt(&layer.v_bias, device),
+            attn_sub_norm: upload_opt(&layer.attn_sub_norm, device),
+            ffn_sub_norm: upload_opt(&layer.ffn_sub_norm, device),
+        }
+    }
 }
 
 /// Weights for one transformer layer.
@@ -980,6 +1029,10 @@ impl InferenceEngine {
             output_norm,
             lm_head,
             compute_device: Device::Cpu,
+            #[cfg(feature = "cuda")]
+            gpu_layer_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_output_norm: std::sync::OnceLock::new(),
         })
     }
 
@@ -1126,6 +1179,10 @@ impl InferenceEngine {
             output_norm,
             lm_head,
             compute_device: Device::Cpu,
+            #[cfg(feature = "cuda")]
+            gpu_layer_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_output_norm: std::sync::OnceLock::new(),
         })
     }
 
@@ -1347,7 +1404,20 @@ impl InferenceEngine {
 
     /// Forward pass for a SINGLE token using KV cache (decode step).
     /// This is the hot path — only processes 1 token, reuses cached K/V.
+    ///
+    /// Two paths:
+    /// - `forward_one_gpu_resident` when CUDA is available and the compute
+    ///   device is a GPU. Keeps the hidden state `x` as a `Tensor<f32>` on
+    ///   GPU through the whole layer loop, using the rms_norm / rope / swiglu /
+    ///   relu2_gate CUDA kernels added in axonml-core/transformer_ops.cu.
+    ///   Eliminates ~10 of 14 per-layer host↔device round trips.
+    /// - CPU path below — unchanged; still used when the engine hasn't been
+    ///   moved to GPU.
     fn forward_one(&self, token_id: u32, kv_cache: &mut KvCache) -> Vec<f32> {
+        #[cfg(feature = "cuda")]
+        if self.compute_device.is_gpu() {
+            return self.forward_one_gpu_resident(token_id, kv_cache);
+        }
         let hidden = self.config.hidden_size;
         let head_dim = self.config.head_dim;
         let n_heads = self.config.num_heads;
@@ -1529,6 +1599,151 @@ impl InferenceEngine {
     //     E-series (Gemma 3n) it applies the per-token × per-layer gate
     //     following the structure documented on `Gemma4Weights`.
     // =========================================================================
+
+    /// GPU-resident decode path. Keeps the hidden state as a `Tensor<f32>` on
+    /// the compute device through the entire layer loop, using the rms_norm
+    /// / rope_split_halves / swiglu / relu2_gate CUDA kernels (see
+    /// axonml-core/src/backends/cuda_kernels/transformer_ops.cu). Only
+    /// round-trips to host for:
+    ///
+    ///   * The single new K and V rows going into the host-side KV cache
+    ///     (needed for the CPU fallback path in `gpu_single_query_attention`
+    ///     and for the `GpuKvCache::append_row` call, which today takes
+    ///     `&[f32]`).
+    ///   * The Q vector into the attention kernel and the attention output
+    ///     back out — ~14 KB each, small compared to the matmul outputs.
+    ///   * The final logits at the end of the forward pass.
+    ///
+    /// This replaces the ~10 larger host↔device round trips per layer that
+    /// the CPU path does (one per matmul input/output, one per norm).
+    #[cfg(feature = "cuda")]
+    fn forward_one_gpu_resident(&self, token_id: u32, kv_cache: &mut KvCache) -> Vec<f32> {
+        let hidden = self.config.hidden_size;
+        let head_dim = self.config.head_dim;
+        let n_heads = self.config.num_heads;
+        let n_kv_heads = self.config.num_kv_heads;
+        let inter_size = self.config.intermediate_size;
+        let pos = kv_cache.len;
+        let eps = self.config.rms_norm_eps;
+        let theta = self.config.rope_theta;
+        let is_bitnet = self.config.architecture.starts_with("bitnet");
+
+        // Lazy-populate the per-layer GPU norm/bias cache on first call.
+        let layer_cache = self.gpu_layer_cache.get_or_init(|| {
+            self.layers
+                .iter()
+                .map(|l| LayerGpuCache::new_for(l, &self.compute_device))
+                .collect()
+        });
+        let output_norm_gpu = self.gpu_output_norm.get_or_init(|| {
+            Tensor::from_vec(self.output_norm.clone(), &[self.output_norm.len()])
+                .expect("output_norm tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move output_norm to GPU")
+        });
+
+        // Embedding lookup — single token. Materialize the hidden state as
+        // a GPU tensor immediately so every downstream op stays on-device.
+        let id = token_id as usize;
+        let mut x_host = vec![0.0f32; hidden];
+        if id < self.config.vocab_size {
+            x_host.copy_from_slice(&self.token_embed[id * hidden..(id + 1) * hidden]);
+        }
+        let mut x = Tensor::from_vec(x_host, &[1, hidden])
+            .expect("embedding tensor")
+            .to_device(self.compute_device.clone())
+            .expect("move embedding to GPU");
+
+        for (li, layer) in self.layers.iter().enumerate() {
+            let lc = &layer_cache[li];
+
+            // ----- Attention sub-layer ---------------------------------------
+            let normed = x.rms_norm(&lc.attn_norm, eps);
+
+            let mut q = layer.q_weight.matmul(&normed);
+            let mut k = layer.k_weight.matmul(&normed);
+            let mut v = layer.v_weight.matmul(&normed);
+
+            if let Some(b) = &lc.q_bias { q = q.add(b).expect("q bias add"); }
+            if let Some(b) = &lc.k_bias { k = k.add(b).expect("k bias add"); }
+            if let Some(b) = &lc.v_bias { v = v.add(b).expect("v bias add"); }
+
+            q = q.apply_rope_split_halves(n_heads, head_dim, theta, pos);
+            k = k.apply_rope_split_halves(n_kv_heads, head_dim, theta, pos);
+
+            // Pull Q/K/V back to host — K/V go into the KV caches (both host
+            // mirror and GPU resident), Q goes into the attention call. Each
+            // is ~14 KB (Q for 7B is 3584 × 4, K/V are 512 × 4 for GQA 4:1).
+            let q_host = q.to_vec();
+            let k_host = k.to_vec();
+            let v_host = v.to_vec();
+
+            kv_cache.k_cache[li].extend_from_slice(&k_host);
+            kv_cache.v_cache[li].extend_from_slice(&v_host);
+
+            let gpu_cache_ref = {
+                if kv_cache.gpu.is_none() {
+                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                        let cap = self.config.max_seq_len.min(4096);
+                        kv_cache.gpu = GpuKvCache::try_new(cuda, self.layers.len(), n_kv_heads, head_dim, cap);
+                    }
+                }
+                let mut r: Option<(&GpuKvCache, usize)> = None;
+                if let Some(ref mut g) = kv_cache.gpu {
+                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                        if g.append_row(cuda, li, pos, &k_host, &v_host) {
+                            r = Some((&*g, li));
+                        }
+                    }
+                }
+                r
+            };
+
+            let total_len = pos + 1;
+            let attn_host = gpu_single_query_attention(
+                &q_host, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                total_len, n_heads, n_kv_heads, head_dim, 0,
+                gpu_cache_ref,
+            );
+
+            // Re-materialize attention output on GPU to resume the chain.
+            let mut attn = Tensor::from_vec(attn_host, &[1, n_heads * head_dim])
+                .expect("attn tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move attn to GPU");
+
+            if let Some(sub) = &lc.attn_sub_norm {
+                attn = attn.rms_norm(sub, eps);
+            }
+
+            let attn_proj = layer.o_weight.matmul(&attn);
+            x = x.add(&attn_proj).expect("residual add (attn)");
+
+            // ----- FFN sub-layer ---------------------------------------------
+            let normed2 = x.rms_norm(&lc.ffn_norm, eps);
+            let gate = layer.gate_weight.matmul(&normed2);
+            let up = layer.up_weight.matmul(&normed2);
+
+            let mut ffn = if is_bitnet { gate.relu2_gate(&up) } else { gate.swiglu(&up) };
+            if let Some(sub) = &lc.ffn_sub_norm {
+                ffn = ffn.rms_norm(sub, eps);
+            }
+
+            // Sanity: the ffn tensor should be [1, inter_size]. The matmul
+            // above produced that shape; the elementwise ops preserve it.
+            debug_assert_eq!(ffn.numel(), inter_size);
+
+            let ffn_out = layer.down_weight.matmul(&ffn);
+            x = x.add(&ffn_out).expect("residual add (ffn)");
+        }
+
+        kv_cache.len += 1;
+
+        // Final norm + LM head. Only D2H the logits, not the hidden state.
+        let normed = x.rms_norm(output_norm_gpu, eps);
+        let logits_tensor = self.lm_head.matmul(&normed);
+        logits_tensor.to_vec()
+    }
 
     fn forward_batch_gemma4(
         &self,
