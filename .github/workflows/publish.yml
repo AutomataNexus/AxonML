@@ -92,12 +92,22 @@ jobs:
   #   Tier 1: axonml-tensor
   #   Tier 2: axonml-autograd, axonml-data, axonml-fusion, axonml-jit,
   #           axonml-profile
-  #   Tier 3: axonml-nn, axonml-audio
-  #   Tier 4: axonml-serialize, axonml-distributed, axonml-hvac, axonml-llm,
-  #           axonml-optim, axonml-quant, axonml-text
-  #   Tier 5: axonml-onnx, axonml-server, axonml-tui, axonml-vision
-  #   Tier 6: axonml-cli, axonml-train
-  #   Tier 7: axonml (umbrella)
+  #   Tier 3: axonml-nn (autograd,core,tensor), axonml-audio (core,data,tensor)
+  #   Tier 4: axonml-optim (autograd,core,nn,tensor), axonml-serialize
+  #           (core,nn,tensor), axonml-distributed (autograd,core,nn,tensor),
+  #           axonml-quant (autograd,core,nn,tensor), axonml-text (autograd,
+  #           core,data,nn,tensor)
+  #   Tier 5: axonml-onnx (needs serialize), axonml-server (needs serialize),
+  #           axonml-tui (needs serialize), axonml-hvac (needs optim+serialize),
+  #           axonml-llm (needs optim), axonml-vision (needs optim+serialize)
+  #   Tier 6: axonml-cli (needs onnx/optim/quant/tui/vision),
+  #           axonml-train (needs llm/optim/vision)
+  #   Tier 7: axonml (umbrella — re-exports everything)
+  #
+  # NOTE: axonml-optim MUST precede hvac/llm/vision. An earlier version of
+  # this list had optim at position 14, which broke the v0.6.2 publish loop
+  # at crate 12/23 (axonml-hvac) with "failed to select version for
+  # axonml-optim = ^0.6.1". Keep optim in tier 4 alongside serialize.
   # ---------------------------------------------------------------------------
   publish:
     name: cargo publish
@@ -151,16 +161,16 @@ jobs:
             axonml-profile
             axonml-nn
             axonml-audio
+            axonml-optim
             axonml-serialize
             axonml-distributed
-            axonml-hvac
-            axonml-llm
-            axonml-optim
             axonml-quant
             axonml-text
             axonml-onnx
             axonml-server
             axonml-tui
+            axonml-hvac
+            axonml-llm
             axonml-vision
             axonml-cli
             axonml-train
