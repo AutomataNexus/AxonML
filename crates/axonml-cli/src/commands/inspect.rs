@@ -79,7 +79,7 @@ struct LayerInfo {
 }
 
 fn inspect_model(path: &PathBuf, format: &str) -> CliResult<ModelInfo> {
-    let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let file_size = std::fs::metadata(path).map_or(0, |m| m.len());
 
     let name = path
         .file_stem()

@@ -138,7 +138,7 @@ struct ExportInfo {
 }
 
 fn export_model(model_path: &PathBuf, args: &ExportArgs) -> Result<ExportInfo, String> {
-    let input_size = std::fs::metadata(model_path).map(|m| m.len()).unwrap_or(0);
+    let input_size = std::fs::metadata(model_path).map_or(0, |m| m.len());
 
     // Perform format-specific export
     let result = match args.format.to_lowercase().as_str() {
@@ -157,9 +157,7 @@ fn export_model(model_path: &PathBuf, args: &ExportArgs) -> Result<ExportInfo, S
     };
 
     result.map(|params| {
-        let output_size = std::fs::metadata(&args.output)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let output_size = std::fs::metadata(&args.output).map_or(0, |m| m.len());
 
         let size_reduction = if args.quantize && input_size > 0 {
             1.0 - (output_size as f64 / input_size as f64)

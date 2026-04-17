@@ -283,14 +283,14 @@ impl ComputeProfiler {
     /// Gets the top N operations by total time.
     pub fn top_by_time(&self, n: usize) -> Vec<&OperationStats> {
         let mut sorted: Vec<_> = self.stats.values().collect();
-        sorted.sort_by(|a, b| b.total_time_ns.cmp(&a.total_time_ns));
+        sorted.sort_by_key(|s| std::cmp::Reverse(s.total_time_ns));
         sorted.into_iter().take(n).collect()
     }
 
     /// Gets the top N operations by call count.
     pub fn top_by_calls(&self, n: usize) -> Vec<&OperationStats> {
         let mut sorted: Vec<_> = self.stats.values().collect();
-        sorted.sort_by(|a, b| b.call_count.cmp(&a.call_count));
+        sorted.sort_by_key(|s| std::cmp::Reverse(s.call_count));
         sorted.into_iter().take(n).collect()
     }
 

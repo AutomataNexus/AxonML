@@ -1,0 +1,28 @@
+# Pin the Rust toolchain so local development matches CI.
+#
+# Background:
+#   Both CI (`dtolnay/rust-toolchain@stable`) and `rustup default stable`
+#   resolve to whatever `stable` is on the day they run. When a new Rust
+#   release ships, CI picks it up within hours while local devs are still
+#   on the previous stable — clippy adds new lints → CI fails on things
+#   that passed locally → you push a one-line fix → repeat next release.
+#
+#   Pinning here gives us a single source of truth. Bump `channel` when
+#   we intentionally adopt a new toolchain; CI re-pins automatically
+#   because `dtolnay/rust-toolchain@stable` reads this file if present.
+#
+# Updating:
+#   * Change `channel` to the target version (e.g. "1.96.0").
+#   * Run `rustup update` locally; `cargo fmt --check` and
+#     `cargo clippy --workspace -- -D warnings` to flush any new lints.
+#   * Commit this file with the fixes.
+#
+# MSRV:
+#   Workspace `rust-version` in Cargo.toml is the floor we support for
+#   downstream users. This toolchain is the version we *build and lint
+#   with* — it must be >= that floor but can (and usually will) be newer.
+
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

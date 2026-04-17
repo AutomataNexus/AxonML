@@ -201,7 +201,7 @@ fn analyze_model(path: &PathBuf, name: &str) -> CliResult<ModelAnalysis> {
     }
 
     // Sort by parameter count
-    layer_analysis.sort_by(|a, b| b.num_parameters.cmp(&a.num_parameters));
+    layer_analysis.sort_by_key(|l| std::cmp::Reverse(l.num_parameters));
 
     let architecture_type = infer_architecture(&layer_analysis);
     let estimated_memory = estimate_memory(total_params);
@@ -1009,7 +1009,7 @@ fn count_image_samples(
 
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.filter_map(std::result::Result::ok) {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
                 let class_name = entry.file_name().to_string_lossy().to_string();
                 if !class_name.starts_with('.') {
                     let count = WalkDir::new(entry.path())

@@ -144,7 +144,7 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
     // Print backward profile if enabled
     if profile_enabled {
         let mut sorted: Vec<_> = op_times.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+        sorted.sort_by_key(|entry| std::cmp::Reverse(entry.1.0));
         eprintln!("[backward profile] {} nodes total", topo_order.len());
         for (name, (us, count)) in sorted.iter().take(15) {
             eprintln!(

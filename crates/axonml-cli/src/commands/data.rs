@@ -450,7 +450,7 @@ fn detect_classes(
             let mut classes: HashMap<String, usize> = HashMap::new();
             if let Ok(entries) = fs::read_dir(path) {
                 for entry in entries.filter_map(std::result::Result::ok) {
-                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    if entry.file_type().is_ok_and(|t| t.is_dir()) {
                         let class_name = entry.file_name().to_string_lossy().to_string();
                         if !class_name.starts_with('.') {
                             // Count files in this class directory
@@ -662,7 +662,7 @@ fn execute_list(args: DataListArgs) -> CliResult<()> {
     let mut found = false;
     if let Ok(entries) = fs::read_dir(&path) {
         for entry in entries.filter_map(std::result::Result::ok) {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 if !name.starts_with('.') {
                     found = true;

@@ -143,7 +143,7 @@ impl ProfileReport {
 
         // Get top operations
         let mut top_ops: Vec<_> = compute_stats.values().collect();
-        top_ops.sort_by(|a, b| b.total_time_ns.cmp(&a.total_time_ns));
+        top_ops.sort_by_key(|s| std::cmp::Reverse(s.total_time_ns));
         let top_operations: Vec<OperationSummary> = top_ops
             .into_iter()
             .take(10)

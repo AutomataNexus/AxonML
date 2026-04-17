@@ -165,7 +165,7 @@ fn convert_model(
     optimize: bool,
 ) -> Result<ConversionInfo, String> {
     // Get input file size
-    let input_size = std::fs::metadata(input_path).map(|m| m.len()).unwrap_or(0);
+    let input_size = std::fs::metadata(input_path).map_or(0, |m| m.len());
 
     let mut warnings = Vec::new();
 
@@ -194,7 +194,7 @@ fn convert_model(
     match conversion_result {
         Ok(num_params) => {
             // Get output file size
-            let output_size = std::fs::metadata(output_path).map(|m| m.len()).unwrap_or(0);
+            let output_size = std::fs::metadata(output_path).map_or(0, |m| m.len());
 
             Ok(ConversionInfo {
                 input_size,

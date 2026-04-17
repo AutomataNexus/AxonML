@@ -273,7 +273,8 @@ impl EchoSpeaker {
 
         // We analyze the first sample in the batch (batch index 0).
         // For batch processing, callers should iterate.
-        let b = 0.min(batch - 1);
+        let _ = batch; // single-sample path: always index the first element
+        let b = 0usize;
 
         if time < 2 || n_mels < 2 {
             return 0.5; // Insufficient data for reliable detection
@@ -347,7 +348,8 @@ impl EchoSpeaker {
         let (batch, n_mels, time) = (shape[0], shape[1], shape[2]);
         let mel_data = mel.data().to_vec();
 
-        let b = 0.min(batch - 1);
+        let _ = batch; // single-sample path: always index the first element
+        let b = 0usize;
 
         if time == 0 {
             return Vec::new();
@@ -494,7 +496,8 @@ impl EchoSpeaker {
         let (batch, n_mels, time) = (shape[0], shape[1], shape[2]);
         let mel_data = mel.data().to_vec();
 
-        let b = 0.min(batch - 1);
+        let _ = batch; // single-sample path: always index the first element
+        let b = 0usize;
 
         // Standard assumption: 10ms frame shift → 100 frames/second
         let frames_per_second = 100.0f32;
