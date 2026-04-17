@@ -3223,4 +3223,125 @@ impl Tensor<f32> {
 
         Some((grad_q, grad_k, grad_v))
     }
+
+    // =========================================================================
+    // Transformer Per-Layer Ops (GPU)
+    //
+    // Decode-step kernels added in axonml-core/cuda_kernels/transformer_ops.cu.
+    // These let nexus-serve keep activations on the device through the whole
+    // layer instead of round-tripping CPU↔GPU after every matmul.
+    // =========================================================================
+
+    /// GPU RMSNorm with a per-element weight scale.
+    /// Input shape `[n]` (single token); weight shape `[n]`.
+    pub(crate) fn rms_norm_cuda(&self, weight: &Self, eps: f32) -> Self {
+        let data = self.contiguous_gpu();
+        let w = weight.contiguous_gpu();
+        let len = data.numel();
+        debug_assert_eq!(len, w.numel(), "rms_norm: weight length must match input");
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        let w_guard = w.storage.as_cuda_slice();
+        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+
+        cuda.rms_norm_f32(&mut out, src_guard.slice(), w_guard.slice(), len, eps)
+            .expect("CUDA rms_norm_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, len, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
+    /// GPU RoPE in the LLaMA / Qwen / Mistral split-halves layout. Returns
+    /// a new tensor with the rotation applied; original is unchanged.
+    /// Input shape `[n_heads * head_dim]` (single token, all heads flattened).
+    pub(crate) fn rope_split_halves_cuda(
+        &self,
+        n_heads: usize,
+        head_dim: usize,
+        theta: f32,
+        pos: usize,
+    ) -> Self {
+        let data = self.contiguous_gpu();
+        let len = data.numel();
+        debug_assert_eq!(
+            len,
+            n_heads * head_dim,
+            "rope: tensor length must equal n_heads * head_dim"
+        );
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+
+        // Copy src → out, then rotate in-place on out (kernel writes both
+        // halves of every pair, so we need a fresh buffer to avoid trampling
+        // the unrotated values mid-rotation).
+        cuda.broadcast_copy_f32(&mut out, src_guard.slice(), len, len)
+            .expect("CUDA broadcast_copy_f32 failed");
+        cuda.rope_split_halves_f32(&mut out, n_heads, head_dim, theta, pos)
+            .expect("CUDA rope_split_halves_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, len, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
+    /// GPU fused SwiGLU: `out[i] = SiLU(self[i]) * up[i]`. `self` is the gate.
+    pub(crate) fn swiglu_cuda(&self, up: &Self) -> Self {
+        let g = self.contiguous_gpu();
+        let u = up.contiguous_gpu();
+        let len = g.numel();
+        debug_assert_eq!(len, u.numel(), "swiglu: gate and up must be same length");
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let g_guard = g.storage.as_cuda_slice();
+        let u_guard = u.storage.as_cuda_slice();
+        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+
+        cuda.swiglu_f32(&mut out, g_guard.slice(), u_guard.slice(), len)
+            .expect("CUDA swiglu_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, len, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
+    /// GPU BitNet b1.58 fused gate: `out[i] = ReLU(self[i])² * up[i]`.
+    /// `self` is the gate.
+    pub(crate) fn relu2_gate_cuda(&self, up: &Self) -> Self {
+        let g = self.contiguous_gpu();
+        let u = up.contiguous_gpu();
+        let len = g.numel();
+        debug_assert_eq!(len, u.numel(), "relu2_gate: gate and up must be same length");
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let g_guard = g.storage.as_cuda_slice();
+        let u_guard = u.storage.as_cuda_slice();
+        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+
+        cuda.relu2_gate_f32(&mut out, g_guard.slice(), u_guard.slice(), len)
+            .expect("CUDA relu2_gate_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, len, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
 }
