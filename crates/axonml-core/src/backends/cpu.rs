@@ -144,9 +144,7 @@ fn get_available_memory() -> usize {
 
 /// Returns the number of CPU cores.
 fn num_cpus() -> usize {
-    std::thread::available_parallelism()
-        .map(std::num::NonZeroUsize::get)
-        .unwrap_or(1)
+    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
 }
 
 // =============================================================================
