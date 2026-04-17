@@ -186,8 +186,29 @@ jobs:
               fi
             fi
 
-            echo "::group::[$idx/$TOTAL] Publishing $crate"
+            echo "::group::[$idx/$TOTAL] $crate"
 
+            # Idempotency check: if this exact crate@version is already on the
+            # crates.io sparse index, skip publish. This makes manual re-runs
+            # after a partial failure safe — without it, re-running blows up
+            # on the first crate that landed last time. The sparse-index URL
+            # shards by name: crates with 4+ char names live under
+            # /{first2}/{next2}/{name}. All AxonML crates match this rule.
+            SHARD1="${crate:0:2}"
+            SHARD2="${crate:2:2}"
+            INDEX_URL="https://index.crates.io/${SHARD1}/${SHARD2}/${crate}"
+            PUBLISHED=0
+            if curl -fsSL "$INDEX_URL" 2>/dev/null | grep -q "\"vers\":\"${{ needs.guard.outputs.version }}\""; then
+              PUBLISHED=1
+            fi
+
+            if [ "$PUBLISHED" = "1" ] && [ "$DRY_RUN" != "true" ]; then
+              echo "  already on crates.io at v${{ needs.guard.outputs.version }} — skipping."
+              echo "::endgroup::"
+              continue
+            fi
+
+            echo "  publishing $crate v${{ needs.guard.outputs.version }}"
             EXTRA_FLAGS=""
             if [ "$DRY_RUN" = "true" ]; then
               EXTRA_FLAGS="--dry-run --allow-dirty"
