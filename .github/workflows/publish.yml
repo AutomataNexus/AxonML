@@ -118,7 +118,12 @@ jobs:
     permissions:
       contents: read
     env:
+      # Both names: `CARGO_REGISTRY_TOKEN` is the legacy default-registry env
+      # var; `CARGO_REGISTRIES_CRATES_IO_TOKEN` is the crates.io-specific one
+      # cargo 1.70+ prefers. Setting both means cargo picks the right one
+      # regardless of which precedence rule fires for the toolchain version.
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      CARGO_REGISTRIES_CRATES_IO_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
@@ -130,6 +135,43 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
+
+      # Fail-fast token hygiene: catch the classic causes of the "doesn't
+      # match the format used by crates.io" 401 (same token that works fine
+      # via ~/.cargo/credentials.toml locally). Does NOT echo the value.
+      #
+      # Previous publish attempt failed here silently — diagnosed by the
+      # fact that the same literal bytes worked from `~/.cargo/credentials.
+      # toml` locally, ruling out key revocation. The rejected-on-the-wire
+      # mode is almost always a token that picked up a trailing newline
+      # (echo without -n), embedded quotes (`--body '"cio..."'`), or got
+      # stored via `CARGO_REGISTRY_TOKEN` when cargo only read
+      # `CARGO_REGISTRIES_CRATES_IO_TOKEN` (the env-var dual-assignment
+      # above handles that case; this step catches the first two).
+      - name: Validate token shape
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          set -euo pipefail
+          TOK="${CARGO_REGISTRIES_CRATES_IO_TOKEN:-}"
+          if [ -z "$TOK" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN secret is empty"; exit 1
+          fi
+          if [ "${TOK#cio}" = "$TOK" ]; then
+            echo "::error::Token does not start with 'cio' — the secret may have been wrapped in quotes or corrupted at paste time"
+            exit 1
+          fi
+          # crates.io tokens are 35 chars: 'cio' + 32 base62.
+          TOK_LEN="${#TOK}"
+          if [ "$TOK_LEN" -ne 35 ]; then
+            echo "::error::Token length is $TOK_LEN (expected 35). The secret almost certainly picked up a trailing newline from \`echo \$TOKEN | gh secret set\`. Re-store it with \`printf '%s' \"\$TOKEN\" | gh secret set CARGO_REGISTRY_TOKEN\` or \`gh secret set CARGO_REGISTRY_TOKEN --body \"\$TOKEN\"\` (no echo)."
+            exit 1
+          fi
+          case "$TOK" in
+            *[[:space:]]*)
+              echo "::error::Token contains embedded whitespace — re-store the secret without a trailing newline or wrapping quotes"
+              exit 1 ;;
+          esac
+          echo "token shape OK: starts with 'cio', 35 chars, no whitespace"
 
       - name: Verify workspace version matches tag
         run: |
