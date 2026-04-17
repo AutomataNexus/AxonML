@@ -45,7 +45,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "axonml-autograd"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -56,7 +56,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-core"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "bytemuck",
  "cudarc",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-llm"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -92,7 +92,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-nn"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-quant"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-serialize"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-tensor"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "cudarc",

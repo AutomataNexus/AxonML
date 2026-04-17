@@ -581,9 +581,6 @@ fn flatten_message_content(content: &MessageContent) -> String {
 fn parse_assistant_output(raw: &str, output_tokens: usize, max_tokens: usize)
     -> (Vec<ContentBlock>, String)
 {
-    let mut blocks: Vec<ContentBlock> = Vec::new();
-    let mut had_tool_use = false;
-
     // Reasoning-model guard: R1-Distill / QwQ / o1-style models emit a
     // `<think>...</think>` block containing internal chain-of-thought
     // before their actual answer. They routinely quote the `<tool_use>`
@@ -598,67 +595,42 @@ fn parse_assistant_output(raw: &str, output_tokens: usize, max_tokens: usize)
     } else {
         raw
     };
-    let mut cursor = 0usize;
-    while let Some(start) = text[cursor..].find("<tool_use>") {
-        let abs_start = cursor + start;
-        // Emit preceding prose as a text block (trimmed of trailing whitespace).
-        let lead = &text[cursor..abs_start];
-        let trimmed = lead.trim();
+
+    // Find the earliest tool call in the text, trying the three formats
+    // the model actually emits despite the preamble specifying only #1:
+    //
+    //   1. <tool_use>{"name":..,"input":..}</tool_use>   (preamble-taught)
+    //   2. ```json\n{"name":..,"input":..}\n```          (OpenAI-style fence)
+    //   3. <tool_name>{..json body..}</tool_name>        (Qwen-style tag)
+    //
+    // DeepSeek-R1-Distill-Qwen-7B was distilled from Qwen2.5 which saw
+    // multiple tool-call conventions during instruction tuning; at
+    // temperature 0.1 it picks one roughly uniformly. Accepting all
+    // three makes tool use reliable without fine-tuning the base model.
+    let candidate = find_tool_call(text);
+
+    let mut blocks: Vec<ContentBlock> = Vec::new();
+    let had_tool_use = if let Some(c) = candidate {
+        // Everything before the tool call is prose.
+        let lead = text[..c.lead_end].trim();
+        if !lead.is_empty() {
+            blocks.push(ContentBlock::Text { text: lead.to_string() });
+        }
+        let id = format!(
+            "toolu_{:x}",
+            (SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros() as u64)
+                ^ (blocks.len() as u64 * 0x9E3779B97F4A7C15),
+        );
+        blocks.push(ContentBlock::ToolUse { id, name: c.name, input: c.input });
+        true
+    } else {
+        // No tool call — whole text is the assistant's answer.
+        let trimmed = text.trim();
         if !trimmed.is_empty() {
             blocks.push(ContentBlock::Text { text: trimmed.to_string() });
         }
-        // Find the closing tag.
-        let body_start = abs_start + "<tool_use>".len();
-        let Some(end_rel) = text[body_start..].find("</tool_use>") else {
-            // Unclosed tool_use — emit the whole remainder as text and bail.
-            let remainder = &text[abs_start..];
-            blocks.push(ContentBlock::Text { text: remainder.to_string() });
-            cursor = text.len();
-            break;
-        };
-        let body_end = body_start + end_rel;
-        let body = text[body_start..body_end].trim();
-
-        // Parse the JSON body.
-        match serde_json::from_str::<ToolCallJson>(body) {
-            Ok(call) => {
-                had_tool_use = true;
-                let id = format!(
-                    "toolu_{:x}",
-                    (SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros() as u64)
-                        ^ (blocks.len() as u64 * 0x9E3779B97F4A7C15),
-                );
-                blocks.push(ContentBlock::ToolUse {
-                    id,
-                    name: call.name,
-                    input: call.input.unwrap_or(serde_json::Value::Null),
-                });
-                // Anthropic semantics: stop at the first tool call.
-                cursor = body_end + "</tool_use>".len();
-                break;
-            }
-            Err(e) => {
-                // Unparseable — keep as text so the user can see what the
-                // model produced and why we rejected it.
-                blocks.push(ContentBlock::Text {
-                    text: format!(
-                        "[nexus-serve: failed to parse tool_use body as JSON: {e}; raw body: {body}]"
-                    ),
-                });
-                cursor = body_end + "</tool_use>".len();
-            }
-        }
-    }
-
-    // Emit trailing text only when we did NOT emit a tool_use. Anthropic
-    // semantics: the first tool_use terminates the assistant turn, so
-    // anything the model generated after it is dropped on the floor.
-    if !had_tool_use && cursor < text.len() {
-        let tail = text[cursor..].trim();
-        if !tail.is_empty() {
-            blocks.push(ContentBlock::Text { text: tail.to_string() });
-        }
-    }
+        false
+    };
 
     // If we produced nothing, keep the raw text as a single text block so
     // the client always gets content.
@@ -675,6 +647,131 @@ fn parse_assistant_output(raw: &str, output_tokens: usize, max_tokens: usize)
     }
     .to_string();
     (blocks, stop_reason)
+}
+
+/// Result of a successful tool-call match in the assistant's raw output.
+struct ToolCallMatch {
+    /// Byte offset where the tool-call syntax starts (everything before
+    /// this is prose).
+    lead_end: usize,
+    /// Resolved tool name (from the JSON body's `name` field or the XML
+    /// tag name, depending on the format that matched).
+    name: String,
+    /// Tool input payload (from the JSON body's `input` field, or the
+    /// whole JSON body when the name came from an XML tag).
+    input: serde_json::Value,
+}
+
+/// Scan `text` for the earliest tool-call syntax in any of the three
+/// supported formats. Returns the match with the smallest starting byte
+/// offset so the leading prose is preserved correctly.
+fn find_tool_call(text: &str) -> Option<ToolCallMatch> {
+    let mut best: Option<ToolCallMatch> = None;
+
+    if let Some(m) = find_tool_use_tag(text) {
+        best = Some(m);
+    }
+    if let Some(m) = find_json_code_fence(text) {
+        if best.as_ref().is_none_or(|b| m.lead_end < b.lead_end) {
+            best = Some(m);
+        }
+    }
+    if let Some(m) = find_named_tag(text) {
+        if best.as_ref().is_none_or(|b| m.lead_end < b.lead_end) {
+            best = Some(m);
+        }
+    }
+
+    best
+}
+
+/// Match `<tool_use>{"name":..,"input":..}</tool_use>` — the format the
+/// server's preamble teaches.
+fn find_tool_use_tag(text: &str) -> Option<ToolCallMatch> {
+    let start = text.find("<tool_use>")?;
+    let body_start = start + "<tool_use>".len();
+    let end_rel = text[body_start..].find("</tool_use>")?;
+    let body = text[body_start..body_start + end_rel].trim();
+    let call: ToolCallJson = serde_json::from_str(body).ok()?;
+    Some(ToolCallMatch {
+        lead_end: start,
+        name: call.name,
+        input: call.input.unwrap_or(serde_json::Value::Null),
+    })
+}
+
+/// Match a fenced JSON code block containing `{"name":..,"input":..}`. The
+/// fence can be ` ```json ... ``` ` or ` ``` ... ``` `. Used by OpenAI-tuned
+/// models that emit "I'll call the foo tool" followed by a JSON fence.
+fn find_json_code_fence(text: &str) -> Option<ToolCallMatch> {
+    let fence_open = text.find("```")?;
+    // Skip an optional language tag on the same line (e.g. "```json\n").
+    let after = fence_open + 3;
+    let newline = text[after..].find('\n')?;
+    let body_start = after + newline + 1;
+    let close_rel = text[body_start..].find("```")?;
+    let body = text[body_start..body_start + close_rel].trim();
+    // Must parse as the tool-call object shape; bare JSON values don't count.
+    let call: ToolCallJson = serde_json::from_str(body).ok()?;
+    Some(ToolCallMatch {
+        lead_end: fence_open,
+        name: call.name,
+        input: call.input.unwrap_or(serde_json::Value::Null),
+    })
+}
+
+/// Match `<tool_name>{..json..}</tool_name>` — the Qwen-style convention
+/// where the XML tag itself carries the tool name and the body is the
+/// tool input. Only accepts tag names that match `[a-z][a-z0-9_]*` (so
+/// prose tags like `<think>`, `<quote>`, `<p>` don't match unless the
+/// body is a JSON object, which they wouldn't be anyway).
+fn find_named_tag(text: &str) -> Option<ToolCallMatch> {
+    // Skip the `<tool_use>` form (handled elsewhere).
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let Some(rel) = text[i..].find('<') else { return None };
+        let start = i + rel;
+        let after_lt = start + 1;
+        // Find the closing `>` of the opening tag.
+        let close_gt_rel = text[after_lt..].find('>')?;
+        let tag = &text[after_lt..after_lt + close_gt_rel];
+        // Reject anything with whitespace or attributes (not a plain tag).
+        if tag.is_empty() || tag.contains(' ') || tag.starts_with('/') {
+            i = after_lt + close_gt_rel + 1;
+            continue;
+        }
+        // Snake_case-only to avoid matching prose HTML like <P> or <Quote>.
+        if !tag.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            || !tag.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+            || tag == "tool_use"
+        {
+            i = after_lt + close_gt_rel + 1;
+            continue;
+        }
+        // Locate matching close tag.
+        let body_start = after_lt + close_gt_rel + 1;
+        let close_tag = format!("</{tag}>");
+        let Some(close_rel) = text[body_start..].find(&close_tag) else {
+            i = body_start;
+            continue;
+        };
+        let body = text[body_start..body_start + close_rel].trim();
+        // Body must be a JSON object; otherwise this is some random tag.
+        let input: serde_json::Value = match serde_json::from_str::<serde_json::Value>(body) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                i = body_start + close_rel + close_tag.len();
+                continue;
+            }
+        };
+        return Some(ToolCallMatch {
+            lead_end: start,
+            name: tag.to_string(),
+            input,
+        });
+    }
+    None
 }
 
 #[derive(Debug, Deserialize)]
@@ -814,9 +911,78 @@ I should call read_file. The format is <tool_use>{"name":"read_file","input":{"p
     fn parse_malformed_tool_use_falls_back_to_text() {
         let raw = "<tool_use>not json</tool_use>";
         let (blocks, stop) = parse_assistant_output(raw, 5, 100);
-        // Malformed tool_use → text block with the error + end_turn
-        // (since no successful tool call happened).
+        // Malformed tool_use body isn't a recognized tool-call format, so
+        // the whole output is preserved as a single text block and the
+        // turn ends normally (no spurious tool_use stop).
         assert_eq!(stop, "end_turn");
-        assert!(blocks.iter().any(|b| matches!(b, ContentBlock::Text { text } if text.contains("failed to parse"))));
+        assert_eq!(blocks.len(), 1);
+        matches!(&blocks[0], ContentBlock::Text { text } if text.contains("not json"));
+    }
+
+    #[test]
+    fn parse_json_code_fence_as_tool_call() {
+        // Some models emit the tool call wrapped in a ```json ... ``` fence
+        // (OpenAI convention) instead of <tool_use> tags.
+        let raw = "I'll read the file.\n\n```json\n{\"name\": \"read_file\", \"input\": {\"path\": \"/etc/hosts\"}}\n```";
+        let (blocks, stop) = parse_assistant_output(raw, 30, 100);
+        assert_eq!(stop, "tool_use");
+        assert!(blocks.iter().any(|b| matches!(
+            b,
+            ContentBlock::ToolUse { name, input, .. }
+                if name == "read_file" && input["path"] == "/etc/hosts"
+        )));
+    }
+
+    #[test]
+    fn parse_named_tag_as_tool_call() {
+        // Qwen-style: the XML tag itself names the tool, body is the input.
+        let raw = "<search_files>\n{\"query\": \"ModelBundle\", \"path\": \"/opt/AxonML\"}\n</search_files>";
+        let (blocks, stop) = parse_assistant_output(raw, 20, 100);
+        assert_eq!(stop, "tool_use");
+        assert!(blocks.iter().any(|b| matches!(
+            b,
+            ContentBlock::ToolUse { name, input, .. }
+                if name == "search_files" && input["query"] == "ModelBundle"
+        )));
+    }
+
+    #[test]
+    fn parse_named_tag_ignores_non_tool_prose() {
+        // <think> blocks are stripped before parsing; prose HTML-ish tags
+        // like <p>, <quote> don't contain JSON objects so the named-tag
+        // matcher falls through.
+        let raw = "<p>Here is the answer.</p>";
+        let (blocks, stop) = parse_assistant_output(raw, 5, 100);
+        assert_eq!(stop, "end_turn");
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(&blocks[0], ContentBlock::Text { .. }));
+    }
+
+    #[test]
+    fn parse_earliest_format_wins_when_multiple_present() {
+        // If the model emits two candidate tool-call formats, the earliest
+        // by byte offset is taken (so the prose before it is preserved).
+        let raw = r#"Preamble.
+
+<tool_use>
+{"name": "first", "input": {"x": 1}}
+</tool_use>
+
+Then a later code fence:
+```json
+{"name": "second", "input": {"y": 2}}
+```"#;
+        let (blocks, stop) = parse_assistant_output(raw, 40, 100);
+        assert_eq!(stop, "tool_use");
+        // First tool_use "first" wins; "second" is dropped because the
+        // assistant turn ends at the first tool call.
+        assert!(blocks.iter().any(|b| matches!(
+            b,
+            ContentBlock::ToolUse { name, .. } if name == "first"
+        )));
+        assert!(!blocks.iter().any(|b| matches!(
+            b,
+            ContentBlock::ToolUse { name, .. } if name == "second"
+        )));
     }
 }
