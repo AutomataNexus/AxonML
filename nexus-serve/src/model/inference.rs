@@ -1759,26 +1759,36 @@ impl InferenceEngine {
                 None
             };
 
-            // Q still needs to go to host for the attention call (the
-            // attention dispatcher takes `&[f32]`). ~14 KB — negligible.
-            let q_host = q.to_vec();
-
             let total_len = pos + 1;
-            // When the resident GPU cache is active, `k_cache[li]` and
-            // `v_cache[li]` are empty — `gpu_single_query_attention` will
-            // route through `try_gpu_attn_resident` which reads the GPU
-            // buffers directly and ignores the (empty) host slices.
-            let attn_host = gpu_single_query_attention(
-                &q_host, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
-                total_len, n_heads, n_kv_heads, head_dim, 0,
+            // GPU-native attention: Q stays on device, attention output
+            // returned as a GPU Tensor. Eliminates the D2H-Q + H2D-attn
+            // round trip pair. Falls back to the host-routed path only
+            // when the resident GPU cache isn't populated for this layer.
+            let mut attn = if let (Some(cuda), Some((gpu, layer_idx))) = (
+                axonml_core::backends::cuda::get_cuda_backend(),
                 gpu_cache_ref,
-            );
-
-            // Re-materialize attention output on GPU to resume the chain.
-            let mut attn = Tensor::from_vec(attn_host, &[1, n_heads * head_dim])
-                .expect("attn tensor")
-                .to_device(self.compute_device.clone())
-                .expect("move attn to GPU");
+            ) {
+                let q_guard = q.as_cuda_slice_read();
+                let attn_t = try_gpu_attn_resident_gpu(
+                    cuda, q_guard.slice(), gpu, layer_idx,
+                    total_len, n_heads, n_kv_heads, head_dim, 0,
+                )
+                .expect("GPU-resident attention failed");
+                drop(q_guard);
+                attn_t
+            } else {
+                // Host fallback: only hit when resident GPU cache absent.
+                let q_host = q.to_vec();
+                let attn_host = gpu_single_query_attention(
+                    &q_host, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                    total_len, n_heads, n_kv_heads, head_dim, 0,
+                    gpu_cache_ref,
+                );
+                Tensor::from_vec(attn_host, &[1, n_heads * head_dim])
+                    .expect("attn tensor")
+                    .to_device(self.compute_device.clone())
+                    .expect("move attn to GPU")
+            };
 
             if let Some(sub) = &lc.attn_sub_norm {
                 attn = attn.rms_norm(sub, eps);
@@ -2499,6 +2509,51 @@ fn try_gpu_attn_resident(
     )
     .ok()?;
     cuda.dtoh_copy(&out_gpu).ok()
+}
+
+/// GPU-native resident attention: takes `q` as an on-device `CudaSlice<f32>`
+/// (no D2H → H2D round trip for Q), returns the attention output as a GPU
+/// `Tensor<f32>` ready to chain into the next op. Saves two round trips per
+/// layer vs `try_gpu_attn_resident` (one D2H of Q plus one H2D of the
+/// attention output on the caller side).
+#[cfg(feature = "cuda")]
+#[allow(clippy::too_many_arguments)]
+fn try_gpu_attn_resident_gpu(
+    cuda: &axonml_core::backends::CudaBackend,
+    q_gpu: &cudarc::driver::CudaSlice<f32>,
+    gpu: &GpuKvCache,
+    layer: usize,
+    kv_len: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    swa_window: usize,
+) -> Option<Tensor<f32>> {
+    use axonml_core::backends::cuda_pool::pool_alloc;
+    use axonml_core::storage::Storage;
+
+    let scale = 1.0f32 / (head_dim as f32).sqrt();
+    let out_len = n_heads * head_dim;
+    let mut out_gpu = pool_alloc(out_len).ok()?;
+    cuda.fused_attn_decode_f32(
+        q_gpu,
+        &gpu.k[layer],
+        &gpu.v[layer],
+        &mut out_gpu,
+        kv_len,
+        n_heads,
+        n_kv_heads,
+        head_dim,
+        swa_window,
+        scale,
+    )
+    .ok()?;
+    let storage = Storage::from_cuda_slice(
+        out_gpu,
+        out_len,
+        Device::Cuda(0),
+    );
+    Tensor::from_storage(storage, &[1, out_len]).ok()
 }
 
 /// Fallback GPU attention that re-uploads the full K/V cache each call.
