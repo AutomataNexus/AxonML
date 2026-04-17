@@ -251,6 +251,201 @@ extern "C" __global__ void fused_attn_decode_f32(
 }
 
 // =============================================================================
+// TurboQuant Q8 KV cache — per-head int8 quantization
+// =============================================================================
+//
+// Layout (one layer):
+//   k_q     : [capacity, n_kv_heads, head_dim]  int8
+//   k_scale : [capacity, n_kv_heads]            f32  (one scale per token,head)
+//   v_q     : [capacity, n_kv_heads, head_dim]  int8
+//   v_scale : [capacity, n_kv_heads]            f32
+//
+// For head_dim = 128 and 4 kv heads this compresses each row from
+// 4*128*4 = 2048 bytes down to 4*128 + 4*4 = 528 bytes → ~3.9x.
+//
+// Quantization: symmetric, per (token, kv_head). amax is reduced inside a
+// warp; then every lane in the warp computes the same scale = amax/127.
+// If a head is exactly zero, scale is set to 1 so dequant is well-defined.
+//
+// One CTA = one (token, kv_head) pair. Thread layout: 32 lanes per CTA;
+// each lane covers head_dim / 32 values (4 for head_dim=128). The caller
+// launches 2 * n_kv_heads CTAs — first n_kv_heads for K, second for V —
+// OR two separate calls (one per tensor). We use two calls because the
+// pointers differ; no extra dispatch cost at the decode step (one token
+// per call, tiny CTA count).
+extern "C" __global__ void quantize_kv_row_q8_f32(
+    const float* __restrict__ src,       // [n_kv_heads, head_dim]  (one row)
+    signed char*  __restrict__ dst_q,    // [capacity, n_kv_heads, head_dim] dst
+    float*        __restrict__ dst_scale,// [capacity, n_kv_heads]
+    unsigned int n_kv_heads,
+    unsigned int head_dim,
+    unsigned int pos                     // row to write into the cache
+) {
+    const unsigned int kv_h = blockIdx.x;
+    const unsigned int lane = threadIdx.x;
+    if (kv_h >= n_kv_heads || lane >= 32u) return;
+
+    const unsigned int DIMS_MAX = 16;  // head_dim ≤ 512 covers today's models
+    float my_vals[DIMS_MAX];
+    const unsigned int DIMS = (head_dim + 31u) / 32u;
+
+    // Load this lane's slice and track amax.
+    float amax = 0.0f;
+    #pragma unroll
+    for (unsigned int d = 0; d < DIMS_MAX; ++d) {
+        if (d < DIMS) {
+            unsigned int di = lane + d * 32u;
+            float v = (di < head_dim) ? src[kv_h * head_dim + di] : 0.0f;
+            my_vals[d] = v;
+            float a = fabsf(v);
+            if (a > amax) amax = a;
+        }
+    }
+
+    // Warp reduce amax: every lane ends with the full-row amax.
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1) {
+        float other = __shfl_xor_sync(0xffffffffu, amax, off);
+        if (other > amax) amax = other;
+    }
+
+    float scale = (amax > 0.0f) ? (amax / 127.0f) : 1.0f;
+    float inv   = (amax > 0.0f) ? (127.0f / amax) : 0.0f;
+
+    // Write scale once per warp.
+    if (lane == 0) {
+        dst_scale[pos * n_kv_heads + kv_h] = scale;
+    }
+
+    // Quantize.
+    signed char* row_out =
+        dst_q + (size_t)(pos * n_kv_heads + kv_h) * (size_t)head_dim;
+    #pragma unroll
+    for (unsigned int d = 0; d < DIMS_MAX; ++d) {
+        if (d < DIMS) {
+            unsigned int di = lane + d * 32u;
+            if (di < head_dim) {
+                float q = my_vals[d] * inv;
+                // Round half-away-from-zero and clamp to int8 range.
+                int qi = (int)(q >= 0.0f ? (q + 0.5f) : (q - 0.5f));
+                if (qi >  127) qi =  127;
+                if (qi < -128) qi = -128;
+                row_out[di] = (signed char)qi;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Fused Flash-Decode Attention — Q8 KV variant
+// =============================================================================
+//
+// Same online-softmax algorithm as `fused_attn_decode_f32`, but reads int8
+// K/V with per-(token,head) f32 scales. Dequant is `int8 * scale` inline
+// inside the dot product / v accumulation — no separate staging buffer.
+//
+// Launch identical to fused_attn_decode_f32:
+//   grid  = (n_heads, 1, 1)
+//   block = (32,       1, 1)
+extern "C" __global__ void fused_attn_decode_q8_f32(
+    const float*        __restrict__ q,        // [n_heads, head_dim]
+    const signed char*  __restrict__ k_q,      // [kv_len, n_kv_heads, head_dim] int8
+    const float*        __restrict__ k_scale,  // [kv_len, n_kv_heads]           f32
+    const signed char*  __restrict__ v_q,      // [kv_len, n_kv_heads, head_dim] int8
+    const float*        __restrict__ v_scale,  // [kv_len, n_kv_heads]           f32
+    float*              __restrict__ out,      // [n_heads, head_dim]
+    unsigned int kv_len,
+    unsigned int n_heads,
+    unsigned int n_kv_heads,
+    unsigned int head_dim,
+    unsigned int swa_window,
+    float scale
+) {
+    const unsigned int h    = blockIdx.x;
+    const unsigned int lane = threadIdx.x;
+    if (h >= n_heads || lane >= 32u) return;
+
+    const unsigned int gqa_ratio = n_heads / n_kv_heads;
+    const unsigned int kv_h      = h / gqa_ratio;
+    const unsigned int kv_dim    = n_kv_heads * head_dim;
+
+    const unsigned int window_start = (swa_window > 0u && kv_len > swa_window)
+        ? (kv_len - swa_window) : 0u;
+
+    constexpr int MAX_DIMS = 16;
+    float q_reg[MAX_DIMS];
+    float o_reg[MAX_DIMS];
+
+    const unsigned int DIMS = (head_dim + 31u) / 32u;
+    #pragma unroll
+    for (int d = 0; d < MAX_DIMS; ++d) {
+        if ((unsigned int)d < DIMS) {
+            unsigned int di = lane + (unsigned int)d * 32u;
+            q_reg[d] = (di < head_dim) ? q[h * head_dim + di] : 0.0f;
+        } else {
+            q_reg[d] = 0.0f;
+        }
+        o_reg[d] = 0.0f;
+    }
+
+    float m = -FLT_MAX;
+    float l = 0.0f;
+
+    for (unsigned int t = window_start; t < kv_len; ++t) {
+        const signed char* k_row =
+            k_q + (size_t)(t * kv_dim) + (size_t)(kv_h * head_dim);
+        const float ks = k_scale[t * n_kv_heads + kv_h];
+
+        float partial = 0.0f;
+        #pragma unroll
+        for (int d = 0; d < MAX_DIMS; ++d) {
+            if ((unsigned int)d < DIMS) {
+                unsigned int di = lane + (unsigned int)d * 32u;
+                if (di < head_dim) {
+                    float kv = (float)k_row[di] * ks;
+                    partial += q_reg[d] * kv;
+                }
+            }
+        }
+
+        #pragma unroll
+        for (int off = 16; off > 0; off >>= 1) {
+            partial += __shfl_xor_sync(0xffffffffu, partial, off);
+        }
+        float s = partial * scale;
+
+        float m_new = fmaxf(m, s);
+        float alpha = expf(m - m_new);
+        float beta  = expf(s - m_new);
+
+        const signed char* v_row =
+            v_q + (size_t)(t * kv_dim) + (size_t)(kv_h * head_dim);
+        const float vs = v_scale[t * n_kv_heads + kv_h];
+        #pragma unroll
+        for (int d = 0; d < MAX_DIMS; ++d) {
+            if ((unsigned int)d < DIMS) {
+                unsigned int di = lane + (unsigned int)d * 32u;
+                float vv = (di < head_dim) ? ((float)v_row[di] * vs) : 0.0f;
+                o_reg[d] = o_reg[d] * alpha + vv * beta;
+            }
+        }
+        l = l * alpha + beta;
+        m = m_new;
+    }
+
+    float inv_l = (l > 0.0f) ? (1.0f / l) : 0.0f;
+    #pragma unroll
+    for (int d = 0; d < MAX_DIMS; ++d) {
+        if ((unsigned int)d < DIMS) {
+            unsigned int di = lane + (unsigned int)d * 32u;
+            if (di < head_dim) {
+                out[h * head_dim + di] = o_reg[d] * inv_l;
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Fused Flash-Prefill Attention (batched causal, GQA-aware)
 // =============================================================================
 //

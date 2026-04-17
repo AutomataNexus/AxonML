@@ -2770,6 +2770,117 @@ impl CudaBackend {
         }
         Ok(())
     }
+
+    /// Quantize one KV row (`n_kv_heads * head_dim` f32s) into the int8
+    /// per-head-scale layout used by `fused_attn_decode_q8_f32`.
+    ///
+    /// Writes int8 values into `dst_q` at row `pos` and one f32 scale per
+    /// head into `dst_scale[pos * n_kv_heads + kv_h]`. The full scale buffer
+    /// holds `capacity * n_kv_heads` f32s; writing by logical `pos` avoids
+    /// needing to pass the capacity to the kernel.
+    ///
+    /// See `attention.cu::quantize_kv_row_q8_f32` for the algorithm.
+    #[allow(clippy::too_many_arguments)]
+    pub fn quantize_kv_row_q8_f32(
+        &self,
+        src: &CudaSlice<f32>,
+        dst_q: &mut CudaSlice<i8>,
+        dst_scale: &mut CudaSlice<f32>,
+        n_kv_heads: usize,
+        head_dim: usize,
+        pos: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(
+            head_dim <= 512,
+            "quantize_kv_row_q8_f32: head_dim {head_dim} exceeds DIMS_MAX budget"
+        );
+        let func = self
+            .kernels
+            .get("quantize_kv_row_q8_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("quantize_kv_row_q8_f32".to_string()))?;
+
+        // One warp per head. n_kv_heads CTAs, 32 threads each.
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (n_kv_heads as u32, 1, 1),
+            block_dim: (32, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst_q)
+                .arg(dst_scale)
+                .arg(&(n_kv_heads as u32))
+                .arg(&(head_dim as u32))
+                .arg(&(pos as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Fused flash-decode attention with TurboQuant Q8 KV cache. Same
+    /// online-softmax algorithm as `fused_attn_decode_f32`, but reads int8
+    /// K/V with per-(token,head) f32 scales. Dequant is inline.
+    ///
+    /// See `attention.cu::fused_attn_decode_q8_f32` for the algorithm.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fused_attn_decode_q8_f32(
+        &self,
+        q: &CudaSlice<f32>,
+        k_q: &CudaSlice<i8>,
+        k_scale: &CudaSlice<f32>,
+        v_q: &CudaSlice<i8>,
+        v_scale: &CudaSlice<f32>,
+        out: &mut CudaSlice<f32>,
+        kv_len: usize,
+        n_heads: usize,
+        n_kv_heads: usize,
+        head_dim: usize,
+        swa_window: usize,
+        scale: f32,
+    ) -> Result<(), CudaError> {
+        debug_assert!(
+            head_dim <= 512,
+            "fused_attn_decode_q8_f32: head_dim {head_dim} exceeds MAX_DIMS budget"
+        );
+        debug_assert!(
+            n_kv_heads > 0 && n_heads % n_kv_heads == 0,
+            "fused_attn_decode_q8_f32: n_heads ({n_heads}) must be a multiple of n_kv_heads ({n_kv_heads})"
+        );
+        let func = self
+            .kernels
+            .get("fused_attn_decode_q8_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("fused_attn_decode_q8_f32".to_string()))?;
+
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (n_heads as u32, 1, 1),
+            block_dim: (32, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(q)
+                .arg(k_q)
+                .arg(k_scale)
+                .arg(v_q)
+                .arg(v_scale)
+                .arg(out)
+                .arg(&(kv_len as u32))
+                .arg(&(n_heads as u32))
+                .arg(&(n_kv_heads as u32))
+                .arg(&(head_dim as u32))
+                .arg(&(swa_window as u32))
+                .arg(&scale)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
 }
 
 // =============================================================================

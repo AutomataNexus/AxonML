@@ -101,6 +101,9 @@ struct Config {
     /// If true, keep weights in their compact GGUF form and dequantize per-matmul.
     /// Saves ~5x RAM (e.g., 27B Gemma: 50GB → 10GB) at the cost of inference speed.
     quantized_weights: bool,
+    /// Enable TurboQuant Q8 KV cache: store KV as int8 with per-(token,head)
+    /// f32 scales. ~3.9× compression, correctness-equivalent at decode.
+    kv_quant_q8: bool,
     /// Number of CPU threads for matmul/dequant. `None` = rayon default (all cores).
     threads: Option<usize>,
     /// Explicit config file path from --config. If `None`, falls back to
@@ -126,6 +129,7 @@ impl Config {
             port: 11435,  // ollama is 11434, we're +1
             host: "0.0.0.0".to_string(),
             quantized_weights: false,
+            kv_quant_q8: false,
             threads: None,
             config_path: None,
             hw_cores: None,
@@ -188,6 +192,19 @@ impl Config {
                 "--quantized" | "-q" => {
                     cfg.quantized_weights = true;
                     cfg.src_quantized = Source::Cli;
+                }
+                "--kv-quant" => {
+                    i += 1;
+                    match args[i].as_str() {
+                        "q8" => cfg.kv_quant_q8 = true,
+                        "none" | "f32" => cfg.kv_quant_q8 = false,
+                        other => {
+                            eprintln!(
+                                "Unknown --kv-quant value: {other} (expected q8 or none)"
+                            );
+                            std::process::exit(1);
+                        }
+                    }
                 }
                 "--threads" | "-t" => {
                     i += 1;
@@ -394,6 +411,11 @@ OPTIONS:
     --quantized, -q        Keep weights in compact GGUF form, dequantize per-matmul.
                            Saves ~5x RAM at the cost of inference speed.
                            Required to fit large models (e.g., 27B Gemma) in 16GB RAM.
+    --kv-quant KIND        TurboQuant KV cache. KIND=q8 stores KV as int8 with
+                           per-(token,head) f32 scales — ~3.9x memory compression
+                           (e.g. 450MB → 115MB for DeepSeek-7B at 4k context), same
+                           attention algorithm, dequant inline in the kernel.
+                           KIND=none (default) keeps KV as f32.
     --threads, -t N        CPU thread count for matmul/dequantization.
                            Default: all physical cores (24 on Intel Core Ultra 9 275HX).
     --port, -p PORT        Listen port (default: 11435)
@@ -580,7 +602,9 @@ async fn main() {
                                     {
                                         if axonml_core::backends::cuda::is_available() {
                                             engine.to_device(Device::Cuda(0));
-                                            println!("  Inference engine: READY (GPU)");
+                                            engine.set_kv_quant_q8(cfg.kv_quant_q8);
+                                            let kv_tag = if cfg.kv_quant_q8 { " [KV=Q8]" } else { "" };
+                                            println!("  Inference engine: READY (GPU){kv_tag}");
                                         } else {
                                             println!("  Inference engine: READY (CPU — no CUDA device found)");
                                         }

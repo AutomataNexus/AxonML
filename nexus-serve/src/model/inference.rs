@@ -553,6 +553,14 @@ pub struct InferenceEngine {
     /// Lazy-cached GPU Tensor for the final `output_norm` weight.
     #[cfg(feature = "cuda")]
     pub gpu_output_norm: std::sync::OnceLock<Tensor<f32>>,
+    /// TurboQuant Q8 KV cache toggle. When true, the decode path
+    /// allocates `GpuKvCacheQ8` (int8 values + per-head f32 scale) and
+    /// calls `fused_attn_decode_q8_f32` instead of the f32 variant.
+    /// ~3.9× memory compression; same algorithm, dequant inline in the
+    /// attention kernel. Set at load time by the CLI `--kv-quant q8`
+    /// flag or programmatically via [`InferenceEngine::set_kv_quant_q8`].
+    #[cfg(feature = "cuda")]
+    pub kv_quant_q8: bool,
 }
 
 /// GPU-resident copies of a `LayerWeights`'s CPU `Vec<f32>` members
@@ -768,6 +776,15 @@ impl InferenceEngine {
         &self.config.model_name
     }
 
+    /// Enable TurboQuant Q8 KV cache. Must be called before the first
+    /// `generate` / `generate_stream` invocation — the KV cache is
+    /// lazily allocated on first decode step using whichever variant is
+    /// configured.
+    #[cfg(feature = "cuda")]
+    pub fn set_kv_quant_q8(&mut self, enabled: bool) {
+        self.kv_quant_q8 = enabled;
+    }
+
     /// Stop-token IDs that terminate generation in `generate_stream`.
     ///
     /// Qwen2-family IDs 151643-151646 carry different meanings depending on
@@ -937,6 +954,115 @@ impl GpuKvCache {
     }
 }
 
+/// TurboQuant Q8 GPU-resident KV cache.
+///
+/// Per-layer storage: int8 quantized values plus one f32 scale per
+/// `(token, kv_head)` — i.e. the quantization granularity is per-head,
+/// not per-row. For DeepSeek-7B (n_kv_heads=4, head_dim=128) each row
+/// shrinks from `4 * 128 * 4 = 2048` bytes of f32 to `4 * 128 = 512` int8
+/// bytes plus `4 * 4 = 16` scale bytes = 528 bytes, a ~3.9× compression
+/// that halves the attention kernel's KV read bandwidth and lets a 4096-
+/// token context sit in ~115 MB instead of ~450 MB.
+///
+/// Layout per layer:
+///   k_q[layer]     : [capacity, n_kv_heads, head_dim]  int8
+///   k_scale[layer] : [capacity, n_kv_heads]            f32
+///   (same for V)
+#[cfg(feature = "cuda")]
+pub struct GpuKvCacheQ8 {
+    pub k_q: Vec<cudarc::driver::CudaSlice<i8>>,
+    pub k_scale: Vec<cudarc::driver::CudaSlice<f32>>,
+    pub v_q: Vec<cudarc::driver::CudaSlice<i8>>,
+    pub v_scale: Vec<cudarc::driver::CudaSlice<f32>>,
+    pub n_kv_heads: usize,
+    pub head_dim: usize,
+    pub row_stride: usize,
+    pub capacity: usize,
+}
+
+#[cfg(feature = "cuda")]
+impl GpuKvCacheQ8 {
+    pub fn try_new(
+        cuda: &axonml_core::backends::CudaBackend,
+        num_layers: usize,
+        n_kv_heads: usize,
+        head_dim: usize,
+        capacity: usize,
+    ) -> Option<Self> {
+        // Both the quantized values AND the per-head scales must be zero-
+        // initialized. Reads for positions the decoder hasn't written yet
+        // (the prefill region, which the GPU cache is lazily allocated
+        // behind) must yield 0 for all four of {k_q, k_scale, v_q, v_scale}
+        // so the attention kernel's dequant (int8 * scale) is 0 on those
+        // positions. Leaving scale uninitialized blows up exp() in online
+        // softmax the moment a stray huge float32 lands in the buffer.
+        let row_stride = n_kv_heads * head_dim;
+        let quant_bytes = capacity * row_stride;
+        let scale_floats = capacity * n_kv_heads;
+        let mut k_q = Vec::with_capacity(num_layers);
+        let mut k_scale = Vec::with_capacity(num_layers);
+        let mut v_q = Vec::with_capacity(num_layers);
+        let mut v_scale = Vec::with_capacity(num_layers);
+        for _ in 0..num_layers {
+            k_q.push(cuda.stream().alloc_zeros::<i8>(quant_bytes).ok()?);
+            k_scale.push(cuda.stream().alloc_zeros::<f32>(scale_floats).ok()?);
+            v_q.push(cuda.stream().alloc_zeros::<i8>(quant_bytes).ok()?);
+            v_scale.push(cuda.stream().alloc_zeros::<f32>(scale_floats).ok()?);
+        }
+        Some(Self {
+            k_q,
+            k_scale,
+            v_q,
+            v_scale,
+            n_kv_heads,
+            head_dim,
+            row_stride,
+            capacity,
+        })
+    }
+
+    /// Quantize one token's K and V rows (held on-device as f32 GPU slices)
+    /// into the int8 cache at position `pos`. Two kernel launches: one for
+    /// K, one for V. Both write in-place; no host hop.
+    pub fn append_row_device(
+        &mut self,
+        cuda: &axonml_core::backends::CudaBackend,
+        layer: usize,
+        pos: usize,
+        k_row: &cudarc::driver::CudaSlice<f32>,
+        v_row: &cudarc::driver::CudaSlice<f32>,
+    ) -> bool {
+        if pos >= self.capacity
+            || k_row.len() != self.row_stride
+            || v_row.len() != self.row_stride
+        {
+            return false;
+        }
+        let k_ok = cuda
+            .quantize_kv_row_q8_f32(
+                k_row,
+                &mut self.k_q[layer],
+                &mut self.k_scale[layer],
+                self.n_kv_heads,
+                self.head_dim,
+                pos,
+            )
+            .is_ok();
+        if !k_ok {
+            return false;
+        }
+        cuda.quantize_kv_row_q8_f32(
+            v_row,
+            &mut self.v_q[layer],
+            &mut self.v_scale[layer],
+            self.n_kv_heads,
+            self.head_dim,
+            pos,
+        )
+        .is_ok()
+    }
+}
+
 /// KV cache for incremental decoding.
 ///
 /// Holds two parallel representations: a host-resident `Vec<Vec<f32>>`
@@ -959,6 +1085,11 @@ pub struct KvCache {
     /// allocation failed (we then fall back to re-uploading per step).
     #[cfg(feature = "cuda")]
     pub gpu: Option<GpuKvCache>,
+    /// TurboQuant Q8 variant. Mutually exclusive with `gpu`: whichever
+    /// variant the engine is configured for (via `InferenceEngine.kv_quant_q8`)
+    /// gets lazily allocated, the other stays `None`.
+    #[cfg(feature = "cuda")]
+    pub gpu_q8: Option<GpuKvCacheQ8>,
 }
 
 impl KvCache {
@@ -969,6 +1100,8 @@ impl KvCache {
             len: 0,
             #[cfg(feature = "cuda")]
             gpu: None,
+            #[cfg(feature = "cuda")]
+            gpu_q8: None,
         }
     }
 
@@ -1102,6 +1235,8 @@ impl InferenceEngine {
             gpu_layer_cache: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
             gpu_output_norm: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            kv_quant_q8: false,
         })
     }
 
@@ -1252,6 +1387,8 @@ impl InferenceEngine {
             gpu_layer_cache: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
             gpu_output_norm: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            kv_quant_q8: false,
         })
     }
 
@@ -1747,37 +1884,68 @@ impl InferenceEngine {
             q = q.apply_rope_split_halves(n_heads, head_dim, theta, pos);
             k = k.apply_rope_split_halves(n_kv_heads, head_dim, theta, pos);
 
-            // Lazy-allocate the GPU-resident KV cache on first use.
-            if kv_cache.gpu.is_none() {
+            // Lazy-allocate the GPU-resident KV cache on first use. Which
+            // variant — f32 or Q8 — is decided by `self.kv_quant_q8`.
+            let cap = self.config.max_seq_len.min(4096);
+            if self.kv_quant_q8 {
+                if kv_cache.gpu_q8.is_none() {
+                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                        kv_cache.gpu_q8 = GpuKvCacheQ8::try_new(
+                            cuda, self.layers.len(), n_kv_heads, head_dim, cap,
+                        );
+                    }
+                }
+            } else if kv_cache.gpu.is_none() {
                 if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
-                    let cap = self.config.max_seq_len.min(4096);
                     kv_cache.gpu = GpuKvCache::try_new(
                         cuda, self.layers.len(), n_kv_heads, head_dim, cap,
                     );
                 }
             }
 
-            // D2H K/V only if we *need* the host mirror. The host mirror
-            // exists for the CPU-attention fallback (`single_query_attention`)
-            // and for `try_gpu_attn_reupload`. On the resident path both are
-            // skipped, so we can avoid the two per-layer D2H copies that
-            // dominate when host-side attention isn't exercised.
-            let gpu_cache_ref = if let (Some(g), Some(cuda)) = (
-                kv_cache.gpu.as_mut(),
-                axonml_core::backends::cuda::get_cuda_backend(),
-            ) {
-                // K/V are GPU tensors; append_row_device writes the new row
-                // straight into the pre-allocated GPU buffer — no host hop.
+            // Append this token's K/V into the cache (f32 or Q8), then
+            // grab a reference we can hand to the attention call below.
+            // `attn_backend` carries which variant actually landed the
+            // write — None means we fell through to the host path.
+            enum AttnBackend<'a> {
+                F32(&'a GpuKvCache, usize),
+                #[cfg(feature = "cuda")]
+                Q8(&'a GpuKvCacheQ8, usize),
+            }
+            let cuda_opt = axonml_core::backends::cuda::get_cuda_backend();
+            let attn_backend: Option<AttnBackend<'_>> = if self.kv_quant_q8 {
+                if let (Some(g), Some(cuda)) = (kv_cache.gpu_q8.as_mut(), cuda_opt) {
+                    let k_guard = k.as_cuda_slice_read();
+                    let v_guard = v.as_cuda_slice_read();
+                    if g.append_row_device(cuda, li, pos, k_guard.slice(), v_guard.slice()) {
+                        drop(k_guard);
+                        drop(v_guard);
+                        Some(AttnBackend::Q8(&*g, li))
+                    } else {
+                        // Q8 append failed (capacity or kernel error). Drop to
+                        // the host mirror so the CPU fallback still gets an
+                        // answer rather than a silent correctness bug.
+                        let k_host = k.to_vec();
+                        let v_host = v.to_vec();
+                        kv_cache.k_cache[li].extend_from_slice(&k_host);
+                        kv_cache.v_cache[li].extend_from_slice(&v_host);
+                        None
+                    }
+                } else {
+                    let k_host = k.to_vec();
+                    let v_host = v.to_vec();
+                    kv_cache.k_cache[li].extend_from_slice(&k_host);
+                    kv_cache.v_cache[li].extend_from_slice(&v_host);
+                    None
+                }
+            } else if let (Some(g), Some(cuda)) = (kv_cache.gpu.as_mut(), cuda_opt) {
                 let k_guard = k.as_cuda_slice_read();
                 let v_guard = v.as_cuda_slice_read();
                 if g.append_row_device(cuda, li, pos, k_guard.slice(), v_guard.slice()) {
                     drop(k_guard);
                     drop(v_guard);
-                    Some((&*g, li))
+                    Some(AttnBackend::F32(&*g, li))
                 } else {
-                    // Fell back to host-based append (capacity exceeded or
-                    // device-device copy failed). In that case we do need
-                    // the host mirror populated for the reupload path.
                     let k_host = k.to_vec();
                     let v_host = v.to_vec();
                     kv_cache.k_cache[li].extend_from_slice(&k_host);
@@ -1785,7 +1953,6 @@ impl InferenceEngine {
                     None
                 }
             } else {
-                // No GPU cache — populate host mirror for the CPU fallback.
                 let k_host = k.to_vec();
                 let v_host = v.to_vec();
                 kv_cache.k_cache[li].extend_from_slice(&k_host);
@@ -1794,34 +1961,45 @@ impl InferenceEngine {
             };
 
             let total_len = pos + 1;
-            // GPU-native attention: Q stays on device, attention output
-            // returned as a GPU Tensor. Eliminates the D2H-Q + H2D-attn
-            // round trip pair. Falls back to the host-routed path only
-            // when the resident GPU cache isn't populated for this layer.
-            let mut attn = if let (Some(cuda), Some((gpu, layer_idx))) = (
-                axonml_core::backends::cuda::get_cuda_backend(),
-                gpu_cache_ref,
-            ) {
-                let q_guard = q.as_cuda_slice_read();
-                let attn_t = try_gpu_attn_resident_gpu(
-                    cuda, q_guard.slice(), gpu, layer_idx,
-                    total_len, n_heads, n_kv_heads, head_dim, 0,
-                )
-                .expect("GPU-resident attention failed");
-                drop(q_guard);
-                attn_t
-            } else {
-                // Host fallback: only hit when resident GPU cache absent.
-                let q_host = q.to_vec();
-                let attn_host = gpu_single_query_attention(
-                    &q_host, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
-                    total_len, n_heads, n_kv_heads, head_dim, 0,
-                    gpu_cache_ref,
-                );
-                Tensor::from_vec(attn_host, &[1, n_heads * head_dim])
-                    .expect("attn tensor")
-                    .to_device(self.compute_device.clone())
-                    .expect("move attn to GPU")
+            // GPU-native attention — same for both F32 and Q8 backends;
+            // the difference is only the kernel called inside the entry
+            // point. Q is a GPU tensor throughout; output comes back as a
+            // GPU tensor ready to chain into the O-projection matmul.
+            let mut attn = match (cuda_opt, attn_backend) {
+                (Some(cuda), Some(AttnBackend::F32(gpu, layer_idx))) => {
+                    let q_guard = q.as_cuda_slice_read();
+                    let attn_t = try_gpu_attn_resident_gpu(
+                        cuda, q_guard.slice(), gpu, layer_idx,
+                        total_len, n_heads, n_kv_heads, head_dim, 0,
+                    )
+                    .expect("GPU-resident F32 attention failed");
+                    drop(q_guard);
+                    attn_t
+                }
+                #[cfg(feature = "cuda")]
+                (Some(cuda), Some(AttnBackend::Q8(gpu, layer_idx))) => {
+                    let q_guard = q.as_cuda_slice_read();
+                    let attn_t = try_gpu_attn_resident_q8_gpu(
+                        cuda, q_guard.slice(), gpu, layer_idx,
+                        total_len, n_heads, n_kv_heads, head_dim, 0,
+                    )
+                    .expect("GPU-resident Q8 attention failed");
+                    drop(q_guard);
+                    attn_t
+                }
+                _ => {
+                    // Host fallback: only when GPU cache couldn't land.
+                    let q_host = q.to_vec();
+                    let attn_host = gpu_single_query_attention(
+                        &q_host, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                        total_len, n_heads, n_kv_heads, head_dim, 0,
+                        None,
+                    );
+                    Tensor::from_vec(attn_host, &[1, n_heads * head_dim])
+                        .expect("attn tensor")
+                        .to_device(self.compute_device.clone())
+                        .expect("move attn to GPU")
+                }
             };
 
             if let Some(sub) = &lc.attn_sub_norm {
@@ -2587,6 +2765,48 @@ fn try_gpu_attn_resident_gpu(
         out_len,
         Device::Cuda(0),
     );
+    Tensor::from_storage(storage, &[1, out_len]).ok()
+}
+
+/// GPU-native resident attention with TurboQuant Q8 KV cache.
+/// Mirrors `try_gpu_attn_resident_gpu` but calls the Q8 kernel which
+/// dequants int8 K/V on the fly inside the dot-product / v accumulate
+/// loops. Returns a GPU `Tensor<f32>` of attention output.
+#[cfg(feature = "cuda")]
+#[allow(clippy::too_many_arguments)]
+fn try_gpu_attn_resident_q8_gpu(
+    cuda: &axonml_core::backends::CudaBackend,
+    q_gpu: &cudarc::driver::CudaSlice<f32>,
+    gpu: &GpuKvCacheQ8,
+    layer: usize,
+    kv_len: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    swa_window: usize,
+) -> Option<Tensor<f32>> {
+    use axonml_core::backends::cuda_pool::pool_alloc;
+    use axonml_core::storage::Storage;
+
+    let scale = 1.0f32 / (head_dim as f32).sqrt();
+    let out_len = n_heads * head_dim;
+    let mut out_gpu = pool_alloc(out_len).ok()?;
+    cuda.fused_attn_decode_q8_f32(
+        q_gpu,
+        &gpu.k_q[layer],
+        &gpu.k_scale[layer],
+        &gpu.v_q[layer],
+        &gpu.v_scale[layer],
+        &mut out_gpu,
+        kv_len,
+        n_heads,
+        n_kv_heads,
+        head_dim,
+        swa_window,
+        scale,
+    )
+    .ok()?;
+    let storage = Storage::from_cuda_slice(out_gpu, out_len, Device::Cuda(0));
     Tensor::from_storage(storage, &[1, out_len]).ok()
 }
 
