@@ -1,13 +1,25 @@
-//! Rate Limiting Middleware
+//! Rate Limiting Middleware — Sliding-Window IP Throttle
+//!
+//! Provides `RateLimiter`, a sliding-window rate limiter keyed by client IP
+//! address. Internally stores a `HashMap<String, Vec<Instant>>` behind an
+//! `Arc<Mutex<_>>` so it is `Clone + Send + Sync`. Expired timestamps are
+//! pruned on every `check()` call; requests beyond `max_requests` within
+//! `window_secs` are rejected.
+//!
+//! Also exposes `rate_limit_middleware`, an Axum middleware that extracts the
+//! client IP from `ConnectInfo<SocketAddr>` (falling back to the
+//! `x-forwarded-for` header) and returns `429 Too Many Requests` when the
+//! limiter denies the request.
 //!
 //! # File
 //! `crates/axonml-server/src/auth/rate_limit.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 30, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

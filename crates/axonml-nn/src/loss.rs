@@ -1,13 +1,22 @@
-//! Loss Functions - Training Objectives
+//! Loss functions for training neural networks.
+//!
+//! 1436 lines. Each loss struct has `new(reduction)` and `compute(input,
+//! target) -> Variable` (graph-tracked, backpropagable). `MSELoss`,
+//! `L1Loss`, `CrossEntropyLoss` (log-softmax + NLL, class weights +
+//! label smoothing), `NLLLoss`, `BCELoss`, `BCEWithLogitsLoss` (fused
+//! sigmoid + BCE for numerical stability), `SmoothL1Loss` (Huber).
+//! Reduction modes: Mean (default), Sum, None. All losses support
+//! batched inputs.
 //!
 //! # File
 //! `crates/axonml-nn/src/loss.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

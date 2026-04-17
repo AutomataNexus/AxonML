@@ -1,21 +1,48 @@
-//! Database schema initialization for AxonML
+//! Database Schema Initialization — Collection Bootstrap and Seed Users
+//!
+//! Defines the canonical collection name constants for all Aegis-DB document
+//! collections used by the AxonML server and provides `Schema::init()` to
+//! create them on startup. Collections are created idempotently (409 Conflict
+//! is silently ignored by `Database::create_collection`).
+//!
+//! Collections managed:
+//! - `axonml_users` — user accounts and authentication data
+//! - `axonml_runs` — training run records
+//! - `axonml_models` — model registry entries
+//! - `axonml_model_versions` — versioned model artifacts
+//! - `axonml_endpoints` — inference serving endpoints
+//! - `axonml_datasets` — dataset metadata
+//! - `axonml_notebooks` — training notebook documents
+//! - `axonml_checkpoints` — training checkpoints
+//!
+//! Also provides `create_default_admin()` and `create_devops_admin()` for
+//! bootstrapping seed admin users with pre-hashed passwords.
 //!
 //! # File
 //! `crates/axonml-server/src/db/schema.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use super::{Database, DbError};
 use tracing::info;
+
+// =============================================================================
+// Collection Name Constants
+// =============================================================================
 
 /// Collection names used by AxonML
 pub const USERS_COLLECTION: &str = "axonml_users";
@@ -26,6 +53,10 @@ pub const ENDPOINTS_COLLECTION: &str = "axonml_endpoints";
 pub const DATASETS_COLLECTION: &str = "axonml_datasets";
 pub const NOTEBOOKS_COLLECTION: &str = "axonml_notebooks";
 pub const CHECKPOINTS_COLLECTION: &str = "axonml_checkpoints";
+
+// =============================================================================
+// Schema Initialization
+// =============================================================================
 
 /// Schema definitions for all AxonML collections
 pub struct Schema;
@@ -48,6 +79,10 @@ impl Schema {
         info!("Database schema initialized successfully");
         Ok(())
     }
+
+    // -------------------------------------------------------------------------
+    // Individual Collection Creation
+    // -------------------------------------------------------------------------
 
     /// Create users collection
     async fn create_users_collection(db: &Database) -> Result<(), DbError> {
@@ -104,6 +139,10 @@ impl Schema {
         info!("Created {} collection", CHECKPOINTS_COLLECTION);
         Ok(())
     }
+
+    // =========================================================================
+    // Seed Users
+    // =========================================================================
 
     /// Create default admin user if not exists
     pub async fn create_default_admin(db: &Database, password_hash: &str) -> Result<(), DbError> {
@@ -169,6 +208,10 @@ impl Schema {
         Ok(())
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

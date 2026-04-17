@@ -1,13 +1,22 @@
 //! V4L2 Backend — Linux Camera Capture via Video4Linux2
 //!
+//! Linux-specific camera capture using V4L2 ioctls and memory-mapped I/O.
+//! Defines C-compatible structs (`V4l2Capability`, `V4l2Format`, `V4l2Buffer`)
+//! and ioctl request codes for QUERYCAP, S_FMT, REQBUFS, QUERYBUF, QBUF, DQBUF,
+//! STREAMON, and STREAMOFF. `MmapBuffer` wraps mmap'd kernel buffers with RAII
+//! cleanup. `V4L2Backend` implements `CaptureBackend` with zero-copy frame capture
+//! from /dev/videoN devices, supporting YUYV and MJPEG pixel formats. Uses 4
+//! memory-mapped buffers for continuous streaming.
+//!
 //! # File
 //! `crates/axonml-vision/src/camera/v4l2.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

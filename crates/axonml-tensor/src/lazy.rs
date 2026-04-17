@@ -1,13 +1,22 @@
-//! Lazy Tensor - Deferred Computation with Graph Optimization
+//! Lazy tensors — deferred computation with algebraic graph optimization.
+//!
+//! 976 lines. `LazyTensor` builds an expression tree of `LazyOp` nodes
+//! (Add, Sub, Mul, Div, Neg, Abs, Relu, Sigmoid, Tanh, Exp, Log, Sqrt,
+//! MatMul, Sum, Mean, Reshape, Transpose, Scalar, MulScalar, AddScalar,
+//! Pow) that is optimized before materialization. `optimize()` applies:
+//! constant folding, identity elimination (add 0, mul 1), inverse
+//! cancellation (neg(neg), exp(log)), and scalar folding. `materialize()`
+//! evaluates the optimized tree into a concrete `Tensor<f32>`.
 //!
 //! # File
 //! `crates/axonml-tensor/src/lazy.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

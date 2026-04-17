@@ -1,13 +1,20 @@
-//! Convolution Gradient Functions
+//! Backward functions for convolution operations.
+//!
+//! 2323 lines. `Conv1dBackward`, `Conv2dBackward`, `ConvTranspose2dBackward`.
+//! Conv2d backward uses BLAS-accelerated im2col for grad_input and col2im
+//! for grad_weight, with optional cuDNN dispatch when the `cudnn` feature
+//! is enabled (`cudnn_conv2d_backward_data` / `cudnn_conv2d_backward_filter`).
+//! Handles grouped convolution, padding, stride, and dilation for all three.
 //!
 //! # File
 //! `crates/axonml-autograd/src/functions/conv.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

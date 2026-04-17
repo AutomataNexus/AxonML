@@ -1,160 +1,187 @@
 # axonml-autograd Documentation
 
-> Automatic differentiation engine for the Axonml ML framework.
+> Automatic differentiation engine for the AxonML ML framework.
 
 ## Overview
 
-`axonml-autograd` provides reverse-mode automatic differentiation (backpropagation) through a dynamic computational graph. This enables gradient computation for any tensor operations, making it the foundation for neural network training.
+`axonml-autograd` implements reverse-mode automatic differentiation (backprop)
+over a dynamic computation graph. The `Variable` type wraps a `Tensor<f32>`
+with a `GradAccumulator` and an optional `GradFn` recording the op that
+produced it. Calling `.backward()` walks the graph and accumulates gradients
+into the leaves.
 
 ## Core Concepts
 
 ### Computational Graph
 
-When `requires_grad=true`, operations build a directed acyclic graph (DAG) that tracks the computation history. During the backward pass, gradients flow through this graph in reverse order.
+Every op on a `Variable` with gradient tracking enabled appends a node to a
+directed acyclic graph. `backward()` topologically sorts the reachable graph
+and calls each node's `GradientFunction::backward()` in reverse order.
 
 ```
-Forward:  x → [Linear] → h → [ReLU] → y → [Loss] → L
-Backward: ∂L/∂x ← [∂Linear] ← ∂L/∂h ← [∂ReLU] ← ∂L/∂y ← [1.0]
+Forward:  x -> [Linear] -> h -> [ReLU] -> y -> [Loss] -> L
+Backward: dL/dx <- [dLinear] <- dL/dh <- [dReLU] <- dL/dy <- 1.0
 ```
 
 ### Variables
 
-`Variable` wraps a `Tensor` and adds gradient tracking:
-
 ```rust
 pub struct Variable {
-    data: Tensor<f32>,
-    grad: Option<Tensor<f32>>,
-    grad_fn: Option<Arc<dyn GradFn>>,
-    requires_grad: bool,
+    data: Arc<RwLock<Tensor<f32>>>,
+    // grad accumulator + optional GradFn recording producing op
 }
 ```
 
 ## Modules
 
-### variable.rs
+### `variable`
 
-The main `Variable` struct for gradient-tracked tensors.
+`Variable` — tensor with automatic gradient tracking (1577 lines, 67 public
+methods). Differentiable versions of all tensor ops:
 
-**Creation:**
-```rust
-use axonml_autograd::Variable;
+- Arithmetic: `add_var`, `sub_var`, `mul_var`, `div_var`, `neg`,
+  `add_scalar`, `mul_scalar`, `pow`
+- Activations: `relu`, `sigmoid`, `tanh`, `gelu`, `silu`, `elu`,
+  `leaky_relu`, `softmax`, `log_softmax`
+- Reductions: `sum`, `mean`, `sum_dim`, `mean_dim`, `var_dim`
+- Shape: `reshape`, `transpose`, `t`, `narrow`, `select`, `unsqueeze`,
+  `expand`, `cat`
+- Linear algebra: `matmul`
+- Misc: `exp`, `log`, `sqrt`, `clamp`
 
-// Create with gradient tracking
-let x = Variable::new(tensor, true);
+Control: `backward()`, `detach()`, `requires_grad_()`, `data()` (read guard),
+`zero_grad()`, `from_operation(op, inputs)` for custom `GradFn` attachment.
 
-// Create without gradient tracking
-let y = Variable::new(tensor, false);
+### `backward`
 
-// From existing variable
-let z = Variable::from_tensor(tensor);
-```
+Topological-sort driven backward pass. The top-level `backward(var)` function
+entry point. Gradients accumulate into leaf variables; non-leaf gradients are
+freed unless retained explicitly.
 
-**Key Methods:**
-- `data()` - Get underlying tensor
-- `grad()` - Get gradient tensor (if computed)
-- `requires_grad()` - Check if tracking gradients
-- `backward()` - Compute gradients
-- `detach()` - Create non-tracking copy
-- `zero_grad()` - Reset gradient to zero
+### `grad_fn`
 
-### backward.rs
+`GradFn` / `GradientFunction` traits and the `GradAccumulator` used by leaf
+`Variable`s to sum contributions. Also `AccumulateGrad` (leaf terminator node).
 
-Backward pass implementation.
+### `graph`
 
-**Usage:**
-```rust
-let x = Variable::new(tensor, true);
-let y = some_operation(&x);
-let loss = compute_loss(&y);
+`ComputationGraph` and `GraphNode` — the global dynamic graph scaffolding.
+`with_graph(|g| ...)` provides scoped access.
 
-// Compute all gradients
-loss.backward();
+### `no_grad`
 
-// Access gradients
-if let Some(grad) = x.grad() {
-    println!("Gradient: {:?}", grad);
-}
-```
-
-**Details:**
-- Topological sort ensures correct order
-- Gradients accumulate (not overwritten)
-- Non-leaf gradients freed by default
-- Supports multiple backward passes
-
-### no_grad.rs
-
-Context manager for disabling gradient computation.
+Gradient-disable context.
 
 ```rust
 use axonml_autograd::no_grad;
 
-// Inside no_grad, operations don't track gradients
 no_grad(|| {
     let y = model.forward(&x);
-    // No graph built, faster inference
+    // no graph built
 });
 ```
 
-### functions/
+`NoGradGuard` RAII guard, plus `is_grad_enabled()` and `enable_grad()`
+(inverse scope). For a stricter guarantee — variables created inside the
+scope can never be upgraded to require gradients — use `inference_mode()`
+or `InferenceModeGuard::new()` / `is_inference_mode()`.
 
-Differentiable operations with forward and backward implementations.
+### `amp`
 
-**Arithmetic (`basic.rs`):**
-- `Add` - a + b, gradients: (1, 1)
-- `Sub` - a - b, gradients: (1, -1)
-- `Mul` - a * b, gradients: (b, a)
-- `Div` - a / b, gradients: (1/b, -a/b²)
-- `Neg` - -a, gradient: -1
-- `MatMul` - a @ b, gradients: (∂L/∂y @ b.T, a.T @ ∂L/∂y)
+Automatic Mixed Precision (F16 autocast) — 321 lines.
 
-**Activations (`activation.rs`):**
-- `Sigmoid` - σ(x), gradient: σ(x)(1 - σ(x))
-- `Tanh` - tanh(x), gradient: 1 - tanh²(x)
-- `ReLU` - max(0, x), gradient: x > 0 ? 1 : 0
-- `LeakyReLU` - x > 0 ? x : αx
-- `GELU` - Gaussian Error Linear Unit
-- `Softmax` - exp(x) / Σexp(x)
+Thread-local autocast state (enabled flag + target `DType` + nesting depth).
 
-**Reductions (`reduction.rs`):**
-- `Sum` - Σx, gradient: broadcast ones
-- `Mean` - Σx/n, gradient: broadcast 1/n
-- `Max` - max(x), gradient: one-hot at max
+```rust
+use axonml_autograd::amp::{autocast, AutocastPolicy};
+use axonml_core::DType;
 
-**Shape (`shape.rs`):**
-- `Reshape` - gradient: reshape back
-- `Transpose` - gradient: transpose back
-- `Squeeze/Unsqueeze` - gradient: inverse operation
+autocast(DType::F16, || {
+    let h = linear.forward(&x);  // matmul/conv run in f16
+    let y = loss.forward(&h);
+});
+```
+
+API: `AutocastGuard`, `AutocastPolicy`, `autocast`, `disable_autocast`,
+`is_autocast_enabled`, `autocast_dtype`. Pairs with `GradScaler` in
+`axonml-optim` for loss scaling.
+
+### `checkpoint`
+
+Gradient checkpointing (428 lines) — trade compute for memory.
+
+```rust
+use axonml_autograd::{checkpoint, checkpoint_sequential};
+
+// Single block: no activations kept; recomputed on backward
+let y = checkpoint(|x| block.forward(x), x);
+
+// Sequence with N segments:
+let y = checkpoint_sequential(&[block1, block2, block3], 2, x);
+```
+
+Cuts peak memory from O(layers) to O(sqrt(layers)) at the cost of one extra
+forward pass. `checkpoint_rng_seed()` returns the deterministic RNG seed
+during recompute so dropout / other stochastic ops replay identically.
+
+### `inspect`
+
+Native graph inspection and DOT export — no external `torchviz`-style tool
+required.
+
+```rust
+use axonml_autograd::inspect::{trace_backward, to_dot, depth, node_count};
+
+let snapshot = trace_backward(&loss);
+snapshot.node_count();
+snapshot.depth();
+snapshot.leaf_count();
+snapshot.operation_names();
+let summary = snapshot.gradient_flow_summary();
+
+let dot = to_dot(&snapshot);
+std::fs::write("graph.dot", &dot).unwrap();
+```
+
+Exports `GraphSnapshot`, `SnapshotNode`, `trace_backward`, `to_dot`, `depth`,
+`node_count`.
+
+### `functions/`
+
+Seven submodules of `*Backward` structs implementing `GradientFunction`.
+
+| Submodule    | Covers                                                                 |
+|--------------|------------------------------------------------------------------------|
+| `basic`      | add, sub, mul, div, neg, scalar ops, reshape, transpose, narrow, select, unsqueeze, expand, cat, clamp, exp, log, sqrt, pow, sum, mean, sum_dim, mean_dim, var_dim |
+| `activation` | relu, sigmoid, tanh, gelu, silu, elu, leaky_relu, softmax, log_softmax |
+| `linalg`     | matmul                                                                 |
+| `loss`       | mse, cross_entropy, bce, bce_with_logits, l1, smooth_l1, nll           |
+| `conv`       | conv1d, conv2d (BLAS-accelerated backward)                             |
+| `rnn`        | lstm, gru, rnn cell backward (`LstmGatesBackward`, `GruGatesBackward`) |
+| `attention`  | multi-head attention (`FusedAttentionBackward`)                        |
 
 ## Usage Examples
 
-### Basic Gradient Computation
+### Basic gradient
 
 ```rust
-use axonml::prelude::*;
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
 
-// Create input with gradient tracking
 let x = Variable::new(
     Tensor::from_vec(vec![2.0, 3.0], &[2]).unwrap(),
-    true
+    true,
 );
 
-// Compute y = x^2
-let y = x.mul_var(&x);
-
-// Compute sum to get scalar
+let y = x.mul_var(&x);   // y = x^2
 let loss = y.sum();
-
-// Backward pass
 loss.backward();
 
-// Gradient: d(x^2)/dx = 2x
-// For x = [2, 3], grad = [4, 6]
-println!("Gradient: {:?}", x.grad());
+// d(x^2)/dx = 2x  =>  [4, 6]
+println!("{:?}", x.grad());
 ```
 
-### Training Loop
+### Training loop
 
 ```rust
 use axonml::prelude::*;
@@ -163,94 +190,44 @@ let model = Linear::new(10, 1);
 let mut optimizer = SGD::new(model.parameters(), 0.01);
 
 for batch in dataloader.iter() {
-    // Forward pass (builds graph)
     let output = model.forward(&batch.data);
     let loss = mse_loss(&output, &batch.targets);
-
-    // Backward pass (computes gradients)
     loss.backward();
-
-    // Update weights
     optimizer.step();
     optimizer.zero_grad();
 }
 ```
 
-### Inference (No Gradients)
+### Inference
 
 ```rust
-use axonml::prelude::*;
+use axonml_autograd::no_grad;
 
-// Disable gradient tracking for inference
 no_grad(|| {
     for batch in test_loader.iter() {
         let output = model.forward(&batch.data);
         let predictions = output.argmax(1);
-        // Process predictions...
     }
 });
 ```
 
-## Implementation Details
+## Implementation Notes
 
-### Memory Management
-
-- Gradients are stored in leaf variables only (by default)
-- Intermediate activations are freed after backward
-- Use `retain_grad()` to keep non-leaf gradients
-
-### Thread Safety
-
-- Variables are `Send` but not `Sync`
-- Computational graph is single-threaded
-- Use `no_grad` for parallel inference
-
-### Numerical Stability
-
-- Log-sum-exp trick for softmax
-- Gradient clipping available
-- NaN/Inf detection in debug mode
+- Gradients accumulate into leaves; call `optimizer.zero_grad()` each step.
+- Intermediate activations are freed after backward.
+- `Variable` is `Send`; the graph itself is single-threaded per scope.
+- Softmax/log-softmax use the log-sum-exp trick for numerical stability.
 
 ## Feature Flags
 
-- `std` (default) - Enable standard library
-
-### inspect.rs *(novel)*
-
-Graph inspection and visualization — native to AxonML, no external tools required.
-
-**Core Types:**
-- `GraphSnapshot` — Frozen snapshot of a computation graph for analysis
-- `SnapshotNode` — Individual node with operation name, shape, and edges
-
-**Functions:**
-```rust
-use axonml_autograd::inspect::{trace_backward, to_dot};
-
-// Capture the computation graph from any Variable
-let snapshot = trace_backward(&loss);
-
-// Query graph structure
-snapshot.node_count();         // Total nodes in the graph
-snapshot.depth();              // Longest path from root to leaf
-snapshot.leaf_count();         // Number of leaf (input) nodes
-snapshot.operation_names();    // All unique operation types used
-
-// Export to Graphviz DOT format
-let dot = to_dot(&snapshot);
-std::fs::write("graph.dot", &dot).unwrap();
-
-// Analyze gradient flow health
-let summary = snapshot.gradient_flow_summary();
-```
-
-**Why novel:** PyTorch requires the external `torchviz` package and `make_dot()` to visualize computation graphs. AxonML provides this natively with richer analysis (depth, leaf count, gradient flow summary).
+- `std` (default) — standard library
 
 ## Related Modules
 
-- [Tensor](../tensor/README.md) - Underlying data structure
-- [Neural Networks](../nn/README.md) - Modules using autograd
-- [Optimizers](../optim/README.md) - Gradient-based optimization
+- [Tensor](../tensor/README.md) — underlying data structure
+- [Neural Networks](../nn/README.md) — modules built on Variable
+- [Optimizers](../optim/README.md) — gradient-based training
 
-@version 0.4.1
-@author AutomataNexus Development Team
+## Last updated
+
+0.6.1 (2026-04-16)

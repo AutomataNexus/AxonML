@@ -1,13 +1,21 @@
-//! Module Trait - Neural Network Module Interface
+//! `Module` trait — the core interface for all neural network layers.
+//!
+//! 260 lines. `Module` requires: `forward(&self, &Variable) -> Variable`,
+//! `parameters(&self) -> Vec<Parameter>`, `train(&mut self)`, `eval(&mut self)`,
+//! `is_training(&self) -> bool`, `zero_grad(&mut self)`, `name() -> &str`,
+//! `to_device(&mut self, Device)`, `named_parameters() -> HashMap`. Also
+//! `ModuleList` (heterogeneous `Vec<Box<dyn Module>>` with forward-sequential,
+//! parameter aggregation, and train/eval propagation).
 //!
 //! # File
 //! `crates/axonml-nn/src/module.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,12 +1,41 @@
-//! BERT Binary Classification Training Example
+//! BERT Binary Classification Training Example — Synthetic Sentiment Task
 //!
-//! Trains a small BERT model on synthetic binary-classification data
-//! (sentiment-like task). Demonstrates BertForSequenceClassification with
-//! CrossEntropyLoss and Adam optimizer.
+//! Trains a small `BertForSequenceClassification` model on synthetic binary-
+//! classification data (sentiment-like task) to exercise the axonml-llm
+//! BERT implementation end-to-end with CrossEntropyLoss and Adam.
+//!
+//! Contents:
+//! - Module-level constants defining the BERT size (`VOCAB_SIZE=1000`,
+//!   `D_MODEL=128`, `NUM_HEADS=4`, `NUM_LAYERS=2`, `INTERMEDIATE_SIZE=256`)
+//!   and training hyperparameters (`BATCH_SIZE=16`, `NUM_EPOCHS=10`,
+//!   `LEARNING_RATE=0.0001`).
+//! - `generate_data` — builds `num_samples` token sequences with a learnable
+//!   signal: label 0 draws mostly from vocab `[0, 500)` and label 1 from
+//!   `[500, 1000)`, both with 20% noise.
+//! - `main` — parses a `--monitor` flag, constructs `BertConfig` +
+//!   `BertForSequenceClassification`, optionally launches a
+//!   `axonml::TrainingMonitor` dashboard, generates train/test splits with
+//!   a seeded `StdRng(42)`, runs the Adam training loop with per-epoch
+//!   evaluation, and parks the thread if the monitor is active.
 //!
 //! Usage:
 //!   cargo run --release --example train_bert -p axonml-llm
 //!   cargo run --release --example train_bert -p axonml-llm -- --monitor
+//!
+//! # File
+//! `crates/axonml-llm/examples/train_bert.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::env;
 use std::time::Instant;
@@ -21,7 +50,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 // =============================================================================
-// Configuration
+// Hyperparameters / Configuration
 // =============================================================================
 
 const VOCAB_SIZE: usize = 1000;
@@ -85,7 +114,7 @@ fn generate_data(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {
@@ -149,7 +178,9 @@ fn main() {
     let mut optimizer = Adam::new(model.parameters(), LEARNING_RATE);
     let criterion = CrossEntropyLoss::new();
 
-    // ---- Training loop ----
+    // -----------------------------------------------------------------------------
+    // Training Loop
+    // -----------------------------------------------------------------------------
     let total_start = Instant::now();
 
     for epoch in 1..=NUM_EPOCHS {
@@ -213,7 +244,9 @@ fn main() {
         let train_acc = epoch_correct as f32 / epoch_total as f32 * 100.0;
         let epoch_time = epoch_start.elapsed();
 
-        // ---- Evaluation ----
+        // -----------------------------------------------------------------------------
+        // Evaluation
+        // -----------------------------------------------------------------------------
         model.eval();
         let mut test_loss = 0.0_f32;
         let mut test_correct = 0usize;

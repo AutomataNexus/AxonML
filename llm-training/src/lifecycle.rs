@@ -1,20 +1,35 @@
-//! Training lifecycle controls — pause / resume / stop / checkpoint / monitor.
+//! Training Lifecycle Controls — Pause / Resume / Stop / Checkpoint / Monitor
 //!
-//! Shared by every `train_*.rs` binary. Adopting this module is a hard rule:
-//! weeks-long runs must never lose progress to Ctrl+C or an orphaned shell.
+//! Shared subsystem adopted by every `train_*.rs` binary. The hard rule is
+//! that weeks-long runs must never lose progress to Ctrl+C or an orphaned
+//! shell, so this module wires the training loop into signals, a control
+//! socket, and an always-on browser monitor with rotating checkpoint saves.
 //!
 //! # What it provides
 //!
 //! - **Signal handlers** — `SIGINT` / `SIGTERM` flush a final checkpoint then
-//!   exit cleanly; `SIGUSR1` pauses; `SIGUSR2` resumes.
-//! - **Unix control socket** at `/tmp/axonml-train-<pid>.sock` with a pidfile
-//!   mirror at `/tmp/axonml-train-latest.sock`. Commands (plaintext, one per
-//!   line): `pause`, `resume`, `stop`, `checkpoint`, `status` (returns JSON).
-//! - **Step-level checkpoint rotation** — write every N steps, keep last K.
-//! - **Always-on training monitor** — `axonml::TrainingMonitor` launched
-//!   automatically at `127.0.0.1:<auto>`. No opt-out flag.
-//! - **Graceful final save** — on stop, the current model + optimizer + RNG +
-//!   training state are flushed to `checkpoint_final.axonml` before exit.
+//!   exit cleanly; `SIGUSR1` pauses; `SIGUSR2` resumes. A dedicated
+//!   `axonml-signal-dispatch` thread polls the raw `signal_hook` flags and
+//!   translates them into the [`ControlFlags`] used by [`TrainingLifecycle`].
+//! - **Unix control socket** at `/tmp/axonml-train-<pid>.sock` with a
+//!   convenience symlink at `/tmp/axonml-train-latest.sock`. Commands
+//!   (plaintext, one per line): `pause`, `resume`, `stop`, `checkpoint`,
+//!   `status` (returns a JSON status blob with epoch, global step, last
+//!   loss, monitor URL, param count, etc.).
+//! - **Step-level checkpoint rotation** — [`TrainingLifecycle::save_step`]
+//!   writes every N steps and prunes older files beyond `keep_last_k`.
+//! - **End-of-epoch + best-model saves** — [`TrainingLifecycle::save_epoch`]
+//!   writes `checkpoint_latest.axonml` plus a numbered
+//!   `checkpoint_epoch_NNNN.axonml`; [`TrainingLifecycle::save_if_best`]
+//!   writes `best_model.axonml` + `checkpoint_best.axonml` when a new best
+//!   metric is observed.
+//! - **Always-on training monitor** — `axonml::TrainingMonitor` is launched
+//!   automatically at `127.0.0.1:<auto>` with no opt-out flag.
+//! - **Graceful final save** — [`TrainingLifecycle::save_final`] flushes
+//!   `checkpoint_final.axonml` on stop before exit.
+//! - **[`LoopAction`]** — enum returned by
+//!   [`TrainingLifecycle::poll`] telling the loop to `Continue`,
+//!   `CheckpointNow`, or `Stop`.
 //!
 //! # Usage in a training binary
 //!
@@ -51,6 +66,25 @@
 //! }
 //! lifecycle.finish();
 //! ```
+//!
+//! # File
+//! `llm-training/src/lifecycle.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write as _};

@@ -1,18 +1,41 @@
-//! API routes module for AxonML Server
+//! API Routes — Shared `AppState`, Axum Router, and Top-Level Handlers
+//!
+//! The router wiring for the AxonML server. Declares all API submodules
+//! (`auth`, `builtin_datasets`, `data`, `datasets`, `hub`, `inference`,
+//! `kaggle`, `metrics`, `models`, `notebooks`, `system`, `terminal`, `tools`,
+//! `training`). Defines `AppState` — the `Clone`-able shared state holding
+//! `Database`, `JwtAuth`, `Config`, `EmailService`, `InferenceServer`,
+//! `TrainingTracker`, `TrainingExecutor`, `NotebookExecutor`, `ModelPool`,
+//! `InferenceMetrics`, `SystemMetricsHistory` (behind a `Mutex`),
+//! `OllamaClient`, and an auth `RateLimiter`. `create_router` assembles a
+//! `Router` from five sub-routers (`public_routes`, `protected_routes`,
+//! `admin_routes`, `mfa_protected_routes`, `optional_auth_routes`, plus WS
+//! and `tower_auth_routes`) and layers CORS + `TraceLayer::new_for_http`.
+//! Handlers in this file: `health_check` (DB + inference + pool status),
+//! `inference_status`, `get_inference_info`, `cache_status`, `pool_status`,
+//! `secure_info`, and admin tools `admin_query` (whitelist-validated
+//! SELECT/SHOW/DESCRIBE/COUNT), `admin_execute` (disabled), and
+//! `admin_record_metrics`. `validate_admin_query` applies
+//! `ALLOWED_QUERY_PREFIXES` / `FORBIDDEN_PATTERNS` for defense-in-depth.
 //!
 //! # File
 //! `crates/axonml-server/src/api/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Sub-Modules
+// =============================================================================
 
 pub mod auth;
 pub mod builtin_datasets;
@@ -28,6 +51,10 @@ pub mod system;
 pub mod terminal;
 pub mod tools;
 pub mod training;
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use crate::auth::{
     AuthLayer, JwtAuth, auth_middleware, optional_auth_middleware, require_admin_middleware,
@@ -55,6 +82,10 @@ use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
+// =============================================================================
+// Application State
+// =============================================================================
+
 /// Application state shared across handlers
 #[derive(Clone)]
 pub struct AppState {
@@ -73,6 +104,10 @@ pub struct AppState {
     /// Rate limiter for auth endpoints (login, register, MFA)
     pub auth_rate_limiter: Arc<crate::auth::RateLimiter>,
 }
+
+// =============================================================================
+// Router Assembly
+// =============================================================================
 
 /// Create the main API router
 pub fn create_router(state: AppState) -> Router {
@@ -422,6 +457,14 @@ pub fn create_router(state: AppState) -> Router {
         .with_state(state)
 }
 
+// =============================================================================
+// Top-Level Handlers
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Secure Info (AuthLayer-protected)
+// -----------------------------------------------------------------------------
+
 /// Secure info endpoint (protected via AuthLayer's tower Layer implementation)
 async fn secure_info(State(state): State<AppState>) -> Json<serde_json::Value> {
     // This endpoint demonstrates the AuthLayer being used via tower Layer trait
@@ -478,6 +521,10 @@ async fn secure_info(State(state): State<AppState>) -> Json<serde_json::Value> {
         },
     }))
 }
+
+// -----------------------------------------------------------------------------
+// Health Check
+// -----------------------------------------------------------------------------
 
 /// Health check response
 #[derive(Serialize)]
@@ -538,6 +585,10 @@ async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<Health
         }),
     )
 }
+
+// -----------------------------------------------------------------------------
+// Inference Status and Info
+// -----------------------------------------------------------------------------
 
 /// Inference server info response
 #[derive(Serialize)]
@@ -647,6 +698,10 @@ async fn get_inference_info(
     }
 }
 
+// -----------------------------------------------------------------------------
+// Cache and Pool Status
+// -----------------------------------------------------------------------------
+
 /// Cache status from KV store
 async fn cache_status(State(state): State<AppState>) -> Json<serde_json::Value> {
     // Retrieve the last health check from KV store
@@ -675,6 +730,10 @@ async fn pool_status(State(state): State<AppState>) -> Json<serde_json::Value> {
         "utilization": pool_stats.utilization,
     }))
 }
+
+// =============================================================================
+// Admin Endpoints and Query Validation
+// =============================================================================
 
 /// Admin query request
 #[derive(serde::Deserialize)]
@@ -815,6 +874,10 @@ async fn admin_record_metrics(
         "success": req.success,
     }))
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

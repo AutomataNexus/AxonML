@@ -1,287 +1,229 @@
 # axonml-distributed Documentation
 
-> Distributed training utilities for the Axonml ML framework.
+> Distributed training for the AxonML ML framework.
 
 ## Overview
 
-`axonml-distributed` provides tools for distributed deep learning across multiple GPUs and nodes. It includes DistributedDataParallel (DDP), communication primitives, and process group management.
+`axonml-distributed` implements data, pipeline, and tensor parallelism for
+multi-GPU / multi-node training: `DistributedDataParallel` (DDP) with
+gradient bucketing, `FullyShardedDataParallel` (FSDP — ZeRO-2 / ZeRO-3 +
+HybridShard + CPU offload), `Pipeline` (GPipe / 1F1B / interleaved
+microbatch scheduling), tensor-parallel linear layers (`ColumnParallelLinear`,
+`RowParallelLinear`), a full set of collective operations, and `ProcessGroup`
+/ `World` abstractions. Backends: `NcclBackend` (real multi-GPU / multi-node,
+dynamic `libcudart` + `libnccl` loading) and `MockBackend` (shared-state
+in-process simulation for deterministic testing).
 
 ## Core Concepts
 
-### Process Groups
-
-A process group represents a set of processes that can communicate:
+### World and process groups
 
 ```rust
 use axonml_distributed::{World, ProcessGroup};
 
-// Get world (all processes)
-let world = World::new()?;
-println!("Rank: {}", world.rank());
-println!("World size: {}", world.world_size());
+let world = World::new()?;             // real world (from env)
+// let world = World::mock();          // in-process mock for tests
 
-// Create sub-groups
-let group = ProcessGroup::new(vec![0, 1, 2, 3]);
+println!("rank {} / world_size {}", world.rank(), world.world_size());
+
+let pg_all = world.default_group();
+let pg_even = world.new_group(vec![0, 2, 4, 6]);
 ```
 
-### Data Parallelism
+### Data parallelism (DDP)
 
-In data parallel training:
-1. Each process has a copy of the model
-2. Data is split across processes
-3. Gradients are synchronized after backward pass
-4. All processes update with averaged gradients
+1. Each rank holds a full copy of the model.
+2. Data is sharded across ranks.
+3. Gradients are bucketed and all-reduced during backward.
+4. All ranks apply the same averaged-gradient update.
 
 ## Modules
 
-### ddp.rs
-
-DistributedDataParallel wrapper for synchronized training.
+### `ddp` — `DistributedDataParallel` (alias `DDP<M>`)
 
 ```rust
-use axonml_distributed::{DistributedDataParallel, DDP};
+use axonml_distributed::{DDP, GradSyncStrategy};
 
-// Wrap model for distributed training
-let model = create_model();
-let ddp_model = DDP::new(model, world);
+let ddp = DDP::new(model, world.default_group().clone())
+    .broadcast_buffers(false)
+    .gradient_as_bucket_view(false);
 
-// Training loop (same as single-GPU)
 for batch in train_loader.iter() {
-    let output = ddp_model.forward(&batch.data);
+    let output = ddp.forward(&batch.data);
     let loss = compute_loss(&output, &batch.targets);
-
-    loss.backward();
-
-    // Gradients are automatically synchronized here
+    loss.backward();           // gradients synced via buckets
     optimizer.step();
     optimizer.zero_grad();
 }
 ```
 
-#### DDP Builder Pattern
+Related types: `GradientBucket`, `GradientSynchronizer`, `GradSyncStrategy`.
+
+### `fsdp` — `FullyShardedDataParallel` (alias `FSDP<M>`)
+
+Shards parameters + optimizer state across ranks (ZeRO-2 / ZeRO-3 /
+HybridShard) with optional CPU offload.
 
 ```rust
-let ddp_model = DDP::builder(model)
-    .world(world)
-    .bucket_size_mb(25.0)      // Gradient bucket size
-    .broadcast_buffers(true)   // Sync batch norm stats
-    .build();
+use axonml_distributed::{FSDP, ShardingStrategy, CPUOffload};
+
+let fsdp = FSDP::new(model, world.default_group().clone())
+    .sharding_strategy(ShardingStrategy::FullShard)
+    .cpu_offload(CPUOffload::params_and_grads());
+
+let mem = fsdp.memory_stats(); // FSDPMemoryStats
 ```
 
-### comm.rs
+Also exports `ColumnParallelLinear` and `RowParallelLinear` for tensor
+parallelism inside an FSDP-style setup.
 
-High-level communication primitives.
+### `pipeline` — Pipeline parallelism
 
-#### All-Reduce
+`Pipeline`, `PipelineStage`, `PipelineSchedule` (GPipe / 1F1B /
+Interleaved), `PipelineMemoryStats`. Splits a model across devices and
+drives microbatch execution.
 
-Reduce tensors across all processes:
+### `comm`
 
-```rust
-use axonml_distributed::{all_reduce_sum, all_reduce_mean};
+Collective ops. All take `&ProcessGroup` (or `&mut Tensor`).
 
-// Sum across all ranks
-let local_tensor = compute_local_gradient();
-let global_sum = all_reduce_sum(&local_tensor);
+| Op                                                           | Purpose                                           |
+|--------------------------------------------------------------|---------------------------------------------------|
+| `all_reduce_sum`, `all_reduce_mean`, `all_reduce_min`, `all_reduce_max`, `all_reduce_product` | Collective reductions          |
+| `broadcast`, `broadcast_from`                                | One -> all                                        |
+| `all_gather`                                                 | All ranks collect every shard                     |
+| `gather_tensor`, `scatter_tensor`                            | Many-to-one / one-to-many                         |
+| `reduce_scatter_sum`, `reduce_scatter_mean`                  | Reduce + scatter                                  |
+| `barrier`                                                    | Synchronization point                             |
+| `sync_gradient`, `sync_gradients`                            | DDP-style gradient sync                           |
+| `rank`, `world_size`, `is_main_process`                      | Introspection                                     |
 
-// Average across all ranks
-let global_mean = all_reduce_mean(&local_tensor);
-```
+### `backend`
 
-#### Broadcast
+`Backend` trait + `ReduceOp` enum (`Sum`, `Product`, `Min`, `Max`,
+`Average`). `MockBackend::create_world(n)` returns `n` linked backends for
+tests.
 
-Send tensor from one rank to all others:
+### `nccl_backend` *(feature = `nccl`)*
 
-```rust
-use axonml_distributed::broadcast;
+`NcclBackend` loads `libcudart` + `libnccl` at runtime. Multi-node
+initialisation via `NcclUniqueId`. `NcclError` wraps NCCL failure codes.
 
-// Broadcast from rank 0
-let tensor = if world.rank() == 0 {
-    initialize_weights()
-} else {
-    Tensor::zeros(&shape)
-};
+### `process_group`
 
-let synced = broadcast(&tensor, 0);  // src_rank = 0
-```
+`World` — global process group provider (`::new()` from environment,
+`::mock()` for tests). `ProcessGroup` — subset of ranks sharing a backend.
 
-#### Barrier
+## Usage
 
-Synchronize all processes:
-
-```rust
-use axonml_distributed::barrier;
-
-// Wait for all processes to reach this point
-barrier();
-```
-
-### process_group.rs
-
-Process group management.
-
-```rust
-use axonml_distributed::{World, ProcessGroup};
-
-// Initialize world
-let world = World::new()?;
-
-// Create custom groups
-let even_ranks = ProcessGroup::new((0..world.world_size()).step_by(2).collect());
-let odd_ranks = ProcessGroup::new((1..world.world_size()).step_by(2).collect());
-
-// Use groups for communication
-all_reduce_sum_group(&tensor, &even_ranks);
-```
-
-### backend.rs
-
-Communication backend implementations.
-
-```rust
-use axonml_distributed::{Backend, ReduceOp};
-
-// Available backends
-let backend = Backend::Gloo;   // CPU distributed
-let backend = Backend::NCCL;   // GPU distributed (CUDA)
-let backend = Backend::Mock;   // For testing
-
-// Reduce operations
-let op = ReduceOp::Sum;
-let op = ReduceOp::Mean;
-let op = ReduceOp::Max;
-let op = ReduceOp::Min;
-```
-
-## Usage Examples
-
-### Basic DDP Training
+### Basic DDP training
 
 ```rust
 use axonml::prelude::*;
+use axonml_distributed::prelude::*;
 
-fn main() {
-    // Initialize distributed environment
-    let world = World::new().expect("Failed to init distributed");
-    let rank = world.rank();
-    let world_size = world.world_size();
+let world = World::new().expect("failed to init distributed");
+let rank = world.rank();
+let world_size = world.world_size();
 
-    println!("Process {}/{}", rank, world_size);
+let model = create_model();
+let mut ddp = DDP::new(model, world.default_group().clone());
 
-    // Create model (same on all ranks)
-    let model = create_model();
+let dataset = load_dataset();
+// DistributedSampler / similar shard mechanism — use rank + world_size
 
-    // Wrap with DDP
-    let ddp_model = DDP::new(model, world.clone());
+let mut optimizer = Adam::new(ddp.parameters(), 0.001);
 
-    // Create distributed data loader
-    // Each rank gets a different shard of data
-    let dataset = load_dataset();
-    let sampler = DistributedSampler::new(&dataset, world_size, rank);
-    let loader = DataLoader::with_sampler(dataset, 32, sampler);
-
-    // Optimizer
-    let mut optimizer = Adam::new(ddp_model.parameters(), 0.001);
-
-    // Training loop
-    for epoch in 0..epochs {
-        for batch in loader.iter() {
-            let output = ddp_model.forward(&batch.data);
-            let loss = compute_loss(&output, &batch.targets);
-
-            loss.backward();
-            // Gradients synchronized automatically by DDP
-
-            optimizer.step();
-            optimizer.zero_grad();
-        }
-
-        // Sync metrics across ranks
-        let local_loss = compute_epoch_loss();
-        let global_loss = all_reduce_mean(&local_loss);
-
-        if rank == 0 {
-            println!("Epoch {}: Loss = {:.4}", epoch, global_loss);
-        }
+for epoch in 0..epochs {
+    for batch in loader.iter() {
+        let output = ddp.forward(&batch.data);
+        let loss = compute_loss(&output, &batch.targets);
+        loss.backward();
+        optimizer.step();
+        optimizer.zero_grad();
     }
 
-    // Save checkpoint from rank 0 only
+    let mut local = compute_epoch_loss();
+    all_reduce_mean(&mut local, &world.default_group());
     if rank == 0 {
-        save_checkpoint(&ddp_model.module());
+        println!("epoch {}: loss = {:.4}", epoch, local.to_vec()[0]);
     }
 }
 ```
 
-### Multi-Node Setup
+### Multi-node launch
+
+Set the standard environment variables on each node:
 
 ```bash
 # Node 0 (master)
 MASTER_ADDR=192.168.1.1 MASTER_PORT=29500 \
-WORLD_SIZE=8 RANK=0 \
-cargo run --release
+WORLD_SIZE=8 RANK=0 LOCAL_RANK=0 \
+cargo run --release --features nccl
 
 # Node 1
 MASTER_ADDR=192.168.1.1 MASTER_PORT=29500 \
-WORLD_SIZE=8 RANK=4 \
-cargo run --release
+WORLD_SIZE=8 RANK=4 LOCAL_RANK=0 \
+cargo run --release --features nccl
 ```
 
-### Gradient Accumulation with DDP
+### Gradient accumulation
 
 ```rust
 let accumulation_steps = 4;
-
 for (i, batch) in loader.iter().enumerate() {
-    let output = ddp_model.forward(&batch.data);
-    let loss = compute_loss(&output, &batch.targets) / accumulation_steps;
-
+    let output = ddp.forward(&batch.data);
+    let loss = compute_loss(&output, &batch.targets) / accumulation_steps as f32;
     loss.backward();
 
     if (i + 1) % accumulation_steps == 0 {
-        // Sync gradients only when updating
         optimizer.step();
         optimizer.zero_grad();
     }
 }
 ```
 
-### Model Checkpointing
+### Checkpointing
 
 ```rust
-// Save (only on rank 0)
 if world.rank() == 0 {
-    let model = ddp_model.module();
-    save_model(model, "checkpoint.pt")?;
+    save_model(&ddp.module(), "checkpoint.axonml")?;
 }
-barrier();  // Wait for save to complete
+barrier(&world.default_group());
 
-// Load (all ranks)
-let model = load_model("checkpoint.pt")?;
-let ddp_model = DDP::new(model, world);
+let model = load_model("checkpoint.axonml")?;
+let ddp = DDP::new(model, world.default_group().clone());
 ```
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `MASTER_ADDR` | IP address of rank 0 |
-| `MASTER_PORT` | Port for communication |
-| `WORLD_SIZE` | Total number of processes |
-| `RANK` | Global rank of this process |
-| `LOCAL_RANK` | Local rank (for multi-GPU per node) |
+| Variable      | Description                                                 |
+|---------------|-------------------------------------------------------------|
+| `MASTER_ADDR` | IP address of rank 0                                        |
+| `MASTER_PORT` | Port for rendezvous                                         |
+| `WORLD_SIZE`  | Total number of processes across all nodes                  |
+| `RANK`        | Global rank of this process (0-based)                       |
+| `LOCAL_RANK`  | Local rank (per node, for multi-GPU selection)              |
+
+## Feature Flags
+
+- `nccl` — enable the real `NcclBackend` (links `libcudart` + `libnccl` at
+  runtime). Without this flag, only `MockBackend` is available.
 
 ## Best Practices
 
-1. **Same seed** - Use same random seed on all ranks for reproducibility
-2. **Rank 0 I/O** - Only do file I/O from rank 0
-3. **Barrier before load** - Sync before loading checkpoints
-4. **Gradient accumulation** - Accumulate before sync for efficiency
-5. **Mixed precision** - Combine with AMP for better performance
+1. Same seed on all ranks for reproducibility.
+2. Do file IO only from rank 0; `barrier` before loading.
+3. Accumulate gradients before syncing for efficiency.
+4. Combine with `axonml_autograd::amp` + `axonml_optim::GradScaler` for
+   mixed-precision training.
 
 ## Related Modules
 
-- [Neural Networks](../nn/README.md) - Models to distribute
-- [Optimizers](../optim/README.md) - Parameter updates
-- [Data](../data/README.md) - Distributed data loading
+- [Neural Networks](../nn/README.md) — models to distribute
+- [Optimizers](../optim/README.md) — parameter updates
+- [Autograd](../autograd/README.md) — AMP + gradient checkpointing
 
-@version 0.1.0
-@author AutomataNexus Development Team
+## Last updated
+
+0.6.1 (2026-04-16)

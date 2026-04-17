@@ -1,4 +1,31 @@
-//! Obsidian vault tools — read, write, and search the knowledge graph at /opt/Vault/.
+//! Obsidian Vault Tools — Read, Write, Search at /opt/Vault/
+//!
+//! Three tools against the knowledge graph rooted at `/opt/Vault/`:
+//! `VaultReadTool` (vault_read) reads a note via the relative path under the
+//! vault root, following symlinks so vault-symlinked source files resolve to
+//! their real targets; `VaultWriteTool` (vault_write) canonicalizes the path
+//! first so writes land on the symlink target rather than the symlink
+//! itself (the vault is symlink-based, wrapping source files in
+//! `/opt/*/WORK_STATE.md` etc.); `VaultSearchTool` (vault_search) shells out
+//! to `rg -l --max-count=1 -i <query> /opt/Vault` and strips the vault
+//! prefix from results for readability.
+//!
+//! The shared `VAULT_ROOT` constant pins the root at `/opt/Vault`.
+//!
+//! # File
+//! `nexus-agent/src/tools/obsidian.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -6,10 +33,14 @@ use serde_json::json;
 
 use crate::Tool;
 
+// =============================================================================
+// Vault Root
+// =============================================================================
+
 const VAULT_ROOT: &str = "/opt/Vault";
 
 // =============================================================================
-// Read a vault note
+// VaultReadTool — Read a Vault Note
 // =============================================================================
 
 pub struct VaultReadTool;
@@ -41,7 +72,7 @@ impl Tool for VaultReadTool {
 }
 
 // =============================================================================
-// Write / update a vault note
+// VaultWriteTool — Write / Update a Vault Note
 // =============================================================================
 
 pub struct VaultWriteTool;
@@ -78,7 +109,7 @@ impl Tool for VaultWriteTool {
 }
 
 // =============================================================================
-// Search vault notes
+// VaultSearchTool — Search Vault Notes
 // =============================================================================
 
 pub struct VaultSearchTool;

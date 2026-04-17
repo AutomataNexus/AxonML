@@ -1,24 +1,51 @@
-//! Sidebar Navigation Component
+//! Sidebar Navigation — Collapsible Left-Rail Menu
+//!
+//! The dashboard's collapsible left navigation. `Sidebar` composes grouped
+//! `SidebarSection`s of `SidebarItem` links covering Main, Training,
+//! Models, Datasets, Inference, Hub, System, optional Admin (rendered only
+//! when `state.is_admin()`), and a bottom user row (Profile, Security,
+//! Settings) plus a Sign Out / collapse-toggle footer.
+//!
+//! `SidebarItem<F, V>` is a generic helper that takes an `href`, `label`,
+//! icon closure, and optional `badge` count. It uses
+//! `leptos_router::use_location` to detect the active path (exact match
+//! for `/`, prefix match otherwise) and hides the text/badge when the
+//! sidebar is in the collapsed state surfaced by `state.sidebar_collapsed`.
+//!
+//! `SidebarSection` renders a section header (hidden when collapsed) and
+//! its children. The global collapse state is toggled via
+//! `state.toggle_sidebar()` and the expand/collapse chevron swaps between
+//! `IconChevronLeft` and `IconChevronRight`. The "Secured by
+//! AutomataNexus" badge is only shown in the expanded state.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/sidebar.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use leptos::*;
 use leptos_router::*;
 
 use crate::components::icons::*;
 use crate::state::use_app_state;
+
+// =============================================================================
+// SidebarItem
+// =============================================================================
 
 /// Sidebar navigation item
 #[component]
@@ -64,6 +91,10 @@ where
     }
 }
 
+// =============================================================================
+// SidebarSection
+// =============================================================================
+
 /// Sidebar section header
 #[component]
 fn SidebarSection(#[prop(into)] label: String, children: Children) -> impl IntoView {
@@ -79,6 +110,10 @@ fn SidebarSection(#[prop(into)] label: String, children: Children) -> impl IntoV
         </div>
     }
 }
+
+// =============================================================================
+// Sidebar
+// =============================================================================
 
 /// Main sidebar component
 #[component]

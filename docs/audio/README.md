@@ -1,258 +1,231 @@
 # axonml-audio Documentation
 
-> Audio processing utilities for the Axonml ML framework.
+> Audio processing for the AxonML ML framework.
 
 ## Overview
 
-`axonml-audio` provides audio processing capabilities including transforms for feature extraction (spectrograms, MFCCs), audio augmentation, and synthetic audio datasets. It's the Axonml equivalent of PyTorch's torchaudio.
+`axonml-audio` provides audio feature-extraction transforms (mel
+spectrogram, MFCC, resample), augmentation ops (noise, time-stretch,
+pitch-shift, silence-trim), and synthetic datasets for command recognition,
+music genre classification, and speaker identification. Equivalent to
+PyTorch's `torchaudio` at a smaller scope. Transforms use `rustfft` for
+O(n log n) FFT; everything else is pure Rust.
 
 ## Modules
 
-### transforms/
+### `transforms`
 
-Audio processing transforms implementing the `Transform` trait.
+All transforms implement `axonml_data::Transform` (`apply(&Tensor<f32>) ->
+Tensor<f32>`).
 
-#### Resample
+#### `Resample`
 
-Change the sample rate of audio:
+Linear-interpolation resampling between sample rates.
 
 ```rust
 use axonml_audio::Resample;
 
-// Resample from 44100 Hz to 16000 Hz
 let resample = Resample::new(44100, 16000);
 let resampled = resample.apply(&audio);
 ```
 
-#### MelSpectrogram
+#### `MelSpectrogram`
 
-Convert waveform to mel-scaled spectrogram:
+STFT + mel-filterbank projection.
 
 ```rust
 use axonml_audio::MelSpectrogram;
 
-// Default parameters
-let mel = MelSpectrogram::new(sample_rate);
+let mel = MelSpectrogram::new(sample_rate);                      // sensible defaults
+let mel = MelSpectrogram::with_params(16000, 512, 256, 40);      // sr, n_fft, hop, n_mels
 
-// Custom parameters
-let mel = MelSpectrogram::with_params(
-    sample_rate,    // e.g., 16000
-    n_fft,          // FFT size, e.g., 512
-    hop_length,     // Hop between windows, e.g., 256
-    n_mels,         // Number of mel bins, e.g., 40
-);
-
-let spectrogram = mel.apply(&waveform);
-// Output shape: [n_mels, time_frames]
+let spec = mel.apply(&waveform); // shape: [n_mels, time_frames]
 ```
 
-#### MFCC
+#### `MFCC`
 
-Mel-frequency cepstral coefficients:
+Mel-frequency cepstral coefficients (mel-spec -> log -> DCT).
 
 ```rust
 use axonml_audio::MFCC;
-
-// Create MFCC transform
-let mfcc = MFCC::new(sample_rate, n_mfcc);
-
-// With custom mel spectrogram parameters
-let mfcc = MFCC::with_params(sample_rate, n_mfcc, n_fft, hop_length, n_mels);
-
-let features = mfcc.apply(&waveform);
-// Output shape: [n_mfcc, time_frames]
+let mfcc = MFCC::new(16000, 13);
+let features = mfcc.apply(&waveform); // [n_mfcc, time_frames]
 ```
 
-#### NormalizeAudio
+#### `TimeStretch`
 
-Normalize audio to [-1, 1] range:
+Phase-vocoder-style time stretching by a rate factor.
 
 ```rust
-use axonml_audio::NormalizeAudio;
-
-let normalize = NormalizeAudio::new();
-let normalized = normalize.apply(&waveform);
+let stretch = TimeStretch::new(1.2);
+let longer = stretch.apply(&waveform);
 ```
 
-#### AddNoise
+#### `PitchShift`
 
-Add random noise for data augmentation:
+Pitch shift in semitones.
 
 ```rust
-use axonml_audio::AddNoise;
+let shift = PitchShift::new(2.0); // +2 semitones
+let shifted = shift.apply(&waveform);
+```
 
-// Add noise with 20dB SNR
+#### `AddNoise`
+
+Additive Gaussian noise at a target SNR (dB).
+
+```rust
 let add_noise = AddNoise::new(20.0);
 let noisy = add_noise.apply(&waveform);
 ```
 
-### datasets/
+#### `NormalizeAudio`
 
-Synthetic audio datasets for testing.
-
-#### SyntheticCommandDataset
-
-Synthetic speech command dataset:
+Normalize peak to 1.0.
 
 ```rust
-use axonml_audio::SyntheticCommandDataset;
-use axonml_data::Dataset;
-
-// Create small dataset
-let dataset = SyntheticCommandDataset::small();
-
-// Create with specific size
-let dataset = SyntheticCommandDataset::new(1000, 10);
-
-println!("Samples: {}", dataset.len());
-println!("Classes: {}", dataset.num_classes());
-
-let (waveform, label) = dataset.get(0).unwrap();
-// waveform: [16000] tensor (1 second at 16kHz)
-// label: [num_classes] one-hot tensor
+let normalize = NormalizeAudio::new();
+let normalized = normalize.apply(&waveform);
 ```
 
-#### SyntheticMusicDataset
+#### `TrimSilence`
 
-Synthetic music genre classification dataset:
+Trim leading/trailing silence below a dB threshold.
 
 ```rust
-use axonml_audio::SyntheticMusicDataset;
+let trim = TrimSilence::new(-40.0);
+let trimmed = trim.apply(&waveform);
+```
 
-let dataset = SyntheticMusicDataset::small();
-println!("Samples: {}", dataset.len());
-println!("Genres: {}", dataset.num_genres());
+### `datasets`
 
-let (waveform, genre) = dataset.get(0).unwrap();
+Synthetic datasets for testing and benchmarking. All implement
+`axonml_data::Dataset`.
+
+#### `AudioClassificationDataset`
+
+Generic container: `Vec<Tensor<f32>> waveforms`, `Vec<usize> labels`,
+`sample_rate`, `num_classes`. `Dataset::Item = (Tensor<f32>, Tensor<f32>)`
+where the label is a single-element class-index tensor (compatible with
+`CrossEntropyLoss`).
+
+```rust
+use axonml_audio::AudioClassificationDataset;
+let ds = AudioClassificationDataset::new(waveforms, labels, 16000, 10);
+```
+
+#### `AudioSeq2SeqDataset`
+
+Pairs of source/target tensors for sequence-to-sequence audio tasks.
+
+```rust
+use axonml_audio::AudioSeq2SeqDataset;
+let ds = AudioSeq2SeqDataset::new(sources, targets);
+```
+
+#### Synthetic generators
+
+```rust
+use axonml_audio::{SyntheticCommandDataset, SyntheticMusicDataset, SyntheticSpeakerDataset};
+
+// num_samples, sample_rate, duration_sec, num_classes
+let cmd = SyntheticCommandDataset::new(8000, 16000, 1.0, 10);
+let cmd_small = SyntheticCommandDataset::small();
+
+let music = SyntheticMusicDataset::new(2000, 22050, 3.0, 4);
+let music_small = SyntheticMusicDataset::small();
+
+let spk = SyntheticSpeakerDataset::new(1000, 16000, 2.0, 8);
+let spk_small = SyntheticSpeakerDataset::small();
 ```
 
 ## Usage Examples
 
-### Audio Classification Pipeline
+### Feature extraction
 
 ```rust
 use axonml::prelude::*;
 
-fn main() {
-    // 1. Create dataset
-    let train_data = SyntheticCommandDataset::new(8000, 10);
-    let test_data = SyntheticCommandDataset::new(2000, 10);
+let sample_rate = 16000;
+let duration = 2.0;
+let n = (sample_rate as f32 * duration) as usize;
 
-    // 2. Create data loader
-    let train_loader = DataLoader::with_shuffle(train_data, 32, true);
+let freq = 440.0;
+let audio: Vec<f32> = (0..n)
+    .map(|i| (2.0 * std::f32::consts::PI * freq * (i as f32 / sample_rate as f32)).sin())
+    .collect();
+let waveform = Tensor::from_vec(audio, &[n]).unwrap();
 
-    // 3. Define preprocessing
-    let mel = MelSpectrogram::with_params(16000, 512, 256, 40);
+let mel = MelSpectrogram::with_params(16000, 512, 256, 40);
+let spec = mel.apply(&waveform);
+println!("spec shape: {:?}", spec.shape());
 
-    // 4. Create model (CNN for spectrograms)
-    let model = create_audio_cnn();
-    let mut optimizer = Adam::new(model.parameters(), 0.001);
+let mfcc = MFCC::new(16000, 13);
+let coefs = mfcc.apply(&waveform);
+println!("mfcc shape: {:?}", coefs.shape());
+```
 
-    // 5. Training loop
-    for epoch in 0..10 {
-        for batch in train_loader.iter() {
-            // Apply mel spectrogram transform
-            let specs = batch_transform(&batch.data, &mel);
+### Command classification pipeline
 
-            // Forward pass
-            let output = model.forward(&specs);
-            let loss = cross_entropy(&output, &batch.targets);
+```rust
+use axonml::prelude::*;
 
-            // Backward pass
-            loss.backward();
-            optimizer.step();
-            optimizer.zero_grad();
-        }
+let train = SyntheticCommandDataset::new(8000, 16000, 1.0, 10);
+let test  = SyntheticCommandDataset::new(2000, 16000, 1.0, 10);
+let loader = DataLoader::with_shuffle(train, 32, true);
+
+let mel = MelSpectrogram::with_params(16000, 512, 256, 40);
+let model = create_audio_cnn();
+let mut opt = Adam::new(model.parameters(), 0.001);
+
+for epoch in 0..10 {
+    for batch in loader.iter() {
+        let specs = batch_transform(&batch.data, &mel);
+        let out = model.forward(&specs);
+        let loss = cross_entropy(&out, &batch.targets);
+        loss.backward();
+        opt.step();
+        opt.zero_grad();
     }
 }
 ```
 
-### Feature Extraction
-
-```rust
-use axonml::prelude::*;
-
-// Load or create audio
-let sample_rate = 16000;
-let duration = 2.0;
-let n_samples = (sample_rate as f32 * duration) as usize;
-
-// Generate sine wave
-let frequency = 440.0;
-let audio: Vec<f32> = (0..n_samples)
-    .map(|i| {
-        let t = i as f32 / sample_rate as f32;
-        (2.0 * std::f32::consts::PI * frequency * t).sin()
-    })
-    .collect();
-
-let waveform = Tensor::from_vec(audio, &[n_samples]).unwrap();
-
-// Extract features
-let mel = MelSpectrogram::with_params(16000, 512, 256, 40);
-let spectrogram = mel.apply(&waveform);
-println!("Spectrogram shape: {:?}", spectrogram.shape());
-
-let mfcc = MFCC::new(16000, 13);
-let mfcc_features = mfcc.apply(&waveform);
-println!("MFCC shape: {:?}", mfcc_features.shape());
-```
-
-### Audio Augmentation
+### Augmentation pipeline
 
 ```rust
 use axonml_audio::*;
 
-// Original audio
 let audio = load_audio("speech.wav")?;
 
-// Augmentation pipeline
 let normalize = NormalizeAudio::new();
-let add_noise = AddNoise::new(20.0);  // 20dB SNR
+let add_noise = AddNoise::new(20.0);
 
-// Apply augmentations
 let normalized = normalize.apply(&audio);
-let augmented = add_noise.apply(&normalized);
+let augmented  = add_noise.apply(&normalized);
 ```
 
-### Resampling
+## Parameter Reference
 
-```rust
-use axonml_audio::Resample;
+### Mel spectrogram
 
-// Audio at 44.1kHz
-let audio_44k = load_audio("music.wav")?;
+| Parameter     | Description                | Typical               |
+|---------------|----------------------------|-----------------------|
+| `sample_rate` | Audio sample rate          | 16000 / 22050 / 44100 |
+| `n_fft`       | FFT window size            | 256 / 512 / 1024      |
+| `hop_length`  | Samples between frames     | n_fft / 4             |
+| `n_mels`      | Number of mel bands        | 40 / 80 / 128         |
 
-// Resample to 16kHz for speech processing
-let resample = Resample::new(44100, 16000);
-let audio_16k = resample.apply(&audio_44k);
+### MFCC
 
-println!("Original samples: {}", audio_44k.shape()[0]);
-println!("Resampled samples: {}", audio_16k.shape()[0]);
-```
-
-## Audio Feature Reference
-
-### Mel Spectrogram Parameters
-
-| Parameter | Description | Typical Value |
-|-----------|-------------|---------------|
-| `sample_rate` | Audio sample rate | 16000, 22050, 44100 |
-| `n_fft` | FFT window size | 256, 512, 1024, 2048 |
-| `hop_length` | Samples between frames | n_fft / 4 |
-| `n_mels` | Number of mel bands | 40, 80, 128 |
-
-### MFCC Parameters
-
-| Parameter | Description | Typical Value |
-|-----------|-------------|---------------|
-| `n_mfcc` | Number of coefficients | 13, 20, 40 |
+| Parameter     | Description              | Typical     |
+|---------------|--------------------------|-------------|
+| `n_mfcc`      | Number of coefficients   | 13 / 20 / 40 |
 
 ## Related Modules
 
-- [Data](../data/README.md) - DataLoader and Dataset traits
-- [Neural Networks](../nn/README.md) - Models for audio classification
-- [Transforms](../data/README.md#transforms) - Transform trait
+- [Data](../../crates/axonml-data) — `DataLoader`, `Dataset`, `Transform`
+- [Neural Networks](../nn/README.md) — models for audio classification
 
-@version 0.1.0
-@author AutomataNexus Development Team
+## Last updated
+
+0.6.1 (2026-04-16)

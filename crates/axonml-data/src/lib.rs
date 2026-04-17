@@ -1,13 +1,22 @@
-//! axonml-data - Data Loading Utilities
+//! Data loading infrastructure for AxonML neural network training.
+//!
+//! `Dataset` trait + implementations (TensorDataset, MapDataset, ConcatDataset,
+//! SubsetDataset, InMemoryDataset), `DataLoader` with batching/shuffling/
+//! drop_last/num_workers (rayon-backed), `GpuPrefetchIter` (background GPU
+//! transfer with bounded channel), samplers (Sequential, Random, Weighted,
+//! Distributed, Batch), transforms (Compose, Normalize, Standardize, MinMaxScale,
+//! RandomCrop, RandomFlip, DropoutTransform, Lambda), and collate functions
+//! (DefaultCollate, StackCollate, stack_tensors, concat_tensors).
 //!
 //! # File
 //! `crates/axonml-data/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

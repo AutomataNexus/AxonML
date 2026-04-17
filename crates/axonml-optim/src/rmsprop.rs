@@ -1,13 +1,18 @@
-//! `RMSprop` Optimizer
+//! `RMSprop` — root mean square propagation optimizer.
+//!
+//! Exponential moving average of squared gradients for per-parameter
+//! adaptive learning rates. Config: alpha (decay), epsilon, optional
+//! momentum, optional centered mode (subtract mean of squared grads).
 //!
 //! # File
 //! `crates/axonml-optim/src/rmsprop.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

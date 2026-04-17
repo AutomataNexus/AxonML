@@ -1,13 +1,22 @@
-//! Metal Backend - Apple GPU Operations
+//! Metal backend — Apple Silicon GPU compute via the `metal` crate + objc.
+//!
+//! 760 lines, 21 public functions. Full Metal implementation: device
+//! enumeration (`MTLDevice::all()`), command queue, shared-storage buffer
+//! management (create, create_init, read, write, destroy), Metal Shading
+//! Language compile + cached compute pipeline creation, command buffer
+//! encoding + dispatch with threadgroup sizing, `DeviceCapabilities` query,
+//! and `Backend` trait implementation. Uses `autoreleasepool` for Objective-C
+//! memory management. Feature-gated behind `metal` + `target_os = "macos"`.
 //!
 //! # File
 //! `crates/axonml-core/src/backends/metal.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

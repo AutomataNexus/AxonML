@@ -1,13 +1,22 @@
-//! Axonml Vision - Computer Vision Utilities
+//! AxonML Vision — Computer Vision Crate
+//!
+//! Top-level crate module for the `axonml-vision` computer vision library.
+//! Re-exports image transforms (Resize, CenterCrop, ColorJitter, Grayscale,
+//! ImageNormalize, Pad, RandomHorizontalFlip, RandomRotation, RandomVerticalFlip,
+//! ToTensorImage), datasets (MNIST, CIFAR10, CIFAR100, FashionMNIST, and their
+//! synthetic variants), classification models (LeNet, MLP, SimpleCNN), biometric
+//! identity types (AegisIdentity, Mnemosyne, Ariadne, Echo, Argus, Themis), and
+//! pretrained model hub utilities. Provides a `prelude` module for common imports.
 //!
 //! # File
 //! `crates/axonml-vision/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -74,6 +83,10 @@
 #![allow(clippy::manual_assert)]
 #![allow(clippy::unnecessary_debug_formatting)]
 
+// =============================================================================
+// Submodule Declarations
+// =============================================================================
+
 pub mod camera;
 pub mod datasets;
 pub mod edge;
@@ -86,7 +99,7 @@ pub mod training;
 pub mod transforms;
 
 // =============================================================================
-// Re-exports
+// Re-exports — Transforms
 // =============================================================================
 
 pub use transforms::{
@@ -94,17 +107,32 @@ pub use transforms::{
     RandomVerticalFlip, Resize, ToTensorImage,
 };
 
+// =============================================================================
+// Re-exports — Datasets
+// =============================================================================
+
 pub use datasets::{CIFAR10, CIFAR100, FashionMNIST, MNIST, SyntheticCIFAR, SyntheticMNIST};
+
+// =============================================================================
+// Re-exports — Models
+// =============================================================================
 
 pub use models::{LeNet, MLP, SimpleCNN};
 
+// -----------------------------------------------------------------------------
 // Biometric Identity (Aegis Identity)
+// -----------------------------------------------------------------------------
+
 pub use models::biometric::{
     AegisIdentity, AngularMarginLoss, ArgusIris, ArgusLoss, AriadneFingerprint, BiometricConfig,
     BiometricEvidence, BiometricModality, CenterLoss, ContrastiveLoss, CrystallizationLoss,
     DiversityRegularization, EchoLoss, EchoSpeaker, EnrollmentResult, IdentificationResult,
     IdentityBank, LivenessLoss, MnemosyneIdentity, ThemisFusion, ThemisLoss, VerificationResult,
 };
+
+// =============================================================================
+// Re-exports — Hub
+// =============================================================================
 
 pub use hub::{
     HubError, HubResult, PretrainedModel, StateDict, cache_dir, download_weights, is_cached,

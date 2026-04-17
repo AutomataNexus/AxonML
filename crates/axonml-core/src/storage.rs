@@ -1,13 +1,22 @@
-//! Storage - Raw Memory Management for Tensors
+//! Reference-counted raw memory management for tensors.
+//!
+//! `Storage<T>` wraps either a CPU `Vec<T>` or a GPU `PooledCudaSlice` behind
+//! an `Arc<RwLock<StorageInner<T>>>`, enabling zero-copy views via offset+len
+//! slicing. GPU storage uses the CUDA memory pool (`cuda_pool.rs`) so freed
+//! allocations are returned to a size-bucketed free list instead of calling
+//! cudaFree. Supports `to_device()` for CPU<->GPU transfer, deep copy,
+//! `as_slice()` / `as_slice_mut()` with RAII guards, and `as_cuda_slice()`
+//! for direct GPU kernel access.
 //!
 //! # File
 //! `crates/axonml-core/src/storage.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

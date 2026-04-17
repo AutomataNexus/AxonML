@@ -1,13 +1,33 @@
-//! Integration Tests
+//! Integration Tests — End-to-End Dataset → Model → Loss → Optimizer Pipelines
+//!
+//! Test-only integration suite that exercises full training pipelines end-to-end.
+//! Helpers `make_batch` and `make_batch_with_transform` collapse one-hot labels
+//! into class indices and assemble batched image / target Variables, optionally
+//! applying a `Transform` (used for `ImageNormalize` with MNIST and CIFAR
+//! statistics). Each test wires together a synthetic dataset, optional
+//! preprocessing transform, a model from the zoo, a loss, and an optimizer,
+//! then asserts losses are finite and (where applicable) decrease over a few
+//! steps. Coverage:
+//!
+//! - MNIST + Normalize -> LeNet -> CrossEntropy -> Adam
+//! - CIFAR -> ResNet18 -> CrossEntropy -> SGD+momentum
+//! - CIFAR + Normalize -> SimpleCNN -> CrossEntropy -> Adam
+//! - CIFAR -> Vision Transformer -> CrossEntropy -> Adam
+//! - MNIST -> MLP -> MSELoss -> Adam (regression-style on one-hot)
+//! - Detection: Phantom training-step pipeline
+//! - Biometric: Mnemosyne identity encoder with MSE on a synthetic embedding
+//! - Gradient-flow validation: assert at least one parameter receives a
+//!   non-zero, finite gradient after backward on LeNet
 //!
 //! # File
 //! `crates/axonml-vision/src/training/integration.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

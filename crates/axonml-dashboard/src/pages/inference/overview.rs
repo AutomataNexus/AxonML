@@ -1,18 +1,37 @@
-//! Inference Overview Page
+//! Inference Overview Page — Fleet-Wide Serving Summary
+//!
+//! Top-level landing view for the inference section.
+//! `InferenceOverviewPage` loads `Vec<InferenceEndpoint>` via
+//! `api::inference::list_endpoints`, then walks every running endpoint to
+//! fetch its `InferenceMetrics` through `api::inference::get_metrics`,
+//! aggregating total requests, error count, and a running average of P50
+//! latency across all samples. The resulting signals feed a five-tile stats
+//! strip (active endpoints, stopped endpoints, total requests, average P50
+//! latency, error rate) and a two-column content grid: an "Active Endpoints"
+//! card listing the first five endpoints via `EndpointListItem` (rendering
+//! name, port, replica count, optional `model_name`, and a status badge
+//! colored by `status.color_class()`) and a "Quick Actions" card linking to
+//! `/inference/endpoints`, `/inference/metrics`, and `/models`. Empty-fleet
+//! state presents a CTA to deploy a model.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/inference/overview.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,17 +41,27 @@ use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// Inference Overview Page
+// =============================================================================
+
 /// Inference overview page
 #[component]
 pub fn InferenceOverviewPage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (endpoints, set_endpoints) = create_signal::<Vec<InferenceEndpoint>>(Vec::new());
     let (total_requests, set_total_requests) = create_signal(0u64);
     let (avg_latency, set_avg_latency) = create_signal(0.0f64);
     let (error_rate, set_error_rate) = create_signal(0.0f64);
 
+    // -------------------------------------------------------------------------
+    // Data Fetch / Aggregation
+    // -------------------------------------------------------------------------
     // Fetch data
     let state_for_effect = state.clone();
     create_effect(move |_| {
@@ -79,6 +108,9 @@ pub fn InferenceOverviewPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Derived Counters
+    // -------------------------------------------------------------------------
     let active_endpoints = move || {
         endpoints
             .get()
@@ -95,6 +127,9 @@ pub fn InferenceOverviewPage() -> impl IntoView {
             .count()
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page inference-overview-page">
             <div class="page-header">
@@ -231,6 +266,10 @@ pub fn InferenceOverviewPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// Endpoint List Item
+// =============================================================================
 
 /// Endpoint list item
 #[component]

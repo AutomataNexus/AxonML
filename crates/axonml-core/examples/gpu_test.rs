@@ -1,13 +1,21 @@
-//! GPU Backend Test Runner
+//! GPU Backend Test Runner — Detect and Validate GPU Backends
+//!
+//! Standalone binary that detects available GPU backends, prints hardware info
+//! via `print_gpu_info`, configures tolerance and benchmark parameters through
+//! `GpuTestConfig`, conditionally runs CUDA tests when the `cuda` feature is
+//! enabled, and prints an overall pass/fail summary with `GpuTestReport`
+//! aggregation. Exits with code 1 if any test fails, or prints a hint to
+//! enable GPU features if no tests were run.
 //!
 //! # File
 //! `crates/axonml-core/examples/gpu_test.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -17,6 +25,10 @@
 use axonml_core::backends::gpu_tests::{
     GpuTestConfig, GpuTestReport, detect_gpu_backends, print_gpu_info,
 };
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
 
 fn main() {
     println!("AxonML GPU Backend Test Suite");
@@ -38,6 +50,10 @@ fn main() {
 
     let reports: Vec<GpuTestReport> = Vec::new();
 
+    // -------------------------------------------------------------------------
+    // CUDA Tests (feature-gated)
+    // -------------------------------------------------------------------------
+
     // Run CUDA tests if available
     #[cfg(feature = "cuda")]
     {
@@ -47,7 +63,10 @@ fn main() {
         reports.push(report);
     }
 
+    // -------------------------------------------------------------------------
     // Summary
+    // -------------------------------------------------------------------------
+
     println!("\n========================================");
     println!("Overall Summary");
     println!("========================================");

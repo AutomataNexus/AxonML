@@ -1,24 +1,47 @@
-//! Server Sync Commands
+//! Server Sync Commands — `login`, `logout`, and `sync` Subcommands
+//!
+//! Implements the three `server-sync`-feature CLI subcommands that link a
+//! local `axonml` CLI session to the AxonML server/webapp:
+//! - `login(args)` — reads credentials from `LoginArgs` (or stdin prompts),
+//!   pings the server via `ApiClient::is_server_available`, and stores
+//!   credentials on success.
+//! - `logout()` — clears the locally persisted credentials with
+//!   `ApiClient::logout`.
+//! - `sync(args)` — loads credentials, checks server reachability, and
+//!   either prints status (`--status`) or performs a full sync of
+//!   training runs, models, and datasets via the client list endpoints.
+//!
+//! All output uses `colored` for status glyphs/colors, and every function
+//! returns `CliResult<()>` so errors propagate up to `main::run`.
 //!
 //! # File
 //! `crates/axonml-cli/src/commands/sync.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use crate::api_client::ApiClient;
 use crate::cli::{LoginArgs, SyncArgs};
 use crate::error::CliResult;
 use colored::Colorize;
 use std::io::{self, Write};
+
+// =============================================================================
+// Login Command
+// =============================================================================
 
 /// Execute the login command
 pub async fn login(args: &LoginArgs) -> CliResult<()> {
@@ -36,6 +59,10 @@ pub async fn login(args: &LoginArgs) -> CliResult<()> {
         eprintln!("Make sure the AxonML server is running (axonml start)");
         return Ok(());
     }
+
+    // -------------------------------------------------------------------------
+    // Credential Prompting
+    // -------------------------------------------------------------------------
 
     // Get username
     let username = if let Some(ref u) = args.username {
@@ -60,6 +87,10 @@ pub async fn login(args: &LoginArgs) -> CliResult<()> {
         input.trim().to_string()
     };
 
+    // -------------------------------------------------------------------------
+    // Login Attempt
+    // -------------------------------------------------------------------------
+
     // Attempt login
     println!("{}", "Logging in...".dimmed());
     match client.login(&username, &password).await {
@@ -83,6 +114,10 @@ pub async fn login(args: &LoginArgs) -> CliResult<()> {
     Ok(())
 }
 
+// =============================================================================
+// Logout Command
+// =============================================================================
+
 /// Execute the logout command
 #[allow(clippy::unused_async)]
 pub async fn logout() -> CliResult<()> {
@@ -98,8 +133,16 @@ pub async fn logout() -> CliResult<()> {
     Ok(())
 }
 
+// =============================================================================
+// Sync Command
+// =============================================================================
+
 /// Execute the sync command
 pub async fn sync(args: &SyncArgs) -> CliResult<()> {
+    // -------------------------------------------------------------------------
+    // Credential and Server Checks
+    // -------------------------------------------------------------------------
+
     // Try to load credentials
     let client = match ApiClient::load_credentials() {
         Ok(c) => c,
@@ -124,6 +167,10 @@ pub async fn sync(args: &SyncArgs) -> CliResult<()> {
         println!("Make sure the AxonML server is running (axonml start)");
         return Ok(());
     }
+
+    // -------------------------------------------------------------------------
+    // Status-Only or Full Sync
+    // -------------------------------------------------------------------------
 
     if args.status {
         // Just show status

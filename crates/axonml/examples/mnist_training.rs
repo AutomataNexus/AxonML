@@ -1,13 +1,23 @@
-//! MNIST Training Example - LeNet on SyntheticMNIST with GPU support
+//! MNIST Training Example — LeNet on SyntheticMNIST with GPU Support
+//!
+//! Demonstrates a complete training pipeline using the AxonML framework:
+//! device detection (CUDA or CPU), `SyntheticMNIST` dataset creation with
+//! configurable train/test sizes, batched `DataLoader` iteration, `LeNet`
+//! model construction with parameter counting and device placement, `Adam`
+//! optimizer with `CrossEntropyLoss`, a full training loop (forward pass,
+//! one-hot to class-index target conversion, loss computation, backward
+//! pass, optimizer step) with per-epoch loss/accuracy/throughput reporting,
+//! and a `no_grad` evaluation pass over the test set with final accuracy.
 //!
 //! # File
 //! `crates/axonml/examples/mnist_training.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 19, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -17,8 +27,16 @@
 use axonml::prelude::*;
 use std::time::Instant;
 
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
 fn main() {
     println!("=== AxonML - MNIST Training (LeNet) ===\n");
+
+    // -------------------------------------------------------------------------
+    // Device Detection
+    // -------------------------------------------------------------------------
 
     // Detect device
     #[cfg(feature = "cuda")]
@@ -38,6 +56,10 @@ fn main() {
         Device::Cpu
     };
 
+    // -------------------------------------------------------------------------
+    // Dataset and DataLoader Setup
+    // -------------------------------------------------------------------------
+
     // 1. Create dataset
     let num_train = 2000;
     let num_test = 400;
@@ -51,6 +73,10 @@ fn main() {
     let train_loader = DataLoader::new(train_dataset, batch_size);
     let test_loader = DataLoader::new(test_dataset, batch_size);
     println!("   Training batches: {}", train_loader.len());
+
+    // -------------------------------------------------------------------------
+    // Model, Optimizer, and Loss
+    // -------------------------------------------------------------------------
 
     // 3. Create LeNet model and move to device
     println!("3. Creating LeNet model...");
@@ -72,6 +98,10 @@ fn main() {
     println!("4. Creating Adam optimizer (lr=0.001) + CrossEntropyLoss...");
     let mut optimizer = Adam::new(params, 0.001);
     let criterion = CrossEntropyLoss::new();
+
+    // -------------------------------------------------------------------------
+    // Training Loop
+    // -------------------------------------------------------------------------
 
     // 5. Training loop
     let epochs = 10;
@@ -180,6 +210,10 @@ fn main() {
 
     let train_time = train_start.elapsed();
     println!("\n   Total training time: {:.2}s", train_time.as_secs_f64());
+
+    // -------------------------------------------------------------------------
+    // Test Evaluation
+    // -------------------------------------------------------------------------
 
     // 6. Test evaluation
     println!("\n6. Evaluating on test set...");

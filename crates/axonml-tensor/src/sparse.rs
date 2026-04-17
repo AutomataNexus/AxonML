@@ -1,13 +1,20 @@
-//! Sparse Tensor Support
+//! Sparse tensor support — COO, CSR, CSC formats.
+//!
+//! 703 lines. `SparseCOO<T>` (coordinate format: indices + values + shape)
+//! with `from_dense`, `to_dense`, `nnz`, `density`, add/mul (sparse×sparse
+//! and sparse×dense), matmul (`spmm` sparse × dense → dense), `coalesce`
+//! (sort + dedup), and `transpose`. `SparseFormat` enum tags
+//! COO/CSR/CSC variants.
 //!
 //! # File
 //! `crates/axonml-tensor/src/sparse.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,13 +1,20 @@
-//! Axonml Text - Natural Language Processing Utilities
+//! NLP utilities for AxonML.
+//!
+//! Tokenizers (Whitespace, Char, WordPunct, NGram, BPE, Unigram), `Vocab`
+//! management with special tokens (PAD/UNK/BOS/EOS/MASK), and datasets
+//! (TextDataset, LanguageModelDataset, SyntheticSentimentDataset,
+//! SyntheticSeq2SeqDataset) for classification, language modeling, and
+//! sequence-to-sequence tasks.
 //!
 //! # File
 //! `crates/axonml-text/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

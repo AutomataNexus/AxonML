@@ -1,13 +1,19 @@
-//! RNN Backward Functions - LSTM and GRU Gate Gradient Implementations
+//! Backward functions for recurrent neural network operations.
+//!
+//! 511 lines. `LSTMCellBackward` (gate-level gradient through forget/input/
+//! output/cell gates), `GRUCellBackward` (update/reset gate gradients),
+//! `RNNCellBackward` (simple tanh-cell backward). Each caches the gate
+//! activations and hidden states from the forward pass for gradient reuse.
 //!
 //! # File
 //! `crates/axonml-autograd/src/functions/rnn.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 18, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

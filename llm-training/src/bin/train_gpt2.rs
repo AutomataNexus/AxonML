@@ -1,15 +1,35 @@
-//! Train GPT-2 on Shakespeare
+//! Train GPT-2 — AxonML Shakespeare Trainer (Golden-Path Reference)
 //!
-//! End-to-end training of the AxonML `GPT2LMHead` on real text, with:
-//! - GPU acceleration (`--features cuda`)
-//! - Live browser training monitor (always on)
-//! - Periodic best / latest / epoch / step checkpoint saving
-//! - Resume from latest / best / specific path
-//! - Graceful pause / resume / stop via `train_ctl` (Unix socket + signals)
-//! - In-flight text sampling to watch the model learn
+//! End-to-end training binary for the AxonML [`GPT2LMHead`] on a text
+//! corpus. This is the Phase 0 lifecycle-controls reference: every other
+//! `train_*` binary in this crate mirrors its pause/resume/stop,
+//! checkpoint-rotation, and browser-monitor wiring.
 //!
-//! Golden-path reference for Phase 0 lifecycle controls: every other
-//! `train_*` binary in this crate is retrofitted to match this pattern.
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser and `print_help`,
+//!   covering corpus path, model geometry (`d_model` / layers / heads /
+//!   seq_len), training schedule, checkpoint cadence, and
+//!   [`ResumeMode`] selection.
+//! - `generate` — greedy auto-regressive sampler that re-feeds the tail of
+//!   the running id buffer into `GPT2LMHead::forward_ids`, reads the
+//!   last-step logits, and picks `argmax` to emit one character at a time.
+//! - `pick_device` / `device_name` — CUDA-feature-gated device detection.
+//! - `main` — loads corpus, builds [`CharTokenizer`] + [`TextDataset`],
+//!   constructs a [`GPT2Config`] / [`GPT2LMHead`], resumes from a
+//!   checkpoint, starts the `TrainingLifecycle` (monitor + signals +
+//!   control socket), and drives the Adam-optimized training loop with
+//!   periodic greedy samples, best-model tracking, and a final 400-char
+//!   ROMEO sample.
+//!
+//! Features:
+//! - GPU acceleration (`--features cuda`) with transparent embedding-layer
+//!   CPU→GPU hand-off (u32 token tensors stay on CPU; f32 activations live
+//!   on the device).
+//! - Live browser training monitor (always on).
+//! - Periodic best / latest / epoch / step checkpoint saving.
+//! - Resume from latest / best / specific path.
+//! - Graceful pause / resume / stop via `train_ctl` (Unix socket + signals).
+//! - In-flight text sampling to watch the model learn.
 //!
 //! Usage:
 //!   cargo run --release --bin train_gpt2 -p llm-training --features cuda
@@ -21,6 +41,25 @@
 //!   cargo run --release --bin train_ctl -- pause
 //!   cargo run --release --bin train_ctl -- resume
 //!   cargo run --release --bin train_ctl -- stop
+//!
+//! # File
+//! `llm-training/src/bin/train_gpt2.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -213,7 +252,7 @@ fn generate(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

@@ -1,13 +1,19 @@
-//! JWT authentication for AxonML
+//! JWT Authentication — Token Issuance, Validation, and Refresh
+//!
+//! Implements access/refresh/MFA token lifecycle using HMAC-SHA256 (HS256).
+//! Access tokens carry user identity, role, and MFA-verified status. Refresh
+//! tokens are long-lived (7 days) and gated behind full authentication.
+//! MFA tokens are short-lived (5 minutes) for the two-step verification flow.
 //!
 //! # File
 //! `crates/axonml-server/src/auth/jwt.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -18,6 +24,10 @@ use super::AuthError;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
+
+// =============================================================================
+// Claims & Token Types
+// =============================================================================
 
 /// JWT claims structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +66,10 @@ pub struct MfaToken {
     pub expires_in: i64,
 }
 
+// =============================================================================
+// JwtAuth Handler
+// =============================================================================
+
 /// JWT authentication handler
 pub struct JwtAuth {
     secret: String,
@@ -91,6 +105,10 @@ impl JwtAuth {
     pub fn refresh_expiry_days(&self) -> i64 {
         self.refresh_expiry_days
     }
+
+    // -------------------------------------------------------------------------
+    // Token Creation
+    // -------------------------------------------------------------------------
 
     /// Create an access token
     pub fn create_access_token(
@@ -184,6 +202,10 @@ impl JwtAuth {
         })
     }
 
+    // -------------------------------------------------------------------------
+    // Token Validation
+    // -------------------------------------------------------------------------
+
     /// Validate a token and return claims
     pub fn validate_token(&self, token: &str) -> Result<Claims, AuthError> {
         let token_data: TokenData<Claims> =
@@ -230,6 +252,10 @@ impl JwtAuth {
         Ok(claims)
     }
 
+    // -------------------------------------------------------------------------
+    // Token Refresh & Extraction
+    // -------------------------------------------------------------------------
+
     /// Refresh an access token using a refresh token
     pub fn refresh_access_token(&self, refresh_token: &str) -> Result<TokenPair, AuthError> {
         let claims = self.validate_refresh_token(refresh_token)?;
@@ -242,6 +268,10 @@ impl JwtAuth {
         header.strip_prefix("Bearer ")
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

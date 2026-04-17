@@ -1,13 +1,20 @@
-//! Axonml Fusion - Kernel Fusion Optimization
+//! Kernel fusion optimization for AxonML.
+//!
+//! Automatic fusion pattern detection (`detect_patterns`), `FusedLinear`
+//! (matmul + bias + activation in one kernel), `FusedElementwise` (chain
+//! multiple elementwise ops into a single pass), `FusionOptimizer` (graph-
+//! level optimizer with conservative/aggressive modes, `OptimizationStats`),
+//! and the `FusedOp` trait for custom fusion implementations.
 //!
 //! # File
 //! `crates/axonml-fusion/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 25, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

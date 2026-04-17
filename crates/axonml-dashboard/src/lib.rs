@@ -1,21 +1,46 @@
-//! AxonML Dashboard - Leptos/WASM Frontend
+//! AxonML Dashboard — Leptos/WASM Frontend Root
+//!
+//! Top-level crate entry for the AxonML web dashboard. Declares the module
+//! tree (`api`, `auth`, `components`, `constants`, `pages`, `state`, `types`,
+//! `utils`) and builds the client-side `Router` that maps URL paths to Leptos
+//! `#[component]` views. Public routes (`/`, `/login`, `/register`) are
+//! rendered directly; every other path is wrapped in `ProtectedRoute` +
+//! `AppShell` so unauthenticated users are redirected and authenticated users
+//! get the persistent navigation chrome. The `App` component also installs
+//! `SessionInitializer`, `PageErrorBoundary`, and `ToastContainer` at the
+//! router root.
+//!
+//! `PublicOrDashboard` is the `/` landing gate: while the session is loading
+//! it shows a branded spinner, otherwise it renders either the marketing
+//! `LandingPage` or the authenticated dashboard. `NotFound` is the 404
+//! fallback. `main` is the `wasm_bindgen(start)` entry point that installs the
+//! panic hook, wires `tracing_wasm`, and mounts `App` to the document body.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use leptos::*;
 use leptos_router::*;
+
+// =============================================================================
+// Module Declarations
+// =============================================================================
 
 pub mod api;
 pub mod auth;
@@ -25,6 +50,10 @@ pub mod pages;
 pub mod state;
 pub mod types;
 pub mod utils;
+
+// -----------------------------------------------------------------------------
+// Page / Component Re-Exports
+// -----------------------------------------------------------------------------
 
 use auth::mfa_setup::{RecoveryCodesPage, TotpSetupPage, WebAuthnSetupPage};
 use auth::{
@@ -54,6 +83,10 @@ use pages::{
 };
 use state::provide_app_state;
 
+// =============================================================================
+// App Component
+// =============================================================================
+
 /// Main application component
 #[component]
 pub fn App() -> impl IntoView {
@@ -65,14 +98,18 @@ pub fn App() -> impl IntoView {
             <SessionInitializer />
             <PageErrorBoundary>
             <Routes>
+                // -------------------------------------------------------------
                 // Public routes
+                // -------------------------------------------------------------
                 <Route path="/" view=|| view! {
                     <PublicOrDashboard />
                 } />
                 <Route path="/login" view=LoginPage />
                 <Route path="/register" view=RegisterPage />
 
+                // -------------------------------------------------------------
                 // Protected dashboard routes
+                // -------------------------------------------------------------
                 <Route path="/dashboard" view=|| view! {
                     <ProtectedRoute>
                         <AppShell>
@@ -81,7 +118,9 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // -------------------------------------------------------------
                 // Training routes
+                // -------------------------------------------------------------
                 <Route path="/training" view=|| view! {
                     <ProtectedRoute>
                         <AppShell>
@@ -104,7 +143,9 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // -------------------------------------------------------------
                 // Training Notebooks routes
+                // -------------------------------------------------------------
                 <Route path="/training/notebooks" view=|| view! {
                     <ProtectedRoute>
                         <AppShell>
@@ -134,7 +175,9 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // -------------------------------------------------------------
                 // Models routes
+                // -------------------------------------------------------------
                 <Route path="/models" view=|| view! {
                     <ProtectedRoute>
                         <AppShell>
@@ -164,7 +207,9 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // -------------------------------------------------------------
                 // Datasets routes
+                // -------------------------------------------------------------
                 <Route path="/datasets" view=|| view! {
                     <ProtectedRoute>
                         <AppShell>
@@ -201,7 +246,9 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // -------------------------------------------------------------
                 // Inference routes
+                // -------------------------------------------------------------
                 <Route path="/inference" view=|| view! {
                     <ProtectedRoute>
                         <AppShell>
@@ -231,7 +278,9 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // -------------------------------------------------------------
                 // System routes
+                // -------------------------------------------------------------
                 <Route path="/system" view=|| view! {
                     <ProtectedRoute>
                         <AppShell>
@@ -240,7 +289,9 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // -------------------------------------------------------------
                 // Hub routes (Pretrained Models)
+                // -------------------------------------------------------------
                 <Route path="/hub" view=|| view! {
                     <ProtectedRoute>
                         <AppShell>
@@ -256,7 +307,9 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // -------------------------------------------------------------
                 // Admin routes
+                // -------------------------------------------------------------
                 <Route path="/admin/users" view=|| view! {
                     <ProtectedRoute>
                         <AppShell>
@@ -272,7 +325,9 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // -------------------------------------------------------------
                 // Settings routes
+                // -------------------------------------------------------------
                 <Route path="/settings" view=|| view! {
                     <ProtectedRoute>
                         <AppShell>
@@ -316,7 +371,9 @@ pub fn App() -> impl IntoView {
                     </ProtectedRoute>
                 } />
 
+                // -------------------------------------------------------------
                 // 404
+                // -------------------------------------------------------------
                 <Route path="/*any" view=NotFound />
             </Routes>
             </PageErrorBoundary>
@@ -324,6 +381,10 @@ pub fn App() -> impl IntoView {
         </Router>
     }
 }
+
+// =============================================================================
+// Landing Gate
+// =============================================================================
 
 /// Show landing page if not authenticated, dashboard if authenticated
 #[component]
@@ -357,6 +418,10 @@ fn PublicOrDashboard() -> impl IntoView {
     }
 }
 
+// =============================================================================
+// 404 Page
+// =============================================================================
+
 /// 404 Not Found page
 #[component]
 fn NotFound() -> impl IntoView {
@@ -373,6 +438,10 @@ fn NotFound() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// WASM Entry Point
+// =============================================================================
 
 /// WASM entry point
 #[wasm_bindgen::prelude::wasm_bindgen(start)]

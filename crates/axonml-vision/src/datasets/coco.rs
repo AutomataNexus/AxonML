@@ -1,13 +1,22 @@
-//! COCO Dataset — Object Detection Benchmark
+//! COCO Dataset — Object Detection Benchmark Loader
+//!
+//! COCO-format object detection dataset loader. Parses COCO JSON annotations
+//! (images, annotations, categories) via serde, remapping non-contiguous category
+//! IDs to contiguous 0-indexed values. `CocoAnnotation` stores normalized [0,1]
+//! bounding boxes in (x1,y1,x2,y2) format with remapped category IDs. `CocoDataset`
+//! loads images on demand via `image_io::load_image_resized()`, filtering out
+//! crowd annotations and empty images. Provides `get()` for (image, annotations)
+//! pairs and `get_annotations()` for annotation-only access.
 //!
 //! # File
 //! `crates/axonml-vision/src/datasets/coco.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

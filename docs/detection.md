@@ -691,3 +691,8 @@ fn main() -> Result<(), String> {
     Ok(())
 }
 ```
+
+---
+
+*Last updated: 2026-04-16 (v0.6.1)*
+

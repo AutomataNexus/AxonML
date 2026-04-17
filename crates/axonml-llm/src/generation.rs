@@ -1,22 +1,59 @@
-//! Text Generation Utilities
+//! Text Generation — Decoding Strategies for Autoregressive LMs
+//!
+//! Decoding primitives used by the LLM family. `GenerationConfig` holds the
+//! decoding knobs (`max_new_tokens`, `temperature`, `top_k`, `top_p`,
+//! `repetition_penalty`, `eos_token_ids`, `pad_token_id`, `do_sample`,
+//! `num_beams`, `length_penalty`, `early_stopping`) and exposes preset
+//! constructors: `greedy`, `sampling(T)`, `top_k_sampling(k, T)`,
+//! `nucleus_sampling(p, T)`, and `beam_search(n)` plus builder helpers
+//! `with_max_tokens`, `with_eos_token`, `with_repetition_penalty`.
+//! `TextGenerator` applies these knobs: `apply_temperature` divides logits by
+//! T, `apply_repetition_penalty` multiplicatively attenuates logits for
+//! already-seen tokens (dividing if positive, multiplying if negative),
+//! `apply_top_k` keeps the k highest logits and masks the rest to `-inf`,
+//! `apply_top_p` computes softmax probabilities and masks tokens outside the
+//! cumulative-probability nucleus. `sample` performs categorical sampling via
+//! softmax and a cumulative threshold from `rand::thread_rng()`; `argmax` is
+//! the greedy fallback. `get_next_token` chains the four modifiers and hands
+//! off to `sample`. Beam search is implemented through `Beam` (token
+//! sequence, cumulative log-prob score, finished flag, length-normalized
+//! score via `score / length^length_penalty`) and `BeamSearch`
+//! (`init_beams`, `expand_beams` that computes top-`2*num_beams` candidates
+//! per beam, marks EOS tokens finished, and keeps the best `num_beams` by
+//! normalized score; `should_stop` honors `early_stopping`; `best_sequence`
+//! picks the highest-scoring finished beam). `generate_beam_search` converts
+//! logits to log-probs via log-sum-exp, iterates up to `max_new_tokens`, and
+//! returns the best sequence. Tests cover default config, greedy, top-k
+//! filtering keeping two finite logits, temperature halving, argmax, per-
+//! token repetition penalty, beam initialization, single-step beam expansion,
+//! and end-to-end beam search with EOS termination.
 //!
 //! # File
 //! `crates/axonml-llm/src/generation.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use axonml_tensor::Tensor;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+
+// =============================================================================
+// GenerationConfig
+// =============================================================================
 
 /// Configuration for text generation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +169,10 @@ impl GenerationConfig {
     }
 }
 
+// =============================================================================
+// TextGenerator
+// =============================================================================
+
 /// Text generator for language models.
 pub struct TextGenerator {
     /// Generation configuration
@@ -143,6 +184,10 @@ impl TextGenerator {
     pub fn new(config: GenerationConfig) -> Self {
         Self { config }
     }
+
+    // -------------------------------------------------------------------------
+    // Logit Modifiers
+    // -------------------------------------------------------------------------
 
     /// Applies temperature scaling to logits.
     pub fn apply_temperature(&self, logits: &mut [f32]) {
@@ -225,6 +270,10 @@ impl TextGenerator {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Sampling
+    // -------------------------------------------------------------------------
+
     /// Samples from logits distribution.
     pub fn sample(&self, logits: &[f32]) -> u32 {
         if !self.config.do_sample {
@@ -265,6 +314,10 @@ impl TextGenerator {
             .map(|(i, _)| i as u32)
             .unwrap_or(0)
     }
+
+    // -------------------------------------------------------------------------
+    // Decoding Pipeline
+    // -------------------------------------------------------------------------
 
     /// Processes logits and returns next token.
     ///
@@ -341,6 +394,10 @@ impl TextGenerator {
         self.config.eos_token_ids.contains(&token)
     }
 }
+
+// =============================================================================
+// Beam Search
+// =============================================================================
 
 /// Beam for beam search.
 #[derive(Debug, Clone)]
@@ -467,6 +524,10 @@ impl BeamSearch {
             .or_else(|| beams.first().map(|b| b.tokens.clone()))
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

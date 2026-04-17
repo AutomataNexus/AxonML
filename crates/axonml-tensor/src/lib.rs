@@ -1,13 +1,25 @@
-//! Axonml Tensor - N-Dimensional Array for Machine Learning
+//! N-dimensional tensor library for AxonML.
+//!
+//! Exports `Tensor<T>` (generic over Scalar types) with NumPy-style
+//! broadcasting, strided zero-copy views, CPU + CUDA GPU matmul (with GEMV
+//! fast path for m=1 decode), quantized matmul dispatch (Q4_K/Q6_K in-shader
+//! dequant via `cuda_ops`), lazy tensors with algebraic optimization, sparse
+//! COO tensors, factory functions (zeros/ones/randn/arange/linspace/eye/full),
+//! and shape/stride utilities. Re-exports `Device`, `DType`, `Error`, `Result`
+//! from `axonml-core`.
+//!
+//! Modules: `tensor`, `shape`, `creation`, `ops`, `view`, `cuda_ops`, `lazy`,
+//! `sparse`.
 //!
 //! # File
 //! `crates/axonml-tensor/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

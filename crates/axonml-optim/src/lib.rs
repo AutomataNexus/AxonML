@@ -1,13 +1,23 @@
-//! axonml-optim - Optimization Algorithms
+//! Optimization algorithms for AxonML neural network training.
+//!
+//! `Optimizer` trait with `step`, `zero_grad`, `get_lr`, `set_lr`.
+//! Implementations: `SGD` (momentum, Nesterov), `Adam`, `AdamW` (decoupled
+//! weight decay), `RMSprop`, `LAMB` (layer-wise adaptive moments for large
+//! batch). `GradScaler` for AMP loss scaling. Seven LR schedulers (StepLR,
+//! MultiStepLR, ExponentialLR, CosineAnnealingLR, OneCycleLR, WarmupLR,
+//! ReduceLROnPlateau). Training Health Monitor (`health` module) for real-time
+//! NaN/gradient-explosion/vanishing detection, loss trend analysis, dead neuron
+//! tracking, convergence scoring, and automatic learning rate suggestions.
 //!
 //! # File
 //! `crates/axonml-optim/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

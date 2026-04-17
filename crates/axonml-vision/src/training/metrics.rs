@@ -1,13 +1,25 @@
-//! Detection Metrics — AP and mAP Computation
+//! Detection Metrics — IoU, AP, mAP, COCO mAP
+//!
+//! Plain-data structs `DetectionResult` (bbox, confidence, class_id) and
+//! `GroundTruth` (bbox, class_id) used for evaluation. `compute_iou` returns
+//! axis-aligned-bbox IoU. `compute_ap` performs greedy single-class
+//! detection-to-GT matching at a given IoU threshold (each GT can be matched
+//! at most once, walked in confidence order), accumulates per-step
+//! true-positive / false-positive counters into precision and recall arrays,
+//! and integrates AP via 11-point Pascal-VOC interpolation. `compute_map`
+//! aggregates per-class AP across all classes that have at least one GT,
+//! and `compute_coco_map` averages mAP across the COCO IoU sweep
+//! `[0.5, 0.55, ..., 0.95]`.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/metrics.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

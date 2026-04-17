@@ -1,13 +1,23 @@
-//! Training Infrastructure — Detection Training Loops
+//! Detection Training Module — FCOS Assignment and Per-Step Loss Runners
+//!
+//! Top-level module for detection-model training utilities in axonml-vision.
+//! Re-exports submodules for target assignment (`assign`), augmentation
+//! (`augment`), COCO benchmarks (`coco_bench`), EMA weight averaging (`ema`),
+//! the `HeliosTrainer` trainer and config, and metric helpers (AP / mAP /
+//! COCO mAP). Defines the shared `TrainConfig` struct and two per-step
+//! training helpers: `nexus_training_step` (FCOS-style multi-scale detection
+//! with focal + Smooth-L1 losses) and `phantom_training_step` (single-scale
+//! face detector with focal classification + Smooth-L1 regression).
 //!
 //! # File
 //! `crates/axonml-vision/src/training/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -81,6 +91,10 @@ impl Default for TrainConfig {
 // =============================================================================
 // Training Step Utilities
 // =============================================================================
+
+// -----------------------------------------------------------------------------
+// Nexus (Multi-Scale FCOS) Training Step
+// -----------------------------------------------------------------------------
 
 /// Run a single Nexus training step.
 ///
@@ -169,6 +183,10 @@ pub fn nexus_training_step(
 
     loss_val
 }
+
+// -----------------------------------------------------------------------------
+// Phantom (Single-Scale Face Detector) Training Step
+// -----------------------------------------------------------------------------
 
 /// Run a single Phantom training step.
 ///

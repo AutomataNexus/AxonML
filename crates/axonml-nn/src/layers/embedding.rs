@@ -1,13 +1,19 @@
-//! Embedding Layer - Lookup Table for Indices
+//! `Embedding` — trainable lookup table mapping integer indices to dense vectors.
+//!
+//! 339 lines. `Embedding::new(num_embeddings, embedding_dim)` with normal-init
+//! weight. `forward` takes `Variable` of integer token IDs and returns
+//! `[batch, seq_len, embedding_dim]`. Optional `padding_idx` zeros out a
+//! specific index. `lookup` and `embedding_gather_cuda` handle CPU/GPU dispatch.
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/embedding.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

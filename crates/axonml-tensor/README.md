@@ -8,40 +8,55 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/rust-1.75%2B-orange.svg" alt="Rust 1.75+">
-  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust 1.85+">
+  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
   <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
 ## Overview
 
-**axonml-tensor** provides the core `Tensor` type for the AxonML framework. Tensors are N-dimensional arrays with support for automatic broadcasting, efficient memory sharing through views, and device-agnostic operations for machine learning computations.
+**axonml-tensor** provides the core `Tensor<T>` type for the AxonML framework. Tensors are N-dimensional arrays with NumPy-style broadcasting, strided zero-copy views, device-agnostic operations across CPU and CUDA (with quantized Q4_K/Q6_K dispatch), deferred computation via `LazyTensor`, and a `SparseCOO` sparse format.
 
 ## Features
 
-- **N-Dimensional Arrays** - Create tensors of arbitrary shape with generic element types (f32, f64, i32, etc.).
+- **N-Dimensional Arrays** - `Tensor<T>` is generic over any `Scalar` element (f32, f64, i32, etc.) with arbitrary rank.
 
 - **Automatic Broadcasting** - NumPy-style broadcasting for element-wise operations between tensors of different shapes.
 
 - **Efficient Views** - Zero-copy slicing, transposing, and reshaping through stride manipulation without data copying.
 
-- **Device Agnostic** - Transparent tensor operations across CPU, CUDA, Vulkan, Metal, and WebGPU backends.
+- **Device Agnostic** - Works with any `axonml-core` device; CUDA GEMM/GEMV with a dedicated m=1 decode fast path and in-shader Q4_K/Q6_K dequant matmul via `cuda_ops`.
 
-- **Rich Operations** - Comprehensive arithmetic, reduction, activation, and matrix operations including matmul with batching support.
+- **Rich Operations** - Arithmetic, reductions (sum/mean/max/min/var), activations (ReLU/sigmoid/tanh/GELU/softmax), matmul with batching, and shape ops (reshape/transpose/squeeze/unsqueeze/cat/chunk/split).
 
-- **Factory Functions** - Convenient tensor creation with `zeros`, `ones`, `rand`, `randn`, `arange`, `linspace`, and more.
+- **Factory Functions** - `zeros`, `ones`, `rand`, `randn`, `arange`, `linspace`, `eye`, `full` for convenient tensor creation.
 
-- **Optimized Concatenation** - `cat` uses contiguous memcpy per slice for fast tensor joining along any axis. `var_dim` computes variance along a dimension in a single pass with Welford's algorithm.
+- **Lazy Tensors** - `LazyTensor` builds an expression tree that `optimize()` simplifies (constant folding, identity elimination, inverse cancellation) before `materialize()` evaluates it.
+
+- **Sparse Tensors** - `SparseCOO` coordinate-format sparse tensor with `from_dense`, `to_dense`, `coalesce`, sparse+sparse add/mul, sparse×dense `spmm`, and `transpose`. `SparseFormat` tags COO/CSR/CSC.
+
+- **Optimized Concatenation** - `cat` uses contiguous memcpy per slice along any axis; `var_dim` computes variance along a dim in a single Welford pass.
 
 ## Modules
 
 | Module | Description |
 |--------|-------------|
-| `tensor` | Core `Tensor` struct with arithmetic, reduction, activation, and shape operations |
-| `shape` | Shape and stride utilities including broadcasting, reshape, and index computation |
-| `creation` | Factory functions for tensor initialization (zeros, ones, rand, randn, arange, linspace, eye) |
-| `view` | Slicing, indexing, and view operations (select, narrow, chunk, split) |
-| `ops` | Additional operations including softmax, GELU, comparisons, and clipping |
+| `tensor` | Core `Tensor<T>` struct with arithmetic, reduction, activation, matmul, and shape operations |
+| `shape` | `Shape` and `Strides` utilities: broadcasting, reshape, index computation |
+| `creation` | Factory functions (`zeros`, `ones`, `rand`, `randn`, `arange`, `linspace`, `eye`, `full`) |
+| `view` | Slicing and view operations (`select`, `narrow`, `chunk`, `split`) |
+| `ops` | Additional ops including softmax, GELU, comparisons, clipping |
+| `lazy` | `LazyTensor` / `LazyOp` — deferred computation with algebraic optimization |
+| `sparse` | `SparseCOO`, `SparseFormat` — sparse tensors with spmm |
+| `cuda_ops` | CUDA GEMM/GEMV dispatch and quantized (Q4_K/Q6_K) matmul (feature `cuda`) |
+
+## Cargo Features
+
+| Feature | Purpose |
+|---------|---------|
+| `std` (default) | Standard library support |
+| `cuda` | Enables CUDA GEMM/GEMV and quantized matmul (forwards to `axonml-core/cuda`) |
+| `cudnn` | Forwards to `axonml-core/cudnn` (implies `cuda`) |
 
 ## Usage
 
@@ -49,7 +64,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-tensor = "0.1.0"
+axonml-tensor = "0.6.1"
 ```
 
 ### Basic Example
@@ -146,9 +161,9 @@ let row = Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[1, 3]).unwrap();
 let result = matrix.add(&row).unwrap();  // [2, 3]
 ```
 
-### Lazy Tensors *(novel)*
+### Lazy Tensors
 
-Defer computation and let algebraic optimizations simplify your expression before execution.
+Defer computation and let algebraic optimizations simplify the expression tree before execution.
 
 ```rust
 use axonml_tensor::lazy::LazyTensor;
@@ -167,9 +182,28 @@ let optimized = result.optimize();
 let tensor = optimized.materialize();
 ```
 
+### Sparse Tensors
+
+```rust
+use axonml_tensor::sparse::SparseCOO;
+use axonml_tensor::Tensor;
+
+let dense = Tensor::<f32>::from_vec(
+    vec![0.0, 1.0, 0.0, 2.0, 0.0, 3.0],
+    &[2, 3],
+).unwrap();
+
+let sparse = SparseCOO::from_dense(&dense);
+println!("nnz = {}, density = {:.3}", sparse.nnz(), sparse.density());
+
+// sparse @ dense -> dense
+let rhs = Tensor::<f32>::from_vec(vec![1.0; 9], &[3, 3]).unwrap();
+let out = sparse.spmm(&rhs).unwrap();
+```
+
 ## Tests
 
-Run the test suite (98 tests):
+Run the test suite:
 
 ```bash
 cargo test -p axonml-tensor
@@ -183,3 +217,7 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](../../LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+---
+
+_Last updated: 2026-04-16 (v0.6.1)_

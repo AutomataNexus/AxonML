@@ -220,4 +220,8 @@ See the [examples/](../../examples/) directory for working examples.
 
 ## License
 
-Licensed under MIT or Apache 2.0, same as the Axonml framework.
+Licensed under MIT or Apache 2.0, same as the AxonML framework.
+
+## Last updated
+
+0.6.1 (2026-04-16)

@@ -1,24 +1,43 @@
-//! TOTP (Time-based One-Time Password) authentication for AxonML
+//! TOTP Authentication — Time-Based One-Time Password MFA
+//!
+//! Implements RFC 6238 TOTP for multi-factor authentication via the `totp-rs`
+//! crate. `TotpAuth` wraps an issuer name and provides:
+//!
+//! - `generate_secret` — creates a new base32-encoded TOTP secret.
+//! - `setup` — returns a `TotpSetup` containing the secret, an `otpauth://`
+//!   URL, and a base64-encoded SVG QR code (rendered by `qrcode`).
+//! - `verify` — checks a 6-digit code against a stored secret with a
+//!   one-step time-drift tolerance (SHA-1, 30-second period).
+//! - `get_current_code` — debug helper that returns the code valid right now.
 //!
 //! # File
 //! `crates/axonml-server/src/auth/totp.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use super::AuthError;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use qrcode::QrCode;
 use qrcode::render::svg;
 use totp_rs::{Algorithm, Secret, TOTP};
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /// TOTP authentication handler
 pub struct TotpAuth {
@@ -36,6 +55,10 @@ pub struct TotpSetup {
     pub otpauth_url: String,
 }
 
+// =============================================================================
+// Implementation
+// =============================================================================
+
 impl TotpAuth {
     /// Create a new TOTP auth handler
     pub fn new(issuer: &str) -> Self {
@@ -49,6 +72,10 @@ impl TotpAuth {
         let secret = Secret::generate_secret();
         secret.to_encoded().to_string()
     }
+
+    // -------------------------------------------------------------------------
+    // Setup and Verification
+    // -------------------------------------------------------------------------
 
     /// Create TOTP setup data including QR code
     pub fn setup(&self, user_email: &str) -> Result<TotpSetup, AuthError> {
@@ -75,6 +102,10 @@ impl TotpAuth {
         Ok(totp.check_current(code).unwrap_or(false))
     }
 
+    // -------------------------------------------------------------------------
+    // QR Code Generation
+    // -------------------------------------------------------------------------
+
     /// Generate a QR code as a data URL (SVG format)
     fn generate_qr_code(&self, data: &str) -> Result<String, AuthError> {
         let code = QrCode::new(data.as_bytes())
@@ -90,6 +121,10 @@ impl TotpAuth {
         let base64_svg = BASE64.encode(svg_string.as_bytes());
         Ok(format!("data:image/svg+xml;base64,{}", base64_svg))
     }
+
+    // -------------------------------------------------------------------------
+    // Internal Helpers
+    // -------------------------------------------------------------------------
 
     /// Create a TOTP instance for a user
     fn create_totp(&self, secret: &str, user_email: &str) -> Result<TOTP, AuthError> {
@@ -117,6 +152,10 @@ impl TotpAuth {
             .map_err(|e| AuthError::Internal(format!("Code generation failed: {}", e)))
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

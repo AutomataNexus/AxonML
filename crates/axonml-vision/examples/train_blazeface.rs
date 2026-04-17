@@ -1,18 +1,48 @@
-//! BlazeFace Training on WIDER FACE — with checkpointing
+//! BlazeFace Training on WIDER FACE — Anchor-Based Face Detection with Checkpointing
+//!
+//! End-to-end training binary for the BlazeFace single-shot face detector on the
+//! WIDER FACE dataset. Covers anchor generation, IoU-based anchor-to-GT matching,
+//! Focal loss for classification, SmoothL1 loss for bbox regression, and full
+//! checkpoint/resume support for weeks-long runs.
+//!
+//! Key pieces:
+//! - `detect_device()` — probes CUDA availability and falls back to CPU.
+//! - `iou_box_anchor()` — IoU between a pixel-space GT box `[x1,y1,x2,y2]` and a
+//!   center-form anchor `[cx,cy,w,h]`.
+//! - `assign_anchors()` — matches each anchor to its best GT by IoU (>0.35 thresh)
+//!   and guarantees every GT claims at least one anchor; emits classification
+//!   targets, encoded bbox deltas, and a positive-mask vector.
+//! - `encode_bbox()` — encodes GT into anchor-relative `(tx, ty, tw, th)` deltas
+//!   using the standard center/log-scale parameterization.
+//! - `save_checkpoint()` / `save_best()` / `load_weights()` — per-epoch and best
+//!   checkpoint I/O using indexed `param_{i}` keys plus a `latest` symlink copy;
+//!   `load_weights()` also scans the checkpoint directory to detect the resume
+//!   epoch.
+//! - `main()` — parses `--resume` / `--monitor` flags, loads the dataset, builds
+//!   and optionally GPU-hosts the model, runs parallel rayon-based batch loading,
+//!   computes a cls+bbox loss with 4x classification upweighting and
+//!   `num_anchors / num_pos` bbox scaling, steps Adam, tracks best loss, and
+//!   finally runs an inference smoke-test computing precision/recall/F1 at
+//!   IoU>0.3 on a fixed index set.
 //!
 //! # File
 //! `crates/axonml-vision/examples/train_blazeface.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml::monitor::TrainingMonitor;
 use axonml_autograd::Variable;
@@ -27,6 +57,10 @@ use axonml_vision::models::blazeface::BlazeFace;
 
 use rayon::prelude::*;
 use std::time::Instant;
+
+// =============================================================================
+// Device Detection
+// =============================================================================
 
 fn detect_device() -> Device {
     #[cfg(feature = "cuda")]
@@ -77,6 +111,10 @@ fn iou_box_anchor(gt: &[f32; 4], anchor: &[f32; 4]) -> f32 {
 
     if union > 0.0 { inter / union } else { 0.0 }
 }
+
+// -----------------------------------------------------------------------------
+// Anchor assignment
+// -----------------------------------------------------------------------------
 
 fn assign_anchors(
     gt_boxes: &[[f32; 4]],
@@ -144,6 +182,10 @@ fn assign_anchors(
     (cls_target, bbox_target, positive)
 }
 
+// -----------------------------------------------------------------------------
+// Bbox encoding (anchor-relative deltas)
+// -----------------------------------------------------------------------------
+
 fn encode_bbox(gt: &[f32; 4], anchor: &[f32; 4], target: &mut [f32], ai: usize) {
     let gt_cx = (gt[0] + gt[2]) / 2.0;
     let gt_cy = (gt[1] + gt[3]) / 2.0;
@@ -157,7 +199,7 @@ fn encode_bbox(gt: &[f32; 4], anchor: &[f32; 4], target: &mut [f32], ai: usize) 
 }
 
 // =============================================================================
-// Checkpoint helpers
+// Checkpoint Helpers
 // =============================================================================
 
 fn save_checkpoint(model: &BlazeFace, epoch: usize, loss: f32) {
@@ -174,6 +216,10 @@ fn save_checkpoint(model: &BlazeFace, epoch: usize, loss: f32) {
     std::fs::copy(&path, &latest).ok();
 }
 
+// -----------------------------------------------------------------------------
+// Best-loss checkpoint
+// -----------------------------------------------------------------------------
+
 fn save_best(model: &BlazeFace, loss: f32) {
     std::fs::create_dir_all(CHECKPOINT_DIR).ok();
     let path = format!("{}/blazeface_best.axonml", CHECKPOINT_DIR);
@@ -182,6 +228,10 @@ fn save_best(model: &BlazeFace, loss: f32) {
         Err(e) => eprintln!("  Failed to save best model: {e}"),
     }
 }
+
+// -----------------------------------------------------------------------------
+// Resume / weight loading
+// -----------------------------------------------------------------------------
 
 fn load_weights(model: &mut BlazeFace) -> Option<usize> {
     let latest = format!("{}/blazeface_latest.axonml", CHECKPOINT_DIR);
@@ -238,9 +288,11 @@ fn load_weights(model: &mut BlazeFace) -> Option<usize> {
 // Training
 // =============================================================================
 
-// =============================================================================
 // (monitor is now provided by axonml::monitor::TrainingMonitor)
-// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Main entrypoint
+// -----------------------------------------------------------------------------
 
 fn main() {
     let resume = std::env::args().any(|a| a == "--resume");
@@ -254,6 +306,10 @@ fn main() {
     println!("LR:         {LR}");
     println!("Resume:     {resume}");
     println!();
+
+    // -------------------------------------------------------------------------
+    // Dataset + device + model setup
+    // -------------------------------------------------------------------------
 
     // Load dataset
     let t0 = Instant::now();
@@ -329,6 +385,10 @@ fn main() {
     let smooth_l1 = SmoothL1Loss::new();
 
     let mut best_loss = f32::MAX;
+
+    // -------------------------------------------------------------------------
+    // Training loop
+    // -------------------------------------------------------------------------
 
     // Training loop
     for epoch in start_epoch..NUM_EPOCHS {
@@ -516,6 +576,10 @@ fn main() {
     if let Some(ref mon) = monitor {
         mon.set_status("complete");
     }
+
+    // =========================================================================
+    // Inference / Evaluation
+    // =========================================================================
 
     // Inference test
     println!("\n=== Inference Test (conf={CONF_THRESHOLD}, nms={NMS_THRESHOLD}) ===");

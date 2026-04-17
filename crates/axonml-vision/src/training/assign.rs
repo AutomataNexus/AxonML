@@ -1,13 +1,26 @@
-//! Target Assignment — FCOS-style Anchor-Free Target Generation
+//! Target Assignment — FCOS Multi-Scale and Phantom Single-Scale Targets
+//!
+//! Generates per-location training targets for anchor-free detectors.
+//! `FcosTarget` holds class id (-1 for background), LTRB box-edge distances,
+//! and centerness for one feature-map cell. `assign_fcos_targets` walks every
+//! location across multiple FPN scales, picks the smallest-area GT box whose
+//! center contains the location and whose `max(l,t,r,b)` lies in that scale's
+//! configured size range, and computes centerness via
+//! `crate::losses::compute_centerness`. `fcos_targets_to_tensors` flattens
+//! per-scale targets into `(cls [N], bbox [N,4], centerness [N])` tensors.
+//! `assign_phantom_targets` produces a single-scale face-detector target
+//! grid: `cls [H,W]` is 1 in the cell that contains a face center, and
+//! `bbox [H,W,4]` stores `(dx, dy, log w, log h)` regression deltas.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/assign.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

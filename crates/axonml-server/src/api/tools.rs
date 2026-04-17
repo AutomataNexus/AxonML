@@ -4,10 +4,11 @@
 //! `crates/axonml-server/src/api/tools.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -312,22 +313,37 @@ pub async fn convert_model(
     let output_ext = format_extension(&target_format);
     let output_path = input_path.with_extension(&output_ext);
 
-    // Load model
-    let state_dict = load_state_dict(&input_path)
-        .map_err(|e| AuthError::Internal(format!("Failed to load model: {}", e)))?;
+    // ONNX conversion routes through the Python converter (reconstructs the
+    // model in PyTorch from the `.axonml` bundle's architecture tag +
+    // hyperparameters + flat weights, then `torch.onnx.export`). Requires the
+    // input to be a proper bundle (StateDict alone doesn't carry architecture).
+    let num_parameters = if target_format == "onnx" {
+        let (header, _) = axonml_serialize::load_bundle(&input_path).map_err(|e| {
+            AuthError::InvalidInput(format!(
+                "ONNX export requires a `.axonml` ModelBundle (architecture + \
+                 hyperparameters + flat weights). Got: {e}"
+            ))
+        })?;
+        run_onnx_converter(&input_path, &output_path).await?;
+        header.num_parameters as u64
+    } else {
+        // Legacy state-dict ↔ state-dict conversions (axonml / safetensors / json)
+        // go through the in-process serializer.
+        let state_dict = load_state_dict(&input_path)
+            .map_err(|e| AuthError::Internal(format!("Failed to load model: {}", e)))?;
+        let params = count_parameters(&state_dict);
 
-    let num_parameters = count_parameters(&state_dict);
+        let output_format = match target_format.as_str() {
+            "safetensors" => Format::SafeTensors,
+            "axonml" => Format::Axonml,
+            "json" => Format::Json,
+            _ => Format::Axonml,
+        };
 
-    // Convert and save
-    let output_format = match target_format.as_str() {
-        "safetensors" => Format::SafeTensors,
-        "axonml" => Format::Axonml,
-        "json" => Format::Json,
-        _ => Format::Axonml,
+        save_state_dict(&state_dict, &output_path, output_format)
+            .map_err(|e| AuthError::Internal(format!("Failed to save model: {}", e)))?;
+        params
     };
-
-    save_state_dict(&state_dict, &output_path, output_format)
-        .map_err(|e| AuthError::Internal(format!("Failed to save model: {}", e)))?;
 
     let output_size = fs::metadata(&output_path)
         .map_err(|e| AuthError::Internal(e.to_string()))?
@@ -386,6 +402,103 @@ fn format_extension(format: &str) -> String {
         "binary" => "bin".to_string(),
         _ => "axonml".to_string(),
     }
+}
+
+// ============================================================================
+// ONNX Converter Subprocess
+// ============================================================================
+
+/// Invoke `tools/model_converter/convert.py` as a child process to emit ONNX
+/// from an `.axonml` bundle. Returns `AuthError::Internal` on any subprocess
+/// failure (missing interpreter, missing script, non-zero exit, or empty output).
+///
+/// Resolution order:
+///   * `AXONML_CONVERTER_PYTHON` — full path to a Python interpreter with
+///     `torch + onnx + onnxruntime` installed (see `tools/model_converter/README.md`)
+///   * `CONVERTER_VENV` — venv root; `<root>/bin/python` is used
+///   * fallback: `python3` on PATH
+///
+/// Script path:
+///   * `AXONML_CONVERTER_SCRIPT` env var, or
+///   * `/opt/AxonML/tools/model_converter/convert.py`
+async fn run_onnx_converter(
+    input_path: &std::path::Path,
+    output_path: &std::path::Path,
+) -> Result<(), AuthError> {
+    let python = if let Ok(p) = std::env::var("AXONML_CONVERTER_PYTHON") {
+        p
+    } else if let Ok(venv) = std::env::var("CONVERTER_VENV") {
+        format!("{venv}/bin/python")
+    } else {
+        "python3".to_string()
+    };
+    let script = std::env::var("AXONML_CONVERTER_SCRIPT")
+        .unwrap_or_else(|_| "/opt/AxonML/tools/model_converter/convert.py".to_string());
+
+    if !std::path::Path::new(&script).exists() {
+        return Err(AuthError::Internal(format!(
+            "ONNX converter script not found at {script} \
+             — install tools/model_converter or set AXONML_CONVERTER_SCRIPT"
+        )));
+    }
+
+    tracing::info!(
+        input = %input_path.display(),
+        output = %output_path.display(),
+        python = %python,
+        "Running ONNX converter"
+    );
+
+    let result = tokio::process::Command::new(&python)
+        .arg(&script)
+        .arg(input_path)
+        .arg("--format")
+        .arg("onnx")
+        .arg("--output")
+        .arg(output_path)
+        .output()
+        .await
+        .map_err(|e| {
+            AuthError::Internal(format!(
+                "Failed to launch ONNX converter `{python} {script}`: {e} \
+                 — install the converter venv (see tools/model_converter/README.md) \
+                 or set AXONML_CONVERTER_PYTHON"
+            ))
+        })?;
+
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        let last = stderr
+            .lines()
+            .rev()
+            .find(|l| {
+                !l.trim().is_empty()
+                    && !l.contains("Warning")
+                    && !l.contains("DeprecationWarning")
+                    && !l.starts_with(' ')
+            })
+            .unwrap_or_else(|| stderr.trim());
+        tracing::error!(stderr = %stderr, "ONNX converter failed");
+        return Err(AuthError::Internal(format!("ONNX conversion failed: {last}")));
+    }
+
+    // Double-check the output file actually got written. `convert.py` can print
+    // success but still emit a 0-byte file if `torch.onnx.export` silently fails
+    // on an unsupported op, so we guard against that.
+    let out_meta = tokio::fs::metadata(output_path).await.map_err(|e| {
+        AuthError::Internal(format!(
+            "Converter exited 0 but output {} is missing: {e}",
+            output_path.display()
+        ))
+    })?;
+    if out_meta.len() == 0 {
+        return Err(AuthError::Internal(format!(
+            "Converter exited 0 but wrote a 0-byte ONNX file at {}",
+            output_path.display()
+        )));
+    }
+
+    Ok(())
 }
 
 // ============================================================================

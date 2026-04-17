@@ -1,14 +1,51 @@
-//! llm-training — shared utilities for training the nine AxonML LLM architectures
+//! llm-training — Shared Utilities for AxonML LLM Training Binaries
 //!
-//! Provides:
-//! - [`CharTokenizer`] — deterministic character-level tokenizer built from a corpus
-//! - [`TextDataset`] — sliding-window dataset for next-token prediction
-//! - [`lcg_range`] — simple seedable RNG for batch sampling (no external dep)
-//! - Checkpoint resume helpers that work with any AxonML `Module`
-//! - [`lifecycle`] — pause/resume/stop/checkpoint + always-on monitor (hard rule;
-//!   every training binary must adopt it)
+//! Crate root that holds the pieces every `train_<arch>.rs` binary reuses:
+//! - [`CharTokenizer`] — deterministic character-level tokenizer built from a
+//!   corpus via [`CharTokenizer::from_corpus`], with `encode` / `decode` /
+//!   `vocab_size` methods and token 0 reserved for the unknown / padding
+//!   character (`'\0'`).
+//! - [`TextDataset`] — sliding-window dataset for next-token prediction, with
+//!   [`TextDataset::sample_batch`] returning a flat `Vec<u32>` of shape
+//!   `[batch_size * seq_len]`.
+//! - [`lcg_range`] — seedable linear congruential generator (no external RNG
+//!   crate) used for batch sampling.
+//! - [`format_count`] — thousands-separator formatter for reporting parameter
+//!   counts and dataset sizes.
+//! - [`ResumeMode`] / [`find_checkpoint`] / [`load_model_from_checkpoint`] —
+//!   checkpoint-resume helpers that match saved tensors either by name or by
+//!   falling back to shape-based in-order matching, so any AxonML [`Module`]
+//!   can be resumed.
+//! - [`shifted_cross_entropy`] — causal-LM loss that shifts logits/labels by
+//!   one position, flattens to `[N, V]`, and moves the f32 target tensor onto
+//!   the logits' device so the fused GPU cross-entropy kernel is used when
+//!   available.
+//! - [`read_corpus`] — opinionated corpus loader that prints a friendly
+//!   Shakespeare-path hint on failure.
+//! - [`lifecycle`] — re-export of the pause/resume/stop/checkpoint +
+//!   always-on monitor subsystem (hard rule; every training binary adopts it).
 //!
-//! Each LLM has its own binary under `src/bin/train_<name>.rs`.
+//! Each LLM architecture has its own binary under `src/bin/train_<name>.rs`
+//! which pulls these utilities in plus its architecture crate.
+//!
+//! # File
+//! `llm-training/src/lib.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Module Exports & Imports
+// =============================================================================
 
 pub mod lifecycle;
 pub use lifecycle::{LoopAction, TrainingLifecycle, TrainingLifecycleBuilder};

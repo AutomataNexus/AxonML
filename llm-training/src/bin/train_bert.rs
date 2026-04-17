@@ -1,13 +1,25 @@
-//! Train BERT (Masked Language Modeling) on Shakespeare
+//! Train BERT (Masked Language Modeling) — AxonML Shakespeare Trainer
 //!
-//! End-to-end training of the AxonML `BertForMaskedLM` on real text. BERT is
-//! the only **encoder** in AxonML's LLM suite — it uses bidirectional self-
-//! attention instead of causal masking and is trained with a **masked
-//! language modeling** objective: randomly replace 15% of input tokens with
-//! a `[MASK]` token and predict the originals from the (unmasked) context.
+//! End-to-end training binary for the AxonML [`BertForMaskedLM`] on a text
+//! corpus. BERT is the only **encoder** in AxonML's LLM suite: it uses
+//! bidirectional self-attention instead of causal masking and is trained with
+//! a **masked language modeling** objective — randomly replace 15% of input
+//! tokens with a `[MASK]` token and predict the originals from the unmasked
+//! context. This is fundamentally different from GPT-2 / LLaMA / Mistral /
+//! Phi, which are causal decoders trained with next-token prediction.
 //!
-//! This is fundamentally different from GPT-2 / LLaMA / Mistral / Phi, which
-//! are causal decoders trained with next-token prediction.
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser and `print_help`.
+//! - `apply_mlm_mask` — Devlin-et-al. 2018 masking: 80% `[MASK]`, 10% random
+//!   token, 10% unchanged, with `IGNORE_INDEX` used for positions that should
+//!   not contribute to the loss.
+//! - `mlm_loss` — gathers only the masked positions, computes per-row
+//!   [`CrossEntropyLoss`] and averages them into a scalar `Variable`.
+//! - `main` — loads the corpus, builds a `CharTokenizer` + one extra
+//!   `[MASK]` token id, constructs a [`BertConfig`] / [`BertForMaskedLM`],
+//!   resumes from a checkpoint if available, wires up the
+//!   `TrainingLifecycle`, and runs the Adam-optimized MLM training loop
+//!   with per-epoch best-model tracking and perplexity reporting.
 //!
 //! ## MLM details (Devlin et al., 2018)
 //! Of the 15% chosen positions:
@@ -20,6 +32,25 @@
 //!   cargo run --release --bin train_bert -p llm-training --features cuda
 //!   cargo run --release --bin train_bert -p llm-training --features cuda -- \
 //!       --epochs 5 --bs 16 --seq-len 128 --mlm-prob 0.15
+//!
+//! # File
+//! `llm-training/src/bin/train_bert.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -292,7 +323,7 @@ fn mlm_loss(logits: &Variable, labels: &[u32], vocab_size: usize) -> Variable {
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

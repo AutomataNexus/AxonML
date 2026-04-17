@@ -1,24 +1,47 @@
-//! Notebook Cell Executor for AxonML
+//! Notebook Cell Executor — Compile and Run AxonML Rust Cells
+//!
+//! `NotebookExecutor` runs notebook code cells by materializing a small
+//! Cargo project per execution in `/tmp/axonml-notebooks/<uuid>/` (gated by
+//! `ALLOWED_WORK_BASES` of `/tmp/` and `/var/tmp/` to contain filesystem
+//! writes), then invoking `cargo build` followed by `cargo run` with a
+//! timeout. `build_source` concatenates the current cell with all preceding
+//! code cells, sorts `use` / `extern crate` lines into an import prelude,
+//! and wraps the remaining code in a `fn main()`. `generate_cargo_toml`
+//! points the generated project at the local `/opt/AxonML/crates/axonml`
+//! crate. Markdown cells short-circuit to echo the source. `clean_compiler_output`
+//! rewrites `/tmp/...` paths to `cell` for readable diagnostics.
+//! `ExecutionResult` carries success/stdout/stderr/duration; the free
+//! function `result_to_cell_output` adapts it into a `CellOutput` with
+//! `execute_result` or `error` type plus traceback.
 //!
 //! # File
 //! `crates/axonml-server/src/training/notebook_executor.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use crate::db::notebooks::{CellOutput, CellType, NotebookCell};
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
 use tracing::{error, info};
+
+// =============================================================================
+// Result Type
+// =============================================================================
 
 /// Result of cell execution
 #[derive(Debug)]
@@ -30,8 +53,16 @@ pub struct ExecutionResult {
     pub duration_ms: u64,
 }
 
+// =============================================================================
+// Sandbox Constants
+// =============================================================================
+
 /// Allowed base directories for notebook execution
 const ALLOWED_WORK_BASES: &[&str] = &["/tmp/", "/var/tmp/"];
+
+// =============================================================================
+// Executor Struct
+// =============================================================================
 
 /// Notebook cell executor
 pub struct NotebookExecutor {
@@ -39,6 +70,10 @@ pub struct NotebookExecutor {
 }
 
 impl NotebookExecutor {
+    // -------------------------------------------------------------------------
+    // Construction
+    // -------------------------------------------------------------------------
+
     /// Create a new executor with a working directory.
     /// SECURITY: work_dir must be under an allowed temp base directory.
     pub fn new(work_dir: PathBuf) -> Self {
@@ -60,6 +95,10 @@ impl NotebookExecutor {
 
         Self { work_dir: safe_dir }
     }
+
+    // -------------------------------------------------------------------------
+    // Cell Execution Driver
+    // -------------------------------------------------------------------------
 
     /// Execute a single cell with context from previous cells
     pub async fn execute_cell(
@@ -154,6 +193,10 @@ impl NotebookExecutor {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Source Assembly
+    // -------------------------------------------------------------------------
+
     /// Build complete Rust source from cells
     fn build_source(&self, current_cell: &NotebookCell, previous_cells: &[NotebookCell]) -> String {
         let mut imports = Vec::new();
@@ -221,6 +264,10 @@ impl NotebookExecutor {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Cargo Project Generation
+    // -------------------------------------------------------------------------
+
     /// Generate Cargo.toml for the temporary project
     fn generate_cargo_toml(&self) -> String {
         r#"[package]
@@ -237,6 +284,10 @@ debug = false
 "#
         .to_string()
     }
+
+    // -------------------------------------------------------------------------
+    // Cargo Build and Run
+    // -------------------------------------------------------------------------
 
     /// Run cargo build and execute
     async fn run_cargo(&self, exec_dir: &PathBuf, timeout_ms: u64) -> ExecutionResult {
@@ -341,6 +392,10 @@ debug = false
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Output Cleanup
+    // -------------------------------------------------------------------------
+
     /// Clean up compiler output to be more readable in the notebook
     fn clean_compiler_output(&self, output: &str) -> String {
         let mut cleaned = Vec::new();
@@ -362,11 +417,19 @@ debug = false
     }
 }
 
+// =============================================================================
+// Default Impl
+// =============================================================================
+
 impl Default for NotebookExecutor {
     fn default() -> Self {
         Self::new(PathBuf::from("/tmp/axonml-notebooks"))
     }
 }
+
+// =============================================================================
+// Result Adapter
+// =============================================================================
 
 /// Convert execution result to cell output
 pub fn result_to_cell_output(result: ExecutionResult, execution_count: u32) -> CellOutput {

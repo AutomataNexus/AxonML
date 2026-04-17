@@ -1,18 +1,47 @@
-//! Code Generation
+//! Code Generation — Interpreter and Cranelift Native Backends
+//!
+//! Provides `CompiledFunction`, the executable output of the JIT, holding an
+//! `Arc<Graph>` and a `CompiledKind` enum that is either `Interpreted`
+//! (tree-walking evaluator) or `Native` (a raw `*const u8` pointer plus size
+//! returned by Cranelift). `CompiledFunction::run` dispatches on kind; native
+//! execution transmutes the pointer to `extern "C" fn(*const f32, *mut f32)`,
+//! flattens inputs, and sizes the output buffer from the graph's output node
+//! shapes. The interpreter path (`run_interpreted` / `eval_node`) walks the
+//! graph in topological order, implementing Add/Sub/Mul/Div/Pow/Max/Min scalar
+//! and tensor ops, unary math (Neg/Abs/Sqrt/Exp/Log/Sin/Cos/Tanh), activations
+//! (Relu/Sigmoid/Gelu via the tanh approximation/Silu), reductions (Sum, Mean,
+//! and axis-aware `SumAxis`/`MeanAxis`/`MaxAxis`), shape ops (Reshape, Squeeze,
+//! Unsqueeze, Broadcast, Contiguous — pass-through — and a full strided
+//! Transpose), 2D matmul, comparisons (Gt/Lt/Eq), and Where selection. Helpers
+//! `normalize_axis`, `reduce_axis` (generic fn-pointer reducer with keepdim
+//! handling), and `matmul_impl` (validated 2D GEMM) support the interpreter.
+//! `JitCompiler` owns the `Optimizer` and `FunctionCache`, gates native codegen
+//! behind `enable_native`, and in `compile_native` builds a Cranelift `JITModule`
+//! with a `fn(*const f32, *mut f32)` signature, lowers each IR node through
+//! `codegen_node` (Input load, Output, Constant, Add/Sub/Mul/Div, Neg/Abs/Sqrt,
+//! AddScalar/MulScalar — unsupported ops bubble up as `UnsupportedOp`), stores
+//! the final output, finalizes and leaks the module so the code remains live.
+//! Tests cover elementwise add, activation chains, sigmoid accuracy, 2D matmul,
+//! and cache hit behaviour.
 //!
 //! # File
 //! `crates/axonml-jit/src/codegen.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::sync::Arc;
 
@@ -20,6 +49,10 @@ use crate::cache::FunctionCache;
 use crate::error::{JitError, JitResult};
 use crate::ir::{Graph, Node, NodeId, Op};
 use crate::optimize::Optimizer;
+
+// =============================================================================
+// CompiledFunction
+// =============================================================================
 
 /// A compiled function ready for execution.
 #[derive(Clone)]
@@ -61,6 +94,10 @@ impl CompiledFunction {
         &self.graph
     }
 
+    // -------------------------------------------------------------------------
+    // Execution Dispatch
+    // -------------------------------------------------------------------------
+
     /// Executes the compiled function with the given inputs.
     pub fn run(&self, inputs: &[(&str, &[f32])]) -> JitResult<Vec<f32>> {
         match &self.kind {
@@ -90,6 +127,10 @@ impl CompiledFunction {
             }
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Interpreter
+    // -------------------------------------------------------------------------
 
     /// Interpreted execution.
     fn run_interpreted(&self, inputs: &[(&str, &[f32])]) -> JitResult<Vec<f32>> {
@@ -430,6 +471,10 @@ impl CompiledFunction {
     }
 }
 
+// =============================================================================
+// Reduction and MatMul Helpers
+// =============================================================================
+
 fn normalize_axis(axis: i32, ndim: usize) -> usize {
     if axis < 0 {
         (ndim as i32 + axis) as usize
@@ -550,6 +595,10 @@ fn matmul_impl(a: &[f32], b: &[f32], a_shape: &[usize], b_shape: &[usize]) -> Ji
     Ok(result)
 }
 
+// =============================================================================
+// JitCompiler
+// =============================================================================
+
 /// JIT compiler.
 pub struct JitCompiler {
     optimizer: Optimizer,
@@ -584,6 +633,10 @@ impl JitCompiler {
         self.use_native = enable;
     }
 
+    // -------------------------------------------------------------------------
+    // Compilation Pipeline
+    // -------------------------------------------------------------------------
+
     /// Compiles a graph into an executable function.
     pub fn compile(&self, graph: &Graph) -> JitResult<CompiledFunction> {
         // Check cache
@@ -617,6 +670,10 @@ impl JitCompiler {
             kind: CompiledKind::Interpreted,
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Cranelift Native Codegen
+    // -------------------------------------------------------------------------
 
     fn compile_native(&self, graph: &Graph) -> JitResult<CompiledFunction> {
         use cranelift::prelude::*;
@@ -803,6 +860,10 @@ impl JitCompiler {
         0
     }
 
+    // -------------------------------------------------------------------------
+    // Cache Accessors
+    // -------------------------------------------------------------------------
+
     /// Returns cache statistics.
     pub fn cache_stats(&self) -> crate::cache::CacheStats {
         self.cache.stats()
@@ -819,6 +880,10 @@ impl Default for JitCompiler {
         Self::new()
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

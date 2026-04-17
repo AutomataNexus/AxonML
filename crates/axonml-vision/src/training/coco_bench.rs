@@ -1,13 +1,31 @@
-//! COCO Evaluation Benchmarks — Full Detection Model Evaluation Suite
+//! COCO Detection Benchmarks — mAP / COCO-mAP Evaluation Suite
+//!
+//! Full detection-model evaluation harness. Public entry point
+//! `evaluate_helios_coco` runs `Helios` over a `CocoDataset`, converting
+//! `Detection` boxes to normalized `DetectionResult`s and `CocoAnnotation`s
+//! to `GroundTruth`, then returns `(mAP@50, COCO mAP@[0.5:0.95])` via
+//! `compute_map` / `compute_coco_map`. The internal `FullEvalResult` struct
+//! carries per-model statistics (param count, image / detection counts,
+//! mean / P50 / P95 latency, FPS, mAP@50, mAP@75, COCO mAP, average box area
+//! and confidence). Helpers `diverse_gt` synthesizes deterministic
+//! pseudo-random ground truth with mixed small / medium / large boxes,
+//! `make_input` builds varied gradient-pattern input tensors,
+//! `run_full_eval` drives warmup + timed iteration + statistics aggregation,
+//! and `print_summary_table` / `print_detection_stats` emit human-readable
+//! summary tables. Tests cover Helios-Nano / Helios-Small multi-resolution
+//! sweeps, NanoDet, Nexus, the face-detector trio (Phantom / BlazeFace /
+//! RetinaFace), an all-models comparison run, a synthetic mAP-pipeline
+//! validation, and an optional real `COCO_ROOT` val2017 evaluation.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/coco_bench.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

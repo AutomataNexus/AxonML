@@ -1,13 +1,23 @@
-//! Visual Question Answering (VQA)
+//! Visual Question Answering — Multi-Modal Vision+Language Model
+//!
+//! VQA model combining image and text understanding via cross-attention fusion.
+//! `VisionEncoder` converts images to patch tokens (Conv2d patch embedding +
+//! transformer encoder layers + LayerNorm). `TextEncoder` embeds token IDs via
+//! `Embedding` and processes through transformer encoder layers. `VQAModel` fuses
+//! the two via `CrossAttention` (text queries attend to image features), mean-pools
+//! over the sequence dimension, and classifies through a 2-layer MLP head.
+//! `forward_vqa()` takes image [N,3,H,W] and question token IDs [N,seq_len],
+//! returning [N, num_answers] logits. `small()` factory creates a test-sized model.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/vqa.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

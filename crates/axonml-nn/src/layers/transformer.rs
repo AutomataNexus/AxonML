@@ -1,13 +1,21 @@
-//! Transformer Architecture - Encoder-Decoder Transformer
+//! Transformer encoder/decoder stacks and the full `Seq2SeqTransformer`.
+//!
+//! 975 lines. `TransformerEncoderLayer` (self-attention + FFN + LayerNorm +
+//! residual), `TransformerDecoderLayer` (self-attention + cross-attention +
+//! FFN + LayerNorm + residual), `TransformerEncoder` (N encoder layers),
+//! `TransformerDecoder` (N decoder layers), `Seq2SeqTransformer` (source
+//! embedding + target embedding + encoder + decoder + output projection,
+//! with causal masking for the decoder). All implement `Module`.
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/transformer.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,13 +1,20 @@
-//! Sequential - Sequential Container for Modules
+//! `Sequential` — ordered container that chains Module forward passes.
+//!
+//! 198 lines. `Sequential::new()`, `.add(Box<dyn Module>)`, `.forward()`
+//! (feeds each layer's output as the next layer's input), and the full
+//! `Module` trait impl (parameters, train/eval, zero_grad, to_device
+//! all propagate to children). Builder pattern: `Sequential::new().add(
+//! Box::new(Linear::new(784, 128))).add(Box::new(ReLU)).add(...)`.
 //!
 //! # File
 //! `crates/axonml-nn/src/sequential.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

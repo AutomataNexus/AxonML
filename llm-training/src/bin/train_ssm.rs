@@ -1,24 +1,54 @@
-//! Train SSM (Mamba-style) on Shakespeare
+//! Train SSM (Mamba-style) — AxonML Shakespeare Trainer
 //!
-//! End-to-end training of the AxonML `SSMForCausalLM` on real text, with:
-//! - Mamba-style selective-scan SSM blocks (depthwise Conv1d → selective scan
-//!   → gated output)
-//! - Token Embedding → N stacked SSM blocks → RMSNorm → LM head
-//! - GPU acceleration (`--features cuda`)
-//! - Live browser training monitor
-//! - Periodic best-model + full-checkpoint saving
-//! - Resume from latest / best / specific path
-//! - In-flight greedy text sampling
+//! End-to-end training binary for the AxonML [`SSMForCausalLM`] on a text
+//! corpus. The model is a pure state-space-model stack: Token Embedding →
+//! N Mamba-style selective-scan SSM blocks (depthwise `Conv1d` of kernel
+//! `d_conv` → selective scan over inner dim `d_inner = d_model *
+//! ssm_expansion` with state dim `d_state` and `dt_rank = ceil(d_model / 16)`)
+//! → RMSNorm → LM head.
+//!
+//! `SSMForCausalLM` exposes its own `forward_with_loss` method (ssm.rs),
+//! so this binary calls it directly instead of the shared
+//! [`shifted_cross_entropy`] helper.
+//!
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser and `print_help`,
+//!   covering the Mamba hyperparameter set (`d_state` / `d_conv` /
+//!   `ssm_expansion`).
+//! - `generate` — greedy auto-regressive sampler that re-feeds the tail of
+//!   the running id buffer into `SSMForCausalLM::forward_ids` and picks
+//!   `argmax` on the last-step logits.
+//! - `pick_device` / `device_name` — CUDA-feature-gated device detection.
+//! - `main` — validates `num_layers >= 1`, loads the corpus, builds
+//!   tokenizer + dataset, computes `d_inner` and `dt_rank`, constructs
+//!   [`SSMConfig`] / [`SSMForCausalLM`], resumes from a checkpoint,
+//!   migrates params to GPU when available, wires the `TrainingLifecycle`,
+//!   and runs the Adam-optimized training loop with periodic greedy
+//!   samples and a 400-char final generation.
 //!
 //! Usage:
 //!   cargo run --release --bin train_ssm -p llm-training --features cuda
 //!   cargo run --release --bin train_ssm -p llm-training --features cuda -- \
 //!       --epochs 10 --bs 16 --seq-len 128 --layers 4 --d-state 16 --resume latest
 //!
-//! `SSMForCausalLM` exposes its own `forward_with_loss` method (ssm.rs),
-//! added in the same framework change that introduced the wrapper itself,
-//! so this binary calls it directly instead of the shared
-//! `shifted_cross_entropy` helper.
+//! # File
+//! `llm-training/src/bin/train_ssm.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -221,7 +251,7 @@ fn generate(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

@@ -1,27 +1,54 @@
-//! Train Trident-Coder from scratch on code corpora.
+//! Train Trident-Coder (1.58-bit Ternary SLM) — AxonML From-Scratch Trainer
 //!
-//! End-to-end training of the AxonML `TridentModel` — a 1.58-bit ternary
-//! small language model — on pre-tokenized code tokens, with full Phase-0
-//! lifecycle controls (pause / resume / stop / checkpoint / monitor).
+//! End-to-end training binary for the AxonML [`TridentModel`] — a 1.58-bit
+//! ternary small language model — on pre-tokenized code tokens, with full
+//! Phase-0 lifecycle controls (pause / resume / stop / checkpoint /
+//! monitor) and a linear-warmup → cosine-decay learning-rate schedule.
 //!
 //! # Configs
-//! - `smoke`  : ~30M-param tiny 1B-shaped model for local CPU sanity checks.
-//! - `1b`     : 24L × 2048d × GQA 4:1, ReLU²-gated FFN, SubLN, RoPE θ=500k.
-//! - `3b`     : stubbed for later scaling (don't train yet).
+//! Driven by the `ModelVariant` enum (`Smoke` / `OneB` / `ThreeB`):
+//! - `smoke`  : ~30M-param tiny 1B-shaped model for local CPU sanity
+//!   checks; defaults to `seq_len=64`, `batch_size=8`, `steps=1000`,
+//!   no step-level checkpoints.
+//! - `1b`     : 24L × 2048d × GQA 4:1, ReLU²-gated FFN, SubLN, RoPE
+//!   θ=500k; defaults to `seq_len=4096`, `batch_size=4`, `steps=100_000`,
+//!   rotating checkpoint every 1000 steps.
+//! - `3b`     : stubbed for later scaling — defaults carried over from
+//!   `1b` but don't train yet.
 //!
 //! # Tokenizer
 //! Loads the 32k-vocab byte-level BPE at
-//! `/opt/AxonML/tokenizers/trident-coder-bpe/tokenizer.json`.
+//! `/opt/AxonML/tokenizers/trident-coder-bpe/tokenizer.json` via the
+//! `tokenizers` crate (`Tokenizer::from_file`).
 //!
 //! # Dataset
-//! Expects pre-tokenized token IDs on disk as a flat u32 little-endian file
-//! (`.bin`). For smoke runs without a pre-tokenized corpus, the binary will
-//! tokenize `/opt/datasets/text/shakespeare.txt` into
-//! `/tmp/shakespeare.trident-bpe.bin` and cache it.
+//! Expects pre-tokenized token IDs on disk as a flat u32 little-endian
+//! file (`.bin`). For smoke runs without a pre-tokenized corpus,
+//! `build_or_load_smoke_dataset` tokenizes
+//! `/opt/datasets/text/shakespeare.txt` into
+//! `/tmp/shakespeare.trident-bpe.bin` and caches it. `load_token_bin`
+//! reads the `.bin` file into an in-memory `Vec<u32>` after validating
+//! length-mod-4, and `sample_batch` draws random sliding-window batches
+//! using [`lcg_range`].
 //!
 //! The companion Python pre-tokenizer
 //! `/opt/AxonML/llm-training/tools/pretokenize_stack_v2.py` emits u32-LE
 //! shards from The Stack v2 for the real run.
+//!
+//! # What this file contains
+//! - `ModelVariant` + `default_*` helpers + `Config` + `Config::from_args`
+//!   with a two-pass argv parser (first pass reads `--config` so later
+//!   defaults can depend on it) and `print_help`.
+//! - `load_tokenizer`, `build_or_load_smoke_dataset`, `load_token_bin`,
+//!   `sample_batch` — tokenizer + dataset I/O.
+//! - `cosine_lr` — linear-warmup then cosine-decay to `lr * min_lr_ratio`.
+//! - `pick_device` / `device_name` — CUDA-feature-gated device detection.
+//! - `main` — sets up tokenizer, dataset, `TridentConfig::smoke /
+//!   trident_1b / trident_3b`, resumes from a checkpoint, migrates params
+//!   to GPU, wires the `TrainingLifecycle`, and runs the LR-scheduled
+//!   Adam-optimized training loop using the model's built-in
+//!   `forward_with_loss` for causal-LM loss, tracking best loss and
+//!   flushing final + step checkpoints on exit.
 //!
 //! # Usage
 //! ```bash
@@ -41,6 +68,25 @@
 //! cargo run --release --bin train_ctl -- resume
 //! cargo run --release --bin train_ctl -- stop
 //! ```
+//!
+//! # File
+//! `llm-training/src/bin/train_trident_code.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -422,7 +468,7 @@ fn cosine_lr(step: usize, total_steps: usize, warmup_steps: usize, lr: f32, min_
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

@@ -1,18 +1,33 @@
-//! Error types for the LLM module.
+//! LLM Error Types — Failure Modes for Transformer Operations
+//!
+//! Defines `LLMError`, the `thiserror`-derived error enum for the `axonml-llm`
+//! crate. Variants cover invalid configuration, shape mismatch (expected vs
+//! actual string pair), invalid input, generation failures, model loading
+//! errors, core framework errors (`#[from] axonml_core::Error`), IO errors
+//! (stored as `String` to avoid duplicate `From` impls), network/parse errors,
+//! missing-model and missing-weight errors, unsupported-format errors,
+//! tensor-layer errors, and a hub error variant. A manual `From<HubError>`
+//! impl stringifies hub errors into `LLMError::HubError`. The `LLMResult<T>`
+//! alias is the corresponding `Result` type used across the crate.
 //!
 //! # File
 //! `crates/axonml-llm/src/error.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Error Types
+// =============================================================================
 
 use thiserror::Error;
 
@@ -83,6 +98,10 @@ pub enum LLMError {
     #[error("Hub error: {0}")]
     HubError(String),
 }
+
+// =============================================================================
+// Conversions
+// =============================================================================
 
 impl From<crate::hub::HubError> for LLMError {
     fn from(e: crate::hub::HubError) -> Self {

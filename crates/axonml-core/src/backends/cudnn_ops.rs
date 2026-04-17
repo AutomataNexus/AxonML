@@ -1,13 +1,22 @@
-//! CUDNN Backend - cuDNN-Accelerated Operations
+//! cuDNN-accelerated conv2d operations — forward, backward-data, backward-filter.
+//!
+//! Three public functions wrapping cuDNN 8 via cudarc's Cudnn bindings:
+//! `cudnn_conv2d_forward` (auto-selects best algorithm, optional bias add via
+//! CUDA kernel, Tensor Core math when available), `cudnn_conv2d_backward_data`
+//! (gradient w.r.t. input), `cudnn_conv2d_backward_filter` (gradient w.r.t.
+//! weight). All three handle grouped convolution, return `Option<CudaSlice<f32>>`
+//! (caller falls back to im2col+GEMM or CPU if cuDNN fails), and allocate
+//! workspace on the fly. Feature-gated behind `cudnn`.
 //!
 //! # File
 //! `crates/axonml-core/src/backends/cudnn_ops.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 18, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,13 +1,23 @@
-//! Feature Pyramid Network (FPN)
+//! Feature Pyramid Network — Multi-Scale Feature Fusion
+//!
+//! Implements FPN (Lin et al., 2017) for multi-scale feature refinement. Takes
+//! backbone features at multiple resolutions (e.g., C2-C5 from ResNet) and
+//! produces refined pyramid levels (P2-P5) with uniform channel dimension.
+//! Architecture: 1x1 lateral convolutions reduce each backbone level to
+//! `out_channels`, then a top-down pathway upsamples deeper features (via
+//! `interpolate_var` for graph tracking) and adds them to shallower laterals.
+//! 3x3 smoothing convolutions reduce aliasing on each output level. `FPN::forward()`
+//! accepts a slice of multi-scale Variables and returns the refined pyramid.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/fpn.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

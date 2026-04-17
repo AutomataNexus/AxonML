@@ -1,13 +1,24 @@
-//! Anomaly Detection Models
+//! Anomaly Detection Models — PatchCore and Student-Teacher
+//!
+//! Two anomaly detection architectures for manufacturing inspection. `PatchCore`
+//! uses a frozen CNN backbone (`PatchCoreBackbone`: 3-layer Conv2d+BN+ReLU) to
+//! extract spatial patch features, stored in a coreset memory bank during `fit()`.
+//! Inference computes max nearest-neighbor distance to detect anomalies with
+//! per-pixel heatmaps via `predict()`. `StudentTeacher` trains a lightweight
+//! student network to match a frozen teacher on normal data; anomalies are
+//! detected by MSE disagreement between teacher and student feature outputs.
+//! Both implement `Module` and produce `AnomalyResult` with score, threshold,
+//! and optional spatial heatmap.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/anomaly.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

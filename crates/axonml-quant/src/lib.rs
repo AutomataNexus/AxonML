@@ -1,13 +1,22 @@
-//! Axonml Quant - Model Quantization Library
+//! Model quantization for AxonML — GGUF formats + BitNet I2_S ternary.
+//!
+//! `types` (QuantType enum, block structs for Q8_0/Q4_0/Q4_1/Q5_0/Q5_1/F16),
+//! `quantize` (tensor/model quantization with RMSE error analysis),
+//! `dequantize` (block/tensor reconstruction to f32), `bitnet` (I2_S 1.58-bit
+//! ternary — 128-weight blocks, fused add-only matmul, int8 activation
+//! quantizer, AVX-VNNI dispatch scaffolded), `calibration` (MinMax/Percentile/
+//! MeanStd/Entropy methods), `inference` (QuantizedLinear drop-in layer,
+//! QuantizedModel wrapper), `error` (QuantError/QuantResult).
 //!
 //! # File
 //! `crates/axonml-quant/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

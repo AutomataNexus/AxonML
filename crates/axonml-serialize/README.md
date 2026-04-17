@@ -9,32 +9,43 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
-  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
   <img src="https://img.shields.io/badge/part%20of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
 ## Overview
 
-`axonml-serialize` provides model serialization functionality for the AxonML machine learning framework. It supports saving and loading trained models, including state dictionaries, training checkpoints, and format conversion utilities for interoperability with PyTorch and ONNX.
+`axonml-serialize` handles model state I/O for AxonML: named-parameter
+`StateDict`s, `Checkpoint`s with full training state, and format conversion
+for PyTorch / ONNX interop. The native `.axonml` format is bincode-encoded
+binary; JSON and SafeTensors (behind the `safetensors` feature) are also
+supported. Format is detected from the file extension with magic-byte
+fallback.
 
 ## Features
 
-- **Multiple Formats** - Support for AxonML native binary (.axonml), JSON (.json), and SafeTensors (.safetensors) formats
-- **State Dictionaries** - PyTorch-style state_dict for storing and loading model parameters
-- **Training Checkpoints** - Save complete training state including model, optimizer, epoch, and metrics
-- **Format Detection** - Automatic format detection from file extensions and magic bytes
-- **PyTorch Conversion** - Utilities for converting between PyTorch and AxonML naming conventions
-- **ONNX Shape Utilities** - Helper functions for ONNX shape conversion with dynamic dimension support
-- **Metadata Support** - Attach custom metadata to state dictionaries and checkpoints
+- **Multiple Formats** — native bincode `.axonml`, `.json`, `.safetensors` (feature-gated)
+- **State Dictionaries** — `StateDict` with `from_module`, `insert`, `get`, `entries`, `keys`, `merge`, `filter_prefix`, `strip_prefix`, `add_prefix`, `remove`, `set_metadata` / `get_metadata`, `total_params`, `size_bytes`, `summary`
+- **Training Checkpoints** — `Checkpoint` + `CheckpointBuilder` + `TrainingState` with loss / val-loss / lr / custom metric history, best-metric tracking, epoch / step counters, ISO-8601 timestamp, config map
+- **Format Detection** — `detect_format(path)` by extension, `detect_format_from_bytes(bytes)` by magic bytes; `Format::is_binary`, `Format::supports_streaming`, `Format::extension`, `Format::name`, `Format::all`
+- **PyTorch Conversion** — `from_pytorch_key`, `to_pytorch_key`, `pytorch_layer_mapping`, `convert_from_pytorch`, `transpose_linear_weights`
+- **ONNX Utilities** — `to_onnx_shape` / `from_onnx_shape` (dynamic batch dim handling), `OnnxOpType` with `parse_op` / `as_str`
+- **High-Level API** — `save_model(&model, path)` / `load_model(&model, path)` (name-matched param load with positional fallback), `save_state_dict` / `load_state_dict`, `save_checkpoint` / `load_checkpoint`
+
+## Feature Flags
+
+| Flag | Effect |
+|------|--------|
+| `safetensors` | Enables `.safetensors` save/load (f32 / f16 / bf16 / f64 input), pulls `safetensors = "0.3"` and `half` |
 
 ## Modules
 
 | Module | Description |
 |--------|-------------|
-| `state_dict` | StateDict and TensorData for storing model parameters by name |
-| `checkpoint` | Checkpoint and TrainingState for saving/resuming training sessions |
-| `format` | Format enum and detection utilities for different serialization formats |
-| `convert` | Conversion utilities for PyTorch and ONNX interoperability |
+| `state_dict` | `TensorData`, `StateDictEntry`, `StateDict` |
+| `checkpoint` | `Checkpoint`, `CheckpointBuilder`, `TrainingState` |
+| `format` | `Format` enum and detection helpers |
+| `convert` | PyTorch / ONNX conversion utilities, `OnnxOpType` |
 
 ## Usage
 
@@ -42,24 +53,33 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-serialize = "0.1.0"
+axonml-serialize = "0.6.1"
+
+# Or with SafeTensors:
+axonml-serialize = { version = "0.6.1", features = ["safetensors"] }
 ```
 
 ### Saving and Loading Models
 
 ```rust
-use axonml_serialize::{save_model, load_state_dict};
+use axonml_serialize::{save_model, load_model, load_state_dict};
 use axonml_nn::Linear;
 
 // Save a model (format detected from extension)
 let model = Linear::new(10, 5);
-save_model(&model, "model.axonml")?;  // Binary format
-save_model(&model, "model.json")?;     // JSON format
+save_model(&model, "model.axonml")?;        // Binary format
+save_model(&model, "model.json")?;          // JSON format
+// save_model(&model, "model.safetensors")?; // Requires `safetensors` feature
 
-// Load state dictionary
-let state_dict = load_state_dict("model.axonml")?;
-println!("Parameters: {}", state_dict.total_params());
-println!("Size: {} bytes", state_dict.size_bytes());
+// Inspect the state dict directly
+let sd = load_state_dict("model.axonml")?;
+println!("Parameters: {}", sd.total_params());
+println!("Size: {} bytes", sd.size_bytes());
+
+// Or load weights back into a model (name-matched, positional fallback)
+let target = Linear::new(10, 5);
+let loaded = load_model(&target, "model.axonml")?;
+println!("Loaded {loaded} parameters");
 ```
 
 ### Working with State Dictionaries
@@ -86,12 +106,10 @@ state_dict.insert("linear.bias".to_string(), bias);
 assert!(state_dict.contains("linear.weight"));
 println!("{}", state_dict.summary());
 
-// Filter by prefix
+// Filter / rename
 let linear_params = state_dict.filter_prefix("linear.");
-
-// Strip prefix from keys
-let stripped = state_dict.strip_prefix("linear.");
-assert!(stripped.contains("weight"));
+let stripped       = state_dict.strip_prefix("linear.");
+let prefixed       = state_dict.add_prefix("module.");
 ```
 
 ### Training Checkpoints
@@ -103,23 +121,30 @@ use axonml_serialize::{Checkpoint, TrainingState, save_checkpoint, load_checkpoi
 let mut training_state = TrainingState::new();
 training_state.record_loss(0.5);
 training_state.record_loss(0.3);
+training_state.record_val_loss(0.35);
+training_state.record_lr(1e-3);
+training_state.record_metric("accuracy", 0.92);
 training_state.update_best("loss", 0.3, false);  // lower is better
 
 training_state.next_epoch();
 training_state.next_step();
 
-// Create checkpoint with builder pattern
+// Average last N losses
+let smoothed = training_state.avg_loss(10);
+
+// Build checkpoint
 let checkpoint = Checkpoint::builder()
     .model_state(model_state_dict)
     .optimizer_state(optimizer_state_dict)
     .training_state(training_state)
+    .rng_state(rng_bytes)
     .epoch(10)
     .global_step(5000)
     .config("learning_rate", "0.001")
     .config("batch_size", "32")
     .build();
 
-// Save and load checkpoints
+// Save and load checkpoints (bincode)
 save_checkpoint(&checkpoint, "checkpoint.ckpt")?;
 let loaded = load_checkpoint("checkpoint.ckpt")?;
 
@@ -133,11 +158,9 @@ println!("Best metric: {:?}", loaded.best_metric());
 use axonml_serialize::{detect_format, detect_format_from_bytes, Format};
 
 // Detect from file extension
-let format = detect_format("model.json");
-assert_eq!(format, Format::Json);
-
-let format = detect_format("model.safetensors");
-assert_eq!(format, Format::SafeTensors);
+assert_eq!(detect_format("model.json"),        Format::Json);
+assert_eq!(detect_format("model.safetensors"), Format::SafeTensors);
+assert_eq!(detect_format("model.bin"),         Format::Axonml); // default
 
 // Detect from file contents
 let bytes = b"{\"key\": \"value\"}";
@@ -152,11 +175,13 @@ assert!(!Format::Json.is_binary());
 ### PyTorch Conversion
 
 ```rust
-use axonml_serialize::{from_pytorch_key, convert_from_pytorch, transpose_linear_weights};
+use axonml_serialize::{
+    from_pytorch_key, to_pytorch_key, pytorch_layer_mapping,
+    convert_from_pytorch, transpose_linear_weights,
+};
 
 // Convert PyTorch key naming to AxonML
 let key = from_pytorch_key("module.layer1.weight");
-assert_eq!(key, "layer1.weight");
 
 // Convert entire state dictionary
 let axonml_dict = convert_from_pytorch(&pytorch_dict);
@@ -178,8 +203,8 @@ assert_eq!(onnx_shape, vec![-1, 3, 224, 224]);
 let shape = from_onnx_shape(&[-1, 3, 224, 224], 1);
 assert_eq!(shape, vec![1, 3, 224, 224]);
 
-// ONNX operator type mapping
-let op = OnnxOpType::from_str("Relu");
+// ONNX operator name mapping
+let op = OnnxOpType::parse_op("Relu");
 assert_eq!(op.as_str(), "Relu");
 ```
 
@@ -189,7 +214,7 @@ assert_eq!(op.as_str(), "Relu");
 use axonml_serialize::StateDict;
 
 let mut state_dict = StateDict::new();
-state_dict.set_metadata("framework_version", "0.1.0");
+state_dict.set_metadata("framework_version", "0.6.1");
 state_dict.set_metadata("model_architecture", "ResNet50");
 
 if let Some(version) = state_dict.get_metadata("framework_version") {
@@ -198,8 +223,6 @@ if let Some(version) = state_dict.get_metadata("framework_version") {
 ```
 
 ## Tests
-
-Run the test suite:
 
 ```bash
 cargo test -p axonml-serialize

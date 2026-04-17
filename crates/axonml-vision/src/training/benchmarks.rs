@@ -1,13 +1,26 @@
-//! Inference Benchmarks
+//! Vision Inference Benchmarks — Per-Model Latency / Throughput Sweeps
+//!
+//! Test-only inference benchmarks for the axonml-vision model zoo. The module
+//! is gated by `#[cfg(test)]` and exposes one `#[test]` per model that
+//! constructs the model, warms it up, and times forward passes across a few
+//! batch sizes. Helpers `dummy_input` build constant input tensors,
+//! `bench_forward` returns `(latency_ms, images_per_sec)` for any `Module`,
+//! and `print_bench` emits a one-line summary. Coverage includes LeNet,
+//! SimpleCNN, MLP, ResNet18, VGG16, Vision Transformer, NanoDet, BlazeFace,
+//! Nexus and Phantom (each with its custom forward), Mnemosyne identity,
+//! a LeNet training-step throughput test (forward + backward + Adam step),
+//! a parameter-count + memory profile across the zoo plus Helios variants,
+//! and a Helios-Nano end-to-end detection latency benchmark.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/benchmarks.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

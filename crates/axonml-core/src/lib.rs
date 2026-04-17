@@ -1,13 +1,25 @@
-//! Axonml Core - Foundation Layer for the Axonml ML Framework
+//! Foundation layer for the AxonML deep learning framework.
+//!
+//! Provides the `Device` enum (CPU, CUDA, Vulkan, Metal, WebGPU) with runtime
+//! capability queries, the `Scalar`/`Numeric`/`Float` trait hierarchy for
+//! generic type-safe dispatch, reference-counted `Storage<T>` with pooled GPU
+//! allocations, and five compute backends: CPU (rayon-parallel GEMM/GEMV via
+//! matrixmultiply), CUDA (cuBLAS + 15 custom PTX kernel modules covering
+//! elementwise ops, activations, attention, Q4_K/Q6_K dequant-in-shader
+//! matmul, softmax, layernorm, RMSNorm, transpose, and embedding gather),
+//! Vulkan (ash + gpu-allocator, full buffer/pipeline/dispatch), Metal
+//! (full buffer/pipeline/dispatch on Apple Silicon), and WebGPU (wgpu,
+//! full buffer/pipeline/dispatch for browser targets).
 //!
 //! # File
 //! `crates/axonml-core/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

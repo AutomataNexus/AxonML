@@ -1,18 +1,58 @@
-//! Standalone micro-bench for `axonml_quant::bitnet::matmul_i2s`.
+//! BitNet I2S Matmul Micro-Benchmark — Standalone Kernel Timing Harness
 //!
-//! Replicates the shape profile of a BitNet b1.58-2B decode step and
-//! measures wall time. Run in isolation from nexus-serve so rayon has
-//! nothing to compete with. Lets us tell apart "the kernel is slow" from
-//! "the server context is blocking rayon."
+//! Standalone micro-bench for `axonml_quant::bitnet::matmul_i2s` that replicates
+//! the shape profile of a BitNet b1.58-2B decode step and measures wall time.
+//! Designed to run in isolation from `nexus-serve` so rayon has nothing to
+//! compete with, letting us distinguish "the kernel is slow" from "the server
+//! context is blocking rayon."
+//!
+//! Contents:
+//! - `make_weights(n, k)` — packs deterministic ternary weights into
+//!   `I2sBlock` byte form using a seeded pattern for reproducible decode.
+//! - `make_activations(m, k)` — synthesizes a smooth sinusoidal activation
+//!   tensor of shape `m × k`.
+//! - `bench(m, k, n, iters)` — warms up once, runs `iters` calls to
+//!   `matmul_i2s`, and reports wall time, per-call microseconds, and
+//!   ternary Gops/s.
+//! - `main` — reports `rayon::current_num_threads()` and sweeps both
+//!   decode (m=1) and prefill (m=24) shapes for BitNet-2B hidden=2560,
+//!   ffn=6912, kv=640 projections.
 //!
 //! Usage:
 //!   cargo run --release --example bitnet_bench -p axonml-quant
+//!
+//! # File
+//! `crates/axonml-quant/examples/bitnet_bench.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::time::Instant;
 
 use axonml_quant::bitnet::{I2S_BLOCK_SIZE, I2S_BYTES_PER_BLOCK, I2sBlock, matmul_i2s};
 
+// =============================================================================
+// Configuration
+// =============================================================================
+
 const SCALE: f32 = 0.05;
+
+// =============================================================================
+// Synthetic Data Generation
+// =============================================================================
 
 fn make_weights(n: usize, k: usize) -> Vec<u8> {
     assert!(k % I2S_BLOCK_SIZE == 0);
@@ -41,6 +81,10 @@ fn make_activations(m: usize, k: usize) -> Vec<f32> {
     (0..m * k).map(|i| (i as f32 * 0.001).sin()).collect()
 }
 
+// =============================================================================
+// Benchmark Core
+// =============================================================================
+
 fn bench(m: usize, k: usize, n: usize, iters: usize) {
     let weights = make_weights(n, k);
     let acts = make_activations(m, k);
@@ -60,6 +104,10 @@ fn bench(m: usize, k: usize, n: usize, iters: usize) {
         "m={m:>2} k={k:>5} n={n:>6} iters={iters:>4}  wall={wall:6.3}s  per_call={per_call_us:7.1}μs  ~{gflops:.1} Gops/s (ternary)"
     );
 }
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
 
 fn main() {
     let threads = rayon::current_num_threads();

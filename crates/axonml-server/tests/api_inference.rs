@@ -1,13 +1,22 @@
-//! Integration tests for inference API endpoints
+//! Inference API — Integration Tests
+//!
+//! Tests for the inference endpoint management API on the AxonML server.
+//! Covers CRUD operations on inference endpoints (list, create, get, start,
+//! stop, delete, scale), authentication enforcement for unauthenticated
+//! requests, 404 handling for nonexistent endpoints, metrics and overview
+//! queries, and prediction dispatch through an existing endpoint. Uses the
+//! `require_server!` macro to skip gracefully when the server or admin DB
+//! is unavailable.
 //!
 //! # File
 //! `crates/axonml-server/tests/api_inference.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -18,6 +27,10 @@ mod common;
 
 use common::*;
 use serde_json::Value;
+
+// =============================================================================
+// Test Helpers
+// =============================================================================
 
 macro_rules! require_server {
     () => {
@@ -32,6 +45,10 @@ macro_rules! require_server {
         }
     };
 }
+
+// =============================================================================
+// Endpoint Listing Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_list_endpoints_authenticated() {
@@ -71,6 +88,10 @@ async fn test_list_endpoints_unauthenticated() {
         status
     );
 }
+
+// =============================================================================
+// Endpoint CRUD Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_create_inference_endpoint() {
@@ -130,42 +151,30 @@ async fn test_get_endpoint_not_found() {
 }
 
 #[tokio::test]
-async fn test_inference_metrics() {
+async fn test_delete_endpoint_not_found() {
     require_server!();
 
     let client = test_client();
     let token = login_as_admin(&client).await.expect("Login failed");
 
-    let response = auth_get(&client, "/api/inference/metrics", &token)
-        .await
-        .expect("Request failed");
+    let response = auth_delete(
+        &client,
+        "/api/inference/endpoints/nonexistent-endpoint-id",
+        &token,
+    )
+    .await
+    .expect("Request failed");
 
-    let status = response.status().as_u16();
-    assert!(
-        status == 200 || status == 404,
-        "Got unexpected status: {}",
-        status
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "Should return 404 for nonexistent endpoint"
     );
 }
 
-#[tokio::test]
-async fn test_inference_overview() {
-    require_server!();
-
-    let client = test_client();
-    let token = login_as_admin(&client).await.expect("Login failed");
-
-    let response = auth_get(&client, "/api/inference/overview", &token)
-        .await
-        .expect("Request failed");
-
-    let status = response.status().as_u16();
-    assert!(
-        status == 200 || status == 404,
-        "Got unexpected status: {}",
-        status
-    );
-}
+// =============================================================================
+// Endpoint Lifecycle Tests (Start / Stop / Scale)
+// =============================================================================
 
 #[tokio::test]
 async fn test_start_endpoint() {
@@ -216,24 +225,70 @@ async fn test_stop_endpoint() {
 }
 
 #[tokio::test]
-async fn test_delete_endpoint_not_found() {
+async fn test_endpoint_scaling() {
     require_server!();
 
     let client = test_client();
     let token = login_as_admin(&client).await.expect("Login failed");
 
-    let response = auth_delete(
+    let response = auth_post(
         &client,
-        "/api/inference/endpoints/nonexistent-endpoint-id",
+        "/api/inference/endpoints/test-endpoint/scale",
         &token,
+        serde_json::json!({
+            "replicas": 2
+        }),
     )
     .await
     .expect("Request failed");
 
-    assert_eq!(
-        response.status().as_u16(),
-        404,
-        "Should return 404 for nonexistent endpoint"
+    let status = response.status().as_u16();
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
+}
+
+// =============================================================================
+// Metrics, Overview, and Prediction Tests
+// =============================================================================
+
+#[tokio::test]
+async fn test_inference_metrics() {
+    require_server!();
+
+    let client = test_client();
+    let token = login_as_admin(&client).await.expect("Login failed");
+
+    let response = auth_get(&client, "/api/inference/metrics", &token)
+        .await
+        .expect("Request failed");
+
+    let status = response.status().as_u16();
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
+    );
+}
+
+#[tokio::test]
+async fn test_inference_overview() {
+    require_server!();
+
+    let client = test_client();
+    let token = login_as_admin(&client).await.expect("Login failed");
+
+    let response = auth_get(&client, "/api/inference/overview", &token)
+        .await
+        .expect("Request failed");
+
+    let status = response.status().as_u16();
+    assert!(
+        status == 200 || status == 404,
+        "Got unexpected status: {}",
+        status
     );
 }
 
@@ -282,30 +337,4 @@ async fn test_inference_predict() {
             }
         }
     }
-}
-
-#[tokio::test]
-async fn test_endpoint_scaling() {
-    require_server!();
-
-    let client = test_client();
-    let token = login_as_admin(&client).await.expect("Login failed");
-
-    let response = auth_post(
-        &client,
-        "/api/inference/endpoints/test-endpoint/scale",
-        &token,
-        serde_json::json!({
-            "replicas": 2
-        }),
-    )
-    .await
-    .expect("Request failed");
-
-    let status = response.status().as_u16();
-    assert!(
-        status == 200 || status == 404,
-        "Got unexpected status: {}",
-        status
-    );
 }

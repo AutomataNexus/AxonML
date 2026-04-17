@@ -1,18 +1,36 @@
-//! Dataset Upload Page
+//! Dataset Upload Page — File Upload Form For New Training Datasets
+//!
+//! Upload screen for registering a new dataset with the platform.
+//! `DatasetUploadPage` renders a two-card form: a "Dataset Information" card
+//! with name, description, and a type `<select>` offering tabular/image/text/
+//! audio/custom, and a "Dataset File" card wired to a `FileInput` component
+//! accepting CSV, TSV, JSON, JSONL, Parquet, NumPy (.npy/.npz), and archive
+//! formats (.tar, .tar.gz, .zip). On submit the page validates name and file
+//! presence, flips the `uploading` signal, posts the `web_sys::File` via
+//! `api::datasets::upload` with the name, optional description, and dataset
+//! type, and navigates to `/datasets` on success (toasting through
+//! `use_app_state`). A `ProgressBar` with `ProgressVariant::Primary` shows a
+//! coarse upload-phase indicator, and a local `format_file_size` helper
+//! renders the selected file's byte size as B/KB/MB/GB.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/datasets/upload.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,12 +40,19 @@ use crate::api;
 use crate::components::{forms::*, icons::*, progress::*, spinner::*};
 use crate::state::use_app_state;
 
+// =============================================================================
+// Dataset Upload Page
+// =============================================================================
+
 /// Dataset upload page
 #[component]
 pub fn DatasetUploadPage() -> impl IntoView {
     let state = use_app_state();
     let navigate = use_navigate();
 
+    // -------------------------------------------------------------------------
+    // Form State / Signals
+    // -------------------------------------------------------------------------
     // Form state
     let dataset_name = create_rw_signal(String::new());
     let dataset_description = create_rw_signal(String::new());
@@ -45,6 +70,9 @@ pub fn DatasetUploadPage() -> impl IntoView {
         ("custom".to_string(), "Custom".to_string()),
     ];
 
+    // -------------------------------------------------------------------------
+    // Event Handlers
+    // -------------------------------------------------------------------------
     let on_file_select = move |files: FileList| {
         if files.length() > 0 {
             if let Some(file) = files.get(0) {
@@ -100,6 +128,9 @@ pub fn DatasetUploadPage() -> impl IntoView {
         });
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page dataset-upload-page">
             <div class="page-header">
@@ -246,6 +277,10 @@ pub fn DatasetUploadPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
 
 fn format_file_size(bytes: u64) -> String {
     const KB: u64 = 1024;

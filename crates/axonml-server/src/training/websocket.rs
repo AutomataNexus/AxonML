@@ -1,24 +1,45 @@
-//! WebSocket metrics streaming for AxonML
+//! Training WebSocket — Live Metrics Streaming to Clients
+//!
+//! Bridges a `tokio::sync::broadcast::Receiver<TrainingMetrics>` from
+//! `TrainingTracker` to an Axum `WebSocket`. `MetricsStreamer::stream`
+//! splits the socket, spawns a reader task that watches for `Close`, and in
+//! the main loop forwards each received `TrainingMetrics` as a JSON
+//! `MetricsMessage { type: "metrics", data: { epoch, step, loss, accuracy,
+//! lr, gpu_util, memory_mb, timestamp (rfc3339) } }`. On
+//! `broadcast::RecvError::Closed` it emits a final
+//! `StatusMessage { type: "status", data: { status: "completed", completed_at } }`
+//! and hangs up; `Lagged` errors are skipped. `format_metrics` and
+//! `format_status` are standalone helpers producing the same JSON shape
+//! without a live socket.
 //!
 //! # File
 //! `crates/axonml-server/src/training/websocket.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use crate::db::runs::TrainingMetrics;
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use serde::Serialize;
 use tokio::sync::broadcast;
+
+// =============================================================================
+// Wire Message Types
+// =============================================================================
 
 /// Metrics message for WebSocket
 #[derive(Debug, Clone, Serialize)]
@@ -62,10 +83,18 @@ pub struct StatusData {
     pub completed_at: Option<String>,
 }
 
+// =============================================================================
+// Streamer
+// =============================================================================
+
 /// Metrics streamer for WebSocket connections
 pub struct MetricsStreamer;
 
 impl MetricsStreamer {
+    // -------------------------------------------------------------------------
+    // Live Stream Loop
+    // -------------------------------------------------------------------------
+
     /// Stream metrics to a WebSocket connection
     pub async fn stream(socket: WebSocket, mut receiver: broadcast::Receiver<TrainingMetrics>) {
         let (mut sender, mut ws_receiver) = socket.split();
@@ -135,6 +164,10 @@ impl MetricsStreamer {
         recv_handle.abort();
     }
 
+    // -------------------------------------------------------------------------
+    // One-Shot Formatters
+    // -------------------------------------------------------------------------
+
     /// Send a single metrics update
     pub fn format_metrics(metrics: &TrainingMetrics) -> String {
         let message = MetricsMessage {
@@ -167,6 +200,10 @@ impl MetricsStreamer {
         serde_json::to_string(&message).unwrap_or_default()
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

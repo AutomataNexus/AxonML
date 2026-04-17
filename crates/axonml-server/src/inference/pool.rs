@@ -1,13 +1,21 @@
-//! Model pool for AxonML
+//! Model Pool — LRU-Evicting Inference Instance Manager
+//!
+//! Provides `ModelPool`, a bounded async pool of model instances keyed by
+//! endpoint ID. Each `PoolEntry` tracks model/version IDs, replica count,
+//! current load, and last-used timestamp. The pool supports LRU eviction when
+//! full, capacity-aware acquire/release for concurrent inference requests, and
+//! idle cleanup based on a configurable timeout. `PoolStats` and `PoolEntryInfo`
+//! expose read-only snapshots for monitoring.
 //!
 //! # File
 //! `crates/axonml-server/src/inference/pool.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -17,6 +25,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /// Model pool entry
 #[derive(Debug)]
@@ -28,6 +40,30 @@ pub struct PoolEntry {
     pub current_load: u32,
     pub last_used: std::time::Instant,
 }
+
+/// Pool statistics
+#[derive(Debug, Clone)]
+pub struct PoolStats {
+    pub total_entries: usize,
+    pub total_load: u32,
+    pub total_capacity: u32,
+    pub utilization: f64,
+}
+
+/// Pool entry info (safe to expose)
+#[derive(Debug, Clone)]
+pub struct PoolEntryInfo {
+    pub endpoint_id: String,
+    pub model_id: String,
+    pub version_id: String,
+    pub replicas: u32,
+    pub current_load: u32,
+    pub idle_time_secs: u64,
+}
+
+// =============================================================================
+// Model Pool
+// =============================================================================
 
 /// Model pool for managing model instances
 pub struct ModelPool {
@@ -45,6 +81,10 @@ impl ModelPool {
             idle_timeout: std::time::Duration::from_secs(idle_timeout_secs),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Add / Remove
+    // -------------------------------------------------------------------------
 
     /// Add a model to the pool
     pub async fn add(
@@ -90,6 +130,10 @@ impl ModelPool {
         Ok(())
     }
 
+    // -------------------------------------------------------------------------
+    // Acquire / Release
+    // -------------------------------------------------------------------------
+
     /// Acquire a model for inference
     pub async fn acquire(&self, endpoint_id: &str) -> Result<(), String> {
         let mut entries = self.entries.write().await;
@@ -120,6 +164,10 @@ impl ModelPool {
 
         Ok(())
     }
+
+    // -------------------------------------------------------------------------
+    // Queries and Status
+    // -------------------------------------------------------------------------
 
     /// Get current load for a model
     pub async fn get_load(&self, endpoint_id: &str) -> Option<u32> {
@@ -206,25 +254,9 @@ impl ModelPool {
     }
 }
 
-/// Pool statistics
-#[derive(Debug, Clone)]
-pub struct PoolStats {
-    pub total_entries: usize,
-    pub total_load: u32,
-    pub total_capacity: u32,
-    pub utilization: f64,
-}
-
-/// Pool entry info (safe to expose)
-#[derive(Debug, Clone)]
-pub struct PoolEntryInfo {
-    pub endpoint_id: String,
-    pub model_id: String,
-    pub version_id: String,
-    pub replicas: u32,
-    pub current_load: u32,
-    pub idle_time_secs: u64,
-}
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

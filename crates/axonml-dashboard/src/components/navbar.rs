@@ -1,24 +1,50 @@
-//! Top Navigation Bar Component
+//! Top Navigation Bars — Authenticated Navbar + Public Landing Navbar
+//!
+//! Defines the two top-of-page navigation components used across the
+//! dashboard: `Navbar` (authenticated shell) and `PublicNavbar` (landing /
+//! auth pages).
+//!
+//! `Navbar` reads `use_app_state()` to derive the current user and
+//! authentication status, wires a sidebar-toggle button to
+//! `state.toggle_sidebar()`, and hosts the global search input (with a
+//! keyboard hint `kbd`). When signed in, it shows an avatar initial, the
+//! user's name + email, and a logout button that clears auth state and
+//! navigates back to `/login`. When signed out, the right side falls back
+//! to a "Sign In" button linking to `/login`.
+//!
+//! `PublicNavbar` is the marketing/landing variant: fixed brand on the
+//! left, a centered link group (Features, Documentation, GitHub — the
+//! external link opens in a new tab with `noopener`), and "Sign In" +
+//! "Get Started" calls-to-action on the right.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/navbar.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use leptos::*;
 use leptos_router::*;
 
 use crate::components::icons::*;
 use crate::state::use_app_state;
+
+// =============================================================================
+// Authenticated Navbar
+// =============================================================================
 
 /// Top navigation bar
 #[component]
@@ -98,6 +124,10 @@ pub fn Navbar() -> impl IntoView {
         </nav>
     }
 }
+
+// =============================================================================
+// Public Navbar
+// =============================================================================
 
 /// Public navbar for landing/auth pages
 #[component]

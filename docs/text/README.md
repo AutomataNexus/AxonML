@@ -1,18 +1,18 @@
 # axonml-text Documentation
 
-> Natural language processing utilities for the Axonml ML framework.
+> Natural language processing utilities for the AxonML ML framework.
 
 ## Overview
 
-`axonml-text` provides text processing capabilities including tokenizers, vocabulary management, and text datasets. It's the Axonml equivalent of PyTorch's torchtext.
+`axonml-text` provides six tokenizers, a `Vocab` with special-token
+management, and four datasets (classification, language modelling, and
+seq2seq). The AxonML counterpart to `torchtext`.
 
 ## Modules
 
-### tokenizer.rs
+### `tokenizer`
 
-Text tokenization implementations.
-
-#### Tokenizer Trait
+All tokenizers implement:
 
 ```rust
 pub trait Tokenizer {
@@ -22,270 +22,205 @@ pub trait Tokenizer {
 }
 ```
 
-#### WhitespaceTokenizer
+Available implementations:
 
-Simple whitespace-based tokenization:
-
-```rust
-use axonml_text::WhitespaceTokenizer;
-
-let tokenizer = WhitespaceTokenizer::new();
-let tokens = tokenizer.tokenize("Hello, world!");
-// Result: ["Hello,", "world!"]
-```
-
-#### CharTokenizer
-
-Character-level tokenization:
+| Tokenizer              | Notes                                                           |
+|------------------------|-----------------------------------------------------------------|
+| `WhitespaceTokenizer`  | Split on whitespace — simplest baseline                         |
+| `CharTokenizer`        | One token per Unicode character                                 |
+| `WordPunctTokenizer`   | Separates words and punctuation                                 |
+| `NGramTokenizer`       | Configurable word- or char-level n-grams                        |
+| `BasicBPETokenizer`    | Byte-Pair Encoding; `train(corpus, num_merges)` learns merges   |
+| `UnigramTokenizer`     | Unigram language-model tokenizer                                |
 
 ```rust
-use axonml_text::CharTokenizer;
+use axonml_text::{WhitespaceTokenizer, CharTokenizer, BasicBPETokenizer, NGramTokenizer};
 
-let tokenizer = CharTokenizer::new();
-let tokens = tokenizer.tokenize("Hello");
-// Result: ["H", "e", "l", "l", "o"]
-```
-
-#### BasicBPETokenizer
-
-Byte-Pair Encoding tokenizer:
-
-```rust
-use axonml_text::BasicBPETokenizer;
+let ws = WhitespaceTokenizer::new();
+let chars = CharTokenizer::new();
 
 let mut bpe = BasicBPETokenizer::new();
-
-// Train on corpus
 bpe.train("low lower lowest newer newest", 10);
-
-// Tokenize
 let tokens = bpe.tokenize("lower");
-println!("Tokens: {:?}", tokens);
-println!("Vocab size: {}", bpe.get_vocab().len());
+
+let bigrams = NGramTokenizer::word_ngrams(2);
+let trigrams = NGramTokenizer::char_ngrams(3);
 ```
 
-### vocab.rs
+### `vocab`
 
-Vocabulary management for mapping tokens to indices.
+`Vocab` maps tokens to indices and back. Special tokens are defined as
+string constants: `PAD_TOKEN`, `UNK_TOKEN`, `BOS_TOKEN`, `EOS_TOKEN`,
+`MASK_TOKEN`.
 
 ```rust
-use axonml_text::Vocab;
+use axonml_text::{Vocab, PAD_TOKEN, UNK_TOKEN};
 
-// Build vocabulary from text
-let corpus = "the quick brown fox jumps over the lazy dog";
-let vocab = Vocab::from_text(corpus, min_freq);
+let vocab = Vocab::from_text("the quick brown fox", 1); // min_freq=1
 
-// Vocabulary operations
-println!("Size: {}", vocab.len());
-println!("'the' index: {:?}", vocab.token_to_index("the"));
-println!("Index 0 token: {:?}", vocab.index_to_token(0));
+vocab.len();
+vocab.token_to_index("the");
+vocab.index_to_token(0);
+vocab.unk_index();
+vocab.pad_index();
 
-// Special tokens
-let unk_idx = vocab.unk_index();
-let pad_idx = vocab.pad_index();
+let mut v = Vocab::with_special_tokens();
+v.add_token("hello");
+v.add_token("world");
 ```
 
-#### Building Custom Vocabulary
+### `datasets`
+
+All implement `axonml_data::Dataset`.
+
+#### `TextDataset`
+
+Token-ID-encoded classification dataset.
 
 ```rust
-use axonml_text::Vocab;
+use axonml_text::{TextDataset, WhitespaceTokenizer};
 
-let mut vocab = Vocab::new();
-
-// Add special tokens
-vocab.add_special_token("<pad>");
-vocab.add_special_token("<unk>");
-vocab.add_special_token("<bos>");
-vocab.add_special_token("<eos>");
-
-// Add tokens from corpus
-vocab.add_token("hello");
-vocab.add_token("world");
+let samples: Vec<(String, usize)> = vec![
+    ("good movie".into(), 1),
+    ("bad movie".into(), 0),
+];
+let tokenizer = WhitespaceTokenizer::new();
+let dataset = TextDataset::from_samples(&samples, &tokenizer, 1 /*min_freq*/, 10 /*max_len*/);
 ```
 
-### datasets/
+#### `LanguageModelDataset`
 
-Text datasets for common NLP tasks.
-
-#### TextDataset
-
-Basic text dataset:
-
-```rust
-use axonml_text::TextDataset;
-
-let dataset = TextDataset::from_texts(texts, labels, vocab, max_len);
-
-let (text_tensor, label) = dataset.get(0).unwrap();
-```
-
-#### LanguageModelDataset
-
-Dataset for language modeling (next token prediction):
+Next-token prediction. `from_text(text, seq_len, min_freq)` returns
+`(input_seq, target_seq)` pairs of shape `[seq_len]`.
 
 ```rust
 use axonml_text::LanguageModelDataset;
-
-let dataset = LanguageModelDataset::from_text(corpus, vocab, seq_len);
-
-// Returns (input_sequence, target_sequence)
-let (input, target) = dataset.get(0).unwrap();
+let ds = LanguageModelDataset::from_text(&corpus, 128, 5);
 ```
 
-#### SyntheticSentimentDataset
+#### `SyntheticSentimentDataset`
 
-Synthetic sentiment analysis dataset:
+Synthetic binary-sentiment dataset for smoke tests.
 
 ```rust
 use axonml_text::SyntheticSentimentDataset;
+let ds = SyntheticSentimentDataset::small();
+```
 
-let dataset = SyntheticSentimentDataset::small();
+#### `SyntheticSeq2SeqDataset`
 
-let (text_tensor, sentiment) = dataset.get(0).unwrap();
-// text_tensor: [max_len] encoded text
-// sentiment: [2] binary sentiment (positive/negative)
+Synthetic sequence-to-sequence tasks (copy / reverse) for seq2seq model
+testing.
+
+```rust
+use axonml_text::SyntheticSeq2SeqDataset;
+let ds = SyntheticSeq2SeqDataset::copy_task(num_samples, seq_len, vocab_size);
 ```
 
 ## Usage Examples
 
-### Text Classification
+### Tokenize and encode
 
 ```rust
 use axonml::prelude::*;
+use axonml_text::{Vocab, WhitespaceTokenizer, Tokenizer};
 
-fn main() {
-    // 1. Create dataset
-    let dataset = SyntheticSentimentDataset::small();
-    let loader = DataLoader::with_shuffle(dataset, 32, true);
+let vocab = Vocab::from_text("the quick brown fox jumps over the lazy dog", 1);
+let tok = WhitespaceTokenizer::new();
 
-    // 2. Create model
-    let vocab_size = 1000;
-    let embed_dim = 128;
-    let hidden_size = 256;
-    let num_classes = 2;
-
-    let embedding = Embedding::new(vocab_size, embed_dim);
-    let lstm = LSTM::new(embed_dim, hidden_size);
-    let classifier = Linear::new(hidden_size, num_classes);
-
-    // 3. Training loop
-    let mut optimizer = Adam::new(
-        [
-            embedding.parameters(),
-            lstm.parameters(),
-            classifier.parameters(),
-        ].concat(),
-        0.001
-    );
-
-    for batch in loader.iter() {
-        // Embed tokens
-        let embedded = embedding.forward(&batch.data);
-
-        // Process with LSTM
-        let (output, _) = lstm.forward_seq(&embedded);
-
-        // Use last hidden state for classification
-        let last = output.select(1, -1)?;
-        let logits = classifier.forward(&last);
-
-        let loss = cross_entropy(&logits, &batch.targets);
-        loss.backward();
-        optimizer.step();
-        optimizer.zero_grad();
-    }
-}
+let tokens  = tok.tokenize("the quick fox");
+let encoded = tok.encode("the quick fox", &vocab);
+let decoded = tok.decode(&encoded, &vocab);
 ```
 
-### Tokenization and Encoding
-
-```rust
-use axonml::prelude::*;
-
-// Build vocabulary from training data
-let train_corpus = "the quick brown fox jumps over the lazy dog";
-let vocab = Vocab::from_text(train_corpus, 1);
-
-// Tokenize and encode
-let tokenizer = WhitespaceTokenizer::new();
-let text = "the quick fox";
-
-let tokens = tokenizer.tokenize(text);
-println!("Tokens: {:?}", tokens);
-
-let encoded = tokenizer.encode(text, &vocab);
-println!("Encoded: {:?}", encoded);
-
-let decoded = tokenizer.decode(&encoded, &vocab);
-println!("Decoded: {}", decoded);
-```
-
-### BPE Training
+### BPE training
 
 ```rust
 use axonml_text::BasicBPETokenizer;
 
-// Training corpus
-let corpus = r#"
-    low lower lowest
-    new newer newest
-    show showed shown
-    slow slower slowest
-"#;
-
-// Train BPE
+let corpus = "low lower lowest new newer newest show showed shown slow slower slowest";
 let mut bpe = BasicBPETokenizer::new();
-bpe.train(corpus, 50);  // Learn 50 merge operations
+bpe.train(corpus, 50);
 
-// Tokenize new text
 let tokens = bpe.tokenize("showing");
-println!("BPE tokens: {:?}", tokens);
 ```
 
-### Language Modeling
+### Sentiment classification pipeline
 
 ```rust
 use axonml::prelude::*;
+use axonml_text::SyntheticSentimentDataset;
 
-// Create language model dataset
-let corpus = load_text_file("corpus.txt")?;
-let vocab = Vocab::from_text(&corpus, 5);  // min_freq = 5
-let dataset = LanguageModelDataset::from_text(&corpus, &vocab, 128);
+let ds = SyntheticSentimentDataset::small();
+let loader = DataLoader::with_shuffle(ds, 32, true);
 
-// Create model
+let vocab_size  = 1000;
+let embed_dim   = 128;
+let hidden_size = 256;
+
+let embedding  = Embedding::new(vocab_size, embed_dim);
+let lstm       = LSTM::new(embed_dim, hidden_size, 1);
+let classifier = Linear::new(hidden_size, 2);
+
+let params = [
+    embedding.parameters(),
+    lstm.parameters(),
+    classifier.parameters(),
+].concat();
+let mut opt = Adam::new(params, 0.001);
+
+for batch in loader.iter() {
+    let emb  = embedding.forward(&batch.data);
+    let out  = lstm.forward(&emb);
+    let last = out.select(1, -1).unwrap();
+    let logits = classifier.forward(&last);
+
+    let loss = cross_entropy(&logits, &batch.targets);
+    loss.backward();
+    opt.step();
+    opt.zero_grad();
+}
+```
+
+### Language modelling
+
+```rust
+use axonml::prelude::*;
+use axonml_text::{LanguageModelDataset, Vocab};
+
+let corpus = std::fs::read_to_string("corpus.txt")?;
+let vocab = Vocab::from_text(&corpus, 5);
+let ds = LanguageModelDataset::from_text(&corpus, 128, 5);
+
 let model = create_transformer_lm(vocab.len(), 512, 8, 6);
-
-// Training
-let loader = DataLoader::with_shuffle(dataset, 32, true);
-let mut optimizer = AdamW::new(model.parameters(), 0.0001);
+let loader = DataLoader::with_shuffle(ds, 32, true);
+let mut opt = AdamW::new(model.parameters(), 0.0001);
 
 for batch in loader.iter() {
     let logits = model.forward(&batch.data);
     let loss = cross_entropy(&logits, &batch.targets);
-
     loss.backward();
-    optimizer.step();
-    optimizer.zero_grad();
+    opt.step();
+    opt.zero_grad();
 }
 ```
 
 ## Special Tokens
 
-Standard special tokens used in NLP:
-
-| Token | Purpose |
-|-------|---------|
-| `<pad>` | Padding for batch alignment |
-| `<unk>` | Unknown/out-of-vocabulary words |
-| `<bos>` | Beginning of sequence |
-| `<eos>` | End of sequence |
-| `<mask>` | Masked token (for MLM) |
+| Constant      | String   | Purpose                         |
+|---------------|----------|---------------------------------|
+| `PAD_TOKEN`   | `<pad>`  | Batch alignment padding         |
+| `UNK_TOKEN`   | `<unk>`  | Out-of-vocabulary placeholder   |
+| `BOS_TOKEN`   | `<bos>`  | Beginning of sequence           |
+| `EOS_TOKEN`   | `<eos>`  | End of sequence                 |
+| `MASK_TOKEN`  | `<mask>` | Masked token (MLM)              |
 
 ## Related Modules
 
-- [Data](../data/README.md) - DataLoader and Dataset traits
-- [Neural Networks](../nn/README.md) - Embedding, RNN, Attention
-- [Autograd](../autograd/README.md) - Training with gradients
+- [Data](../../crates/axonml-data) — `DataLoader`, `Dataset`
+- [Neural Networks](../nn/README.md) — `Embedding`, `RNN`, `Attention`
+- [LLM](../llm/README.md) — large language model training / inference
 
-@version 0.1.0
-@author AutomataNexus Development Team
+## Last updated
+
+0.6.1 (2026-04-16)

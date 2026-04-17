@@ -1,18 +1,41 @@
-//! ResNet-18 Training on CIFAR-10 (Synthetic)
+//! ResNet-18 Training on Synthetic CIFAR-10 — Reference Image-Classification Example
+//!
+//! End-to-end training script for `ResNet::resnet18` on the `SyntheticCIFAR`
+//! dataset (programmatically generated stand-in for CIFAR-10 to keep the example
+//! offline). Demonstrates the standard supervised image-classification flow on
+//! AxonML: dataset construction, `DataLoader` batching, GPU placement, Adam +
+//! `CrossEntropyLoss`, per-epoch train/test accuracy reporting, optional
+//! browser-based `TrainingMonitor`, and best/final-model checkpointing.
+//!
+//! Pieces:
+//! - `detect_device()` — probe CUDA, fall back to CPU.
+//! - `argmax_batch()` — argmax over an `[N, C]` flattened logits buffer.
+//! - `onehot_to_indices()` — convert one-hot `[N, C]` targets to class index `[N]`.
+//! - `main()` — builds train/test `SyntheticCIFAR::cifar10` datasets, wraps them
+//!   in `DataLoader`s, instantiates `ResNet::resnet18(NUM_CLASSES)`, optimizes
+//!   with `Adam` (lr=1e-3) + `CrossEntropyLoss`, then runs a `NUM_EPOCHS` loop
+//!   reshaping each batch to `[N, 3, 32, 32]`, computing per-batch loss/accuracy,
+//!   evaluating in `no_grad` after each epoch, and saving the best test-accuracy
+//!   checkpoint plus a final checkpoint at the end.
 //!
 //! # File
 //! `crates/axonml-vision/examples/train_resnet.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 19, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml::monitor::TrainingMonitor;
 use axonml_autograd::{Variable, no_grad};
@@ -91,6 +114,10 @@ fn main() {
 
     println!("=== AxonML - ResNet-18 Training on CIFAR-10 ===\n");
 
+    // -------------------------------------------------------------------------
+    // Setup: device, dataset, model, optimizer
+    // -------------------------------------------------------------------------
+
     // Device
     let device = detect_device();
     println!("Device: {:?}", device);
@@ -149,6 +176,10 @@ fn main() {
 
     // Checkpoint dir
     std::fs::create_dir_all(CHECKPOINT_DIR).ok();
+
+    // -------------------------------------------------------------------------
+    // Training loop
+    // -------------------------------------------------------------------------
 
     // Training
     println!("5. Training for {} epochs...\n", NUM_EPOCHS);
@@ -222,6 +253,10 @@ fn main() {
         let avg_loss = total_loss / batch_count as f32;
         let train_acc = 100.0 * correct as f32 / total as f32;
         let samples_per_sec = total as f64 / epoch_time.as_secs_f64();
+
+        // ---------------------------------------------------------------------
+        // Per-epoch test evaluation
+        // ---------------------------------------------------------------------
 
         // Test evaluation
         model.eval();
@@ -299,6 +334,10 @@ fn main() {
     }
 
     let total_time = train_start.elapsed();
+
+    // =========================================================================
+    // Finalization
+    // =========================================================================
 
     // Final checkpoint
     let final_path = format!("{}/final_model.axonml", CHECKPOINT_DIR);

@@ -1,18 +1,43 @@
-//! Inference Endpoints Page
+//! Inference Endpoints Page — Endpoint List And Per-Endpoint Detail View
+//!
+//! Front-end for managing deployed model-serving endpoints. `EndpointsListPage`
+//! loads `Vec<InferenceEndpoint>` from `api::inference::list_endpoints` and
+//! renders them as a grid of `EndpointCard` tiles with a refresh button and a
+//! "Deploy Model" CTA. Each card shows endpoint name (linking to
+//! `/inference/endpoints/:id`), an `EndpointStatus` badge, a dropdown of
+//! View/Start/Stop/Delete actions, an info grid of port, replicas, model
+//! name, version, and a copyable API URL. The toggle handler is stored in a
+//! `store_value` cell and calls `api::inference::start_endpoint` or
+//! `stop_endpoint` depending on current status; deletion confirms through a
+//! `ConfirmDialog` and calls `api::inference::delete_endpoint`, re-fetching
+//! the list on success. `EndpointDetailPage` reads the `:id` route param,
+//! fetches the endpoint via `api::inference::get_endpoint`, pulls
+//! `InferenceMetrics` through `api::inference::get_metrics`, and displays a
+//! header with a live/stopped indicator, a four-tile stats grid (replicas,
+//! total requests summed from `requests_total`, averaged P50 latency,
+//! error count summed from `requests_error`), a configuration card
+//! (batch_size, timeout_ms, max_concurrent), and an API-info card with an
+//! example `curl` snippet hitting `/api/inference/predict/{name}`. Errors
+//! during fetch toast and navigate back to the endpoints list.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/inference/endpoints.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,11 +47,18 @@ use crate::components::{icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// Endpoints List Page
+// =============================================================================
+
 /// Endpoints list page
 #[component]
 pub fn EndpointsListPage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (endpoints, set_endpoints) = create_signal::<Vec<InferenceEndpoint>>(Vec::new());
     let delete_modal = create_rw_signal(false);
@@ -38,6 +70,9 @@ pub fn EndpointsListPage() -> impl IntoView {
     let state_for_delete = state.clone();
     let state_for_toggle = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Data Fetch
+    // -------------------------------------------------------------------------
     // Initial fetch
     create_effect(move |_| {
         let state = state_for_effect.clone();
@@ -55,6 +90,9 @@ pub fn EndpointsListPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Event Handlers
+    // -------------------------------------------------------------------------
     // Refresh handler
     let on_refresh = move |_| {
         let state = state_for_refresh.clone();
@@ -135,6 +173,9 @@ pub fn EndpointsListPage() -> impl IntoView {
     };
     let toggle_endpoint = store_value(toggle_endpoint_fn);
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page endpoints-page">
             <div class="page-header">
@@ -211,6 +252,10 @@ pub fn EndpointsListPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// Endpoint Card
+// =============================================================================
 
 /// Endpoint card component
 #[component]
@@ -327,6 +372,10 @@ fn EndpointCard(
     }
 }
 
+// =============================================================================
+// Endpoint Detail Page
+// =============================================================================
+
 /// Endpoint detail page
 #[component]
 pub fn EndpointDetailPage() -> impl IntoView {
@@ -336,10 +385,16 @@ pub fn EndpointDetailPage() -> impl IntoView {
 
     let endpoint_id = move || params.get().get("id").cloned().unwrap_or_default();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (endpoint, set_endpoint) = create_signal::<Option<InferenceEndpoint>>(None);
     let (metrics, set_metrics) = create_signal::<Vec<InferenceMetrics>>(Vec::new());
 
+    // -------------------------------------------------------------------------
+    // Data Fetch
+    // -------------------------------------------------------------------------
     // Fetch endpoint data
     let state_for_effect = state.clone();
     let navigate_for_effect = navigate.clone();
@@ -372,6 +427,9 @@ pub fn EndpointDetailPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page endpoint-detail-page">
             <Show when=move || loading.get()>

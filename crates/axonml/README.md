@@ -15,22 +15,24 @@
 
 ## Overview
 
-**axonml** is the umbrella crate for the AxonML machine learning framework — a complete, PyTorch-equivalent ML/AI toolkit written in pure Rust. It re-exports every sub-crate under a unified API, so you can build and train deep learning models with a single dependency.
+**axonml** is the umbrella crate for the AxonML machine-learning framework — a PyTorch-equivalent ML/AI toolkit written in pure Rust. It re-exports every sub-crate under a unified namespace, so you can pull in the whole framework with a single dependency.
 
-The crate is intentionally thin. It contains:
+The crate is intentionally thin. After the 0.6.1 split, it contains only:
 
-1. Feature-gated re-exports of every sub-crate
+1. Feature-gated re-exports of every sub-crate (`axonml-core` .. `axonml-train`)
 2. A [`prelude`](#prelude) module with the most-used types
 3. The live browser training monitor ([`TrainingMonitor`](#training-monitor))
 4. `version()` / `features()` introspection helpers
 
-Everything else — layers, optimizers, models, data loaders, training infrastructure, HVAC diagnostics — lives in dedicated sibling crates that can also be used standalone.
+Everything else — layers, optimizers, models, data loaders, training infrastructure, HVAC diagnostics, adversarial training — lives in dedicated sibling crates that can also be used standalone.
+
+Last updated: 2026-04-16 — version 0.6.1.
 
 ---
 
 ## Sub-Crate Architecture
 
-AxonML is a workspace of 24 sub-crates. The umbrella crate re-exports them under short names:
+The umbrella crate re-exports the framework sub-crates under short module names:
 
 ### Core
 
@@ -44,8 +46,8 @@ AxonML is a workspace of 24 sub-crates. The umbrella crate re-exports them under
 
 | Feature | Sub-crate | Namespace | Purpose |
 |---------|-----------|-----------|---------|
-| `nn` | `axonml-nn` | `axonml::nn` | 41 layers — Linear, Conv1d/2d, Attention, LSTM/GRU, Transformer, etc. |
-| `nn` | `axonml-optim` | `axonml::optim` | SGD, Adam, AdamW, RMSprop, LAMB + schedulers |
+| `nn` | `axonml-nn` | `axonml::nn` | Layers — Linear, Conv1d/2d, Attention, LSTM/GRU, Transformer, etc. |
+| `nn` | `axonml-optim` | `axonml::optim` | SGD, Adam, AdamW, RMSprop, schedulers |
 
 ### Data & I/O
 
@@ -62,14 +64,14 @@ AxonML is a workspace of 24 sub-crates. The umbrella crate re-exports them under
 | `vision` | `axonml-vision` | `axonml::vision` | CNNs (LeNet, ResNet, VGG, ViT), MNIST/CIFAR/COCO/WIDER FACE, **Aegis biometric suite** (Mnemosyne, Argus, Echo, Ariadne, Themis) |
 | `text` | `axonml-text` | `axonml::text` | BPE, WordPiece, Whitespace/Char tokenizers, text datasets |
 | `audio` | `axonml-audio` | `axonml::audio` | MelSpectrogram, MFCC, resample, augmentation transforms |
-| `llm` | `axonml-llm` | `axonml::llm` | **9 LLM architectures** — see table below |
-| `hvac` | `axonml-hvac` | `axonml::hvac` | HVAC diagnostic models (Apollo, Panoptes, Vulcan, etc.) |
+| `llm` | `axonml-llm` | `axonml::llm` | Nine LLM architectures — see table below |
+| `hvac` | `axonml-hvac` | `axonml::hvac` | HVAC diagnostic models (Apollo, Panoptes, Vulcan, etc.) **— extracted in 0.6.1** |
 
 ### Training, Optimization, Deployment
 
 | Feature | Sub-crate | Namespace | Purpose |
 |---------|-----------|-----------|---------|
-| `train` | `axonml-train` | `axonml::train` | `TrainingConfig`, `EarlyStopping`, `AdversarialTrainer`, unified model hub, benchmarking |
+| `train` | `axonml-train` | `axonml::train` | `TrainingConfig`, `EarlyStopping`, `AdversarialTrainer`, unified model hub, benchmarking **— extracted in 0.6.1** |
 | `distributed` | `axonml-distributed` | `axonml::distributed` | DDP, all-reduce, NCCL, process groups |
 | `profile` | `axonml-profile` | `axonml::profile` | Memory / compute profilers, timeline, bottleneck detection |
 | `quant` | `axonml-quant` | `axonml::quant` | INT8 / INT4 / FP16 quantization |
@@ -80,10 +82,10 @@ AxonML is a workspace of 24 sub-crates. The umbrella crate re-exports them under
 
 | Sub-crate | Purpose |
 |-----------|---------|
-| `axonml-cli` | `axonml` command-line tool for scaffolding projects |
-| `axonml-tui` | Terminal user interface |
-| `axonml-server` | HTTP / gRPC inference server |
-| `axonml-dashboard` | Web dashboard for training monitoring |
+| `axonml-cli` | `axonml` command-line tool |
+| `axonml-tui` | Ratatui terminal user interface |
+| `axonml-server` | Axum REST/WebSocket API server |
+| `axonml-dashboard` | Leptos/WASM web dashboard |
 
 ---
 
@@ -98,13 +100,15 @@ AxonML is a workspace of 24 sub-crates. The umbrella crate re-exports them under
 | **BERT** | Bidirectional masked LM | Encoder for classification / masked LM |
 | **SSM / Mamba** | Selective S6 scan, depthwise conv | Linear-complexity sequence model |
 | **Hydra** | Hybrid SSM + windowed attention | Best-of-both-worlds architecture |
-| **Trident** | 1.58-bit ternary weights, 16× compression | Published paper reference implementation |
+| **Trident** | 1.58-bit ternary weights, 16x compression | Published paper reference implementation |
 | **Chimera** | Sparse MoE (8 experts, top-2) + Differential Attention | Large-capacity conditional compute |
 
 Plus:
 - **BPE / WordPiece / Whitespace / Character tokenizers** (in `axonml-text`)
 - **Generation utilities** — `TextGenerator`, `GenerationConfig`
 - **Training scripts** for every model in `crates/axonml-llm/examples/`
+
+The `axonml::prelude` re-exports only a small subset of LLM types (`Bert`, `BertConfig`, `BertForMaskedLM`, `BertForSequenceClassification`, `GPT2`, `GPT2Config`, `GPT2LMHead`, `GenerationConfig`, `TextGenerator`). For the other architectures pull from `axonml::llm::*` directly.
 
 ---
 
@@ -165,6 +169,20 @@ fn main() -> axonml::core::Result<()> {
 }
 ```
 
+Contents of the `prelude`, feature-gated:
+
+- `core`: `DType`, `Device`, `Error`, `Result`, `Tensor`, `Variable`, `no_grad`
+- `nn`: layers (`Linear`, `Conv2d`, `LSTM`, `GRU`, `RNN`, `MultiHeadAttention`, `BatchNorm1d/2d`, `LayerNorm`, `Dropout`, `Embedding`, `MaxPool2d`, `AvgPool2d`, activations, losses, `Parameter`, `Sequential`, `Module`) and optimizers (`SGD`, `Adam`, `AdamW`, `RMSprop`, `Optimizer`, `LRScheduler`, `CosineAnnealingLR`, `ExponentialLR`, `StepLR`)
+- `data`: `DataLoader`, `Dataset`, `RandomSampler`, `SequentialSampler`, `Transform`
+- `vision`: `LeNet`, `SimpleCNN`, `SyntheticMNIST`, `SyntheticCIFAR`, `CenterCrop`, `ImageNormalize`, `RandomHorizontalFlip`, `Resize`
+- `text`: tokenizers, `Vocab`, `TextDataset`, `LanguageModelDataset`, `SyntheticSentimentDataset`
+- `audio`: `MelSpectrogram`, `MFCC`, `Resample`, `NormalizeAudio`, `AddNoise`, synthetic datasets
+- `distributed`: `DDP`, `DistributedDataParallel`, `ProcessGroup`, `World`, `all_reduce_{mean,sum}`, `barrier`, `broadcast`
+- `profile`: `Profiler`, `ComputeProfiler`, `MemoryProfiler`, `TimelineProfiler`, `Bottleneck`, `BottleneckAnalyzer`, `ProfileGuard`, `ProfileReport`
+- `llm`: `GPT2`, `GPT2Config`, `GPT2LMHead`, `Bert`, `BertConfig`, `BertForMaskedLM`, `BertForSequenceClassification`, `GenerationConfig`, `TextGenerator`
+- `train`: `TrainingConfig`, `TrainingHistory`, `TrainingMetrics`, `EarlyStopping`, `ProgressLogger`, `Callback`, `AdversarialTrainer`
+- `jit`: `CompiledFunction`, `Graph`, `JitCompiler`, `Optimizer as JitOptimizer`, `TracedValue`, `trace`
+
 ### Training Loop with Live Monitor
 
 ```rust
@@ -214,7 +232,7 @@ fn train() -> axonml::core::Result<()> {
 
 ## Training Monitor
 
-`axonml::monitor::TrainingMonitor` is a zero-dependency, pure-Rust HTTP server that serves a real-time training dashboard to your browser. It's intentionally kept in the umbrella crate so every training script across the workspace can use it with a single import.
+`axonml::monitor::TrainingMonitor` (re-exported as `axonml::TrainingMonitor`) is a zero-dependency, pure-Rust HTTP server that serves a real-time training dashboard to your browser. The dashboard HTML lives next to the module at `crates/axonml/src/monitor_dashboard.html`. It is intentionally kept in the umbrella crate so every training script across the workspace can use it with a single import.
 
 ```rust
 use axonml::TrainingMonitor;
@@ -234,46 +252,42 @@ monitor.log_epoch(epoch + 1, train_loss, Some(val_loss), vec![
 monitor.set_status("complete");
 ```
 
-The dashboard shows:
-- Real-time training loss curve
-- Validation loss (if provided)
-- Custom metric overlays
-- Current epoch / total epochs
-- Best loss so far
+The dashboard shows real-time training loss, optional validation loss, custom metric overlays, current epoch / total epochs, and best loss so far.
 
 ---
 
 ## Feature Flag Reference
 
-| Feature | Includes | Description |
-|---------|----------|-------------|
-| `full` | All features | Complete framework (default) |
-| `core` | tensor, autograd | Core tensor operations and autodiff |
-| `nn` | core + nn, optim | Neural network layers and optimizers |
-| `data` | core + data | DataLoader and dataset utilities |
-| `vision` | nn, data + vision | Image processing + Aegis biometric suite |
-| `text` | nn, data + text | Tokenizers and text processing |
-| `audio` | nn, data + audio | Audio transforms and datasets |
-| `llm` | nn + llm | All 9 LLM architectures |
-| `hvac` | nn + hvac | HVAC diagnostic models |
-| `train` | nn + train | High-level training, adversarial, hub, benchmark |
-| `distributed` | nn + distributed | Distributed training (DDP + NCCL) |
-| `profile` | core + profile | Profiling and bottleneck analysis |
-| `serialize` | core + serialize | Model checkpoint save/load |
-| `onnx` | core + onnx | ONNX import/export |
-| `quant` | nn + quant | INT8 / INT4 / FP16 quantization |
-| `fusion` | core + fusion | Kernel fusion optimization |
-| `jit` | core + jit | JIT compilation and tracing |
-| `cuda` | — | CUDA GPU acceleration |
-| `cudnn` | cuda + cudnn | cuDNN acceleration |
-| `wgpu` | — | WebGPU/Vulkan GPU acceleration |
-| `nccl` | distributed + nccl | NCCL distributed communication |
+| Feature | Implies | Description |
+|---------|---------|-------------|
+| `default` | `full` | Complete framework |
+| `full` | everything below (except `nccl`/`cuda`/`cudnn`/`wgpu`) | Complete framework |
+| `core` | — | `axonml-core` + `axonml-tensor` + `axonml-autograd` |
+| `nn` | `core` | `axonml-nn` + `axonml-optim` |
+| `data` | `core` | `axonml-data` |
+| `vision` | `nn`, `data` | `axonml-vision` (incl. Aegis biometric suite) |
+| `text` | `nn`, `data` | `axonml-text` |
+| `audio` | `nn`, `data` | `axonml-audio` |
+| `llm` | `nn` | `axonml-llm` (all 9 architectures) |
+| `hvac` | `nn` | `axonml-hvac` |
+| `train` | `nn` | `axonml-train` (trainer, hub, benchmark, adversarial) |
+| `distributed` | `nn` | `axonml-distributed` |
+| `profile` | `core` | `axonml-profile` |
+| `serialize` | `core` | `axonml-serialize` |
+| `onnx` | `core` | `axonml-onnx` |
+| `quant` | `nn` | `axonml-quant` |
+| `fusion` | `core` | `axonml-fusion` |
+| `jit` | `core` | `axonml-jit` |
+| `nccl` | `distributed` | NCCL distributed communication (requires CUDA + `libnccl.so.2`) |
+| `cuda` | — | Forwards CUDA to `axonml-core`, `axonml-tensor`, `axonml-nn` |
+| `cudnn` | `cuda` | Forwards cuDNN to core/tensor/nn |
+| `wgpu` | — | Forwards WebGPU/Vulkan to `axonml-core` |
 
 ---
 
 ## Examples
 
-The crate includes three generic examples (HVAC-specific examples moved to `axonml-hvac`):
+The crate ships three generic examples; HVAC-specific examples live in `axonml-hvac`.
 
 ```bash
 # Simple training loop
@@ -282,7 +296,7 @@ cargo run -p axonml --example simple_training
 # MNIST digit classification
 cargo run -p axonml --example mnist_training
 
-# NLP + audio transform test
+# NLP + audio transform smoke test
 cargo run -p axonml --example nlp_audio_test
 ```
 
@@ -322,7 +336,7 @@ fn main() {
 - **Crate version:** 0.6.1
 - **Rust edition:** 2024
 - **MSRV:** Rust 1.85+
-- **Workspace members:** 24 sub-crates
+- **0.6.1 split:** `hvac` (HVAC diagnostic models) and `train` (trainer / hub / benchmark / adversarial) were extracted from this umbrella into standalone crates to keep the umbrella a thin re-export layer. The live browser `TrainingMonitor` stayed here.
 
 ## License
 

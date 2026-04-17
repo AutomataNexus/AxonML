@@ -1,13 +1,26 @@
-//! Authentication API endpoints for AxonML
+//! Authentication API — Registration, Login, MFA, and Admin User Management
+//!
+//! Axum handler functions for the `/api/auth/*` and `/api/admin/users/*` routes.
+//! Covers user registration with email verification, login with optional MFA
+//! (TOTP, WebAuthn, recovery codes), JWT token refresh, logout, and the `/me`
+//! endpoint. MFA setup includes TOTP secret generation with QR code, WebAuthn
+//! credential registration/authentication, and one-time recovery codes. Admin
+//! handlers provide CRUD on users (list, create, get, update, delete) with
+//! self-deletion prevention. Email verification and admin approval flows use
+//! token-based links. Request/response types: `RegisterRequest`, `LoginRequest`,
+//! `LoginResponse`, `TokenResponse`, `UserResponse`, `TotpSetupResponse`,
+//! `WebAuthnChallengeResponse`, and related structs. Rate limiting is enforced
+//! on register, login, and MFA verification via `auth_rate_limiter`.
 //!
 //! # File
 //! `crates/axonml-server/src/api/auth.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -26,6 +39,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 /// Extract client IP address from headers or connection info.
 /// Checks X-Forwarded-For, X-Real-IP headers (for proxy scenarios), then falls back to connection IP.
@@ -50,9 +67,9 @@ fn extract_client_ip(headers: &HeaderMap, conn_info: Option<&SocketAddr>) -> Opt
     conn_info.map(|addr| addr.ip().to_string())
 }
 
-// ============================================================================
-// Request/Response Types
-// ============================================================================
+// =============================================================================
+// Request / Response Types
+// =============================================================================
 
 #[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
@@ -189,9 +206,9 @@ pub struct UpdateUserRequest {
     pub role: Option<String>,
 }
 
-// ============================================================================
-// Handlers
-// ============================================================================
+// =============================================================================
+// Auth Handlers — Registration and Login
+// =============================================================================
 
 /// Register a new user
 pub async fn register(
@@ -390,6 +407,10 @@ pub async fn login(
     }))
 }
 
+// =============================================================================
+// Auth Handlers — MFA (TOTP)
+// =============================================================================
+
 /// Verify TOTP code
 pub async fn verify_totp(
     State(state): State<AppState>,
@@ -436,6 +457,10 @@ pub async fn verify_totp(
         token_type: token_pair.token_type,
     }))
 }
+
+// =============================================================================
+// Auth Handlers — Session Management
+// =============================================================================
 
 /// Logout user
 pub async fn logout(
@@ -488,6 +513,10 @@ pub async fn me(
         updated_at: user_data.updated_at.to_rfc3339(),
     }))
 }
+
+// =============================================================================
+// Auth Handlers — TOTP Setup
+// =============================================================================
 
 /// Setup TOTP
 pub async fn setup_totp(
@@ -548,6 +577,10 @@ pub async fn disable_mfa(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+// =============================================================================
+// Auth Handlers — Recovery Codes
+// =============================================================================
 
 /// Generate new recovery codes
 pub async fn generate_recovery_codes(
@@ -616,6 +649,10 @@ pub async fn use_recovery_code(
         token_type: token_pair.token_type,
     }))
 }
+
+// =============================================================================
+// Auth Handlers — WebAuthn
+// =============================================================================
 
 /// Start WebAuthn registration
 pub async fn webauthn_register_start(
@@ -756,9 +793,9 @@ pub async fn webauthn_auth_finish(
     }))
 }
 
-// ============================================================================
-// Admin Handlers
-// ============================================================================
+// =============================================================================
+// Admin Handlers — User CRUD
+// =============================================================================
 
 /// List all users (admin only)
 pub async fn list_users(
@@ -934,6 +971,10 @@ pub async fn delete_user(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+// =============================================================================
+// Email Verification and Admin Approval
+// =============================================================================
 
 /// Verify email endpoint - User clicks link in verification email
 pub async fn verify_email(

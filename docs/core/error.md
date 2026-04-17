@@ -1,172 +1,161 @@
+---
+layout: default
+title: Error
+parent: Core
+nav_order: 3
+description: "AxonML Error enum and Result alias"
+---
+
 # Error Module
 
-Unified error handling for the Axonml framework.
+Unified error handling for AxonML (`axonml_core::error`).
 
 ## Overview
 
-The error module provides a comprehensive error type that covers all possible failure modes across the framework. This enables consistent error handling and helpful error messages.
+`Error` is a `thiserror`-derived enum covering every failure mode the tensor / device / autograd stack can produce. All fallible tensor ops return `axonml_core::Result<T>` (i.e. `std::result::Result<T, Error>`).
 
 ## Error Enum
 
+Authoritative definition from `crates/axonml-core/src/error.rs`:
+
 ```rust
+use axonml_core::{Device, DType};
+use thiserror::Error;
+
+#[derive(Error, Debug, Clone, PartialEq)]
 pub enum Error {
-    /// Shape mismatch in operation
+    #[error("Shape mismatch: expected {expected:?}, got {actual:?}")]
     ShapeMismatch {
         expected: Vec<usize>,
-        got: Vec<usize>,
+        actual: Vec<usize>,
     },
 
-    /// Invalid shape specification
-    InvalidShape(String),
-
-    /// Index out of bounds
-    IndexOutOfBounds {
-        index: usize,
-        size: usize,
-    },
-
-    /// Device mismatch between tensors
-    DeviceMismatch {
-        expected: Device,
-        got: Device,
-    },
-
-    /// Data type mismatch
+    #[error("DType mismatch: expected {expected:?}, got {actual:?}")]
     DTypeMismatch {
         expected: DType,
-        got: DType,
+        actual: DType,
     },
 
-    /// Dimension mismatch
-    DimensionMismatch {
-        expected: usize,
-        got: usize,
+    #[error("Device mismatch: expected {expected:?}, got {actual:?}")]
+    DeviceMismatch {
+        expected: Device,
+        actual: Device,
     },
 
-    /// Invalid operation
-    InvalidOperation(String),
+    #[error("Invalid dimension: index {index} for tensor with {ndim} dimensions")]
+    InvalidDimension { index: i64, ndim: usize },
 
-    /// Gradient computation error
-    GradientError(String),
+    #[error("Index out of bounds: index {index} for dimension of size {size}")]
+    IndexOutOfBounds { index: usize, size: usize },
 
-    /// I/O error
-    IoError(std::io::Error),
+    #[error("Memory allocation failed: requested {size} bytes on {device:?}")]
+    AllocationFailed { size: usize, device: Device },
 
-    /// Backend-specific error
-    BackendError(String),
+    #[error("Device not available: {device:?}")]
+    DeviceNotAvailable { device: Device },
+
+    #[error("Invalid operation: {message}")]
+    InvalidOperation { message: String },
+
+    #[error("Cannot broadcast shapes {shape1:?} and {shape2:?}")]
+    BroadcastError {
+        shape1: Vec<usize>,
+        shape2: Vec<usize>,
+    },
+
+    #[error("Operation not supported on empty tensor")]
+    EmptyTensor,
+
+    #[error("Operation requires contiguous tensor")]
+    NotContiguous,
+
+    #[error("Gradient error: {message}")]
+    GradientError { message: String },
+
+    #[error("Serialization error: {message}")]
+    SerializationError { message: String },
+
+    #[error("Internal error: {message}")]
+    InternalError { message: String },
 }
 ```
 
 ## Result Type
 
 ```rust
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
 ```
 
-## Usage Examples
+## Constructors
 
-### Creating Errors
-
-```rust
-use axonml_core::{Error, Result};
-
-fn check_shape(expected: &[usize], got: &[usize]) -> Result<()> {
-    if expected != got {
-        return Err(Error::ShapeMismatch {
-            expected: expected.to_vec(),
-            got: got.to_vec(),
-        });
-    }
-    Ok(())
-}
-```
-
-### Handling Errors
-
-```rust
-use axonml::prelude::*;
-
-fn process_tensor(data: Vec<f32>, shape: &[usize]) -> Result<Tensor<f32>> {
-    let tensor = Tensor::from_vec(data, shape)?;
-    Ok(tensor)
-}
-
-fn main() {
-    match process_tensor(vec![1.0, 2.0, 3.0], &[2, 2]) {
-        Ok(t) => println!("Success: {:?}", t.shape()),
-        Err(Error::ShapeMismatch { expected, got }) => {
-            println!("Shape mismatch: expected {:?}, got {:?}", expected, got);
-        }
-        Err(e) => println!("Other error: {}", e),
-    }
-}
-```
-
-### Error Propagation
-
-```rust
-use axonml::prelude::*;
-
-fn complex_operation(a: &Tensor<f32>, b: &Tensor<f32>) -> Result<Tensor<f32>> {
-    // Errors automatically propagate with ?
-    let sum = a.add(b)?;
-    let result = sum.matmul(b)?;
-    Ok(result)
-}
-```
-
-## Error Messages
-
-All errors implement `Display` for human-readable messages:
+Helper functions for the most common variants:
 
 ```rust
 use axonml_core::Error;
 
-let err = Error::ShapeMismatch {
-    expected: vec![2, 3],
-    got: vec![3, 2],
-};
-
-println!("{}", err);
-// Output: "Shape mismatch: expected [2, 3], got [3, 2]"
+let e1 = Error::shape_mismatch(&[2, 3], &[2, 4]);
+let e2 = Error::invalid_operation("cannot invert a singular matrix");
+let e3 = Error::internal("this should never happen");
 ```
 
-## Error Conversion
+## Usage
 
-The Error type implements `From` for common error types:
+### Matching Specific Variants
 
 ```rust
-// From std::io::Error
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Error::IoError(e)
+use axonml_core::{Error, Result};
+use axonml_tensor::Tensor;
+
+fn add(a: &Tensor<f32>, b: &Tensor<f32>) -> Result<Tensor<f32>> {
+    a.add(b)
+}
+
+match add(&t1, &t2) {
+    Ok(out) => { /* use out */ }
+    Err(Error::ShapeMismatch { expected, actual }) => {
+        eprintln!("shape mismatch: {expected:?} vs {actual:?}");
     }
+    Err(Error::BroadcastError { shape1, shape2 }) => {
+        eprintln!("can't broadcast {shape1:?} with {shape2:?}");
+    }
+    Err(Error::DeviceMismatch { expected, actual }) => {
+        eprintln!("device mismatch: {expected:?} vs {actual:?}");
+    }
+    Err(e) => eprintln!("other error: {e}"),
 }
 ```
 
-This enables using `?` with standard library functions:
+### Propagation
+
+Every tensor method that can fail uses `Result<T>`, so `?` composes naturally:
 
 ```rust
 use axonml_core::Result;
-use std::fs::File;
+use axonml_tensor::Tensor;
 
-fn load_data(path: &str) -> Result<Vec<u8>> {
-    let mut file = File::open(path)?;  // IoError automatically converted
-    // ...
+fn two_step(a: &Tensor<f32>, b: &Tensor<f32>) -> Result<Tensor<f32>> {
+    let sum = a.add(b)?;
+    let out = sum.matmul(b)?;
+    Ok(out)
 }
 ```
 
-## Best Practices
+## Common Errors and Causes
 
-1. **Use Result<T>** - Always return Result for fallible operations
-2. **Propagate with ?** - Use the `?` operator for clean error propagation
-3. **Add context** - Use `.map_err()` to add context when needed
-4. **Match specifically** - Match on specific error variants when handling
+| Variant | Typical Cause |
+|:--------|:--------------|
+| `ShapeMismatch` | Feeding a tensor with the wrong shape into a Linear / Conv / loss. |
+| `BroadcastError` | Trying to `add` / `mul` tensors whose shapes are not broadcast-compatible. |
+| `DeviceMismatch` | Model is on GPU, input is still on CPU (or vice-versa). Move inputs with `Tensor::to_device` each batch. |
+| `DTypeMismatch` | Mixing `Tensor<f32>` and `Tensor<f64>` in one op. |
+| `InvalidDimension` | `sum_dim(3, ...)` on a 2-D tensor, or a negative dim that resolves out of range. |
+| `IndexOutOfBounds` | `.get(&[5])` on a length-3 axis. |
+| `AllocationFailed` | OOM — check `Device::capabilities().available_memory`. |
+| `DeviceNotAvailable` | Asked for `Device::Cuda(1)` when only one GPU is present, or the `cuda` feature is off. |
+| `NotContiguous` | An op that requires contiguous layout got a strided view. Insert `.contiguous()`. |
+| `EmptyTensor` | Reducing or indexing a zero-element tensor. |
+| `GradientError` | Disconnected autograd graph (e.g. constructing a fresh `Variable::new(tensor.to_vec() ...)` in the middle of a forward pass severs the graph — use framework built-ins instead). |
 
-## Related
+---
 
-- [Tensor](../tensor/tensor.md) - Operations that return Result
-- [Variable](../autograd/variable.md) - Autograd operations with error handling
-
-@version 0.1.0
-@author AutomataNexus Development Team
+*Last updated: 2026-04-16 (v0.6.1)*

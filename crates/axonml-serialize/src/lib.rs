@@ -1,13 +1,21 @@
-//! Axonml Serialize - Model Serialization for Axonml ML Framework
+//! Model serialization for AxonML.
+//!
+//! Save/load in .axonml (binary), .json, and SafeTensors formats. `StateDict`
+//! (PyTorch-compatible named parameter collection), `Checkpoint` with
+//! `TrainingState` (loss/val-loss/metric history, epoch/step, config map),
+//! format auto-detection (by extension and magic bytes), PyTorch weight
+//! conversion (`convert_pytorch_key`, `convert_full_dict`, linear weight
+//! transposition), metadata embedding, ONNX shape utilities.
 //!
 //! # File
 //! `crates/axonml-serialize/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -78,6 +86,7 @@
 // Modules
 // =============================================================================
 
+mod bundle;
 mod checkpoint;
 mod convert;
 mod format;
@@ -87,6 +96,10 @@ mod state_dict;
 // Re-exports
 // =============================================================================
 
+pub use bundle::{
+    AXONML_BUNDLE_VERSION, AXONML_MAGIC, BundleError, BundleHeader, BundleResult, ModelBundle,
+    load_bundle, load_bundle_from_bytes, load_header, save_bundle,
+};
 pub use checkpoint::{Checkpoint, CheckpointBuilder, TrainingState};
 pub use convert::{
     OnnxOpType, convert_from_pytorch, from_onnx_shape, from_pytorch_key, pytorch_layer_mapping,

@@ -1,24 +1,50 @@
-//! WebAuthn authentication for AxonML
+//! WebAuthn Authentication — FIDO2 Passwordless MFA
+//!
+//! Implements a simplified WebAuthn (FIDO2) registration and authentication
+//! flow. `WebAuthnAuth` is configured with a relying-party ID, name, and
+//! origin, and exposes a four-step ceremony:
+//!
+//! - `start_registration` / `finish_registration` — creates a
+//!   `RegistrationChallenge` with ES256/RS256 credential params, then
+//!   converts the client `RegistrationResponse` into a `WebAuthnCredential`.
+//! - `start_authentication` / `finish_authentication` — issues an
+//!   `AuthenticationChallenge` scoped to existing credentials, then verifies
+//!   origin and counter-regression before returning the updated credential.
+//!
+//! Supporting types: `RelyingParty`, `UserEntity`, `PubKeyCredParam`,
+//! `AuthenticatorSelection`, `AllowCredential`, `AttestationResponse`,
+//! `AssertionResponse`, `ClientData`, and the challenge/response envelopes.
+//!
+//! Challenges are 32 bytes of `OsRng` entropy, base64url-encoded.
 //!
 //! # File
 //! `crates/axonml-server/src/auth/webauthn.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use super::AuthError;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as BASE64};
 use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
+
+// =============================================================================
+// Types — Credential Storage
+// =============================================================================
 
 /// WebAuthn authentication handler
 pub struct WebAuthnAuth {
@@ -36,6 +62,10 @@ pub struct WebAuthnCredential {
     pub created_at: String,
     pub name: String,
 }
+
+// =============================================================================
+// Types — Registration
+// =============================================================================
 
 /// Registration challenge
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +110,27 @@ pub struct AuthenticatorSelection {
     pub user_verification: String,
 }
 
+/// Registration response from client
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistrationResponse {
+    pub id: String,
+    pub raw_id: String,
+    pub response: AttestationResponse,
+    #[serde(rename = "type")]
+    pub cred_type: String,
+}
+
+/// Attestation response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttestationResponse {
+    pub client_data_json: String,
+    pub attestation_object: String,
+}
+
+// =============================================================================
+// Types — Authentication
+// =============================================================================
+
 /// Authentication challenge
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticationChallenge {
@@ -96,23 +147,6 @@ pub struct AllowCredential {
     pub id: String,
     #[serde(rename = "type")]
     pub cred_type: String,
-}
-
-/// Registration response from client
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegistrationResponse {
-    pub id: String,
-    pub raw_id: String,
-    pub response: AttestationResponse,
-    #[serde(rename = "type")]
-    pub cred_type: String,
-}
-
-/// Attestation response
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AttestationResponse {
-    pub client_data_json: String,
-    pub attestation_object: String,
 }
 
 /// Authentication response from client
@@ -150,6 +184,10 @@ pub struct AssertionResponse {
     pub user_handle: Option<String>,
 }
 
+// =============================================================================
+// Implementation
+// =============================================================================
+
 impl WebAuthnAuth {
     /// Create a new WebAuthn auth handler
     pub fn new(rp_id: &str, rp_name: &str, rp_origin: &str) -> Self {
@@ -167,6 +205,10 @@ impl WebAuthnAuth {
         OsRng.fill_bytes(&mut bytes);
         BASE64.encode(bytes)
     }
+
+    // -------------------------------------------------------------------------
+    // Registration
+    // -------------------------------------------------------------------------
 
     /// Start registration process
     pub fn start_registration(
@@ -235,6 +277,10 @@ impl WebAuthnAuth {
         })
     }
 
+    // -------------------------------------------------------------------------
+    // Authentication
+    // -------------------------------------------------------------------------
+
     /// Start authentication process
     pub fn start_authentication(
         &self,
@@ -299,6 +345,10 @@ impl WebAuthnAuth {
         Ok(updated)
     }
 
+    // -------------------------------------------------------------------------
+    // Origin Verification
+    // -------------------------------------------------------------------------
+
     /// Verify the origin matches our expected origin
     fn verify_origin(&self, origin: &str) -> bool {
         let expected = self.rp_origin();
@@ -310,6 +360,10 @@ impl WebAuthnAuth {
         &self.rp_origin
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

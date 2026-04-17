@@ -1,18 +1,36 @@
-//! Model Hub Browse Page
+//! Model Hub Browse Page — Searchable Grid Of Pretrained Models
+//!
+//! Browser for `PretrainedModel` entries in the model hub. `HubBrowsePage`
+//! loads the full catalog via `api::hub::list_models` and filters it with a
+//! case-insensitive search over name/description/architecture plus an
+//! architecture `<select>` whose options are derived from the sorted-unique
+//! list of `m.architecture`. Filtered models flow through the `ModelsGrid`
+//! component, which renders a grid of `PretrainedModelCard` tiles. Each card
+//! displays name, architecture badge, cached badge (when `is_cached`),
+//! description, accuracy, parameter count, size-MB, dataset, input-size
+//! tuple, and class count, with a footer button that calls
+//! `api::hub::download_model`, toasts success/cached-state through
+//! `use_app_state`, and re-fetches the catalog to update cached status.
+//! A local `format_params` helper abbreviates parameter counts as K/M/B.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/hub/browse.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,11 +40,18 @@ use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// Hub Browse Page
+// =============================================================================
+
 /// Hub browse page
 #[component]
 pub fn HubBrowsePage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (models, set_models) = create_signal::<Vec<PretrainedModel>>(Vec::new());
     let (search, set_search) = create_signal(String::new());
@@ -35,6 +60,9 @@ pub fn HubBrowsePage() -> impl IntoView {
 
     let state_for_effect = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Data Fetch
+    // -------------------------------------------------------------------------
     // Initial fetch
     create_effect(move |_| {
         let state = state_for_effect.clone();
@@ -48,6 +76,9 @@ pub fn HubBrowsePage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Derived Filters
+    // -------------------------------------------------------------------------
     // Get unique architectures for filter
     let architectures = move || {
         let mut archs: Vec<String> = models
@@ -84,6 +115,9 @@ pub fn HubBrowsePage() -> impl IntoView {
             .collect::<Vec<_>>()
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page hub-browse-page">
             <div class="page-header">
@@ -154,6 +188,10 @@ pub fn HubBrowsePage() -> impl IntoView {
     }
 }
 
+// =============================================================================
+// Models Grid
+// =============================================================================
+
 /// Models Grid component
 #[component]
 fn ModelsGrid<F>(
@@ -214,6 +252,10 @@ where
         </div>
     }
 }
+
+// =============================================================================
+// Pretrained Model Card
+// =============================================================================
 
 /// Pretrained Model Card component
 #[component]
@@ -313,6 +355,10 @@ where
         </div>
     }
 }
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
 
 fn format_params(params: u64) -> String {
     if params >= 1_000_000_000 {

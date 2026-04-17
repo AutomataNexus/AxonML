@@ -1,13 +1,20 @@
-//! Activation Modules - Non-linear Activation Functions
+//! Activation function modules implementing the `Module` trait.
+//!
+//! 437 lines. `ReLU`, `Sigmoid`, `Tanh`, `GELU`, `SiLU` (Swish), `ELU`,
+//! `LeakyReLU` (configurable negative_slope), `Mish`, `Softmax` (with dim),
+//! `LogSoftmax`, `Identity`, `Flatten`. Each wraps the corresponding
+//! `Variable` method in a `Module::forward` so it can be used in `Sequential`
+//! or `ModuleList` chains. Stateless (no parameters, no train/eval difference).
 //!
 //! # File
 //! `crates/axonml-nn/src/activation.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

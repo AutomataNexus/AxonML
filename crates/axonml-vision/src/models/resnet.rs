@@ -1,13 +1,23 @@
-//! `ResNet` - Deep Residual Networks
+//! ResNet — Deep Residual Networks for Image Classification
+//!
+//! Implements ResNet (He et al., 2015) with `BasicBlock` (two 3x3 convs, for
+//! ResNet-18/34) and `Bottleneck` (1x1->3x3->1x1, expansion=4, for ResNet-50+).
+//! Each block supports optional downsampling via 1x1 conv + BN for residual
+//! dimension matching. `ResNet` composes a 7x7 stem conv + MaxPool, four residual
+//! layers with configurable block counts and strides, AdaptiveAvgPool2d, and a
+//! final Linear classifier. Factory methods: `resnet18()` [2,2,2,2] and
+//! `resnet34()` [3,4,6,3] with BasicBlock. All blocks propagate train/eval
+//! mode to their BatchNorm2d layers.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/resnet.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

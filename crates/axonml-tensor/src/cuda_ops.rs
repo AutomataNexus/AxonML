@@ -1,13 +1,24 @@
-//! GPU Tensor Operations
+//! CUDA GPU operations on `Tensor<f32>` — 3215 lines, 34 public methods.
+//!
+//! Feature-gated (`cuda`). Methods on `Tensor<f32>` that dispatch to the
+//! `CudaBackend` singleton: `to_device` / `contiguous_gpu` / `to_vec` (for
+//! GPU tensors), elementwise (add/sub/mul/div/scalar/neg/abs/pow), activations
+//! (relu/sigmoid/tanh/gelu/silu/elu/leaky_relu/softmax/log_softmax),
+//! reductions (sum/mean/max/min), matmul (cuBLAS GEMM), layernorm, RMSNorm,
+//! transpose, embedding_gather, dropout, and quantized matmul dispatch
+//! (`q4k_gemv_cuda`, `q4k_gemm_cuda`, `q6k_gemv_cuda`, `q6k_gemm_cuda`
+//! for in-shader Q4_K/Q6_K dequant). Also `pool_alloc` + `get_cuda_backend`
+//! helper re-exports for other crates.
 //!
 //! # File
 //! `crates/axonml-tensor/src/cuda_ops.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,18 +1,33 @@
-//! ONNX Error Types
+//! ONNX Error Types — Import, Export, and Runtime Failures
+//!
+//! Defines `OnnxError`, the `thiserror`-derived error enum for the
+//! `axonml-onnx` crate. Variants cover file I/O failures (`#[from]
+//! std::io::Error`), protobuf decoding failures (with a manual `From<prost::
+//! DecodeError>` impl), unsupported opset versions, unsupported operators,
+//! invalid tensor shapes and data-type enum values, missing / invalid ONNX
+//! attributes, missing initializers (weight tensors), graph validation
+//! failures, tensor-conversion issues, model export failures, and a generic
+//! string-wrapped Axonml core error variant. `OnnxResult<T>` is the
+//! corresponding `Result` alias.
 //!
 //! # File
 //! `crates/axonml-onnx/src/error.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Error Types
+// =============================================================================
 
 use thiserror::Error;
 
@@ -74,6 +89,10 @@ pub enum OnnxError {
     #[error("Axonml error: {0}")]
     Axonml(String),
 }
+
+// =============================================================================
+// Conversions
+// =============================================================================
 
 impl From<prost::DecodeError> for OnnxError {
     fn from(err: prost::DecodeError) -> Self {

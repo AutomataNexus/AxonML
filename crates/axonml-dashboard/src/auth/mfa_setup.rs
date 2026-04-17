@@ -1,18 +1,44 @@
-//! MFA Setup Pages (TOTP, WebAuthn, Recovery Codes)
+//! MFA Enrollment — TOTP, WebAuthn, and Recovery Code Setup Pages
+//!
+//! Three enrollment pages mounted under `/settings/security/*` that let the
+//! signed-in user add or manage second-factor credentials.
+//!
+//! `TotpSetupPage` is a 3-step wizard: step 1 calls `api::auth::totp_setup`
+//! to fetch a QR-code SVG + shared secret (with copy-to-clipboard via the
+//! browser Clipboard API), step 2 takes a 6-digit code through `CodeInput`
+//! and POSTs to `api::auth::totp_enable`, step 3 renders the one-time backup
+//! codes returned by the setup response. A dashboard toast confirms activation.
+//!
+//! `WebAuthnSetupPage` runs the FIDO2 registration ceremony: it requires a
+//! user-supplied `device_name`, checks `webauthn::is_webauthn_available`,
+//! calls `api::auth::webauthn_register_start` for a challenge, invokes
+//! `webauthn::create_credential` using the browser's hostname as the RP ID,
+//! and finishes with `webauthn_register_finish`. `UserCancelled` is caught
+//! and surfaced as a friendly message.
+//!
+//! `RecoveryCodesPage` loads existing codes via
+//! `api::auth::get_recovery_codes`, offers a "Copy All" clipboard action,
+//! and (after a `ConfirmDialog`) regenerates the set via
+//! `regenerate_recovery_codes`, firing a success toast on completion.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/auth/mfa_setup.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,6 +48,10 @@ use crate::components::{forms::*, icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 use crate::utils::webauthn;
+
+// =============================================================================
+// TOTP Setup Page
+// =============================================================================
 
 /// TOTP Setup Page
 #[component]
@@ -283,6 +313,10 @@ pub fn TotpSetupPage() -> impl IntoView {
     }
 }
 
+// =============================================================================
+// WebAuthn Setup Page
+// =============================================================================
+
 /// WebAuthn Setup Page
 #[component]
 pub fn WebAuthnSetupPage() -> impl IntoView {
@@ -445,6 +479,10 @@ pub fn WebAuthnSetupPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// Recovery Codes Page
+// =============================================================================
 
 /// Recovery Codes Page (view/regenerate)
 #[component]

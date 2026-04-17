@@ -1,13 +1,20 @@
-//! Computational Graph - Dynamic Graph Construction
+//! Dynamic computation graph construction for automatic differentiation.
+//!
+//! 237 lines. `GraphNode` (leaf or intermediate, carries GradFn + topo order +
+//! thread ID for cross-thread detection). `ComputationGraph` (thread-local
+//! global via `with_graph` closure, monotonic counter for topological ordering,
+//! `register_leaf` / `register_operation`). The graph is built implicitly as
+//! `Variable` operations execute and torn down during `backward()`.
 //!
 //! # File
 //! `crates/axonml-autograd/src/graph.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

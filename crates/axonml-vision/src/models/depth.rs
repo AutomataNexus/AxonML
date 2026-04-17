@@ -1,13 +1,24 @@
-//! Depth Estimation Models
+//! Depth Estimation Models — DPT and FastDepth
+//!
+//! Monocular depth estimation architectures. `DPT` (Dense Prediction Transformer)
+//! uses a ViT-like patch embedding + transformer encoder, extracting features at
+//! 4 depths, reassembling them to spatial maps via `DPTReassemble`, and fusing
+//! bottom-up through `DPTFusion` modules with differentiable `interpolate_var()`.
+//! Final 1-channel depth is upsampled to input resolution. `FastDepth` is a
+//! lightweight encoder-decoder (<4M params) using MobileNet-style depthwise
+//! separable convolutions for encoding and transposed convolutions for decoding,
+//! targeting real-time inference on embedded GPUs. Both produce `DepthMap` with
+//! min/max depth values via `estimate_depth()`.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/depth.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

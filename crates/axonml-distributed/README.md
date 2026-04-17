@@ -9,32 +9,50 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
-  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
   <img src="https://img.shields.io/badge/part%20of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
 ## Overview
 
-`axonml-distributed` provides distributed training utilities for the AxonML machine learning framework. It includes backend abstractions for communication, process group management, DistributedDataParallel (DDP) wrappers for multi-GPU training, and high-level communication primitives like all-reduce, broadcast, and gather operations.
+`axonml-distributed` provides distributed training primitives for AxonML:
+data parallelism (`DDP`), fully sharded data parallelism (`FSDP`, ZeRO-2 /
+ZeRO-3 with HybridShard and CPU offload), pipeline parallelism (`Pipeline`
+with GPipe / 1F1B / Interleaved 1F1B schedules), tensor parallelism
+(`ColumnParallelLinear`, `RowParallelLinear`), collective ops (all-reduce,
+broadcast, gather/scatter, reduce-scatter, barrier), a pluggable `Backend`
+trait, a deterministic `MockBackend` for tests, and an optional NCCL backend
+behind the `nccl` feature.
 
 ## Features
 
-- **Backend Abstraction** - Pluggable communication backend trait with mock implementation for testing
-- **Process Groups** - Manage distributed processes with rank and world size information
-- **DistributedDataParallel (DDP)** - Wrap models for automatic gradient synchronization across processes
-- **Collective Operations** - All-reduce, broadcast, all-gather, reduce-scatter, and barrier primitives
-- **Gradient Bucketing** - Efficient gradient accumulation and synchronization with configurable bucket sizes
-- **Multiple Reduce Operations** - Sum, product, min, max, and average reduction strategies
-- **Model Parallel Utilities** - Tensor scattering and gathering for model parallelism
+- **Backend Abstraction** — `Backend` trait with `MockBackend` (in-process shared-state simulation) and optional `NcclBackend` (dynamic `libcudart` / `libnccl` loading via `libloading`)
+- **Process Groups** — `ProcessGroup` / `World` abstractions with rank, world size, subgroups, default group
+- **DistributedDataParallel (DDP)** — model wrapper with gradient bucketing, sync strategies (`Synchronous`, `Overlapped`, `NoSync`), parameter broadcast, buffer sync toggle, `DDP<M>` type alias
+- **FullyShardedDataParallel (FSDP)** — parameter sharding with `FullShard` (ZeRO-3), `ShardGradOp` (ZeRO-2), `NoShard`, `HybridShard`; optional `CPUOffload::{None, Params, Full}`; mixed precision toggle; `gather_parameters` / `reshard_parameters`; `clip_grad_norm`; `FSDPMemoryStats` diagnostics; `FSDP<M>` type alias
+- **Pipeline Parallelism** — `Pipeline` with `GPipe`, `OneFOneBSchedule` (default), `InterleavedOneFOneB`; `PipelineStage`, `PipelineMemoryStats` with `gpipe_peak_activations` and `one_f_one_b_peak_activations`
+- **Tensor Parallelism** — `ColumnParallelLinear`, `RowParallelLinear`
+- **Collective Operations** — `all_reduce_{sum,mean,min,max,product}`, `broadcast`, `broadcast_from`, `all_gather`, `reduce_scatter_sum`, `reduce_scatter_mean`, `gather_tensor`, `scatter_tensor`, `barrier`, `sync_gradient`, `sync_gradients`, `rank`, `world_size`, `is_main_process`
+- **Reduce Operations** — `ReduceOp::{Sum, Product, Min, Max, Average}`
+- **Gradient Bucketing** — `GradientBucket`, `GradientSynchronizer`, `GradSyncStrategy`
 
 ## Modules
 
 | Module | Description |
 |--------|-------------|
-| `backend` | Communication backend trait and MockBackend implementation for testing |
-| `process_group` | ProcessGroup and World abstractions for managing distributed processes |
-| `ddp` | DistributedDataParallel wrapper, GradientBucket, and GradientSynchronizer |
-| `comm` | High-level communication utilities (all_reduce, broadcast, gather, etc.) |
+| `backend` | `Backend` trait, `MockBackend`, `ReduceOp` |
+| `process_group` | `ProcessGroup`, `World` (with `new_group` subgroups, `default_group`, `mock` constructor) |
+| `comm` | Collective ops (`all_reduce_*`, `broadcast*`, `all_gather`, `reduce_scatter_*`, `gather_tensor`, `scatter_tensor`, `barrier`, `sync_gradient(s)`, query helpers) |
+| `ddp` | `DistributedDataParallel`, `GradientBucket`, `GradientSynchronizer`, `GradSyncStrategy` |
+| `fsdp` | `FullyShardedDataParallel`, `ShardingStrategy`, `CPUOffload`, `FSDPMemoryStats`, `ColumnParallelLinear`, `RowParallelLinear` |
+| `pipeline` | `Pipeline`, `PipelineStage`, `PipelineSchedule`, `PipelineMemoryStats` |
+| `nccl_backend` (feature: `nccl`) | `NcclBackend`, `NcclUniqueId`, `NcclError`, version/device query, multi-node init |
+
+## Features Flags
+
+| Flag | Effect |
+|------|--------|
+| `nccl` | Enables the `NcclBackend` module and pulls in `libloading` for runtime NCCL discovery |
 
 ## Usage
 
@@ -42,7 +60,10 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-distributed = "0.1.0"
+axonml-distributed = "0.6.1"
+
+# Or with NCCL support:
+axonml-distributed = { version = "0.6.1", features = ["nccl"] }
 ```
 
 ### Basic DDP Training
@@ -74,6 +95,68 @@ for batch in data_loader.iter() {
 }
 ```
 
+### DDP Builder
+
+```rust
+use axonml_distributed::prelude::*;
+
+let ddp = DDP::new(model, pg)
+    .broadcast_buffers(false)
+    .gradient_as_bucket_view(false);
+```
+
+### FSDP (ZeRO-3 / ZeRO-2 / Hybrid)
+
+```rust
+use axonml_distributed::prelude::*;
+
+let fsdp = FullyShardedDataParallel::new(model, world.default_group().clone())
+    .sharding_strategy(ShardingStrategy::FullShard)   // ZeRO-3
+    .cpu_offload(CPUOffload::Params)
+    .mixed_precision(true);
+
+// Gather full parameters for a forward pass, then reshard
+fsdp.gather_parameters();
+// ... forward / backward ...
+fsdp.reshard_parameters();
+fsdp.sync_gradients();
+
+// Gradient clipping
+let grad_norm = fsdp.clip_grad_norm(1.0);
+
+// Memory accounting
+let stats = fsdp.memory_estimate();
+println!("FSDP total: {:.1} MB (savings {:.1}%)",
+         stats.total_memory_mb(), stats.memory_savings() * 100.0);
+```
+
+### Pipeline Parallelism
+
+```rust
+use axonml_distributed::prelude::*;
+
+let pipe = Pipeline::from_modules(stage_modules, world.default_group().clone())
+    .schedule(PipelineSchedule::OneFOneBSchedule)
+    .num_microbatches(8);
+
+let output = pipe.forward(&input);
+
+// Memory accounting
+let peak = PipelineMemoryStats::one_f_one_b_peak_activations(pipe.num_stages(), 8);
+```
+
+### Tensor Parallelism
+
+```rust
+use axonml_distributed::prelude::*;
+
+// Shard along output dimension
+let col = ColumnParallelLinear::new(/* ... */);
+
+// Shard along input dimension
+let row = RowParallelLinear::new(/* ... */);
+```
+
 ### Communication Primitives
 
 ```rust
@@ -85,28 +168,34 @@ let pg = ProcessGroup::mock();
 let mut tensor = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap();
 all_reduce_sum(&mut tensor, &pg);
 all_reduce_mean(&mut tensor, &pg);
+all_reduce_max(&mut tensor, &pg);
+all_reduce_min(&mut tensor, &pg);
+all_reduce_product(&mut tensor, &pg);
 
-// Broadcast from rank 0
+// Broadcast from rank 0 (or from any source rank)
 broadcast(&mut tensor, &pg);
+broadcast_from(&mut tensor, &pg, /* src_rank */ 0);
 
-// All-gather across processes
+// All-gather / reduce-scatter / gather / scatter
 let gathered = all_gather(&tensor, &pg);
+let scattered_sum   = reduce_scatter_sum(&tensor, &pg);
+let scattered_mean  = reduce_scatter_mean(&tensor, &pg);
+let _ = gather_tensor(&tensor, &pg, 0);
+let _ = scatter_tensor(&tensor, &pg, 0);
 
 // Barrier synchronization
 barrier(&pg);
 
 // Query process information
-let my_rank = rank(&pg);
+let my_rank         = rank(&pg);
 let total_processes = world_size(&pg);
-let is_main = is_main_process(&pg);
+let is_main         = is_main_process(&pg);
 ```
 
 ### Gradient Synchronization
 
 ```rust
 use axonml_distributed::prelude::*;
-
-let pg = ProcessGroup::mock();
 
 // Synchronize multiple gradients
 let mut gradients = vec![
@@ -134,10 +223,6 @@ let grad2 = Tensor::from_vec(vec![0.3, 0.4, 0.5], &[3]).unwrap();
 bucket.add(&grad1);
 bucket.add(&grad2);
 
-// All-reduce the flattened bucket data
-let pg = ProcessGroup::mock();
-pg.backend().all_reduce(bucket.data_mut(), ReduceOp::Average);
-
 // Extract synchronized gradients
 let synced_grads = bucket.extract();
 ```
@@ -148,8 +233,8 @@ let synced_grads = bucket.extract();
 use axonml_distributed::prelude::*;
 
 let mut sync = GradientSynchronizer::new(
-    GradSyncStrategy::Synchronous,
-    25_000_000  // ~100MB bucket size for f32
+    GradSyncStrategy::Synchronous,  // or Overlapped, NoSync
+    25_000_000                      // ~100MB bucket size for f32
 );
 
 sync.prepare(10);  // 10 parameters
@@ -159,9 +244,7 @@ let grad = Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap();
 sync.add_gradient(0, &grad);
 
 // Synchronize all buckets
-let pg = ProcessGroup::mock();
 sync.sync_all(&pg);
-
 sync.clear();
 ```
 
@@ -194,9 +277,27 @@ assert!(subgroup.contains(0));
 assert_eq!(subgroup.size(), 2);
 ```
 
-## Tests
+### NCCL Backend (feature-gated)
 
-Run the test suite:
+```rust
+#[cfg(feature = "nccl")]
+use axonml_distributed::{NcclBackend, NcclUniqueId};
+
+# #[cfg(feature = "nccl")]
+# fn example() -> Result<(), axonml_distributed::NcclError> {
+// Multi-node: rank 0 generates the unique id and broadcasts it out-of-band.
+let unique_id = NcclBackend::generate_unique_id()?;
+let backend   = NcclBackend::new(unique_id, /* rank */ 0, /* world_size */ 2, /* device */ 0)?;
+
+// Or spin up a single-node world over multiple local GPUs:
+let backends = NcclBackend::create_world(&[0, 1])?;
+
+let (major, minor, patch) = backend.nccl_version()?;
+backend.synchronize()?;
+# Ok(()) }
+```
+
+## Tests
 
 ```bash
 cargo test -p axonml-distributed

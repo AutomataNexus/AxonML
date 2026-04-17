@@ -1,21 +1,50 @@
-//! Graph Optimization
+//! Graph Optimization — Six-Pass IR Transformation Pipeline
+//!
+//! Implements `Optimizer`, the driver that runs an ordered list of
+//! `OptimizationPass` transformations over a `Graph`. `OptimizationPass`
+//! enumerates ConstantFolding, DeadCodeElimination, ElementwiseFusion,
+//! CommonSubexpressionElimination, AlgebraicSimplification, and
+//! StrengthReduction. `default_passes` seeds the pipeline with folding, algebra,
+//! DCE, and CSE. Each pass is a standalone `fn(Graph) -> Graph`:
+//! `constant_folding` rewrites `x * 1 -> x`, `x * 0 -> Constant(0)`, and
+//! `x + 0 -> x` while tracking known-constant node values;
+//! `dead_code_elimination` walks backward from the registered outputs to build
+//! a `FxHashSet` of live nodes and rebuilds the graph keeping only those;
+//! `elementwise_fusion` is a no-op stub; `cse` uses a debug-formatted op string
+//! as the hash key in an `FxHashMap<String, NodeId>` to deduplicate structurally
+//! identical subexpressions; `algebraic_simplification` collapses `x * 1`,
+//! `x + 0`, and double negation (`--x -> x`); `strength_reduction` is a
+//! pass-through placeholder for Pow/Div cheapening. All passes share `remap_op`,
+//! a dense helper that rewrites every `Op` variant's `NodeId` references through
+//! a `FxHashMap` produced during graph rebuilding. Tests verify DCE removes an
+//! unused Mul, algebraic simplification eliminates `MulScalar(1.0)`, and
+//! constant folding materializes a Constant for `MulScalar(0.0)`.
 //!
 //! # File
 //! `crates/axonml-jit/src/optimize.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use crate::ir::{Graph, NodeId, Op};
 use rustc_hash::{FxHashMap, FxHashSet};
+
+// =============================================================================
+// OptimizationPass
+// =============================================================================
 
 /// Optimization passes available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +62,10 @@ pub enum OptimizationPass {
     /// Strength reduction (expensive ops -> cheaper ops).
     StrengthReduction,
 }
+
+// =============================================================================
+// Optimizer Driver
+// =============================================================================
 
 /// Graph optimizer.
 pub struct Optimizer {
@@ -88,6 +121,14 @@ impl Default for Optimizer {
     }
 }
 
+// =============================================================================
+// Optimizer Passes
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Constant Folding
+// -----------------------------------------------------------------------------
+
 /// Constant folding: evaluate constant expressions at compile time.
 fn constant_folding(graph: Graph) -> Graph {
     // For now, just identify constant nodes
@@ -142,6 +183,10 @@ fn constant_folding(graph: Graph) -> Graph {
     new_graph
 }
 
+// -----------------------------------------------------------------------------
+// Dead Code Elimination
+// -----------------------------------------------------------------------------
+
 /// Dead code elimination: remove nodes that don't contribute to outputs.
 fn dead_code_elimination(graph: Graph) -> Graph {
     // Find all nodes reachable from outputs
@@ -186,6 +231,10 @@ fn dead_code_elimination(graph: Graph) -> Graph {
     new_graph
 }
 
+// -----------------------------------------------------------------------------
+// Elementwise Fusion
+// -----------------------------------------------------------------------------
+
 /// Elementwise fusion: combine consecutive elementwise ops into kernels.
 fn elementwise_fusion(graph: Graph) -> Graph {
     // For now, just return the graph unchanged
@@ -193,6 +242,10 @@ fn elementwise_fusion(graph: Graph) -> Graph {
     // and create FusedElementwise nodes
     graph
 }
+
+// -----------------------------------------------------------------------------
+// Common Subexpression Elimination
+// -----------------------------------------------------------------------------
 
 /// Common subexpression elimination.
 fn cse(graph: Graph) -> Graph {
@@ -229,6 +282,10 @@ fn cse(graph: Graph) -> Graph {
 
     new_graph
 }
+
+// -----------------------------------------------------------------------------
+// Algebraic Simplification
+// -----------------------------------------------------------------------------
 
 /// Algebraic simplifications.
 fn algebraic_simplification(graph: Graph) -> Graph {
@@ -286,6 +343,10 @@ fn algebraic_simplification(graph: Graph) -> Graph {
     new_graph
 }
 
+// -----------------------------------------------------------------------------
+// Strength Reduction
+// -----------------------------------------------------------------------------
+
 /// Strength reduction: replace expensive ops with cheaper equivalents.
 fn strength_reduction(graph: Graph) -> Graph {
     let mut new_graph = Graph::new();
@@ -325,6 +386,10 @@ fn strength_reduction(graph: Graph) -> Graph {
 
     new_graph
 }
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 /// Remaps node IDs in an operation using the provided mapping.
 fn remap_op(op: &Op, node_map: &FxHashMap<NodeId, NodeId>) -> Op {
@@ -503,6 +568,10 @@ fn remap_op(op: &Op, node_map: &FxHashMap<NodeId, NodeId>) -> Op {
         },
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

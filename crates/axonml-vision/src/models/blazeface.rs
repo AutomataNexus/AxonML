@@ -1,13 +1,24 @@
-//! BlazeFace - Lightweight Face Detection for Edge
+//! BlazeFace — Lightweight Dual-Scale Face Detection for Edge
+//!
+//! Implements the BlazeFace face detector optimized for edge deployment (~100K
+//! params). Uses depthwise separable residual blocks: `BlazeBlock` (single DW+PW)
+//! and `DoubleBlazeBlock` (stacked DW+PW for 5x5 receptive field). Architecture:
+//! 5x5 stem conv -> 8 front BlazeBlocks (64x64->16x16) -> 3 back DoubleBlazeBlocks
+//! (16x16->8x8). Dual-scale SSD-style detection: scale 1 (16x16, 2 anchors/cell)
+//! and scale 2 (8x8, 6 anchors/cell), totaling 896 anchors for 128x128 input.
+//! `forward_train()` returns (cls_logits, bbox_preds); `detect()` decodes anchors
+//! with sigmoid confidence and applies NMS. `generate_anchors()` produces multi-
+//! aspect-ratio anchor boxes at both scales.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/blazeface.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

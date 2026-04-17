@@ -1,16 +1,51 @@
-//! biometric-training — shared utilities for the Aegis biometric suite
+//! biometric-training — Shared Utilities for the Aegis Biometric Suite
 //!
-//! Provides:
-//! - `IdentityDataset` — generic per-identity binary loader used by all three
-//!   modalities (face, iris, fingerprint, and a polar-cache variant for iris)
-//! - `ResumeMode` + `find_checkpoint` + `load_model_from_checkpoint`
-//!   helpers shared with llm-training but duplicated here so biometric-training
-//!   stays a self-contained standalone crate
-//! - Simple LCG RNG for deterministic batch mining
-//! - `format_count` number formatter
-//! - `l2_normalize_var` — graph-tracked L2 norm used by every modality head
+//! Crate root that holds the pieces every `train_*.rs` modality trainer
+//! (Argus / Ariadne / Mnemosyne) reuses:
+//! - [`IdentityRecord`] + [`IdentityDataset`] — generic per-identity binary
+//!   loader. Every modality preprocesses its data into `identity_NNNN.bin`
+//!   files with a 16-byte `u32 LE` header (num_samples, channels, height,
+//!   width) followed by flat f32 pixel data. [`IdentityDataset::load`]
+//!   sorts filenames to produce stable label IDs, validates shape
+//!   consistency, and exposes `sample_len`, `num_identities`,
+//!   `total_samples`, and `count_with_at_least` accessors.
+//! - [`mine_triplet_batch`] — random (anchor, positive, negative) triplet
+//!   sampler used by Argus training.
+//! - [`mine_identity_sequence_batches`] — per-step triplet sequences used
+//!   by Mnemosyne's crystallization training.
+//! - [`mine_pair_batch`] — 50/50 same/different pair sampler used by
+//!   Ariadne contrastive training.
+//! - [`l2_normalize_var`] — graph-tracked L2 norm (via
+//!   `mul_var`/`sum`/`sqrt`/`div_var`) used by every modality head so
+//!   embeddings live on the unit hypersphere.
+//! - [`lcg_range`] — Numerical Recipes LCG for deterministic batch mining.
+//! - [`format_count`] — thousand-separator formatter.
+//! - [`ResumeMode`] / [`find_checkpoint`] / [`load_model_from_checkpoint`]
+//!   — checkpoint-resume helpers. Duplicated from `llm-training` on
+//!   purpose so `biometric-training` stays a self-contained standalone
+//!   crate.
 //!
-//! Each modality has its own training binary under `src/bin/train_*.rs`.
+//! Each modality has its own training binary under `src/bin/train_*.rs`
+//! which pulls these utilities in plus its per-modality model crate.
+//!
+//! # File
+//! `biometric-training/src/lib.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::fs;
 use std::io::Read;

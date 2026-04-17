@@ -1,13 +1,21 @@
-//! Tests for pooling operators (MaxPool, AveragePool)
+//! Pooling Operator Tests — MaxPool and AveragePool Tensor Shapes
+//!
+//! Unit tests for ONNX pooling operators. Validates 4D tensor construction
+//! for MaxPool (2x2 kernel basic and with padding) and AveragePool (2x2
+//! kernel basic) via `Tensor::from_vec`, verifies `to_vec` round-trip
+//! fidelity, and confirms correct shape handling for multi-channel
+//! (`[1, 2, 4, 4]`) and batched (`[2, 1, 4, 4]`) inputs. Expected pool
+//! output values are documented in comments for future kernel validation.
 //!
 //! # File
 //! `crates/axonml-onnx/tests/pooling_tests.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -16,8 +24,16 @@
 
 use axonml_tensor::Tensor;
 
+// =============================================================================
+// Test Helpers
+// =============================================================================
+
 // Test helper to create operators manually for unit testing
 // In practice, these would be created via ONNX model parsing
+
+// =============================================================================
+// MaxPool Tests
+// =============================================================================
 
 #[test]
 fn test_maxpool_basic_2x2() {
@@ -47,6 +63,10 @@ fn test_maxpool_with_padding() {
     assert_eq!(shape, &[1, 1, 3, 3]);
 }
 
+// =============================================================================
+// AveragePool Tests
+// =============================================================================
+
 #[test]
 fn test_avgpool_basic_2x2() {
     // Create a 4D tensor [1, 1, 4, 4]
@@ -65,6 +85,10 @@ fn test_avgpool_basic_2x2() {
     assert_eq!(shape, &[1, 1, 4, 4]);
 }
 
+// =============================================================================
+// Tensor Utility Tests
+// =============================================================================
+
 #[test]
 fn test_tensor_to_vec() {
     let input_data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
@@ -73,6 +97,10 @@ fn test_tensor_to_vec() {
     let vec_data = tensor.to_vec();
     assert_eq!(vec_data, input_data);
 }
+
+// =============================================================================
+// Multi-Channel and Batched Pooling Tests
+// =============================================================================
 
 #[test]
 fn test_multi_channel_pooling() {

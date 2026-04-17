@@ -1,13 +1,23 @@
-//! VGG - Very Deep Convolutional Networks
+//! VGG — Very Deep Convolutional Networks for Classification
+//!
+//! Implements VGG (Simonyan & Zisserman, 2014) with configurable depth. `VggLayer`
+//! enum defines Conv(channels) and MaxPool layer types. Config functions `vgg11_config()`
+//! through `vgg19_config()` produce the standard layer sequences. `VggFeatures`
+//! builds the convolutional feature extractor from config with optional BatchNorm.
+//! `VggClassifier` is the standard 3-layer FC head (512*7*7->4096->4096->N_classes)
+//! with dropout. `VGG` composes features + flatten + classifier. Factory methods:
+//! `vgg11()` through `vgg19()` and their `_bn` variants. Convenience functions
+//! create ImageNet-1000 defaults.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/vgg.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

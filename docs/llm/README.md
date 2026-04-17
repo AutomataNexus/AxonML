@@ -1,196 +1,76 @@
 # axonml-llm Documentation
 
-> Large Language Model architectures for Axonml.
+> Large-language-model architectures for AxonML.
 
 ## Overview
 
-`axonml-llm` provides production-ready implementations of popular LLM architectures including BERT (encoder-only) and GPT-2 (decoder-only). It includes pre-built model configurations, text generation utilities, and fine-tuning support.
+`axonml-llm` ships nine full pure-Rust LLM architectures on top of
+`axonml-nn` + `axonml-autograd`, with shared building blocks (attention,
+embeddings, RMSNorm, rotary positions), a HuggingFace weight loader, a
+pretrained model hub, and a text-generation engine with top-k / top-p /
+temperature sampling.
 
-## Architecture
+## Architectures
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                     Text Generation                      │
-│        TextGenerator, GenerationConfig                   │
-├─────────────────────────────────────────────────────────┤
-│                    Task-Specific Heads                   │
-│   BertForSequenceClassification, BertForMaskedLM        │
-│   GPT2LMHead                                             │
-├─────────────────────────────────────────────────────────┤
-│                     Base Models                          │
-│   Bert (encoder), GPT2 (decoder)                         │
-├─────────────────────────────────────────────────────────┤
-│                    Transformer Blocks                    │
-│   BertLayer, GPT2Block                                   │
-├─────────────────────────────────────────────────────────┤
-│                    Core Components                       │
-│   MultiHeadAttention, FeedForward, LayerNorm            │
-├─────────────────────────────────────────────────────────┤
-│                      Embeddings                          │
-│   TokenEmbedding, PositionalEmbedding                   │
-└─────────────────────────────────────────────────────────┘
-```
+| Module       | Model / Variant                                                                                |
+|--------------|------------------------------------------------------------------------------------------------|
+| `gpt2`       | `GPT2`, `GPT2LMHead` (classic decoder-only)                                                    |
+| `bert`       | `Bert`, `BertForSequenceClassification`, `BertForMaskedLM` (bidirectional encoder)             |
+| `llama`      | `LLaMA`, `LLaMAForCausalLM` (split-halves RoPE + GQA + SwiGLU)                                 |
+| `mistral`    | `Mistral`, `MistralForCausalLM` (sliding-window attention)                                     |
+| `phi`        | `Phi`, `PhiForCausalLM` (partial RoPE + GELU)                                                  |
+| `ssm`        | `SSMBlock`, `SSMConfig`, `SSMForCausalLM` (Mamba: selective S6 scan + depthwise conv)          |
+| `hydra`      | `HydraModel`, `HydraConfig` (hybrid SSM + windowed attention)                                  |
+| `chimera`    | `ChimeraModel`, `ChimeraConfig` (sparse MoE + differential attention)                          |
+| `trident`    | `TridentModel`, `TridentConfig` (1.58-bit ternary weights: RoPE + GQA + ReLU^2 FFN + SubLN)    |
 
-## Modules
+## Shared Building Blocks
 
-### config.rs
+### `attention`
 
-Model configuration for BERT and GPT-2.
+- `MultiHeadSelfAttention` — BERT-style bidirectional self-attention
+- `CausalSelfAttention` — GPT-style causal self-attention
+- `FlashAttention`, `FlashAttentionConfig` — tiled / block-sparse attention
+- `KVCache`, `LayerKVCache` — per-layer KV cache for incremental decode
+- `scaled_dot_product_attention(q, k, v, mask, dropout)` — low-level primitive
 
-```rust
-pub struct BertConfig {
-    pub vocab_size: usize,         // 30522
-    pub hidden_size: usize,        // 768
-    pub num_hidden_layers: usize,  // 12
-    pub num_attention_heads: usize, // 12
-    pub intermediate_size: usize,   // 3072
-    pub hidden_dropout_prob: f32,   // 0.1
-    pub attention_dropout_prob: f32, // 0.1
-    pub max_position_embeddings: usize, // 512
-    pub layer_norm_eps: f32,        // 1e-12
-}
+### `embedding`
 
-impl BertConfig {
-    pub fn base() -> Self;      // BERT-base (110M params)
-    pub fn large() -> Self;     // BERT-large (340M params)
-    pub fn tiny() -> Self;      // BERT-tiny (for testing)
-}
+- `TokenEmbedding` — vocab -> hidden projection
+- `PositionalEmbedding` — learned absolute positions
+- `BertEmbedding` — BERT embedding stack (token + position + segment +
+  LayerNorm + dropout)
+- `GPT2Embedding` — GPT-2 embedding stack
 
-pub struct GPT2Config {
-    pub vocab_size: usize,         // 50257
-    pub n_positions: usize,        // 1024
-    pub n_embd: usize,             // 768
-    pub n_layer: usize,            // 12
-    pub n_head: usize,             // 12
-    pub dropout: f32,              // 0.1
-    pub layer_norm_eps: f32,       // 1e-5
-}
+Rotary embeddings and RMSNorm live inside the individual model modules
+where they are used (LLaMA, Mistral, Trident).
 
-impl GPT2Config {
-    pub fn small() -> Self;     // GPT-2 small (117M params)
-    pub fn medium() -> Self;    // GPT-2 medium (345M params)
-    pub fn large() -> Self;     // GPT-2 large (762M params)
-    pub fn xl() -> Self;        // GPT-2 XL (1.5B params)
-    pub fn tiny() -> Self;      // Tiny (for testing)
-}
-```
+### `transformer`
 
-### bert.rs
+`TransformerBlock`, `TransformerEncoder`, `TransformerDecoder` — generic
+building blocks used by several models.
 
-BERT encoder model and task heads.
+### `config`
 
-```rust
-pub struct Bert {
-    embeddings: BertEmbedding,
-    layers: Vec<BertLayer>,
-    pooler: Linear,
-}
+`BertConfig`, `GPT2Config`, `TransformerConfig`. Architecture-specific
+configs live alongside their models (`LLaMAConfig`, `MistralConfig`,
+`PhiConfig`, `SSMConfig`, `HydraConfig`, `ChimeraConfig`, `TridentConfig`).
 
-impl Bert {
-    pub fn new(config: &BertConfig) -> Self;
-    pub fn forward(&self, input_ids: &Variable, attention_mask: Option<&Variable>)
-        -> (Variable, Variable);  // (sequence_output, pooled_output)
-}
+### `generation`
 
-pub struct BertForSequenceClassification {
-    bert: Bert,
-    classifier: Linear,
-    num_labels: usize,
-}
-
-impl BertForSequenceClassification {
-    pub fn new(config: &BertConfig, num_labels: usize) -> Self;
-    pub fn forward(&self, input_ids: &Variable, attention_mask: Option<&Variable>)
-        -> Variable;  // logits [batch_size, num_labels]
-}
-
-pub struct BertForMaskedLM {
-    bert: Bert,
-    lm_head: Linear,
-}
-
-impl BertForMaskedLM {
-    pub fn new(config: &BertConfig) -> Self;
-    pub fn forward(&self, input_ids: &Variable, attention_mask: Option<&Variable>)
-        -> Variable;  // logits [batch_size, seq_len, vocab_size]
-}
-```
-
-### gpt2.rs
-
-GPT-2 decoder model.
-
-```rust
-pub struct GPT2 {
-    wte: Embedding,      // Token embeddings
-    wpe: Embedding,      // Position embeddings
-    blocks: Vec<GPT2Block>,
-    ln_f: LayerNorm,     // Final layer norm
-}
-
-impl GPT2 {
-    pub fn new(config: &GPT2Config) -> Self;
-    pub fn forward(&self, input_ids: &Variable) -> Variable;
-        // hidden_states [batch_size, seq_len, n_embd]
-}
-
-pub struct GPT2LMHead {
-    transformer: GPT2,
-    lm_head: Linear,  // Tied with wte
-}
-
-impl GPT2LMHead {
-    pub fn new(config: &GPT2Config) -> Self;
-    pub fn forward(&self, input_ids: &Variable) -> Variable;
-        // logits [batch_size, seq_len, vocab_size]
-}
-```
-
-### attention.rs
-
-Multi-head attention implementations.
-
-```rust
-pub struct MultiHeadSelfAttention {
-    num_heads: usize,
-    head_dim: usize,
-    query: Linear,
-    key: Linear,
-    value: Linear,
-    output: Linear,
-    dropout: f32,
-}
-
-impl MultiHeadSelfAttention {
-    pub fn new(hidden_size: usize, num_heads: usize, dropout: f32) -> Self;
-    pub fn forward(&self, hidden_states: &Variable, attention_mask: Option<&Variable>)
-        -> Variable;
-}
-
-pub struct CausalSelfAttention {
-    // Same as MultiHeadSelfAttention but with causal masking
-}
-
-impl CausalSelfAttention {
-    pub fn forward(&self, hidden_states: &Variable) -> Variable;
-}
-```
-
-### generation.rs
-
-Text generation utilities.
+Text generation with greedy, sampling, top-k, and nucleus (top-p) decoding.
 
 ```rust
 pub struct GenerationConfig {
-    pub max_length: usize,       // Maximum tokens to generate
-    pub min_length: usize,       // Minimum tokens
-    pub do_sample: bool,         // Use sampling vs greedy
-    pub temperature: f32,        // Sampling temperature
-    pub top_k: Option<usize>,    // Top-k filtering
-    pub top_p: Option<f32>,      // Nucleus (top-p) sampling
-    pub repetition_penalty: f32, // Penalize repetition
-    pub eos_token_id: Option<u32>, // End of sequence token
-    pub pad_token_id: Option<u32>, // Padding token
+    pub max_length: usize,
+    pub min_length: usize,
+    pub do_sample: bool,
+    pub temperature: f32,
+    pub top_k: Option<usize>,
+    pub top_p: Option<f32>,
+    pub repetition_penalty: f32,
+    pub eos_token_id: Option<u32>,
+    pub pad_token_id: Option<u32>,
 }
 
 impl GenerationConfig {
@@ -199,113 +79,90 @@ impl GenerationConfig {
     pub fn top_k_sampling(k: usize, temperature: f32) -> Self;
     pub fn nucleus_sampling(p: f32, temperature: f32) -> Self;
 }
-
-pub struct TextGenerator<M> {
-    model: M,
-    config: GenerationConfig,
-}
-
-impl<M: LanguageModel> TextGenerator<M> {
-    pub fn new(model: M, config: GenerationConfig) -> Self;
-    pub fn generate(&self, input_ids: &[u32]) -> Vec<u32>;
-    pub fn generate_batch(&self, input_ids: &[Vec<u32>]) -> Vec<Vec<u32>>;
-}
 ```
 
-### embedding.rs
+`TextGenerator<M>::generate(&[u32]) -> Vec<u32>` runs token-by-token
+autoregressive decoding.
 
-Embedding layers for transformers.
+### `tokenizer`
 
-```rust
-pub struct BertEmbedding {
-    word_embeddings: Embedding,
-    position_embeddings: Embedding,
-    token_type_embeddings: Embedding,
-    layer_norm: LayerNorm,
-    dropout: f32,
-}
+`HFTokenizer` (HuggingFace-compatible tokenizer shim) and `SpecialTokens`
+helper.
 
-impl BertEmbedding {
-    pub fn forward(&self, input_ids: &Variable, token_type_ids: Option<&Variable>)
-        -> Variable;
-}
-```
+### `hf_loader`
+
+`HFLoader`, `load_llama_from_hf`, `load_mistral_from_hf` — reads
+`safetensors` checkpoints from HuggingFace-style directories into AxonML
+`state_dict` form.
+
+### `hub`
+
+`PretrainedLLM`, `download_weights`, and `llm_registry()` — curated index
+of downloadable model checkpoints.
+
+### `state_dict`
+
+`LoadStateDict` trait + `LoadResult` for loading parameter tensors into
+`Module` trees from flat key -> tensor maps.
+
+### `error`
+
+`LLMError` + `LLMResult<T>`.
 
 ## Usage
 
-### BERT for Classification
+### BERT classification
 
 ```rust
 use axonml_llm::{BertConfig, BertForSequenceClassification};
-use axonml::prelude::*;
+use axonml_autograd::Variable;
+use axonml_tensor::Tensor;
 
-// Create model
 let config = BertConfig::base();
-let model = BertForSequenceClassification::new(&config, 2);  // Binary classification
+let model = BertForSequenceClassification::new(&config, 2);
 
-// Prepare input (token IDs)
 let input_ids = Variable::new(
-    Tensor::from_vec(vec![101u32, 2054, 2003, 2023, 102], &[1, 5]).unwrap(),
-    false
+    Tensor::from_vec(vec![101.0, 2054.0, 2003.0, 2023.0, 102.0], &[1, 5]).unwrap(),
+    false,
 );
-
-// Forward pass
 let logits = model.forward(&input_ids, None);
-// logits shape: [1, 2]
 ```
 
-### BERT for Masked Language Modeling
+### BERT masked LM
 
 ```rust
 use axonml_llm::{BertConfig, BertForMaskedLM};
-
 let config = BertConfig::base();
-let model = BertForMaskedLM::new(&config);
-
-// Input with [MASK] token (103)
-let input_ids = Variable::new(
-    Tensor::from_vec(vec![101u32, 2023, 103, 1037, 3231, 102], &[1, 6]).unwrap(),
-    false
-);
-
-let logits = model.forward(&input_ids, None);
-// logits shape: [1, 6, 30522] - predictions for each position
+let model  = BertForMaskedLM::new(&config);
+let logits = model.forward(&input_ids, None); // [batch, seq, vocab]
 ```
 
-### GPT-2 Text Generation
+### GPT-2 text generation
 
 ```rust
 use axonml_llm::{GPT2Config, GPT2LMHead, GenerationConfig, TextGenerator};
 
-// Create model
 let config = GPT2Config::small();
-let model = GPT2LMHead::new(&config);
+let model  = GPT2LMHead::new(&config);
 
-// Create generator with sampling
 let gen_config = GenerationConfig::top_k_sampling(50, 0.8);
-let generator = TextGenerator::new(model, gen_config);
+let generator  = TextGenerator::new(model, gen_config);
 
-// Generate text
-let prompt = vec![15496u32, 11, 314];  // "Hello, I"
+let prompt = vec![15496u32, 11, 314]; // "Hello, I"
 let output = generator.generate(&prompt);
-// output: token IDs for generated text
 ```
 
-### Custom Generation Config
+### Trident (1.58-bit ternary)
 
 ```rust
-let config = GenerationConfig {
-    max_length: 100,
-    min_length: 10,
-    do_sample: true,
-    temperature: 0.9,
-    top_k: Some(40),
-    top_p: Some(0.95),
-    repetition_penalty: 1.2,
-    eos_token_id: Some(50256),
-    pad_token_id: Some(50256),
-};
+use axonml_llm::{TridentConfig, TridentModel};
+let config = TridentConfig::smoke(); // or ::trident_1b(), ::trident_3b()
+let model  = TridentModel::new(&config);
 ```
+
+Each Trident block uses `TernaryLinear` from `axonml-nn` with trained
+shadow weights + Straight-Through-Estimator, giving ~16x memory compression
+for transformer weights while keeping activations in fp32 for accuracy.
 
 ### Fine-tuning BERT
 
@@ -313,33 +170,22 @@ let config = GenerationConfig {
 use axonml_llm::{BertConfig, BertForSequenceClassification};
 use axonml::prelude::*;
 
-// Create model
 let config = BertConfig::base();
-let model = BertForSequenceClassification::new(&config, 3);  // 3 classes
+let mut model = BertForSequenceClassification::new(&config, 3);
+let mut opt = Adam::new(model.parameters(), 2e-5);
 
-// Create optimizer
-let mut optimizer = Adam::new(model.parameters(), 2e-5);
-
-// Training loop
 for (input_ids, labels) in dataset {
-    // Forward
     let logits = model.forward(&input_ids, None);
-
-    // Compute loss
-    let loss = cross_entropy_loss(&logits, &labels);
-
-    // Backward
+    let loss = CrossEntropyLoss::new().compute(&logits, &labels);
     loss.backward();
-
-    // Update
-    optimizer.step();
-    optimizer.zero_grad();
+    opt.step();
+    opt.zero_grad();
 }
 ```
 
 ## Model Sizes
 
-### BERT Variants
+### BERT variants
 
 | Variant | Layers | Hidden | Heads | Params |
 |---------|--------|--------|-------|--------|
@@ -347,7 +193,7 @@ for (input_ids, labels) in dataset {
 | base    | 12     | 768    | 12    | ~110M  |
 | large   | 24     | 1024   | 16    | ~340M  |
 
-### GPT-2 Variants
+### GPT-2 variants
 
 | Variant | Layers | Hidden | Heads | Params |
 |---------|--------|--------|-------|--------|
@@ -359,30 +205,23 @@ for (input_ids, labels) in dataset {
 
 ## Attention Patterns
 
-### BERT (Bidirectional)
-```
-Tokens:  [CLS] The cat sat [SEP]
-Attends:   ←────────────────→
-Each token can attend to all other tokens.
-```
-
-### GPT-2 (Causal/Autoregressive)
-```
-Tokens:  The cat sat on
-Attends: ←── ←── ←── ←──
-Each token can only attend to previous tokens.
-```
-
-## Best Practices
-
-1. **Use appropriate precision**: FP16 for inference, FP32 for training
-2. **Batch for efficiency**: Process multiple sequences together
-3. **Truncate long sequences**: Respect max_position_embeddings
-4. **Use attention masks**: Properly mask padding tokens
-5. **Gradient checkpointing**: For memory-constrained training
+- **BERT** — bidirectional; every token attends to every other.
+- **GPT-2 / LLaMA / Phi / Trident** — causal; token *t* attends to tokens
+  *0..=t*.
+- **Mistral** — sliding-window causal; token *t* attends to tokens
+  *max(0, t-W)..=t*.
+- **Hydra** — hybrid SSM state + windowed attention over short spans.
 
 ## Feature Flags
 
-- Default: Basic BERT and GPT-2
-- `pretrained` - Enable loading pretrained weights
-- `flash-attention` - Use Flash Attention for efficiency
+- `default` — base features
+- `pretrained` — load pretrained weight sets
+
+## Dependencies of Note
+
+`safetensors = "0.3"` for checkpoint IO, `half = "2.3"` for f16 conversion,
+`reqwest` + `indicatif` for `hub` downloads.
+
+## Last updated
+
+0.6.1 (2026-04-16)

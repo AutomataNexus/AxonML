@@ -1,18 +1,44 @@
-//! Data Analysis Page
+//! Data Analysis Page — Dataset Inspection, Preview, Validation, Config
+//!
+//! Four-tab workbench over a user-selected `Dataset`. `DataAnalyzePage` loads
+//! the dataset list on mount and lays out a two-column grid: a
+//! `DatasetSelector` panel on the left and an `analysis-panel` on the right
+//! whose tabs (`analysis`, `preview`, `validation`, `config`) render the
+//! `AnalysisTab`, `PreviewTab`, `ValidationTab`, and `ConfigTab` sub-components.
+//! Selecting a dataset fires four parallel API calls via `api::data`:
+//! `analyze` (returning `DatasetAnalysis` with statistics and
+//! recommendations), `preview` (`DataPreviewResponse` with up to five
+//! samples), `validate` (`ValidationResult` with issues/warnings/class
+//! distribution), and `generate_config` (`GeneratedTrainingConfig` formatted
+//! as TOML). `AnalysisTab` surfaces data type, task type, sample/class counts,
+//! mean/std/min/max/missing statistics, and suggested model/batch
+//! size/LR/epochs/optimizer. `PreviewTab` renders per-sample cards with label
+//! badges, text snippets truncated at 200 chars, feature vectors truncated to
+//! the first ten values, and image dimensions. `ValidationTab` displays an
+//! is_valid status badge, itemized issues (by category/severity/message/
+//! file_path), warnings, and a class distribution grid. `ConfigTab` shows
+//! training (learning_rate, batch_size, epochs, optimizer, loss_function) and
+//! data-split (train/val/test, shuffle/augmentation/normalize) settings plus
+//! any generated notes.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/datasets/analyze.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 
@@ -21,11 +47,18 @@ use crate::components::{icons::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// Data Analyze Page
+// =============================================================================
+
 /// Data analysis page
 #[component]
 pub fn DataAnalyzePage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (datasets, set_datasets) = create_signal::<Vec<Dataset>>(vec![]);
     let (selected_dataset, set_selected_dataset) = create_signal::<Option<String>>(None);
     let (analysis, set_analysis) = create_signal::<Option<DatasetAnalysis>>(None);
@@ -39,6 +72,9 @@ pub fn DataAnalyzePage() -> impl IntoView {
 
     let state_for_fetch = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Data Fetch
+    // -------------------------------------------------------------------------
     // Fetch datasets on mount
     create_effect(move |_| {
         let state = state_for_fetch.clone();
@@ -51,6 +87,9 @@ pub fn DataAnalyzePage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page data-analyze-page">
             <div class="page-header">
@@ -161,6 +200,10 @@ pub fn DataAnalyzePage() -> impl IntoView {
     }
 }
 
+// =============================================================================
+// Dataset Selector
+// =============================================================================
+
 /// Dataset selector component
 #[component]
 fn DatasetSelector(
@@ -267,6 +310,10 @@ fn DatasetSelector(
         </div>
     }
 }
+
+// =============================================================================
+// Analysis Tab
+// =============================================================================
 
 /// Analysis tab component
 #[component]
@@ -375,6 +422,10 @@ fn AnalysisTab(analysis: ReadSignal<Option<DatasetAnalysis>>) -> impl IntoView {
     }
 }
 
+// =============================================================================
+// Preview Tab
+// =============================================================================
+
 /// Preview tab component
 #[component]
 fn PreviewTab(preview: ReadSignal<Option<DataPreviewResponse>>) -> impl IntoView {
@@ -422,6 +473,10 @@ fn PreviewTab(preview: ReadSignal<Option<DataPreviewResponse>>) -> impl IntoView
         }}
     }
 }
+
+// =============================================================================
+// Validation Tab
+// =============================================================================
 
 /// Validation tab component
 #[component]
@@ -499,6 +554,10 @@ fn ValidationTab(validation: ReadSignal<Option<ValidationResult>>) -> impl IntoV
         }}
     }
 }
+
+// =============================================================================
+// Config Tab
+// =============================================================================
 
 /// Config tab component
 #[component]

@@ -1,13 +1,27 @@
-//! Training Convergence Tests
+//! Training Convergence Tests — Loss-Decrease Smoke Suite
+//!
+//! Test-only convergence checks for the axonml-vision model zoo. Helpers
+//! `make_batch` builds (image, class-index) batches by collapsing a one-hot
+//! label into an argmax index, and `accuracy` computes top-1 accuracy from
+//! logits and targets. Tests train each model for a handful of epochs /
+//! steps over `SyntheticMNIST` or `SyntheticCIFAR` and assert the final
+//! per-epoch loss is strictly less than the first-epoch loss (and finite),
+//! covering: LeNet on MNIST with Adam, MLP on MNIST, LeNet on CIFAR-10,
+//! LeNet on MNIST with SGD+momentum, ResNet18 multi-step smoke,
+//! NanoDet forward-only smoke at 64 / 128, Phantom training-step (used
+//! as the detection convergence proxy), Vision Transformer multi-step
+//! smoke on CIFAR, and a Helios training-step convergence check using
+//! `HeliosLoss` with synthetic GT boxes.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/convergence.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,18 +1,31 @@
-//! Quantization Error Types
+//! Quantization Error Types — Block, Shape, and Calibration Failures
+//!
+//! Defines `QuantError`, the `thiserror`-derived error enum for the
+//! `axonml-quant` crate. Variants cover invalid block sizes, unknown
+//! quantization-type strings, shape mismatch (expected/actual `Vec<usize>`),
+//! data-length mismatch (expected/actual byte counts), calibration errors,
+//! numerical overflow during quantization, invalid encoded data, and
+//! tensor-conversion errors. `QuantResult<T>` is the corresponding `Result`
+//! alias used throughout the quantization pipeline.
 //!
 //! # File
 //! `crates/axonml-quant/src/error.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Error Types
+// =============================================================================
 
 use thiserror::Error;
 

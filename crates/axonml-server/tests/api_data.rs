@@ -1,13 +1,22 @@
-//! Integration tests for data analysis API endpoints
+//! Data Analysis API — Integration Tests
+//!
+//! Tests for the data analysis, Kaggle integration, and built-in dataset API
+//! endpoints on the AxonML server. Covers authentication enforcement (401 on
+//! unauthenticated requests), 404 handling for nonexistent datasets, Kaggle
+//! credential validation, search, and downloaded-list queries, as well as
+//! built-in dataset listing, searching, source enumeration, info lookup, and
+//! prepare operations. Uses the `require_server!` macro to skip gracefully
+//! when the server or admin DB is unavailable.
 //!
 //! # File
 //! `crates/axonml-server/tests/api_data.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -18,6 +27,10 @@ mod common;
 
 use common::*;
 use serde_json::Value;
+
+// =============================================================================
+// Test Helpers
+// =============================================================================
 
 /// Skip test if server not running
 macro_rules! require_server {
@@ -34,9 +47,9 @@ macro_rules! require_server {
     };
 }
 
-// ============================================================================
+// =============================================================================
 // Data Analysis Endpoint Tests
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_analyze_dataset_requires_auth() {
@@ -134,9 +147,9 @@ async fn test_generate_config_requires_auth() {
     );
 }
 
-// ============================================================================
+// =============================================================================
 // Kaggle Integration Endpoint Tests
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_kaggle_status_endpoint() {
@@ -282,9 +295,9 @@ async fn test_kaggle_save_credentials_validation() {
     );
 }
 
-// ============================================================================
+// =============================================================================
 // Built-in Datasets Endpoint Tests
-// ============================================================================
+// =============================================================================
 
 #[tokio::test]
 async fn test_list_builtin_datasets() {

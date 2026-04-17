@@ -1,18 +1,36 @@
-//! Training Executor for AxonML Server
+//! Training Executor — Background Runner for Server-Submitted Training Runs
+//!
+//! Defines `TrainingExecutor`, which owns a `Database`, a
+//! `TrainingTracker`, and a models directory, and keeps a map of in-flight
+//! run ids to `mpsc::Sender<TrainingCommand>` for external control. `start_training`
+//! spawns a `tokio` task that drives `run_training_loop` for the given
+//! `TrainingRun` (config: epochs, batch size, learning rate, steps per
+//! epoch) against a demo `Sequential` network (784 -> 128 -> 10) and
+//! publishes simulated loss/accuracy/LR/GPU/memory metrics through the
+//! tracker every 10 steps. The loop polls a command channel each step and
+//! honors `TrainingCommand::Stop` by exiting with an error; on completion
+//! the executor calls `tracker.complete_run` (success or failure) and
+//! removes the command sender. `stop_run(run_id)` is the public kill
+//! switch used by API handlers.
 //!
 //! # File
 //! `crates/axonml-server/src/training/executor.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use crate::db::Database;
 use crate::db::runs::TrainingRun;
@@ -23,6 +41,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 
+// =============================================================================
+// Executor Struct
+// =============================================================================
+
 /// Training executor that runs actual training
 pub struct TrainingExecutor {
     db: Arc<Database>,
@@ -32,11 +54,19 @@ pub struct TrainingExecutor {
     run_commands: Arc<RwLock<HashMap<String, mpsc::Sender<TrainingCommand>>>>,
 }
 
+// =============================================================================
+// Control Commands
+// =============================================================================
+
 /// Command to control training
 #[derive(Debug)]
 pub enum TrainingCommand {
     Stop,
 }
+
+// =============================================================================
+// Executor Implementation
+// =============================================================================
 
 impl TrainingExecutor {
     /// Create a new training executor
@@ -48,6 +78,10 @@ impl TrainingExecutor {
             run_commands: Arc::new(RwLock::new(HashMap::new())),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // External Control
+    // -------------------------------------------------------------------------
 
     /// Stop a running training by run_id
     pub async fn stop_run(&self, run_id: &str) -> Result<(), String> {
@@ -61,6 +95,10 @@ impl TrainingExecutor {
             Err(format!("No active training found for run {}", run_id))
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Background Task Launch
+    // -------------------------------------------------------------------------
 
     /// Start training a run in the background
     pub async fn start_training(&self, run: TrainingRun) -> Result<(), String> {
@@ -109,6 +147,10 @@ impl TrainingExecutor {
 
         Ok(())
     }
+
+    // -------------------------------------------------------------------------
+    // Training Loop
+    // -------------------------------------------------------------------------
 
     /// The actual training loop
     async fn run_training_loop(

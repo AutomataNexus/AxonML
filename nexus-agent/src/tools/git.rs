@@ -1,10 +1,40 @@
-//! Git tools — status, log, diff, commit.
+//! Git Tools — Status, Log, Diff, Commit
+//!
+//! Four tools wrapping the `git` CLI against a caller-supplied `repo` path:
+//! `GitStatusTool` runs `git status --short`; `GitLogTool` runs
+//! `git log --oneline -<count>` (default 10); `GitDiffTool` runs
+//! `git diff --stat` or `git diff --cached --stat` when `staged=true`;
+//! `GitCommitTool` optionally stages a file list via `git add` then creates
+//! a commit with `-m <message>`.
+//!
+//! All commands go through the private `git()` helper which sets
+//! `current_dir(repo)`, captures stdout/stderr, and `bail!`s with the
+//! stderr text if the git process exits non-zero.
+//!
+//! # File
+//! `nexus-agent/src/tools/git.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::Tool;
+
+// =============================================================================
+// Shared Git Runner
+// =============================================================================
 
 async fn git(args: &[&str], repo: &str) -> anyhow::Result<String> {
     let output = tokio::process::Command::new("git")
@@ -21,7 +51,7 @@ async fn git(args: &[&str], repo: &str) -> anyhow::Result<String> {
 }
 
 // =============================================================================
-// git status
+// GitStatusTool
 // =============================================================================
 
 pub struct GitStatusTool;
@@ -45,7 +75,7 @@ impl Tool for GitStatusTool {
 }
 
 // =============================================================================
-// git log
+// GitLogTool
 // =============================================================================
 
 pub struct GitLogTool;
@@ -75,7 +105,7 @@ impl Tool for GitLogTool {
 }
 
 // =============================================================================
-// git diff
+// GitDiffTool
 // =============================================================================
 
 pub struct GitDiffTool;
@@ -108,7 +138,7 @@ impl Tool for GitDiffTool {
 }
 
 // =============================================================================
-// git commit
+// GitCommitTool
 // =============================================================================
 
 pub struct GitCommitTool;

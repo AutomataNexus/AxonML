@@ -1,4 +1,30 @@
-//! File read/write/search tools.
+//! File Tools — Read, Write, Search, Grep
+//!
+//! Four filesystem tools for nexus-agent: `ReadFileTool` (read_file) reads a
+//! file with optional line offset/limit windowing and numbered output;
+//! `WriteFileTool` (write_file) creates or overwrites a file, auto-creating
+//! parent directories; `SearchFilesTool` (search_files) matches files by
+//! glob pattern under a root directory (default `/opt`, truncates at 100
+//! results); `GrepTool` (grep) shells out to ripgrep with `-n --no-heading
+//! --max-count=50` and optional case-insensitive matching.
+//!
+//! Each struct implements the `Tool` trait and provides a JSON Schema for
+//! LLM tool calling.
+//!
+//! # File
+//! `nexus-agent/src/tools/file.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use async_trait::async_trait;
 use serde::Deserialize;

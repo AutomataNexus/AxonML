@@ -1,25 +1,52 @@
-//! Shield agent — invoked by the security-ticker drill-down modal when the
-//! user clicks "Run Shield Agent" on a stat chip (blocked / sql / ssrf /
-//! rate / threats / quarantine / audit events).
+//! Shield Agent — NexusShield Drill-Down Investigation And Fix Proposer
 //!
-//! The agent is given the stat kind + a JSON payload of the underlying
-//! events for that stat (pulled from shield's `/audit` or
-//! `/endpoint/detections`), and is expected to:
-//!   1. Investigate each event — enrich with WHOIS / reverse DNS, process
-//!      context, cross-references to known benign services.
-//!   2. Classify as true-positive, false-positive, or needs-more-data.
-//!   3. Propose concrete, user-acceptable fixes. Each fix is one of:
-//!      - allowlist_cidr  { cidr, reason }
-//!      - allowlist_process { comm, reason }
-//!      - kill_process { pid, reason }
-//!      - quarantine_release { item_id, reason }
-//!      - block_ip { ip, reason }
-//!      - no_action { reason }
-//!   4. Emit a final JSON block the ticker can parse and render as
-//!      accept/reject rows. Never apply fixes itself — user acceptance is
-//!      required.
+//! Defines the `shield` agent configuration: invoked by the
+//! security-ticker's drill-down modal when the user clicks a stat chip
+//! (blocked / sql / ssrf / rate / threats / quarantine / audit) on the
+//! NexusShield dashboard. Investigates the underlying events (from
+//! shield's `/audit` or `/endpoint/detections`) and emits a structured
+//! JSON block of proposed fixes that the ticker renders as accept/reject
+//! rows — the agent never applies fixes itself.
+//!
+//! Exports:
+//! - `SYSTEM_PROMPT` — the input format (STAT / WINDOW / EVENTS), the
+//!   investigation workflow (reverse-DNS, process inspection, LESSONS.md
+//!   cross-check), a catalog of known-benign CIDRs (Linode, Canonical,
+//!   GitHub) and processes (chrome, cargo, nexus-serve, ...), and the
+//!   exact output schema — a single ```json ... ``` block with
+//!   `summary`, `classification`, `findings[]`, and `proposed_actions[]`
+//!   whose `kind` is one of `allowlist_cidr`, `allowlist_process`,
+//!   `kill_process`, `quarantine_release`, `block_ip`, `no_action`.
+//!   Also encodes the safety rules (no `kill_process` on pid 1 or
+//!   critical system processes; no `allowlist_cidr` with prefix < 12).
+//! - `config()` — returns an `AgentConfig` with
+//!   `max_iterations = 15`, `model = "qwen3"`, `temperature = 0.1`
+//!   (consistent classification).
+//!
+//! # File
+//! `nexus-agent/src/agents/shield.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use crate::AgentConfig;
+
+// =============================================================================
+// System Prompt
+// =============================================================================
 
 pub const SYSTEM_PROMPT: &str = r#"You are the Shield Agent for NexusShield, AutomataNexus's zero-trust security gateway + endpoint protection stack running on Andrew Jewell Sr.'s workstation and production DigitalOcean host.
 
@@ -120,6 +147,10 @@ All free-text preceding the JSON block is shown to the user as your investigatio
 
 You do NOT apply fixes. The user approves each action individually in the ticker UI, and the ticker calls the corresponding shield endpoint. Propose — never execute.
 "#;
+
+// =============================================================================
+// Agent Configuration
+// =============================================================================
 
 pub fn config() -> AgentConfig {
     AgentConfig {

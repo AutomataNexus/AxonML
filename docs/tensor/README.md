@@ -1,16 +1,20 @@
 # axonml-tensor Documentation
 
-> N-dimensional tensor operations for the Axonml ML framework.
+> N-dimensional tensor operations for the AxonML ML framework.
 
 ## Overview
 
-`axonml-tensor` provides the core `Tensor` type that serves as the foundation for all machine learning operations in Axonml. Tensors are multi-dimensional arrays with support for automatic broadcasting, device placement, and efficient memory sharing through views.
+`axonml-tensor` provides `Tensor<T>`, AxonML's generic strided
+multi-dimensional array. Features: NumPy-style broadcasting, zero-copy
+strided views, CPU and CUDA backends, quantized matmul dispatch (Q4_K /
+Q6_K in-shader dequant), lazy tensors with algebraic optimization, sparse
+COO tensors, and the full factory-function suite.
 
 ## Modules
 
-### tensor.rs
+### `tensor`
 
-The main `Tensor<T>` struct and its operations.
+The core `Tensor<T>` struct.
 
 ```rust
 pub struct Tensor<T: Scalar> {
@@ -21,134 +25,145 @@ pub struct Tensor<T: Scalar> {
 }
 ```
 
-**Key methods:**
+**Shape info:** `shape()`, `ndim()`, `numel()`, `size(dim)`
+**Data access:** `get(indices)`, `set(indices, value)`, `item()`, `to_vec()`
+**Shape ops:** `reshape(shape)`, `flatten()`, `transpose(d0, d1)`,
+`squeeze(dim)`, `unsqueeze(dim)`, `permute(dims)`, `contiguous()`
+**Arithmetic:** `+ - * /` operators, `matmul`, `neg`, `abs`, `pow`
+**Reductions:** `sum`, `mean`, `max`, `min`, `var_dim`
 
-Shape Information:
-- `shape()` - Get tensor dimensions
-- `ndim()` - Number of dimensions
-- `numel()` - Total number of elements
-- `size(dim)` - Size of specific dimension
+### `shape`
 
-Data Access:
-- `get(indices)` - Get element at indices
-- `set(indices, value)` - Set element at indices
-- `item()` - Get scalar value (for single-element tensors)
-- `to_vec()` - Convert to vector
+`Shape` (`SmallVec<[usize; 6]>`) and `Strides` (`SmallVec<[isize; 6]>`)
+aliases plus stride/broadcast utilities: `numel`, `contiguous_strides`,
+`is_contiguous`, `broadcast_shape`, `reshape`, `squeeze`, `unsqueeze`.
 
-Shape Operations:
-- `reshape(shape)` - Change shape
-- `flatten()` - Flatten to 1D
-- `transpose(d0, d1)` - Swap dimensions
-- `squeeze(dim)` - Remove size-1 dimensions
-- `unsqueeze(dim)` - Add size-1 dimension
-- `permute(dims)` - Reorder dimensions
-- `contiguous()` - Make contiguous copy
-
-### shape.rs
-
-Shape and stride utilities.
-
-**Types:**
-- `Shape` - `SmallVec<[usize; 6]>` for dimensions
-- `Strides` - `SmallVec<[isize; 6]>` for strides
-
-**Functions:**
-- `numel(shape)` - Total elements
-- `contiguous_strides(shape)` - Row-major strides
-- `is_contiguous(shape, strides)` - Check contiguity
-- `broadcast_shape(s1, s2)` - Compute broadcast shape
-- `reshape(old, new)` - Compute reshape
-- `squeeze(shape, dim)` - Remove size-1 dims
-- `unsqueeze(shape, dim)` - Add size-1 dim
-
-### creation.rs
+### `creation`
 
 Tensor factory functions.
 
-**Zero/One:**
+**Zero / one / full:**
+
 ```rust
-zeros::<f32>(&[2, 3])    // All zeros
-ones::<f32>(&[2, 3])     // All ones
-full::<f32>(&[2, 3], v)  // Fill with value
-eye::<f32>(n)            // Identity matrix
-diag(&[1.0, 2.0, 3.0])   // Diagonal matrix
+zeros::<f32>(&[2, 3])
+ones::<f32>(&[2, 3])
+full::<f32>(&[2, 3], v)
+eye::<f32>(n)
+diag(&[1.0, 2.0, 3.0])
 ```
 
 **Random:**
+
 ```rust
-rand::<f32>(&[10])       // Uniform [0, 1)
-randn::<f32>(&[10])      // Normal(0, 1)
-uniform(&[10], lo, hi)   // Uniform [lo, hi)
-normal(&[10], mu, std)   // Normal(mu, std)
-randint(&[10], lo, hi)   // Random integers
+rand::<f32>(&[10])              // Uniform [0, 1)
+randn::<f32>(&[10])             // Normal(0, 1)
+uniform(&[10], lo, hi)
+normal(&[10], mu, std)
+randint(&[10], lo, hi)
 ```
 
 **Ranges:**
+
 ```rust
-arange(start, end, step) // Range with step
-linspace(start, end, n)  // N evenly spaced
-logspace(s, e, n, base)  // Log-spaced
+arange(start, end, step)
+linspace(start, end, n)
+logspace(start, end, n, base)
 ```
 
-### view.rs
+### `view`
 
-Slicing and indexing operations.
+Slicing, indexing, and splitting.
 
-**Methods:**
-- `slice_dim0(start, end)` - Slice first dimension
-- `select(dim, index)` - Select single index
-- `narrow(dim, start, len)` - Narrow a dimension
-- `chunk(n, dim)` - Split into chunks
-- `split(sizes, dim)` - Split by sizes
-- `gather(dim, indices)` - Gather by indices
-- `masked_select(mask)` - Boolean masking
+- `slice_dim0(start, end)` — slice first dimension
+- `select(dim, index)` — select single index
+- `narrow(dim, start, len)` — narrow a dimension
+- `chunk(n, dim)` — split into `n` equal chunks
+- `split(sizes, dim)` — split by explicit sizes
+- `gather(dim, indices)` — gather by indices
+- `masked_select(mask)` — boolean mask
+- Standalone: `cat(tensors, dim)`, `stack(tensors, dim)`
 
-**Standalone:**
-- `cat(tensors, dim)` - Concatenate
-- `stack(tensors, dim)` - Stack along new dimension
+### `ops`
 
-### ops/mod.rs
+Higher-level free functions (1133 lines).
 
-Additional operations.
+**Comparisons:** `eq`, `lt`, `gt`, and the mask variants `eq_mask`,
+`lt_mask`, `gt_mask`
+**Softmax:** `softmax(x, dim)`, `log_softmax(x, dim)` (numerically stable)
+**Activations:** `gelu`, `leaky_relu`, `elu`, `silu`, `mish`
+**Clipping:** `clamp`, `clamp_min`, `clamp_max`
+**Selection:** `where_cond(cond, x, y)`
+**Stats:** `var_dim` (Welford single-pass variance)
+**Training:** `dropout`, `layer_norm`, `batch_norm` (with running mean/var
++ affine)
 
-**Activations:**
-- `softmax(x, dim)` - Softmax
-- `log_softmax(x, dim)` - Log-softmax
-- `gelu(x)` - GELU activation
-- `leaky_relu(x, neg_slope)` - Leaky ReLU
-- `elu(x, alpha)` - ELU activation
-- `silu(x)` - SiLU/Swish
+### `lazy`
 
-**Clipping:**
-- `clamp(x, min, max)` - Clamp to range
-- `clamp_min(x, min)` - Clamp minimum
-- `clamp_max(x, max)` - Clamp maximum
+Deferred computation with algebraic optimization (976 lines).
 
-**Comparisons:**
-- `eq(a, b)` - Element-wise equality
-- `lt(a, b)` - Less than
-- `gt(a, b)` - Greater than
+**Types:**
+- `LazyTensor` — a tensor wrapped in a deferred expression tree
+- `LazyOp` — op nodes: `Tensor`, unary (`Neg`/`Relu`/`Sigmoid`/`Tanh`/`Exp`
+  /`Log`/`Sqrt`/`Abs`), binary (`Add`/`Sub`/`Mul`/`Div`/`MatMul`/`Pow`),
+  reductions (`Sum`/`Mean`), shape (`Reshape`/`Transpose`), scalar
+  (`Scalar`/`AddScalar`/`MulScalar`)
 
-**Selection:**
-- `where_cond(cond, x, y)` - Conditional selection
+**Usage:**
+
+```rust
+use axonml_tensor::lazy::LazyTensor;
+
+let a = LazyTensor::from_tensor(tensor_a);
+let b = LazyTensor::from_tensor(tensor_b);
+let result = a.add(&b).mul_scalar(2.0).neg().neg();
+
+let optimized = result.optimize();
+let concrete = optimized.materialize();
+```
+
+`optimize()` performs: constant folding, identity elimination (`x+0`,
+`x*1`, `x-0`), inverse cancellation (`neg(neg)`, `exp(log)`, `log(exp)`),
+and scalar folding (`(x*2)*3` → `x*6`).
+
+### `sparse`
+
+`SparseCOO` — coordinate-format sparse tensor (f32 values), with
+`from_dense`, `to_dense`, `nnz`, `density`, sparse+sparse and sparse+dense
+add/mul, `spmm` (sparse × dense → dense), `coalesce` (sort + dedup), and
+`transpose`. `SparseFormat` tags the COO/CSR/CSC variants (COO is the
+implemented one).
+
+### `cuda_ops` *(feature = `cuda`)*
+
+3215 lines, 34 GPU methods on `Tensor<f32>`, dispatched through the
+`CudaBackend` singleton:
+
+- Placement: `to_device`, `contiguous_gpu`, `to_vec` for GPU tensors
+- Elementwise: add/sub/mul/div/scalar, neg, abs, pow
+- Activations: relu, sigmoid, tanh, gelu, silu, elu, leaky_relu, softmax,
+  log_softmax
+- Reductions: sum, mean, max, min
+- Linear algebra: matmul (cuBLAS GEMM), layernorm, RMSNorm, transpose
+- Quantized matmul: `q4k_gemv_cuda`, `q4k_gemm_cuda`, `q6k_gemv_cuda`,
+  `q6k_gemm_cuda` (in-shader Q4_K / Q6_K dequant)
+- Other: `embedding_gather`, `dropout`
+
+Re-exports `pool_alloc` and `get_cuda_backend` for other crates.
 
 ## Usage Examples
 
-### Basic Operations
+### Basic
 
 ```rust
 use axonml_tensor::prelude::*;
 
-// Create tensors
 let a = randn::<f32>(&[3, 4]);
 let b = randn::<f32>(&[3, 4]);
 
-// Arithmetic
 let c = &a + &b;
 let d = &a * &b;
 let e = a.matmul(&b.t()?)?;
 
-// Reductions
 let sum = c.sum();
 let mean = c.mean()?;
 let max = c.max()?;
@@ -158,16 +173,14 @@ let max = c.max()?;
 
 ```rust
 let a = randn::<f32>(&[3, 4]);
-let b = randn::<f32>(&[4]);     // Will broadcast
-
-let c = &a + &b;  // Shape: [3, 4]
+let b = randn::<f32>(&[4]);
+let c = &a + &b; // [3, 4]
 ```
 
-### Shape Manipulation
+### Shape manipulation
 
 ```rust
 let a = randn::<f32>(&[2, 3, 4]);
-
 let b = a.reshape(&[6, 4])?;
 let c = a.flatten();
 let d = a.transpose(0, 2)?;
@@ -178,46 +191,18 @@ let e = a.permute(&[2, 0, 1])?;
 
 ```rust
 let a = arange::<f32>(0.0, 24.0, 1.0).reshape(&[4, 6])?;
-
-let row = a.select(0, 0)?;        // First row
-let col = a.select(1, 0)?;        // First column
-let sub = a.narrow(0, 1, 2)?;     // Rows 1-2
-let chunks = a.chunk(2, 0)?;      // Split into 2
+let row    = a.select(0, 0)?;
+let col    = a.select(1, 0)?;
+let sub    = a.narrow(0, 1, 2)?;
+let chunks = a.chunk(2, 0)?;
 ```
-
-### lazy.rs *(novel)*
-
-Lazy tensor computation with algebraic optimization.
-
-**Core Types:**
-- `LazyTensor` — A tensor wrapped in a deferred expression tree
-- `LazyOp` — Operation nodes: Unary, Binary, Reduction, Shape, Scalar
-
-**Usage:**
-```rust
-use axonml_tensor::lazy::LazyTensor;
-
-// Build expression tree without executing anything
-let a = LazyTensor::from_tensor(tensor_a);
-let b = LazyTensor::from_tensor(tensor_b);
-let result = a.add(&b).mul_scalar(2.0).neg().neg();
-
-// Optimize: eliminates double negation, folds constants
-let optimized = result.optimize();
-
-// Execute the optimized tree
-let concrete = optimized.materialize();
-```
-
-**Optimizations applied:**
-- **Identity elimination** — `x + 0`, `x * 1`, `x - 0` → `x`
-- **Double negation** — `neg(neg(x))` → `x`
-- **Inverse cancellation** — `exp(log(x))`, `log(exp(x))` → `x`
-- **Constant folding** — `2.0 * 3.0` → `6.0` at compile time
-- **Scalar folding** — `(x * 2) * 3` → `x * 6`
-
-**Why novel:** PyTorch requires TorchScript JIT for lazy evaluation. AxonML's lazy tensors are built into the tensor type itself with algebraic simplification.
 
 ## Feature Flags
 
-- `std` (default) - Enable standard library
+- `std` (default) — standard library
+- `cuda` — enables `cuda_ops` and CUDA-backed tensor storage
+- `cudnn` — cuDNN conv2d (implies `cuda`)
+
+## Last updated
+
+0.6.1 (2026-04-16)

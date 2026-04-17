@@ -1,21 +1,65 @@
 //! Train Mnemosyne — Face Identity via Temporal Crystallization
 //!
-//! Trains the Aegis face model on LFW (Labeled Faces in the Wild). The
-//! training objective is the `CrystallizationLoss`: triplet margin in cosine
-//! space plus a convergence-velocity regularization that pushes the GRU
-//! hidden state to stabilize after repeated face observations.
+//! End-to-end training binary for the AxonML [`MnemosyneIdentity`] face
+//! model on LFW (Labeled Faces in the Wild, 64×64 RGB). The training
+//! objective is [`CrystallizationLoss`]: triplet margin in cosine space
+//! plus a convergence-velocity regularization that pushes the GRU hidden
+//! state to stabilize after repeated face observations of the same
+//! identity. Each batch is a sequence of `seq_len` face observations fed
+//! step-by-step through [`MnemosyneIdentity::crystallize_step`], threading
+//! the hidden state across time.
 //!
 //! Features:
-//! - GPU acceleration via `--features cuda`
-//! - Live browser training monitor (axonml::TrainingMonitor)
-//! - Best/latest/epoch checkpoints with shape-based resume
-//! - Batched crystallization (all triplets through one Conv2d pass per step)
-//! - CLI flags for every hyperparameter
+//! - GPU acceleration via `--features cuda`.
+//! - Live browser training monitor ([`axonml::TrainingMonitor`]).
+//! - Best/latest/epoch checkpoints with shape-based resume via
+//!   [`load_model_from_checkpoint`].
+//! - Batched crystallization (all triplets through one Conv2d pass per
+//!   step via `crystallize_batched`).
+//! - CLI flags for every hyperparameter.
+//!
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser and `print_help`,
+//!   with Mnemosyne-specific `--seq-len` and `--weight-decay` on top of
+//!   the shared biometric trainer hyperparameters.
+//! - `cosine_lr` — linear warmup then cosine decay to 1% of `base_lr`.
+//! - `crystallize_batched` — runs a batched `seq_len`-step sequence
+//!   through `MnemosyneIdentity::crystallize_step`, accumulating velocity
+//!   variables and returning `(final_hidden, mean_velocity)`.
+//! - `main` — asserts dataset shape (3×64×64), builds the model, resumes
+//!   from a checkpoint, launches the browser monitor, wires [`AdamW`] +
+//!   [`CrystallizationLoss`], and drives the training loop. Mines a
+//!   triplet sequence via [`mine_identity_sequence_batches`], splits it
+//!   into anchor/positive/negative step vectors, crystallizes each branch,
+//!   L2-normalizes the final hidden states with [`l2_normalize_var`], and
+//!   feeds them + the anchor velocity into `CrystallizationLoss::compute_var`.
+//!   Logs loss + velocity per batch and saves `best_model.axonml`,
+//!   `checkpoint_best.axonml`, `checkpoint_latest.axonml`, and periodic
+//!   `checkpoint_epoch_NNNN.axonml` files.
 //!
 //! Usage:
 //!   cargo run --release --bin train_mnemosyne -p biometric-training --features cuda
 //!   cargo run --release --bin train_mnemosyne -p biometric-training --features cuda -- \
 //!       --epochs 30 --bs 32 --seq-len 5 --batches 100 --resume latest
+//!
+//! # File
+//! `biometric-training/src/bin/train_mnemosyne.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -201,7 +245,7 @@ fn crystallize_batched(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

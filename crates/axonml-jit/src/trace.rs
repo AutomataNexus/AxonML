@@ -1,21 +1,51 @@
-//! Operation Tracing
+//! Operation Tracing — Thread-Local Graph Recorder
+//!
+//! Records AxonML tensor operations into an IR `Graph` via a thread-local
+//! `RefCell<TracerState>`. `TracedValue` is a thin `Copy` handle bundling a
+//! `NodeId` and a tracer id, exposing a fluent API for binary ops (add, sub,
+//! mul, div, pow, matmul), scalar ops (add_scalar, mul_scalar), unary math
+//! (neg, abs, sqrt, exp, log, sin, cos, tanh), activations (relu, sigmoid,
+//! gelu, silu), reductions (sum, sum_axis, mean, mean_axis), and shape ops
+//! (reshape with `-1` inference, transpose, squeeze, unsqueeze). The private
+//! `TracerState` tracks the active `Graph`, an `active` flag, and a monotonic
+//! `tracer_id`; its helper methods (`unary_op`, `binary_op`, `matmul_op`,
+//! `reduction_op`, `reshape_op`, `transpose_op`, `squeeze_op`, `unsqueeze_op`)
+//! infer output dtype and shape (including broadcast via
+//! `Shape::broadcast_shape`, matmul output shape from lhs/rhs dims, axis-aware
+//! reductions with optional keepdim, and numel-preserving `-1` reshape
+//! resolution). The public `Tracer` handle registers inputs, constants, and
+//! outputs, and the top-level `trace(|tracer| ...)` function resets the
+//! thread-local, increments the tracer id, invokes the user closure, and
+//! returns the assembled `Graph` via `mem::take`. Tests cover a trivial add,
+//! a chained relu/mul_scalar/add_scalar pipeline, matmul output-op wrapping,
+//! and the [2, 1, 4] shape produced by `sum_axis(1, true)` on a [2, 3, 4]
+//! input.
 //!
 //! # File
 //! `crates/axonml-jit/src/trace.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use crate::ir::{DataType, Graph, NodeId, Op, Shape};
 use std::cell::RefCell;
+
+// =============================================================================
+// TracedValue
+// =============================================================================
 
 /// A traced value representing a node in the computation graph.
 #[derive(Debug, Clone, Copy)]
@@ -38,7 +68,9 @@ impl TracedValue {
         self.id
     }
 
-    // Binary operations
+    // -------------------------------------------------------------------------
+    // Binary Operations
+    // -------------------------------------------------------------------------
 
     /// Element-wise addition.
     pub fn add(&self, other: &TracedValue) -> TracedValue {
@@ -123,7 +155,9 @@ impl TracedValue {
         })
     }
 
-    // Scalar operations
+    // -------------------------------------------------------------------------
+    // Scalar Operations
+    // -------------------------------------------------------------------------
 
     /// Add scalar.
     pub fn add_scalar(&self, scalar: f64) -> TracedValue {
@@ -153,7 +187,9 @@ impl TracedValue {
         })
     }
 
-    // Unary operations
+    // -------------------------------------------------------------------------
+    // Unary Math Operations
+    // -------------------------------------------------------------------------
 
     /// Negation.
     pub fn neg(&self) -> TracedValue {
@@ -219,7 +255,9 @@ impl TracedValue {
         })
     }
 
-    // Activation functions
+    // -------------------------------------------------------------------------
+    // Activation Functions
+    // -------------------------------------------------------------------------
 
     /// ReLU activation.
     pub fn relu(&self) -> TracedValue {
@@ -253,7 +291,9 @@ impl TracedValue {
         })
     }
 
-    // Reduction operations
+    // -------------------------------------------------------------------------
+    // Reduction Operations
+    // -------------------------------------------------------------------------
 
     /// Sum over all elements.
     pub fn sum(&self) -> TracedValue {
@@ -305,7 +345,9 @@ impl TracedValue {
         })
     }
 
-    // Shape operations
+    // -------------------------------------------------------------------------
+    // Shape Operations
+    // -------------------------------------------------------------------------
 
     /// Reshape tensor.
     pub fn reshape(&self, shape: &[isize]) -> TracedValue {
@@ -340,6 +382,10 @@ impl TracedValue {
     }
 }
 
+// =============================================================================
+// Thread-Local Tracer State
+// =============================================================================
+
 // Thread-local tracer for operation recording
 thread_local! {
     static TRACER: RefCell<TracerState> = RefCell::new(TracerState::new());
@@ -360,6 +406,10 @@ impl TracerState {
             tracer_id: 0,
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Op Builders
+    // -------------------------------------------------------------------------
 
     fn unary_op(&mut self, op: Op, input: NodeId) -> TracedValue {
         let node = self.graph.node(input);
@@ -531,6 +581,10 @@ impl TracerState {
     }
 }
 
+// =============================================================================
+// Tracer Handle
+// =============================================================================
+
 /// Tracer handle for recording operations.
 pub struct Tracer {
     tracer_id: usize,
@@ -587,6 +641,10 @@ impl Tracer {
     }
 }
 
+// =============================================================================
+// Trace Entry Point
+// =============================================================================
+
 /// Traces operations and builds a computation graph.
 ///
 /// # Example
@@ -626,6 +684,10 @@ where
         std::mem::take(&mut tracer.graph)
     })
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -1,13 +1,23 @@
-//! Basic Gradient Functions - Arithmetic Operations
+//! Backward functions for basic arithmetic and shape operations.
+//!
+//! 1067 lines. `AddBackward`, `SubBackward`, `MulBackward`, `DivBackward`,
+//! `NegBackward`, `AddScalarBackward`, `MulScalarBackward`, `PowBackward`,
+//! `ExpBackward`, `LogBackward`, `SqrtBackward`, `ClampBackward`,
+//! `SumBackward`, `MeanBackward`, `SumDimBackward`, `MeanDimBackward`,
+//! `VarDimBackward`, `ReshapeBackward`, `TransposeBackward`,
+//! `NarrowBackward`, `SelectBackward`, `UnsqueezeBackward`,
+//! `ExpandBackward`, `CatBackward`. Each stores the inputs/shapes needed
+//! for the backward pass and implements `GradientFunction::backward`.
 //!
 //! # File
 //! `crates/axonml-autograd/src/functions/basic.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

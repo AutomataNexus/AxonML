@@ -1,13 +1,22 @@
-//! Weight Initialization - Parameter Initialization Strategies
+//! Parameter initialization strategies.
+//!
+//! 350 lines. Free functions returning `Tensor<f32>`: `zeros`, `ones`,
+//! `constant`, `uniform`, `uniform_range`, `randn`, `normal`,
+//! `xavier_uniform` / `xavier_normal`, `glorot_uniform` / `glorot_normal`,
+//! `kaiming_uniform` / `kaiming_normal` / `he_uniform` / `he_normal`,
+//! `orthogonal`, `sparse` (fan_in fraction zeroed), `eye`, `diag`. Each
+//! computes the correct gain/scale for the initialization scheme and
+//! returns a fresh tensor ready to wrap in a `Parameter`.
 //!
 //! # File
 //! `crates/axonml-nn/src/init.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

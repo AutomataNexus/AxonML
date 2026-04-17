@@ -1,18 +1,42 @@
-//! BERT Model Implementation
+//! BERT Model — Encoder-Only Transformer with Task Heads
+//!
+//! Implements the BERT family of encoder-only transformer models.
+//! `Bert` owns a `BertConfig`, a `BertEmbedding` (token + position + segment),
+//! a post-norm `TransformerEncoder`, and an optional `BertPooler`. `BertPooler`
+//! extracts the `[CLS]` token by slicing `input[:, 0, :]`, reshapes to
+//! `[batch, hidden]`, applies a `Linear` dense projection, and finishes with a
+//! `tanh` nonlinearity. `Bert::forward_with_pooling` drives the full pipeline
+//! (embeddings -> encoder with optional `attention_mask` -> pooler) returning
+//! the sequence output and an optional pooled output; `forward_ids` is the
+//! single-output convenience variant. `BertForSequenceClassification` stacks
+//! `Dropout` and a `Linear` classifier over the pooled output, returning an
+//! `LLMError::InvalidConfig` when the pooler is missing. `BertForMaskedLM`
+//! attaches a `BertLMPredictionHead` (dense -> activation (gelu/relu/gelu
+//! fallback) -> `LayerNorm` via `BertPredictionHeadTransform`, then a
+//! `Linear` decoder over the vocab) and disables the pooler. All modules
+//! implement the `Module` trait, wiring `parameters()`, `train()`, and
+//! `eval()` through to submodules. Tests cover the tiny BERT shape pipeline,
+//! pooler output shape, sequence classification logits shape, MLM logits
+//! shape, and nonzero parameter count.
 //!
 //! # File
 //! `crates/axonml-llm/src/bert.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml_autograd::Variable;
 use axonml_nn::{Dropout, Linear, Module, Parameter};
@@ -22,6 +46,10 @@ use crate::config::BertConfig;
 use crate::embedding::BertEmbedding;
 use crate::error::{LLMError, LLMResult};
 use crate::transformer::{LayerNorm, TransformerEncoder};
+
+// =============================================================================
+// Bert Core Model
+// =============================================================================
 
 /// BERT model (encoder-only transformer).
 #[derive(Debug)]
@@ -35,6 +63,10 @@ pub struct Bert {
     /// Pooler (optional CLS token transformation)
     pub pooler: Option<BertPooler>,
 }
+
+// -----------------------------------------------------------------------------
+// BertPooler
+// -----------------------------------------------------------------------------
 
 /// BERT pooler for sequence classification.
 #[derive(Debug)]
@@ -73,6 +105,10 @@ impl Module for BertPooler {
         self.dense.parameters()
     }
 }
+
+// -----------------------------------------------------------------------------
+// Bert Construction and Forward
+// -----------------------------------------------------------------------------
 
 impl Bert {
     /// Creates a new BERT model.
@@ -173,6 +209,10 @@ impl Module for Bert {
     }
 }
 
+// =============================================================================
+// BertForSequenceClassification
+// =============================================================================
+
 /// BERT for sequence classification.
 #[derive(Debug)]
 pub struct BertForSequenceClassification {
@@ -249,6 +289,10 @@ impl Module for BertForSequenceClassification {
     }
 }
 
+// =============================================================================
+// BertForMaskedLM and Prediction Heads
+// =============================================================================
+
 /// BERT for masked language modeling.
 #[derive(Debug)]
 pub struct BertForMaskedLM {
@@ -277,6 +321,10 @@ pub struct BertPredictionHeadTransform {
     /// Activation
     pub activation: String,
 }
+
+// -----------------------------------------------------------------------------
+// BertPredictionHeadTransform
+// -----------------------------------------------------------------------------
 
 impl BertPredictionHeadTransform {
     /// Creates a new prediction head transform.
@@ -307,6 +355,10 @@ impl Module for BertPredictionHeadTransform {
     }
 }
 
+// -----------------------------------------------------------------------------
+// BertLMPredictionHead
+// -----------------------------------------------------------------------------
+
 impl BertLMPredictionHead {
     /// Creates a new LM prediction head.
     pub fn new(
@@ -334,6 +386,10 @@ impl Module for BertLMPredictionHead {
         params
     }
 }
+
+// -----------------------------------------------------------------------------
+// BertForMaskedLM
+// -----------------------------------------------------------------------------
 
 impl BertForMaskedLM {
     /// Creates a new BERT for masked language modeling.
@@ -376,6 +432,10 @@ impl Module for BertForMaskedLM {
         self.bert.eval();
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

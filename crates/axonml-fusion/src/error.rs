@@ -1,18 +1,29 @@
-//! Fusion Error Types
+//! Fusion Error Types — Kernel Fusion Failure Modes
+//!
+//! Defines `FusionError`, the `thiserror`-derived error enum used throughout
+//! `axonml-fusion`. Variants cover input shape mismatches (expected vs actual
+//! `Vec<usize>`), unfusable patterns, invalid fusion configuration, execution
+//! errors, and tensor-conversion errors. `FusionResult<T>` is the
+//! corresponding `Result` alias used by public APIs in the crate.
 //!
 //! # File
 //! `crates/axonml-fusion/src/error.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Error Types
+// =============================================================================
 
 use thiserror::Error;
 

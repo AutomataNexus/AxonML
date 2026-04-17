@@ -1,18 +1,55 @@
-//! Session Management Utilities
+//! Session Lifecycle — Storage, Refresh Timer, Route Guards, Idle Timeout
+//!
+//! Owns everything about the dashboard's client-side auth session: how tokens
+//! are persisted, how they get rotated, which routes require a login, and how
+//! inactivity logs the user out.
+//!
+//! Token storage splits between `SessionStorage` (access token + user object
+//! — cleared when the browser tab closes) and `LocalStorage` (refresh token
+//! — survives a full browser restart). `has_stored_session`,
+//! `get_access_token`, `get_refresh_token`, `get_stored_user`, `store_session`,
+//! `clear_session`, and `update_access_token` are the thin wrappers around
+//! `gloo_storage` with console warnings on failed writes.
+//!
+//! `SessionManager` holds an optional `gloo_timers::Interval` that fires every
+//! 5 minutes (`TOKEN_REFRESH_INTERVAL_MS`) to call `refresh_token_if_needed`,
+//! which POSTs the refresh token to `api::auth::refresh` and stores the new
+//! pair — clearing the session if the refresh call fails. `validate_session`
+//! asks `api::auth::me` whether the current access token is still live, and
+//! on a 401 retries once after a refresh round-trip.
+//!
+//! `SessionInitializer` is a zero-render component mounted at the router root:
+//! it sets `state.loading`, validates any stored session at startup, and
+//! populates `state.user` before releasing the loading guard.
+//! `ProtectedRoute` wraps children behind an authenticated-user check and
+//! redirects (default `/login`) via a `create_effect`; `AdminRoute` layers an
+//! additional `state.is_admin()` check on top and shows an "Access Denied"
+//! pane for non-admins.
+//!
+//! `logout` clears storage and hard-redirects to `/login` via
+//! `window.location`. `use_session_timeout` registers `mousemove`, `keypress`,
+//! and `click` listeners on the window to refresh a `last_activity` timestamp
+//! and, on a once-per-minute tick, logs the user out with a warning toast
+//! after `timeout_minutes` of inactivity.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/auth/session.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use gloo_storage::{LocalStorage, SessionStorage, Storage};
 use gloo_timers::callback::Interval;
@@ -24,7 +61,15 @@ use crate::constants::{ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, USER_KEY};
 use crate::state::use_app_state;
 use crate::types::User;
 
+// =============================================================================
+// Constants
+// =============================================================================
+
 const TOKEN_REFRESH_INTERVAL_MS: u32 = 5 * 60 * 1000; // 5 minutes
+
+// =============================================================================
+// Session Manager
+// =============================================================================
 
 /// Session manager that handles token refresh and session validation
 pub struct SessionManager {
@@ -59,6 +104,10 @@ impl Default for SessionManager {
         Self::new()
     }
 }
+
+// =============================================================================
+// Storage Helpers
+// =============================================================================
 
 /// Check if we have a stored session
 pub fn has_stored_session() -> bool {
@@ -113,6 +162,10 @@ pub fn update_access_token(token: &str) {
     }
 }
 
+// =============================================================================
+// Token Refresh & Validation
+// =============================================================================
+
 /// Refresh the access token if we have a refresh token
 pub async fn refresh_token_if_needed() {
     if let Some(refresh) = get_refresh_token() {
@@ -161,6 +214,10 @@ pub async fn validate_session() -> bool {
     }
 }
 
+// =============================================================================
+// Session Initializer Component
+// =============================================================================
+
 /// Session initialization component
 /// This runs once at app startup to validate/refresh the session
 #[component]
@@ -194,6 +251,14 @@ pub fn SessionInitializer() -> impl IntoView {
     // This component doesn't render anything
     view! {}
 }
+
+// =============================================================================
+// Route Guards
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// ProtectedRoute
+// -----------------------------------------------------------------------------
 
 /// Protected route wrapper
 /// Redirects to login if not authenticated
@@ -238,6 +303,10 @@ pub fn ProtectedRoute(
         </Show>
     }
 }
+
+// -----------------------------------------------------------------------------
+// AdminRoute
+// -----------------------------------------------------------------------------
 
 /// Admin-only route wrapper
 #[component]
@@ -290,6 +359,10 @@ pub fn AdminRoute(
     }
 }
 
+// =============================================================================
+// Logout
+// =============================================================================
+
 /// Logout action
 pub fn logout() {
     clear_session();
@@ -298,6 +371,10 @@ pub fn logout() {
         let _ = window.location().set_href("/login");
     }
 }
+
+// =============================================================================
+// Idle Timeout Hook
+// =============================================================================
 
 /// Hook to handle session timeout
 pub fn use_session_timeout(timeout_minutes: u32) {

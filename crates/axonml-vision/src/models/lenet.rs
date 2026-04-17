@@ -1,13 +1,22 @@
-//! `LeNet` - Classic CNN Architecture
+//! LeNet-5, SimpleCNN, MLP — Classic Classification Architectures
+//!
+//! Three lightweight classification models. `LeNet` implements LeNet-5: two
+//! Conv2d layers with ReLU + MaxPool2d, then three Linear layers (256->120->84->10).
+//! Includes differentiable `MaxPool2dBackward` gradient function. `SimpleCNN` is
+//! a minimal single-conv model (Conv2d->ReLU->MaxPool->Linear->ReLU->Linear).
+//! `MLP` is a three-layer fully-connected network with auto-flattening for image
+//! inputs. All implement `Module` with factory methods for MNIST (1ch, 28x28) and
+//! CIFAR-10 (3ch, 32x32) configurations.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/lenet.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

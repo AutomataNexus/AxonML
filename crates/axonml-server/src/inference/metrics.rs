@@ -1,13 +1,22 @@
-//! Inference metrics for AxonML
+//! Inference Metrics — Per-Endpoint Latency, Throughput, and Error Tracking
+//!
+//! Provides `EndpointMetrics` for recording per-endpoint request success/error
+//! counts, latency percentiles (p50/p95/p99), Prometheus-style histogram buckets
+//! via `LatencyBucket`, requests-per-second, and error rate. The `InferenceMetrics`
+//! collector wraps a concurrent `HashMap<String, EndpointMetrics>` behind
+//! `Arc<RwLock<_>>` for async-safe access, and exposes `MetricsSummary` for
+//! aggregate statistics across all endpoints. `RequestTimer` offers RAII-style
+//! latency measurement that auto-records on `finish_success` / `finish_error`.
 //!
 //! # File
 //! `crates/axonml-server/src/inference/metrics.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -19,12 +28,20 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
+// =============================================================================
+// Types
+// =============================================================================
+
 /// Latency histogram bucket
 #[derive(Debug, Clone)]
 pub struct LatencyBucket {
     pub le: f64, // Less than or equal to (milliseconds)
     pub count: u64,
 }
+
+// =============================================================================
+// Endpoint Metrics
+// =============================================================================
 
 /// Endpoint metrics
 #[derive(Debug, Clone)]
@@ -51,6 +68,10 @@ impl EndpointMetrics {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Recording
+    // -------------------------------------------------------------------------
+
     /// Record a successful request
     pub fn record_success(&mut self, latency_ms: f64) {
         self.requests_total += 1;
@@ -75,6 +96,10 @@ impl EndpointMetrics {
         }
         self.latencies.push(latency_ms);
     }
+
+    // -------------------------------------------------------------------------
+    // Percentile Calculations
+    // -------------------------------------------------------------------------
 
     /// Calculate percentile latency
     pub fn percentile(&self, p: f64) -> f64 {
@@ -113,6 +138,10 @@ impl EndpointMetrics {
         }
         self.latencies.iter().sum::<f64>() / self.latencies.len() as f64
     }
+
+    // -------------------------------------------------------------------------
+    // Accessors and Derived Stats
+    // -------------------------------------------------------------------------
 
     /// Get uptime since metrics were created
     pub fn uptime(&self) -> Duration {
@@ -157,6 +186,10 @@ impl EndpointMetrics {
         }
     }
 }
+
+// =============================================================================
+// Inference Metrics Collector
+// =============================================================================
 
 /// Inference metrics collector
 pub struct InferenceMetrics {
@@ -244,6 +277,10 @@ impl Default for InferenceMetrics {
     }
 }
 
+// =============================================================================
+// Summary and Timer Types
+// =============================================================================
+
 /// Metrics summary
 #[derive(Debug, Clone)]
 pub struct MetricsSummary {
@@ -285,6 +322,10 @@ impl RequestTimer {
         self.start.elapsed()
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

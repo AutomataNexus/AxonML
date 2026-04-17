@@ -1,28 +1,51 @@
-//! ferrum-ticker — always-on-top widget for the Ferrum Mail stack +
-//! Vultr NexusRelay (direct-MX outbound + public-side mailbox infra).
+//! ferrum-ticker — Ferrum Mail + NexusRelay Uptime Monitor
 //!
-//! Two sections, one row per service:
+//! eframe-based always-on-top widget that pings the Ferrum Mail stack and
+//! Vultr NexusRelay every 8 seconds. The `PROBES` constant declares six
+//! live probes split across two groups:
 //!
-//!   AN box (DO 100.67.227.31)
-//!     - mailbox REST (3838)
-//!     - SaaS API    (3737)
-//!     - public API  (https://ferrum-mail.com/mailbox/api/v1/health)
-//!     - webmail     (https://ferrum-mail.com/mail/)
-//!     - SMTP :25    (Tailscale-side TCP probe)
+//! * `Group::An` (DO 100.67.227.31): `an_mailbox` (FerumMailbox REST via
+//!   Tailscale), `an_saas` (landing page + billing API), `an_public_api`
+//!   (nginx → mailbox over HTTPS), `an_webmail` (FerumWebmail Rust WASM),
+//!   `an_smtp_ts` (Postfix via Tailscale-side TCP).
+//! * `Group::Vultr` (NexusRelay 100.119.45.41 / 137.220.57.248):
+//!   `vu_relay` (nexus-relay HTTP :9587), `vu_shield` (:8080 TCP),
+//!   `vu_vault` (:8200 TCP), `vu_dns` (:53 unbound), `vu_smtp_ts`
+//!   (Postfix Tailscale-side).
 //!
-//!   Vultr NexusRelay (100.119.45.41 / 137.220.57.248)
-//!     - direct-MX   (nexus-relay  :9587)
-//!     - shield      (nexus-shield :8080)
-//!     - vault       (nexus-vault  :8200)
-//!     - SMTP :25 ts (Postfix Tailscale-side)
-//!     - SMTP :25 pub(Postfix public-internet — what MX clients see)
-//!     - DNS  :53    (unbound recursive — required for Spamhaus RBL)
+//! Each `Probe` carries a `ProbeKind` — `Http` (requires 2xx), `HttpAny`
+//! (< 400, tolerates 3xx for webmail), or `Tcp` (requires a connect within
+//! `TCP_TIMEOUT`). `probe_with_retry` runs each twice with `RETRY_DELAY`
+//! between attempts to ride through transient nginx/TLS blips.
+//! `apply_outcome` edge-triggers log lines on UP↔DOWN transitions
+//! (categorized `Sev::Info` / `Warn` / `Crit`) and bumps `fail_count`.
 //!
-//! Same chrome as nexus-ticker / tech-ticker / security-ticker:
-//!   frameless transparent pill, custom titlebar, sun/moon theme toggle,
-//!   hover-tooltip on every LED, scrolling event log.
+//! UI: rounded transparent pill with custom titlebar (drag, close, min,
+//! sun/moon theme toggle, clickable fail counter that opens a floating
+//! full-log window). `render_group` paints each service row with a pulsing
+//! LED (red when down), label, and right-aligned latency / DOWN / — text;
+//! `build_tip` generates the hover tooltip with probe URL/target, result
+//! code, latency, and last-ok age. Theme persists to
+//! `/tmp/.ferrum-ticker-theme`.
+//!
+//! Same chrome as nexus-ticker / tech-ticker / security-ticker.
 //!
 //! Launch: ferrum-ticker &
+//!
+//! # File
+//! `nexus-agent/src/ui/ferrum_ticker.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use eframe::egui;
 use std::collections::HashMap;
@@ -30,7 +53,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // =============================================================================
-// Config
+// Config — Constants, Probe Definitions
 // =============================================================================
 
 const WIDTH: f32 = 460.0;
@@ -174,7 +197,7 @@ const PROBES: &[Probe] = &[
 ];
 
 // =============================================================================
-// Palette
+// Theme — Palette and Dark/Light Persistence
 // =============================================================================
 
 #[derive(Clone, Copy, PartialEq)]
@@ -252,7 +275,7 @@ fn palette(theme: Theme) -> Palette {
 }
 
 // =============================================================================
-// State
+// State — ProbeState, LogEntry, SharedState, FerrumApp
 // =============================================================================
 
 #[derive(Clone, Default)]
@@ -364,7 +387,7 @@ impl FerrumApp {
 }
 
 // =============================================================================
-// Probes
+// Polling / Probes — run_probes, probe_with_retry, probe_once, apply_outcome
 // =============================================================================
 
 async fn run_probes(state: Arc<Mutex<SharedState>>, client: &reqwest::Client) {
@@ -520,7 +543,7 @@ fn apply_outcome(state: &Arc<Mutex<SharedState>>, id: &'static str, out: Outcome
 }
 
 // =============================================================================
-// UI entry
+// Entry Point and eframe::App
 // =============================================================================
 
 fn main() -> eframe::Result {
@@ -923,6 +946,10 @@ impl eframe::App for FerrumApp {
         }
     }
 }
+
+// =============================================================================
+// Widgets / UI Components — Group Rendering, Tooltip Builder
+// =============================================================================
 
 fn render_group(
     ui: &mut egui::Ui,

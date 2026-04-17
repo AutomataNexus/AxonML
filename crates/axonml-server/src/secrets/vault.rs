@@ -1,13 +1,21 @@
-//! HashiCorp Vault backend for secrets management.
+//! Vault Backend — HashiCorp Vault KV2 Secrets Integration
+//!
+//! Implements `SecretsBackend` via `VaultBackend`, which reads secrets from a
+//! HashiCorp Vault KV v2 secrets engine. Supports both direct token auth
+//! (`VaultAuth::Token`) and AppRole auth (`VaultAuth::AppRole`) with automatic
+//! re-authentication on token expiry. The `from_env()` constructor reads
+//! VAULT_ADDR, VAULT_TOKEN, VAULT_ROLE_ID, and VAULT_SECRET_ID from the
+//! environment. Background token renewal is available via `start_token_renewal`.
 //!
 //! # File
 //! `crates/axonml-server/src/secrets/vault.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -111,6 +119,10 @@ impl VaultBackend {
         Ok(backend)
     }
 
+    // -------------------------------------------------------------------------
+    // Environment-Based Construction
+    // -------------------------------------------------------------------------
+
     /// Create a Vault backend from environment variables
     ///
     /// Returns `Ok(None)` if `VAULT_ADDR` is not set (Vault not configured).
@@ -161,6 +173,10 @@ impl VaultBackend {
 
         Ok(Some(Self::new(&address, auth, &mount, &path).await?))
     }
+
+    // -------------------------------------------------------------------------
+    // Authentication
+    // -------------------------------------------------------------------------
 
     /// Authenticate using AppRole and get a token
     async fn authenticate_approle(&self) -> Result<(), SecretsError> {
@@ -222,6 +238,10 @@ impl VaultBackend {
         Ok(())
     }
 
+    // -------------------------------------------------------------------------
+    // Token Renewal
+    // -------------------------------------------------------------------------
+
     /// Start background token renewal task
     ///
     /// This spawns a tokio task that periodically renews the Vault token.
@@ -274,6 +294,10 @@ impl VaultBackend {
         }
     }
 }
+
+// =============================================================================
+// SecretsBackend Implementation
+// =============================================================================
 
 #[async_trait::async_trait]
 impl SecretsBackend for VaultBackend {

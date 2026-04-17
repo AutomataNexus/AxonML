@@ -1,12 +1,41 @@
-//! GPT-2 Language Modeling Training Example
+//! GPT-2 Language Modeling Training Example — Synthetic Next-Token Prediction
 //!
-//! Trains a small GPT-2 model on synthetic next-token prediction data.
-//! Demonstrates GPT2LMHead with CrossEntropyLoss and Adam optimizer,
-//! reporting both loss and perplexity per epoch.
+//! Trains a small `GPT2LMHead` model on synthetic next-token prediction data
+//! to exercise the axonml-llm GPT-2 implementation with
+//! `model.forward_with_loss` (fused CE loss + internal logit/label shift)
+//! and Adam.
+//!
+//! Contents:
+//! - Hyperparameter constants (`VOCAB_SIZE=1000`, `MAX_SEQ_LEN=64`,
+//!   `D_MODEL=128`, `NUM_HEADS=4`, `NUM_LAYERS=2`, `BATCH_SIZE=8`,
+//!   `NUM_EPOCHS=10`, `LEARNING_RATE=0.0001`).
+//! - `generate_sequences` — random token IDs in `[1, VOCAB_SIZE)` with
+//!   token 0 reserved as padding; the model's `forward_with_loss`
+//!   performs the internal right-shift for next-token targets.
+//! - `main` — parses a `--monitor` flag, constructs `GPT2Config` and
+//!   `GPT2LMHead` with dropout=0.1 / GELU activation, optionally
+//!   launches an `axonml::TrainingMonitor` dashboard, builds training
+//!   sequences with a seeded `StdRng(42)`, and runs the Adam training
+//!   loop reporting loss + perplexity per epoch.
 //!
 //! Usage:
 //!   cargo run --release --example train_gpt2 -p axonml-llm
 //!   cargo run --release --example train_gpt2 -p axonml-llm -- --monitor
+//!
+//! # File
+//! `crates/axonml-llm/examples/train_gpt2.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use std::env;
 use std::time::Instant;
@@ -20,7 +49,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 // =============================================================================
-// Configuration
+// Hyperparameters / Configuration
 // =============================================================================
 
 const VOCAB_SIZE: usize = 1000;
@@ -55,7 +84,7 @@ fn generate_sequences(num_samples: usize, seq_len: usize, rng: &mut StdRng) -> V
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {
@@ -115,7 +144,9 @@ fn main() {
     // ---- Optimizer ----
     let mut optimizer = Adam::new(model.parameters(), LEARNING_RATE);
 
-    // ---- Training loop ----
+    // -----------------------------------------------------------------------------
+    // Training Loop
+    // -----------------------------------------------------------------------------
     let total_start = Instant::now();
 
     for epoch in 1..=NUM_EPOCHS {

@@ -1,13 +1,20 @@
-//! Loss Gradient Functions
+//! Backward functions for loss operations.
+//!
+//! 522 lines. `MseLossBackward`, `CrossEntropyLossBackward`,
+//! `BceLossBackward`, `BceWithLogitsLossBackward`, `L1LossBackward`,
+//! `SmoothL1LossBackward`, `NllLossBackward`. Each stores the predictions
+//! and targets from the forward pass and computes the analytical gradient
+//! using `zip_map` for single-allocation backward.
 //!
 //! # File
 //! `crates/axonml-autograd/src/functions/loss.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

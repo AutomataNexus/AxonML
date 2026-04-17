@@ -1,18 +1,29 @@
-//! Error types for the profiling module.
+//! Profile Error Types — Failures for Compute and Memory Profiling
+//!
+//! Defines `ProfileError`, the `thiserror`-derived error enum used throughout
+//! `axonml-profile`. Variants cover a missing-operation lookup, invalid
+//! profiler state, `std::io::Error` (via `#[from]`) for report export
+//! failures, serialization errors, and timer errors. `ProfileResult<T>` is
+//! the corresponding `Result` alias exported to the rest of the crate.
 //!
 //! # File
 //! `crates/axonml-profile/src/error.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Error Types
+// =============================================================================
 
 use thiserror::Error;
 

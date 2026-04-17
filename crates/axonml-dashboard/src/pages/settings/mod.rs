@@ -1,18 +1,30 @@
-//! Settings Pages
+//! Settings Pages — Module Root and Settings Landing Page
+//!
+//! Module root that re-exports the `profile` and `security` settings
+//! subpages, and defines the top-level `SettingsPage` Leptos component.
+//! `SettingsPage` renders a four-card grid linking to Profile and Security,
+//! with Preferences and API Keys cards shown as disabled "Coming Soon"
+//! placeholders. Navigation uses `leptos_router::A` links to
+//! `/settings/profile` and `/settings/security`.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/settings/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Submodules and Re-Exports
+// =============================================================================
 
 pub mod profile;
 pub mod security;
@@ -20,10 +32,18 @@ pub mod security;
 pub use profile::*;
 pub use security::*;
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use leptos::*;
 use leptos_router::*;
 
 use crate::components::icons::*;
+
+// =============================================================================
+// SettingsPage Component
+// =============================================================================
 
 /// Settings layout page
 #[component]

@@ -1,22 +1,49 @@
-//! Configuration module for AxonML Server
+//! Server Configuration — TOML-Based Config Loading and Validation
+//!
+//! Defines the `Config` struct and its nested sub-configs that are
+//! deserialized from `~/.axonml/config.toml` via `toml`:
+//!
+//! - `ServerConfig` — host, port, data directory.
+//! - `AegisConfig` — Aegis-DB connection (host, port, credentials).
+//! - `AuthConfig` — JWT secret/expiry, session timeout, MFA policy,
+//!   public registration toggle.
+//! - `InferenceConfig` — port range and max endpoint count.
+//! - `DashboardConfig` — dashboard port.
+//! - `HubConfig` — model hub URL and local cache directory.
+//!
+//! `Config::load` reads from the default path; `Config::validate` enforces
+//! security invariants (non-empty JWT secret >= 32 chars, non-empty DB
+//! credentials). Helper methods expose derived paths (`models_dir`,
+//! `runs_dir`, `logs_dir`, `checkpoints_dir`, `hub_cache_dir`) and
+//! `ensure_directories` creates them on disk. Tilde expansion is handled
+//! manually via `dirs::home_dir`.
 //!
 //! # File
 //! `crates/axonml-server/src/config.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
+
+// =============================================================================
+// Error Types
+// =============================================================================
 
 #[derive(Error, Debug)]
 pub enum ConfigError {
@@ -27,6 +54,10 @@ pub enum ConfigError {
     #[error("Missing required configuration: {0}")]
     MissingConfig(String),
 }
+
+// =============================================================================
+// Configuration Structs
+// =============================================================================
 
 /// Main server configuration
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -106,7 +137,10 @@ pub struct HubConfig {
     pub cache_dir: String,
 }
 
-// Default value functions
+// =============================================================================
+// Default Value Functions
+// =============================================================================
+
 fn default_host() -> String {
     "0.0.0.0".to_string()
 }
@@ -160,6 +194,10 @@ fn default_hub_url() -> String {
 fn default_hub_cache_dir() -> String {
     "~/.axonml/hub_cache".to_string()
 }
+
+// =============================================================================
+// Default Implementations
+// =============================================================================
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -221,7 +259,15 @@ impl Default for HubConfig {
     }
 }
 
+// =============================================================================
+// Config Implementation
+// =============================================================================
+
 impl Config {
+    // -------------------------------------------------------------------------
+    // Loading
+    // -------------------------------------------------------------------------
+
     /// Load configuration from the default location (~/.axonml/config.toml)
     pub fn load() -> Result<Self, ConfigError> {
         let config_path = Self::config_path();
@@ -246,6 +292,10 @@ impl Config {
             .join(".axonml")
             .join("config.toml")
     }
+
+    // -------------------------------------------------------------------------
+    // Directory Paths
+    // -------------------------------------------------------------------------
 
     /// Get the data directory path (expanded)
     pub fn data_dir(&self) -> PathBuf {
@@ -302,10 +352,18 @@ impl Config {
         Ok(())
     }
 
+    // -------------------------------------------------------------------------
+    // Connection Helpers
+    // -------------------------------------------------------------------------
+
     /// Get the Aegis-DB connection URL
     pub fn aegis_url(&self) -> String {
         format!("http://{}:{}", self.aegis.host, self.aegis.port)
     }
+
+    // -------------------------------------------------------------------------
+    // Validation
+    // -------------------------------------------------------------------------
 
     /// Validate configuration - always called on startup
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -348,6 +406,10 @@ impl Config {
         warnings
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -1,13 +1,23 @@
-//! Vulkan Backend - Cross-Platform GPU Operations
+//! Vulkan backend — cross-platform GPU compute via ash + gpu-allocator.
+//!
+//! 972 lines, 23 public functions. Full Vulkan 1.1 implementation:
+//! instance creation, physical device enumeration, logical device + compute
+//! queue, command pool + buffer recording, gpu-allocator for GPU-local +
+//! CPU-visible buffer allocation, buffer ops (create, create_init, read,
+//! write, copy, destroy), SPIR-V compute pipeline creation + dispatch,
+//! descriptor set/pool management, `DeviceCapabilities` query from
+//! `VkPhysicalDeviceProperties`, and `Backend` trait implementation.
+//! Feature-gated behind `vulkan`.
 //!
 //! # File
 //! `crates/axonml-core/src/backends/vulkan.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

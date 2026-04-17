@@ -1,134 +1,164 @@
+---
+layout: default
+title: DType
+parent: Core
+nav_order: 2
+description: "Data type enum and Scalar/Numeric/Float trait hierarchy"
+---
+
 # DType Module
 
-Data type system for tensor element types.
+Type system for AxonML's generic tensor operations (`axonml_core::dtype`).
 
 ## Overview
 
-The dtype module defines the supported data types for tensor elements. This provides type safety and enables efficient memory layout.
+Two layers:
+
+1. **`DType`** — a runtime enum for dtype dispatch (ONNX, serialization, backend kernels).
+2. **`Scalar` / `Numeric` / `Float` traits** — compile-time generics so `Tensor<T>` is monomorphized for each element type.
 
 ## DType Enum
 
 ```rust
+use axonml_core::DType;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum DType {
-    // Floating point
-    F16,    // 16-bit float (half precision)
-    F32,    // 32-bit float (single precision)
-    F64,    // 64-bit float (double precision)
-    BF16,   // Brain float 16
-
-    // Integers
-    I8,     // 8-bit signed
-    I16,    // 16-bit signed
-    I32,    // 32-bit signed
-    I64,    // 64-bit signed
-
-    // Unsigned integers
-    U8,     // 8-bit unsigned
-    U16,    // 16-bit unsigned
-    U32,    // 32-bit unsigned
-    U64,    // 64-bit unsigned
-
-    // Boolean
+    F16,
+    #[default]
+    F32,
+    F64,
+    I8, I16, I32, I64,
+    U8, U32, U64,
     Bool,
 }
 ```
 
-## Usage Examples
-
-### Getting Element Size
+### Methods
 
 ```rust
 use axonml_core::DType;
 
-let dtype = DType::F32;
-assert_eq!(dtype.size_bytes(), 4);
+// Size (const fn)
+assert_eq!(DType::F32.size_of(), 4);
+assert_eq!(DType::F64.size_of(), 8);
+assert_eq!(DType::Bool.size_of(), 1);
+assert_eq!(DType::F16.size_of(), 2);
 
-let dtype64 = DType::F64;
-assert_eq!(dtype64.size_bytes(), 8);
+// Classification
+assert!(DType::F32.is_float());
+assert!(DType::I32.is_integer());
+assert!(DType::I32.is_signed());
+assert!(!DType::U32.is_signed());
+
+// Name
+assert_eq!(DType::F32.name(), "f32");
+assert_eq!(format!("{}", DType::F32), "f32");      // Display uses name()
+
+// Defaults
+assert_eq!(DType::default(),      DType::F32);
+assert_eq!(DType::default_float(), DType::F32);
+assert_eq!(DType::default_int(),   DType::I64);
 ```
 
-### Type Checking
+Note: `bf16` is not in the enum — only `F16`. Integer widths are I8/I16/I32/I64 + U8/U32/U64 (no `U16`).
+
+## Trait Hierarchy
+
+Three compile-time traits let generic tensor code dispatch without boxing:
 
 ```rust
-use axonml_core::DType;
+use axonml_core::dtype::{Scalar, Numeric, Float};
 
-let dtype = DType::F32;
+// Scalar: any storable element (Pod + Zeroable + Send + Sync)
+pub trait Scalar: Copy + Clone + Debug + Default + Send + Sync + Pod + Zeroable + 'static {
+    const DTYPE: DType;
+    fn dtype() -> DType { Self::DTYPE }
+}
 
-assert!(dtype.is_floating_point());
-assert!(!dtype.is_integer());
-assert!(!dtype.is_signed()); // floating point is neither signed nor unsigned int
+// Numeric: adds arithmetic (Num + NumCast + PartialOrd + Zero + One)
+pub trait Numeric: Scalar + /* ... */ {
+    const ZERO: Self;
+    const ONE: Self;
+    fn min_value() -> Self;
+    fn max_value() -> Self;
+}
+
+// Float: adds exp/ln/pow/sqrt/sin/cos/tanh + NaN/Inf/EPSILON constants
+pub trait Float: Numeric + /* num_traits::Float */ {
+    const NAN: Self;
+    const INFINITY: Self;
+    const NEG_INFINITY: Self;
+    const EPSILON: Self;
+    fn is_nan_value(self) -> bool;
+    fn is_infinite_value(self) -> bool;
+    fn exp_value(self) -> Self;
+    fn ln_value(self) -> Self;
+    fn pow_value(self, exp: Self) -> Self;
+    fn sqrt_value(self) -> Self;
+    fn sin_value(self) -> Self;
+    fn cos_value(self) -> Self;
+    fn tanh_value(self) -> Self;
+}
 ```
 
-### Default Types
+### Implementations
+
+- `Scalar`: `f32`, `f64`, `i8`, `i16`, `i32`, `i64`, `u8`, `u32`, `u64`, plus wrapper types `F16Wrapper(half::f16)` and `BoolWrapper(u8)` — these wrappers exist because `bytemuck` does not implement `Pod` for `half::f16` or `bool` directly.
+- `Numeric`: `f32`, `f64`, `i8`, `i16`, `i32`, `i64`, `u8`.
+- `Float`: `f32`, `f64`.
+
+### Wrapper Types
 
 ```rust
-use axonml_core::DType;
+use axonml_core::dtype::{F16Wrapper, BoolWrapper};
 
-// Default floating point type
-let default_float = DType::default_float(); // F32
+// f16
+let h = F16Wrapper(half::f16::from_f32(3.14));
 
-// Default integer type
-let default_int = DType::default_int(); // I64
+// Bool (u8-backed)
+let b: BoolWrapper = true.into();
+let raw: bool = b.into();
 ```
 
-## Type Conversion
+## Usage
 
-### Promotion Rules
-
-When operating on tensors with different dtypes, automatic promotion follows these rules:
-
-1. `Bool` promotes to any numeric type
-2. Integers promote to floats when mixed
-3. Smaller types promote to larger types
-4. Signed and unsigned of same size: both promote to next larger signed
+### Query a generic `T`'s runtime dtype
 
 ```rust
-// Example promotions:
-// F32 + F64 -> F64
-// I32 + F32 -> F32
-// I32 + I64 -> I64
-// Bool + F32 -> F32
+use axonml_core::dtype::Scalar;
+
+fn name_of<T: Scalar>() -> &'static str {
+    T::dtype().name()
+}
+
+assert_eq!(name_of::<f32>(), "f32");
+assert_eq!(name_of::<i64>(), "i64");
 ```
 
-### Explicit Casting
+### Memory Layout
 
-```rust
-use axonml::prelude::*;
+| DType | Size (bytes) |
+|-------|--------------|
+| Bool, I8, U8 | 1 |
+| F16, I16     | 2 |
+| F32, I32, U32 | 4 |
+| F64, I64, U64 | 8 |
 
-let float_tensor = Tensor::from_vec(vec![1.5, 2.7, 3.2], &[3]).unwrap();
-
-// Cast to integer (truncates)
-let int_tensor = float_tensor.to_dtype(DType::I32);
-// Result: [1, 2, 3]
-```
-
-## Memory Layout
-
-Each dtype has a specific memory layout:
-
-| DType | Size (bytes) | Alignment |
-|-------|--------------|-----------|
-| F16   | 2            | 2         |
-| F32   | 4            | 4         |
-| F64   | 8            | 8         |
-| BF16  | 2            | 2         |
-| I8    | 1            | 1         |
-| I16   | 2            | 2         |
-| I32   | 4            | 4         |
-| I64   | 8            | 8         |
-| Bool  | 1            | 1         |
+Alignment matches size (Pod + Zeroable invariants).
 
 ## Best Practices
 
-1. **Use F32 for training** - Good balance of precision and memory
-2. **Use F16/BF16 for inference** - Faster with minimal accuracy loss
-3. **Use I64 for indices** - Handles large datasets
-4. **Avoid unnecessary casts** - Each cast has overhead
+1. **Use f32 for training** — good precision/memory balance.
+2. **Use f16 via `F16Wrapper` for inference** — half the memory; `axonml-autograd::amp::autocast(DType::F16, ...)` handles the mixed-precision pattern.
+3. **Use i64 for indices** — matches PyTorch and ONNX conventions.
+4. **Avoid unnecessary conversions** — per-element conversion copies the tensor.
 
 ## Related
 
-- [Tensor](../tensor/tensor.md) - Tensors using dtypes
-- [Storage](storage.md) - Raw storage with dtype awareness
+- [Device]({% link core/device.md %}) — where tensors live
+- [Tensor operations]({% link tensors.md %}) — where these element types are used
 
-@version 0.1.0
-@author AutomataNexus Development Team
+---
+
+*Last updated: 2026-04-16 (v0.6.1)*

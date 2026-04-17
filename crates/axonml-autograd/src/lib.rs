@@ -1,13 +1,27 @@
-//! Axonml Autograd - Automatic Differentiation Engine
+//! Reverse-mode automatic differentiation engine for AxonML.
+//!
+//! `Variable` wraps `Tensor<f32>` with gradient tracking. `backward()` walks
+//! the dynamic computation graph and accumulates gradients via `GradFn` /
+//! `GradientFunction` traits. Gradient functions cover arithmetic, activations,
+//! matmul, conv, RNN, loss, and attention ops. `NoGradGuard` disables tracking;
+//! `checkpoint` / `checkpoint_sequential` trade compute for memory; `amp`
+//! provides F16 autocast for mixed-precision training. The `inspect` module
+//! offers `trace_backward`, `to_dot` (DOT graph export), `node_count`, `depth`,
+//! and gradient flow summary — native graph visualization without external tools.
+//!
+//! Modules: `variable`, `backward`, `grad_fn`, `functions` (basic, activation,
+//! linalg, loss, conv, rnn, attention), `graph`, `inspect`, `checkpoint`,
+//! `amp`, `no_grad`.
 //!
 //! # File
 //! `crates/axonml-autograd/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

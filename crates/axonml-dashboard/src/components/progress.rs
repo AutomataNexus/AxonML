@@ -1,20 +1,55 @@
-//! Progress Bar Components
+//! Progress Indicators — Linear Bar, Circular, Steps, Training
+//!
+//! Family of progress components for indicating completion percentage or
+//! step position in a flow.
+//!
+//! `ProgressVariant` (`Primary`, `Success`, `Warning`, `Error`, `Info`)
+//! selects the CSS accent; `class()` returns the associated `progress-*`
+//! class name or `var(--*)` CSS variable mapping.
+//!
+//! `ProgressBar` renders a linear bar whose width is a clamped percentage
+//! of `value/max`, with optional `show_label` percentage text, `striped`
+//! diagonal pattern, and `animated` stripe motion. ARIA role/valuenow
+//! metadata is set for accessibility.
+//!
+//! `CircularProgress` draws a ring SVG: a background circle plus a
+//! foreground circle whose `stroke-dasharray` / `stroke-dashoffset`
+//! combination is driven by the signal and rotated -90° so progress starts
+//! from 12 o'clock. Includes an optional centred percentage label.
+//!
+//! `ProgressSteps` renders a sequence of labelled step indicators from a
+//! `Vec<String>` and a `current: MaybeSignal<usize>`; completed steps show
+//! a check SVG, the current step gets a `current` class, and future steps
+//! show their 1-based index.
+//!
+//! `TrainingProgress` composes two `ProgressBar`s (Primary for epochs,
+//! Info for steps) with `epoch/total_epochs` and `step/total_steps`
+//! counters derived into fractional signals for the child bars.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/progress.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use leptos::*;
+
+// =============================================================================
+// ProgressVariant
+// =============================================================================
 
 /// Progress bar variant
 #[derive(Debug, Clone, Copy, Default)]
@@ -38,6 +73,10 @@ impl ProgressVariant {
         }
     }
 }
+
+// =============================================================================
+// ProgressBar
+// =============================================================================
 
 /// Progress bar component
 #[component]
@@ -85,6 +124,10 @@ pub fn ProgressBar(
         </div>
     }
 }
+
+// =============================================================================
+// CircularProgress
+// =============================================================================
 
 /// Circular progress indicator
 #[component]
@@ -153,6 +196,10 @@ pub fn CircularProgress(
     }
 }
 
+// =============================================================================
+// ProgressSteps
+// =============================================================================
+
 /// Progress steps component
 #[component]
 pub fn ProgressSteps(
@@ -189,6 +236,10 @@ pub fn ProgressSteps(
         </div>
     }
 }
+
+// =============================================================================
+// TrainingProgress
+// =============================================================================
 
 /// Training progress component with epoch/step info
 #[component]

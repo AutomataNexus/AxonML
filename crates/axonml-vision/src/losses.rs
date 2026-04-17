@@ -1,13 +1,22 @@
 //! Detection Losses — Focal Loss, GIoU Loss, Uncertainty NLL Loss
 //!
+//! Loss functions for object detection training. `FocalLoss` implements the
+//! focal loss from Lin et al. (2017) that down-weights easy negatives via
+//! alpha-balanced (1-p_t)^gamma weighting. `GIoULoss` computes Generalized IoU
+//! loss for bounding box regression (Rezatofighi et al., 2019). `UncertaintyLoss`
+//! implements aleatoric uncertainty-aware NLL from Kendall & Gal (NeurIPS 2017).
+//! `compute_centerness()` calculates FCOS-style centerness targets from (l,t,r,b)
+//! distances.
+//!
 //! # File
 //! `crates/axonml-vision/src/losses.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,13 +1,23 @@
-//! Backends - Device-Specific Implementations
+//! Compute backend modules and the `Backend` trait.
+//!
+//! Five backends: `cpu` (rayon-parallel, always available), `cuda` (cuBLAS +
+//! custom PTX kernels via cudarc), `vulkan` (ash + gpu-allocator, SPIR-V
+//! compute), `metal` (Apple Metal via objc, compute pipelines), `wgpu_backend`
+//! (wgpu for browser/cross-platform WebGPU). Also `cuda_kernels` (PTX module
+//! registry), `cuda_pool` (memory pool), `cudnn_ops` (cuDNN conv2d),
+//! `gpu_tests` (correctness infra). `GpuMemory`, `GpuStream`, `BackendType`,
+//! `best_available_backend()`, and `gpu_count()` provide device-agnostic
+//! dispatch at the top level.
 //!
 //! # File
 //! `crates/axonml-core/src/backends/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

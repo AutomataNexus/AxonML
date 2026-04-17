@@ -1,13 +1,22 @@
-//! axonml-profile - Profiling Tools for Axonml ML Framework
+//! Performance profiling for AxonML.
+//!
+//! Unified `Profiler` combining `MemoryProfiler` (allocation tracking, peak/
+//! current stats), `ComputeProfiler` (per-op timing + FLOP counting),
+//! `TimelineProfiler` (event-based recording with start/stop spans). RAII
+//! `ProfileGuard` + `profile_scope!` macro for zero-overhead-when-disabled
+//! instrumentation. Global singleton via `global_profiler()`. `BottleneckAnalyzer`
+//! detects memory-bound, compute-bound, I/O-bound, launch-overhead, and
+//! synchronization bottlenecks. `ProfileReport` exports to Text/JSON/Markdown/HTML.
 //!
 //! # File
 //! `crates/axonml-profile/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

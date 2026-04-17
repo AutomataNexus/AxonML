@@ -1,18 +1,43 @@
-//! MFA Verification Components
+//! MFA Verification — Challenge Page + WebAuthn Authenticator
+//!
+//! Provides the standalone MFA challenge surface used when a session requires
+//! a second factor before tokens are issued. `MfaChallengePage` accepts an
+//! `mfa_token` plus `on_success` / `on_cancel` callbacks, lets the user pick
+//! between `MfaMethod::Totp` and `MfaMethod::Recovery` via tab-style method
+//! buttons, and dispatches to either `api::auth::verify_mfa` or
+//! `api::auth::use_recovery_code`. TOTP uses a 6-slot `CodeInput`; recovery
+//! uses a single `TextInput`. The component intentionally rejects in-line
+//! code entry for `MfaMethod::WebAuthn` and directs the user to the dedicated
+//! `WebAuthnAuthenticator` button instead.
+//!
+//! `MfaMethod` is the enum of supported factors (`Totp`, `WebAuthn`,
+//! `Recovery`). `WebAuthnAuthenticator` runs the full three-step WebAuthn
+//! assertion ceremony: it calls `api::auth::webauthn_authenticate_start` to
+//! pull the challenge, invokes `webauthn::get_assertion` against the
+//! browser's credential store using the current hostname as the RP ID, and
+//! POSTs the resulting `WebAuthnAuthFinishRequest` back via
+//! `webauthn_authenticate_finish`. Errors surface through an optional
+//! `on_error` callback and a local `error` signal; `WebAuthnError::UserCancelled`
+//! is special-cased into a friendly "Authentication cancelled" message.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/auth/mfa.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 
@@ -20,6 +45,10 @@ use crate::api;
 use crate::components::{forms::*, icons::*, spinner::*};
 use crate::types::*;
 use crate::utils::webauthn;
+
+// =============================================================================
+// MFA Challenge Page
+// =============================================================================
 
 /// MFA challenge page (shown when login requires MFA)
 #[component]
@@ -177,6 +206,10 @@ pub fn MfaChallengePage(
     }
 }
 
+// =============================================================================
+// MFA Method Enum
+// =============================================================================
+
 /// MFA method enum
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MfaMethod {
@@ -184,6 +217,10 @@ pub enum MfaMethod {
     WebAuthn,
     Recovery,
 }
+
+// =============================================================================
+// WebAuthn Authenticator Component
+// =============================================================================
 
 /// WebAuthn authenticator component
 #[component]

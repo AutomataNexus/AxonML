@@ -1,18 +1,39 @@
-//! Security Settings Page
+//! Security Settings Page — Password, MFA, and Session Management
+//!
+//! Leptos page component `SecuritySettingsPage` that exposes security
+//! controls for the signed-in user. Pulls `totp_enabled` and
+//! `webauthn_enabled` flags from the shared app-state user record and
+//! renders four sections:
+//!
+//! - **Password** — "Change Password" button opens an inline modal with
+//!   current/new/confirm fields, validates match and ≥8 character length,
+//!   then calls `api::auth::change_password`.
+//! - **Two-Factor Authentication** — lists TOTP (authenticator app),
+//!   WebAuthn security key, and recovery codes. Enabled states show a
+//!   success badge plus manage/disable action; disabled states link to
+//!   the respective setup route. Disable-TOTP uses a `ConfirmDialog`
+//!   that calls `api::auth::totp_disable`.
+//! - **Active Sessions** — placeholder list showing only the current
+//!   session; the "Sign Out All Other Sessions" button is disabled.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/settings/security.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -21,9 +42,16 @@ use crate::api;
 use crate::components::{forms::*, icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 
+// =============================================================================
+// SecuritySettingsPage Component
+// =============================================================================
+
 /// Security settings page
 #[component]
 pub fn SecuritySettingsPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Signals and State
+    // -------------------------------------------------------------------------
     let state = use_app_state();
 
     let loading = create_rw_signal(true);
@@ -46,6 +74,9 @@ pub fn SecuritySettingsPage() -> impl IntoView {
     let state_for_password = state.clone();
     let state_for_totp = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Load MFA Status
+    // -------------------------------------------------------------------------
     // Load user MFA status
     create_effect(move |_| {
         if let Some(user) = state_for_effect.user.get() {
@@ -55,6 +86,9 @@ pub fn SecuritySettingsPage() -> impl IntoView {
         loading.set(false);
     });
 
+    // -------------------------------------------------------------------------
+    // Event Handlers
+    // -------------------------------------------------------------------------
     let change_password = move |_| {
         let current = current_password.get();
         let new_pw = new_password.get();
@@ -114,6 +148,9 @@ pub fn SecuritySettingsPage() -> impl IntoView {
     let change_password_stored = store_value(change_password);
     let disable_totp_stored = store_value(disable_totp);
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page security-settings-page">
             <div class="page-header">

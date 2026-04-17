@@ -1,18 +1,38 @@
-//! Model Upload Page
+//! Model Upload Page — Create New Model or Add Version to Existing Model
+//!
+//! Leptos page component `ModelUploadPage` that handles two modes based on
+//! the presence of an `id` route parameter:
+//!
+//! - **New model mode** — renders model name, type dropdown (neural_network,
+//!   transformer, cnn, rnn, lstm, custom), and description fields, then
+//!   calls `api::models::create` followed by `api::models::upload_version`.
+//! - **Existing model mode** — fetches the target model by id for display
+//!   and skips directly to `api::models::upload_version` on submit.
+//!
+//! Both modes accept an optional training run id for traceability, show a
+//! `ProgressBar`-driven upload indicator, and navigate to the model detail
+//! page on success. Supported file extensions: .py, .pt, .pth, .onnx, .h5,
+//! .pb, .safetensors, .bin, .pkl, .npy, .npz, .json, .yaml, .yml. Includes
+//! a local `format_file_size` helper for the selected-file summary.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/models/upload.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -23,9 +43,16 @@ use crate::components::{forms::*, icons::*, progress::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// ModelUploadPage Component
+// =============================================================================
+
 /// Model upload page
 #[component]
 pub fn ModelUploadPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Params and Mode Detection
+    // -------------------------------------------------------------------------
     let params = use_params_map();
     let state = use_app_state();
     let navigate = use_navigate();
@@ -34,6 +61,9 @@ pub fn ModelUploadPage() -> impl IntoView {
     let existing_model_id = move || params.get().get("id").cloned();
     let is_new_model = move || existing_model_id().is_none();
 
+    // -------------------------------------------------------------------------
+    // Form Signals and State
+    // -------------------------------------------------------------------------
     // Form state
     let model_name = create_rw_signal(String::new());
     let model_description = create_rw_signal(String::new());
@@ -44,6 +74,9 @@ pub fn ModelUploadPage() -> impl IntoView {
     let (upload_progress, set_upload_progress) = create_signal(0.0f64);
     let error = create_rw_signal::<Option<String>>(None);
 
+    // -------------------------------------------------------------------------
+    // Load Existing Model (if editing)
+    // -------------------------------------------------------------------------
     // Load existing model data if editing
     let (existing_model, set_existing_model) = create_signal::<Option<Model>>(None);
     create_effect(move |_| {
@@ -56,6 +89,9 @@ pub fn ModelUploadPage() -> impl IntoView {
         }
     });
 
+    // -------------------------------------------------------------------------
+    // Model Type Options
+    // -------------------------------------------------------------------------
     let model_types = [
         ("neural_network".to_string(), "Neural Network".to_string()),
         ("transformer".to_string(), "Transformer".to_string()),
@@ -65,6 +101,9 @@ pub fn ModelUploadPage() -> impl IntoView {
         ("custom".to_string(), "Custom".to_string()),
     ];
 
+    // -------------------------------------------------------------------------
+    // Event Handlers
+    // -------------------------------------------------------------------------
     let on_file_select = move |files: FileList| {
         if files.length() > 0 {
             if let Some(file) = files.get(0) {
@@ -169,6 +208,9 @@ pub fn ModelUploadPage() -> impl IntoView {
         }
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page model-upload-page">
             <div class="page-header">
@@ -345,6 +387,10 @@ pub fn ModelUploadPage() -> impl IntoView {
         </div>
     }
 }
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 fn format_file_size(bytes: u64) -> String {
     const KB: u64 = 1024;

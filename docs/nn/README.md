@@ -1,213 +1,116 @@
 # axonml-nn Documentation
 
-> Neural network modules for the Axonml ML framework.
+> Neural network modules for the AxonML ML framework.
 
 ## Overview
 
-`axonml-nn` provides a PyTorch-like module system for building neural networks. It includes common layers, activation functions, loss functions, and container modules.
+`axonml-nn` provides a PyTorch-style `Module` trait and a large library of
+layers, activations, loss functions, initializers, and container modules.
+Every layer implements `Module`, with forward pass, parameter aggregation,
+train/eval mode, and device placement.
 
 ## Core Concepts
 
-### Module Trait
-
-All neural network components implement the `Module` trait:
+### The `Module` trait
 
 ```rust
-pub trait Module {
+pub trait Module: Send + Sync {
     fn forward(&self, input: &Variable) -> Variable;
-    fn parameters(&self) -> Vec<Parameter>;
+    fn parameters(&self) -> Vec<Parameter> { Vec::new() }
+    fn named_parameters(&self) -> HashMap<String, Parameter> { HashMap::new() }
     fn train(&mut self);
     fn eval(&mut self);
     fn is_training(&self) -> bool;
+    fn zero_grad(&mut self);
+    fn name(&self) -> &str;
+    fn to_device(&mut self, device: Device);
 }
 ```
 
-### Parameters
+`ModuleList` is a heterogeneous `Vec<Box<dyn Module>>` that runs modules
+sequentially and aggregates parameters + mode switches.
 
-`Parameter` wraps a `Variable` that should be optimized:
+### `Parameter`
 
-```rust
-pub struct Parameter {
-    variable: Variable,
-    name: String,
-}
-```
+`Parameter` is a named, gradient-tracked weight wrapping a `Variable`.
 
 ## Modules
 
-### Layers
-
-#### linear.rs - Fully Connected Layer
-
-```rust
-let linear = Linear::new(in_features, out_features);
-let output = linear.forward(&input);  // [batch, out_features]
-```
-
-- Computes `y = xW^T + b`
-- Weight shape: `[out_features, in_features]`
-- Bias shape: `[out_features]`
-
-#### conv.rs - Convolutional Layers
-
-```rust
-// 2D Convolution
-let conv = Conv2d::new(in_channels, out_channels, kernel_size);
-let output = conv.forward(&input);  // [batch, out_channels, H', W']
-
-// With padding and stride
-let conv = Conv2d::with_options(in_ch, out_ch, kernel, stride, padding);
-```
-
-**Available:**
-- `Conv1d` - 1D convolution (sequences)
-- `Conv2d` - 2D convolution (images)
-- `Conv3d` - 3D convolution (video/volumetric)
-
-#### pooling.rs - Pooling Layers
-
-```rust
-// Max pooling
-let pool = MaxPool2d::new(kernel_size);
-let pool = MaxPool2d::with_stride(kernel_size, stride);
-
-// Average pooling
-let pool = AvgPool2d::new(kernel_size);
-
-// Global pooling
-let pool = GlobalAvgPool2d::new();
-```
-
-#### norm.rs - Normalization Layers
-
-```rust
-// Batch normalization
-let bn = BatchNorm1d::new(num_features);
-let bn = BatchNorm2d::new(num_features);
-
-// Layer normalization
-let ln = LayerNorm::new(normalized_shape);
-```
-
-#### dropout.rs - Regularization
-
-```rust
-let dropout = Dropout::new(p);  // Drop probability
-
-// In training: randomly zero elements
-// In eval: pass through unchanged
-let output = dropout.forward(&input);
-```
-
-#### rnn.rs - Recurrent Layers
-
-```rust
-// Simple RNN
-let rnn = RNN::new(input_size, hidden_size);
-
-// LSTM
-let lstm = LSTM::new(input_size, hidden_size);
-
-// GRU
-let gru = GRU::new(input_size, hidden_size);
-
-// Multi-layer with dropout
-let lstm = LSTM::with_options(input_size, hidden_size, num_layers, dropout);
-```
-
-#### attention.rs - Attention Mechanisms
-
-```rust
-let attention = MultiHeadAttention::new(embed_dim, num_heads);
-let output = attention.forward_qkv(&query, &key, &value, mask);
-```
-
-#### embedding.rs - Embeddings
-
-```rust
-let embedding = Embedding::new(vocab_size, embed_dim);
-let output = embedding.forward(&indices);  // [batch, seq, embed_dim]
-```
-
-### Activations
-
-```rust
-use axonml_nn::*;
-
-// As modules
-let relu = ReLU;
-let sigmoid = Sigmoid;
-let tanh = Tanh;
-let softmax = Softmax::new(dim);
-let leaky_relu = LeakyReLU::new(negative_slope);
-let gelu = GELU;
-let silu = SiLU;
-
-// Applied to variables
-let y = x.relu();
-let y = x.sigmoid();
-let y = x.tanh();
-```
-
-### Loss Functions
-
-```rust
-use axonml_nn::*;
-
-// Mean Squared Error
-let loss = MSELoss::new();
-let l = loss.forward(&prediction, &target);
-
-// Cross Entropy (for classification)
-let loss = CrossEntropyLoss::new();
-let l = loss.forward(&logits, &labels);
-
-// Binary Cross Entropy
-let loss = BCELoss::new();
-let l = loss.forward(&prediction, &target);
-
-// L1 Loss
-let loss = L1Loss::new();
-let l = loss.forward(&prediction, &target);
-```
-
 ### Containers
 
-#### sequential.rs
+- `Sequential` — chain of modules (builder API via `.add(...)`)
+- `ModuleList` — heterogeneous owned list
 
-Chain modules together:
+### Layers (in `layers/`)
 
-```rust
-let model = Sequential::new()
-    .add(Linear::new(784, 256))
-    .add(ReLU)
-    .add(Linear::new(256, 128))
-    .add(ReLU)
-    .add(Linear::new(128, 10));
+| Category        | Items                                                                                   |
+|-----------------|-----------------------------------------------------------------------------------------|
+| Linear          | `Linear`                                                                                |
+| Convolution     | `Conv1d`, `Conv2d`, `ConvTranspose2d`                                                   |
+| Pooling         | `MaxPool1d`, `MaxPool2d`, `AvgPool1d`, `AvgPool2d`, `AdaptiveAvgPool2d`                 |
+| Normalization   | `BatchNorm1d`, `BatchNorm2d`, `LayerNorm`, `GroupNorm`, `InstanceNorm2d` (RMSNorm lives in `axonml-llm::llama`, not this crate) |
+| Dropout         | `Dropout`, `Dropout2d`                                                                  |
+| Recurrent       | `RNN`, `RNNCell`, `LSTM`, `LSTMCell`, `GRU`, `GRUCell`                                  |
+| Attention       | `MultiHeadAttention`, `CrossAttention`, `DifferentialAttention`                         |
+| Transformer     | `TransformerEncoder(Layer)`, `TransformerDecoder(Layer)`, `Seq2SeqTransformer`          |
+| Embedding       | `Embedding`                                                                             |
+| Residual        | `ResidualBlock`                                                                         |
+| MoE             | `MoELayer`, `MoERouter`, `Expert`                                                       |
+| Quantized       | `TernaryLinear`, `PackedTernaryWeights` (BitNet b1.58)                                  |
+| Graph           | `GCNConv`, `GATConv`                                                                    |
+| Spectral        | `FFT1d`, `STFT`                                                                         |
+| Sparse          | `SparseLinear`, `GroupSparsity`, `LotteryTicket` (differentiable structured sparsity)   |
 
-let output = model.forward(&input);
-```
+### Activations (module form)
 
-### Initialization
+`ReLU`, `Sigmoid`, `Tanh`, `GELU`, `SiLU`, `ELU`, `LeakyReLU`, `Softmax`,
+`LogSoftmax`, `Flatten`, `Identity`. Available both as `Module` structs and
+as `Variable` methods (`x.relu()`, `x.gelu()`, ...).
+
+### Losses
+
+`MSELoss`, `CrossEntropyLoss`, `BCELoss`, `BCEWithLogitsLoss`, `L1Loss`,
+`SmoothL1Loss`, `NLLLoss`. All share a `Reduction` enum (`Mean`, `Sum`,
+`None`).
+
+Higher-level losses (`CTCLoss`, `FocalLoss`, `TripletLoss`, `ArcFaceLoss`)
+are also available in the `loss` module.
+
+### `init`
+
+Weight initialization.
 
 ```rust
 use axonml_nn::init::*;
 
-// Xavier/Glorot initialization
 xavier_uniform(&mut tensor);
 xavier_normal(&mut tensor);
-
-// Kaiming/He initialization
+glorot_uniform(&mut tensor);
+glorot_normal(&mut tensor);
 kaiming_uniform(&mut tensor, nonlinearity);
 kaiming_normal(&mut tensor, nonlinearity);
+he_uniform(&mut tensor, nonlinearity);
+he_normal(&mut tensor, nonlinearity);
 
-// Others
 zeros(&mut tensor);
 ones(&mut tensor);
 constant(&mut tensor, value);
+eye(&mut tensor);
+diag(&mut tensor, value);
 normal(&mut tensor, mean, std);
 uniform(&mut tensor, low, high);
+uniform_range(&mut tensor, r);
+orthogonal(&mut tensor, gain);
+sparse(&mut tensor, sparsity, std);
+randn(&mut tensor);
 ```
+
+`InitMode` enum captures the choice when storing configuration.
+
+### `functional`
+
+Stateless function wrappers (`functional::relu(&x)`, `functional::linear(...)`,
+etc.) — the module-free API for one-off ops.
 
 ## Usage Examples
 
@@ -216,38 +119,23 @@ uniform(&mut tensor, low, high);
 ```rust
 use axonml::prelude::*;
 
-// Build model
 let model = Sequential::new()
     .add(Linear::new(784, 128))
     .add(ReLU)
     .add(Dropout::new(0.5))
     .add(Linear::new(128, 10));
 
-// Forward pass
 let output = model.forward(&input);
 ```
 
-### Convolutional Network
+### CNN
 
 ```rust
-use axonml::prelude::*;
-
 struct CNN {
     conv1: Conv2d,
     conv2: Conv2d,
     pool: MaxPool2d,
     fc: Linear,
-}
-
-impl CNN {
-    fn new() -> Self {
-        Self {
-            conv1: Conv2d::new(1, 32, 3),
-            conv2: Conv2d::new(32, 64, 3),
-            pool: MaxPool2d::new(2),
-            fc: Linear::new(64 * 5 * 5, 10),
-        }
-    }
 }
 
 impl Module for CNN {
@@ -267,74 +155,57 @@ impl Module for CNN {
             self.fc.parameters(),
         ].concat()
     }
+    // (remaining Module methods)
+    # fn train(&mut self) {}
+    # fn eval(&mut self) {}
+    # fn is_training(&self) -> bool { false }
+    # fn zero_grad(&mut self) {}
+    # fn name(&self) -> &str { "CNN" }
+    # fn to_device(&mut self, _d: axonml_core::Device) {}
 }
 ```
 
-### Training/Eval Mode
+### Train / eval mode
 
 ```rust
 let mut model = create_model();
 
-// Training mode (dropout active, batchnorm uses batch stats)
-model.train();
-let output = model.forward(&train_input);
+model.train(); // dropout active, batchnorm uses batch stats
+let y = model.forward(&train_input);
 
-// Eval mode (dropout inactive, batchnorm uses running stats)
-model.eval();
-let output = model.forward(&test_input);
+model.eval();  // dropout off, batchnorm uses running stats
+let y = model.forward(&test_input);
 ```
 
-### Differentiable Structured Sparsity *(novel)*
+### Differentiable structured sparsity
 
-#### sparse.rs - Learnable Pruning
-
-`SparseLinear` applies a differentiable magnitude-based pruning mask:
+`SparseLinear` applies a soft-thresholded, differentiable pruning mask:
 
 ```rust
 use axonml_nn::layers::sparse::{SparseLinear, GroupSparsity, LotteryTicket};
 
-// Soft-thresholded magnitude pruning
-let sparse = SparseLinear::new(256, 128, 0.5, 10.0);
+let mut sparse = SparseLinear::new(256, 128, 0.5, 10.0);
 let output = sparse.forward(&input);
-println!("Sparsity: {:.1}%", sparse.sparsity() * 100.0);
+println!("sparsity: {:.1}%", sparse.sparsity() * 100.0);
 
-// Group sparsity regularization (row, column, or block)
 let group_reg = GroupSparsity::new(0.01, "row");
 let reg_loss = group_reg.compute(&sparse);
 
-// Lottery Ticket Hypothesis: snapshot → train → prune → rewind
 let mut ticket = LotteryTicket::new(&sparse);
 ticket.snapshot();
 // ... train ...
-ticket.prune(0.2); // prune 20% by magnitude
-ticket.rewind(&mut sparse); // rewind to init weights with mask
+ticket.prune(0.2);           // prune 20% by magnitude
+ticket.rewind(&mut sparse);  // rewind to init weights with mask
 ```
 
-**Mask formula:** `sigmoid((|weight| - threshold) * temperature)`
-
-This makes the mask continuous and differentiable — gradients flow through the pruning decision. PyTorch's pruning (`torch.nn.utils.prune`) uses binary masks that are not differentiable.
-
-### Additional Layers
-
-The following layers are also available in `axonml-nn`:
-
-| Layer | Module | Description |
-|:------|:-------|:------------|
-| `DiffAttention` | `layers::diff_attention` | Differential attention (used by Chimera SLM) |
-| `MoELayer` | `layers::moe` | Mixture of Experts with top-k routing |
-| `TernaryLinear` | `layers::ternary` | 1.58-bit ternary weight layer (BitNet b1.58) |
-| `ResidualBlock` | `layers::residual` | Pre-configured residual skip connection |
-| `GCNConv` | `layers::graph` | Graph Convolutional Network layer |
-| `GATConv` | `layers::graph` | Graph Attention Network layer |
-| `FFT1d` / `STFT` | `layers::fft` | Fourier transform layers |
-
-These layers are used as building blocks by higher-level models in `axonml-vision` (NightVision, Biometric Suite) and `axonml-llm` (Chimera, Trident).
+Mask formula: `sigmoid((|weight| - threshold) * temperature)` — gradients
+flow through the pruning decision.
 
 ## Related Modules
 
-- [Autograd](../autograd/README.md) - Gradient computation
-- [Optimizers](../optim/README.md) - Parameter updates
-- [Data](../data/README.md) - Data loading
+- [Autograd](../autograd/README.md) — gradient computation
+- [Optimizers](../optim/README.md) — parameter updates
 
-@version 0.4.1
-@author AutomataNexus Development Team
+## Last updated
+
+0.6.1 (2026-04-16)

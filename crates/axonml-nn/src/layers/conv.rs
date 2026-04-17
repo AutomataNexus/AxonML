@@ -1,13 +1,21 @@
-//! Convolutional Layers - 1D and 2D Convolutions
+//! Convolutional layers — `Conv1d`, `Conv2d`, `ConvTranspose2d`.
+//!
+//! 1360 lines. `Conv1d` (1D temporal), `Conv2d` (2D spatial with im2col
+//! forward + optional cuDNN dispatch via `cudnn_conv2d_forward`),
+//! `ConvTranspose2d` (learnable upsampling). All support padding, stride,
+//! dilation, groups (including depthwise separable), and optional bias.
+//! Kaiming-uniform weight init. Full `Module` trait impl with forward,
+//! parameters, train/eval, to_device.
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/conv.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

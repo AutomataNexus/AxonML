@@ -1,18 +1,36 @@
-//! Model Hub Cache Page
+//! Model Hub Cache Page — Manage Locally Downloaded Pretrained Models
+//!
+//! Local cache inspector for models previously downloaded via the hub.
+//! `HubCachePage` pulls a `CacheInfo` payload from `api::hub::get_cache_info`
+//! and renders a summary card (total model count, total size on disk,
+//! `cache_directory` path) above a list of cached models. A "Clear All"
+//! action (confirmed via a `ConfirmDialog`) calls
+//! `api::hub::clear_cache(None)` to wipe the cache, while each row's trash
+//! button targets a single model through `api::hub::clear_cache(Some(name))`
+//! using the `model_to_clear` signal and a second `ConfirmDialog`. Rendering
+//! is split across `CacheContent` (which unwraps the `Option<CacheInfo>`) and
+//! `CacheContentInner` (which lays out the summary and either the cached
+//! models list or an empty-state prompt linking back to `/hub`). A local
+//! `format_bytes` helper renders sizes as B/KB/MB/GB.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/hub/cache.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,11 +40,18 @@ use crate::components::{icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// Hub Cache Page
+// =============================================================================
+
 /// Hub cache page
 #[component]
 pub fn HubCachePage() -> impl IntoView {
     let state = use_app_state();
 
+    // -------------------------------------------------------------------------
+    // Signals And State
+    // -------------------------------------------------------------------------
     let (loading, set_loading) = create_signal(true);
     let (cache_info, set_cache_info) = create_signal::<Option<CacheInfo>>(None);
     let clear_all_modal = create_rw_signal(false);
@@ -37,6 +62,9 @@ pub fn HubCachePage() -> impl IntoView {
     let state_for_clear_all = state.clone();
     let state_for_clear_model = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Data Fetch
+    // -------------------------------------------------------------------------
     // Initial fetch
     create_effect(move |_| {
         let state = state_for_effect.clone();
@@ -50,6 +78,9 @@ pub fn HubCachePage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Event Handlers
+    // -------------------------------------------------------------------------
     // Clear all cache
     let clear_all = move |_| {
         let state = state_for_clear_all.clone();
@@ -95,6 +126,9 @@ pub fn HubCachePage() -> impl IntoView {
             .unwrap_or(false)
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page hub-cache-page">
             <div class="page-header">
@@ -156,6 +190,10 @@ pub fn HubCachePage() -> impl IntoView {
     }
 }
 
+// =============================================================================
+// Cache Content Wrapper
+// =============================================================================
+
 /// Cache Content component
 #[component]
 fn CacheContent(
@@ -185,6 +223,10 @@ fn CacheContent(
         })}
     }
 }
+
+// =============================================================================
+// Cache Content Inner
+// =============================================================================
 
 /// Cache Content Inner component
 #[component]
@@ -267,6 +309,10 @@ fn CacheContentInner(
         }}
     }
 }
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
 
 fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;

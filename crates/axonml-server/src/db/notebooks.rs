@@ -1,18 +1,39 @@
-//! Training notebooks database operations for AxonML
+//! Training Notebooks Database Operations — Notebook and Checkpoint Persistence
+//!
+//! Provides document-store-backed persistence for training notebooks and their
+//! checkpoints via `NotebookRepository`. Uses two Aegis-DB collections:
+//!
+//! - `axonml_notebooks` — `TrainingNotebook` records containing an ordered list
+//!   of `NotebookCell` items (Code or Markdown), per-cell execution status and
+//!   outputs (`CellOutput`), notebook-level metadata (`NotebookMetadata` with
+//!   kernel, language, framework, tags), and lifecycle status
+//!   (Draft/Running/Completed/Failed/Stopped).
+//! - `axonml_checkpoints` — `NotebookCheckpoint` records with epoch, step,
+//!   metrics JSON, and paths to model/optimizer state files.
+//!
+//! Repository methods cover full CRUD for notebooks, individual cell-level
+//! mutations (update/add/delete), checkpoint creation and listing, and a
+//! `get_best_checkpoint()` helper that selects the checkpoint with the best
+//! value for a given metric key (minimize or maximize).
 //!
 //! # File
 //! `crates/axonml-server/src/db/notebooks.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use super::{Database, DbError, DocumentQuery};
 use chrono::{DateTime, Utc};
@@ -20,11 +41,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+// =============================================================================
+// Constants
+// =============================================================================
+
 /// Collection name for notebooks
 const COLLECTION: &str = "axonml_notebooks";
 
 /// Collection name for checkpoints
 const CHECKPOINTS_COLLECTION: &str = "axonml_checkpoints";
+
+// =============================================================================
+// Types — Cell Enums
+// =============================================================================
 
 /// Cell type enum
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -60,6 +89,10 @@ pub enum NotebookStatus {
     Failed,
     Stopped,
 }
+
+// =============================================================================
+// Types — Cell and Output
+// =============================================================================
 
 /// Cell output
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +143,10 @@ impl Default for NotebookCell {
     }
 }
 
+// =============================================================================
+// Types — Notebook Metadata
+// =============================================================================
+
 /// Notebook metadata
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NotebookMetadata {
@@ -124,6 +161,10 @@ pub struct NotebookMetadata {
     #[serde(default)]
     pub extra: HashMap<String, serde_json::Value>,
 }
+
+// =============================================================================
+// Types — Training Notebook
+// =============================================================================
 
 /// Training notebook
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,6 +187,10 @@ pub struct TrainingNotebook {
     pub updated_at: DateTime<Utc>,
 }
 
+// =============================================================================
+// Types — Checkpoint
+// =============================================================================
+
 /// Training checkpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotebookCheckpoint {
@@ -159,6 +204,10 @@ pub struct NotebookCheckpoint {
     pub optimizer_state_path: Option<String>,
     pub created_at: DateTime<Utc>,
 }
+
+// =============================================================================
+// Types — Creation and Update Payloads
+// =============================================================================
 
 /// New notebook data
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,6 +231,21 @@ pub struct NewCheckpoint {
     pub optimizer_state_path: Option<String>,
 }
 
+/// Update notebook data
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdateNotebook {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub cells: Option<Vec<NotebookCell>>,
+    pub model_id: Option<String>,
+    pub dataset_id: Option<String>,
+    pub status: Option<NotebookStatus>,
+}
+
+// =============================================================================
+// Repository
+// =============================================================================
+
 /// Notebook repository
 pub struct NotebookRepository<'a> {
     db: &'a Database,
@@ -192,6 +256,10 @@ impl<'a> NotebookRepository<'a> {
     pub fn new(db: &'a Database) -> Self {
         Self { db }
     }
+
+    // -------------------------------------------------------------------------
+    // Notebook CRUD
+    // -------------------------------------------------------------------------
 
     /// Create a new training notebook
     pub async fn create(&self, new_notebook: NewNotebook) -> Result<TrainingNotebook, DbError> {
@@ -255,6 +323,10 @@ impl<'a> NotebookRepository<'a> {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Notebook Listing
+    // -------------------------------------------------------------------------
+
     /// List notebooks for a user
     pub async fn list_by_user(
         &self,
@@ -308,6 +380,10 @@ impl<'a> NotebookRepository<'a> {
         Ok(notebooks)
     }
 
+    // -------------------------------------------------------------------------
+    // Notebook Updates
+    // -------------------------------------------------------------------------
+
     /// Update notebook
     pub async fn update(
         &self,
@@ -345,6 +421,26 @@ impl<'a> NotebookRepository<'a> {
 
         Ok(notebook)
     }
+
+    /// Update notebook status
+    pub async fn update_status(
+        &self,
+        id: &str,
+        status: NotebookStatus,
+    ) -> Result<TrainingNotebook, DbError> {
+        self.update(
+            id,
+            UpdateNotebook {
+                status: Some(status),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    // -------------------------------------------------------------------------
+    // Cell-Level Operations
+    // -------------------------------------------------------------------------
 
     /// Update a single cell in a notebook
     pub async fn update_cell(
@@ -446,21 +542,9 @@ impl<'a> NotebookRepository<'a> {
         Ok(notebook)
     }
 
-    /// Update notebook status
-    pub async fn update_status(
-        &self,
-        id: &str,
-        status: NotebookStatus,
-    ) -> Result<TrainingNotebook, DbError> {
-        self.update(
-            id,
-            UpdateNotebook {
-                status: Some(status),
-                ..Default::default()
-            },
-        )
-        .await
-    }
+    // -------------------------------------------------------------------------
+    // Notebook Deletion
+    // -------------------------------------------------------------------------
 
     /// Delete notebook
     pub async fn delete(&self, id: &str) -> Result<(), DbError> {
@@ -479,9 +563,9 @@ impl<'a> NotebookRepository<'a> {
         Ok(())
     }
 
-    // ========================================================================
+    // =========================================================================
     // Checkpoint Operations
-    // ========================================================================
+    // =========================================================================
 
     /// Create a checkpoint
     pub async fn create_checkpoint(
@@ -551,6 +635,10 @@ impl<'a> NotebookRepository<'a> {
         Ok(checkpoints)
     }
 
+    // -------------------------------------------------------------------------
+    // Best Checkpoint Selection
+    // -------------------------------------------------------------------------
+
     /// Get best checkpoint by metric
     pub async fn get_best_checkpoint(
         &self,
@@ -578,6 +666,10 @@ impl<'a> NotebookRepository<'a> {
         Ok(best)
     }
 
+    // -------------------------------------------------------------------------
+    // Checkpoint Deletion
+    // -------------------------------------------------------------------------
+
     /// Delete checkpoint
     pub async fn delete_checkpoint(&self, id: &str) -> Result<(), DbError> {
         self.db.doc_delete(CHECKPOINTS_COLLECTION, id).await
@@ -593,16 +685,9 @@ impl<'a> NotebookRepository<'a> {
     }
 }
 
-/// Update notebook data
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct UpdateNotebook {
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub cells: Option<Vec<NotebookCell>>,
-    pub model_id: Option<String>,
-    pub dataset_id: Option<String>,
-    pub status: Option<NotebookStatus>,
-}
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

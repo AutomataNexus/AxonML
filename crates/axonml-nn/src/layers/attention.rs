@@ -1,13 +1,21 @@
-//! Attention Mechanisms - Multi-Head Attention
+//! Attention mechanisms — `MultiHeadAttention` and `CrossAttention`.
+//!
+//! 946 lines. `MultiHeadAttention` (Q/K/V projections, scaled dot-product
+//! with optional causal mask + dropout, output projection, fused CUDA
+//! dispatch via `scaled_dot_product_attention_fused`). `CrossAttention`
+//! (separate Q vs K/V sources for encoder-decoder models). Both support
+//! `with_options` for custom dropout rate, bias, and output projection
+//! configuration.
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/attention.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

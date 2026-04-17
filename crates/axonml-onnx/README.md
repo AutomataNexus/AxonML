@@ -9,48 +9,59 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
-  <img src="https://img.shields.io/badge/version-0.1.0-green.svg" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
   <img src="https://img.shields.io/badge/part%20of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
 ## Overview
 
-`axonml-onnx` provides ONNX (Open Neural Network Exchange) import and export functionality for the AxonML machine learning framework. It enables interoperability with PyTorch, TensorFlow, and other ML frameworks by supporting ONNX model loading and saving up to opset version 17.
+`axonml-onnx` provides ONNX (Open Neural Network Exchange) import and export
+for AxonML. Imported models are executed by a dispatch-driven graph runtime
+over `Tensor<f32>`; exported models are built via a fluent `OnnxExporter`
+builder. Target opset is 17, IR version 8. Protobuf parsing is done
+in-crate (no `prost-derive` generated types — the structs live in
+`proto.rs`; `prost-build` is a build dep used for optional schema work).
 
 ## Features
 
-- **ONNX Import** - Load ONNX models and convert to executable AxonML representation
-- **ONNX Export** - Export AxonML models to ONNX format for deployment
-- **Operator Support** - Implementations for 40+ common ONNX operators including activations, math, and neural network ops
-- **Protobuf Parsing** - Full ONNX protobuf structure support with JSON fallback for testing
-- **Graph Execution** - Execute imported models with automatic operator dispatch
-- **Feedforward Export** - Helper utilities for exporting simple feedforward networks
-- **Error Handling** - Comprehensive error types for debugging import/export issues
+- **ONNX Import** — `import_onnx(path)` and `import_onnx_bytes(bytes)` produce a ready-to-run `OnnxModel`
+- **ONNX Export** — `OnnxExporter` builder (`add_input`, `add_output`, `add_node`, `add_initializer`, `to_proto`, `to_bytes`, `export`) + `export_feedforward` helper
+- **Operator Support** — 40+ operators with dispatch via `create_operator(node)` returning `Box<dyn OnnxOperator>`
+- **Initializers** — f32 weight tensors threaded through graph execution via `initializer_map`
+- **State-Dict Bridge** — `OnnxModel::to_state_dict()` emits an `axonml_serialize::StateDict`
+- **Dynamic Shapes** — `ModelInput::shape` is `Vec<Option<i64>>` with named dimensions supported via `Dimension::dynamic`
+- **Error Handling** — rich `OnnxError` enum (file I/O, protobuf, opset, operator, shape, dtype, attribute, initializer, graph validation, tensor conversion, export, axonml-core)
 
 ## Modules
 
 | Module | Description |
 |--------|-------------|
-| `parser` | ONNX file parsing and model import functionality |
-| `export` | OnnxExporter builder and export utilities |
-| `model` | OnnxModel representation for inference |
-| `operators` | ONNX operator implementations (Relu, MatMul, Conv, etc.) |
-| `proto` | ONNX protobuf structure definitions |
-| `error` | Error types for ONNX operations |
+| `parser` | `import_onnx`, `import_onnx_bytes`, `parse_model_proto`, `validate_model` |
+| `export` | `OnnxExporter` builder, `AttributeValue` enum, `export_onnx`, `export_onnx_bytes`, `export_feedforward` |
+| `model` | `OnnxModel`, `ModelInput`, `CompiledOp`, `forward`, `to_state_dict` |
+| `operators` | `OnnxOperator` trait + 40+ operator structs and `create_operator` dispatch |
+| `proto` | Hand-written ONNX protobuf types: `ModelProto`, `GraphProto`, `NodeProto`, `TensorProto`, `AttributeProto`, `ValueInfo`, `TensorDataType`, `AttributeType`, `Dimension`, `TensorShape`, `OperatorSetIdProto`, `TypeProto`, `StringStringEntry` |
+| `error` | `OnnxError` / `OnnxResult` |
 
 ## Supported Operators
 
+All dispatched via `operators::create_operator`:
+
 | Category | Operators |
 |----------|-----------|
-| Activations | Relu, Sigmoid, Tanh, Softmax, LeakyRelu, Gelu |
-| Math | Add, Sub, Mul, Div, MatMul, Gemm, Sqrt, Pow, Exp, Log |
-| Shape | Reshape, Transpose, Flatten, Squeeze, Unsqueeze, Concat, Gather |
-| Reduction | ReduceSum, ReduceMean, ReduceMax |
-| Neural Network | Conv*, MaxPool*, AveragePool*, BatchNormalization, Dropout |
-| Comparison | Equal, Greater, Less, Clip |
-| Utility | Constant, Identity, Cast, Shape |
+| Activations | `Relu`, `Sigmoid`, `Tanh`, `Softmax`, `LeakyRelu`, `Gelu` |
+| Math | `Add`, `Sub`, `Mul`, `Div`, `MatMul`, `Gemm`, `Sqrt`, `Pow`, `Exp`, `Log` |
+| Shape | `Reshape`, `Transpose`, `Flatten`, `Squeeze`, `Unsqueeze`, `Concat`, `Gather` |
+| Reduction | `ReduceSum`, `ReduceMean`, `ReduceMax` |
+| Neural Network | `Conv`, `MaxPool`, `AveragePool`, `BatchNormalization`, `Dropout` |
+| Comparison | `Equal`, `Greater`, `Less`, `Clip` |
+| Utility | `Constant`, `Identity`, `Cast`, `Shape` |
 
-*\* Partial implementation - basic structure only*
+Operators with attributes (`Softmax`, `LeakyRelu`, `Gemm`, `Transpose`,
+`Flatten`, `Squeeze`, `Unsqueeze`, `Concat`, `Gather`, `ReduceSum`,
+`ReduceMean`, `ReduceMax`, `Conv`, `MaxPool`, `AveragePool`,
+`BatchNormalization`, `Constant`, `Clip`) parse their attributes via
+`from_node`.
 
 ## Usage
 
@@ -58,7 +69,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-onnx = "0.1.0"
+axonml-onnx = "0.6.1"
 ```
 
 ### Importing an ONNX Model
@@ -99,7 +110,6 @@ let model = import_onnx_bytes(&bytes)?;
 ```rust
 use axonml_onnx::export::{OnnxExporter, AttributeValue};
 use axonml_onnx::proto::TensorDataType;
-use axonml_tensor::Tensor;
 use std::collections::HashMap;
 
 // Create exporter
@@ -129,10 +139,9 @@ let bytes = exporter.to_bytes()?;
 use axonml_onnx::export::{OnnxExporter, AttributeValue};
 use axonml_onnx::proto::TensorDataType;
 use axonml_tensor::Tensor;
+use std::collections::HashMap;
 
 let mut exporter = OnnxExporter::new("linear_model");
-
-// Add input
 exporter.add_input("input", &[1, 10], TensorDataType::Float);
 
 // Add weight initializer
@@ -148,7 +157,6 @@ let mut attrs = HashMap::new();
 attrs.insert("transB".to_string(), AttributeValue::Int(1));
 exporter.add_node("Gemm", &["input", "weight", "bias"], &["output"], attrs);
 
-// Add output
 exporter.add_output("output", &[1, 5], TensorDataType::Float);
 ```
 
@@ -161,18 +169,15 @@ use axonml_tensor::Tensor;
 // Define layers (in_features, out_features)
 let layers = vec![(784, 256), (256, 128), (128, 10)];
 
-// Prepare weights and biases
-let weights = vec![
-    ("fc1_weight", &Tensor::from_vec(vec![0.01; 784 * 256], &[256, 784]).unwrap()),
-    ("fc2_weight", &Tensor::from_vec(vec![0.01; 256 * 128], &[128, 256]).unwrap()),
-    ("fc3_weight", &Tensor::from_vec(vec![0.01; 128 * 10], &[10, 128]).unwrap()),
-];
+let w1 = Tensor::from_vec(vec![0.01; 784 * 256], &[256, 784]).unwrap();
+let w2 = Tensor::from_vec(vec![0.01; 256 * 128], &[128, 256]).unwrap();
+let w3 = Tensor::from_vec(vec![0.01; 128 * 10], &[10, 128]).unwrap();
+let b1 = Tensor::from_vec(vec![0.0; 256], &[256]).unwrap();
+let b2 = Tensor::from_vec(vec![0.0; 128], &[128]).unwrap();
+let b3 = Tensor::from_vec(vec![0.0; 10], &[10]).unwrap();
 
-let biases = vec![
-    ("fc1_bias", &Tensor::from_vec(vec![0.0; 256], &[256]).unwrap()),
-    ("fc2_bias", &Tensor::from_vec(vec![0.0; 128], &[128]).unwrap()),
-    ("fc3_bias", &Tensor::from_vec(vec![0.0; 10], &[10]).unwrap()),
-];
+let weights = vec![("fc1_weight", &w1), ("fc2_weight", &w2), ("fc3_weight", &w3)];
+let biases  = vec![("fc1_bias", &b1),  ("fc2_bias", &b2),  ("fc3_bias", &b3)];
 
 let exporter = export_feedforward("mlp", &layers, &weights, &biases)?;
 exporter.export("mlp.onnx")?;
@@ -186,19 +191,11 @@ use std::collections::HashMap;
 
 let mut attrs = HashMap::new();
 
-// Float attribute
-attrs.insert("alpha".to_string(), AttributeValue::Float(0.01));
-
-// Integer attribute
-attrs.insert("axis".to_string(), AttributeValue::Int(-1));
-
-// Integer array attribute
+// Float / Int / arrays
+attrs.insert("alpha".to_string(),        AttributeValue::Float(0.01));
+attrs.insert("axis".to_string(),         AttributeValue::Int(-1));
 attrs.insert("kernel_shape".to_string(), AttributeValue::Ints(vec![3, 3]));
-
-// Float array attribute
-attrs.insert("scales".to_string(), AttributeValue::Floats(vec![1.0, 2.0]));
-
-exporter.add_node("LeakyRelu", &["input"], &["output"], attrs);
+attrs.insert("scales".to_string(),       AttributeValue::Floats(vec![1.0, 2.0]));
 ```
 
 ### Error Handling
@@ -207,22 +204,25 @@ exporter.add_node("LeakyRelu", &["input"], &["output"], attrs);
 use axonml_onnx::{import_onnx, OnnxError};
 
 match import_onnx("model.onnx") {
-    Ok(model) => {
-        println!("Model loaded successfully");
-    }
-    Err(OnnxError::FileRead(e)) => {
-        eprintln!("Could not read file: {}", e);
-    }
-    Err(OnnxError::UnsupportedOperator(op)) => {
-        eprintln!("Operator not supported: {}", op);
-    }
-    Err(OnnxError::InvalidShape(msg)) => {
-        eprintln!("Invalid tensor shape: {}", msg);
-    }
-    Err(e) => {
-        eprintln!("Error: {}", e);
-    }
+    Ok(model) => println!("Model loaded successfully"),
+    Err(OnnxError::FileRead(e))               => eprintln!("Could not read file: {}", e),
+    Err(OnnxError::UnsupportedOperator(op))   => eprintln!("Operator not supported: {}", op),
+    Err(OnnxError::UnsupportedOpset(v))       => eprintln!("Opset not supported: {}", v),
+    Err(OnnxError::InvalidShape(msg))         => eprintln!("Invalid tensor shape: {}", msg),
+    Err(OnnxError::MissingInitializer(name))  => eprintln!("Missing initializer: {}", name),
+    Err(OnnxError::GraphValidation(msg))      => eprintln!("Graph error: {}", msg),
+    Err(e)                                    => eprintln!("Error: {}", e),
 }
+```
+
+### State-Dict Bridge
+
+```rust
+use axonml_onnx::import_onnx;
+
+let model = import_onnx("model.onnx")?;
+let state_dict = model.to_state_dict();
+// Feed into axonml-serialize save/load
 ```
 
 ## Constants
@@ -235,8 +235,6 @@ println!("IR version: {}", ONNX_IR_VERSION);                // 8
 ```
 
 ## Tests
-
-Run the test suite:
 
 ```bash
 cargo test -p axonml-onnx

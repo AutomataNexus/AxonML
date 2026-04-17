@@ -1,13 +1,24 @@
-//! GPU Benchmarks — Measure CUDA-accelerated inference throughput
+//! GPU Benchmarks — CUDA Throughput Measurement Suite
+//!
+//! Test-only GPU benchmarks gated by `#[cfg(test)]`. Each test prints
+//! warmup-excluded latency and FPS for a representative model / resolution
+//! configuration so CUDA-path performance can be tracked over time. Coverage:
+//! Helios-Nano forward_train + detect at 64x64, forward_train at 320x320 and
+//! 640x640, Helios-Small forward_train at 320x320, ResNet18 forward at
+//! 224x224, a full Helios training step (zero_grad + forward_train +
+//! HeliosLoss + backward + Adam.step) at 128x128, and an isolated Conv2d
+//! sweep over five Helios backbone shapes (stem, s1, s2, s3, s4) to compare
+//! CUDA im2col+GEMM against CPU.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/gpu_bench.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

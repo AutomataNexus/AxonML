@@ -1,13 +1,19 @@
-//! Linear Algebra Gradient Functions
+//! Backward functions for linear algebra operations.
+//!
+//! 796 lines. `MatMulBackward` — computes dA = dOut @ B^T and dB = A^T @ dOut
+//! for both 2D and batched matmul. Handles shape broadcasting and accumulates
+//! gradients along broadcast dims. Also `RepeatKVBackward` used by LLaMA-style
+//! GQA attention to preserve gradient flow through the KV-head repeat step.
 //!
 //! # File
 //! `crates/axonml-autograd/src/functions/linalg.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

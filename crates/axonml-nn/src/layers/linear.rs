@@ -1,13 +1,19 @@
-//! Linear Layer - Fully Connected Layer
+//! `Linear` — fully connected layer (y = xW^T + b).
+//!
+//! 245 lines. `Linear::new(in_features, out_features)` with Xavier-uniform
+//! weight init and optional bias. Implements `Module` (forward, parameters,
+//! train/eval, zero_grad, to_device). Also `Linear::no_bias(in, out)` for
+//! bias-free variants used in some LLM architectures.
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/linear.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

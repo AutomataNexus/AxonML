@@ -1,13 +1,25 @@
-//! CUDA Kernel Registry
+//! CUDA kernel registry — 17 PTX modules with 60+ kernel entry points.
+//!
+//! 3828 lines. Each PTX module is compiled from a `.cu` source file via
+//! `nvcc -ptx -arch=sm_80 --use_fast_math` and embedded at compile time via
+//! `include_str!`. `CudaKernels` loads all modules at backend init and stores
+//! each kernel function handle in a HashMap for O(1) dispatch. Modules cover
+//! elementwise ops (add, mul, scalar, neg, abs, sign, pow), activations
+//! (relu, sigmoid, tanh, gelu, silu, elu, leaky_relu), softmax, layernorm,
+//! RMSNorm, transpose, embedding gather, dropout, fused attention (forward +
+//! backward + flash-decode + flash-prefill), and quantized matmul (Q4_K +
+//! Q6_K dequant-in-shader GEMV/GEMM with cooperative warp reduction).
+//! `launch_config(n)` provides standard grid/block dims.
 //!
 //! # File
 //! `crates/axonml-core/src/backends/cuda_kernels/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

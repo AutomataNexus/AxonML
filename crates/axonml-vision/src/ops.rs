@@ -1,13 +1,26 @@
-//! Vision Operations - Detection and Spatial Primitives
+//! Vision Operations — Detection Primitives, NMS, Interpolation, RoI Align
+//!
+//! Core spatial operations for detection and vision models. Bounding box utilities:
+//! `box_iou()` (pairwise IoU), `box_cxcywh_to_xyxy()` / `box_xyxy_to_cxcywh()`
+//! (format conversion). NMS: `nms()` (greedy non-maximum suppression) and
+//! `batched_nms()` (per-class NMS via coordinate offsetting). Anchor generation:
+//! `generate_anchors()` and `generate_multi_scale_anchors()` for FPN-style pyramids.
+//! Interpolation: `interpolate()` (nearest/bilinear resize of 4D tensors) and
+//! `Upsample` / `interpolate_var()` (differentiable variants with `InterpolateBackward`).
+//! `roi_align()` extracts fixed-size features from RoI regions via bilinear sampling.
+//! Detection output types: `Detection`, `FaceDetection`, `AnomalyResult`,
+//! `NexusDetection`, `PhantomFaceDetection`, `DepthMap`. Also provides
+//! `positional_encoding_2d()` for DETR-style spatial positional embeddings.
 //!
 //! # File
 //! `crates/axonml-vision/src/ops.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

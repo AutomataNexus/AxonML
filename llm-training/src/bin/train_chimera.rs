@@ -1,26 +1,55 @@
-//! Train Chimera on Shakespeare
+//! Train Chimera (MoE + Differential Attention) — AxonML Shakespeare Trainer
 //!
-//! End-to-end training of the AxonML `ChimeraModel` on real text, with:
+//! End-to-end training binary for the AxonML [`ChimeraModel`] on a text
+//! corpus. Chimera combines:
 //! - Sparse Mixture-of-Experts MLP (top-k routing per token)
-//! - Differential attention with learned lambda
-//! - RMSNorm + residual blocks
-//! - Load-balancing auxiliary loss combined with the CE loss inside
-//!   `ChimeraModel::forward_with_loss`
-//! - GPU acceleration (`--features cuda`)
-//! - Live browser training monitor
-//! - Periodic best-model + full-checkpoint saving
-//! - Resume from latest / best / specific path
-//! - In-flight greedy text sampling
+//! - Differential attention with a learned `lambda` parameter
+//! - RMSNorm + residual transformer blocks
+//!
+//! Like Hydra, `ChimeraModel` exposes its own
+//! `forward_with_loss(input_ids, labels)` method (chimera.rs:355) that
+//! performs the shift-then-CE step and adds the MoE load-balance auxiliary
+//! term (weighted by `load_balance_weight`), so this binary uses it directly
+//! instead of the shared `shifted_cross_entropy` helper.
+//!
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser, `print_help` — full
+//!   set of MoE (experts / top-k / load-balance weight) + differential-
+//!   attention (`lambda_init`) + standard transformer hyperparameters.
+//! - `generate` — greedy auto-regressive sampler that feeds the tail of the
+//!   running id buffer back into `ChimeraModel::forward_ids`, pulls the
+//!   last-step logits, and picks `argmax` for in-flight text previews.
+//! - `pick_device` / `device_name` — CUDA-feature-gated device selection.
+//! - `main` — validates head-divisibility + `top_k <= experts`, loads the
+//!   corpus, builds a `CharTokenizer` + [`TextDataset`], constructs the
+//!   [`ChimeraConfig`] / [`ChimeraModel`], resumes from a checkpoint,
+//!   moves params to GPU, wires the `TrainingLifecycle`, and runs the
+//!   Adam-optimized training loop with periodic greedy sampling and final
+//!   generation of a 400-char ROMEO soliloquy.
 //!
 //! Usage:
 //!   cargo run --release --bin train_chimera -p llm-training --features cuda
 //!   cargo run --release --bin train_chimera -p llm-training --features cuda -- \
 //!       --epochs 10 --bs 16 --seq-len 128 --experts 4 --top-k 2 --resume latest
 //!
-//! Like Hydra, `ChimeraModel` exposes its own `forward_with_loss` method
-//! (chimera.rs:355) that handles shift-then-CE and adds the MoE load-balance
-//! auxiliary term, so this binary uses it directly instead of the shared
-//! `shifted_cross_entropy` helper.
+//! # File
+//! `llm-training/src/bin/train_chimera.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -239,7 +268,7 @@ fn generate(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

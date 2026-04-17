@@ -1,13 +1,25 @@
-//! Transformer - Attention-based Neural Networks
+//! Transformer — Attention-Based Models and Vision Transformer
+//!
+//! Full Transformer implementation with encoder, decoder, and Vision Transformer
+//! (ViT). `PositionalEncoding` adds sinusoidal position signals. `TransformerEncoderLayer`
+//! implements pre-norm self-attention + FFN with dropout and residual connections.
+//! `TransformerDecoderLayer` adds cross-attention between target and encoder memory.
+//! `TransformerEncoder` / `TransformerDecoder` stack N layers with optional final
+//! LayerNorm. `Transformer` combines encoder-decoder with `forward_full()` supporting
+//! src/tgt/memory masks. `VisionTransformer` converts images to patch tokens via
+//! `extract_patches()` (with `PatchExtractBackward` for autograd), prepends a learnable
+//! CLS token, adds positional encoding, encodes, and classifies. Factory methods:
+//! `vit_tiny`, `vit_small`, `vit_base`, `vit_large`.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/transformer.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

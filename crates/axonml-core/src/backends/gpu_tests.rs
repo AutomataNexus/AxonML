@@ -1,13 +1,23 @@
-//! GPU Backend Testing Infrastructure
+//! GPU backend correctness and performance testing infrastructure.
+//!
+//! `GpuTestConfig` (tolerances, test/benchmark sizes), `GpuTestResult` (per-
+//! test pass/fail + max absolute error + throughput/latency), `GpuTestReport`
+//! (per-backend summary with device capabilities). Utility functions:
+//! `assert_close` (f32 slice comparison within atol+rtol), `random_vec`
+//! (deterministic LCG for reproducible test data). 826 lines covering the
+//! full GPU correctness test suite: elementwise ops, activations, matmul,
+//! reductions, softmax, layernorm, transpose, embedding gather — each
+//! compares CUDA kernel output against the CPU reference at 1e-5 atol.
 //!
 //! # File
 //! `crates/axonml-core/src/backends/gpu_tests.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

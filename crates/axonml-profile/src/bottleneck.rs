@@ -1,24 +1,54 @@
-//! Bottleneck Detection Module
+//! Bottleneck Detection — Rule-Based Compute and Memory Analyzer
+//!
+//! Diagnoses hot spots and resource issues in profiled runs.
+//! `BottleneckType` enumerates the categories this module detects:
+//! `SlowOperation`, `HighCallCount`, `MemoryHotspot`, `MemoryLeak`,
+//! `LowThroughput`, `MemoryBound`, and `LoadImbalance`. `Severity` is an
+//! ordered `Low`/`Medium`/`High`/`Critical` enum that sorts results
+//! highest-first. `Bottleneck` is the finding record (type, severity, name,
+//! description, suggestion, free-form `metrics: HashMap<String, f64>`).
+//! `AnalyzerConfig` holds tunable thresholds
+//! (`slow_op_threshold_pct = 20`, `high_call_threshold = 10_000`,
+//! `memory_hotspot_threshold_pct = 30`, `min_gflops_threshold = 1`,
+//! `check_memory_leaks = true`). `BottleneckAnalyzer::analyze` combines five
+//! passes over `HashMap<String, OperationStats>` and `MemoryStats`:
+//! `analyze_slow_operations` flags ops exceeding the time-percentage threshold
+//! and scales severity at 50/35/25/20 pct; `analyze_high_call_counts` scales
+//! severity at 100k / 50k / threshold; `analyze_throughput` divides recorded
+//! FLOPs by elapsed time and flags sub-threshold GFLOPS; `analyze_memory_hotspots`
+//! flags per-name allocations that are 30/45/60 pct of peak; `analyze_memory_leaks`
+//! flags allocated-minus-freed gaps above 5 pct, scaling severity at 50/25/10.
+//! `summary` renders a human-readable multi-line report. Tests cover slow-op,
+//! hotspot, leak detection, and the summary string.
 //!
 //! # File
 //! `crates/axonml-profile/src/bottleneck.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::compute::OperationStats;
 use crate::memory::MemoryStats;
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /// Type of bottleneck detected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +99,10 @@ pub struct Bottleneck {
     pub metrics: HashMap<String, f64>,
 }
 
+// =============================================================================
+// AnalyzerConfig
+// =============================================================================
+
 /// Configuration for bottleneck analysis thresholds.
 #[derive(Debug, Clone)]
 pub struct AnalyzerConfig {
@@ -95,6 +129,10 @@ impl Default for AnalyzerConfig {
         }
     }
 }
+
+// =============================================================================
+// BottleneckAnalyzer
+// =============================================================================
 
 /// Analyzer for detecting performance bottlenecks.
 #[derive(Debug)]
@@ -146,6 +184,10 @@ impl BottleneckAnalyzer {
 
         bottlenecks
     }
+
+    // -------------------------------------------------------------------------
+    // Compute Analyses
+    // -------------------------------------------------------------------------
 
     /// Analyzes for slow operations.
     fn analyze_slow_operations(&self, stats: &HashMap<String, OperationStats>) -> Vec<Bottleneck> {
@@ -285,6 +327,10 @@ impl BottleneckAnalyzer {
         bottlenecks
     }
 
+    // -------------------------------------------------------------------------
+    // Memory Analyses
+    // -------------------------------------------------------------------------
+
     /// Analyzes memory hotspots.
     fn analyze_memory_hotspots(&self, stats: &MemoryStats) -> Vec<Bottleneck> {
         let mut bottlenecks = Vec::new();
@@ -374,6 +420,10 @@ impl BottleneckAnalyzer {
         bottlenecks
     }
 
+    // -------------------------------------------------------------------------
+    // Reporting
+    // -------------------------------------------------------------------------
+
     /// Generates a summary report of bottlenecks.
     pub fn summary(bottlenecks: &[Bottleneck]) -> String {
         if bottlenecks.is_empty() {
@@ -405,6 +455,10 @@ impl BottleneckAnalyzer {
         output
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

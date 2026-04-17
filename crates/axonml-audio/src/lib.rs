@@ -1,13 +1,20 @@
-//! Axonml Audio - Audio Processing Utilities
+//! Audio processing for AxonML.
+//!
+//! Transforms (MelSpectrogram via rustfft O(n log n), MFCC, Resample,
+//! NormalizeAudio, AddNoise, TimeStretch, PitchShift, TrimSilence) and
+//! synthetic datasets (SyntheticCommandDataset, SyntheticMusicDataset,
+//! SyntheticSpeakerDataset) for command recognition, music genre
+//! classification, and speaker identification tasks.
 //!
 //! # File
 //! `crates/axonml-audio/src/lib.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

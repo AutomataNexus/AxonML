@@ -1,13 +1,20 @@
-//! Activation Gradient Functions
+//! Backward functions for activation operations.
+//!
+//! 1177 lines. `ReluBackward`, `SigmoidBackward`, `TanhBackward`,
+//! `GeluBackward`, `SiluBackward`, `EluBackward`, `LeakyReluBackward`,
+//! `SoftmaxBackward`, `LogSoftmaxBackward`. Each caches the forward output
+//! or input needed for the derivative and uses `zip_map` for single-
+//! allocation element-wise backward.
 //!
 //! # File
 //! `crates/axonml-autograd/src/functions/activation.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

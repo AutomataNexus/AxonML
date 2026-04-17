@@ -1,13 +1,20 @@
-//! Normalization Layers
+//! Normalization layers — BatchNorm, LayerNorm, GroupNorm, InstanceNorm.
+//!
+//! 1383 lines. `BatchNorm1d` / `BatchNorm2d` (running mean/var, momentum,
+//! affine, train/eval mode switch), `LayerNorm` (per-element affine over
+//! normalized_shape), `GroupNorm` (splits channels into groups),
+//! `InstanceNorm2d` (per-instance per-channel). All track learnable
+//! weight/bias parameters and implement `Module`.
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/norm.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

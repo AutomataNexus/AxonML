@@ -1,23 +1,56 @@
-//! Train Hydra on Shakespeare
+//! Train Hydra (Hybrid SSM + Windowed Attention) — AxonML Shakespeare Trainer
 //!
-//! End-to-end training of the AxonML `HydraModel` on real text, with:
-//! - Hybrid alternating SSM + windowed attention blocks (even layers SSM,
-//!   odd layers windowed attention)
-//! - RMSNorm + SwiGLU-style MLP
-//! - GPU acceleration (`--features cuda`)
-//! - Live browser training monitor
-//! - Periodic best-model + full-checkpoint saving
-//! - Resume from latest / best / specific path
-//! - In-flight greedy text sampling
+//! End-to-end training binary for the AxonML [`HydraModel`] on a text
+//! corpus. Hydra alternates block types: even layers are selective-SSM
+//! (Mamba-style, with a 1-D conv of kernel `d_conv`, expanded inner
+//! dimension `d_inner = ssm_expansion * d_model`, and state dim
+//! `d_state`), odd layers are windowed-attention blocks with span
+//! `window_size`. All blocks use RMSNorm + a SwiGLU-style MLP.
+//!
+//! Unlike LLaMA/Mistral/Phi, `HydraModel` exposes its own
+//! `forward_with_loss` method (hydra.rs:730) that handles the shift-and-CE
+//! internally, so this binary uses it directly instead of the shared
+//! `shifted_cross_entropy` helper.
+//!
+//! ## What this file contains
+//! - `Config` struct + `Config::from_args` CLI parser and `print_help` —
+//!   covers the full Hydra hyperparameter set (SSM `d_state` / `d_conv` /
+//!   `ssm_expansion`, attention `num_heads` / `window_size`).
+//! - `generate` — greedy auto-regressive sampler that re-feeds the tail of
+//!   the running id buffer into `HydraModel::forward_ids` and picks
+//!   `argmax` on the last-step logits.
+//! - `pick_device` / `device_name` — CUDA-feature-gated device detection.
+//! - `main` — validates `d_model % num_heads == 0` and `num_layers >= 2`
+//!   (so we always have at least one of each block type), loads the corpus,
+//!   builds the tokenizer + dataset, clamps the attention `window_size` to
+//!   `seq_len`, constructs [`HydraConfig`] / [`HydraModel`], resumes from a
+//!   checkpoint, moves params to GPU when available, starts the
+//!   `TrainingLifecycle`, and runs the Adam-optimized training loop with
+//!   periodic greedy ROMEO samples.
 //!
 //! Usage:
 //!   cargo run --release --bin train_hydra -p llm-training --features cuda
 //!   cargo run --release --bin train_hydra -p llm-training --features cuda -- \
 //!       --epochs 10 --bs 16 --seq-len 128 --layers 4 --window 64 --resume latest
 //!
-//! Unlike LLaMA/Mistral/Phi, `HydraModel` exposes its own `forward_with_loss`
-//! method (hydra.rs:730) that handles the shift-and-CE internally, so this
-//! binary uses it directly instead of the shared shifted_cross_entropy helper.
+//! # File
+//! `llm-training/src/bin/train_hydra.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -236,7 +269,7 @@ fn generate(
 }
 
 // =============================================================================
-// Main
+// Main Entry Point
 // =============================================================================
 
 fn main() {

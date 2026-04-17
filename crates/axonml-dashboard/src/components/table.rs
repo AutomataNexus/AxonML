@@ -1,22 +1,60 @@
-//! Data Table Components
+//! Data Tables — DataTable, KeyValueTable, StatusBadge, Pagination
+//!
+//! Tabular-display primitives for list views and detail screens.
+//!
+//! `SortDirection` (`Ascending`/`Descending`) with a `toggle()` helper,
+//! plus `TableColumn<T>` — a generic column descriptor carrying a `key`,
+//! human-readable `label`, `sortable` flag, and an `Rc<dyn Fn(&T) -> View>`
+//! render closure. Columns default to non-sortable; call `.sortable()` to
+//! opt in.
+//!
+//! `DataTable<T>` is the generic sortable table: it tracks
+//! `sort_column` / `sort_direction` signals, toggles direction on repeated
+//! clicks of the same sortable header, renders per-cell via the column's
+//! render closure, supports optional `on_row_click: Callback<T>` for
+//! clickable rows, and shows a centred empty-state with `IconBox` when
+//! the underlying `MaybeSignal<Vec<T>>` is empty. Sort icons swap between
+//! `IconChevronUp`/`IconChevronDown` based on the active sort.
+//!
+//! `KeyValueTable` renders a two-column `(key, value)` table commonly
+//! used on detail pages.
+//!
+//! `StatusBadge` maps case-insensitive status strings (running/active/
+//! starting/completed/success → success, failed/error → error,
+//! stopped/paused → warning, pending/queued → info, else default) to
+//! `badge-*` classes.
+//!
+//! `Pagination` implements a windowed page bar: previous/next chevrons,
+//! a sliding window of `visible_pages` page numbers around the current
+//! page (default 5), and first/last + ellipsis overflow controls. Pages
+//! are clamped 1..=total.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/components/table.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use crate::components::icons::*;
 use leptos::*;
 use std::rc::Rc;
+
+// =============================================================================
+// SortDirection
+// =============================================================================
 
 /// Sort direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +71,10 @@ impl SortDirection {
         }
     }
 }
+
+// =============================================================================
+// TableColumn
+// =============================================================================
 
 /// Table column definition
 #[derive(Clone)]
@@ -62,6 +104,10 @@ impl<T: Clone + 'static> TableColumn<T> {
         self
     }
 }
+
+// =============================================================================
+// DataTable
+// =============================================================================
 
 /// Data table component
 #[component]
@@ -183,6 +229,10 @@ pub fn DataTable<T: Clone + 'static>(
     }
 }
 
+// =============================================================================
+// KeyValueTable
+// =============================================================================
+
 /// Simple key-value table
 #[component]
 pub fn KeyValueTable(
@@ -207,6 +257,10 @@ pub fn KeyValueTable(
     }
 }
 
+// =============================================================================
+// StatusBadge
+// =============================================================================
+
 /// Status badge component
 #[component]
 pub fn StatusBadge(
@@ -228,6 +282,10 @@ pub fn StatusBadge(
         </span>
     }
 }
+
+// =============================================================================
+// Pagination
+// =============================================================================
 
 /// Pagination component
 #[component]

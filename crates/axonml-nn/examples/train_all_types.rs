@@ -1,18 +1,47 @@
 //! Train All Model Types — End-to-End Pipeline Verification
 //!
+//! Smoke test that walks every major neural-network module exposed by
+//! `axonml_nn` through a short MSE-driven Adam training loop and asserts that
+//! the loss decreases. Intended as a regression guard against autograd graph
+//! disconnections and shape bugs across the layer zoo.
+//!
+//! Helpers:
+//! - `rand_tensor` / `rand_target`: deterministic pseudo-random `Tensor<f32>`
+//!   generators (sin/cos of an index) so runs are reproducible.
+//! - `train_loop`: shared `STEPS`-iteration trainer that takes a name,
+//!   parameter list, a forward closure, and a fixed target. It records the
+//!   first and last losses, computes the percent improvement, prints a
+//!   formatted line, and returns `true` if loss strictly decreased. If the
+//!   computed loss has no gradient (autograd graph is severed), it prints a
+//!   `NO GRAD` warning and returns `false`.
+//!
+//! Modules exercised in `main`, in order:
+//! 1. `Linear` (MLP), 2. `Conv1d`, 3. `Conv2d`, 4. `ConvTranspose2d`,
+//! 5. `RNN`, 6. `LSTM`, 7. `GRU`, 8. `TransformerEncoder`,
+//! 9. `TransformerDecoder`, 10. `Seq2SeqTransformer`, 11. `MultiHeadAttention`,
+//! 12. `CrossAttention`, 13. `Embedding`, 14. `BatchNorm1d`, 15. `LayerNorm`,
+//! 16. `GroupNorm` + `Conv2d`, and 17. a full Conv -> MaxPool -> FC pipeline.
+//! After the table prints, a summary reports `passed/total` and lists any
+//! failing layers by name.
+//!
 //! # File
 //! `crates/axonml-nn/examples/train_all_types.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 9, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml_autograd::Variable;
 use axonml_nn::layers::*;
@@ -21,8 +50,16 @@ use axonml_optim::Optimizer;
 use axonml_tensor::Tensor;
 use std::time::Instant;
 
+// =============================================================================
+// Constants
+// =============================================================================
+
 const STEPS: usize = 20;
 const LR: f32 = 1e-3;
+
+// =============================================================================
+// Random Tensor Helpers
+// =============================================================================
 
 fn rand_tensor(shape: &[usize]) -> Tensor<f32> {
     let n: usize = shape.iter().product();
@@ -39,6 +76,10 @@ fn rand_target(shape: &[usize]) -> Variable {
         .collect();
     Variable::new(Tensor::from_vec(data, shape).unwrap(), false)
 }
+
+// =============================================================================
+// Shared Training Loop
+// =============================================================================
 
 fn train_loop(
     name: &str,
@@ -94,6 +135,10 @@ fn train_loop(
     improved
 }
 
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
 fn main() {
     println!("=== AxonML Training Pipeline — All Model Types ===");
     println!("  Steps: {STEPS} | LR: {LR} | Optimizer: Adam\n");
@@ -108,7 +153,9 @@ fn main() {
 
     let mut results: Vec<(&str, bool)> = Vec::new();
 
+    // -------------------------------------------------------------------------
     // 1. Linear (MLP)
+    // -------------------------------------------------------------------------
     {
         let l1 = Linear::new(16, 32);
         let l2 = Linear::new(32, 8);
@@ -124,7 +171,9 @@ fn main() {
         results.push(("Linear (MLP)", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 2. Conv1d
+    // -------------------------------------------------------------------------
     {
         let conv = Conv1d::new(3, 8, 3);
         let fc = Linear::new(8 * 30, 10);
@@ -144,7 +193,9 @@ fn main() {
         results.push(("Conv1d", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 3. Conv2d
+    // -------------------------------------------------------------------------
     {
         let conv = Conv2d::new(3, 8, 3);
         let fc = Linear::new(8 * 14 * 14, 10);
@@ -164,7 +215,9 @@ fn main() {
         results.push(("Conv2d", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 4. ConvTranspose2d
+    // -------------------------------------------------------------------------
     {
         let conv = ConvTranspose2d::new(8, 3, 3);
         let input = Variable::new(rand_tensor(&[2, 8, 8, 8]), true);
@@ -174,7 +227,9 @@ fn main() {
         results.push(("ConvTranspose2d", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 5. RNN
+    // -------------------------------------------------------------------------
     {
         let rnn = RNN::new(8, 16, 1);
         let fc = Linear::new(16, 4);
@@ -195,7 +250,9 @@ fn main() {
         results.push(("RNN", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 6. LSTM
+    // -------------------------------------------------------------------------
     {
         let lstm = LSTM::new(8, 16, 1);
         let fc = Linear::new(16, 4);
@@ -215,7 +272,9 @@ fn main() {
         results.push(("LSTM", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 7. GRU
+    // -------------------------------------------------------------------------
     {
         let gru = GRU::new(8, 16, 1);
         let fc = Linear::new(16, 4);
@@ -234,7 +293,9 @@ fn main() {
         results.push(("GRU", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 8. TransformerEncoder
+    // -------------------------------------------------------------------------
     {
         let encoder = TransformerEncoder::new(16, 2, 32, 2);
         let fc = Linear::new(16, 4);
@@ -255,7 +316,9 @@ fn main() {
         results.push(("TransformerEncoder", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 9. TransformerDecoder
+    // -------------------------------------------------------------------------
     {
         let decoder = TransformerDecoder::new(16, 2, 32, 2);
         let memory = Variable::new(rand_tensor(&[2, 8, 16]), false);
@@ -271,7 +334,9 @@ fn main() {
         results.push(("TransformerDecoder", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 10. Seq2SeqTransformer
+    // -------------------------------------------------------------------------
     {
         let s2s = Seq2SeqTransformer::new(16, 2, 2, 2, 32);
         let src = Variable::new(rand_tensor(&[2, 8, 16]), true);
@@ -287,7 +352,9 @@ fn main() {
         results.push(("Seq2SeqTransformer", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 11. MultiHeadAttention
+    // -------------------------------------------------------------------------
     {
         let mha = MultiHeadAttention::new(16, 2);
         let input = Variable::new(rand_tensor(&[2, 8, 16]), true);
@@ -302,7 +369,9 @@ fn main() {
         results.push(("MultiHeadAttention", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 12. CrossAttention
+    // -------------------------------------------------------------------------
     {
         let ca = CrossAttention::new(16, 2);
         let query = Variable::new(rand_tensor(&[2, 6, 16]), true);
@@ -318,7 +387,9 @@ fn main() {
         results.push(("CrossAttention", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 13. Embedding
+    // -------------------------------------------------------------------------
     {
         let emb = Embedding::new(100, 16);
         let fc = Linear::new(16, 4);
@@ -339,7 +410,9 @@ fn main() {
         results.push(("Embedding", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 14. BatchNorm1d
+    // -------------------------------------------------------------------------
     {
         let linear = Linear::new(16, 16);
         let bn = BatchNorm1d::new(16);
@@ -355,7 +428,9 @@ fn main() {
         results.push(("BatchNorm1d", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 15. LayerNorm
+    // -------------------------------------------------------------------------
     {
         let linear = Linear::new(16, 16);
         let ln = LayerNorm::new(vec![16]);
@@ -371,7 +446,9 @@ fn main() {
         results.push(("LayerNorm", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 16. GroupNorm + Conv2d
+    // -------------------------------------------------------------------------
     {
         let conv = Conv2d::new(3, 8, 3);
         let gn = GroupNorm::new(4, 8);
@@ -392,7 +469,9 @@ fn main() {
         results.push(("GroupNorm + Conv2d", ok));
     }
 
+    // -------------------------------------------------------------------------
     // 17. MaxPool2d + Conv2d → FC
+    // -------------------------------------------------------------------------
     {
         let conv = Conv2d::new(3, 8, 3);
         let pool = MaxPool2d::new(2);
@@ -413,9 +492,9 @@ fn main() {
         results.push(("Conv→MaxPool→FC", ok));
     }
 
-    // =========================================================================
+    // -------------------------------------------------------------------------
     // Summary
-    // =========================================================================
+    // -------------------------------------------------------------------------
     println!();
     let passed = results.iter().filter(|(_, ok)| *ok).count();
     let failed = results.iter().filter(|(_, ok)| !*ok).count();

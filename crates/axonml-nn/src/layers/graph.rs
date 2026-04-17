@@ -1,13 +1,20 @@
-//! Graph Neural Network Layers
+//! Graph neural network layers — `GCNConv` and `GATConv`.
+//!
+//! 672 lines. `GCNConv` (Graph Convolutional Network — symmetric normalized
+//! adjacency message passing with linear transform). `GATConv` (Graph
+//! Attention Network — attention-weighted neighbor aggregation with
+//! multi-head support and LeakyReLU gating). Both operate on adjacency
+//! matrix + node feature matrix and implement `Module`.
 //!
 //! # File
 //! `crates/axonml-nn/src/layers/graph.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

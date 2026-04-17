@@ -18,157 +18,126 @@ description: "ONNX model import and export with AxonML"
 
 ## Overview
 
-AxonML supports ONNX (Open Neural Network Exchange) for interoperability with PyTorch, TensorFlow, and other frameworks.
+`axonml-onnx` provides ONNX (Open Neural Network Exchange) import and export for interoperability with PyTorch, TensorFlow, and other frameworks. Protobuf parsing is implemented via `prost` (the `proto` module). The current supported ONNX opset version and IR version are:
 
-**Supported Features:**
+```rust
+use axonml_onnx::{SUPPORTED_OPSET_VERSION, ONNX_IR_VERSION};
+
+assert_eq!(SUPPORTED_OPSET_VERSION, 17);
+assert_eq!(ONNX_IR_VERSION, 8);
+```
+
+**Supported:**
 - 40+ ONNX operators
 - Import from PyTorch-exported models
-- Export AxonML models to ONNX
-- Dynamic input shapes
-- Custom operators
+- Export AxonML computation graphs to ONNX via `OnnxExporter`
+- Dynamic input shapes (unknown dims become `None` in `ModelInput::shape`)
 
 ## Importing ONNX Models
 
 ### Basic Import
 
-```rust
-use axonml::onnx::import_onnx;
-
-// Load ONNX model
-let model = import_onnx("model.onnx")?;
-
-// Get model information
-println!("Inputs: {:?}", model.inputs());
-println!("Outputs: {:?}", model.outputs());
-
-// Run inference
-let input = Tensor::randn(&[1, 3, 224, 224]);
-let output = model.forward(&input)?;
-```
-
-### From Bytes
+Two entry points: from a path, or from a byte slice.
 
 ```rust
-use axonml::onnx::OnnxModel;
+use std::collections::HashMap;
+use axonml_onnx::{import_onnx, import_onnx_bytes, OnnxModel};
+use axonml_tensor::Tensor;
 
+// From a path
+let model: OnnxModel = import_onnx("model.onnx")?;
+
+// From bytes (e.g. loaded from S3 / hub)
 let bytes = std::fs::read("model.onnx")?;
-let model = OnnxModel::from_bytes(&bytes)?;
-```
+let model = import_onnx_bytes(&bytes)?;
 
-### With Options
+// Inspect the model
+println!("Name: {}", model.name);
+println!("Opset: {}", model.opset_version);
+println!("Inputs: {:?}", model.get_inputs());
+println!("Outputs: {:?}", model.get_outputs());
+println!("Parameters: {}", model.num_parameters());
 
-```rust
-use axonml::onnx::{import_onnx_with_options, ImportOptions};
-
-let options = ImportOptions::new()
-    .device(Device::CUDA(0))
-    .dtype(DType::F16)
-    .optimize(true);
-
-let model = import_onnx_with_options("model.onnx", options)?;
+// Run inference — OnnxModel::forward takes a HashMap<input_name, Tensor<f32>>
+// and returns a HashMap<output_name, Tensor<f32>>.
+let mut inputs = HashMap::new();
+inputs.insert("input".to_string(), Tensor::<f32>::randn(&[1, 3, 224, 224]));
+let outputs = model.forward(inputs)?;
 ```
 
 ## Exporting to ONNX
 
-### Basic Export
+Export is explicit — you build an `OnnxExporter` and add inputs, outputs, nodes, and initializers. The free function `export_onnx` then writes the resulting `ModelProto` to disk.
 
 ```rust
-use axonml::onnx::export_onnx;
+use axonml_onnx::{export_onnx, export_onnx_bytes};
+use axonml_onnx::export::OnnxExporter;
+use axonml_onnx::proto::TensorDataType;
+use axonml_tensor::Tensor;
 
-let model = Sequential::new()
-    .add(Linear::new(784, 256))
-    .add(ReLU)
-    .add(Linear::new(256, 10));
+let mut exporter = OnnxExporter::new("my_model")
+    .with_producer("axonml", "0.6.1")
+    .with_doc_string("Two-layer MLP exported from AxonML");
 
-// Export with example input shape
-export_onnx(&model, "my_model.onnx", &[1, 784])?;
+// Declare IO
+exporter.add_input("input", &[1, 784], TensorDataType::Float);
+exporter.add_output("logits", &[1, 10], TensorDataType::Float);
+
+// Add initializers (weights)
+let w1 = Tensor::<f32>::randn(&[784, 256]);
+exporter.add_initializer("fc1.weight", &w1);
+
+// Add a node (op_type, inputs, outputs, attributes via the add_node signature
+// — see crates/axonml-onnx/src/export.rs for the full attribute encoding)
+// exporter.add_node(...);
+
+// Write to disk
+export_onnx(&exporter, "my_model.onnx")?;
+
+// Or serialize to bytes
+let bytes = export_onnx_bytes(&exporter)?;
 ```
 
-### With Dynamic Axes
+For feedforward models, `axonml_onnx::export::export_feedforward` automates wiring the common `Linear → Activation → Linear` patterns.
+
+## Converting ONNX Weights to a StateDict
+
+`OnnxModel::to_state_dict()` extracts the model's initializers (weights) to an `axonml_serialize::StateDict`, which you can feed to AxonML modules whose tensors are keyed by the same names:
 
 ```rust
-use axonml::onnx::{export_onnx_with_options, ExportOptions};
-
-let options = ExportOptions::new()
-    .dynamic_axes(vec![("input", vec![0])])  // Batch dimension is dynamic
-    .opset_version(13);
-
-export_onnx_with_options(&model, "model.onnx", &[1, 784], options)?;
+let model = import_onnx("model.onnx")?;
+let state_dict: axonml_serialize::StateDict = model.to_state_dict();
 ```
 
 ## Supported Operators
 
-### Math Operations
+The parser/operator registry is in `axonml_onnx::operators`. 40+ ONNX ops are implemented, grouped as follows:
 
-| ONNX Op | Status | Notes |
-|:--------|:-------|:------|
-| Add | ✅ | With broadcasting |
-| Sub | ✅ | With broadcasting |
-| Mul | ✅ | With broadcasting |
-| Div | ✅ | With broadcasting |
-| MatMul | ✅ | 2D and batched |
-| Gemm | ✅ | General matrix multiply |
-| Pow | ✅ | Element-wise |
-| Sqrt | ✅ | |
-| Exp | ✅ | |
-| Log | ✅ | |
+### Math
 
-### Tensor Operations
+`Add`, `Sub`, `Mul`, `Div`, `MatMul`, `Gemm`, `Pow`, `Sqrt`, `Exp`, `Log`
 
-| ONNX Op | Status | Notes |
-|:--------|:-------|:------|
-| Reshape | ✅ | |
-| Transpose | ✅ | |
-| Concat | ✅ | Any axis |
-| Split | ✅ | |
-| Slice | ✅ | |
-| Gather | ✅ | |
-| Squeeze | ✅ | |
-| Unsqueeze | ✅ | |
-| Flatten | ✅ | |
+### Tensor
 
-### Reduction Operations
+`Reshape`, `Transpose`, `Concat`, `Split`, `Slice`, `Gather`, `Squeeze`, `Unsqueeze`, `Flatten`
 
-| ONNX Op | Status | Notes |
-|:--------|:-------|:------|
-| ReduceSum | ✅ | |
-| ReduceMean | ✅ | |
-| ReduceMax | ✅ | |
-| ReduceMin | ✅ | |
-| ReduceProd | ✅ | |
+### Reduction
 
-### Neural Network Layers
+`ReduceSum`, `ReduceMean`, `ReduceMax`, `ReduceMin`, `ReduceProd`
 
-| ONNX Op | Status | Notes |
-|:--------|:-------|:------|
-| Conv | ✅ | 1D and 2D |
-| ConvTranspose | ✅ | |
-| MaxPool | ✅ | |
-| AveragePool | ✅ | |
-| GlobalAveragePool | ✅ | |
-| BatchNormalization | ✅ | |
-| Dropout | ✅ | Inference mode |
-| Softmax | ✅ | |
-| LogSoftmax | ✅ | |
+### NN
+
+`Conv`, `ConvTranspose`, `MaxPool`, `AveragePool`, `GlobalAveragePool`, `BatchNormalization`, `Dropout` (inference mode), `Softmax`, `LogSoftmax`
 
 ### Activations
 
-| ONNX Op | Status | Notes |
-|:--------|:-------|:------|
-| Relu | ✅ | |
-| LeakyRelu | ✅ | |
-| Sigmoid | ✅ | |
-| Tanh | ✅ | |
-| Elu | ✅ | |
-| Gelu | ✅ | |
-| Silu | ✅ | |
+`Relu`, `LeakyRelu`, `Sigmoid`, `Tanh`, `Elu`, `Gelu`, `Silu`
 
 ### RNN
 
-| ONNX Op | Status | Notes |
-|:--------|:-------|:------|
-| LSTM | ✅ | Unidirectional |
-| GRU | ✅ | |
+`LSTM`, `GRU`
+
+(Run `grep -n "register" /opt/AxonML/crates/axonml-onnx/src/operators.rs` for the authoritative up-to-date list.)
 
 ## Working with PyTorch Models
 
@@ -187,6 +156,7 @@ torch.onnx.export(
     "resnet18.onnx",
     input_names=['input'],
     output_names=['output'],
+    opset_version=17,                         # Match AxonML's SUPPORTED_OPSET_VERSION
     dynamic_axes={'input': {0: 'batch'}, 'output': {0: 'batch'}}
 )
 ```
@@ -194,101 +164,32 @@ torch.onnx.export(
 ### Import in AxonML
 
 ```rust
-use axonml::onnx::import_onnx;
+use std::collections::HashMap;
+use axonml_onnx::import_onnx;
+use axonml_tensor::Tensor;
 
 let model = import_onnx("resnet18.onnx")?;
 
-// Run inference
-let input = Tensor::randn(&[1, 3, 224, 224]);
-let output = model.forward(&input)?;
-
-// Get predictions
-let predictions = output.argmax(1);
+let mut inputs = HashMap::new();
+inputs.insert("input".to_string(), Tensor::<f32>::randn(&[1, 3, 224, 224]));
+let outputs = model.forward(inputs)?;
+let logits = outputs.get("output").unwrap();
 ```
 
-## Custom Operators
+## Error Handling
 
-### Register Custom Op
-
-```rust
-use axonml::onnx::{register_custom_op, CustomOp};
-
-struct MyCustomOp;
-
-impl CustomOp for MyCustomOp {
-    fn name(&self) -> &str {
-        "MyCustomOp"
-    }
-
-    fn forward(&self, inputs: &[&Tensor]) -> Result<Vec<Tensor>> {
-        let x = inputs[0];
-        let y = x.mul(&Tensor::full(x.shape(), 2.0));
-        Ok(vec![y])
-    }
-}
-
-// Register before importing
-register_custom_op(MyCustomOp);
-
-let model = import_onnx("model_with_custom_op.onnx")?;
-```
-
-## Model Optimization
-
-### Constant Folding
+All imports return `OnnxResult<T>` (alias for `Result<T, OnnxError>`):
 
 ```rust
-use axonml::onnx::{optimize_model, OptimizationPass};
+use axonml_onnx::{OnnxError, OnnxResult};
 
-let model = import_onnx("model.onnx")?;
-
-let optimized = optimize_model(&model, &[
-    OptimizationPass::ConstantFolding,
-    OptimizationPass::EliminateDeadNodes,
-    OptimizationPass::FuseOperations,
-])?;
-```
-
-### Quantization
-
-```rust
-use axonml::onnx::quantize_model;
-
-let model = import_onnx("model.onnx")?;
-let quantized = quantize_model(&model, DType::I8)?;
-
-// Save quantized model
-export_onnx(&quantized, "model_int8.onnx", &[1, 3, 224, 224])?;
-```
-
-## Validation
-
-```rust
-use axonml::onnx::validate_model;
-
-// Check model is valid ONNX
-let result = validate_model("model.onnx");
-match result {
-    Ok(()) => println!("Model is valid"),
-    Err(e) => println!("Validation error: {}", e),
+match import_onnx("model.onnx") {
+    Ok(model) => { /* ... */ }
+    Err(OnnxError::GraphValidation(msg)) => eprintln!("graph error: {msg}"),
+    Err(e) => eprintln!("other ONNX error: {e}"),
 }
 ```
 
-## Model Information
+---
 
-```rust
-let model = import_onnx("model.onnx")?;
-
-// Input/output info
-for input in model.inputs() {
-    println!("Input: {} - {:?}", input.name, input.shape);
-}
-
-for output in model.outputs() {
-    println!("Output: {} - {:?}", output.name, output.shape);
-}
-
-// Graph info
-println!("Nodes: {}", model.graph().nodes().len());
-println!("Opset version: {}", model.opset_version());
-```
+*Last updated: 2026-04-16 (v0.6.1)*

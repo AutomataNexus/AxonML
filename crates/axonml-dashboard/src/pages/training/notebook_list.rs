@@ -1,18 +1,38 @@
-//! Training Notebooks List Page
+//! Training Notebooks List Page — Browse, Import, and Export Notebooks
+//!
+//! Leptos page component `NotebookListPage` that lists the user's
+//! `TrainingNotebook` documents fetched via `api::notebooks::list_notebooks`.
+//! Supports client-side filter over notebook name and description, a
+//! refresh button, and deletion through a `ConfirmDialog` backed by
+//! `api::notebooks::delete_notebook`. Header actions link to the
+//! import page (`/training/notebooks/import`) and the new-notebook
+//! route (`/training/notebooks/new`).
+//!
+//! Each entry is rendered by the private `NotebookCard` component,
+//! which displays the notebook name, run-status badge, description,
+//! cell count, last-updated timestamp (via the local `format_time`
+//! helper), and a tag list when metadata tags are present. The
+//! per-card dropdown offers Open, Export (linking to
+//! `/training/notebooks/{id}/export?format=ipynb`), and Delete actions.
 //!
 //! # File
 //! `crates/axonml-dashboard/src/pages/training/notebook_list.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use leptos::*;
 use leptos_router::*;
@@ -22,9 +42,16 @@ use crate::components::{StatusBadge, icons::*, modal::*, spinner::*};
 use crate::state::use_app_state;
 use crate::types::*;
 
+// =============================================================================
+// NotebookListPage Component
+// =============================================================================
+
 /// Notebooks list page
 #[component]
 pub fn NotebookListPage() -> impl IntoView {
+    // -------------------------------------------------------------------------
+    // Signals and State
+    // -------------------------------------------------------------------------
     let state = use_app_state();
 
     let (loading, set_loading) = create_signal(true);
@@ -37,6 +64,9 @@ pub fn NotebookListPage() -> impl IntoView {
     let state_for_refresh = state.clone();
     let state_for_delete = state.clone();
 
+    // -------------------------------------------------------------------------
+    // Initial Fetch
+    // -------------------------------------------------------------------------
     // Fetch notebooks on mount
     create_effect(move |_| {
         let state = state_for_effect.clone();
@@ -54,6 +84,9 @@ pub fn NotebookListPage() -> impl IntoView {
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Derived Data and Event Handlers
+    // -------------------------------------------------------------------------
     // Filtered notebooks based on search
     let filtered_notebooks = move || {
         let search_term = search.get().to_lowercase();
@@ -111,6 +144,9 @@ pub fn NotebookListPage() -> impl IntoView {
         set_notebook_to_delete.set(None);
     };
 
+    // -------------------------------------------------------------------------
+    // View
+    // -------------------------------------------------------------------------
     view! {
         <div class="page notebooks-list-page">
             <div class="page-header">
@@ -202,6 +238,10 @@ pub fn NotebookListPage() -> impl IntoView {
     }
 }
 
+// =============================================================================
+// NotebookCard Component
+// =============================================================================
+
 /// Notebook card component
 #[component]
 fn NotebookCard(
@@ -288,6 +328,10 @@ fn NotebookCard(
         </div>
     }
 }
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 fn format_time(dt: &chrono::DateTime<chrono::Utc>) -> String {
     dt.format("%b %d, %H:%M").to_string()

@@ -1,8 +1,31 @@
-//! Email tool — send transactional email via FerumMailSaaS (self-hosted).
+//! Email Tool — Transactional Email via FerumMailSaaS
 //!
-//! FerumMailSaaS is the AutomataNexus transactional email platform at /opt/FerumMailSaaS.
-//! Default endpoint: http://127.0.0.1:3030/api/v1/send (configurable via FERRUM_API_URL).
-//! API key from FERRUM_API_KEY env var or vault at secret/email/ferrum.
+//! Single-tool module providing `EmailTool` (name `send_email`). Accepts
+//! `to`, `subject`, `body`, and an optional `from` (defaults to
+//! `agent@automatanexus.com`), then POSTs a JSON payload with
+//! `Authorization: Bearer <FERRUM_API_KEY>` to the FerumMailSaaS send
+//! endpoint (default `http://127.0.0.1:3030/api/v1/send`, overridable via
+//! `FERRUM_API_URL`).
+//!
+//! FerumMailSaaS is the AutomataNexus transactional email platform at
+//! /opt/FerumMailSaaS. API key comes from the `FERRUM_API_KEY` environment
+//! variable or the Vault path `secret/email/ferrum`. Used for alerting on
+//! HVAC faults, CI failures, and training completions.
+//!
+//! # File
+//! `nexus-agent/src/tools/email.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -10,7 +33,15 @@ use serde_json::json;
 
 use crate::Tool;
 
+// =============================================================================
+// Ferrum Endpoint
+// =============================================================================
+
 const DEFAULT_FERRUM_URL: &str = "http://127.0.0.1:3030/api/v1/send";
+
+// =============================================================================
+// EmailTool
+// =============================================================================
 
 pub struct EmailTool;
 

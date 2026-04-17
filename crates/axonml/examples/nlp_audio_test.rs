@@ -1,13 +1,25 @@
-//! NLP and Audio Test Example
+//! NLP and Audio Processing Example — Text and Audio Pipeline Smoke Tests
+//!
+//! Demonstrates and validates the AxonML text and audio processing pipelines.
+//! Text section: `WhitespaceTokenizer` and `CharTokenizer` tokenization,
+//! `Vocab` construction from corpus with `token_to_index` lookup, text
+//! encoding via tokenizer + vocab, `BasicBPETokenizer` training and
+//! subword tokenization, and `SyntheticSentimentDataset` creation with
+//! tensor shape inspection. Audio section: sine-wave generation at 440Hz,
+//! `Resample` (16kHz to 8kHz), `MelSpectrogram` (512 FFT, 256 hop, 40 bins),
+//! `MFCC` (13 coefficients), `NormalizeAudio` amplitude normalization,
+//! `AddNoise` augmentation at 20dB SNR, and `SyntheticCommandDataset` /
+//! `SyntheticMusicDataset` creation with class/genre counts and sample shapes.
 //!
 //! # File
 //! `crates/axonml/examples/nlp_audio_test.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -16,11 +28,22 @@
 
 use axonml::prelude::*;
 
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
 fn main() {
     println!("=== Axonml ML Framework - NLP & Audio Test ===\n");
 
-    // === TEXT PROCESSING ===
+    // =============================================================================
+    // Text Processing
+    // =============================================================================
+
     println!("--- TEXT PROCESSING ---\n");
+
+    // -------------------------------------------------------------------------
+    // Tokenization
+    // -------------------------------------------------------------------------
 
     // 1. Tokenization
     println!("1. Testing Tokenizers...");
@@ -33,6 +56,10 @@ fn main() {
     let char_tokenizer = CharTokenizer::new();
     let char_tokens = char_tokenizer.tokenize("Hello");
     println!("   Character: {char_tokens:?}");
+
+    // -------------------------------------------------------------------------
+    // Vocabulary and Encoding
+    // -------------------------------------------------------------------------
 
     // 2. Vocabulary
     println!("\n2. Building Vocabulary...");
@@ -47,6 +74,10 @@ fn main() {
     let encoded = ws_tokenizer.encode("the quick fox", &vocab);
     println!("   'the quick fox' -> {encoded:?}");
 
+    // -------------------------------------------------------------------------
+    // BPE Tokenizer
+    // -------------------------------------------------------------------------
+
     // 4. BPE Tokenizer
     println!("\n4. Training BPE Tokenizer...");
     let mut bpe = BasicBPETokenizer::new();
@@ -54,6 +85,10 @@ fn main() {
     let bpe_tokens = bpe.tokenize("lower");
     println!("   BPE vocab size: {}", bpe.get_vocab().len());
     println!("   'lower' tokens: {bpe_tokens:?}");
+
+    // -------------------------------------------------------------------------
+    // Text Dataset
+    // -------------------------------------------------------------------------
 
     // 5. Text Dataset
     println!("\n5. Creating Sentiment Dataset...");
@@ -64,8 +99,15 @@ fn main() {
     println!("   Sample text shape: {:?}", text_tensor.shape());
     println!("   Sample label shape: {:?}", label.shape());
 
-    // === AUDIO PROCESSING ===
+    // =============================================================================
+    // Audio Processing
+    // =============================================================================
+
     println!("\n--- AUDIO PROCESSING ---\n");
+
+    // -------------------------------------------------------------------------
+    // Audio Transforms
+    // -------------------------------------------------------------------------
 
     // 6. Audio Transforms
     println!("6. Testing Audio Transforms...");
@@ -117,6 +159,10 @@ fn main() {
     let add_noise = AddNoise::new(20.0);
     let noisy = add_noise.apply(&audio);
     println!("   Noisy audio shape: {:?}", noisy.shape());
+
+    // -------------------------------------------------------------------------
+    // Audio Datasets
+    // -------------------------------------------------------------------------
 
     // 7. Audio Dataset
     println!("\n7. Creating Audio Datasets...");

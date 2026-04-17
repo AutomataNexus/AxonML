@@ -1,18 +1,41 @@
-//! Training runs database operations for AxonML
+//! Training Runs Database Operations — Run Lifecycle and Metrics Persistence
+//!
+//! Provides document-store-backed persistence for training runs via
+//! `RunRepository`. Runs are stored in the `axonml_runs` Aegis-DB document
+//! collection, with metric time series written to the Aegis-DB time series
+//! store.
+//!
+//! Key types:
+//! - `TrainingRun` — full run record with id, owner, model type, config,
+//!   status lifecycle (Pending/Running/Completed/Failed/Stopped), latest
+//!   metrics snapshot, and timestamps.
+//! - `RunConfig` — training hyperparameters: epochs, batch_size,
+//!   learning_rate, steps_per_epoch, optimizer, plus a `#[serde(flatten)]`
+//!   extra JSON catch-all.
+//! - `TrainingMetrics` — per-step snapshot with loss, accuracy, learning
+//!   rate, GPU utilization, memory usage, and custom JSON fields.
+//! - `RunRepository` — CRUD, status transitions, metrics updates (both
+//!   document-level latest and time series history), and a
+//!   `count_running()` aggregate query.
 //!
 //! # File
 //! `crates/axonml-server/src/db/runs.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use super::{Database, DbError, DocumentQuery, TimeSeriesQuery};
 use chrono::{DateTime, Utc};
@@ -20,8 +43,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+// =============================================================================
+// Constants
+// =============================================================================
+
 /// Collection name for runs
 const COLLECTION: &str = "axonml_runs";
+
+// =============================================================================
+// Types — Run Status
+// =============================================================================
 
 /// Training run status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -35,6 +66,10 @@ pub enum RunStatus {
     Failed,
     Stopped,
 }
+
+// =============================================================================
+// Types — Run Configuration
+// =============================================================================
 
 /// Training run configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +88,10 @@ pub struct RunConfig {
 fn default_steps_per_epoch() -> u32 {
     100
 }
+
+// =============================================================================
+// Types — Training Run and Metrics
+// =============================================================================
 
 /// Training run data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +135,10 @@ pub struct TrainingMetrics {
     pub timestamp: DateTime<Utc>,
 }
 
+// =============================================================================
+// Types — Creation Payload
+// =============================================================================
+
 /// New training run data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewTrainingRun {
@@ -107,6 +150,10 @@ pub struct NewTrainingRun {
     pub config: RunConfig,
 }
 
+// =============================================================================
+// Repository
+// =============================================================================
+
 /// Training run repository
 pub struct RunRepository<'a> {
     db: &'a Database,
@@ -117,6 +164,10 @@ impl<'a> RunRepository<'a> {
     pub fn new(db: &'a Database) -> Self {
         Self { db }
     }
+
+    // -------------------------------------------------------------------------
+    // Run CRUD
+    // -------------------------------------------------------------------------
 
     /// Create a new training run
     pub async fn create(&self, new_run: NewTrainingRun) -> Result<TrainingRun, DbError> {
@@ -158,6 +209,10 @@ impl<'a> RunRepository<'a> {
             None => Ok(None),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Run Listing
+    // -------------------------------------------------------------------------
 
     /// List runs for a user
     pub async fn list_by_user(
@@ -236,6 +291,10 @@ impl<'a> RunRepository<'a> {
         Ok(runs)
     }
 
+    // -------------------------------------------------------------------------
+    // Status and Metrics Updates
+    // -------------------------------------------------------------------------
+
     /// Update run status
     pub async fn update_status(&self, id: &str, status: RunStatus) -> Result<TrainingRun, DbError> {
         let mut run = self
@@ -278,6 +337,10 @@ impl<'a> RunRepository<'a> {
         Ok(run)
     }
 
+    // -------------------------------------------------------------------------
+    // Run Deletion
+    // -------------------------------------------------------------------------
+
     /// Delete run
     pub async fn delete(&self, id: &str) -> Result<(), DbError> {
         // Check if run exists
@@ -292,6 +355,10 @@ impl<'a> RunRepository<'a> {
 
         Ok(())
     }
+
+    // -------------------------------------------------------------------------
+    // Time Series Metrics Recording
+    // -------------------------------------------------------------------------
 
     /// Record training metrics to time series
     pub async fn record_metrics(
@@ -365,6 +432,10 @@ impl<'a> RunRepository<'a> {
         Ok(())
     }
 
+    // -------------------------------------------------------------------------
+    // Time Series Metrics Retrieval
+    // -------------------------------------------------------------------------
+
     /// Get metrics history for a run from time series
     pub async fn get_metrics_history(
         &self,
@@ -414,6 +485,10 @@ impl<'a> RunRepository<'a> {
         Ok(metrics)
     }
 
+    // -------------------------------------------------------------------------
+    // Aggregate Queries
+    // -------------------------------------------------------------------------
+
     /// Get running runs count
     pub async fn count_running(&self) -> Result<u64, DbError> {
         let filter = serde_json::json!({
@@ -431,6 +506,10 @@ impl<'a> RunRepository<'a> {
         Ok(docs.len() as u64)
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

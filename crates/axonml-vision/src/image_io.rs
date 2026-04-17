@@ -1,13 +1,20 @@
-//! Image I/O — Load JPEG/PNG images into Tensors
+//! Image I/O — Load JPEG/PNG/BMP Images into Tensors
+//!
+//! File-based image loading functions that convert pixel data to `Tensor<f32>` in
+//! [C, H, W] format with values in [0.0, 1.0]. `load_image()` reads any supported
+//! format into [3, H, W]. `load_image_resized()` adds bilinear resize to a target
+//! resolution. `load_image_with_info()` returns the tensor plus original dimensions.
+//! `rgb_bytes_to_tensor()` converts raw HWC u8 bytes to CHW f32 tensors.
 //!
 //! # File
 //! `crates/axonml-vision/src/image_io.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,8 +1,34 @@
-//! nexus-agent — Autonomous AI agent framework
+//! nexus-agent — Autonomous AI Agent Framework
 //!
-//! Core types: Agent, Tool, Memory, and the ReAct execution loop.
+//! Core types and execution engine for the nexus-agent framework. Defines the
+//! `Tool` trait that wraps an async function with a JSON Schema for LLM tool
+//! calling, the `ToolRegistry` that indexes tools by name and produces
+//! OpenAI-format `ToolDefinition` objects for the system prompt, and a
+//! `Memory` trait with a `FileMemory` JSON-on-disk implementation.
+//!
+//! The `react_loop` function drives the ReAct execution loop against any
+//! `LlmBackend` (see `backend` module): it sends the running message history
+//! plus tool schemas to the LLM, routes any emitted `ToolCall`s through the
+//! registry, appends `tool` role messages with the results, and repeats until
+//! the model returns a plain assistant reply or the iteration cap is hit.
+//!
 //! LLM inference is provided by nexus-serve (local, OpenAI-compatible API)
 //! running Gemma 4, Qwen 3, or any GGUF model.
+//!
+//! # File
+//! `nexus-agent/src/lib.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 
 pub mod agents;
 pub mod backend;
@@ -13,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // =============================================================================
-// Core types
+// Core Types
 // =============================================================================
 
 /// A single message in the conversation context.
@@ -63,7 +89,7 @@ pub struct ToolResult {
 }
 
 // =============================================================================
-// Tool trait
+// Tool Trait
 // =============================================================================
 
 /// A tool that an agent can invoke. Each tool has a name, a JSON Schema for
@@ -96,7 +122,7 @@ pub trait Tool: Send + Sync {
 }
 
 // =============================================================================
-// Tool registry
+// Tool Registry
 // =============================================================================
 
 /// Registry of available tools, indexed by name.
@@ -139,7 +165,7 @@ impl Default for ToolRegistry {
 }
 
 // =============================================================================
-// Memory trait
+// Memory Trait
 // =============================================================================
 
 /// Persistent memory for an agent across invocations.
@@ -154,6 +180,10 @@ pub trait Memory: Send + Sync {
     /// Search memory by a query string (semantic or keyword).
     async fn search(&self, query: &str, limit: usize) -> anyhow::Result<Vec<(String, String)>>;
 }
+
+// -----------------------------------------------------------------------------
+// FileMemory (JSON-on-disk)
+// -----------------------------------------------------------------------------
 
 /// Simple file-backed memory (JSON on disk).
 pub struct FileMemory {
@@ -209,7 +239,7 @@ impl Memory for FileMemory {
 }
 
 // =============================================================================
-// ReAct execution loop
+// ReAct Execution Loop
 // =============================================================================
 
 /// Configuration for the ReAct loop.

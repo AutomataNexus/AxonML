@@ -1,13 +1,21 @@
-//! File Backend — Read frames from disk for testing and replay
+//! File Backend — Replay Frames from Disk for Testing
+//!
+//! Camera backend that serves pre-loaded `FrameBuffer` frames from memory,
+//! implementing `CaptureBackend`. `FileBackend::new()` takes a Vec of frames;
+//! `synthetic()` creates a single uniform-value frame; `synthetic_sequence()`
+//! generates N frames with incrementing pixel values and ~30fps timestamps.
+//! Supports optional looping when frames are exhausted. Useful for deterministic
+//! testing, offline replay, and benchmarking of inference pipelines.
 //!
 //! # File
 //! `crates/axonml-vision/src/camera/file.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

@@ -1,21 +1,53 @@
-//! Timeline Profiling Module
+//! Timeline Profiling — Time-Stamped Event Recorder
+//!
+//! Records a chronological stream of profiling events. `EventType` enumerates
+//! `Start`, `End`, `Instant` (marker), `Alloc`, `Free`, and `Custom`. `Event`
+//! captures the per-record payload (name, type, `timestamp_ns` relative to
+//! the profiler start, optional thread id hash, and optional freeform
+//! `metadata` string). `TimelineProfiler` owns a `Vec<Event>`, the wall-clock
+//! `start_time: Instant`, and an optional `max_events` ring-buffer capacity.
+//! `new` is unbounded, `with_capacity(max_events)` preallocates up to
+//! `min(max_events, 10_000)` slots and enables bounded retention. `record` /
+//! `record_with_metadata` capture the elapsed nanoseconds via
+//! `start_time.elapsed()`, attach the current thread id (hashed through
+//! `DefaultHasher`), and delegate to `add_event`, which drops the oldest
+//! events when the buffer exceeds `max_events`. Convenience helpers `start`,
+//! `end`, and `instant` wrap the common event types. Queries include
+//! `events`, `events_by_name`, `events_by_type`, `duration(name)` (sums
+//! matched start/end pairs by index order, handling multi-call operations by
+//! accumulating individual spans rather than wall time), `total_duration`,
+//! and `event_count`. `to_json` pretty-prints all events via `serde_json`,
+//! and the `chrome-trace` feature enables `to_chrome_trace` emitting the
+//! Chrome tracing `B`/`E`/`i` phases with microsecond timestamps. `reset`
+//! clears the buffer and re-anchors the start time. Tests cover basic
+//! start/end duration, name/type filtering, ring-buffer capacity dropping
+//! the oldest event, and JSON export containing the event name.
 //!
 //! # File
 //! `crates/axonml-profile/src/timeline.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
+
+// =============================================================================
+// Event Types
+// =============================================================================
 
 /// Type of event in the timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +80,10 @@ pub struct Event {
     /// Optional additional data
     pub metadata: Option<String>,
 }
+
+// =============================================================================
+// TimelineProfiler
+// =============================================================================
 
 /// Timeline profiler for recording events with timestamps.
 #[derive(Debug)]
@@ -84,6 +120,10 @@ impl TimelineProfiler {
             max_events: Some(max_events),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Event Recording
+    // -------------------------------------------------------------------------
 
     /// Records an event.
     pub fn record(&mut self, name: &str, event_type: EventType) {
@@ -153,6 +193,10 @@ impl TimelineProfiler {
         hasher.finish()
     }
 
+    // -------------------------------------------------------------------------
+    // Queries
+    // -------------------------------------------------------------------------
+
     /// Returns all recorded events.
     pub fn events(&self) -> &[Event] {
         &self.events
@@ -215,6 +259,10 @@ impl TimelineProfiler {
         self.events.len()
     }
 
+    // -------------------------------------------------------------------------
+    // Exports
+    // -------------------------------------------------------------------------
+
     /// Exports events to Chrome trace format (JSON).
     #[cfg(feature = "chrome-trace")]
     pub fn to_chrome_trace(&self) -> String {
@@ -258,6 +306,10 @@ impl TimelineProfiler {
         self.start_time = Instant::now();
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

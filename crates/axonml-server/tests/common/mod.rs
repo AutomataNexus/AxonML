@@ -1,13 +1,23 @@
-//! Common test utilities for integration tests
+//! Common Test Utilities — Shared Helpers for Integration Tests
+//!
+//! Provides `test_client()` for building a pre-configured `reqwest::Client`,
+//! `login()` / `login_as_admin()` for obtaining JWT tokens, and authenticated
+//! request helpers (`auth_get`, `auth_post`, `auth_put`, `auth_delete`).
+//! `route_exists` / `post_route_exists` probe whether a route returns 404.
+//! `is_server_running()` checks the `/health` endpoint, and the
+//! `require_server!` macro skips tests when the server is offline or the
+//! admin user is not configured. Test server URL defaults to
+//! `http://localhost:3021`.
 //!
 //! # File
 //! `crates/axonml-server/tests/common/mod.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -18,6 +28,10 @@ use reqwest::Client;
 use serde_json::Value;
 use std::time::Duration;
 
+// =============================================================================
+// Constants and Config
+// =============================================================================
+
 pub const TEST_API_URL: &str = "http://localhost:3021";
 
 pub fn admin_email() -> String {
@@ -27,6 +41,10 @@ pub fn admin_email() -> String {
 pub fn admin_password() -> String {
     std::env::var("AXONML_TEST_ADMIN_PASSWORD").unwrap_or_else(|_| "admin".to_string())
 }
+
+// =============================================================================
+// Route Probing
+// =============================================================================
 
 /// Check if a specific route exists by making an authenticated request
 /// and checking if it returns 404 (route not found) vs other responses
@@ -58,6 +76,10 @@ pub async fn post_route_exists(client: &Client, path: &str, token: &str) -> bool
         Err(_) => false,
     }
 }
+
+// =============================================================================
+// Client and Authentication
+// =============================================================================
 
 /// Test HTTP client with common configuration
 pub fn test_client() -> Client {
@@ -99,6 +121,10 @@ pub async fn login(client: &Client, email: &str, password: &str) -> Result<Strin
 pub async fn login_as_admin(client: &Client) -> Result<String, String> {
     login(client, &admin_email(), &admin_password()).await
 }
+
+// =============================================================================
+// Authenticated Request Helpers
+// =============================================================================
 
 /// Make authenticated GET request
 pub async fn auth_get(
@@ -160,6 +186,10 @@ pub async fn auth_delete(
         .map_err(|e| format!("Request failed: {}", e))
 }
 
+// =============================================================================
+// Server Health Check
+// =============================================================================
+
 /// Check if test server is running
 pub async fn is_server_running() -> bool {
     let client = test_client();
@@ -170,6 +200,10 @@ pub async fn is_server_running() -> bool {
         .map(|r| r.status().is_success())
         .unwrap_or(false)
 }
+
+// =============================================================================
+// Test Skip Macro
+// =============================================================================
 
 /// Macro to skip integration tests when the server is not running
 /// or the test admin user is not configured.

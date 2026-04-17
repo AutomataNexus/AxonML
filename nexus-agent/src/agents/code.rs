@@ -1,7 +1,35 @@
-//! Code agent — local agentic coder powered by nexus-serve.
+//! Code Agent — Local Agentic Coder Powered By nexus-serve
 //!
-//! Runs via nexus-serve's Anthropic Messages API (`/v1/messages`) so tool
-//! calls round-trip as native `tool_use` / `tool_result` content blocks.
+//! Defines the `code` agent configuration: an agentic coder specialized for
+//! Andrew Jewell's engineering workspace. Runs through nexus-serve's
+//! Anthropic Messages API (`/v1/messages`) so tool calls round-trip as
+//! native `tool_use` / `tool_result` content blocks with
+//! `stop_reason = "tool_use"`.
+//!
+//! Exports:
+//! - `SYSTEM_PROMPT` — short ROLE-only prompt (tool FORMAT is injected by
+//!   the server preamble when `tools[]` is non-empty).
+//! - `config()` — returns an `AgentConfig` with
+//!   `max_iterations = 12`, `model = "deepseek"`, `temperature = 0.1`,
+//!   tuned for DeepSeek-R1-Distill-Qwen-7B at ~1.6 tok/s.
+//!
+//! The prompt explicitly suppresses R1-Distill's chain-of-thought narration
+//! ("think quietly") so a 10-step loop remains usable.
+//!
+//! # File
+//! `nexus-agent/src/agents/code.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
 //!
 //! Default invocation (DeepSeek-R1-Distill-Qwen-7B on :11436):
 //!   nexus-agent --url http://127.0.0.1:11436 --anthropic code \
@@ -25,7 +53,15 @@
 //! prompt explicitly suppresses narration so the model gets to the tool
 //! call directly.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use crate::AgentConfig;
+
+// =============================================================================
+// System Prompt
+// =============================================================================
 
 pub const SYSTEM_PROMPT: &str = r#"You are the Code agent for Andrew Jewell's engineering workspace.
 
@@ -46,6 +82,10 @@ Guardrails:
 - Never touch files outside the paths the user pointed you at.
 - If you cannot complete the task in the iteration budget, stop and summarize what remains.
 "#;
+
+// =============================================================================
+// Agent Configuration
+// =============================================================================
 
 pub fn config() -> AgentConfig {
     AgentConfig {

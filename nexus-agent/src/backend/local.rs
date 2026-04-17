@@ -1,7 +1,44 @@
-//! Local LLM backend — calls nexus-serve (or any OpenAI-compatible server).
+//! Local Backend — OpenAI-Compatible /v1/chat/completions For nexus-serve
 //!
-//! Default endpoint: http://127.0.0.1:11435 (nexus-serve)
-//! Supports: Gemma 4, Qwen 3, and any model nexus-serve can load via GGUF.
+//! Implements `LocalBackend`, an `LlmBackend` that talks to nexus-serve
+//! (or any other OpenAI-compatible server) over HTTP. Default endpoint
+//! is `http://127.0.0.1:11435`. Supports any model nexus-serve can load
+//! via GGUF — Gemma 4, Qwen 3, and the rest of the zoo.
+//!
+//! Key items:
+//! - `LocalBackend` — reqwest-based client with `new()` and `with_url`
+//!   builders.
+//! - Wire types: `ChatRequest` (sets `tool_choice = "auto"` when tools
+//!   are supplied), `ChatResponse`, `Choice`, `ResponseMessage`,
+//!   `ResponseToolCall`, `ResponseFunction`, `ModelsResponse`,
+//!   `ModelEntry`.
+//! - `LlmBackend` impl — POSTs to `/v1/chat/completions`, translates the
+//!   OpenAI response `tool_calls` array into our internal `ToolCall`
+//!   vector, lists models via `/v1/models`, and pings `/health` for the
+//!   health check.
+//!
+//! This is the legacy path. New agents should use `AnthropicBackend`,
+//! whose content-block / `tool_use` shape is the hard rule for
+//! nexus-agent ↔ nexus-serve tool calling.
+//!
+//! # File
+//! `nexus-agent/src/backend/local.rs`
+//!
+//! # Author
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
+//!
+//! # Updated
+//! April 16, 2026 11:15 PM EST
+//!
+//! # Disclaimer
+//! Use at own risk. This software is provided "as is", without warranty of any
+//! kind, express or implied. The author and AutomataNexus shall not be held
+//! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -10,7 +47,15 @@ use crate::{FunctionCall, Message, ToolCall, ToolDefinition};
 
 use super::LlmBackend;
 
+// =============================================================================
+// Constants
+// =============================================================================
+
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:11435";
+
+// =============================================================================
+// Backend Struct And Constructors
+// =============================================================================
 
 /// Local inference backend powered by nexus-serve.
 pub struct LocalBackend {

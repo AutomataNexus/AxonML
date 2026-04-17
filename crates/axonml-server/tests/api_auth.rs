@@ -1,13 +1,20 @@
-//! Integration tests for authentication API endpoints
+//! Auth API Integration Tests — Login, Registration, Token, and MFA Endpoints
+//!
+//! Integration tests against a live AxonML server for the `/api/auth/*` routes.
+//! Tests cover: health check, valid/invalid/missing-field login, `/me` endpoint
+//! with valid/invalid/missing tokens, new user registration, duplicate email
+//! rejection, logout, and refresh token flow. Each test uses the `require_server!`
+//! macro to skip gracefully when the server is not running.
 //!
 //! # File
 //! `crates/axonml-server/tests/api_auth.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -18,6 +25,10 @@ mod common;
 
 use common::*;
 use serde_json::Value;
+
+// =============================================================================
+// Test Skip Macro
+// =============================================================================
 
 /// Skip test if server not running
 macro_rules! require_server {
@@ -34,6 +45,10 @@ macro_rules! require_server {
     };
 }
 
+// =============================================================================
+// Health Check
+// =============================================================================
+
 #[tokio::test]
 async fn test_health_endpoint() {
     require_server!();
@@ -47,6 +62,10 @@ async fn test_health_endpoint() {
 
     assert!(response.status().is_success());
 }
+
+// =============================================================================
+// Login Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_login_with_valid_credentials() {
@@ -102,6 +121,10 @@ async fn test_login_with_missing_fields() {
     );
 }
 
+// =============================================================================
+// /me Endpoint Tests
+// =============================================================================
+
 #[tokio::test]
 async fn test_me_endpoint_with_valid_token() {
     require_server!();
@@ -156,6 +179,10 @@ async fn test_me_endpoint_with_invalid_token() {
     );
 }
 
+// =============================================================================
+// Registration Tests
+// =============================================================================
+
 #[tokio::test]
 async fn test_register_new_user() {
     require_server!();
@@ -209,6 +236,10 @@ async fn test_register_duplicate_email() {
         "Should reject duplicate email"
     );
 }
+
+// =============================================================================
+// Session Management Tests
+// =============================================================================
 
 #[tokio::test]
 async fn test_logout() {

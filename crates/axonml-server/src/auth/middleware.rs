@@ -1,13 +1,26 @@
-//! Authentication middleware for AxonML
+//! Authentication Middleware — Tower Layer, Axum Extractors, and Route Guards
+//!
+//! Provides the full auth middleware stack for the AxonML REST API:
+//! - `AuthLayer` / `AuthService`: Tower `Layer` + `Service` that extracts JWT
+//!   from the `Authorization: Bearer` header and injects `AuthUser` into
+//!   request extensions.
+//! - `AuthUser`: Axum `FromRequestParts` extractor — handlers pull the
+//!   authenticated user directly from the request.
+//! - Route guard middleware functions: `auth_middleware` (required auth),
+//!   `optional_auth_middleware`, `require_mfa_middleware`, and
+//!   `require_admin_middleware`.
+//! - `AuthError` → `IntoResponse` mapping to JSON error bodies with proper
+//!   HTTP status codes.
 //!
 //! # File
 //! `crates/axonml-server/src/auth/middleware.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 14, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -26,6 +39,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower;
+
+// =============================================================================
+// AuthUser Extractor
+// =============================================================================
 
 /// Authenticated user extracted from JWT
 #[derive(Debug, Clone)]
@@ -46,6 +63,28 @@ impl From<Claims> for AuthUser {
         }
     }
 }
+
+/// Extract user from request parts (for use in handlers)
+#[axum::async_trait]
+impl<S> FromRequestParts<S> for AuthUser
+where
+    S: Send + Sync,
+{
+    type Rejection = AuthError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        // Get user from extensions (set by middleware)
+        parts
+            .extensions
+            .get::<AuthUser>()
+            .cloned()
+            .ok_or(AuthError::Unauthorized)
+    }
+}
+
+// =============================================================================
+// Tower Layer / Service
+// =============================================================================
 
 /// Auth layer for Axum (tower Layer implementation)
 #[derive(Clone)]
@@ -125,6 +164,10 @@ where
     }
 }
 
+// =============================================================================
+// Error Response
+// =============================================================================
+
 /// Error response
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ErrorResponse {
@@ -181,23 +224,9 @@ impl IntoResponse for AuthError {
     }
 }
 
-/// Extract user from request parts (for use in handlers)
-#[axum::async_trait]
-impl<S> FromRequestParts<S> for AuthUser
-where
-    S: Send + Sync,
-{
-    type Rejection = AuthError;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        // Get user from extensions (set by middleware)
-        parts
-            .extensions
-            .get::<AuthUser>()
-            .cloned()
-            .ok_or(AuthError::Unauthorized)
-    }
-}
+// =============================================================================
+// Route Guard Middleware
+// =============================================================================
 
 /// Authentication middleware function
 pub async fn auth_middleware(
@@ -320,6 +349,10 @@ pub async fn require_admin_middleware(
     // Continue to next handler
     Ok(next.run(request).await)
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {

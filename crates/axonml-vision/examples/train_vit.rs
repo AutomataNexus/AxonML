@@ -1,18 +1,45 @@
-//! Vision Transformer (ViT) Training on Synthetic CIFAR-like Data
+//! Vision Transformer (ViT) Training on Synthetic CIFAR-Like Data
+//!
+//! Demonstration script for `VisionTransformer` on a randomly generated CIFAR-10
+//! stand-in (random `[3, 32, 32]` images and random labels). Useful as a smoke
+//! test for the patch-embedding + transformer-encoder + classification-head
+//! pipeline; with random labels there is no true signal so accuracy is only
+//! meaningful as a memorization sanity check.
+//!
+//! Pieces:
+//! - `detect_device()` — CUDA probe with CPU fallback.
+//! - `generate_synthetic_data()` — produces `num_samples` images sampled
+//!   uniformly in `[-1.0, 1.0]` plus uniformly random class labels using
+//!   `StdRng`.
+//! - `make_batch()` — slices `[start, start+batch_size)` of pre-generated images
+//!   and labels into a `(Variable, Variable)` pair shaped
+//!   `([bs, 3, 32, 32], [bs])`.
+//! - `compute_accuracy()` — argmax over `[B, C]` logits versus ground-truth
+//!   class indices, returns fraction correct.
+//! - `main()` — builds `VisionTransformer::new(IMAGE_SIZE, PATCH_SIZE,
+//!   IN_CHANNELS, NUM_CLASSES, D_MODEL, NHEAD, NUM_LAYERS, DIM_FF, DROPOUT)`,
+//!   wires Adam + `CrossEntropyLoss`, then runs `NUM_EPOCHS` of training with
+//!   per-epoch validation, optional `TrainingMonitor`, and per-epoch printout
+//!   of loss / accuracy / val_loss / val_acc / elapsed time.
 //!
 //! # File
 //! `crates/axonml-vision/examples/train_vit.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 19, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Imports
+// =============================================================================
 
 use axonml::monitor::TrainingMonitor;
 use axonml_autograd::Variable;
@@ -78,6 +105,10 @@ fn generate_synthetic_data(num_samples: usize, rng: &mut StdRng) -> (Vec<Vec<f32
     (images, labels)
 }
 
+// -----------------------------------------------------------------------------
+// Batch construction
+// -----------------------------------------------------------------------------
+
 /// Build a batched tensor pair from a slice of images and labels.
 fn make_batch(
     images: &[Vec<f32>],
@@ -142,6 +173,10 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let use_monitor = args.iter().any(|a| a == "--monitor");
 
+    // -------------------------------------------------------------------------
+    // Banner + setup
+    // -------------------------------------------------------------------------
+
     let device = detect_device();
     println!("===== ViT Training on Synthetic CIFAR-10 =====");
     println!("Device:       {:?}", device);
@@ -154,6 +189,10 @@ fn main() {
     println!("Epochs:       {}", NUM_EPOCHS);
     println!("LR:           {}", LR);
     println!();
+
+    // -------------------------------------------------------------------------
+    // Model + optimizer + data
+    // -------------------------------------------------------------------------
 
     // Build model
     let mut vit = VisionTransformer::new(
@@ -198,6 +237,10 @@ fn main() {
         None
     };
 
+    // =========================================================================
+    // Training loop
+    // =========================================================================
+
     // Training loop
     vit.train();
     let num_batches = NUM_TRAIN.div_ceil(BATCH_SIZE);
@@ -231,6 +274,10 @@ fn main() {
 
         let avg_loss = epoch_loss / epoch_total as f32;
         let train_acc = epoch_correct as f32 / epoch_total as f32 * 100.0;
+
+        // ---------------------------------------------------------------------
+        // Per-epoch validation
+        // ---------------------------------------------------------------------
 
         // Validation
         vit.eval();
@@ -273,6 +320,10 @@ fn main() {
             );
         }
     }
+
+    // =========================================================================
+    // Finalization
+    // =========================================================================
 
     if let Some(ref mon) = monitor {
         mon.set_status("complete");

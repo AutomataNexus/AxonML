@@ -1,18 +1,36 @@
-//! AxonML Server - REST API for Machine Learning
+//! AxonML Server — REST API Entry Point and Runtime Bootstrap
+//!
+//! Binary entry point for the AxonML HTTP/WebSocket server. Parses CLI flags
+//! via `clap`, initializes the tracing subscriber, loads `Config` (with optional
+//! file override), wires a `SecretsManager` with Vault and environment
+//! backends, connects to Aegis-DB, initializes the schema, provisions the
+//! default admin (random password written to a temp file) and an optional
+//! DevOps admin from `AXONML_DEVOPS_PASSWORD`, constructs `JwtAuth`,
+//! `EmailService`, `InferenceServer`, `ModelPool`, `InferenceMetrics`,
+//! `OllamaClient`, `NotebookExecutor`, `TrainingTracker`, `TrainingExecutor`,
+//! and assembles the `AppState`. A background task samples `sysinfo` every
+//! second to maintain a 60-point rolling `SystemMetricsHistory`. Finally
+//! builds the Axum router via `create_router`, prints the ASCII banner, and
+//! serves on the resolved `SocketAddr`.
 //!
 //! # File
 //! `crates/axonml-server/src/main.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
+
+// =============================================================================
+// Module Declarations
+// =============================================================================
 
 mod api;
 mod auth;
@@ -24,6 +42,10 @@ mod llm;
 mod secrets;
 mod training;
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use api::{AppState, create_router};
 use auth::JwtAuth;
 use clap::Parser;
@@ -33,6 +55,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+// =============================================================================
+// CLI Arguments
+// =============================================================================
 
 /// AxonML Server - REST API for Machine Learning
 #[derive(Parser, Debug)]
@@ -53,10 +79,18 @@ struct Args {
     config: Option<String>,
 }
 
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments
     let args = Args::parse();
+
+    // -------------------------------------------------------------------------
+    // Tracing Setup
+    // -------------------------------------------------------------------------
 
     // Initialize tracing
     tracing_subscriber::registry()
@@ -68,6 +102,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     info!("Starting AxonML Server v{}", env!("CARGO_PKG_VERSION"));
+
+    // -------------------------------------------------------------------------
+    // Configuration Loading and Validation
+    // -------------------------------------------------------------------------
 
     // Load configuration
     let config = if let Some(config_path) = args.config {
@@ -90,6 +128,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Data directory: {:?}", config.data_dir());
     info!("Models directory: {:?}", config.models_dir());
     info!("Runs directory: {:?}", config.runs_dir());
+
+    // -------------------------------------------------------------------------
+    // Secrets Manager Initialization
+    // -------------------------------------------------------------------------
 
     // Initialize secrets manager
     // Priority: Vault -> Environment variables -> Config file
@@ -123,6 +165,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Secrets manager initialized"
     );
 
+    // -------------------------------------------------------------------------
+    // Secret Resolution
+    // -------------------------------------------------------------------------
+
     // Load secrets with config file fallback
     let jwt_secret = secrets_manager
         .get_secret(secrets::SecretKey::JWT_SECRET)
@@ -155,6 +201,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("JWT secret must be at least 32 characters".into());
     }
 
+    // -------------------------------------------------------------------------
+    // Database Connection and Schema Initialization
+    // -------------------------------------------------------------------------
+
     // Connect to Aegis-DB with secrets-loaded credentials
     info!("Connecting to Aegis-DB at {}", config.aegis_url());
     let mut aegis_config = config.aegis.clone();
@@ -182,6 +232,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         error!("Failed to initialize database schema: {}", e);
         // Continue anyway - tables might already exist
     }
+
+    // -------------------------------------------------------------------------
+    // Default Admin and DevOps Admin Provisioning
+    // -------------------------------------------------------------------------
 
     // Create default admin user if not exists (with secure random password)
     // SECURITY: Generate a random password for the default admin
@@ -229,6 +283,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Service Component Initialization
+    // -------------------------------------------------------------------------
 
     // Initialize JWT authentication with secrets-loaded secret
     let jwt = JwtAuth::new(&jwt_secret, config.auth.jwt_expiry_hours);
@@ -278,6 +336,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let notebook_executor = Arc::new(training::notebook_executor::NotebookExecutor::default());
     info!("Notebook executor initialized");
 
+    // -------------------------------------------------------------------------
+    // Application State Assembly
+    // -------------------------------------------------------------------------
+
     // Create application state
     let state = AppState {
         db: db_arc,
@@ -303,6 +365,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ollama: Arc::new(ollama),
         auth_rate_limiter: Arc::new(crate::auth::RateLimiter::auth_default()),
     };
+
+    // -------------------------------------------------------------------------
+    // Background Metrics Collection
+    // -------------------------------------------------------------------------
 
     // Spawn background task to collect system metrics
     let metrics_history_clone = state.metrics_history.clone();
@@ -361,6 +427,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // -------------------------------------------------------------------------
+    // Router Construction and Address Resolution
+    // -------------------------------------------------------------------------
+
     // Create router
     let app = create_router(state);
 
@@ -381,6 +451,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("AxonML Server listening on http://{}", addr);
     info!("API documentation: http://{}/api", addr);
     info!("Health check: http://{}/health", addr);
+
+    // -------------------------------------------------------------------------
+    // Startup Banner
+    // -------------------------------------------------------------------------
 
     // Print startup banner
     println!();
@@ -403,6 +477,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("║                                                           ║");
     println!("╚═══════════════════════════════════════════════════════════╝");
     println!();
+
+    // -------------------------------------------------------------------------
+    // Server Start
+    // -------------------------------------------------------------------------
 
     // Start server
     let listener = tokio::net::TcpListener::bind(&addr).await?;

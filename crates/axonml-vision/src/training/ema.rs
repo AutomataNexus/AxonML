@@ -1,13 +1,26 @@
-//! Exponential Moving Average (EMA) for Model Weights
+//! Model EMA — YOLOv8-Style Exponential Moving Average of Weights
+//!
+//! `ModelEMA` keeps a shadow copy of every parameter's flat data alongside a
+//! decay factor (default 0.9999) and an update counter. `update` blends the
+//! shadow toward the live parameters using the YOLOv8 warmup-decay formula
+//! `decay * (1 - exp(-updates / 2000))` exposed via `effective_decay`, so
+//! early steps weight new values heavily and late steps approach the target
+//! decay. `apply_to` writes the shadow back into the model parameters via
+//! `Parameter::update_data`; `apply_and_restore` snapshots the live weights,
+//! installs the EMA, runs a closure (typically evaluation), and restores the
+//! originals afterward. `shadow_params` exposes the shadow vectors for
+//! checkpoint serialization, and `with_warmup` is a convenience constructor
+//! using the standard 0.9999 decay.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/ema.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any

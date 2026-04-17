@@ -1,20 +1,43 @@
-//! Model Configuration Module
+//! Model Configuration — Transformer, BERT, and GPT-2 Hyperparameters
+//!
+//! Serde-serializable hyperparameter structs for the transformer-family models
+//! in `axonml-llm`. `TransformerConfig` carries the generic hidden/FF/head/
+//! layer/vocab/pos-emb knobs, dropout probabilities, layer-norm epsilon, and
+//! activation string, defaulting to a BERT-base-like 768/12/12/3072 shape.
+//! `BertConfig` adds BERT-specific `type_vocab_size`, `hidden_act`,
+//! `pad_token_id`, and dropout fields, with `base` (768/12/12), `large`
+//! (1024/24/16), and `tiny` (128/2/2 for tests) factories plus a `head_dim`
+//! accessor. `GPT2Config` uses GPT-2's OpenAI-style naming (`n_ctx`, `n_embd`,
+//! `n_layer`, `n_head`, separate `attn_dropout` and `resid_dropout`, BOS/EOS
+//! tokens) and provides `small` (117M), `medium` (345M), `large` (774M), `xl`
+//! (1.5B), and `tiny` factories with the correct embedding dimensions and
+//! layer counts. Tests verify the BERT and GPT-2 factory shapes and derived
+//! head dimensions.
 //!
 //! # File
 //! `crates/axonml-llm/src/config.rs`
 //!
 //! # Author
-//! Andrew Jewell Sr - AutomataNexus
+//! Andrew Jewell Sr. — AutomataNexus LLC
+//! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! March 8, 2026
+//! April 16, 2026 11:15 PM EST
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// =============================================================================
+// Imports
+// =============================================================================
+
 use serde::{Deserialize, Serialize};
+
+// =============================================================================
+// TransformerConfig
+// =============================================================================
 
 /// Base transformer configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +80,10 @@ impl Default for TransformerConfig {
         }
     }
 }
+
+// =============================================================================
+// BertConfig
+// =============================================================================
 
 /// BERT model configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +180,10 @@ impl BertConfig {
         self.hidden_size / self.num_attention_heads
     }
 }
+
+// =============================================================================
+// GPT2Config
+// =============================================================================
 
 /// GPT-2 model configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -285,6 +316,10 @@ impl GPT2Config {
         self.n_embd / self.n_head
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {
