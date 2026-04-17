@@ -21,3 +21,15 @@ axonml-tensor.workspace = true
 axonml-autograd.workspace = true
 axonml-nn.workspace = true
 libloading = { version = "0.8", optional = true }
+
+# Controls how docs.rs builds this crate when a new version is published.
+# * default-target + targets = build only on Linux x86_64; GPU backends
+#   (cuda/vulkan/metal/wgpu) require system SDKs that docs.rs doesn't have,
+#   so we don't try to cross-build multiple platforms.
+# * rustdoc-args sets the `docsrs` cfg so the crate can gate platform- or
+#   feature-specific code with `#[cfg(docsrs)]` or `#[cfg_attr(docsrs, ...)]`
+#   when docs.rs compiles it.
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["x86_64-unknown-linux-gnu"]
+rustdoc-args = ["--cfg", "docsrs"]

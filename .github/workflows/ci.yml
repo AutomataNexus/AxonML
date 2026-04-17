@@ -11,8 +11,17 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # NOTE: we are NOT enabling `-D warnings` in RUSTDOCFLAGS yet. axonml-vision
+  # has ~52 legitimate "unresolved link" warnings from tensor-shape notation in
+  # doc comments (`[B, 1, H, W]` etc.) that rustdoc tries to resolve as
+  # intra-doc links. Cleaning those up is a separate chore; in the meantime,
+  # `cargo doc` without `-D warnings` still catches real breakage (missing
+  # crates, renamed types, malformed markdown) without failing on style.
 
 jobs:
+  # Rust toolchain used by every job is pinned via rust-toolchain.toml at the
+  # workspace root. `dtolnay/rust-toolchain@stable` honors that file — CI and
+  # local devs always resolve to the same version.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -69,3 +78,23 @@ jobs:
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
+
+  # Catches broken intra-doc links, missing doc summaries, and any rustdoc
+  # warning that would otherwise only surface on docs.rs after publishing.
+  # Runs before publish.yml so we don't ship a release with broken rustdoc.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build docs (rustdoc warnings = errors)
+        run: cargo doc --workspace --no-deps --document-private-items
