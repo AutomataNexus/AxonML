@@ -218,7 +218,10 @@ impl ModelBundle {
 ///
 /// Creates parent directories if they don't exist. Ensures the output path has
 /// a `.axonml` extension (renames if missing). Returns the final path written.
-pub fn save_bundle<P: AsRef<Path>>(bundle: &ModelBundle, path: P) -> BundleResult<std::path::PathBuf> {
+pub fn save_bundle<P: AsRef<Path>>(
+    bundle: &ModelBundle,
+    path: P,
+) -> BundleResult<std::path::PathBuf> {
     let raw = path.as_ref();
     if let Some(parent) = raw.parent() {
         if !parent.as_os_str().is_empty() {
@@ -226,7 +229,7 @@ pub fn save_bundle<P: AsRef<Path>>(bundle: &ModelBundle, path: P) -> BundleResul
         }
     }
 
-    let final_path = if raw.extension().map_or(true, |e| e != "axonml") {
+    let final_path = if raw.extension().is_none_or(|e| e != "axonml") {
         raw.with_extension("axonml")
     } else {
         raw.to_path_buf()
@@ -358,7 +361,10 @@ mod tests {
         assert_eq!(loaded.architecture, "sentinel");
         assert_eq!(loaded.weights, weights);
         assert_eq!(
-            loaded.hyperparameters.get("hidden_dim").and_then(|v| v.as_i64()),
+            loaded
+                .hyperparameters
+                .get("hidden_dim")
+                .and_then(|v| v.as_i64()),
             Some(128)
         );
         assert_eq!(loaded.anomaly_threshold, Some(0.5));

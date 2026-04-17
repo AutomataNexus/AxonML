@@ -479,7 +479,9 @@ async fn run_onnx_converter(
             })
             .unwrap_or_else(|| stderr.trim());
         tracing::error!(stderr = %stderr, "ONNX converter failed");
-        return Err(AuthError::Internal(format!("ONNX conversion failed: {last}")));
+        return Err(AuthError::Internal(format!(
+            "ONNX conversion failed: {last}"
+        )));
     }
 
     // Double-check the output file actually got written. `convert.py` can print
