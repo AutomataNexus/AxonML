@@ -439,7 +439,7 @@ fn quick_analyze_dataset(
             // Check for class subdirectories
             if let Ok(entries) = fs::read_dir(path) {
                 for entry in entries.filter_map(std::result::Result::ok) {
-                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    if entry.file_type().is_ok_and(|t| t.is_dir()) {
                         let class_name = entry.file_name().to_string_lossy().to_string();
                         if !class_name.starts_with('.') {
                             classes.insert(class_name);

@@ -169,15 +169,13 @@ pub fn TrainingDetailPage() -> impl IntoView {
                                 WsMessage::Status {
                                     run_id: msg_run_id,
                                     status,
-                                } => {
+                                } if msg_run_id == id => {
                                     // Only update if the message is for the current run
-                                    if msg_run_id == id {
-                                        set_run.update(|r| {
-                                            if let Some(run) = r {
-                                                run.status = status;
-                                            }
-                                        });
-                                    }
+                                    set_run.update(|r| {
+                                        if let Some(run) = r {
+                                            run.status = status;
+                                        }
+                                    });
                                 }
                                 WsMessage::Log(entry) => {
                                     set_logs.update(|l| l.push(entry));

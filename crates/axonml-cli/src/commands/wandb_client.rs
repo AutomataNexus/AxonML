@@ -328,9 +328,7 @@ pub fn init_training_run(
 
 /// Check if W&B is available and configured
 pub fn is_available() -> bool {
-    WandbConfig::load()
-        .map(|c| c.is_configured())
-        .unwrap_or(false)
+    WandbConfig::load().is_ok_and(|c| c.is_configured())
 }
 
 // =============================================================================

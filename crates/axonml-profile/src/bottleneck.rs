@@ -180,7 +180,7 @@ impl BottleneckAnalyzer {
         }
 
         // Sort by severity (highest first)
-        bottlenecks.sort_by(|a, b| b.severity.cmp(&a.severity));
+        bottlenecks.sort_by_key(|b| std::cmp::Reverse(b.severity));
 
         bottlenecks
     }
