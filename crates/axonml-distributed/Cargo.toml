@@ -22,6 +22,9 @@ axonml-autograd.workspace = true
 axonml-nn.workspace = true
 libloading = { version = "0.8", optional = true }
 
+[dev-dependencies]
+axonml-optim = { path = "../axonml-optim" }
+
 # Controls how docs.rs builds this crate when a new version is published.
 # * default-target + targets = build only on Linux x86_64; GPU backends
 #   (cuda/vulkan/metal/wgpu) require system SDKs that docs.rs doesn't have,
