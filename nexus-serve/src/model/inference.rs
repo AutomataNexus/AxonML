@@ -866,6 +866,41 @@ impl GpuKvCache {
         };
         v_ok
     }
+
+    /// Device-to-device variant of `append_row` that reads K and V straight
+    /// from pre-existing GPU buffers. Used by the GPU-resident decode path
+    /// to avoid the two ~14 KB D2H copies per layer that `append_row` would
+    /// otherwise require. Returns `false` if the position exceeds capacity
+    /// or either copy fails (caller falls back to the host-side path).
+    pub fn append_row_device(
+        &mut self,
+        cuda: &axonml_core::backends::CudaBackend,
+        layer: usize,
+        pos: usize,
+        k_row: &cudarc::driver::CudaSlice<f32>,
+        v_row: &cudarc::driver::CudaSlice<f32>,
+    ) -> bool {
+        if pos >= self.capacity
+            || k_row.len() != self.row_stride
+            || v_row.len() != self.row_stride
+        {
+            return false;
+        }
+        let offset = pos * self.row_stride;
+        let end = offset + self.row_stride;
+        let k_ok = {
+            let mut view = self.k[layer].slice_mut(offset..end);
+            cuda.stream().memcpy_dtod(k_row, &mut view).is_ok()
+        };
+        if !k_ok {
+            return false;
+        }
+        let v_ok = {
+            let mut view = self.v[layer].slice_mut(offset..end);
+            cuda.stream().memcpy_dtod(v_row, &mut view).is_ok()
+        };
+        v_ok
+    }
 }
 
 /// KV cache for incremental decoding.
@@ -1671,35 +1706,61 @@ impl InferenceEngine {
             q = q.apply_rope_split_halves(n_heads, head_dim, theta, pos);
             k = k.apply_rope_split_halves(n_kv_heads, head_dim, theta, pos);
 
-            // Pull Q/K/V back to host — K/V go into the KV caches (both host
-            // mirror and GPU resident), Q goes into the attention call. Each
-            // is ~14 KB (Q for 7B is 3584 × 4, K/V are 512 × 4 for GQA 4:1).
-            let q_host = q.to_vec();
-            let k_host = k.to_vec();
-            let v_host = v.to_vec();
-
-            kv_cache.k_cache[li].extend_from_slice(&k_host);
-            kv_cache.v_cache[li].extend_from_slice(&v_host);
-
-            let gpu_cache_ref = {
-                if kv_cache.gpu.is_none() {
-                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
-                        let cap = self.config.max_seq_len.min(4096);
-                        kv_cache.gpu = GpuKvCache::try_new(cuda, self.layers.len(), n_kv_heads, head_dim, cap);
-                    }
+            // Lazy-allocate the GPU-resident KV cache on first use.
+            if kv_cache.gpu.is_none() {
+                if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                    let cap = self.config.max_seq_len.min(4096);
+                    kv_cache.gpu = GpuKvCache::try_new(
+                        cuda, self.layers.len(), n_kv_heads, head_dim, cap,
+                    );
                 }
-                let mut r: Option<(&GpuKvCache, usize)> = None;
-                if let Some(ref mut g) = kv_cache.gpu {
-                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
-                        if g.append_row(cuda, li, pos, &k_host, &v_host) {
-                            r = Some((&*g, li));
-                        }
-                    }
+            }
+
+            // D2H K/V only if we *need* the host mirror. The host mirror
+            // exists for the CPU-attention fallback (`single_query_attention`)
+            // and for `try_gpu_attn_reupload`. On the resident path both are
+            // skipped, so we can avoid the two per-layer D2H copies that
+            // dominate when host-side attention isn't exercised.
+            let gpu_cache_ref = if let (Some(g), Some(cuda)) = (
+                kv_cache.gpu.as_mut(),
+                axonml_core::backends::cuda::get_cuda_backend(),
+            ) {
+                // K/V are GPU tensors; append_row_device writes the new row
+                // straight into the pre-allocated GPU buffer — no host hop.
+                let k_guard = k.as_cuda_slice_read();
+                let v_guard = v.as_cuda_slice_read();
+                if g.append_row_device(cuda, li, pos, k_guard.slice(), v_guard.slice()) {
+                    drop(k_guard);
+                    drop(v_guard);
+                    Some((&*g, li))
+                } else {
+                    // Fell back to host-based append (capacity exceeded or
+                    // device-device copy failed). In that case we do need
+                    // the host mirror populated for the reupload path.
+                    let k_host = k.to_vec();
+                    let v_host = v.to_vec();
+                    kv_cache.k_cache[li].extend_from_slice(&k_host);
+                    kv_cache.v_cache[li].extend_from_slice(&v_host);
+                    None
                 }
-                r
+            } else {
+                // No GPU cache — populate host mirror for the CPU fallback.
+                let k_host = k.to_vec();
+                let v_host = v.to_vec();
+                kv_cache.k_cache[li].extend_from_slice(&k_host);
+                kv_cache.v_cache[li].extend_from_slice(&v_host);
+                None
             };
 
+            // Q still needs to go to host for the attention call (the
+            // attention dispatcher takes `&[f32]`). ~14 KB — negligible.
+            let q_host = q.to_vec();
+
             let total_len = pos + 1;
+            // When the resident GPU cache is active, `k_cache[li]` and
+            // `v_cache[li]` are empty — `gpu_single_query_attention` will
+            // route through `try_gpu_attn_resident` which reads the GPU
+            // buffers directly and ignores the (empty) host slices.
             let attn_host = gpu_single_query_attention(
                 &q_host, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
                 total_len, n_heads, n_kv_heads, head_dim, 0,

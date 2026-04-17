@@ -1158,6 +1158,22 @@ impl<T: Float> Tensor<T> {
         Self::from_vec(out, &self.shape).expect("swiglu: build output tensor")
     }
 
+    /// Read-only access to the underlying GPU storage as a `CudaSlice<f32>`.
+    /// Panics if the tensor is on CPU. Used by downstream crates (e.g.
+    /// nexus-serve) that need to pass the GPU buffer directly into a kernel
+    /// without going through `.to_vec()` + re-upload.
+    ///
+    /// Only valid for `Tensor<f32>` — the underlying storage is always f32
+    /// on GPU regardless of the Tensor's generic type. The guard holds a
+    /// read lock on the storage for its lifetime.
+    #[cfg(feature = "cuda")]
+    pub fn as_cuda_slice_read(&self) -> axonml_core::storage::CudaSliceReadGuard<'_> {
+        assert!(self.device().is_gpu(), "as_cuda_slice_read: tensor must be on GPU");
+        assert!(is_f32::<T>(), "as_cuda_slice_read: GPU storage is f32-only");
+        let self_f32 = unsafe { gpu_ref(self) };
+        self_f32.storage.as_cuda_slice()
+    }
+
     /// BitNet b1.58 fused gate: `out = ReLU(self)² * up`. `self` is the gate.
     #[must_use]
     pub fn relu2_gate(&self, up: &Self) -> Self {
