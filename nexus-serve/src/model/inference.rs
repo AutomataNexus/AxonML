@@ -2920,87 +2920,157 @@ impl InferenceEngine {
         let head_dim = self.config.head_dim;
         let n_heads = self.config.num_heads;
         let n_kv_heads = self.config.num_kv_heads;
-        let q_dim = n_heads * head_dim;
-        let kv_dim = n_kv_heads * head_dim;
         let eps = self.config.rms_norm_eps;
         let theta = self.config.rope_theta;
         let pos = kv_cache.len;
         let n_experts = moe_cfg.n_experts;
         let top_k = moe_cfg.n_experts_used;
-        let intermediate = self.config.intermediate_size;
 
-        // Embedding lookup.
+        // Embedding → GPU tensor, stays resident through the layer loop.
         let id = token_id as usize;
-        let mut x: Vec<f32> = if id < self.config.vocab_size {
+        let x_host: Vec<f32> = if id < self.config.vocab_size {
             self.token_embed[id * hidden..(id + 1) * hidden].to_vec()
         } else {
             vec![0.0; hidden]
         };
+        let mut x_t = Tensor::from_vec(x_host, &[1, hidden])
+            .expect("embed tensor")
+            .to_device(self.compute_device.clone())
+            .expect("move embed");
+
+        // Lazy-allocate GPU KV cache on first call.
+        #[cfg(feature = "cuda")]
+        {
+            let cap = self.config.max_seq_len.min(4096);
+            if kv_cache.gpu.is_none() && self.compute_device.is_gpu() {
+                if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                    kv_cache.gpu = GpuKvCache::try_new(
+                        cuda, self.config.num_layers, n_kv_heads, head_dim, cap,
+                    );
+                }
+            }
+        }
 
         for (li, layer) in layers.iter().enumerate() {
-            // --- Attention --------------------------------------------
-            let normed_attn = rms_norm_single(&x, &layer.attn_norm, eps);
-            let normed_attn_t = Tensor::from_vec(normed_attn, &[1, hidden])
-                .expect("normed_attn tensor")
+            // Upload per-layer norm weights. Each is `[hidden]` (8 KB) —
+            // negligible H2D cost relative to the matmul bandwidth.
+            let attn_norm_gpu = Tensor::from_vec(layer.attn_norm.clone(), &[hidden])
+                .expect("attn_norm")
                 .to_device(self.compute_device.clone())
-                .expect("move normed_attn");
+                .expect("move attn_norm");
+            let attn_q_norm_gpu = Tensor::from_vec(layer.attn_q_norm.clone(), &[hidden])
+                .expect("attn_q_norm")
+                .to_device(self.compute_device.clone())
+                .expect("move attn_q_norm");
+            let attn_k_norm_gpu = Tensor::from_vec(layer.attn_k_norm.clone(), &[hidden])
+                .expect("attn_k_norm")
+                .to_device(self.compute_device.clone())
+                .expect("move attn_k_norm");
+            let ffn_norm_gpu = Tensor::from_vec(layer.ffn_norm.clone(), &[hidden])
+                .expect("ffn_norm")
+                .to_device(self.compute_device.clone())
+                .expect("move ffn_norm");
 
-            let mut q = layer.q_weight.matmul(&normed_attn_t).to_vec();
-            let mut k = layer.k_weight.matmul(&normed_attn_t).to_vec();
-            let v = layer.v_weight.matmul(&normed_attn_t).to_vec();
+            // --- Attention (GPU-resident) -----------------------------
+            let normed_attn_t = x_t.rms_norm(&attn_norm_gpu, eps);
+            let q_t = layer.q_weight.matmul(&normed_attn_t);
+            let k_t = layer.k_weight.matmul(&normed_attn_t);
+            let v_t = layer.v_weight.matmul(&normed_attn_t);
 
-            // OLMoE Q/K norm is over the whole hidden/kv_dim vector,
-            // NOT per-head (HF uses `OlmoeRMSNorm(hidden_size)`). The
-            // weight tensors are `[hidden]` even though attention is
-            // multi-head.
-            q = rms_norm_single(&q, &layer.attn_q_norm, eps);
-            k = rms_norm_single(&k, &layer.attn_k_norm, eps);
+            // OLMoE Q/K norm normalizes over the WHOLE hidden vector
+            // (not per-head); shape `[hidden]`. rms_norm handles it.
+            let q_t = q_t.rms_norm(&attn_q_norm_gpu, eps);
+            let k_t = k_t.rms_norm(&attn_k_norm_gpu, eps);
 
-            apply_rope_single(&mut q, n_heads, head_dim, theta, pos);
-            apply_rope_single(&mut k, n_kv_heads, head_dim, theta, pos);
+            let q_t = q_t.apply_rope_split_halves(n_heads, head_dim, theta, pos);
+            let k_t = k_t.apply_rope_split_halves(n_kv_heads, head_dim, theta, pos);
 
-            kv_cache.k_cache[li].extend_from_slice(&k);
-            kv_cache.v_cache[li].extend_from_slice(&v);
             let kv_len = kv_cache.len + 1;
+            let attn_t: Tensor<f32> = {
+                #[cfg(feature = "cuda")]
+                {
+                    let cuda_opt = axonml_core::backends::cuda::get_cuda_backend();
+                    let gpu_ok = if let (Some(g), Some(cuda)) =
+                        (kv_cache.gpu.as_mut(), cuda_opt)
+                    {
+                        let k_guard = k_t.as_cuda_slice_read();
+                        let v_guard = v_t.as_cuda_slice_read();
+                        let appended = g.append_row_device(
+                            cuda, li, pos, k_guard.slice(), v_guard.slice(),
+                        );
+                        drop(k_guard);
+                        drop(v_guard);
+                        appended
+                    } else {
+                        false
+                    };
+                    if gpu_ok {
+                        let (cuda, gpu) = (
+                            axonml_core::backends::cuda::get_cuda_backend().unwrap(),
+                            kv_cache.gpu.as_ref().unwrap(),
+                        );
+                        let q_guard = q_t.as_cuda_slice_read();
+                        let t = try_gpu_attn_resident_gpu(
+                            cuda, q_guard.slice(), gpu, li, kv_len,
+                            n_heads, n_kv_heads, head_dim, 0,
+                        )
+                        .expect("GPU-resident attention failed");
+                        drop(q_guard);
+                        t
+                    } else {
+                        let q = q_t.to_vec();
+                        let k = k_t.to_vec();
+                        let v = v_t.to_vec();
+                        kv_cache.k_cache[li].extend_from_slice(&k);
+                        kv_cache.v_cache[li].extend_from_slice(&v);
+                        let attn = single_query_attention(
+                            &q, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                            kv_len, n_heads, n_kv_heads, head_dim,
+                        );
+                        Tensor::from_vec(attn, &[1, n_heads * head_dim])
+                            .expect("attn tensor")
+                            .to_device(self.compute_device.clone())
+                            .expect("move attn")
+                    }
+                }
+                #[cfg(not(feature = "cuda"))]
+                {
+                    let q = q_t.to_vec();
+                    let k = k_t.to_vec();
+                    let v = v_t.to_vec();
+                    kv_cache.k_cache[li].extend_from_slice(&k);
+                    kv_cache.v_cache[li].extend_from_slice(&v);
+                    let attn = single_query_attention(
+                        &q, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                        kv_len, n_heads, n_kv_heads, head_dim,
+                    );
+                    Tensor::from_vec(attn, &[1, n_heads * head_dim])
+                        .expect("attn tensor")
+                }
+            };
 
-            let attn = single_query_attention(
-                &q,
-                &kv_cache.k_cache[li],
-                &kv_cache.v_cache[li],
-                kv_len,
-                n_heads,
-                n_kv_heads,
-                head_dim,
-            );
-
-            let attn_t = Tensor::from_vec(attn, &[1, q_dim])
-                .expect("attn tensor")
-                .to_device(self.compute_device.clone())
-                .expect("move attn");
-            let attn_proj = layer.o_weight.matmul(&attn_t).to_vec();
-
-            for d in 0..hidden {
-                x[d] += attn_proj[d];
-            }
+            let attn_proj_t = layer.o_weight.matmul(&attn_t);
+            x_t = x_t.add(&attn_proj_t).expect("attn residual");
 
             // --- MoE FFN ----------------------------------------------
-            let normed_ffn = rms_norm_single(&x, &layer.ffn_norm, eps);
+            let normed_ffn_t = x_t.rms_norm(&ffn_norm_gpu, eps);
 
-            // Router: router_logits[e] = Σ_i ffn_gate_inp[e, i] · normed_ffn[i]
-            // ffn_gate_inp GGUF dims [hidden, n_experts] → PyTorch
-            // [out=n_experts, in=hidden], flat index e*hidden + i.
+            // Router runs CPU-side. Pull normed_ffn once per layer
+            // (hidden f32 ≈ 8 KB D2H) to compute n_experts × hidden
+            // dot products — tiny compared to per-expert matmuls.
+            let normed_ffn_host = normed_ffn_t.to_vec();
             let mut router_logits = vec![0.0f32; n_experts];
             for e in 0..n_experts {
                 let row = e * hidden;
                 let mut acc = 0.0f32;
                 for i in 0..hidden {
-                    acc += layer.ffn_gate_inp[row + i] * normed_ffn[i];
+                    acc += layer.ffn_gate_inp[row + i] * normed_ffn_host[i];
                 }
                 router_logits[e] = acc;
             }
+            drop(normed_ffn_host);
 
-            // Top-k expert selection. For small top_k (typically 8), an
-            // O(n_experts · top_k) partial-sort is fine.
+            // Top-k expert selection.
             let mut top_k_idx: Vec<usize> = Vec::with_capacity(top_k);
             let mut top_k_logits: Vec<f32> = Vec::with_capacity(top_k);
             for e in 0..n_experts {
@@ -3024,11 +3094,8 @@ impl InferenceEngine {
                 }
             }
 
-            // Sparse softmax over the selected top-k logits.
-            let max_l = top_k_logits
-                .iter()
-                .copied()
-                .fold(f32::NEG_INFINITY, f32::max);
+            // Sparse softmax over top-k only.
+            let max_l = top_k_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
             let mut sum = 0.0f32;
             for v in top_k_logits.iter_mut() {
                 *v = (*v - max_l).exp();
@@ -3038,44 +3105,32 @@ impl InferenceEngine {
                 *v /= sum;
             }
 
-            let normed_ffn_t = Tensor::from_vec(normed_ffn, &[1, hidden])
-                .expect("normed_ffn tensor")
-                .to_device(self.compute_device.clone())
-                .expect("move normed_ffn");
-
-            let mut moe_out = vec![0.0f32; hidden];
+            // Per-expert SwiGLU → down → weighted accumulate, all GPU.
+            let mut moe_out_t: Option<Tensor<f32>> = None;
             for (idx, &e) in top_k_idx.iter().enumerate() {
                 let w_e = top_k_logits[idx];
-                let gate = layer.gate_exps[e].matmul(&normed_ffn_t).to_vec();
-                let up = layer.up_exps[e].matmul(&normed_ffn_t).to_vec();
-                debug_assert_eq!(gate.len(), intermediate);
-                debug_assert_eq!(up.len(), intermediate);
-
-                let mut mid = vec![0.0f32; intermediate];
-                for j in 0..intermediate {
-                    mid[j] = gate[j] * sigmoid(gate[j]) * up[j];
-                }
-                let mid_t = Tensor::from_vec(mid, &[1, intermediate])
-                    .expect("mid tensor")
-                    .to_device(self.compute_device.clone())
-                    .expect("move mid");
-                let contrib = layer.down_exps[e].matmul(&mid_t).to_vec();
-                for d in 0..hidden {
-                    moe_out[d] += w_e * contrib[d];
-                }
+                let gate = layer.gate_exps[e].matmul(&normed_ffn_t);
+                let up = layer.up_exps[e].matmul(&normed_ffn_t);
+                let mid = gate.swiglu(&up);
+                let contrib = layer.down_exps[e].matmul(&mid);
+                let weighted = contrib.mul_scalar(w_e);
+                moe_out_t = Some(match moe_out_t.take() {
+                    None => weighted,
+                    Some(acc) => acc.add(&weighted).expect("moe accumulate"),
+                });
             }
-            for d in 0..hidden {
-                x[d] += moe_out[d];
+            if let Some(moe) = moe_out_t {
+                x_t = x_t.add(&moe).expect("moe residual");
             }
-            let _ = kv_dim;
         }
 
-        let final_norm = rms_norm_single(&x, &self.output_norm, eps);
-        let norm_t = Tensor::from_vec(final_norm, &[1, hidden])
-            .expect("final norm tensor")
+        // Final norm + LM head.
+        let output_norm_gpu = Tensor::from_vec(self.output_norm.clone(), &[hidden])
+            .expect("output_norm")
             .to_device(self.compute_device.clone())
-            .expect("move final norm");
-        let logits = self.lm_head.matmul(&norm_t);
+            .expect("move output_norm");
+        let final_norm = x_t.rms_norm(&output_norm_gpu, eps);
+        let logits = self.lm_head.matmul(&final_norm);
         kv_cache.len += 1;
         logits.to_vec()
     }
