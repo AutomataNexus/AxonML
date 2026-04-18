@@ -973,6 +973,156 @@ pub fn fused_gate_up_q4k_matmul_gpu(
     Some((gate_t, up_t))
 }
 
+/// Fused Q4_K matmul + residual add: returns `x_in + matmul(input, weight)`
+/// as a new tensor. One kernel launch instead of the matmul/add pair, no
+/// intermediate projection buffer in HBM. Used by the decode layer for
+/// both O-proj (post-attention residual) and down-proj (post-FFN residual).
+///
+/// Returns `None` if any precondition is unmet (weight not Q4_K, dims
+/// mismatch, CPU input, no CUDA) — caller falls back to the standard
+/// matmul + Tensor::add path.
+#[cfg(feature = "cuda")]
+pub fn residual_q4k_matmul_gpu(
+    weight: &Weight,
+    input: &Tensor<f32>,
+    x_in: &Tensor<f32>,
+) -> Option<Tensor<f32>> {
+    use axonml_core::backends::cuda::get_cuda_backend;
+    use axonml_core::storage::Storage;
+
+    if !input.device().is_gpu() || !x_in.device().is_gpu() {
+        return None;
+    }
+    let cuda = get_cuda_backend()?;
+
+    let (w_data, w_dims) = q4k_quantized_bytes(weight)?;
+    let in_dim = w_dims[0];
+    let out_dim = w_dims[1];
+    if in_dim % 256 != 0 {
+        return None;
+    }
+    if x_in.numel() != out_dim {
+        return None;
+    }
+
+    let w_gpu = match weight {
+        Weight::Quantized { gpu_cache, .. } => gpu_cache.get_or_init(|| {
+            cuda.htod_copy(w_data.as_slice())
+                .expect("residual q4k: weight gpu_cache htod_copy failed")
+        }),
+        _ => return None,
+    };
+
+    use axonml_core::backends::cuda_pool::pool_alloc_uninit;
+    let in_guard = input.as_cuda_slice_read();
+    let x_guard = x_in.as_cuda_slice_read();
+    let mut out_buf = pool_alloc_uninit(out_dim).ok()?;
+
+    cuda.q4k_gemv_residual_f32(
+        w_gpu,
+        in_guard.slice(),
+        x_guard.slice(),
+        &mut out_buf,
+        out_dim,
+        in_dim,
+    )
+    .ok()?;
+    drop(in_guard);
+    drop(x_guard);
+
+    static FIRED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !FIRED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!(
+            "[perf] fused Q4_K matmul+residual kernel FIRED (first time) \
+             in={in_dim} out={out_dim}"
+        );
+    }
+
+    let dev = input.device();
+    Tensor::from_storage(
+        Storage::from_cuda_slice(out_buf, out_dim, dev),
+        &[1, out_dim],
+    )
+    .ok()
+}
+
+/// Fused Q4_K gate/up matmul + SwiGLU: returns `silu(gate · input) * (up · input)`
+/// as a [1, inter] tensor. One launch, no gate_c/up_c intermediates.
+///
+/// Returns `None` on any shape/dtype mismatch or CPU input — caller falls
+/// back to the separate gate/up matmul + swiglu kernel path.
+#[cfg(feature = "cuda")]
+pub fn fused_gate_up_swiglu_q4k_matmul_gpu(
+    gate_weight: &Weight,
+    up_weight: &Weight,
+    input: &Tensor<f32>,
+) -> Option<Tensor<f32>> {
+    use axonml_core::backends::cuda::get_cuda_backend;
+    use axonml_core::storage::Storage;
+
+    if !input.device().is_gpu() {
+        return None;
+    }
+    let cuda = get_cuda_backend()?;
+
+    let (gate_data, gate_dims) = q4k_quantized_bytes(gate_weight)?;
+    let (up_data, up_dims) = q4k_quantized_bytes(up_weight)?;
+
+    let in_dim = gate_dims[0];
+    if up_dims[0] != in_dim || gate_dims[1] != up_dims[1] || in_dim % 256 != 0 {
+        return None;
+    }
+    let inter = gate_dims[1];
+
+    let (gate_gpu, up_gpu) = match (gate_weight, up_weight) {
+        (
+            Weight::Quantized { gpu_cache: gc, .. },
+            Weight::Quantized { gpu_cache: uc, .. },
+        ) => {
+            let gg = gc.get_or_init(|| {
+                cuda.htod_copy(gate_data.as_slice())
+                    .expect("fused gate/up+swiglu: gate gpu_cache htod_copy failed")
+            });
+            let ug = uc.get_or_init(|| {
+                cuda.htod_copy(up_data.as_slice())
+                    .expect("fused gate/up+swiglu: up gpu_cache htod_copy failed")
+            });
+            (gg, ug)
+        }
+        _ => return None,
+    };
+
+    use axonml_core::backends::cuda_pool::pool_alloc_uninit;
+    let in_guard = input.as_cuda_slice_read();
+    let mut ffn_buf = pool_alloc_uninit(inter).ok()?;
+
+    cuda.q4k_gemv_fused_gate_up_swiglu_f32(
+        gate_gpu,
+        up_gpu,
+        in_guard.slice(),
+        &mut ffn_buf,
+        inter,
+        in_dim,
+    )
+    .ok()?;
+    drop(in_guard);
+
+    static FIRED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !FIRED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!(
+            "[perf] fused Q4_K gate/up+SwiGLU kernel FIRED (first time) \
+             in={in_dim} inter={inter}"
+        );
+    }
+
+    let dev = input.device();
+    Tensor::from_storage(
+        Storage::from_cuda_slice(ffn_buf, inter, dev),
+        &[1, inter],
+    )
+    .ok()
+}
+
 /// Helper — extract the `(data bytes, dims)` from a `Weight::Quantized` if
 /// it's Q4_K. Returns `None` for every other variant / dtype.
 #[cfg(feature = "cuda")]

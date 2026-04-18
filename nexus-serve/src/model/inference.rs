@@ -2206,32 +2206,68 @@ impl InferenceEngine {
                 attn = attn.rms_norm(sub, eps);
             }
 
-            let attn_proj = layer.o_weight.matmul(&attn);
-            x = x.add(&attn_proj).expect("residual add (attn)");
+            // O-proj + residual fused when the attn sub-norm isn't present
+            // (BitNet has one; qwen/llama don't). The fused kernel writes
+            // `x[j] + o_proj[j]` in one launch, saving a matmul-output
+            // HBM round trip.
+            x = match crate::model::weight::residual_q4k_matmul_gpu(
+                &layer.o_weight, &attn, &x,
+            ) {
+                Some(t) => t,
+                None => {
+                    let attn_proj = layer.o_weight.matmul(&attn);
+                    x.add(&attn_proj).expect("residual add (attn)")
+                }
+            };
 
             // ----- FFN sub-layer ---------------------------------------------
             let normed2 = x.rms_norm(&lc.ffn_norm, eps);
-            let (gate, up) = match crate::model::weight::fused_gate_up_q4k_matmul_gpu(
-                &layer.gate_weight, &layer.up_weight, &normed2,
-            ) {
-                Some(pair) => pair,
-                None => (
-                    layer.gate_weight.matmul(&normed2),
-                    layer.up_weight.matmul(&normed2),
-                ),
+
+            // Fused gate/up + SwiGLU: one kernel writes ffn[j] directly.
+            // Only applies when the FFN sub-norm isn't needed (non-BitNet)
+            // and no ReLU² gate (BitNet uses relu2, not SwiGLU).
+            let fused_ffn = if !is_bitnet && lc.ffn_sub_norm.is_none() {
+                crate::model::weight::fused_gate_up_swiglu_q4k_matmul_gpu(
+                    &layer.gate_weight, &layer.up_weight, &normed2,
+                )
+            } else {
+                None
             };
 
-            let mut ffn = if is_bitnet { gate.relu2_gate(&up) } else { gate.swiglu(&up) };
-            if let Some(sub) = &lc.ffn_sub_norm {
-                ffn = ffn.rms_norm(sub, eps);
-            }
+            let ffn = match fused_ffn {
+                Some(t) => t,
+                None => {
+                    let (gate, up) = match crate::model::weight::fused_gate_up_q4k_matmul_gpu(
+                        &layer.gate_weight, &layer.up_weight, &normed2,
+                    ) {
+                        Some(pair) => pair,
+                        None => (
+                            layer.gate_weight.matmul(&normed2),
+                            layer.up_weight.matmul(&normed2),
+                        ),
+                    };
+                    let mut ffn = if is_bitnet { gate.relu2_gate(&up) } else { gate.swiglu(&up) };
+                    if let Some(sub) = &lc.ffn_sub_norm {
+                        ffn = ffn.rms_norm(sub, eps);
+                    }
+                    ffn
+                }
+            };
 
             // Sanity: the ffn tensor should be [1, inter_size]. The matmul
             // above produced that shape; the elementwise ops preserve it.
             debug_assert_eq!(ffn.numel(), inter_size);
 
-            let ffn_out = layer.down_weight.matmul(&ffn);
-            x = x.add(&ffn_out).expect("residual add (ffn)");
+            // Down-proj + residual fused.
+            x = match crate::model::weight::residual_q4k_matmul_gpu(
+                &layer.down_weight, &ffn, &x,
+            ) {
+                Some(t) => t,
+                None => {
+                    let ffn_out = layer.down_weight.matmul(&ffn);
+                    x.add(&ffn_out).expect("residual add (ffn)")
+                }
+            };
         }
 
         kv_cache.len += 1;
