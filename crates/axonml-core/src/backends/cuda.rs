@@ -1422,6 +1422,62 @@ impl CudaBackend {
         }
     }
 
+    /// Q8_0 GEMV — same v2 two-warp-per-row layout as Q5_0. 34-byte block
+    /// (f16 scale + 32 signed int8 quants). Primary consumer: Falcon-7B's
+    /// Q8_0 LM head (4544 × 65024), which otherwise falls through to
+    /// `cpu_dequant_matmul` on every decode token.
+    pub fn q8_0_gemv_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 32 == 0, "Q8_0 GEMV requires in_dim % 32 == 0");
+        let func = self.kernels.get("q8_0_gemv_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q8_0_gemv_f32".to_string()))?;
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream.launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&(out_dim as u32)).arg(&(in_dim as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Q8_0 GEMM (m > 1 prefill). Naive one-thread-per-output.
+    pub fn q8_0_gemm_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        m_dim: usize,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 32 == 0, "Q8_0 GEMM requires in_dim % 32 == 0");
+        let func = self.kernels.get("q8_0_gemm_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q8_0_gemm_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(m_dim * out_dim);
+        unsafe {
+            self.stream.launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&(m_dim as u32)).arg(&(out_dim as u32)).arg(&(in_dim as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// Q6_K GEMV: one WARP per output row, lanes cooperate on each block.
     /// See `q6k_matmul.cu`.
     pub fn q6k_gemv_f32(

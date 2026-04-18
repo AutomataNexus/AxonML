@@ -3595,6 +3595,14 @@ pub const Q5K_MATMUL_PTX: &str = include_str!("q5k_matmul.ptx");
 /// which fell through to `cpu_dequant_matmul` before this kernel existed.
 pub const Q5_01_MATMUL_PTX: &str = include_str!("q5_01_matmul.ptx");
 
+/// Q8_0 quantized matmul (dequant-in-shader).
+///
+/// Compiled from `q8_0_matmul.cu`. 34-byte block: f16 scale + 32 signed
+/// int8 quants. Two warps per output row, same v2 layout as Q5_0. Primary
+/// consumer: Falcon-7B's Q8_0 LM head (4544 × 65024), which otherwise
+/// falls through to `cpu_dequant_matmul` on every decode token.
+pub const Q8_0_MATMUL_PTX: &str = include_str!("q8_0_matmul.ptx");
+
 /// Q6_K quantized matmul (dequant-in-shader).
 ///
 /// Compiled from `q6k_matmul.cu`. Same shape contract as Q4_K but with
@@ -3820,6 +3828,13 @@ impl CudaKernels {
             "q5_01_matmul",
             Q5_01_MATMUL_PTX,
             &["q5_0_gemv_f32", "q5_0_gemm_f32", "q5_1_gemv_f32", "q5_1_gemm_f32"],
+        )?;
+
+        // Q8_0 dequant-in-shader matmul — Falcon-7B LM head.
+        kernels.load_module(
+            "q8_0_matmul",
+            Q8_0_MATMUL_PTX,
+            &["q8_0_gemv_f32", "q8_0_gemm_f32"],
         )?;
 
         // Q6_K dequant-in-shader matmul — LM head + higher-precision weights.
