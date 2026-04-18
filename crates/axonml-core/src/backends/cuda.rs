@@ -1168,6 +1168,84 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Q5_K GEMV: `c = a @ B^T` with B stored on-device as Q5_K super-blocks
+    /// (176 bytes per 256-element block). Same warp-cooperative layout as
+    /// Q6_K — one warp per output row, 32 lanes handle 8 weights each per
+    /// block. See `q5k_matmul.cu`.
+    pub fn q5k_gemv_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "Q5_K GEMV requires in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q5k_gemv_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q5k_gemv_f32".to_string()))?;
+
+        const WARPS_PER_CTA: u32 = 4;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((out_dim as u32) + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Q5_K GEMM: `c = a @ B^T` where a is `[m, in]` f32 and B is Q5_K
+    /// `[out, in]`. One thread per output element — naive but correct;
+    /// the GEMV path (m=1) above is the hot decode case. See
+    /// `q5k_matmul.cu`.
+    pub fn q5k_gemm_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        m_dim: usize,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "Q5_K GEMM requires in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q5k_gemm_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q5k_gemm_f32".to_string()))?;
+
+        let total = m_dim * out_dim;
+        let cfg = cuda_kernels::launch_config(total);
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(m_dim as u32))
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Q6_K GEMV: one WARP per output row, lanes cooperate on each block.
     /// See `q6k_matmul.cu`.
     pub fn q6k_gemv_f32(

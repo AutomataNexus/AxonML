@@ -3576,6 +3576,15 @@ pub const ATTENTION_PTX: &str = include_str!("attention.ptx");
 /// can't fit f32 weights in 12 GB VRAM.
 pub const Q4K_MATMUL_PTX: &str = include_str!("q4k_matmul.ptx");
 
+/// Q5_K quantized matmul (dequant-in-shader).
+///
+/// Compiled from `q5k_matmul.cu`. Same shape contract as Q4_K but with
+/// the 176-byte Q5_K super-block layout (adds 32 bytes of qh — one high
+/// bit per 5-bit weight — between Q4_K's packed scales and qs nibbles).
+/// Unlocks Phi-3-mini Q4_K_M at GPU-native decode speed by removing the
+/// eager Q5_K → F32 dequant fallback on `attn_qkv`.
+pub const Q5K_MATMUL_PTX: &str = include_str!("q5k_matmul.ptx");
+
 /// Q6_K quantized matmul (dequant-in-shader).
 ///
 /// Compiled from `q6k_matmul.cu`. Same shape contract as Q4_K but with
@@ -3785,6 +3794,15 @@ impl CudaKernels {
                 // the separate swiglu kernel launch.
                 "q4k_gemv_fused_gate_up_swiglu_f32",
             ],
+        )?;
+
+        // Q5_K dequant-in-shader matmul — Phi-3's attn_qkv, Mistral
+        // Q5_K_M bodies, and any model that mixes Q5_K into otherwise
+        // Q4_K_M weights.
+        kernels.load_module(
+            "q5k_matmul",
+            Q5K_MATMUL_PTX,
+            &["q5k_gemv_f32", "q5k_gemm_f32"],
         )?;
 
         // Q6_K dequant-in-shader matmul — LM head + higher-precision weights.
