@@ -52,7 +52,7 @@ use std::time::Instant;
 use axonml_autograd::no_grad::NoGradGuard;
 use axonml_autograd::Variable;
 use axonml_core::Device;
-use axonml_llm::{Qwen3Config, Qwen3ForCausalLM};
+use axonml_llm::{load_qwen3_from_gguf, Qwen3Config, Qwen3ForCausalLM};
 use axonml_nn::{KLDivLoss, Module, Reduction};
 use axonml_optim::{AdamW, Optimizer};
 use axonml_serialize::TrainingState;
@@ -110,6 +110,12 @@ struct Config {
     resume: ResumeMode,
     /// Use `Qwen3Config::tiny` for smoke runs; `0.6B` / `1.7B` for real.
     arch_preset: String,
+    /// Optional path to a Qwen3-family GGUF. When set, the teacher is
+    /// loaded from this file instead of fresh-initialized — graduating
+    /// the trainer from pipeline smoke to useful-draft distillation.
+    /// Teacher's vocab_size is propagated to the student so the KL head
+    /// has shape-aligned logit distributions.
+    teacher_gguf: Option<PathBuf>,
 }
 
 impl Config {
@@ -141,6 +147,7 @@ impl Config {
             seed: 42,
             resume: ResumeMode::None,
             arch_preset: "tiny".to_string(),
+            teacher_gguf: None,
         };
 
         let mut i = 0;
@@ -179,6 +186,7 @@ impl Config {
                     i += 2;
                 }
                 "--arch" => { cfg.arch_preset = next(i).clone(); i += 2; }
+                "--teacher-gguf" => { cfg.teacher_gguf = Some(PathBuf::from(next(i))); i += 2; }
                 other => {
                     eprintln!("Unknown flag: {other}");
                     print_help();
@@ -217,6 +225,9 @@ fn print_help() {
     eprintln!();
     eprintln!("MODEL:");
     eprintln!("  --arch NAME           Qwen3 arch preset: tiny | 0.6b | 1.7b | 4b (default: tiny)");
+    eprintln!("  --teacher-gguf PATH   Load teacher from Qwen3 GGUF (pretrained).");
+    eprintln!("                        When set, student vocab_size is forced to match teacher's.");
+    eprintln!("                        Without this, teacher is fresh-init (pipeline smoke only).");
     eprintln!();
     eprintln!("CHECKPOINTING:");
     eprintln!("  --checkpoint-every-steps N  (default: {DEFAULT_CHECKPOINT_EVERY})");
@@ -374,12 +385,69 @@ fn main() {
     println!("Windows: {}", format_count(dataset.len()));
     println!();
 
-    // ---- Build student + teacher from the same preset ----
-    let model_cfg = qwen3_preset(&cfg.arch_preset, vocab_size, cfg.seq_len);
+    // ---- Build teacher first — its vocab_size drives the student's.  ----
+    let (teacher, teacher_cfg_opt): (Qwen3ForCausalLM, Option<Qwen3Config>) =
+        if let Some(ref gguf_path) = cfg.teacher_gguf {
+            println!("Teacher: loading pretrained GGUF from {}", gguf_path.display());
+            let t0 = Instant::now();
+            let (t, tcfg) = load_qwen3_from_gguf(gguf_path).unwrap_or_else(|e| {
+                eprintln!("Failed to load teacher GGUF: {e}");
+                std::process::exit(1);
+            });
+            let dt = t0.elapsed();
+            println!(
+                "         ✓ loaded in {:.1}s — vocab={}, hidden={}, layers={}, heads={}x{}, head_dim={}, tie={}",
+                dt.as_secs_f32(),
+                tcfg.vocab_size,
+                tcfg.hidden_size,
+                tcfg.num_hidden_layers,
+                tcfg.num_attention_heads,
+                tcfg.num_key_value_heads,
+                tcfg.head_dim,
+                tcfg.tie_word_embeddings,
+            );
+            if tcfg.vocab_size != vocab_size {
+                println!(
+                    "  ⚠  student's CharTokenizer vocab ({}) ≠ teacher's vocab ({}).",
+                    vocab_size, tcfg.vocab_size
+                );
+                println!(
+                    "     KL head will use teacher's vocab; student's embed/LM head will be rebuilt at that size."
+                );
+                println!(
+                    "     Until the Qwen BPE tokenizer lands, the teacher's distribution over char IDs"
+                );
+                println!(
+                    "     is mostly noise — this remains a pipeline smoke until dataset prep is done."
+                );
+            }
+            (t, Some(tcfg))
+        } else {
+            println!("Teacher: fresh Qwen3 (no --teacher-gguf → pipeline smoke only).");
+            println!(
+                "         Pass --teacher-gguf PATH to load a pretrained teacher and train a useful draft."
+            );
+            let fresh_cfg = qwen3_preset(&cfg.arch_preset, vocab_size, cfg.seq_len);
+            (Qwen3ForCausalLM::new(&fresh_cfg), None)
+        };
+
+    // ---- Build student with matched vocab_size (required for KL alignment) ----
+    // If the teacher is GGUF-loaded, the student inherits vocab_size + head_dim +
+    // rope_theta + rms_norm_eps from the teacher (these MUST match for KL at the
+    // logit-distribution level). Other dimensions (hidden, intermediate, layers,
+    // head counts) follow the student's --arch preset — that's what makes this a
+    // distillation and not a weight-copy.
+    let student_vocab = teacher_cfg_opt
+        .as_ref()
+        .map(|tc| tc.vocab_size)
+        .unwrap_or(vocab_size);
+    let mut model_cfg = qwen3_preset(&cfg.arch_preset, student_vocab, cfg.seq_len);
+    if let Some(ref tc) = teacher_cfg_opt {
+        model_cfg.head_dim = tc.head_dim;
+        model_cfg.rope_theta = tc.rope_theta;
+        model_cfg.rms_norm_eps = tc.rms_norm_eps;
+    }
     let mut student = Qwen3ForCausalLM::new(&model_cfg);
-    // SMOKE-PHASE TEACHER: fresh Qwen3 with identical arch. Swap for a
-    // real pre-trained teacher (GGUF loader) to get a useful draft.
-    let teacher = Qwen3ForCausalLM::new(&model_cfg);
 
     let param_count: usize = student.parameters().iter().map(|p| p.data().numel()).sum();
 
@@ -393,10 +461,6 @@ fn main() {
         model_cfg.head_dim,
     );
     println!("  params    : {}", format_count(param_count));
-    println!("Teacher: identical Qwen3 arch (frozen, fresh init — pipeline smoke only).");
-    println!(
-        "          Swap for a real pre-trained teacher via GGUF loader to train a useful draft."
-    );
     println!();
 
     // ---- Resume from checkpoint if available ----
