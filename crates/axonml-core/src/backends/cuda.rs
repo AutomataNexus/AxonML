@@ -3094,10 +3094,11 @@ impl CudaBackend {
     /// every head `h`, where `weight` is a single `[head_dim]` vector
     /// broadcast across every head.
     ///
-    /// One warp per head. Operates in place on `x`.
+    /// One warp per head. `src` and `out` may alias for in-place normalize.
     pub fn rms_norm_heads_f32(
         &self,
-        x: &mut CudaSlice<f32>,
+        out: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
         weight: &CudaSlice<f32>,
         n_heads: usize,
         head_dim: usize,
@@ -3115,7 +3116,8 @@ impl CudaBackend {
         unsafe {
             self.stream
                 .launch_builder(func)
-                .arg(x)
+                .arg(src)
+                .arg(out)
                 .arg(weight)
                 .arg(&(head_dim as u32))
                 .arg(&eps)
@@ -3130,9 +3132,11 @@ impl CudaBackend {
     /// Each query/key vector is laid out as `[head][dim]` and rotated by
     /// pairing dimension `d` with `d + head_dim/2`. One thread per pair
     /// per head. Operates in place on `x`.
+    /// `src` and `out` may alias for in-place rotation.
     pub fn rope_split_halves_f32(
         &self,
-        x: &mut CudaSlice<f32>,
+        out: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
         n_heads: usize,
         head_dim: usize,
         theta: f32,
@@ -3154,7 +3158,8 @@ impl CudaBackend {
         unsafe {
             self.stream
                 .launch_builder(func)
-                .arg(x)
+                .arg(src)
+                .arg(out)
                 .arg(&(n_heads as u32))
                 .arg(&(head_dim as u32))
                 .arg(&theta)
@@ -3268,9 +3273,11 @@ impl CudaBackend {
 
     /// Batched per-head RMSNorm (Qwen3 QK-norm) over `m` tokens.
     /// In-place on x of shape [m, n_heads, head_dim] row-major.
+    /// `src`/`out` may alias for in-place normalize.
     pub fn rms_norm_heads_batched_f32(
         &self,
-        x: &mut CudaSlice<f32>,
+        out: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
         weight: &CudaSlice<f32>,
         m: usize,
         n_heads: usize,
@@ -3289,7 +3296,8 @@ impl CudaBackend {
         unsafe {
             self.stream
                 .launch_builder(func)
-                .arg(x)
+                .arg(src)
+                .arg(out)
                 .arg(weight)
                 .arg(&(n_heads as u32))
                 .arg(&(head_dim as u32))
@@ -3302,9 +3310,11 @@ impl CudaBackend {
 
     /// Batched split-halves RoPE. Rotates x[t, h, :] at position (pos_start + t)
     /// for t in [0, m). In-place on x of shape [m, n_heads, head_dim] row-major.
+    /// `src`/`out` may alias for in-place rotation.
     pub fn rope_split_halves_batched_f32(
         &self,
-        x: &mut CudaSlice<f32>,
+        out: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
         m: usize,
         n_heads: usize,
         head_dim: usize,
@@ -3327,7 +3337,8 @@ impl CudaBackend {
         unsafe {
             self.stream
                 .launch_builder(func)
-                .arg(x)
+                .arg(src)
+                .arg(out)
                 .arg(&(n_heads as u32))
                 .arg(&(head_dim as u32))
                 .arg(&theta)

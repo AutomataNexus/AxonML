@@ -102,8 +102,13 @@ extern "C" __global__ void rms_norm_f32(
 // One thread per (head, pair_index). Grid = (n_heads, head_dim/2, 1).
 // ============================================================================
 
+// `src` and `out` MAY alias for in-place rotation; each thread reads both
+// x[base] and x[base+half] from src BEFORE any write to out, so aliasing
+// is safe. Separate-pointer signature lets callers skip the broadcast_copy
+// prep pass (single kernel launch instead of copy+rotate).
 extern "C" __global__ void rope_split_halves_f32(
-    float* __restrict__ x,
+    const float* __restrict__ src,
+    float* __restrict__ out,
     uint32_t n_heads,
     uint32_t head_dim,
     float theta,
@@ -121,10 +126,10 @@ extern "C" __global__ void rope_split_halves_f32(
     sincosf(angle, &s, &c);
 
     const uint32_t base = head * head_dim + pair;
-    const float a = x[base];
-    const float b = x[base + half];
-    x[base]        = c * a - s * b;
-    x[base + half] = s * a + c * b;
+    const float a = src[base];
+    const float b = src[base + half];
+    out[base]        = c * a - s * b;
+    out[base + half] = s * a + c * b;
 }
 
 // ============================================================================
@@ -183,20 +188,24 @@ extern "C" __global__ void relu2_gate_f32(
 // Launch: grid = (n_heads, 1, 1), block = (32, 1, 1). One warp per head.
 // head_dim must be a multiple of 32 (Qwen3: head_dim = 128, so 4 elems/lane).
 // ============================================================================
+// `src` and `out` MAY alias (in-place normalize); the sum-of-squares
+// reduction completes before any write to out, so aliasing is safe.
 extern "C" __global__ void rms_norm_heads_f32(
-    float* __restrict__ x,
+    const float* __restrict__ src,
+    float* __restrict__ out,
     const float* __restrict__ weight,
     unsigned int head_dim,
     float eps
 ) {
     const unsigned int h    = blockIdx.x;
     const unsigned int lane = threadIdx.x;
-    float* x_head = x + (size_t)h * (size_t)head_dim;
+    const float* src_head = src + (size_t)h * (size_t)head_dim;
+    float*       out_head = out + (size_t)h * (size_t)head_dim;
 
     // Sum-of-squares, lane-strided over this head's head_dim elements.
     float local = 0.0f;
     for (unsigned int i = lane; i < head_dim; i += 32u) {
-        float v = x_head[i];
+        float v = src_head[i];
         local += v * v;
     }
 
@@ -209,7 +218,7 @@ extern "C" __global__ void rms_norm_heads_f32(
     float inv_rms = rsqrtf(local / (float)head_dim + eps);
 
     for (unsigned int i = lane; i < head_dim; i += 32u) {
-        x_head[i] = x_head[i] * inv_rms * weight[i];
+        out_head[i] = src_head[i] * inv_rms * weight[i];
     }
 }
 
@@ -279,9 +288,10 @@ extern "C" __global__ void rms_norm_batched_f32(
 
 // One warp per (head, token). Same structure as rms_norm_heads_f32 but the
 // (head, token) pair selects the slice inside a [m, n_heads, head_dim] tensor.
-// Launch: grid = (n_heads, m, 1), block = (32, 1, 1). In-place on x.
+// `src` and `out` MAY alias. Launch: grid = (n_heads, m, 1), block = (32, 1, 1).
 extern "C" __global__ void rms_norm_heads_batched_f32(
-    float* __restrict__ x,
+    const float* __restrict__ src,
+    float* __restrict__ out,
     const float* __restrict__ weight,
     unsigned int n_heads,
     unsigned int head_dim,
@@ -290,13 +300,14 @@ extern "C" __global__ void rms_norm_heads_batched_f32(
     const unsigned int h    = blockIdx.x;
     const unsigned int t    = blockIdx.y;
     const unsigned int lane = threadIdx.x;
-    float* x_head = x
-        + (size_t)t * (size_t)n_heads * (size_t)head_dim
-        + (size_t)h * (size_t)head_dim;
+    const size_t row_off = (size_t)t * (size_t)n_heads * (size_t)head_dim
+                         + (size_t)h * (size_t)head_dim;
+    const float* src_head = src + row_off;
+    float*       out_head = out + row_off;
 
     float local = 0.0f;
     for (unsigned int i = lane; i < head_dim; i += 32u) {
-        float v = x_head[i];
+        float v = src_head[i];
         local += v * v;
     }
 
@@ -308,7 +319,7 @@ extern "C" __global__ void rms_norm_heads_batched_f32(
     float inv_rms = rsqrtf(local / (float)head_dim + eps);
 
     for (unsigned int i = lane; i < head_dim; i += 32u) {
-        x_head[i] = x_head[i] * inv_rms * weight[i];
+        out_head[i] = src_head[i] * inv_rms * weight[i];
     }
 }
 
@@ -318,8 +329,10 @@ extern "C" __global__ void rms_norm_heads_batched_f32(
 // satisfy blockDim.x >= head_dim/2 at the user-level launcher — or set
 // gridDim.y = ceil_div(head_dim/2, blockDim.x) and compute the pair index
 // from both dims. The launcher uses the latter (mirrors rope_split_halves_f32).
+// Batched split-halves RoPE. `src`/`out` may alias.
 extern "C" __global__ void rope_split_halves_batched_f32(
-    float* __restrict__ x,
+    const float* __restrict__ src,
+    float* __restrict__ out,
     uint32_t n_heads,
     uint32_t head_dim,
     float theta,
@@ -341,10 +354,10 @@ extern "C" __global__ void rope_split_halves_batched_f32(
     const size_t base = (size_t)tok * row_stride
                       + (size_t)head * (size_t)head_dim
                       + (size_t)pair;
-    const float a = x[base];
-    const float b = x[base + half];
-    x[base]        = c * a - s * b;
-    x[base + half] = s * a + c * b;
+    const float a = src[base];
+    const float b = src[base + half];
+    out[base]        = c * a - s * b;
+    out[base + half] = s * a + c * b;
 }
 
 // Broadcast per-column bias across m rows of a [m, n] matrix.
