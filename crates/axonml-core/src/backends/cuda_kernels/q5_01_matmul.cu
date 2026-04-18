@@ -307,3 +307,81 @@ extern "C" __global__ void q5_1_gemm_f32(
     }
     c[tid] = sum;
 }
+
+// ============================================================================
+// Q5_1 fused QKV GEMV — one kernel computes Q, K, V projections from a
+// shared activation and three separate Q5_1 weight matrices in one grid.
+// Key win for Falcon-7B (MQA, n_kv_heads=1): K and V each have only 64
+// output rows — too small to fill the GPU in their own launches. The
+// fused grid combines the 4544-row Q with the two 64-row K/V into a
+// single launch of size ceil((q_out+k_out+v_out)/ROWS_PER_CTA).
+// ============================================================================
+extern "C" __global__ void q5_1_gemv_fused_qkv_f32(
+    const unsigned char* __restrict__ q_w,
+    const unsigned char* __restrict__ k_w,
+    const unsigned char* __restrict__ v_w,
+    const float* __restrict__ a,
+    float* __restrict__ q_c,
+    float* __restrict__ k_c,
+    float* __restrict__ v_c,
+    unsigned int q_out,
+    unsigned int k_out,
+    unsigned int v_out,
+    unsigned int in_dim
+) {
+    extern __shared__ float s_partial_q5_1_qkv[];
+
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int global_row   = blockIdx.x * rows_per_cta + row_in_cta;
+    const unsigned int total_out    = q_out + k_out + v_out;
+
+    const unsigned int n_blocks  = in_dim / Q5_BLOCK;
+    const unsigned int row_bytes = n_blocks * Q5_1_BYTES;
+
+    const unsigned char* w = (const unsigned char*)0;
+    float* c = (float*)0;
+    unsigned int j = 0u;
+    bool have_work = global_row < total_out;
+    if (have_work) {
+        if (global_row < q_out) {
+            w = q_w; c = q_c; j = global_row;
+        } else if (global_row < q_out + k_out) {
+            w = k_w; c = k_c; j = global_row - q_out;
+        } else {
+            w = v_w; c = v_c; j = global_row - q_out - k_out;
+        }
+    }
+
+    float sum = 0.0f;
+    if (have_work) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        for (unsigned int b = b_start; b < b_end; ++b) {
+            const unsigned char* block = row + (size_t)b * Q5_1_BYTES;
+            float wv = q5_1_weight(block, lane);
+            float av = a[b * Q5_BLOCK + lane];
+            sum += wv * av;
+        }
+    }
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1) {
+        sum += __shfl_xor_sync(0xffffffffu, sum, off);
+    }
+
+    if (lane == 0u) {
+        s_partial_q5_1_qkv[row_in_cta * 2u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (have_work && warp_in_row == 0u && lane == 0u) {
+        c[j] = s_partial_q5_1_qkv[row_in_cta * 2u]
+             + s_partial_q5_1_qkv[row_in_cta * 2u + 1u];
+    }
+}
