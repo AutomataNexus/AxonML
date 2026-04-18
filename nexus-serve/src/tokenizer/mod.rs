@@ -75,8 +75,20 @@ pub enum Tokenizer {
         id_to_token: Vec<String>,
         /// Token string → token ID
         token_to_id: HashMap<String, u32>,
-        /// BPE merge pairs (if available)
+        /// BPE merge pairs (GPT-2 / LLaMA-3 / Qwen tokenizer).
+        /// Empty for LLaMA-1/2 / Mistral / Phi-3-style tokenizers that
+        /// drive merges from `scores` instead.
         merges: Vec<(String, String)>,
+        /// Per-token scores (SentencePiece merge priorities). Populated
+        /// when the source GGUF provides `tokenizer.ggml.scores` — used
+        /// by the SentencePiece-BPE path when `merges` is empty.
+        scores: Vec<f32>,
+        /// When set, encode() prepends this token ID to every output.
+        /// Pulled from `tokenizer.ggml.bos_token_id` when
+        /// `tokenizer.ggml.add_bos_token = true` (LLaMA-1/2 / Mistral /
+        /// Phi-3 all use this; Qwen / LLaMA-3 leave it false and expect
+        /// BOS in the chat template).
+        bos_prepend: Option<u32>,
     },
     /// Simple character-level fallback for AxonML-trained models.
     CharLevel {
@@ -147,10 +159,44 @@ impl Tokenizer {
             })
             .unwrap_or_default();
 
+        // Load scores if available (SentencePiece-style LLaMA-1/2/Mistral/Phi-3).
+        let scores: Vec<f32> = gguf
+            .get_meta("tokenizer.ggml.scores")
+            .and_then(|v| match v {
+                GgufValue::Array(arr) => Some(
+                    arr.iter()
+                        .map(|v| match v {
+                            GgufValue::F32(f) => *f,
+                            GgufValue::F64(f) => *f as f32,
+                            _ => 0.0,
+                        })
+                        .collect::<Vec<f32>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        // Determine whether the model wants BOS auto-prepended at
+        // encode time (LLaMA-1/2 / Mistral / Phi-3). GGUF spec convention:
+        // `tokenizer.ggml.add_bos_token` (bool) + `tokenizer.ggml.bos_token_id`.
+        let add_bos = gguf
+            .get_meta("tokenizer.ggml.add_bos_token")
+            .and_then(|v| match v {
+                GgufValue::Bool(b) => Some(*b),
+                _ => None,
+            })
+            .unwrap_or(false);
+        let bos_id = gguf
+            .get_meta("tokenizer.ggml.bos_token_id")
+            .and_then(|v| v.as_u32());
+        let bos_prepend = if add_bos { bos_id } else { None };
+
         Some(Self::GgufBpe {
             id_to_token: token_strings,
             token_to_id,
             merges,
+            scores,
+            bos_prepend,
         })
     }
 
@@ -184,7 +230,8 @@ impl Tokenizer {
                 token_to_id,
                 merges,
                 id_to_token,
-                ..
+                scores,
+                bos_prepend,
             } => {
                 // Special tokens (`<|begin_of_text|>`, `<|eot_id|>`, etc.)
                 // must be matched exactly BEFORE byte-level BPE runs. If
@@ -196,6 +243,18 @@ impl Tokenizer {
                 // interleave the special-token IDs.
                 let specials = collect_special_tokens(token_to_id);
                 let mut out: Vec<u32> = Vec::new();
+                // Auto-prepend BOS when the GGUF declared it needed (Phi-3,
+                // LLaMA-1/2, Mistral). Skip if the user already started
+                // their prompt with a special token that IS the BOS (their
+                // chat template may have emitted it explicitly).
+                if let Some(bos) = bos_prepend {
+                    let text_starts_with_bos = specials.iter().any(|(s, id)| {
+                        *id == *bos && text.starts_with(s.as_str())
+                    });
+                    if !text_starts_with_bos {
+                        out.push(*bos);
+                    }
+                }
                 for segment in split_on_specials(text, &specials) {
                     match segment {
                         Segment::Special(id) => out.push(id),
@@ -205,6 +264,11 @@ impl Tokenizer {
                             }
                             if !merges.is_empty() {
                                 out.extend(bpe_encode(s, token_to_id, merges, id_to_token));
+                            } else if !scores.is_empty() {
+                                // SentencePiece-BPE (LLaMA-1/2, Mistral,
+                                // Phi-3) — drive merges from per-token
+                                // scores instead of a merge-pair list.
+                                out.extend(spm_encode(s, token_to_id, scores));
                             } else {
                                 out.extend(greedy_encode(s, token_to_id));
                             }
@@ -301,11 +365,13 @@ impl Tokenizer {
     pub fn variant(&self) -> &'static str {
         match self {
             Self::HuggingFace(_) => "HuggingFace BPE",
-            Self::GgufBpe { merges, .. } => {
-                if merges.is_empty() {
-                    "GGUF vocab (greedy)"
-                } else {
+            Self::GgufBpe { merges, scores, .. } => {
+                if !merges.is_empty() {
                     "GGUF BPE"
+                } else if !scores.is_empty() {
+                    "GGUF SentencePiece-BPE"
+                } else {
+                    "GGUF vocab (greedy)"
                 }
             }
             Self::CharLevel { .. } => "char-level fallback",
@@ -412,6 +478,192 @@ fn greedy_encode(text: &str, token_to_id: &HashMap<String, u32>) -> Vec<u32> {
         }
     }
 
+    ids
+}
+
+/// SentencePiece-BPE encode using per-token scores as merge priorities.
+///
+/// Used when the GGUF vocab ships a `tokenizer.ggml.scores` array but no
+/// explicit `tokenizer.ggml.merges` list — that's LLaMA-1/2, Mistral, and
+/// Phi-3. Algorithm follows llama.cpp's `llm_tokenizer_spm`:
+///
+/// 1. Replace every ASCII space in the input with `▁` (U+2581) and
+///    prepend one `▁` (the SentencePiece convention that makes
+///    leading-space tokens match what the training pipeline saw).
+/// 2. Seed a doubly-linked list with one symbol per Unicode character.
+/// 3. Insert every adjacent-pair candidate `(left, right)` whose merged
+///    string is in the vocab into a max-heap keyed by the vocab score.
+/// 4. Repeatedly pop the highest-score merge, verify both endpoints are
+///    still live and adjacent, merge them in the linked list, and emit
+///    new candidate pairs on both sides.
+/// 5. Walk the linked list and look each surviving symbol up in the
+///    vocab; fall back to `<0xNN>` byte sentinels (which Phi-3 /
+///    LLaMA-1/2 vocabs include) for anything that didn't resolve.
+fn spm_encode(
+    text: &str,
+    token_to_id: &HashMap<String, u32>,
+    scores: &[f32],
+) -> Vec<u32> {
+    use std::collections::BinaryHeap;
+
+    // Step 1 — SentencePiece preprocessing.
+    let preprocessed: String = {
+        let mut s = String::with_capacity(text.len() + 3);
+        s.push('\u{2581}');
+        for c in text.chars() {
+            if c == ' ' {
+                s.push('\u{2581}');
+            } else {
+                s.push(c);
+            }
+        }
+        s
+    };
+
+    #[derive(Clone)]
+    struct Sym {
+        text: String,
+        prev: i32,
+        next: i32,
+        alive: bool,
+    }
+
+    let mut symbols: Vec<Sym> = preprocessed
+        .chars()
+        .enumerate()
+        .map(|(i, c)| {
+            let len = preprocessed.chars().count();
+            Sym {
+                text: c.to_string(),
+                prev: if i == 0 { -1 } else { i as i32 - 1 },
+                next: if i + 1 == len { -1 } else { i as i32 + 1 },
+                alive: true,
+            }
+        })
+        .collect();
+
+    if symbols.is_empty() {
+        return Vec::new();
+    }
+
+    // Merge candidate: (score, left_index, right_index, combined_len).
+    // Order by score ascending on the f32 wrapped in a Reverse-like
+    // adapter, so `BinaryHeap` (max-heap) pops the highest score. We
+    // tag each candidate with a creation sequence so stale pairs that
+    // reference a now-merged symbol can be detected: if the recorded
+    // text at `left` no longer equals `left_text`, the pair is stale.
+    #[derive(Clone)]
+    struct Cand {
+        score: f32,
+        left: i32,
+        right: i32,
+        merged_text: String,
+    }
+    impl PartialEq for Cand {
+        fn eq(&self, other: &Self) -> bool {
+            self.score == other.score
+        }
+    }
+    impl Eq for Cand {}
+    impl Ord for Cand {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            // Max-heap on score, break ties by preferring the longer
+            // merged token (matches SentencePiece tie-breaking which
+            // favors longer matches because training defaults treat
+            // length as a mild prior).
+            self.score
+                .partial_cmp(&other.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| self.merged_text.len().cmp(&other.merged_text.len()))
+                .then_with(|| other.left.cmp(&self.left))
+        }
+    }
+    impl PartialOrd for Cand {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    let try_candidate = |heap: &mut BinaryHeap<Cand>,
+                         symbols: &Vec<Sym>,
+                         left: i32,
+                         right: i32| {
+        if left < 0 || right < 0 {
+            return;
+        }
+        let l = &symbols[left as usize];
+        let r = &symbols[right as usize];
+        if !l.alive || !r.alive {
+            return;
+        }
+        let merged: String = format!("{}{}", l.text, r.text);
+        if let Some(&id) = token_to_id.get(&merged) {
+            let score = scores.get(id as usize).copied().unwrap_or(0.0);
+            heap.push(Cand {
+                score,
+                left,
+                right,
+                merged_text: merged,
+            });
+        }
+    };
+
+    let mut heap: BinaryHeap<Cand> = BinaryHeap::new();
+    for i in 0..symbols.len() as i32 - 1 {
+        try_candidate(&mut heap, &symbols, i, i + 1);
+    }
+
+    while let Some(cand) = heap.pop() {
+        let (l, r) = (cand.left as usize, cand.right as usize);
+        if !symbols[l].alive || !symbols[r].alive {
+            continue;
+        }
+        let cur_merge = format!("{}{}", symbols[l].text, symbols[r].text);
+        if cur_merge != cand.merged_text {
+            // Stale — one side was merged with a different neighbor.
+            continue;
+        }
+
+        // Merge r into l.
+        symbols[l].text = cur_merge;
+        let next_next = symbols[r].next;
+        symbols[l].next = next_next;
+        symbols[r].alive = false;
+        if next_next >= 0 {
+            symbols[next_next as usize].prev = cand.left;
+        }
+
+        // Reseed candidates on both sides of the newly-merged symbol.
+        let prev = symbols[l].prev;
+        if prev >= 0 {
+            try_candidate(&mut heap, &symbols, prev, cand.left);
+        }
+        if next_next >= 0 {
+            try_candidate(&mut heap, &symbols, cand.left, next_next);
+        }
+    }
+
+    // Walk the linked list and emit IDs, with byte-fallback for symbols
+    // that don't resolve directly. Phi-3 / LLaMA-1/2 vocabs include
+    // every `<0xNN>` byte token exactly once.
+    let mut ids = Vec::new();
+    let mut i: i32 = 0;
+    while i >= 0 && (i as usize) < symbols.len() {
+        let s = &symbols[i as usize];
+        if s.alive {
+            if let Some(&id) = token_to_id.get(&s.text) {
+                ids.push(id);
+            } else {
+                for b in s.text.as_bytes() {
+                    let byte_tok = format!("<0x{:02X}>", b);
+                    if let Some(&id) = token_to_id.get(&byte_tok) {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
+        i = s.next;
+    }
     ids
 }
 
@@ -615,9 +867,84 @@ mod tests {
             id_to_token: tokens,
             token_to_id,
             merges: vec![],
+            scores: vec![],
+            bos_prepend: None,
         };
         let decoded = tok.decode(&[1, 2, 3, 4]);
         assert_eq!(decoded, " hello world!\n");
+    }
+
+    #[test]
+    fn spm_encode_prefers_longer_high_score_tokens() {
+        // Real-SentencePiece-shaped vocab: BPE training populates every
+        // intermediate merge. Give the longest target token the highest
+        // score so the tie-breaking in Cand::cmp (longer-wins-on-tie)
+        // and the merge order pick it.
+        let vocab_strs = vec![
+            "<unk>".to_string(),    // 0
+            "▁".to_string(),        // 1
+            "H".to_string(),        // 2
+            "e".to_string(),        // 3
+            "l".to_string(),        // 4
+            "o".to_string(),        // 5
+            "▁H".to_string(),       // 6
+            "▁He".to_string(),      // 7
+            "▁Hel".to_string(),     // 8
+            "▁Hell".to_string(),    // 9
+            "▁Hello".to_string(),   // 10
+            "▁w".to_string(),       // 11
+            "▁wo".to_string(),      // 12
+            "▁wor".to_string(),     // 13
+            "▁worl".to_string(),    // 14
+            "▁world".to_string(),   // 15
+            "w".to_string(),        // 16
+            "r".to_string(),        // 17
+            "d".to_string(),        // 18
+        ];
+        let mut token_to_id = HashMap::new();
+        for (i, t) in vocab_strs.iter().enumerate() {
+            token_to_id.insert(t.clone(), i as u32);
+        }
+        let mut scores = vec![0.0_f32; vocab_strs.len()];
+        // Give compound tokens higher (less-negative) scores than parts.
+        for (tok, id) in [("▁H",-8.0),("▁He",-7.0),("▁Hel",-6.0),("▁Hell",-5.0),
+                          ("▁Hello",-1.0),("▁w",-8.0),("▁wo",-7.0),("▁wor",-6.0),
+                          ("▁worl",-5.0),("▁world",-1.0)].iter().map(|(t,s)| {
+            (t.to_string(), *s)
+        }).collect::<Vec<_>>() {
+            scores[token_to_id[&tok] as usize] = id;
+        }
+        // Letters get worst score so they're merged away first.
+        for c in &["H","e","l","o","▁","w","r","d"] {
+            if let Some(&id) = token_to_id.get(*c) {
+                scores[id as usize] = -15.0;
+            }
+        }
+        let ids = spm_encode("Hello world", &token_to_id, &scores);
+        assert_eq!(ids, vec![token_to_id["▁Hello"], token_to_id["▁world"]],
+                   "SPM must merge to high-score tokens, got {:?}", ids);
+    }
+
+    #[test]
+    fn spm_encode_falls_back_to_bytes_for_unknown() {
+        // Vocab with no combined matches — every char must fall through
+        // to <0xNN> bytes.
+        let mut vocab_strs: Vec<String> = (0..=255).map(|b| format!("<0x{:02X}>", b)).collect();
+        vocab_strs.insert(0, "<unk>".to_string());
+        vocab_strs.insert(1, "▁".to_string()); // vocab has ▁ so preprocessing leading ▁ can resolve
+        let mut token_to_id = HashMap::new();
+        for (i, t) in vocab_strs.iter().enumerate() {
+            token_to_id.insert(t.clone(), i as u32);
+        }
+        let scores = vec![0.0_f32; vocab_strs.len()];
+        let ids = spm_encode("Hi", &token_to_id, &scores);
+        // "Hi" → "▁Hi" after preprocess → [▁, H, i] with H,i falling
+        // back to <0x48>, <0x69>.
+        assert!(ids.contains(&1), "expected ▁ in output, got {:?}", ids);
+        let h_id = token_to_id["<0x48>"];
+        let i_id = token_to_id["<0x69>"];
+        assert!(ids.contains(&h_id) && ids.contains(&i_id),
+                "expected H (<0x48>) and i (<0x69>) fallback bytes, got {:?}", ids);
     }
 
     #[test]

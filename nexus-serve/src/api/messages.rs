@@ -658,13 +658,48 @@ fn build_prompt(architecture: &str, model_name: &str, req: &MessagesRequest) -> 
     let is_llama3 = architecture.starts_with("bitnet")
         || architecture == "llama3"
         || architecture.starts_with("llama-3");
+    let is_phi3 = architecture == "phi3";
     if is_deepseek_r1 {
         render_deepseek_r1(&full_system, &req.messages)
+    } else if is_phi3 {
+        render_phi3(&full_system, &req.messages)
     } else if is_llama3 {
         render_llama3(&full_system, &req.messages)
     } else {
         render_chatml(&full_system, &req.messages)
     }
+}
+
+/// Render a prompt using Phi-3's chat template: `<|system|>`, `<|user|>`,
+/// `<|assistant|>` role markers and `<|end|>` turn terminators, each on
+/// its own line. Matches the Jinja template shipped in
+/// `Phi-3-mini-4k-instruct/tokenizer_config.json`.
+///
+/// Phi-3's tokenizer has each of these as a single special token
+/// (`<|system|>`=32006, `<|user|>`=32010, `<|assistant|>`=32001,
+/// `<|end|>`=32007); the BPE path must keep them literal so the encoder
+/// emits the single-token ID rather than splitting them into bytes.
+fn render_phi3(system: &str, messages: &[MessagesMessage]) -> String {
+    let mut out = String::new();
+    if !system.is_empty() {
+        out.push_str("<|system|>\n");
+        out.push_str(system);
+        out.push_str("<|end|>\n");
+    }
+    for m in messages {
+        let role = match m.role.as_str() {
+            "user" | "assistant" | "system" => m.role.as_str(),
+            _ => "user",
+        };
+        out.push('<');
+        out.push('|');
+        out.push_str(role);
+        out.push_str("|>\n");
+        out.push_str(&flatten_message_content(&m.content));
+        out.push_str("<|end|>\n");
+    }
+    out.push_str("<|assistant|>\n");
+    out
 }
 
 /// Render a prompt in DeepSeek's R1-family chat template. Mirrors the Jinja

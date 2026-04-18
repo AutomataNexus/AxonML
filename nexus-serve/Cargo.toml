@@ -71,3 +71,7 @@ path = "src/bin/gguf_inspect.rs"
 [[bin]]
 name = "spec_bench"
 path = "src/bin/spec_bench.rs"
+
+[[bin]]
+name = "tokenize_test"
+path = "src/bin/tokenize_test.rs"
