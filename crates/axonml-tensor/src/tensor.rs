@@ -99,6 +99,16 @@ unsafe fn gpu_ref<T: Scalar>(t: &Tensor<T>) -> &Tensor<f32> {
 }
 
 #[cfg(feature = "cuda")]
+unsafe fn gpu_ref_mut<T: Scalar>(t: &mut Tensor<T>) -> &mut Tensor<f32> {
+    assert!(
+        is_f32::<T>(),
+        "gpu_ref_mut: only Tensor<f32> can be used for GPU operations, got {:?}",
+        T::DTYPE
+    );
+    unsafe { &mut *(t as *mut Tensor<T> as *mut Tensor<f32>) }
+}
+
+#[cfg(feature = "cuda")]
 unsafe fn gpu_into<T: Scalar>(t: Tensor<f32>) -> Tensor<T> {
     assert!(
         is_f32::<T>(),
@@ -1073,6 +1083,81 @@ impl<T: Float> Tensor<T> {
     /// Decode-step kernel — one CTA, suitable for single-token activations of
     /// any hidden size up to ~16K. CPU fallback uses a serial reduction.
     #[must_use]
+    /// Single-token LayerNorm (mean-subtracting, affine). Falcon arch.
+    /// `out[i] = (x[i] - mean) / sqrt(var + eps) * gamma[i] + beta[i]`.
+    pub fn layer_norm_tokenwise(&self, gamma: &Self, beta: &Self, eps: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).layer_norm_tokenwise_cuda(
+                    gpu_ref(gamma), gpu_ref(beta), eps,
+                ))
+            };
+        }
+        // CPU fallback.
+        let x = self.to_vec();
+        let g = gamma.to_vec();
+        let b = beta.to_vec();
+        let n = x.len();
+        let n_f = n as f32;
+        let mean: f32 = x.iter().map(|v| v.to_f32().unwrap_or(0.0)).sum::<f32>() / n_f;
+        let var: f32 = x.iter()
+            .map(|v| { let d = v.to_f32().unwrap_or(0.0) - mean; d * d })
+            .sum::<f32>() / n_f;
+        let inv = (var + eps).sqrt().recip();
+        let mut out: Vec<T> = Vec::with_capacity(n);
+        for i in 0..n {
+            let xi = x[i].to_f32().unwrap_or(0.0);
+            let gi = g[i].to_f32().unwrap_or(0.0);
+            let bi = b[i].to_f32().unwrap_or(0.0);
+            let v = (xi - mean) * inv * gi + bi;
+            out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+        }
+        Self::from_vec(out, &self.shape).expect("layer_norm_tokenwise: build output")
+    }
+
+    /// Element-wise tanh-approximation GELU. Falcon MLP activation.
+    pub fn gelu_tanh(&self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe { gpu_into(gpu_ref(self).gelu_tanh_cuda()) };
+        }
+        let x = self.to_vec();
+        const K: f32 = 0.7978845608028654;
+        let mut out: Vec<T> = Vec::with_capacity(x.len());
+        for xi in &x {
+            let v = xi.to_f32().unwrap_or(0.0);
+            let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
+            out.push(num_traits::cast(y).unwrap_or_else(T::zero));
+        }
+        Self::from_vec(out, &self.shape).expect("gelu_tanh: build output")
+    }
+
+    /// In-place parallel-residual add: `self += attn + ffn`. Falcon arch.
+    pub fn parallel_residual_add_(&mut self, attn: &Self, ffn: &Self) {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            unsafe {
+                gpu_ref_mut(self).parallel_residual_add_cuda_(gpu_ref(attn), gpu_ref(ffn));
+            }
+            return;
+        }
+        let a = attn.to_vec();
+        let f = ffn.to_vec();
+        let x = self.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(x.len());
+        for i in 0..x.len() {
+            let v = x[i].to_f32().unwrap_or(0.0)
+                  + a[i].to_f32().unwrap_or(0.0)
+                  + f[i].to_f32().unwrap_or(0.0);
+            out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+        }
+        *self = Self::from_vec(out, &self.shape).expect("parallel_residual_add_: build output");
+    }
+
     pub fn rms_norm(&self, weight: &Self, eps: f32) -> Self {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {

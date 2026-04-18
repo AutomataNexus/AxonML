@@ -175,6 +175,126 @@ extern "C" __global__ void relu2_gate_f32(
 }
 
 // ============================================================================
+// LayerNorm (true LayerNorm, not RMSNorm) — subtract mean, divide by stddev,
+// scale by gamma, shift by beta. Used by legacy Falcon's attn_norm and the
+// final `output_norm` on Falcon-7B / 40B.
+//
+//   mean = (1/n) Σ x[i]
+//   var  = (1/n) Σ (x[i] - mean)²
+//   out[i] = (x[i] - mean) * rsqrt(var + eps) * gamma[i] + beta[i]
+//
+// Same two-pass reduction layout as rms_norm_f32. One CTA per token —
+// Falcon's decode path calls this with n == 1 and n == hidden_size.
+// ============================================================================
+
+extern "C" __global__ void layer_norm_tokenwise_f32(
+    float* __restrict__ out,
+    const float* __restrict__ x,
+    const float* __restrict__ gamma,
+    const float* __restrict__ beta,
+    uint32_t n,
+    float eps
+) {
+    // warp_sums holds `mean_partial` in index 0, `var_partial` in index 1.
+    extern __shared__ float warp_sums[];
+    float* warp_mean = warp_sums;
+    float* warp_var  = warp_sums + (blockDim.x + 31) / 32;
+
+    const int tid = threadIdx.x;
+    const int warp_id = tid >> 5;
+    const int lane = tid & 31;
+    const int n_warps = (blockDim.x + 31) >> 5;
+
+    // Pass 1 — mean.
+    float sum = 0.0f;
+    for (int i = tid; i < (int)n; i += blockDim.x) {
+        sum += x[i];
+    }
+    #pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        sum += __shfl_xor_sync(0xFFFFFFFF, sum, offset);
+    }
+    if (lane == 0) warp_mean[warp_id] = sum;
+    __syncthreads();
+    float mean = 0.0f;
+    if (warp_id == 0) {
+        mean = (lane < n_warps) ? warp_mean[lane] : 0.0f;
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            mean += __shfl_xor_sync(0xFFFFFFFF, mean, offset);
+        }
+        if (lane == 0) warp_mean[0] = mean;
+    }
+    __syncthreads();
+    mean = warp_mean[0] / (float)n;
+
+    // Pass 2 — variance around that mean.
+    float sq = 0.0f;
+    for (int i = tid; i < (int)n; i += blockDim.x) {
+        float d = x[i] - mean;
+        sq += d * d;
+    }
+    #pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        sq += __shfl_xor_sync(0xFFFFFFFF, sq, offset);
+    }
+    if (lane == 0) warp_var[warp_id] = sq;
+    __syncthreads();
+    float var = 0.0f;
+    if (warp_id == 0) {
+        var = (lane < n_warps) ? warp_var[lane] : 0.0f;
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            var += __shfl_xor_sync(0xFFFFFFFF, var, offset);
+        }
+        if (lane == 0) warp_var[0] = var;
+    }
+    __syncthreads();
+    var = warp_var[0] / (float)n;
+    const float inv_std = rsqrtf(var + eps);
+
+    for (int i = tid; i < (int)n; i += blockDim.x) {
+        out[i] = (x[i] - mean) * inv_std * gamma[i] + beta[i];
+    }
+}
+
+// ============================================================================
+// GELU (tanh approximation) — `0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715x³)))`.
+// Falcon MLP uses this (`gelu_pytorch_tanh`); most other HF archs use exact
+// GELU via erf — they can layer over this if needed. One thread per element.
+// ============================================================================
+
+extern "C" __global__ void gelu_tanh_f32(
+    float* __restrict__ out,
+    const float* __restrict__ x,
+    uint32_t n
+) {
+    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+    const float v = x[idx];
+    const float k = 0.7978845608028654f; // sqrt(2 / pi)
+    const float y = k * (v + 0.044715f * v * v * v);
+    out[idx] = 0.5f * v * (1.0f + tanhf(y));
+}
+
+// ============================================================================
+// Parallel-residual add — `x = x + attn + ffn` for Falcon's parallel
+// attention+FFN block. Fuses two element-wise adds into one kernel launch
+// so the decode hot path doesn't round-trip through two `tensor.add()` calls.
+// ============================================================================
+
+extern "C" __global__ void parallel_residual_add_f32(
+    float* __restrict__ x,
+    const float* __restrict__ attn,
+    const float* __restrict__ ffn,
+    uint32_t n
+) {
+    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+    x[idx] = x[idx] + attn[idx] + ffn[idx];
+}
+
+// ============================================================================
 // Per-head RMS_norm (Qwen3 QK-norm)
 //
 // Applies RMS_norm(x[h, :], weight, eps) independently for every head h.
