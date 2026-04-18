@@ -16,7 +16,7 @@
 //! liable for any damages arising from the use of this software.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 
 // =============================================================================
 // Reduce Operations
@@ -141,12 +141,25 @@ pub trait Backend: Send + Sync {
 // =============================================================================
 
 /// Shared state for mock distributed communication.
-#[derive(Debug)]
+///
+/// The MockBackend simulates an N-rank collective by running each rank on
+/// its own OS thread. Every collective op is a two-phase cycle:
+///
+///   Phase 1 — *submit* : each rank writes its contribution into
+///                        `buffers`, then meets `submit_barrier`.
+///   Phase 2 — *read*   : each rank reads the collective result out of
+///                        `buffers`, then meets `read_barrier`.
+///
+/// The `read_barrier` is essential: without it, the first rank out of
+/// submit phase can call the NEXT collective op and overwrite `buffers`
+/// before slower ranks have had a chance to read. `std::sync::Barrier`
+/// is reusable — it auto-resets once all `world_size` threads reach it,
+/// which makes it the natural building block for this cycle.
 struct SharedState {
-    /// Data buffers for each rank.
+    /// Data buffers for each rank, populated per-round by the submit phase.
+    /// The sentinel key `usize::MAX` is used by reductions/scatter to
+    /// store the full reduced / scatter-source vector.
     buffers: HashMap<usize, Vec<f32>>,
-    /// Barrier counter.
-    barrier_count: usize,
     /// Message queue for send/recv operations.
     messages: HashMap<(usize, usize, usize), Vec<f32>>, // (src, dst, tag) -> data
 }
@@ -161,6 +174,15 @@ pub struct MockBackend {
     rank: usize,
     world_size: usize,
     state: Arc<Mutex<SharedState>>,
+    /// Meets after every rank has written its contribution into `state`.
+    submit_barrier: Arc<Barrier>,
+    /// Meets after every rank has read the result out of `state`. Ensures
+    /// no rank can start the next collective (and clobber buffers) before
+    /// everyone has read the current one.
+    read_barrier: Arc<Barrier>,
+    /// Separate barrier for explicit `barrier()` calls, decoupled from
+    /// the collective cycle.
+    explicit_barrier: Arc<Barrier>,
 }
 
 impl MockBackend {
@@ -169,15 +191,20 @@ impl MockBackend {
     pub fn create_world(world_size: usize) -> Vec<Self> {
         let state = Arc::new(Mutex::new(SharedState {
             buffers: HashMap::new(),
-            barrier_count: 0,
             messages: HashMap::new(),
         }));
+        let submit_barrier = Arc::new(Barrier::new(world_size));
+        let read_barrier = Arc::new(Barrier::new(world_size));
+        let explicit_barrier = Arc::new(Barrier::new(world_size));
 
         (0..world_size)
             .map(|rank| MockBackend {
                 rank,
                 world_size,
                 state: Arc::clone(&state),
+                submit_barrier: Arc::clone(&submit_barrier),
+                read_barrier: Arc::clone(&read_barrier),
+                explicit_barrier: Arc::clone(&explicit_barrier),
             })
             .collect()
     }
@@ -203,73 +230,85 @@ impl Backend for MockBackend {
     }
 
     fn all_reduce(&self, data: &mut [f32], op: ReduceOp) {
-        let mut state = self.state.lock().unwrap();
+        // --- Submit phase ---
+        {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.insert(self.rank, data.to_vec());
+        }
+        self.submit_barrier.wait();
 
-        // Store this rank's data
-        state.buffers.insert(self.rank, data.to_vec());
-
-        // Check if all ranks have submitted
-        if state.buffers.len() == self.world_size {
-            // Perform reduction
+        // All ranks have submitted. Any one rank could compute the
+        // reduction, but we have every rank do it from its own lock so
+        // the result is available without an extra broadcast. The
+        // `state` lock serializes so in practice only one rank's
+        // reduction actually writes to `buffers[self.rank]` — all ranks
+        // read the same `buffers[rank]` they wrote.
+        {
+            let mut state = self.state.lock().unwrap();
             let all_data: Vec<Vec<f32>> = (0..self.world_size)
                 .map(|r| state.buffers.get(&r).cloned().unwrap_or_default())
                 .collect();
-
             let reduced = op.reduce_slices(&all_data);
-
-            // Update all buffers with result
-            for r in 0..self.world_size {
-                state.buffers.insert(r, reduced.clone());
-            }
-        }
-
-        // Get result for this rank
-        if let Some(result) = state.buffers.get(&self.rank) {
-            for (i, &val) in result.iter().enumerate() {
+            for (i, &val) in reduced.iter().enumerate() {
                 if i < data.len() {
                     data[i] = val;
                 }
             }
         }
 
-        // Clear buffers if this is the last rank to read
-        if state.buffers.len() == self.world_size {
+        // --- Read-complete phase: ensure nobody starts the next op
+        // before every rank has read the buffers from this one. ---
+        self.read_barrier.wait();
+        // Rank 0 clears buffers for the next cycle (safe because
+        // read_barrier guarantees everyone has already read).
+        if self.rank == 0 {
+            let mut state = self.state.lock().unwrap();
             state.buffers.clear();
         }
     }
 
     fn broadcast(&self, data: &mut [f32], src: usize) {
-        let mut state = self.state.lock().unwrap();
-
+        // --- Submit phase: src writes its data ---
         if self.rank == src {
-            // Source rank stores its data
-            state.buffers.insert(0, data.to_vec());
+            let mut state = self.state.lock().unwrap();
+            state.buffers.insert(src, data.to_vec());
         }
+        self.submit_barrier.wait();
 
-        // Get broadcast data
-        if let Some(src_data) = state.buffers.get(&0) {
-            for (i, &val) in src_data.iter().enumerate() {
-                if i < data.len() {
-                    data[i] = val;
+        // --- Read phase: every rank reads buffers[src] ---
+        {
+            let state = self.state.lock().unwrap();
+            if let Some(src_data) = state.buffers.get(&src) {
+                for (i, &val) in src_data.iter().enumerate() {
+                    if i < data.len() {
+                        data[i] = val;
+                    }
                 }
             }
+        }
+
+        self.read_barrier.wait();
+        if self.rank == 0 {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.clear();
         }
     }
 
     fn all_gather(&self, send_data: &[f32], recv_data: &mut [f32]) {
-        let mut state = self.state.lock().unwrap();
+        {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.insert(self.rank, send_data.to_vec());
+        }
+        self.submit_barrier.wait();
 
-        // Store this rank's data
-        state.buffers.insert(self.rank, send_data.to_vec());
-
-        // Check if all ranks have submitted
-        if state.buffers.len() == self.world_size {
-            // Concatenate all data in rank order
+        // Every rank reconstructs the full concat-in-rank-order result.
+        {
+            let state = self.state.lock().unwrap();
             let chunk_size = send_data.len();
             for r in 0..self.world_size {
-                if let Some(data) = state.buffers.get(&r) {
+                if let Some(d) = state.buffers.get(&r) {
                     let start = r * chunk_size;
-                    for (i, &val) in data.iter().enumerate() {
+                    for (i, &val) in d.iter().enumerate() {
                         if start + i < recv_data.len() {
                             recv_data[start + i] = val;
                         }
@@ -277,49 +316,58 @@ impl Backend for MockBackend {
                 }
             }
         }
+
+        self.read_barrier.wait();
+        if self.rank == 0 {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.clear();
+        }
     }
 
     fn reduce_scatter(&self, send_data: &[f32], recv_data: &mut [f32], op: ReduceOp) {
-        let mut state = self.state.lock().unwrap();
+        {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.insert(self.rank, send_data.to_vec());
+        }
+        self.submit_barrier.wait();
 
-        // Store this rank's data
-        state.buffers.insert(self.rank, send_data.to_vec());
-
-        // Check if all ranks have submitted
-        if state.buffers.len() == self.world_size {
-            // First reduce all data
+        {
+            let state = self.state.lock().unwrap();
             let all_data: Vec<Vec<f32>> = (0..self.world_size)
                 .map(|r| state.buffers.get(&r).cloned().unwrap_or_default())
                 .collect();
-
             let reduced = op.reduce_slices(&all_data);
-
-            // Scatter to each rank
             let chunk_size = recv_data.len();
             let start = self.rank * chunk_size;
             let end = (start + chunk_size).min(reduced.len());
-
             for (i, &val) in reduced[start..end].iter().enumerate() {
                 if i < recv_data.len() {
                     recv_data[i] = val;
                 }
             }
         }
+
+        self.read_barrier.wait();
+        if self.rank == 0 {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.clear();
+        }
     }
 
     fn gather(&self, send_data: &[f32], recv_data: &mut [f32], dst: usize) {
-        let mut state = self.state.lock().unwrap();
+        {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.insert(self.rank, send_data.to_vec());
+        }
+        self.submit_barrier.wait();
 
-        // Store this rank's data
-        state.buffers.insert(self.rank, send_data.to_vec());
-
-        // Only destination rank collects
-        if self.rank == dst && state.buffers.len() == self.world_size {
+        if self.rank == dst {
+            let state = self.state.lock().unwrap();
             let chunk_size = send_data.len();
             for r in 0..self.world_size {
-                if let Some(data) = state.buffers.get(&r) {
+                if let Some(d) = state.buffers.get(&r) {
                     let start = r * chunk_size;
-                    for (i, &val) in data.iter().enumerate() {
+                    for (i, &val) in d.iter().enumerate() {
                         if start + i < recv_data.len() {
                             recv_data[start + i] = val;
                         }
@@ -327,57 +375,73 @@ impl Backend for MockBackend {
                 }
             }
         }
+
+        self.read_barrier.wait();
+        if self.rank == 0 {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.clear();
+        }
     }
 
     fn scatter(&self, send_data: &[f32], recv_data: &mut [f32], src: usize) {
-        let state = self.state.lock().unwrap();
-
-        // Only source rank has full data
+        // Only `src` provides the full vector — stash under a sentinel
+        // key so every other rank can slice out its chunk.
         if self.rank == src {
-            // Scatter to all (in mock, we copy our portion)
-            let chunk_size = recv_data.len();
-            let start = self.rank * chunk_size;
-            let end = (start + chunk_size).min(send_data.len());
+            let mut state = self.state.lock().unwrap();
+            state.buffers.insert(usize::MAX, send_data.to_vec());
+        }
+        self.submit_barrier.wait();
 
-            for (i, &val) in send_data[start..end].iter().enumerate() {
-                recv_data[i] = val;
+        {
+            let state = self.state.lock().unwrap();
+            if let Some(full) = state.buffers.get(&usize::MAX) {
+                let chunk_size = recv_data.len();
+                let start = self.rank * chunk_size;
+                let end = (start + chunk_size).min(full.len());
+                for (i, &val) in full[start..end].iter().enumerate() {
+                    if i < recv_data.len() {
+                        recv_data[i] = val;
+                    }
+                }
             }
         }
-        drop(state);
 
-        // Others would receive via message passing in real impl
+        self.read_barrier.wait();
+        if self.rank == 0 {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.clear();
+        }
     }
 
     fn reduce(&self, send_data: &[f32], recv_data: &mut [f32], dst: usize, op: ReduceOp) {
-        let mut state = self.state.lock().unwrap();
+        {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.insert(self.rank, send_data.to_vec());
+        }
+        self.submit_barrier.wait();
 
-        // Store this rank's data
-        state.buffers.insert(self.rank, send_data.to_vec());
-
-        // Only destination rank reduces
-        if self.rank == dst && state.buffers.len() == self.world_size {
+        if self.rank == dst {
+            let state = self.state.lock().unwrap();
             let all_data: Vec<Vec<f32>> = (0..self.world_size)
                 .map(|r| state.buffers.get(&r).cloned().unwrap_or_default())
                 .collect();
-
             let reduced = op.reduce_slices(&all_data);
-
             for (i, &val) in reduced.iter().enumerate() {
                 if i < recv_data.len() {
                     recv_data[i] = val;
                 }
             }
         }
+
+        self.read_barrier.wait();
+        if self.rank == 0 {
+            let mut state = self.state.lock().unwrap();
+            state.buffers.clear();
+        }
     }
 
     fn barrier(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.barrier_count += 1;
-
-        // Reset when all have arrived
-        if state.barrier_count == self.world_size {
-            state.barrier_count = 0;
-        }
+        self.explicit_barrier.wait();
     }
 
     fn send(&self, data: &[f32], dst: usize, tag: usize) {
@@ -480,17 +544,53 @@ mod tests {
 
     #[test]
     fn test_mock_broadcast() {
+        // Collective ops on the Condvar-based MockBackend require every
+        // rank to arrive concurrently — running them sequentially on one
+        // thread deadlocks. Spawn one thread per rank and join.
+        use std::thread;
+
         let backends = MockBackend::create_world(2);
+        let handles: Vec<_> = backends
+            .into_iter()
+            .enumerate()
+            .map(|(rank, backend)| {
+                thread::spawn(move || {
+                    let mut data = if rank == 0 {
+                        vec![1.0, 2.0, 3.0]
+                    } else {
+                        vec![0.0, 0.0, 0.0]
+                    };
+                    backend.broadcast(&mut data, 0);
+                    data
+                })
+            })
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().unwrap(), vec![1.0, 2.0, 3.0]);
+        }
+    }
 
-        let mut data0 = vec![1.0, 2.0, 3.0];
-        let mut data1 = vec![0.0, 0.0, 0.0];
-
-        // Broadcast from rank 0
-        backends[0].broadcast(&mut data0, 0);
-        backends[1].broadcast(&mut data1, 0);
-
-        assert_eq!(data0, vec![1.0, 2.0, 3.0]);
-        assert_eq!(data1, vec![1.0, 2.0, 3.0]);
+    #[test]
+    fn test_mock_all_reduce_sum_world_of_three() {
+        use std::thread;
+        let backends = MockBackend::create_world(3);
+        let handles: Vec<_> = backends
+            .into_iter()
+            .enumerate()
+            .map(|(rank, backend)| {
+                thread::spawn(move || {
+                    let mut data = vec![(rank + 1) as f32; 4];
+                    backend.all_reduce(&mut data, ReduceOp::Sum);
+                    data
+                })
+            })
+            .collect();
+        for h in handles {
+            // 1 + 2 + 3 = 6 on every element on every rank.
+            for v in h.join().unwrap() {
+                assert!((v - 6.0).abs() < 1e-6, "sum: got {v}, want 6.0");
+            }
+        }
     }
 
     #[test]
@@ -510,12 +610,14 @@ mod tests {
 
     #[test]
     fn test_mock_barrier() {
+        use std::thread;
         let backends = MockBackend::create_world(2);
-
-        // Both call barrier
-        backends[0].barrier();
-        backends[1].barrier();
-
-        // Should not deadlock
+        let handles: Vec<_> = backends
+            .into_iter()
+            .map(|backend| thread::spawn(move || backend.barrier()))
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
     }
 }
