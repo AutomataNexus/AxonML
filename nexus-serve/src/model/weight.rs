@@ -782,6 +782,118 @@ pub fn fused_qkv_q4k_matmul_gpu(
     Some((q_t, k_t, v_t))
 }
 
+static FUSED_QKV_BIAS_FIRED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Fused Q4_K QKV matmul WITH bias-add absorbed into the output write.
+///
+/// Variant of [`fused_qkv_q4k_matmul_gpu`] that additionally applies Q,
+/// K, V biases inline. Requires all three biases to be present as GPU
+/// tensors (Qwen2 / DeepSeek always have them). Saves three separate
+/// elementwise-add kernel launches per layer.
+///
+/// Returns `None` and lets the caller fall through to the no-bias
+/// variant + separate `q.add(b)` etc. if any precondition isn't met.
+#[cfg(feature = "cuda")]
+#[allow(clippy::too_many_arguments)]
+pub fn fused_qkv_bias_q4k_matmul_gpu(
+    q_weight: &Weight,
+    k_weight: &Weight,
+    v_weight: &Weight,
+    input: &Tensor<f32>,
+    q_bias: &Tensor<f32>,
+    k_bias: &Tensor<f32>,
+    v_bias: &Tensor<f32>,
+) -> Option<(Tensor<f32>, Tensor<f32>, Tensor<f32>)> {
+    use axonml_core::backends::cuda::get_cuda_backend;
+    use axonml_core::backends::cuda_pool::pool_alloc;
+    use axonml_core::storage::Storage;
+
+    if !input.device().is_gpu()
+        || !q_bias.device().is_gpu()
+        || !k_bias.device().is_gpu()
+        || !v_bias.device().is_gpu()
+    {
+        return None;
+    }
+    let cuda = get_cuda_backend()?;
+
+    let (q_data, q_dims) = q4k_quantized_bytes(q_weight)?;
+    let (k_data, k_dims) = q4k_quantized_bytes(k_weight)?;
+    let (v_data, v_dims) = q4k_quantized_bytes(v_weight)?;
+
+    let in_dim = q_dims[0];
+    if k_dims[0] != in_dim || v_dims[0] != in_dim || in_dim % 256 != 0 {
+        return None;
+    }
+    let q_out = q_dims[1];
+    let k_out = k_dims[1];
+    let v_out = v_dims[1];
+    if q_bias.numel() != q_out || k_bias.numel() != k_out || v_bias.numel() != v_out {
+        return None;
+    }
+
+    let (q_gpu, k_gpu, v_gpu) = match (q_weight, k_weight, v_weight) {
+        (
+            Weight::Quantized { gpu_cache: qc, .. },
+            Weight::Quantized { gpu_cache: kc, .. },
+            Weight::Quantized { gpu_cache: vc, .. },
+        ) => {
+            let qg = qc.get_or_init(|| {
+                cuda.htod_copy(q_data.as_slice())
+                    .expect("fused QKV+bias: q gpu_cache htod_copy failed")
+            });
+            let kg = kc.get_or_init(|| {
+                cuda.htod_copy(k_data.as_slice())
+                    .expect("fused QKV+bias: k gpu_cache htod_copy failed")
+            });
+            let vg = vc.get_or_init(|| {
+                cuda.htod_copy(v_data.as_slice())
+                    .expect("fused QKV+bias: v gpu_cache htod_copy failed")
+            });
+            (qg, kg, vg)
+        }
+        _ => return None,
+    };
+
+    let in_guard = input.as_cuda_slice_read();
+    let q_bias_guard = q_bias.as_cuda_slice_read();
+    let k_bias_guard = k_bias.as_cuda_slice_read();
+    let v_bias_guard = v_bias.as_cuda_slice_read();
+
+    let mut q_out_buf = pool_alloc(q_out).ok()?;
+    let mut k_out_buf = pool_alloc(k_out).ok()?;
+    let mut v_out_buf = pool_alloc(v_out).ok()?;
+
+    cuda.q4k_gemv_fused_qkv_bias_f32(
+        q_gpu, k_gpu, v_gpu,
+        in_guard.slice(),
+        q_bias_guard.slice(),
+        k_bias_guard.slice(),
+        v_bias_guard.slice(),
+        &mut q_out_buf, &mut k_out_buf, &mut v_out_buf,
+        q_out, k_out, v_out, in_dim,
+    )
+    .ok()?;
+    drop(in_guard);
+    drop(q_bias_guard);
+    drop(k_bias_guard);
+    drop(v_bias_guard);
+
+    if !FUSED_QKV_BIAS_FIRED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!(
+            "[perf] fused Q4_K QKV+bias kernel FIRED (first time) \
+             in={in_dim} q_out={q_out} k_out={k_out} v_out={v_out}"
+        );
+    }
+
+    let dev = input.device();
+    let q_t = Tensor::from_storage(Storage::from_cuda_slice(q_out_buf, q_out, dev.clone()), &[1, q_out]).ok()?;
+    let k_t = Tensor::from_storage(Storage::from_cuda_slice(k_out_buf, k_out, dev.clone()), &[1, k_out]).ok()?;
+    let v_t = Tensor::from_storage(Storage::from_cuda_slice(v_out_buf, v_out, dev), &[1, v_out]).ok()?;
+    Some((q_t, k_t, v_t))
+}
+
 /// Fused Q4_K GEMV for gate+up projections (SwiGLU / ReLU² FFN). Returns
 /// `Some((gate, up))` on the GPU fast path; returns `None` if either weight
 /// isn't a GPU-compatible Q4_K variant — caller falls back to two matmuls.

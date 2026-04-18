@@ -1896,20 +1896,40 @@ impl InferenceEngine {
             // ----- Attention sub-layer ---------------------------------------
             let normed = x.rms_norm(&lc.attn_norm, eps);
 
-            let (mut q, mut k, mut v) = match crate::model::weight::fused_qkv_q4k_matmul_gpu(
-                &layer.q_weight, &layer.k_weight, &layer.v_weight, &normed,
-            ) {
-                Some(triple) => triple,
-                None => (
-                    layer.q_weight.matmul(&normed),
-                    layer.k_weight.matmul(&normed),
-                    layer.v_weight.matmul(&normed),
-                ),
+            // Try the bias-fused QKV variant first — absorbs the three
+            // separate bias-add launches into the matmul output write.
+            // Needs all three biases to be present (Qwen2 / DeepSeek case).
+            let fused_bias = if let (Some(qb), Some(kb), Some(vb)) =
+                (&lc.q_bias, &lc.k_bias, &lc.v_bias)
+            {
+                crate::model::weight::fused_qkv_bias_q4k_matmul_gpu(
+                    &layer.q_weight, &layer.k_weight, &layer.v_weight,
+                    &normed, qb, kb, vb,
+                )
+            } else {
+                None
             };
 
-            if let Some(b) = &lc.q_bias { q = q.add(b).expect("q bias add"); }
-            if let Some(b) = &lc.k_bias { k = k.add(b).expect("k bias add"); }
-            if let Some(b) = &lc.v_bias { v = v.add(b).expect("v bias add"); }
+            let (mut q, mut k, mut v) = if let Some(triple) = fused_bias {
+                // Biases already applied inside the matmul kernel.
+                triple
+            } else {
+                // Fall back to the no-bias fused QKV + separate bias adds.
+                let (mut q, mut k, mut v) = match crate::model::weight::fused_qkv_q4k_matmul_gpu(
+                    &layer.q_weight, &layer.k_weight, &layer.v_weight, &normed,
+                ) {
+                    Some(triple) => triple,
+                    None => (
+                        layer.q_weight.matmul(&normed),
+                        layer.k_weight.matmul(&normed),
+                        layer.v_weight.matmul(&normed),
+                    ),
+                };
+                if let Some(b) = &lc.q_bias { q = q.add(b).expect("q bias add"); }
+                if let Some(b) = &lc.k_bias { k = k.add(b).expect("k bias add"); }
+                if let Some(b) = &lc.v_bias { v = v.add(b).expect("v bias add"); }
+                (q, k, v)
+            };
 
             q = q.apply_rope_split_halves(n_heads, head_dim, theta, pos);
             k = k.apply_rope_split_halves(n_kv_heads, head_dim, theta, pos);

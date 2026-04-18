@@ -3774,6 +3774,7 @@ impl CudaKernels {
                 "q4k_gemv_f32",
                 "q4k_gemm_f32",
                 "q4k_gemv_fused_qkv_f32",
+                "q4k_gemv_fused_qkv_bias_f32",
                 "q4k_gemv_fused_gate_up_f32",
             ],
         )?;
