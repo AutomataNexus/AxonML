@@ -261,13 +261,15 @@ mod tests {
 
     #[test]
     fn test_process_group_all_reduce_tensor() {
-        let backends = MockBackend::create_world(2);
-        let pg0 = ProcessGroup::new(Arc::new(backends.into_iter().next().unwrap()));
+        // World of 1 — the Condvar barrier in MockBackend requires every
+        // rank to arrive before the collective closes, so a single-threaded
+        // call must correspond to a single-rank world.
+        let pg = ProcessGroup::mock();
 
         let mut tensor = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap();
-        pg0.all_reduce_tensor(&mut tensor, ReduceOp::Sum);
+        pg.all_reduce_tensor(&mut tensor, ReduceOp::Sum);
 
-        // Single rank, values unchanged
+        // Single rank, values unchanged after sum.
         assert_eq!(tensor.to_vec(), vec![1.0, 2.0, 3.0]);
     }
 
