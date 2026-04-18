@@ -396,6 +396,94 @@ extern "C" __global__ void q4k_gemv_fused_qkv_f32(
 }
 
 // ============================================================================
+// Q4_K GEMV (fused QKV + bias): q4k_gemv_fused_qkv_f32 with an extra
+// per-section bias add at the output write. Absorbs the three separate
+// bias_add kernel launches per layer that Qwen2/DeepSeek require into
+// the matmul itself — saves three host→GPU launch cycles per layer.
+//
+// Bias buffers are mandatory. Callers without biases for a section
+// should pass a zero buffer or route through `q4k_gemv_fused_qkv_f32`
+// instead; this kernel does NOT test a flag.
+//
+// Launch geometry identical to q4k_gemv_fused_qkv_f32.
+extern "C" __global__ void q4k_gemv_fused_qkv_bias_f32(
+    const unsigned char* __restrict__ q_w,
+    const unsigned char* __restrict__ k_w,
+    const unsigned char* __restrict__ v_w,
+    const float*         __restrict__ a,
+    const float*         __restrict__ q_bias,
+    const float*         __restrict__ k_bias,
+    const float*         __restrict__ v_bias,
+    float*               __restrict__ q_c,
+    float*               __restrict__ k_c,
+    float*               __restrict__ v_c,
+    unsigned int q_out,
+    unsigned int k_out,
+    unsigned int v_out,
+    unsigned int in_dim
+) {
+    extern __shared__ float s_partial[];
+
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int global_row   = blockIdx.x * rows_per_cta + row_in_cta;
+    const unsigned int total_out    = q_out + k_out + v_out;
+
+    const unsigned int chunk          = lane >> 3;
+    const unsigned int lane_in_ch     = lane & 7u;
+    const unsigned int chunk_byte_off = chunk * 32u + lane_in_ch * 4u;
+    const unsigned int chunk_a_lo     = chunk * 64u + lane_in_ch * 4u;
+    const unsigned int chunk_a_hi     = chunk_a_lo + 32u;
+
+    const unsigned int n_blocks  = in_dim / 256u;
+    const unsigned int row_bytes = n_blocks * 144u;
+
+    // Dispatch: which weight matrix + output buffer + bias + local row j.
+    const unsigned char* w      = (const unsigned char*)0;
+    float*               c      = (float*)0;
+    const float*         bias   = (const float*)0;
+    unsigned int         j      = 0u;
+    bool have_work = global_row < total_out;
+    if (have_work) {
+        if (global_row < q_out) {
+            w = q_w; c = q_c; bias = q_bias; j = global_row;
+        } else if (global_row < q_out + k_out) {
+            w = k_w; c = k_c; bias = k_bias; j = global_row - q_out;
+        } else {
+            w = v_w; c = v_c; bias = v_bias; j = global_row - q_out - k_out;
+        }
+    }
+
+    float sum = 0.0f;
+    if (have_work) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        sum = q4k_gemv_partial(
+            row, a, b_start, b_end,
+            chunk, chunk_byte_off, chunk_a_lo, chunk_a_hi
+        );
+    }
+    sum = warp_reduce_sum_f32(sum);
+
+    if (lane == 0u) {
+        s_partial[row_in_cta * 2u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (have_work && warp_in_row == 0u && lane == 0u) {
+        float result = s_partial[row_in_cta * 2u] + s_partial[row_in_cta * 2u + 1u];
+        result += bias[j];
+        c[j] = result;
+    }
+}
+
+// ============================================================================
 // Q4_K GEMV (fused gate/up): one kernel launch produces gate and up
 // projections of the SwiGLU / ReLU² FFN. Same input, two different
 // weight matrices, same output dim (intermediate_size). Collapses the

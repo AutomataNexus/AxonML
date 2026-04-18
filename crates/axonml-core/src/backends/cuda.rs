@@ -929,6 +929,76 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Fused Q4_K QKV GEMV with per-section bias add at the output write.
+    /// Extends `q4k_gemv_fused_qkv_f32` to absorb the three separate
+    /// bias-add kernel launches per layer that Qwen2 / DeepSeek require
+    /// (Qwen2 adds bias to Q, K, AND V projections). Saves three
+    /// host→GPU launch cycles per layer.
+    ///
+    /// The bias buffers are mandatory — a caller without biases should
+    /// route through `q4k_gemv_fused_qkv_f32` instead. Launch geometry
+    /// matches the no-bias variant.
+    #[allow(clippy::too_many_arguments)]
+    pub fn q4k_gemv_fused_qkv_bias_f32(
+        &self,
+        q_w: &CudaSlice<u8>,
+        k_w: &CudaSlice<u8>,
+        v_w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        q_bias: &CudaSlice<f32>,
+        k_bias: &CudaSlice<f32>,
+        v_bias: &CudaSlice<f32>,
+        q_c: &mut CudaSlice<f32>,
+        k_c: &mut CudaSlice<f32>,
+        v_c: &mut CudaSlice<f32>,
+        q_out: usize,
+        k_out: usize,
+        v_out: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "fused QKV+bias GEMV requires in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q4k_gemv_fused_qkv_bias_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q4k_gemv_fused_qkv_bias_f32".to_string()))?;
+
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        const STAGE_MAX_FLOATS: u32 = 8192;
+        let _stage_cap = STAGE_MAX_FLOATS; // kept for parity; unused here
+        let total_out = (q_out + k_out + v_out) as u32;
+        let grid = (total_out + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let reduction_bytes = 8u32 * std::mem::size_of::<f32>() as u32;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: reduction_bytes,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(q_w)
+                .arg(k_w)
+                .arg(v_w)
+                .arg(a)
+                .arg(q_bias)
+                .arg(k_bias)
+                .arg(v_bias)
+                .arg(q_c)
+                .arg(k_c)
+                .arg(v_c)
+                .arg(&(q_out as u32))
+                .arg(&(k_out as u32))
+                .arg(&(v_out as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Fused Q4_K GEMV for SwiGLU / ReLU² gate+up projections — one kernel
     /// launch produces both outputs from a shared input activation. Both
     /// projections have the same `intermediate_size` output dimension.
