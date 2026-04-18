@@ -3846,6 +3846,8 @@ impl CudaKernels {
                 // Parallel residual `x = x + attn + ffn` — Falcon's
                 // parallel-attn+FFN block fuses two adds into one launch.
                 "parallel_residual_add_f32",
+                // `dst += src * scalar` — MoE expert-accumulate hot path.
+                "scaled_add_inplace_f32",
                 "rms_norm_heads_f32",
                 "rope_split_halves_f32",
                 "swiglu_f32",

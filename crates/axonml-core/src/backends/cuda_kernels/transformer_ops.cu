@@ -294,6 +294,21 @@ extern "C" __global__ void parallel_residual_add_f32(
     x[idx] = x[idx] + attn[idx] + ffn[idx];
 }
 
+// Element-wise `dst += src * scalar`. Used by the MoE expert-accumulate
+// hot path: replaces a `mul_scalar(w_e)` + `add(&...)` kernel pair with
+// one launch. Eight experts × 16 layers × 2 launches saved per step =
+// 256 fewer kernel launches per token on OLMoE decode.
+extern "C" __global__ void scaled_add_inplace_f32(
+    float* __restrict__ dst,
+    const float* __restrict__ src,
+    uint32_t n,
+    float scalar
+) {
+    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+    dst[idx] = dst[idx] + src[idx] * scalar;
+}
+
 // ============================================================================
 // Per-head RMS_norm (Qwen3 QK-norm)
 //

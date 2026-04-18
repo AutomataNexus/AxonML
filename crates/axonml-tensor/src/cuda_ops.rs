@@ -3550,6 +3550,27 @@ impl Tensor<f32> {
         }
     }
 
+    /// In-place `self += other * scalar`. Both tensors on the same GPU,
+    /// same numel. Fuses a `mul_scalar(...)` + `add(...)` kernel pair
+    /// into one launch — MoE expert-accumulate hot path.
+    pub(crate) fn scaled_add_inplace_cuda_(&mut self, other: &Self, scalar: f32) {
+        debug_assert_eq!(self.numel(), other.numel(), "scaled_add_inplace: numel mismatch");
+        let o = other.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        if !self.is_contiguous() {
+            *self = self.contiguous();
+        }
+        let o_guard = o.storage.as_cuda_slice();
+        let mut self_guard = self.storage.as_cuda_slice_mut();
+        cuda.scaled_add_inplace_f32(
+            self_guard.slice_mut(),
+            o_guard.slice(),
+            self.numel(),
+            scalar,
+        )
+        .expect("CUDA scaled_add_inplace_f32 failed");
+    }
+
     /// Parallel-residual in-place update for Falcon: `self += attn + ffn`.
     /// Fuses two element-wise adds into one kernel launch. All three
     /// tensors must be on the same GPU device and have the same numel.
