@@ -3270,13 +3270,14 @@ impl Tensor<f32> {
 
         let src_guard = data.storage.as_cuda_slice();
         let w_guard = w.storage.as_cuda_slice();
-        // pool_alloc_uninit: broadcast_copy below writes every element.
+        // pool_alloc_uninit: rms_norm_heads_f32 writes every output element
+        // via the per-lane normalize+multiply store loop.
         let mut out = pool_alloc_uninit(data.numel()).expect("GPU pool alloc failed");
 
-        // Copy src -> out (rms_norm_heads_f32 operates in place).
-        cuda.broadcast_copy_f32(&mut out, src_guard.slice(), data.numel(), data.numel())
-            .expect("CUDA broadcast_copy_f32 failed");
-        cuda.rms_norm_heads_f32(&mut out, w_guard.slice(), n_heads, head_dim, eps)
+        // Kernel reads from `src`, writes to `out` — no broadcast_copy prep
+        // needed. The sum-of-squares reduction completes before any write
+        // to `out`, so src/out aliasing would be safe if we wanted it.
+        cuda.rms_norm_heads_f32(&mut out, src_guard.slice(), w_guard.slice(), n_heads, head_dim, eps)
             .expect("CUDA rms_norm_heads_f32 failed");
 
         let storage = Storage::from_cuda_slice(out, data.numel(), self.device());
@@ -3332,16 +3333,15 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        // pool_alloc_uninit: the broadcast_copy below writes every element
-        // of `out` (it's a full copy of src), then rope mutates in place.
+        // pool_alloc_uninit: rope kernel writes every output element (both
+        // halves of every pair) via the per-thread store.
         let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
-        // Copy src → out, then rotate in-place on out (kernel writes both
-        // halves of every pair, so we need a fresh buffer to avoid trampling
-        // the unrotated values mid-rotation).
-        cuda.broadcast_copy_f32(&mut out, src_guard.slice(), len, len)
-            .expect("CUDA broadcast_copy_f32 failed");
-        cuda.rope_split_halves_f32(&mut out, n_heads, head_dim, theta, pos)
+        // Kernel reads from `src`, writes to `out` — no broadcast_copy prep
+        // needed. Each thread reads src[base] + src[base+half] BEFORE any
+        // write, so src/out aliasing is safe (fresh buffer is for new-tensor
+        // semantics, not correctness).
+        cuda.rope_split_halves_f32(&mut out, src_guard.slice(), n_heads, head_dim, theta, pos)
             .expect("CUDA rope_split_halves_f32 failed");
 
         let storage = Storage::from_cuda_slice(out, len, self.device());
@@ -3456,14 +3456,14 @@ impl Tensor<f32> {
 
         let src_guard = data.storage.as_cuda_slice();
         let w_guard = w.storage.as_cuda_slice();
-        // pool_alloc_uninit: broadcast_copy below writes every element, then
-        // rms_norm_heads_batched_f32 mutates in place.
+        // pool_alloc_uninit: rms_norm_heads_batched_f32 writes every output
+        // element via the per-lane normalize+multiply store loop.
         let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
 
-        cuda.broadcast_copy_f32(&mut out, src_guard.slice(), total, total)
-            .expect("CUDA broadcast_copy_f32 failed");
-        cuda.rms_norm_heads_batched_f32(&mut out, w_guard.slice(), m, n_heads, head_dim, eps)
-            .expect("CUDA rms_norm_heads_batched_f32 failed");
+        cuda.rms_norm_heads_batched_f32(
+            &mut out, src_guard.slice(), w_guard.slice(),
+            m, n_heads, head_dim, eps,
+        ).expect("CUDA rms_norm_heads_batched_f32 failed");
 
         let storage = Storage::from_cuda_slice(out, total, self.device());
         Self {
@@ -3490,13 +3490,14 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        // pool_alloc_uninit: broadcast_copy writes every element.
+        // pool_alloc_uninit: rope kernel writes every output pair via the
+        // per-thread store (both halves covered).
         let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
 
-        cuda.broadcast_copy_f32(&mut out, src_guard.slice(), total, total)
-            .expect("CUDA broadcast_copy_f32 failed");
-        cuda.rope_split_halves_batched_f32(&mut out, m, n_heads, head_dim, theta, pos_start)
-            .expect("CUDA rope_split_halves_batched_f32 failed");
+        cuda.rope_split_halves_batched_f32(
+            &mut out, src_guard.slice(),
+            m, n_heads, head_dim, theta, pos_start,
+        ).expect("CUDA rope_split_halves_batched_f32 failed");
 
         let storage = Storage::from_cuda_slice(out, total, self.device());
         Self {
