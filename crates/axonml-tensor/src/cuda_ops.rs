@@ -3243,6 +3243,51 @@ impl Tensor<f32> {
 
     /// GPU RMSNorm with a per-element weight scale.
     /// Input shape `[n]` (single token); weight shape `[n]`.
+    /// Qwen3 QK-norm: per-head RMS_norm over the last `head_dim` axis.
+    /// `self` is `[n_heads * head_dim]`; `weight` is `[head_dim]`
+    /// broadcast across all heads. Returns a new tensor with the norm
+    /// applied. Kernel operates in place on a fresh copy of self.
+    pub(crate) fn rms_norm_heads_cuda(
+        &self,
+        weight: &Self,
+        n_heads: usize,
+        head_dim: usize,
+        eps: f32,
+    ) -> Self {
+        let data = self.contiguous_gpu();
+        let w = weight.contiguous_gpu();
+        debug_assert_eq!(
+            data.numel(),
+            n_heads * head_dim,
+            "rms_norm_heads: tensor must be [n_heads * head_dim]"
+        );
+        debug_assert_eq!(
+            w.numel(),
+            head_dim,
+            "rms_norm_heads: weight must be [head_dim]"
+        );
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        let w_guard = w.storage.as_cuda_slice();
+        // pool_alloc_uninit: broadcast_copy below writes every element.
+        let mut out = pool_alloc_uninit(data.numel()).expect("GPU pool alloc failed");
+
+        // Copy src -> out (rms_norm_heads_f32 operates in place).
+        cuda.broadcast_copy_f32(&mut out, src_guard.slice(), data.numel(), data.numel())
+            .expect("CUDA broadcast_copy_f32 failed");
+        cuda.rms_norm_heads_f32(&mut out, w_guard.slice(), n_heads, head_dim, eps)
+            .expect("CUDA rms_norm_heads_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, data.numel(), self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
     pub(crate) fn rms_norm_cuda(&self, weight: &Self, eps: f32) -> Self {
         let data = self.contiguous_gpu();
         let w = weight.contiguous_gpu();

@@ -168,3 +168,47 @@ extern "C" __global__ void relu2_gate_f32(
     const float r = fmaxf(0.0f, g);
     out[idx] = (r * r) * up[idx];
 }
+
+// ============================================================================
+// Per-head RMS_norm (Qwen3 QK-norm)
+//
+// Applies RMS_norm(x[h, :], weight, eps) independently for every head h.
+// The SAME [head_dim] weight vector is broadcast across every head (this
+// is how Qwen3 stores its attn_q_norm / attn_k_norm).
+//
+// Layout:
+//   x       : [n_heads * head_dim]  in-place
+//   weight  : [head_dim]
+//
+// Launch: grid = (n_heads, 1, 1), block = (32, 1, 1). One warp per head.
+// head_dim must be a multiple of 32 (Qwen3: head_dim = 128, so 4 elems/lane).
+// ============================================================================
+extern "C" __global__ void rms_norm_heads_f32(
+    float* __restrict__ x,
+    const float* __restrict__ weight,
+    unsigned int head_dim,
+    float eps
+) {
+    const unsigned int h    = blockIdx.x;
+    const unsigned int lane = threadIdx.x;
+    float* x_head = x + (size_t)h * (size_t)head_dim;
+
+    // Sum-of-squares, lane-strided over this head's head_dim elements.
+    float local = 0.0f;
+    for (unsigned int i = lane; i < head_dim; i += 32u) {
+        float v = x_head[i];
+        local += v * v;
+    }
+
+    // Warp-level reduction (head_dim <= ~8 * 32, fits in a single warp).
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1) {
+        local += __shfl_xor_sync(0xFFFFFFFFu, local, off);
+    }
+
+    float inv_rms = rsqrtf(local / (float)head_dim + eps);
+
+    for (unsigned int i = lane; i < head_dim; i += 32u) {
+        x_head[i] = x_head[i] * inv_rms * weight[i];
+    }
+}

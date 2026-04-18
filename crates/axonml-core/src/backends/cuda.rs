@@ -3001,6 +3001,42 @@ impl CudaBackend {
         }
     }
 
+    /// Per-head RMS_norm (Qwen3 QK-norm). Applies
+    /// `x[h, :] = x[h, :] * rsqrt(mean(x[h,:]²) + eps) * weight` for
+    /// every head `h`, where `weight` is a single `[head_dim]` vector
+    /// broadcast across every head.
+    ///
+    /// One warp per head. Operates in place on `x`.
+    pub fn rms_norm_heads_f32(
+        &self,
+        x: &mut CudaSlice<f32>,
+        weight: &CudaSlice<f32>,
+        n_heads: usize,
+        head_dim: usize,
+        eps: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("rms_norm_heads_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("rms_norm_heads_f32".to_string()))?;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (n_heads as u32, 1, 1),
+            block_dim: (32, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(x)
+                .arg(weight)
+                .arg(&(head_dim as u32))
+                .arg(&eps)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// RoPE in the LLaMA / Qwen / Mistral split-halves layout.
     ///
     /// Each query/key vector is laid out as `[head][dim]` and rotated by
