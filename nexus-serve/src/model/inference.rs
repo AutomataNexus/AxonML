@@ -119,6 +119,19 @@ pub struct InferenceConfig {
     /// `num_kv_heads`, `head_dim`, or `rope_theta` — those fields are dummy
     /// values on Mamba models.
     pub mamba: Option<MambaConfig>,
+    /// MoE hyperparameters (expert count + top-k routing). Populated for
+    /// Mixtral-style MoE architectures (`olmoe`, `qwen3moe`, `mixtral`).
+    /// `None` for dense models.
+    pub moe: Option<MoeConfig>,
+}
+
+/// Mixture-of-Experts routing parameters.
+#[derive(Debug, Clone)]
+pub struct MoeConfig {
+    /// Total number of experts per layer (`{arch}.expert_count`).
+    pub n_experts: usize,
+    /// Top-k experts activated per token (`{arch}.expert_used_count`).
+    pub n_experts_used: usize,
 }
 
 /// Mamba-family SSM hyperparameters.
@@ -287,6 +300,21 @@ impl InferenceConfig {
             None
         };
 
+        // MoE routing params, read under the arch-specific prefix.
+        let moe = gguf
+            .get_meta(&format!("{prefix}.expert_count"))
+            .and_then(|v| v.as_u32())
+            .map(|n_experts| {
+                let n_experts_used = gguf
+                    .get_meta(&format!("{prefix}.expert_used_count"))
+                    .and_then(|v| v.as_u32())
+                    .unwrap_or(n_experts.min(8)) as usize;
+                MoeConfig {
+                    n_experts: n_experts as usize,
+                    n_experts_used,
+                }
+            });
+
         // Mamba: no attention, no RoPE — SSM state machine instead. GGUF
         // exposes its SSM hyperparameters under `mamba.ssm.*`.
         let mamba = if arch == "mamba" {
@@ -326,6 +354,7 @@ impl InferenceConfig {
             model_name,
             gemma,
             mamba,
+            moe,
         }
     }
 
@@ -628,6 +657,10 @@ pub struct InferenceEngine {
     /// Falcon's layer is parallel attention+FFN both fed by a single
     /// LayerNorm, so it needs its own forward path.
     pub falcon_layers: Option<Vec<FalconLayerWeights>>,
+    /// Per-layer OLMoE / Mixtral-style MoE weights. Present when
+    /// `config.moe` is populated. Each layer has standard attention
+    /// weights plus a router + per-expert SwiGLU FFN triple.
+    pub olmoe_layers: Option<Vec<OlmoeLayerWeights>>,
     /// Output norm [hidden_size]
     pub output_norm: Vec<f32>,
     /// Output LayerNorm bias (for Falcon; None for RMSNorm archs).
@@ -855,6 +888,32 @@ pub struct FalconLayerWeights {
     pub ffn_down: Weight,
 }
 
+/// Per-layer OLMoE / Mixtral-style MoE weights.
+///
+/// Standard attention block (matches Qwen3's QK-norm layout) plus a
+/// Mixture-of-Experts FFN: `ffn_gate_inp` routes each token to top-k
+/// experts out of `n_experts`, each expert is a SwiGLU MLP
+/// (`gate_exp × up_exp → SiLU × → down_exp`), and outputs are weighted
+/// by softmax over top-k router logits.
+pub struct OlmoeLayerWeights {
+    pub attn_norm: Vec<f32>,
+    pub attn_q_norm: Vec<f32>,
+    pub attn_k_norm: Vec<f32>,
+    pub q_weight: Weight,
+    pub k_weight: Weight,
+    pub v_weight: Weight,
+    pub o_weight: Weight,
+    pub ffn_norm: Vec<f32>,
+    /// Router — produces `[n_experts]` logits per token. F32 flat
+    /// `[n_experts, hidden]` (out-major).
+    pub ffn_gate_inp: Vec<f32>,
+    /// Per-expert gate/up/down weights. Each `Vec<Weight>` has
+    /// `n_experts` entries sliced out of the packed 3D GGUF tensor.
+    pub gate_exps: Vec<Weight>,
+    pub up_exps: Vec<Weight>,
+    pub down_exps: Vec<Weight>,
+}
+
 /// Per-layer Mamba SSM weights. Each layer's forward pass reads all of
 /// these; shapes reference `d_model = hidden_size`, `d_inner`, `d_state`,
 /// `d_conv`, `dt_rank` from `MambaConfig`.
@@ -1012,6 +1071,10 @@ impl InferenceEngine {
             // is 11 (`<|endoftext|>`), and token 193 is the `</s>` some
             // checkpoints emit. Stop on both.
             "falcon" => &[11, 193],
+            // OLMoE uses the GPT-NeoX-style vocab with token 50279 as
+            // both BOS and EOS (`<|endoftext|>`). Stop on that to avoid
+            // runaway output past the assistant turn.
+            "olmoe" => &[50279],
             _ => &[0, 151643, 151644, 151645, 151646],
         }
     }
@@ -1052,6 +1115,24 @@ impl InferenceEngine {
                 layer.ffn_up.to_device(device.clone());
                 layer.ffn_down.to_device(device.clone());
                 if (i + 1) % 8 == 0 || i + 1 == num {
+                    println!("    Layer {}/{}", i + 1, num);
+                }
+            }
+        } else if let Some(ref mut mlayers) = self.olmoe_layers {
+            // OLMoE path: attention weights + every expert's 3 matmuls.
+            // GPU upload is lazy (per-matmul OnceLock), so unused
+            // experts stay on CPU — important when 64 experts × 3
+            // matrices would otherwise overflow VRAM.
+            let num = mlayers.len();
+            for (i, layer) in mlayers.iter_mut().enumerate() {
+                layer.q_weight.to_device(device.clone());
+                layer.k_weight.to_device(device.clone());
+                layer.v_weight.to_device(device.clone());
+                layer.o_weight.to_device(device.clone());
+                for e in layer.gate_exps.iter_mut() { e.to_device(device.clone()); }
+                for e in layer.up_exps.iter_mut()   { e.to_device(device.clone()); }
+                for e in layer.down_exps.iter_mut() { e.to_device(device.clone()); }
+                if (i + 1) % 4 == 0 || i + 1 == num {
                     println!("    Layer {}/{}", i + 1, num);
                 }
             }
@@ -1510,6 +1591,16 @@ impl InferenceEngine {
             return Self::load_falcon(gguf, mapped, quantized_weights, config);
         }
 
+        // OLMoE / Mixtral-style Mixture-of-Experts. Standard attention
+        // (with Qwen3-like QK-norm on OLMoE) + a router + per-token
+        // top-k expert routing over per-expert SwiGLU FFNs. Each layer's
+        // expert weights live in packed 3D tensors (`ffn_gate_exps`
+        // etc) that we split into `n_experts` separate Weight objects
+        // at load time.
+        if config.architecture == "olmoe" {
+            return Self::load_olmoe(gguf, mapped, quantized_weights, config);
+        }
+
         // Token embeddings as flat Vec (fast lookup) — always dequantized
         let token_embed = load_vec(mapped, "token_embd.weight")?;
 
@@ -1598,6 +1689,7 @@ impl InferenceEngine {
             gemma4: None,
             mamba_layers: None,
             falcon_layers: None,
+            olmoe_layers: None,
             output_norm,
             output_norm_bias: None,
             lm_head,
@@ -1715,6 +1807,7 @@ impl InferenceEngine {
             gemma4: None,
             mamba_layers: None,
             falcon_layers: None,
+            olmoe_layers: None,
             output_norm,
             output_norm_bias: None,
             lm_head,
@@ -1808,6 +1901,7 @@ impl InferenceEngine {
             gemma4: None,
             mamba_layers: Some(mamba_layers),
             falcon_layers: None,
+            olmoe_layers: None,
             output_norm,
             output_norm_bias: None,
             lm_head,
@@ -1913,8 +2007,167 @@ impl InferenceEngine {
             gemma4: None,
             mamba_layers: None,
             falcon_layers: Some(falcon_layers),
+            olmoe_layers: None,
             output_norm,
             output_norm_bias: Some(output_norm_bias),
+            lm_head,
+            compute_device: Device::Cpu,
+            #[cfg(feature = "cuda")]
+            gpu_layer_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_output_norm: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            kv_quant_q8: false,
+        })
+    }
+
+    /// OLMoE weight loader. Called from `from_gguf_with_mode` when the
+    /// architecture is `"olmoe"`.
+    ///
+    /// The packed expert tensors (`ffn_gate_exps` / `ffn_up_exps` /
+    /// `ffn_down_exps`) are 3D: `[in, out, n_experts]` with `n_experts`
+    /// as the slowest axis. We split each packed tensor along its
+    /// output-axis into `n_experts` separate `Weight` objects so the
+    /// forward path can pick any top-k subset without a custom
+    /// per-expert-indexing matmul kernel. Weights stay on CPU until
+    /// first use — each expert's GPU upload happens lazily via the
+    /// `OnceLock` inside `Weight::Quantized`.
+    fn load_olmoe(
+        _gguf: &GgufFile,
+        mapped: &MappedGguf,
+        quantized_weights: bool,
+        config: InferenceConfig,
+    ) -> Result<Self, String> {
+        let moe_cfg = config
+            .moe
+            .as_ref()
+            .ok_or_else(|| "OLMoE requires a MoeConfig — missing expert_count".to_string())?;
+        let n_experts = moe_cfg.n_experts;
+
+        let token_embed = load_vec(mapped, "token_embd.weight")?;
+
+        let intermediate = config.intermediate_size;
+
+        let mut olmoe_layers = Vec::with_capacity(config.num_layers);
+        for i in 0..config.num_layers {
+            let prefix = format!("blk.{i}");
+
+            let attn_norm = load_vec(mapped, &format!("{prefix}.attn_norm.weight"))?;
+            let attn_q_norm = load_vec(mapped, &format!("{prefix}.attn_q_norm.weight"))?;
+            let attn_k_norm = load_vec(mapped, &format!("{prefix}.attn_k_norm.weight"))?;
+
+            let q_weight = load_weight(
+                mapped,
+                &format!("{prefix}.attn_q.weight"),
+                quantized_weights,
+            )?;
+            let k_weight = load_weight(
+                mapped,
+                &format!("{prefix}.attn_k.weight"),
+                quantized_weights,
+            )?;
+            let v_weight = load_weight(
+                mapped,
+                &format!("{prefix}.attn_v.weight"),
+                quantized_weights,
+            )?;
+            let o_weight = load_weight(
+                mapped,
+                &format!("{prefix}.attn_output.weight"),
+                quantized_weights,
+            )?;
+
+            let ffn_norm = load_vec(mapped, &format!("{prefix}.ffn_norm.weight"))?;
+            let ffn_gate_inp = load_vec(mapped, &format!("{prefix}.ffn_gate_inp.weight"))?;
+
+            // Packed 3D expert tensors. GGUF dims for `ffn_gate_exps`
+            // are `[hidden, intermediate, n_experts]` — split along the
+            // output axis into n_experts separate [hidden, intermediate]
+            // weights. (`split_weight_along_output` expects 2D, so we
+            // treat the 3D tensor as 2D with total_out = intermediate *
+            // n_experts.)
+            let gate_all = load_weight(
+                mapped,
+                &format!("{prefix}.ffn_gate_exps.weight"),
+                quantized_weights,
+            )?;
+            let up_all = load_weight(
+                mapped,
+                &format!("{prefix}.ffn_up_exps.weight"),
+                quantized_weights,
+            )?;
+            let down_all = load_weight(
+                mapped,
+                &format!("{prefix}.ffn_down_exps.weight"),
+                quantized_weights,
+            )?;
+
+            let gate_split = vec![intermediate; n_experts];
+            let up_split = vec![intermediate; n_experts];
+            let down_split = vec![config.hidden_size; n_experts];
+
+            let gate_exps = split_weight_along_output(&gate_all, &gate_split)
+                .map_err(|e| format!("{prefix}.ffn_gate_exps split: {e}"))?
+                .into_vec();
+            let up_exps = split_weight_along_output(&up_all, &up_split)
+                .map_err(|e| format!("{prefix}.ffn_up_exps split: {e}"))?
+                .into_vec();
+            let down_exps = split_weight_along_output(&down_all, &down_split)
+                .map_err(|e| format!("{prefix}.ffn_down_exps split: {e}"))?
+                .into_vec();
+
+            olmoe_layers.push(OlmoeLayerWeights {
+                attn_norm,
+                attn_q_norm,
+                attn_k_norm,
+                q_weight,
+                k_weight,
+                v_weight,
+                o_weight,
+                ffn_norm,
+                ffn_gate_inp,
+                gate_exps,
+                up_exps,
+                down_exps,
+            });
+
+            if (i + 1) % 4 == 0 || i + 1 == config.num_layers {
+                println!(
+                    "    Loaded layer {}/{} ({} experts × 3 tensors)",
+                    i + 1,
+                    config.num_layers,
+                    n_experts,
+                );
+            }
+        }
+
+        let output_norm = load_vec(mapped, "output_norm.weight")?;
+        let lm_head = if mapped.has_tensor("output.weight") {
+            load_weight(mapped, "output.weight", quantized_weights)?
+        } else {
+            println!("    LM head tied to token embeddings");
+            load_weight(mapped, "token_embd.weight", quantized_weights)?
+        };
+
+        println!(
+            "  OLMoE model loaded: {} layers, hidden={}, n_heads={}, experts={}/{}",
+            config.num_layers,
+            config.hidden_size,
+            config.num_heads,
+            moe_cfg.n_experts_used,
+            moe_cfg.n_experts,
+        );
+
+        Ok(Self {
+            config,
+            token_embed,
+            layers: Vec::new(),
+            gemma4: None,
+            mamba_layers: None,
+            falcon_layers: None,
+            olmoe_layers: Some(olmoe_layers),
+            output_norm,
+            output_norm_bias: None,
             lm_head,
             compute_device: Device::Cpu,
             #[cfg(feature = "cuda")]
@@ -2068,6 +2321,7 @@ impl InferenceEngine {
             gemma4: Some(gemma),
             mamba_layers: None,
             falcon_layers: None,
+            olmoe_layers: None,
             output_norm,
             output_norm_bias: None,
             lm_head,
@@ -2121,6 +2375,13 @@ impl InferenceEngine {
         // regular KV cache but a different per-step forward.
         if self.falcon_layers.is_some() {
             self.generate_falcon_stream(prompt_ids, max_new_tokens, temperature, top_p, on_token);
+            return;
+        }
+
+        // OLMoE / Mixtral-style MoE: standard attention + per-token
+        // top-k expert routing. Same KV cache shape as LLaMA.
+        if self.olmoe_layers.is_some() {
+            self.generate_olmoe_stream(prompt_ids, max_new_tokens, temperature, top_p, on_token);
             return;
         }
 
@@ -2624,6 +2885,232 @@ impl InferenceEngine {
 
         for _ in 1..max_new_tokens {
             let logits = self.forward_one_mamba(next_id, &mut state);
+            next_id = if temperature < 0.01 {
+                argmax(&logits) as u32
+            } else {
+                sample_top_p(&logits, temperature, top_p)
+            };
+            if stop.contains(&next_id) {
+                break;
+            }
+            if !on_token(next_id) {
+                break;
+            }
+        }
+    }
+
+    /// OLMoE / Mixtral-style Mixture-of-Experts per-token forward.
+    /// Standard attention (with Q/K RMSNorm applied to the whole
+    /// hidden vector), then MoE FFN:
+    ///   * router logits = `ffn_gate_inp · normed`
+    ///   * softmax over top-`n_experts_used` logits → expert weights
+    ///   * for each selected expert, run a SwiGLU MLP
+    ///   * sum weighted outputs into residual.
+    pub fn forward_one_olmoe(&self, token_id: u32, kv_cache: &mut KvCache) -> Vec<f32> {
+        let layers = self
+            .olmoe_layers
+            .as_ref()
+            .expect("forward_one_olmoe called on non-olmoe engine");
+        let moe_cfg = self
+            .config
+            .moe
+            .as_ref()
+            .expect("olmoe requires MoeConfig");
+        let hidden = self.config.hidden_size;
+        let head_dim = self.config.head_dim;
+        let n_heads = self.config.num_heads;
+        let n_kv_heads = self.config.num_kv_heads;
+        let q_dim = n_heads * head_dim;
+        let kv_dim = n_kv_heads * head_dim;
+        let eps = self.config.rms_norm_eps;
+        let theta = self.config.rope_theta;
+        let pos = kv_cache.len;
+        let n_experts = moe_cfg.n_experts;
+        let top_k = moe_cfg.n_experts_used;
+        let intermediate = self.config.intermediate_size;
+
+        // Embedding lookup.
+        let id = token_id as usize;
+        let mut x: Vec<f32> = if id < self.config.vocab_size {
+            self.token_embed[id * hidden..(id + 1) * hidden].to_vec()
+        } else {
+            vec![0.0; hidden]
+        };
+
+        for (li, layer) in layers.iter().enumerate() {
+            // --- Attention --------------------------------------------
+            let normed_attn = rms_norm_single(&x, &layer.attn_norm, eps);
+            let normed_attn_t = Tensor::from_vec(normed_attn, &[1, hidden])
+                .expect("normed_attn tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move normed_attn");
+
+            let mut q = layer.q_weight.matmul(&normed_attn_t).to_vec();
+            let mut k = layer.k_weight.matmul(&normed_attn_t).to_vec();
+            let v = layer.v_weight.matmul(&normed_attn_t).to_vec();
+
+            // OLMoE Q/K norm is over the whole hidden/kv_dim vector,
+            // NOT per-head (HF uses `OlmoeRMSNorm(hidden_size)`). The
+            // weight tensors are `[hidden]` even though attention is
+            // multi-head.
+            q = rms_norm_single(&q, &layer.attn_q_norm, eps);
+            k = rms_norm_single(&k, &layer.attn_k_norm, eps);
+
+            apply_rope_single(&mut q, n_heads, head_dim, theta, pos);
+            apply_rope_single(&mut k, n_kv_heads, head_dim, theta, pos);
+
+            kv_cache.k_cache[li].extend_from_slice(&k);
+            kv_cache.v_cache[li].extend_from_slice(&v);
+            let kv_len = kv_cache.len + 1;
+
+            let attn = single_query_attention(
+                &q,
+                &kv_cache.k_cache[li],
+                &kv_cache.v_cache[li],
+                kv_len,
+                n_heads,
+                n_kv_heads,
+                head_dim,
+            );
+
+            let attn_t = Tensor::from_vec(attn, &[1, q_dim])
+                .expect("attn tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move attn");
+            let attn_proj = layer.o_weight.matmul(&attn_t).to_vec();
+
+            for d in 0..hidden {
+                x[d] += attn_proj[d];
+            }
+
+            // --- MoE FFN ----------------------------------------------
+            let normed_ffn = rms_norm_single(&x, &layer.ffn_norm, eps);
+
+            // Router: router_logits[e] = Σ_i ffn_gate_inp[e, i] · normed_ffn[i]
+            // ffn_gate_inp GGUF dims [hidden, n_experts] → PyTorch
+            // [out=n_experts, in=hidden], flat index e*hidden + i.
+            let mut router_logits = vec![0.0f32; n_experts];
+            for e in 0..n_experts {
+                let row = e * hidden;
+                let mut acc = 0.0f32;
+                for i in 0..hidden {
+                    acc += layer.ffn_gate_inp[row + i] * normed_ffn[i];
+                }
+                router_logits[e] = acc;
+            }
+
+            // Top-k expert selection. For small top_k (typically 8), an
+            // O(n_experts · top_k) partial-sort is fine.
+            let mut top_k_idx: Vec<usize> = Vec::with_capacity(top_k);
+            let mut top_k_logits: Vec<f32> = Vec::with_capacity(top_k);
+            for e in 0..n_experts {
+                let logit = router_logits[e];
+                let mut inserted = false;
+                for j in 0..top_k_idx.len() {
+                    if logit > top_k_logits[j] {
+                        top_k_idx.insert(j, e);
+                        top_k_logits.insert(j, logit);
+                        if top_k_idx.len() > top_k {
+                            top_k_idx.truncate(top_k);
+                            top_k_logits.truncate(top_k);
+                        }
+                        inserted = true;
+                        break;
+                    }
+                }
+                if !inserted && top_k_idx.len() < top_k {
+                    top_k_idx.push(e);
+                    top_k_logits.push(logit);
+                }
+            }
+
+            // Sparse softmax over the selected top-k logits.
+            let max_l = top_k_logits
+                .iter()
+                .copied()
+                .fold(f32::NEG_INFINITY, f32::max);
+            let mut sum = 0.0f32;
+            for v in top_k_logits.iter_mut() {
+                *v = (*v - max_l).exp();
+                sum += *v;
+            }
+            for v in top_k_logits.iter_mut() {
+                *v /= sum;
+            }
+
+            let normed_ffn_t = Tensor::from_vec(normed_ffn, &[1, hidden])
+                .expect("normed_ffn tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move normed_ffn");
+
+            let mut moe_out = vec![0.0f32; hidden];
+            for (idx, &e) in top_k_idx.iter().enumerate() {
+                let w_e = top_k_logits[idx];
+                let gate = layer.gate_exps[e].matmul(&normed_ffn_t).to_vec();
+                let up = layer.up_exps[e].matmul(&normed_ffn_t).to_vec();
+                debug_assert_eq!(gate.len(), intermediate);
+                debug_assert_eq!(up.len(), intermediate);
+
+                let mut mid = vec![0.0f32; intermediate];
+                for j in 0..intermediate {
+                    mid[j] = gate[j] * sigmoid(gate[j]) * up[j];
+                }
+                let mid_t = Tensor::from_vec(mid, &[1, intermediate])
+                    .expect("mid tensor")
+                    .to_device(self.compute_device.clone())
+                    .expect("move mid");
+                let contrib = layer.down_exps[e].matmul(&mid_t).to_vec();
+                for d in 0..hidden {
+                    moe_out[d] += w_e * contrib[d];
+                }
+            }
+            for d in 0..hidden {
+                x[d] += moe_out[d];
+            }
+            let _ = kv_dim;
+        }
+
+        let final_norm = rms_norm_single(&x, &self.output_norm, eps);
+        let norm_t = Tensor::from_vec(final_norm, &[1, hidden])
+            .expect("final norm tensor")
+            .to_device(self.compute_device.clone())
+            .expect("move final norm");
+        let logits = self.lm_head.matmul(&norm_t);
+        kv_cache.len += 1;
+        logits.to_vec()
+    }
+
+    /// OLMoE decode stream.
+    fn generate_olmoe_stream<F: FnMut(u32) -> bool>(
+        &self,
+        prompt_ids: &[u32],
+        max_new_tokens: usize,
+        temperature: f32,
+        top_p: f32,
+        mut on_token: F,
+    ) {
+        let mut kv_cache = KvCache::new(self.config.num_layers);
+        if prompt_ids.is_empty() {
+            return;
+        }
+        let mut last_logits: Vec<f32> = Vec::new();
+        for &tok in prompt_ids {
+            last_logits = self.forward_one_olmoe(tok, &mut kv_cache);
+        }
+        let stop = self.stop_tokens();
+        let mut next_id = if temperature < 0.01 {
+            argmax(&last_logits) as u32
+        } else {
+            sample_top_p(&last_logits, temperature, top_p)
+        };
+        if stop.contains(&next_id) {
+            return;
+        }
+        if !on_token(next_id) {
+            return;
+        }
+        for _ in 1..max_new_tokens {
+            let logits = self.forward_one_olmoe(next_id, &mut kv_cache);
             next_id = if temperature < 0.01 {
                 argmax(&logits) as u32
             } else {
@@ -4784,7 +5271,13 @@ fn load_weight(mapped: &MappedGguf, name: &str, quantized: bool) -> Result<Weigh
         | GgmlType::I2S,
     );
 
-    if quantized && dims.len() == 2 && is_block_quantized {
+    // Allow 3D quantized tensors on the lazy path — OLMoE's packed
+    // expert tensors are `[in, out, n_experts]` and we split them into
+    // per-expert 2D `Weight`s later via `split_weight_along_output`.
+    // Eager-dequanting a 3D Q4K expert stack would blow out memory
+    // (64 experts × 2048 × 1024 × f32 = 512 MB × 3 projections × 16
+    // layers = 25 GB of f32 scratch).
+    if quantized && (dims.len() == 2 || dims.len() == 3) && is_block_quantized {
         // Lazy dequant path: store raw bytes
         let raw = mapped.load_tensor_raw(name)
             .ok_or_else(|| format!("Failed to load raw bytes for {name}"))?;
@@ -4839,6 +5332,11 @@ impl WeightSplit {
         let b = self.0.remove(0);
         Some((a, b))
     }
+    /// Consume and hand back all pieces in order. Used by MoE where
+    /// `n_experts` can be anything (typically 8 or 64+).
+    pub fn into_vec(self) -> Vec<Weight> {
+        self.0
+    }
 }
 
 /// Split a 2D `Weight` along its output axis (axis 1 in GGUF dim order)
@@ -4853,12 +5351,20 @@ impl WeightSplit {
 /// Returns `Err` if the `out_dims` don't sum to the original weight's
 /// output dim, or if the weight is not 2D.
 fn split_weight_along_output(w: &Weight, out_dims: &[usize]) -> Result<WeightSplit, String> {
-    let shape = w.shape(); // [in, out]
-    if shape.len() != 2 {
-        return Err(format!("expected 2D weight, got shape {shape:?}"));
-    }
-    let in_dim = shape[0];
-    let total_out = shape[1];
+    let shape = w.shape();
+    // Accept 2D `[in, out]` (Phi-3 QKV / gate-up case) or 3D
+    // `[in, out_per_expert, n_experts]` (OLMoE expert stacks). The 3D
+    // case is treated as the flattened 2D shape `[in, out_per_expert *
+    // n_experts]` because GGUF's row-major layout stores all elements
+    // with the same (j, k) consecutively along axis 0 — so along axis 1
+    // after flattening, each "row" of the flat 2D view is exactly one
+    // (j, k) pair, and slicing by `out_per_expert` picks one expert's
+    // rows.
+    let (in_dim, total_out) = match shape.len() {
+        2 => (shape[0], shape[1]),
+        3 => (shape[0], shape[1] * shape[2]),
+        _ => return Err(format!("expected 2D or 3D weight, got shape {shape:?}")),
+    };
     let sum_out: usize = out_dims.iter().sum();
     if sum_out != total_out {
         return Err(format!(

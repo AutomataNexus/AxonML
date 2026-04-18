@@ -184,9 +184,9 @@ impl Weight {
     pub fn shape(&self) -> Vec<usize> {
         match self {
             Weight::F32(t) => t.shape().to_vec(),
-            Weight::Quantized { dims, .. } => vec![dims[0], dims[1]],
+            Weight::Quantized { dims, .. } => dims.clone(),
             #[cfg(feature = "cuda")]
-            Weight::QuantizedGpu { dims, .. } => vec![dims[0], dims[1]],
+            Weight::QuantizedGpu { dims, .. } => dims.clone(),
         }
     }
 
