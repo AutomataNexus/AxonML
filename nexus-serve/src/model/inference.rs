@@ -3409,9 +3409,29 @@ impl InferenceEngine {
             };
 
             // --- Attention branch (all GPU-resident) ------------------
-            let q_t = layer.q_weight.matmul(&normed_t);
-            let k_t = layer.k_weight.matmul(&normed_t);
-            let v_t = layer.v_weight.matmul(&normed_t);
+            // Fused Q5_1 QKV for Falcon-7B's attn_qkv (MQA: K/V have only
+            // 64 rows each — too small to fill the GPU on their own).
+            // Falls back to three separate matmuls if the kernel doesn't
+            // apply (e.g. non-GPU input or non-Q5_1 weights).
+            #[cfg(feature = "cuda")]
+            let (q_t, k_t, v_t) = if let Some(triple) =
+                crate::model::weight::fused_qkv_q5_1_matmul_gpu(
+                    &layer.q_weight, &layer.k_weight, &layer.v_weight, &normed_t,
+                ) {
+                triple
+            } else {
+                (
+                    layer.q_weight.matmul(&normed_t),
+                    layer.k_weight.matmul(&normed_t),
+                    layer.v_weight.matmul(&normed_t),
+                )
+            };
+            #[cfg(not(feature = "cuda"))]
+            let (q_t, k_t, v_t) = (
+                layer.q_weight.matmul(&normed_t),
+                layer.k_weight.matmul(&normed_t),
+                layer.v_weight.matmul(&normed_t),
+            );
 
             // GPU RoPE on Q and K. V is not rotated.
             let q_t = q_t.apply_rope_split_halves(n_heads, head_dim, theta, pos);

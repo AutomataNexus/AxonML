@@ -1422,6 +1422,56 @@ impl CudaBackend {
         }
     }
 
+    /// Q5_1 fused QKV GEMV — one launch computes Q, K, V from a shared
+    /// activation. Primary target: Falcon-7B's attn_qkv (MQA, K/V each
+    /// only 64 rows — too small to fill the GPU on their own).
+    pub fn q5_1_gemv_fused_qkv_f32(
+        &self,
+        q_w: &CudaSlice<u8>,
+        k_w: &CudaSlice<u8>,
+        v_w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        q_c: &mut CudaSlice<f32>,
+        k_c: &mut CudaSlice<f32>,
+        v_c: &mut CudaSlice<f32>,
+        q_out: usize,
+        k_out: usize,
+        v_out: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 32 == 0, "fused QKV Q5_1 GEMV requires in_dim % 32 == 0");
+        let func = self
+            .kernels
+            .get("q5_1_gemv_fused_qkv_f32")
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("q5_1_gemv_fused_qkv_f32".to_string())
+            })?;
+
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let total_out = (q_out + k_out + v_out) as u32;
+        let grid = (total_out + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(q_w).arg(k_w).arg(v_w).arg(a)
+                .arg(q_c).arg(k_c).arg(v_c)
+                .arg(&(q_out as u32))
+                .arg(&(k_out as u32))
+                .arg(&(v_out as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Q8_0 GEMV — same v2 two-warp-per-row layout as Q5_0. 34-byte block
     /// (f16 scale + 32 signed int8 quants). Primary consumer: Falcon-7B's
     /// Q8_0 LM head (4544 × 65024), which otherwise falls through to

@@ -1322,3 +1322,107 @@ pub fn fused_qkv_q5k_matmul_gpu(
         Storage::from_cuda_slice(v_out_buf, v_out, dev), &[1, v_out]).ok()?;
     Some((q_t, k_t, v_t))
 }
+
+fn q5_1_quantized_bytes(w: &Weight) -> Option<(&Vec<u8>, &Vec<usize>)> {
+    match w {
+        Weight::Quantized { data, dims, dtype, .. }
+            if *dtype == GgmlType::Q5_1 && dims.len() == 2 =>
+        {
+            Some((data, dims))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(feature = "cuda")]
+static FUSED_QKV_Q5_1_FIRED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Fused Q5_1 QKV matmul — one kernel launch for Q/K/V projections.
+///
+/// Target: Falcon-7B's attn_qkv (Q5_1, MQA). The load path splits the
+/// original fused GGUF tensor into three Weights; this function re-fuses
+/// the matmul at decode time. Key win: Falcon's K and V each have only
+/// 64 output rows, too small to fill the GPU on their own — the fused
+/// grid combines them with Q's 4544 rows in one launch.
+#[cfg(feature = "cuda")]
+pub fn fused_qkv_q5_1_matmul_gpu(
+    q_weight: &Weight,
+    k_weight: &Weight,
+    v_weight: &Weight,
+    input: &Tensor<f32>,
+) -> Option<(Tensor<f32>, Tensor<f32>, Tensor<f32>)> {
+    use axonml_core::backends::cuda::get_cuda_backend;
+    use axonml_core::storage::Storage;
+
+    if !input.device().is_gpu() {
+        return None;
+    }
+    let cuda = get_cuda_backend()?;
+
+    let (q_data, q_dims) = q5_1_quantized_bytes(q_weight)?;
+    let (k_data, k_dims) = q5_1_quantized_bytes(k_weight)?;
+    let (v_data, v_dims) = q5_1_quantized_bytes(v_weight)?;
+
+    let in_dim = q_dims[0];
+    if k_dims[0] != in_dim || v_dims[0] != in_dim || in_dim % 32 != 0 {
+        return None;
+    }
+    let q_out = q_dims[1];
+    let k_out = k_dims[1];
+    let v_out = v_dims[1];
+
+    let (q_gpu, k_gpu, v_gpu) = match (q_weight, k_weight, v_weight) {
+        (
+            Weight::Quantized { gpu_cache: qc, .. },
+            Weight::Quantized { gpu_cache: kc, .. },
+            Weight::Quantized { gpu_cache: vc, .. },
+        ) => {
+            let qg = qc.get_or_init(|| {
+                cuda.htod_copy(q_data.as_slice())
+                    .expect("fused Q5_1 QKV: q gpu_cache htod_copy failed")
+            });
+            let kg = kc.get_or_init(|| {
+                cuda.htod_copy(k_data.as_slice())
+                    .expect("fused Q5_1 QKV: k gpu_cache htod_copy failed")
+            });
+            let vg = vc.get_or_init(|| {
+                cuda.htod_copy(v_data.as_slice())
+                    .expect("fused Q5_1 QKV: v gpu_cache htod_copy failed")
+            });
+            (qg, kg, vg)
+        }
+        _ => return None,
+    };
+
+    use axonml_core::backends::cuda_pool::pool_alloc_uninit;
+    let in_guard = input.as_cuda_slice_read();
+    let mut q_out_buf = pool_alloc_uninit(q_out).ok()?;
+    let mut k_out_buf = pool_alloc_uninit(k_out).ok()?;
+    let mut v_out_buf = pool_alloc_uninit(v_out).ok()?;
+
+    cuda.q5_1_gemv_fused_qkv_f32(
+        q_gpu, k_gpu, v_gpu,
+        in_guard.slice(),
+        &mut q_out_buf, &mut k_out_buf, &mut v_out_buf,
+        q_out, k_out, v_out, in_dim,
+    )
+    .ok()?;
+    drop(in_guard);
+
+    if !FUSED_QKV_Q5_1_FIRED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!(
+            "[perf] fused Q5_1 QKV kernel FIRED (first time) \
+             in={in_dim} q_out={q_out} k_out={k_out} v_out={v_out}"
+        );
+    }
+
+    let dev = input.device();
+    let q_t = Tensor::from_storage(
+        Storage::from_cuda_slice(q_out_buf, q_out, dev.clone()), &[1, q_out]).ok()?;
+    let k_t = Tensor::from_storage(
+        Storage::from_cuda_slice(k_out_buf, k_out, dev.clone()), &[1, k_out]).ok()?;
+    let v_t = Tensor::from_storage(
+        Storage::from_cuda_slice(v_out_buf, v_out, dev), &[1, v_out]).ok()?;
+    Some((q_t, k_t, v_t))
+}
