@@ -1182,6 +1182,152 @@ impl<T: Float> Tensor<T> {
         Self::from_vec(x, &self.shape).expect("apply_rope: build output tensor")
     }
 
+    /// Batched RMSNorm over `m` tokens. `self` is `[m, n]`; `weight` is `[n]`.
+    #[must_use]
+    pub fn rms_norm_batched(&self, weight: &Self, m: usize, n: usize, eps: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).rms_norm_batched_cuda(gpu_ref(weight), m, n, eps))
+            };
+        }
+        // CPU fallback: independent rms_norm over each of m rows.
+        let x = self.to_vec();
+        let w = weight.to_vec();
+        assert_eq!(x.len(), m * n, "rms_norm_batched: expected m*n");
+        assert_eq!(w.len(), n, "rms_norm_batched: weight len mismatch");
+        let mut out: Vec<T> = Vec::with_capacity(m * n);
+        for t in 0..m {
+            let base = t * n;
+            let mut sum_sq = 0.0f64;
+            for i in 0..n {
+                let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
+                sum_sq += f * f;
+            }
+            let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+            for i in 0..n {
+                let v = x[base + i].to_f32().unwrap_or(0.0) * scale
+                    * w[i].to_f32().unwrap_or(0.0);
+                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+            }
+        }
+        Self::from_vec(out, &[m, n]).expect("rms_norm_batched: build output")
+    }
+
+    /// Batched Qwen3 QK-norm over `m` tokens. `self` is `[m, n_heads * head_dim]`;
+    /// `weight` is `[head_dim]` broadcast across every (token, head).
+    #[must_use]
+    pub fn rms_norm_heads_batched(
+        &self,
+        weight: &Self,
+        m: usize,
+        n_heads: usize,
+        head_dim: usize,
+        eps: f32,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).rms_norm_heads_batched_cuda(
+                    gpu_ref(weight), m, n_heads, head_dim, eps,
+                ))
+            };
+        }
+        // CPU fallback: m × rms_norm_heads.
+        let x = self.to_vec();
+        let w = weight.to_vec();
+        let total = m * n_heads * head_dim;
+        assert_eq!(x.len(), total);
+        assert_eq!(w.len(), head_dim);
+        let mut out: Vec<T> = Vec::with_capacity(total);
+        for t in 0..m {
+            for h in 0..n_heads {
+                let base = t * n_heads * head_dim + h * head_dim;
+                let mut sum_sq = 0.0f64;
+                for i in 0..head_dim {
+                    let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
+                    sum_sq += f * f;
+                }
+                let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+                for i in 0..head_dim {
+                    let v = x[base + i].to_f32().unwrap_or(0.0) * scale
+                        * w[i].to_f32().unwrap_or(0.0);
+                    out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+                }
+            }
+        }
+        Self::from_vec(out, &self.shape).expect("rms_norm_heads_batched: build output")
+    }
+
+    /// Batched split-halves RoPE over `m` tokens at positions
+    /// `[pos_start, pos_start + m)`. `self` is `[m, n_heads * head_dim]`.
+    #[must_use]
+    pub fn apply_rope_split_halves_batched(
+        &self,
+        m: usize,
+        n_heads: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).apply_rope_split_halves_batched_cuda(
+                    m, n_heads, head_dim, theta, pos_start,
+                ))
+            };
+        }
+        // CPU fallback.
+        let mut x = self.to_vec();
+        let half = head_dim / 2;
+        let row_stride = n_heads * head_dim;
+        for t in 0..m {
+            let pos = pos_start + t;
+            for h in 0..n_heads {
+                for d in 0..half {
+                    let base = t * row_stride + h * head_dim + d;
+                    let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                    let angle = pos as f32 * theta.powf(exponent);
+                    let (s, c) = angle.sin_cos();
+                    let a = x[base].to_f32().unwrap_or(0.0);
+                    let b = x[base + half].to_f32().unwrap_or(0.0);
+                    x[base] = num_traits::cast(c * a - s * b).unwrap_or_else(T::zero);
+                    x[base + half] = num_traits::cast(s * a + c * b).unwrap_or_else(T::zero);
+                }
+            }
+        }
+        Self::from_vec(x, &self.shape).expect("rope_batched: build output")
+    }
+
+    /// Broadcast per-column bias add across `m` rows: `out[t, c] = self[t, c] + bias[c]`.
+    #[must_use]
+    pub fn add_bias_batched(&self, bias: &Self, m: usize, n: usize) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).add_bias_batched_cuda(gpu_ref(bias), m, n))
+            };
+        }
+        // CPU fallback.
+        let x = self.to_vec();
+        let b = bias.to_vec();
+        assert_eq!(x.len(), m * n);
+        assert_eq!(b.len(), n);
+        let mut out: Vec<T> = Vec::with_capacity(m * n);
+        for t in 0..m {
+            for c in 0..n {
+                let v = x[t * n + c].to_f32().unwrap_or(0.0) + b[c].to_f32().unwrap_or(0.0);
+                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+            }
+        }
+        Self::from_vec(out, &[m, n]).expect("add_bias_batched: build output")
+    }
+
     /// Fused SwiGLU: `out = SiLU(self) * up`. `self` is the gate.
     #[must_use]
     pub fn swiglu(&self, up: &Self) -> Self {

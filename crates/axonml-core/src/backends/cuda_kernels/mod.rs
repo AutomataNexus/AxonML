@@ -3791,7 +3791,20 @@ impl CudaKernels {
         kernels.load_module(
             "transformer_ops",
             TRANSFORMER_OPS_PTX,
-            &["rms_norm_f32", "rms_norm_heads_f32", "rope_split_halves_f32", "swiglu_f32", "relu2_gate_f32"],
+            &[
+                "rms_norm_f32",
+                "rms_norm_heads_f32",
+                "rope_split_halves_f32",
+                "swiglu_f32",
+                "relu2_gate_f32",
+                // Batched (prefill, m>1) counterparts — used by
+                // forward_batch_gpu_resident. Same math as their m=1
+                // siblings; grid dims vary over tokens.
+                "rms_norm_batched_f32",
+                "rms_norm_heads_batched_f32",
+                "rope_split_halves_batched_f32",
+                "add_bias_batched_f32",
+            ],
         )?;
 
         Ok(kernels)
