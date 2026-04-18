@@ -821,10 +821,18 @@ impl InferenceEngine {
     pub fn stop_tokens(&self) -> &'static [u32] {
         match self.config.architecture.as_str() {
             "gemma" | "gemma2" | "gemma3" | "gemma4" => &[1, 106],
-            // BitNet b1.58 uses the LLaMA-3 tokenizer: 128000 BOS,
-            // 128001 `<|end_of_text|>`, 128009 `<|eot_id|>`. Include both
-            // EOS and EOT so the assistant turn terminates cleanly.
+            // BitNet b1.58 and Llama-3 family both use the LLaMA-3
+            // tokenizer: 128000 BOS, 128001 `<|end_of_text|>`, 128009
+            // `<|eot_id|>`. Include both EOS and EOT so the assistant
+            // turn terminates cleanly.
             a if a.starts_with("bitnet") => &[128001, 128009],
+            // Plain "llama" arch with a Llama-3-sized vocab (128256):
+            // these are Llama-3/3.1/3.2 models plus their many community
+            // fine-tunes. The older Llama-2-vocab (~32k) variant falls
+            // through to the qwen2 fallback because it has no stop-token
+            // convention encoded in the GGUF we can rely on.
+            "llama" if self.config.vocab_size >= 128000
+                   && self.config.vocab_size < 150000 => &[128001, 128009],
             _ => &[0, 151643, 151644, 151645, 151646],
         }
     }
