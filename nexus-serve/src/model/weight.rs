@@ -349,6 +349,33 @@ impl Weight {
                             dims[0], dims[1], input.device(),
                         );
                     }
+
+                    // Q5_K GEMV/GEMM GPU fast path — Phi-3's attn_qkv
+                    // lives here (Mistral Q5_K_M bodies too). Before this
+                    // path landed, Q5_K weights were eagerly dequanted to
+                    // F32 at load time and hit the plain F32 matmul on
+                    // every decode — Phi-3-mini decode was 1.66 tok/s
+                    // because of this one tensor type.
+                    if *dtype == GgmlType::Q5K
+                        && dims.len() == 2
+                        && dims[0] % 256 == 0
+                        && input.device().is_gpu()
+                    {
+                        if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                            let w_gpu = gpu_cache.get_or_init(|| {
+                                cuda.htod_copy(data.as_slice())
+                                    .expect("Q5_K gpu_cache htod_copy failed")
+                            });
+                            let _ = cuda;
+                            let m_shape = input.shape().first().copied().unwrap_or(1);
+                            let result = if m_shape == 1 {
+                                input.q5k_gemv_cuda(w_gpu, dims[1], dims[0])
+                            } else {
+                                input.q5k_gemm_cuda(w_gpu, dims[1], dims[0])
+                            };
+                            return result.expect("q5k_{gemv,gemm}_cuda failed");
+                        }
+                    }
                 }
                 // BitNet I2_S fast path: the whole point of 1.58-bit is an
                 // add-only matmul that never materializes f32 weights. Skip

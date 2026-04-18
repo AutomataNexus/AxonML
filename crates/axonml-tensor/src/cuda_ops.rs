@@ -797,6 +797,91 @@ impl Tensor<f32> {
 
     /// Q6_K GEMM: `self` is `[m, in]` on GPU, `w` is a device-side `[out, in]`
     /// weight matrix in raw Q6_K bytes. Returns `[m, out]` on GPU.
+    /// Q5_K GEMM: `self` is `[m, in]` f32 on GPU, `w` is a device-side
+    /// `[out, in]` weight matrix in raw Q5_K super-block bytes (176 bytes
+    /// per 256-element block). Returns `[m, out]`.
+    pub fn q5k_gemm_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu(), "q5k_gemm_cuda: self must be on GPU");
+        assert_eq!(
+            in_dim % 256,
+            0,
+            "q5k_gemm_cuda: in_dim must be a multiple of 256"
+        );
+
+        let a_data = self.contiguous_gpu();
+        let numel = a_data.numel();
+        assert!(
+            numel % in_dim == 0,
+            "q5k_gemm_cuda: numel ({}) not divisible by in_dim ({})",
+            numel,
+            in_dim
+        );
+        let m = numel / in_dim;
+
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(m * out_dim).expect("GPU pool alloc failed");
+
+        cuda.q5k_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
+            .expect("CUDA q5k_gemm_f32 failed");
+
+        let shape = Shape::from_slice(&[m, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, m * out_dim, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
+    /// Q5_K GEMV: `self` is `[1, in]` row vector on GPU, `w` is device-side
+    /// `[out, in]` Q5_K raw bytes. Returns `[1, out]`.
+    pub fn q5k_gemv_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu(), "q5k_gemv_cuda: self must be on GPU");
+        assert_eq!(
+            self.numel(),
+            in_dim,
+            "q5k_gemv_cuda: self.numel() ({}) != in_dim ({})",
+            self.numel(),
+            in_dim
+        );
+        assert_eq!(
+            in_dim % 256,
+            0,
+            "q5k_gemv_cuda: in_dim must be a multiple of 256"
+        );
+
+        let a_data = self.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(out_dim).expect("GPU pool alloc failed");
+
+        cuda.q5k_gemv_f32(w, a_guard.slice(), &mut out, out_dim, in_dim)
+            .expect("CUDA q5k_gemv_f32 failed");
+
+        let shape = Shape::from_slice(&[1, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, out_dim, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
     pub fn q6k_gemm_cuda(
         &self,
         w: &cudarc::driver::CudaSlice<u8>,

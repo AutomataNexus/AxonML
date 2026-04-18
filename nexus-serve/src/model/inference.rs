@@ -2458,17 +2458,19 @@ impl InferenceEngine {
         if self.config.architecture.starts_with("bitnet") {
             return None;
         }
-        // Phi-3 eagerly dequants its Q5_K attn_qkv tensors to F32. The
-        // batched-matmul GPU path hits the F32 tensor matmul (not the
-        // fused Q4K gemm), and its K/V output DIVERGES from what
-        // forward_one's decode path produces for the same prompt — by
-        // enough that decode's attention then diverges into nonsense
-        // ("Thehell, am de- de the-WTh the,0 **'ble…"). Route Phi-3
-        // prefill through the per-token `forward_one` loop — same
-        // trade-off BitNet takes (higher first-token latency) in
-        // exchange for numerically-identical K/V to decode. Proven
-        // load-bearing: reverting this re-breaks Phi-3 even with a
-        // correct system prompt and NaN-safe sampling.
+        // Phi-3 prefill → forward_one loop. Even with the Q5_K GPU
+        // kernels in place the batched prefill path produces K/V that
+        // DOES NOT match decode's single-query path bit-for-bit —
+        // q5k_gemm_f32 accumulates output dot products in a different
+        // order than q5k_gemv_f32 (naive one-thread-per-output vs
+        // warp-cooperative shuffle reduction), and the rounding deltas
+        // compound through 32 layers until decode locks onto wrong K/V
+        // and spirals into nonsense ("Theazionale constellationO's
+        // {{{Reticensed Sojourn…"). Same mitigation BitNet takes: route
+        // prefill through forward_one so decode reads the K/V it
+        // produced itself. Trade: higher first-token latency, correct
+        // output. The real fix is an order-matched q5k_gemm_f32 kernel,
+        // queued as a follow-up.
         if self.config.architecture == "phi3" {
             return None;
         }
@@ -3868,17 +3870,17 @@ fn load_weight(mapped: &MappedGguf, name: &str, quantized: bool) -> Result<Weigh
     // every matmul — catastrophic for a tied LM head (e.g. BitNet's 656 MB F16
     // token_embd doubling as the LM head = 1.3 GB of f32 scratch + GEMM per
     // decode token). Keep these eager even under `--quantized`.
-    // Q5K: dequant is supported (CPU-only), but no Q5_K matmul kernel
-    // exists — so we can't take the lazy-dequant path that relies on
-    // the Weight::matmul CUDA dispatch. Force eager dequant to F32 for
-    // Q5_K tensors even under --quantized so matmul works via standard
-    // Tensor::matmul. Costs more CPU RAM per Q5_K tensor (~1.6× the
-    // packed size → f32 floats), but correctness > compactness.
+    //
+    // Q5_K used to be excluded here (no GPU matmul kernel → had to eagerly
+    // dequant to F32, which crushed Phi-3-mini decode to 1.66 tok/s on its
+    // Q5_K `attn_qkv`). The `q5k_gemv_f32` / `q5k_gemm_f32` CUDA kernels
+    // now exist, so Q5_K takes the lazy-dequant + GPU-dispatch path same
+    // as Q4_K and Q6_K.
     let is_block_quantized = matches!(
         info.dtype,
         GgmlType::Q4_0 | GgmlType::Q4_1 | GgmlType::Q5_0 | GgmlType::Q5_1
         | GgmlType::Q8_0 | GgmlType::Q8_1 | GgmlType::Q2K | GgmlType::Q3K
-        | GgmlType::Q4K | GgmlType::Q6K | GgmlType::Q8K
+        | GgmlType::Q4K | GgmlType::Q5K | GgmlType::Q6K | GgmlType::Q8K
         | GgmlType::I2S,
     );
 
