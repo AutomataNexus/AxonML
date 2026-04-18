@@ -682,6 +682,16 @@ pub struct InferenceEngine {
     /// Lazy-cached GPU Tensor for the final `output_norm` weight.
     #[cfg(feature = "cuda")]
     pub gpu_output_norm: std::sync::OnceLock<Tensor<f32>>,
+    /// Lazy-cached GPU Tensor for the final `output_norm_bias`
+    /// (Falcon only; `None` for RMSNorm-family archs).
+    #[cfg(feature = "cuda")]
+    pub gpu_output_norm_bias: std::sync::OnceLock<Option<Tensor<f32>>>,
+    /// Lazy-cached per-layer Falcon norm tensors (γ + β).
+    #[cfg(feature = "cuda")]
+    pub gpu_falcon_cache: std::sync::OnceLock<Vec<FalconLayerGpuCache>>,
+    /// Lazy-cached per-layer OLMoE norm tensors.
+    #[cfg(feature = "cuda")]
+    pub gpu_olmoe_cache: std::sync::OnceLock<Vec<OlmoeLayerGpuCache>>,
     /// TurboQuant Q8 KV cache toggle. When true, the decode path
     /// allocates `GpuKvCacheQ8` (int8 values + per-head f32 scale) and
     /// calls `fused_attn_decode_q8_f32` instead of the f32 variant.
@@ -690,6 +700,61 @@ pub struct InferenceEngine {
     /// flag or programmatically via [`InferenceEngine::set_kv_quant_q8`].
     #[cfg(feature = "cuda")]
     pub kv_quant_q8: bool,
+}
+
+/// GPU-resident per-layer norm tensors for legacy-Falcon.
+/// Keeps `attn_norm` (γ) and `attn_norm_bias` (β) on device so the
+/// per-token decode loop doesn't re-upload `hidden` floats × 2 per
+/// layer from CPU every step.
+#[cfg(feature = "cuda")]
+pub struct FalconLayerGpuCache {
+    pub attn_norm: Tensor<f32>,
+    pub attn_norm_bias: Tensor<f32>,
+}
+
+#[cfg(feature = "cuda")]
+impl FalconLayerGpuCache {
+    fn new_for(layer: &FalconLayerWeights, device: &Device) -> Self {
+        fn upload(v: &[f32], d: &Device) -> Tensor<f32> {
+            Tensor::from_vec(v.to_vec(), &[v.len()])
+                .expect("falcon cache norm")
+                .to_device(d.clone())
+                .expect("move norm to GPU")
+        }
+        Self {
+            attn_norm: upload(&layer.attn_norm, device),
+            attn_norm_bias: upload(&layer.attn_norm_bias, device),
+        }
+    }
+}
+
+/// GPU-resident per-layer norms for OLMoE (and future MoE arches).
+/// Mirrors `LayerGpuCache` shape but tuned for OLMoE which has both
+/// `attn_q_norm`/`attn_k_norm` (always present) and `ffn_norm`.
+#[cfg(feature = "cuda")]
+pub struct OlmoeLayerGpuCache {
+    pub attn_norm: Tensor<f32>,
+    pub attn_q_norm: Tensor<f32>,
+    pub attn_k_norm: Tensor<f32>,
+    pub ffn_norm: Tensor<f32>,
+}
+
+#[cfg(feature = "cuda")]
+impl OlmoeLayerGpuCache {
+    fn new_for(layer: &OlmoeLayerWeights, device: &Device) -> Self {
+        fn upload(v: &[f32], d: &Device) -> Tensor<f32> {
+            Tensor::from_vec(v.to_vec(), &[v.len()])
+                .expect("olmoe cache norm")
+                .to_device(d.clone())
+                .expect("move norm to GPU")
+        }
+        Self {
+            attn_norm: upload(&layer.attn_norm, device),
+            attn_q_norm: upload(&layer.attn_q_norm, device),
+            attn_k_norm: upload(&layer.attn_k_norm, device),
+            ffn_norm: upload(&layer.ffn_norm, device),
+        }
+    }
 }
 
 /// GPU-resident copies of a `LayerWeights`'s CPU `Vec<f32>` members
@@ -1699,6 +1764,12 @@ impl InferenceEngine {
             #[cfg(feature = "cuda")]
             gpu_output_norm: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
+            gpu_output_norm_bias: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_falcon_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_olmoe_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
             kv_quant_q8: false,
         })
     }
@@ -1817,6 +1888,12 @@ impl InferenceEngine {
             #[cfg(feature = "cuda")]
             gpu_output_norm: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
+            gpu_output_norm_bias: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_falcon_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_olmoe_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
             kv_quant_q8: false,
         })
     }
@@ -1910,6 +1987,12 @@ impl InferenceEngine {
             gpu_layer_cache: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
             gpu_output_norm: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_output_norm_bias: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_falcon_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_olmoe_cache: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
             kv_quant_q8: false,
         })
@@ -2016,6 +2099,12 @@ impl InferenceEngine {
             gpu_layer_cache: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
             gpu_output_norm: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_output_norm_bias: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_falcon_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_olmoe_cache: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
             kv_quant_q8: false,
         })
@@ -2175,6 +2264,12 @@ impl InferenceEngine {
             #[cfg(feature = "cuda")]
             gpu_output_norm: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
+            gpu_output_norm_bias: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_falcon_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_olmoe_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
             kv_quant_q8: false,
         })
     }
@@ -2330,6 +2425,12 @@ impl InferenceEngine {
             gpu_layer_cache: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
             gpu_output_norm: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_output_norm_bias: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_falcon_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_olmoe_cache: std::sync::OnceLock::new(),
             #[cfg(feature = "cuda")]
             kv_quant_q8: false,
         })
@@ -2951,36 +3052,55 @@ impl InferenceEngine {
             }
         }
 
+        // Pre-upload per-layer OLMoE norms (attn + attn_q + attn_k +
+        // ffn). Old path uploaded 4 × 8 KB × 16 layers = 512 KB per
+        // token; now it's one-time at load.
+        #[cfg(feature = "cuda")]
+        let olmoe_cache = self.gpu_olmoe_cache.get_or_init(|| {
+            layers
+                .iter()
+                .map(|l| OlmoeLayerGpuCache::new_for(l, &self.compute_device))
+                .collect()
+        });
+
         for (li, layer) in layers.iter().enumerate() {
-            // Upload per-layer norm weights. Each is `[hidden]` (8 KB) —
-            // negligible H2D cost relative to the matmul bandwidth.
-            let attn_norm_gpu = Tensor::from_vec(layer.attn_norm.clone(), &[hidden])
-                .expect("attn_norm")
-                .to_device(self.compute_device.clone())
-                .expect("move attn_norm");
-            let attn_q_norm_gpu = Tensor::from_vec(layer.attn_q_norm.clone(), &[hidden])
-                .expect("attn_q_norm")
-                .to_device(self.compute_device.clone())
-                .expect("move attn_q_norm");
-            let attn_k_norm_gpu = Tensor::from_vec(layer.attn_k_norm.clone(), &[hidden])
-                .expect("attn_k_norm")
-                .to_device(self.compute_device.clone())
-                .expect("move attn_k_norm");
-            let ffn_norm_gpu = Tensor::from_vec(layer.ffn_norm.clone(), &[hidden])
-                .expect("ffn_norm")
-                .to_device(self.compute_device.clone())
-                .expect("move ffn_norm");
+            #[cfg(feature = "cuda")]
+            let (attn_norm_gpu, attn_q_norm_gpu, attn_k_norm_gpu, ffn_norm_gpu) = (
+                &olmoe_cache[li].attn_norm,
+                &olmoe_cache[li].attn_q_norm,
+                &olmoe_cache[li].attn_k_norm,
+                &olmoe_cache[li].ffn_norm,
+            );
+            #[cfg(not(feature = "cuda"))]
+            let (attn_norm_t, attn_q_norm_t, attn_k_norm_t, ffn_norm_t) = {
+                let a = Tensor::from_vec(layer.attn_norm.clone(), &[hidden])
+                    .expect("attn_norm").to_device(self.compute_device.clone())
+                    .expect("move attn_norm");
+                let qn = Tensor::from_vec(layer.attn_q_norm.clone(), &[hidden])
+                    .expect("attn_q_norm").to_device(self.compute_device.clone())
+                    .expect("move attn_q_norm");
+                let kn = Tensor::from_vec(layer.attn_k_norm.clone(), &[hidden])
+                    .expect("attn_k_norm").to_device(self.compute_device.clone())
+                    .expect("move attn_k_norm");
+                let fn_ = Tensor::from_vec(layer.ffn_norm.clone(), &[hidden])
+                    .expect("ffn_norm").to_device(self.compute_device.clone())
+                    .expect("move ffn_norm");
+                (a, qn, kn, fn_)
+            };
+            #[cfg(not(feature = "cuda"))]
+            let (attn_norm_gpu, attn_q_norm_gpu, attn_k_norm_gpu, ffn_norm_gpu) =
+                (&attn_norm_t, &attn_q_norm_t, &attn_k_norm_t, &ffn_norm_t);
 
             // --- Attention (GPU-resident) -----------------------------
-            let normed_attn_t = x_t.rms_norm(&attn_norm_gpu, eps);
+            let normed_attn_t = x_t.rms_norm(attn_norm_gpu, eps);
             let q_t = layer.q_weight.matmul(&normed_attn_t);
             let k_t = layer.k_weight.matmul(&normed_attn_t);
             let v_t = layer.v_weight.matmul(&normed_attn_t);
 
             // OLMoE Q/K norm normalizes over the WHOLE hidden vector
             // (not per-head); shape `[hidden]`. rms_norm handles it.
-            let q_t = q_t.rms_norm(&attn_q_norm_gpu, eps);
-            let k_t = k_t.rms_norm(&attn_k_norm_gpu, eps);
+            let q_t = q_t.rms_norm(attn_q_norm_gpu, eps);
+            let k_t = k_t.rms_norm(attn_k_norm_gpu, eps);
 
             let q_t = q_t.apply_rope_split_halves(n_heads, head_dim, theta, pos);
             let k_t = k_t.apply_rope_split_halves(n_kv_heads, head_dim, theta, pos);
@@ -3053,7 +3173,7 @@ impl InferenceEngine {
             x_t = x_t.add(&attn_proj_t).expect("attn residual");
 
             // --- MoE FFN ----------------------------------------------
-            let normed_ffn_t = x_t.rms_norm(&ffn_norm_gpu, eps);
+            let normed_ffn_t = x_t.rms_norm(ffn_norm_gpu, eps);
 
             // Router runs CPU-side. Pull normed_ffn once per layer
             // (hidden f32 ≈ 8 KB D2H) to compute n_experts × hidden
@@ -3124,12 +3244,23 @@ impl InferenceEngine {
             }
         }
 
-        // Final norm + LM head.
-        let output_norm_gpu = Tensor::from_vec(self.output_norm.clone(), &[hidden])
+        // Final norm + LM head. Reuse the shared output-norm OnceLock
+        // so we don't re-upload the `hidden`-sized γ every token.
+        #[cfg(feature = "cuda")]
+        let output_norm_gpu = self.gpu_output_norm.get_or_init(|| {
+            Tensor::from_vec(self.output_norm.clone(), &[hidden])
+                .expect("output_norm")
+                .to_device(self.compute_device.clone())
+                .expect("move output_norm")
+        });
+        #[cfg(not(feature = "cuda"))]
+        let output_norm_gpu_owned = Tensor::from_vec(self.output_norm.clone(), &[hidden])
             .expect("output_norm")
             .to_device(self.compute_device.clone())
             .expect("move output_norm");
-        let final_norm = x_t.rms_norm(&output_norm_gpu, eps);
+        #[cfg(not(feature = "cuda"))]
+        let output_norm_gpu = &output_norm_gpu_owned;
+        let final_norm = x_t.rms_norm(output_norm_gpu, eps);
         let logits = self.lm_head.matmul(&final_norm);
         kv_cache.len += 1;
         logits.to_vec()
@@ -3230,21 +3361,36 @@ impl InferenceEngine {
             }
         }
 
-        for (li, layer) in layers.iter().enumerate() {
-            // Upload LayerNorm gamma/beta for this layer. Cheap (hidden
-            // f32 ≈ 18 KB) — a per-layer OnceLock would save the H2D but
-            // the round-trip isn't on any hot budget at these sizes.
-            let gamma = Tensor::from_vec(layer.attn_norm.clone(), &[hidden])
-                .expect("attn_norm")
-                .to_device(self.compute_device.clone())
-                .expect("move gamma");
-            let beta = Tensor::from_vec(layer.attn_norm_bias.clone(), &[hidden])
-                .expect("attn_norm_bias")
-                .to_device(self.compute_device.clone())
-                .expect("move beta");
+        // Pre-upload per-layer LayerNorm γ+β to GPU once; reused every
+        // token. Eliminates 2 H2D per layer per token (~36 KB × 32 layers
+        // = 1.2 MB per token) that the old path was paying.
+        #[cfg(feature = "cuda")]
+        let falcon_cache = self.gpu_falcon_cache.get_or_init(|| {
+            layers
+                .iter()
+                .map(|l| FalconLayerGpuCache::new_for(l, &self.compute_device))
+                .collect()
+        });
 
-            // Single LayerNorm feeds both attention and FFN (parallel).
-            let normed_t = x_t.layer_norm_tokenwise(&gamma, &beta, eps);
+        for (li, layer) in layers.iter().enumerate() {
+            #[cfg(feature = "cuda")]
+            let normed_t = x_t.layer_norm_tokenwise(
+                &falcon_cache[li].attn_norm,
+                &falcon_cache[li].attn_norm_bias,
+                eps,
+            );
+            #[cfg(not(feature = "cuda"))]
+            let normed_t = {
+                let gamma = Tensor::from_vec(layer.attn_norm.clone(), &[hidden])
+                    .expect("attn_norm")
+                    .to_device(self.compute_device.clone())
+                    .expect("move gamma");
+                let beta = Tensor::from_vec(layer.attn_norm_bias.clone(), &[hidden])
+                    .expect("attn_norm_bias")
+                    .to_device(self.compute_device.clone())
+                    .expect("move beta");
+                x_t.layer_norm_tokenwise(&gamma, &beta, eps)
+            };
 
             // --- Attention branch (all GPU-resident) ------------------
             let q_t = layer.q_weight.matmul(&normed_t);
@@ -3335,20 +3481,45 @@ impl InferenceEngine {
             x_t.parallel_residual_add_(&attn_proj_t, &ffn_out_t);
         }
 
-        // Final LayerNorm + LM head on GPU.
-        let bias_vec = self
-            .output_norm_bias
-            .as_ref()
-            .expect("falcon expects output_norm_bias");
-        let out_gamma = Tensor::from_vec(self.output_norm.clone(), &[hidden])
-            .expect("output_norm")
-            .to_device(self.compute_device.clone())
-            .expect("move output_norm");
-        let out_beta = Tensor::from_vec(bias_vec.clone(), &[hidden])
-            .expect("output_norm_bias")
-            .to_device(self.compute_device.clone())
-            .expect("move output_norm_bias");
-        let final_norm = x_t.layer_norm_tokenwise(&out_gamma, &out_beta, eps);
+        // Final LayerNorm + LM head on GPU. γ and β both cached.
+        #[cfg(feature = "cuda")]
+        let final_norm = {
+            let out_gamma = self.gpu_output_norm.get_or_init(|| {
+                Tensor::from_vec(self.output_norm.clone(), &[hidden])
+                    .expect("output_norm")
+                    .to_device(self.compute_device.clone())
+                    .expect("move output_norm")
+            });
+            let out_beta = self
+                .gpu_output_norm_bias
+                .get_or_init(|| {
+                    self.output_norm_bias.as_ref().map(|b| {
+                        Tensor::from_vec(b.clone(), &[hidden])
+                            .expect("output_norm_bias")
+                            .to_device(self.compute_device.clone())
+                            .expect("move output_norm_bias")
+                    })
+                })
+                .as_ref()
+                .expect("falcon expects output_norm_bias");
+            x_t.layer_norm_tokenwise(out_gamma, out_beta, eps)
+        };
+        #[cfg(not(feature = "cuda"))]
+        let final_norm = {
+            let bias_vec = self
+                .output_norm_bias
+                .as_ref()
+                .expect("falcon expects output_norm_bias");
+            let out_gamma = Tensor::from_vec(self.output_norm.clone(), &[hidden])
+                .expect("output_norm")
+                .to_device(self.compute_device.clone())
+                .expect("move output_norm");
+            let out_beta = Tensor::from_vec(bias_vec.clone(), &[hidden])
+                .expect("output_norm_bias")
+                .to_device(self.compute_device.clone())
+                .expect("move output_norm_bias");
+            x_t.layer_norm_tokenwise(&out_gamma, &out_beta, eps)
+        };
         let logits = self.lm_head.matmul(&final_norm);
 
         kv_cache.len += 1;
