@@ -30,7 +30,7 @@ use axonml_nn::{Dropout, Embedding, Linear, Module, Parameter};
 use axonml_tensor::Tensor;
 
 use crate::attention::{KVCache, LayerKVCache};
-use crate::llama::{LLaMAMLP, RMSNorm, RotaryEmbedding};
+use crate::llama::{RMSNorm, RotaryEmbedding};
 
 // =============================================================================
 // Qwen3 Configuration
@@ -193,11 +193,12 @@ impl Qwen3Attention {
         let q_hidden = config.q_dim();
         let kv_hidden = config.kv_dim();
 
+        // Qwen3 projections carry no bias (per the HF reference config).
         Self {
-            q_proj: Linear::new(config.hidden_size, q_hidden),
-            k_proj: Linear::new(config.hidden_size, kv_hidden),
-            v_proj: Linear::new(config.hidden_size, kv_hidden),
-            o_proj: Linear::new(q_hidden, config.hidden_size),
+            q_proj: Linear::with_bias(config.hidden_size, q_hidden, false),
+            k_proj: Linear::with_bias(config.hidden_size, kv_hidden, false),
+            v_proj: Linear::with_bias(config.hidden_size, kv_hidden, false),
+            o_proj: Linear::with_bias(q_hidden, config.hidden_size, false),
             q_norm: RMSNorm::new(config.head_dim, config.rms_norm_eps),
             k_norm: RMSNorm::new(config.head_dim, config.rms_norm_eps),
             rotary_emb: RotaryEmbedding::new(
@@ -405,6 +406,68 @@ fn create_causal_mask(q_len: usize, kv_len: usize, offset: usize) -> Tensor<f32>
 }
 
 // =============================================================================
+// Qwen3 MLP (SwiGLU, bias-free — matches the Qwen3 HF reference)
+// =============================================================================
+
+/// Qwen3 MLP: SwiGLU with bias-free projections. Structurally identical
+/// to `LLaMAMLP` but uses `Linear::with_bias(..., false)` everywhere so
+/// the parameter count and tensor names line up 1:1 with Qwen3 GGUFs.
+#[derive(Debug)]
+pub struct Qwen3MLP {
+    gate_proj: Linear,
+    up_proj: Linear,
+    down_proj: Linear,
+}
+
+impl Qwen3MLP {
+    /// Create new Qwen3 MLP from a config.
+    pub fn new(cfg: &Qwen3Config) -> Self {
+        Self {
+            gate_proj: Linear::with_bias(cfg.hidden_size, cfg.intermediate_size, false),
+            up_proj: Linear::with_bias(cfg.hidden_size, cfg.intermediate_size, false),
+            down_proj: Linear::with_bias(cfg.intermediate_size, cfg.hidden_size, false),
+        }
+    }
+
+    /// Forward pass: `down(silu(gate(x)) * up(x))`.
+    pub fn forward(&self, x: &Variable) -> Variable {
+        let gate = self.gate_proj.forward(x).silu();
+        let up = self.up_proj.forward(x);
+        let hidden = gate.mul(&up);
+        self.down_proj.forward(&hidden)
+    }
+
+    pub fn parameters(&self) -> Vec<Parameter> {
+        let mut params = Vec::new();
+        params.extend(self.gate_proj.parameters());
+        params.extend(self.up_proj.parameters());
+        params.extend(self.down_proj.parameters());
+        params
+    }
+
+    pub fn load_weights(
+        &mut self,
+        prefix: &str,
+        weights: &std::collections::HashMap<String, Tensor<f32>>,
+    ) -> usize {
+        let mut loaded = 0;
+        if let Some(w) = weights.get(&format!("{prefix}.gate_proj.weight")) {
+            self.gate_proj.weight.update_data(w.clone());
+            loaded += 1;
+        }
+        if let Some(w) = weights.get(&format!("{prefix}.up_proj.weight")) {
+            self.up_proj.weight.update_data(w.clone());
+            loaded += 1;
+        }
+        if let Some(w) = weights.get(&format!("{prefix}.down_proj.weight")) {
+            self.down_proj.weight.update_data(w.clone());
+            loaded += 1;
+        }
+        loaded
+    }
+}
+
+// =============================================================================
 // Qwen3 Decoder Layer
 // =============================================================================
 
@@ -412,7 +475,7 @@ fn create_causal_mask(q_len: usize, kv_len: usize, offset: usize) -> Tensor<f32>
 #[derive(Debug)]
 pub struct Qwen3DecoderLayer {
     self_attn: Qwen3Attention,
-    mlp: LLaMAMLP,
+    mlp: Qwen3MLP,
     input_layernorm: RMSNorm,
     post_attention_layernorm: RMSNorm,
 }
@@ -420,26 +483,9 @@ pub struct Qwen3DecoderLayer {
 impl Qwen3DecoderLayer {
     /// Create new decoder layer.
     pub fn new(config: &Qwen3Config) -> Self {
-        // Reuse LLaMAMLP — SwiGLU in Qwen3 is identical. The MLP config
-        // only needs hidden_size / intermediate_size, which we pass via
-        // a shim LLaMAConfig (only those two fields matter for LLaMAMLP).
-        let mlp_config = crate::llama::LLaMAConfig {
-            vocab_size: config.vocab_size,
-            hidden_size: config.hidden_size,
-            intermediate_size: config.intermediate_size,
-            num_hidden_layers: config.num_hidden_layers,
-            num_attention_heads: config.num_attention_heads,
-            num_key_value_heads: config.num_key_value_heads,
-            max_position_embeddings: config.max_position_embeddings,
-            rms_norm_eps: config.rms_norm_eps,
-            rope_theta: config.rope_theta,
-            attention_dropout: config.attention_dropout,
-            hidden_dropout: config.hidden_dropout,
-        };
-
         Self {
             self_attn: Qwen3Attention::new(config),
-            mlp: LLaMAMLP::new(&mlp_config),
+            mlp: Qwen3MLP::new(config),
             input_layernorm: RMSNorm::new(config.hidden_size, config.rms_norm_eps),
             post_attention_layernorm: RMSNorm::new(config.hidden_size, config.rms_norm_eps),
         }
