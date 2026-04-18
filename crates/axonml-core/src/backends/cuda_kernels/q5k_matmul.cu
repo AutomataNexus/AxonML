@@ -289,6 +289,91 @@ extern "C" __global__ void q5k_gemv_f32(
     }
 }
 
+// ============================================================================
+// Q5_K fused QKV GEMV — one kernel launch computes q_c / k_c / v_c
+// from a shared activation `a` and three separate Q5_K weights.
+// Mirrors q4k_gemv_fused_qkv_f32's layout: warp_id in [0, q_out) →
+// Q row, [q_out, q_out+k_out) → K row, rest → V row.
+//
+// Launch geometry: ROWS_PER_CTA × 2 warps/row × 32 threads/warp.
+// Grid = ceil((q_out + k_out + v_out) / ROWS_PER_CTA).
+// ============================================================================
+extern "C" __global__ void q5k_gemv_fused_qkv_f32(
+    const unsigned char* __restrict__ q_w,
+    const unsigned char* __restrict__ k_w,
+    const unsigned char* __restrict__ v_w,
+    const float* __restrict__ a,
+    float* __restrict__ q_c,
+    float* __restrict__ k_c,
+    float* __restrict__ v_c,
+    unsigned int q_out,
+    unsigned int k_out,
+    unsigned int v_out,
+    unsigned int in_dim
+) {
+    extern __shared__ float s_partial_q5k_qkv[];
+
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int global_row   = blockIdx.x * rows_per_cta + row_in_cta;
+    const unsigned int total_out    = q_out + k_out + v_out;
+
+    const unsigned int chunk             = lane >> 3;
+    const unsigned int lane_in_ch        = lane & 7u;
+    const unsigned int chunk_byte_off    = chunk * 32u + lane_in_ch * 4u;
+    const unsigned int chunk_qh_byte_off = lane_in_ch * 4u;
+    const unsigned int chunk_a_lo        = chunk * 64u + lane_in_ch * 4u;
+    const unsigned int chunk_a_hi        = chunk_a_lo + 32u;
+
+    const unsigned int n_blocks  = in_dim / 256u;
+    const unsigned int row_bytes = n_blocks * 176u;
+
+    const unsigned char* w = (const unsigned char*)0;
+    float* c = (float*)0;
+    unsigned int j = 0u;
+    bool have_work = global_row < total_out;
+    if (have_work) {
+        if (global_row < q_out) {
+            w = q_w; c = q_c; j = global_row;
+        } else if (global_row < q_out + k_out) {
+            w = k_w; c = k_c; j = global_row - q_out;
+        } else {
+            w = v_w; c = v_c; j = global_row - q_out - k_out;
+        }
+    }
+
+    float sum = 0.0f;
+    if (have_work) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        sum = q5k_gemv_partial(
+            row, a, b_start, b_end,
+            chunk, chunk_byte_off, chunk_qh_byte_off,
+            chunk_a_lo, chunk_a_hi
+        );
+    }
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1) {
+        sum += __shfl_xor_sync(0xffffffffu, sum, off);
+    }
+
+    if (lane == 0u) {
+        s_partial_q5k_qkv[row_in_cta * 2u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (have_work && warp_in_row == 0u && lane == 0u) {
+        c[j] = s_partial_q5k_qkv[row_in_cta * 2u]
+             + s_partial_q5k_qkv[row_in_cta * 2u + 1u];
+    }
+}
+
 // Q5_K GEMM: c = a @ B^T, where a is [m, in] and B is Q5_K [out, in].
 //
 // Shapes:

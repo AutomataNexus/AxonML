@@ -3864,16 +3864,27 @@ impl InferenceEngine {
                 // Biases already applied inside the matmul kernel.
                 triple
             } else {
-                // Fall back to the no-bias fused QKV + separate bias adds.
-                let (mut q, mut k, mut v) = match crate::model::weight::fused_qkv_q4k_matmul_gpu(
-                    &layer.q_weight, &layer.k_weight, &layer.v_weight, &normed,
-                ) {
-                    Some(triple) => triple,
-                    None => (
+                // Try fused QKV in quant-priority order (Q4_K first since it's
+                // most common, then Q5_K for Phi-3's attn_qkv). Fall back to
+                // three separate matmuls if neither fuser matches.
+                let (mut q, mut k, mut v) = if let Some(triple) =
+                    crate::model::weight::fused_qkv_q4k_matmul_gpu(
+                        &layer.q_weight, &layer.k_weight, &layer.v_weight, &normed,
+                    )
+                {
+                    triple
+                } else if let Some(triple) =
+                    crate::model::weight::fused_qkv_q5k_matmul_gpu(
+                        &layer.q_weight, &layer.k_weight, &layer.v_weight, &normed,
+                    )
+                {
+                    triple
+                } else {
+                    (
                         layer.q_weight.matmul(&normed),
                         layer.k_weight.matmul(&normed),
                         layer.v_weight.matmul(&normed),
-                    ),
+                    )
                 };
                 if let Some(b) = &lc.q_bias { q = q.add(b).expect("q bias add"); }
                 if let Some(b) = &lc.k_bias { k = k.add(b).expect("k bias add"); }
