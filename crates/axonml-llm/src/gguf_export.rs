@@ -39,6 +39,7 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use axonml_nn::Module;
 use axonml_tensor::Tensor;
 
+use crate::gguf_loader::read_gguf_metadata_raw_bytes;
 use crate::qwen3::{Qwen3Config, Qwen3ForCausalLM};
 
 // =============================================================================
@@ -357,12 +358,25 @@ pub fn export_qwen3_to_gguf(
         write_meta_u32(w, "general.alignment", DATA_ALIGNMENT as u32)
     }));
 
-    // Tokenizer metadata (copy from source GGUF if provided).
-    // TODO: implement passthrough — currently a no-op until a tokenizer
-    // round-trip helper lands in gguf_loader.
-    let tokenizer_meta: HashMap<String, Vec<u8>> = HashMap::new();
+    // Tokenizer metadata passthrough: read the raw encoded bytes of
+    // each tokenizer.ggml.* entry (plus chat_template + bos/eos ids)
+    // from the source GGUF and splice them into our output. Works on
+    // ANY value type (scalar, string, array of strings, array of f32,
+    // etc.) because the bytes are already GGUF-encoded.
+    let tokenizer_meta: HashMap<String, Vec<u8>> = match tokenizer_source {
+        Some(src) => {
+            let raw = read_gguf_metadata_raw_bytes(src, TOKENIZER_META_KEYS)?;
+            if raw.is_empty() {
+                eprintln!(
+                    "[gguf-export] WARNING: --tokenizer-source {} has no tokenizer.ggml.* keys — exported file will lack tokenizer metadata.",
+                    src.display()
+                );
+            }
+            raw
+        }
+        None => HashMap::new(),
+    };
     let has_tokenizer = !tokenizer_meta.is_empty();
-    let _ = tokenizer_source;
 
     // ---- Count metadata entries for the header. ----
     //
