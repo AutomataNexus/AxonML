@@ -1186,13 +1186,20 @@ impl CudaBackend {
             .get("q5k_gemv_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q5k_gemv_f32".to_string()))?;
 
-        const WARPS_PER_CTA: u32 = 4;
+        // v2 layout: ROWS_PER_CTA output rows × 2 warps/row × 32 threads =
+        // 64 * ROWS_PER_CTA threads per CTA. Two warps cooperate on each
+        // output row (each handles half the super-blocks) and combine
+        // partial sums through shared memory. Vectorized qs+qh (uint32)
+        // and activation (float4) loads inside each warp. Same shape as
+        // q4k_gemv_f32 launcher for consistency.
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
-            shared_mem_bytes: 0,
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
         };
         unsafe {
             self.stream
@@ -1260,11 +1267,15 @@ impl CudaBackend {
         debug_assert!(in_dim % 32 == 0, "Q5_0 GEMV requires in_dim % 32 == 0");
         let func = self.kernels.get("q5_0_gemv_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q5_0_gemv_f32".to_string()))?;
-        const WARPS_PER_CTA: u32 = 4;
+        // v2: two warps per row (split block range), rows_per_cta=4.
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
         let cfg = cudarc::driver::LaunchConfig {
-            grid_dim: (grid, 1, 1), block_dim: (THREADS_PER_CTA, 1, 1), shared_mem_bytes: 0,
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
         };
         unsafe {
             self.stream.launch_builder(func)
@@ -1311,11 +1322,15 @@ impl CudaBackend {
         debug_assert!(in_dim % 32 == 0, "Q5_1 GEMV requires in_dim % 32 == 0");
         let func = self.kernels.get("q5_1_gemv_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q5_1_gemv_f32".to_string()))?;
-        const WARPS_PER_CTA: u32 = 4;
+        // v2: two warps per row (split block range), rows_per_cta=4.
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
         let cfg = cudarc::driver::LaunchConfig {
-            grid_dim: (grid, 1, 1), block_dim: (THREADS_PER_CTA, 1, 1), shared_mem_bytes: 0,
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
         };
         unsafe {
             self.stream.launch_builder(func)
