@@ -3226,18 +3226,34 @@ impl InferenceEngine {
             }
 
             // Per-expert SwiGLU → down → weighted accumulate, all GPU.
+            // Uses the Q4K-fused gate+up+SwiGLU kernel when available:
+            // collapses 3 separate launches (gate matmul, up matmul,
+            // swiglu) into 1 per expert. Then `scaled_add_inplace_`
+            // fuses the `mul_scalar(w_e) + add` accumulate pair into
+            // one launch. Per-step total saving on OLMoE:
+            // 8 experts × 16 layers × (2 + 1) = 384 fewer launches.
             let mut moe_out_t: Option<Tensor<f32>> = None;
             for (idx, &e) in top_k_idx.iter().enumerate() {
                 let w_e = top_k_logits[idx];
-                let gate = layer.gate_exps[e].matmul(&normed_ffn_t);
-                let up = layer.up_exps[e].matmul(&normed_ffn_t);
-                let mid = gate.swiglu(&up);
-                let contrib = layer.down_exps[e].matmul(&mid);
-                let weighted = contrib.mul_scalar(w_e);
-                moe_out_t = Some(match moe_out_t.take() {
-                    None => weighted,
-                    Some(acc) => acc.add(&weighted).expect("moe accumulate"),
+                let mid = crate::model::weight::fused_gate_up_swiglu_q4k_matmul_gpu(
+                    &layer.gate_exps[e],
+                    &layer.up_exps[e],
+                    &normed_ffn_t,
+                )
+                .unwrap_or_else(|| {
+                    let gate = layer.gate_exps[e].matmul(&normed_ffn_t);
+                    let up = layer.up_exps[e].matmul(&normed_ffn_t);
+                    gate.swiglu(&up)
                 });
+                let contrib = layer.down_exps[e].matmul(&mid);
+                match moe_out_t.as_mut() {
+                    None => {
+                        moe_out_t = Some(contrib.mul_scalar(w_e));
+                    }
+                    Some(acc) => {
+                        acc.scaled_add_inplace_(&contrib, w_e);
+                    }
+                }
             }
             if let Some(moe) = moe_out_t {
                 x_t = x_t.add(&moe).expect("moe residual");

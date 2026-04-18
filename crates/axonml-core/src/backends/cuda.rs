@@ -3354,6 +3354,33 @@ impl CudaBackend {
         }
     }
 
+    /// Element-wise `dst += src * scalar` (in-place). MoE expert
+    /// accumulate — one kernel instead of `mul_scalar` + `add`.
+    pub fn scaled_add_inplace_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        n: usize,
+        scalar: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("scaled_add_inplace_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("scaled_add_inplace_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(dst)
+                .arg(src)
+                .arg(&(n as u32))
+                .arg(&scalar)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// Parallel-residual add: `x[i] = x[i] + attn[i] + ffn[i]`. Element-
     /// wise; fuses Falcon's two residual adds into one kernel launch.
     pub fn parallel_residual_add_f32(

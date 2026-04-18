@@ -1135,6 +1135,28 @@ impl<T: Float> Tensor<T> {
         Self::from_vec(out, &self.shape).expect("gelu_tanh: build output")
     }
 
+    /// In-place scaled accumulate: `self += other * scalar`. One kernel
+    /// launch on GPU (instead of `mul_scalar` + `add` = two launches).
+    /// MoE expert-accumulate hot path.
+    pub fn scaled_add_inplace_(&mut self, other: &Self, scalar: f32) {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            unsafe {
+                gpu_ref_mut(self).scaled_add_inplace_cuda_(gpu_ref(other), scalar);
+            }
+            return;
+        }
+        let o = other.to_vec();
+        let x = self.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(x.len());
+        for i in 0..x.len() {
+            let v = x[i].to_f32().unwrap_or(0.0) + o[i].to_f32().unwrap_or(0.0) * scalar;
+            out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+        }
+        *self = Self::from_vec(out, &self.shape).expect("scaled_add_inplace_: build output");
+    }
+
     /// In-place parallel-residual add: `self += attn + ffn`. Falcon arch.
     pub fn parallel_residual_add_(&mut self, attn: &Self, ffn: &Self) {
         #[cfg(feature = "cuda")]
