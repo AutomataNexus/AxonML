@@ -217,6 +217,13 @@ impl InferenceConfig {
         let rms_norm_eps = gguf
             .get_meta(&format!("{prefix}.attention.layer_norm_rms_epsilon"))
             .and_then(|v| v.as_f32())
+            .or_else(|| {
+                // Legacy Falcon uses LayerNorm, not RMSNorm — the GGUF
+                // stores the epsilon under a different key. Keep the same
+                // `rms_norm_eps` field for storage (it's just a scalar).
+                gguf.get_meta(&format!("{prefix}.attention.layer_norm_epsilon"))
+                    .and_then(|v| v.as_f32())
+            })
             .unwrap_or(1e-5);
 
         // Gemma 3 (non-E-series) GGUFs often omit `rope.freq_base` entirely.
@@ -487,6 +494,26 @@ impl MappedGguf {
                     }
                 }
             }
+            GgmlType::Q5_0 => {
+                let block_size = 32;
+                let type_size = 22;
+                for (block_idx, chunk) in raw_data.chunks_exact(type_size).enumerate() {
+                    let out_offset = block_idx * block_size;
+                    if out_offset + block_size <= n_elements {
+                        gguf::dequantize_q5_0(chunk, &mut output[out_offset..out_offset + block_size]);
+                    }
+                }
+            }
+            GgmlType::Q5_1 => {
+                let block_size = 32;
+                let type_size = 24;
+                for (block_idx, chunk) in raw_data.chunks_exact(type_size).enumerate() {
+                    let out_offset = block_idx * block_size;
+                    if out_offset + block_size <= n_elements {
+                        gguf::dequantize_q5_1(chunk, &mut output[out_offset..out_offset + block_size]);
+                    }
+                }
+            }
             GgmlType::Q4K => {
                 let block_size = 256;
                 let type_size = 144;
@@ -595,8 +622,16 @@ pub struct InferenceEngine {
     /// Per-layer Mamba SSM weights. `None` for Transformer archs. Present
     /// when `config.architecture == "mamba"`. Populated by `load_mamba`.
     pub mamba_layers: Option<Vec<MambaLayerWeights>>,
+    /// Per-layer legacy-Falcon weights. Present when
+    /// `config.architecture == "falcon"` (the original Falcon-7B/40B line
+    /// — distinct from Falcon3 which uses `architecture = "llama"`).
+    /// Falcon's layer is parallel attention+FFN both fed by a single
+    /// LayerNorm, so it needs its own forward path.
+    pub falcon_layers: Option<Vec<FalconLayerWeights>>,
     /// Output norm [hidden_size]
     pub output_norm: Vec<f32>,
+    /// Output LayerNorm bias (for Falcon; None for RMSNorm archs).
+    pub output_norm_bias: Option<Vec<f32>>,
     /// LM head — logical shape `[hidden, vocab]` (post-transpose).
     pub lm_head: Weight,
     /// Target compute device for matmul. For f32 weights, inputs and weights
@@ -789,6 +824,37 @@ pub struct Gemma4Weights {
     pub rope_freqs: Option<Vec<f32>>,
 }
 
+/// Per-layer legacy-Falcon weights. Falcon's block is
+///
+/// ```text
+/// normed = LayerNorm(x, attn_norm, attn_norm_bias, eps)
+/// attn  = attention(QKV(normed))   # MQA
+/// ffn   = ffn_down(GELU(ffn_up(normed)))
+/// x     = x + attn + ffn           # parallel residual
+/// ```
+///
+/// Note: no `ffn_norm`, both attn and ffn read the same `normed`. The
+/// QKV projection is merged in the GGUF — stored sequentially as
+/// `[Q_all_heads | K_single_head | V_single_head]` for MQA.
+pub struct FalconLayerWeights {
+    /// LayerNorm weight (gamma), shape `[hidden]`.
+    pub attn_norm: Vec<f32>,
+    /// LayerNorm bias (beta), shape `[hidden]`.
+    pub attn_norm_bias: Vec<f32>,
+    /// Merged QKV projection, shape `[hidden, n_heads*head_dim + 2*head_dim]`
+    /// for MQA (`num_kv_heads = 1`). Split at load time into separate q/k/v.
+    pub q_weight: Weight,
+    pub k_weight: Weight,
+    pub v_weight: Weight,
+    /// Attention output projection, `[n_heads*head_dim, hidden]`.
+    pub o_weight: Weight,
+    /// FFN up-projection (no gate — Falcon MLP is a standard 2-layer GELU),
+    /// shape `[hidden, intermediate]`.
+    pub ffn_up: Weight,
+    /// FFN down-projection, shape `[intermediate, hidden]`.
+    pub ffn_down: Weight,
+}
+
 /// Per-layer Mamba SSM weights. Each layer's forward pass reads all of
 /// these; shapes reference `d_model = hidden_size`, `d_inner`, `d_state`,
 /// `d_conv`, `dt_rank` from `MambaConfig`.
@@ -942,6 +1008,10 @@ impl InferenceEngine {
             // bos_token_id = eos_token_id = padding_token_id =
             // unknown_token_id = 0. Stop on it to avoid runaway output.
             "mamba" => &[0],
+            // Legacy Falcon-7B/40B use the RefinedWeb vocab. `eos_token_id`
+            // is 11 (`<|endoftext|>`), and token 193 is the `</s>` some
+            // checkpoints emit. Stop on both.
+            "falcon" => &[11, 193],
             _ => &[0, 151643, 151644, 151645, 151646],
         }
     }
@@ -967,6 +1037,21 @@ impl InferenceEngine {
                 layer.ssm_in.to_device(device.clone());
                 layer.ssm_out.to_device(device.clone());
                 if (i + 1) % 6 == 0 || i + 1 == num {
+                    println!("    Layer {}/{}", i + 1, num);
+                }
+            }
+        } else if let Some(ref mut flayers) = self.falcon_layers {
+            // Falcon path: move every quantized matmul weight to GPU.
+            // LayerNorm / bias stay CPU-side (small f32 vecs).
+            let num = flayers.len();
+            for (i, layer) in flayers.iter_mut().enumerate() {
+                layer.q_weight.to_device(device.clone());
+                layer.k_weight.to_device(device.clone());
+                layer.v_weight.to_device(device.clone());
+                layer.o_weight.to_device(device.clone());
+                layer.ffn_up.to_device(device.clone());
+                layer.ffn_down.to_device(device.clone());
+                if (i + 1) % 8 == 0 || i + 1 == num {
                     println!("    Layer {}/{}", i + 1, num);
                 }
             }
@@ -1417,6 +1502,14 @@ impl InferenceEngine {
             return Self::load_mamba(gguf, mapped, quantized_weights, config);
         }
 
+        // Legacy Falcon (Falcon-7B / 40B). LayerNorm instead of RMSNorm,
+        // parallel attention+FFN fed by a single norm, plain GELU MLP
+        // (no gate), MQA with num_kv_heads=1, merged QKV laid out as
+        // [Q_all_heads | K_single | V_single].
+        if config.architecture == "falcon" {
+            return Self::load_falcon(gguf, mapped, quantized_weights, config);
+        }
+
         // Token embeddings as flat Vec (fast lookup) — always dequantized
         let token_embed = load_vec(mapped, "token_embd.weight")?;
 
@@ -1504,7 +1597,9 @@ impl InferenceEngine {
             layers,
             gemma4: None,
             mamba_layers: None,
+            falcon_layers: None,
             output_norm,
+            output_norm_bias: None,
             lm_head,
             compute_device: Device::Cpu,
             #[cfg(feature = "cuda")]
@@ -1619,7 +1714,9 @@ impl InferenceEngine {
             layers,
             gemma4: None,
             mamba_layers: None,
+            falcon_layers: None,
             output_norm,
+            output_norm_bias: None,
             lm_head,
             compute_device: Device::Cpu,
             #[cfg(feature = "cuda")]
@@ -1710,7 +1807,114 @@ impl InferenceEngine {
             layers: Vec::new(),
             gemma4: None,
             mamba_layers: Some(mamba_layers),
+            falcon_layers: None,
             output_norm,
+            output_norm_bias: None,
+            lm_head,
+            compute_device: Device::Cpu,
+            #[cfg(feature = "cuda")]
+            gpu_layer_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_output_norm: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            kv_quant_q8: false,
+        })
+    }
+
+    /// Legacy Falcon weight loader. Called from `from_gguf_with_mode`
+    /// when `architecture == "falcon"`. The GGUF's QKV tensor is stored
+    /// sequentially as `[Q_all | K_single | V_single]` (for MQA with
+    /// `num_kv_heads = 1`); we split it along the output axis at load
+    /// time so the forward path can use plain per-weight matmuls.
+    fn load_falcon(
+        _gguf: &GgufFile,
+        mapped: &MappedGguf,
+        quantized_weights: bool,
+        config: InferenceConfig,
+    ) -> Result<Self, String> {
+        let token_embed = load_vec(mapped, "token_embd.weight")?;
+
+        let q_out = config.num_heads * config.head_dim;
+        let k_out = config.num_kv_heads * config.head_dim;
+        let v_out = k_out;
+
+        let mut falcon_layers = Vec::with_capacity(config.num_layers);
+        for i in 0..config.num_layers {
+            let prefix = format!("blk.{i}");
+
+            let attn_norm = load_vec(mapped, &format!("{prefix}.attn_norm.weight"))?;
+            let attn_norm_bias = load_vec(mapped, &format!("{prefix}.attn_norm.bias"))?;
+
+            let qkv = load_weight(
+                mapped,
+                &format!("{prefix}.attn_qkv.weight"),
+                quantized_weights,
+            )?;
+            let (q_weight, k_weight, v_weight) =
+                split_weight_along_output(&qkv, &[q_out, k_out, v_out])
+                    .map_err(|e| format!("{prefix}.attn_qkv split: {e}"))?
+                    .into_3()
+                    .ok_or_else(|| format!("{prefix}.attn_qkv: expected 3-way split"))?;
+
+            let o_weight = load_weight(
+                mapped,
+                &format!("{prefix}.attn_output.weight"),
+                quantized_weights,
+            )?;
+            let ffn_up = load_weight(
+                mapped,
+                &format!("{prefix}.ffn_up.weight"),
+                quantized_weights,
+            )?;
+            let ffn_down = load_weight(
+                mapped,
+                &format!("{prefix}.ffn_down.weight"),
+                quantized_weights,
+            )?;
+
+            falcon_layers.push(FalconLayerWeights {
+                attn_norm,
+                attn_norm_bias,
+                q_weight,
+                k_weight,
+                v_weight,
+                o_weight,
+                ffn_up,
+                ffn_down,
+            });
+
+            if (i + 1) % 8 == 0 || i + 1 == config.num_layers {
+                println!("    Loaded layer {}/{}", i + 1, config.num_layers);
+            }
+        }
+
+        let output_norm = load_vec(mapped, "output_norm.weight")?;
+        let output_norm_bias = load_vec(mapped, "output_norm.bias")?;
+        let lm_head = if mapped.has_tensor("output.weight") {
+            load_weight(mapped, "output.weight", quantized_weights)?
+        } else {
+            println!("    LM head tied to token embeddings");
+            load_weight(mapped, "token_embd.weight", quantized_weights)?
+        };
+
+        println!(
+            "  Falcon model loaded: {} layers, hidden={}, n_heads={} (KV={}), head_dim={}",
+            config.num_layers,
+            config.hidden_size,
+            config.num_heads,
+            config.num_kv_heads,
+            config.head_dim,
+        );
+
+        Ok(Self {
+            config,
+            token_embed,
+            layers: Vec::new(),
+            gemma4: None,
+            mamba_layers: None,
+            falcon_layers: Some(falcon_layers),
+            output_norm,
+            output_norm_bias: Some(output_norm_bias),
             lm_head,
             compute_device: Device::Cpu,
             #[cfg(feature = "cuda")]
@@ -1863,7 +2067,9 @@ impl InferenceEngine {
             layers: Vec::new(), // LLaMA-family layers unused in Gemma path
             gemma4: Some(gemma),
             mamba_layers: None,
+            falcon_layers: None,
             output_norm,
+            output_norm_bias: None,
             lm_head,
             compute_device: Device::Cpu,
             #[cfg(feature = "cuda")]
@@ -1908,6 +2114,13 @@ impl InferenceEngine {
         // no attention. Dispatch straight through to the SSM generator.
         if self.mamba_layers.is_some() {
             self.generate_mamba_stream(prompt_ids, max_new_tokens, temperature, top_p, on_token);
+            return;
+        }
+
+        // Falcon: parallel attention+FFN with LayerNorm. Uses the
+        // regular KV cache but a different per-step forward.
+        if self.falcon_layers.is_some() {
+            self.generate_falcon_stream(prompt_ids, max_new_tokens, temperature, top_p, on_token);
             return;
         }
 
@@ -2411,6 +2624,162 @@ impl InferenceEngine {
 
         for _ in 1..max_new_tokens {
             let logits = self.forward_one_mamba(next_id, &mut state);
+            next_id = if temperature < 0.01 {
+                argmax(&logits) as u32
+            } else {
+                sample_top_p(&logits, temperature, top_p)
+            };
+            if stop.contains(&next_id) {
+                break;
+            }
+            if !on_token(next_id) {
+                break;
+            }
+        }
+    }
+
+    /// Legacy-Falcon per-token forward. LayerNorm + parallel attention
+    /// & FFN + GELU + MQA. Matmuls route through `Weight::matmul` for
+    /// GPU dispatch on Q4K/Q5K/Q6K weights; everything else is CPU-side.
+    ///
+    /// Parallel residual means the FFN reads the SAME `normed` vector
+    /// as attention (not the post-attention state), and the final
+    /// update is `x + attn_out + ffn_out`.
+    pub fn forward_one_falcon(&self, token_id: u32, kv_cache: &mut KvCache) -> Vec<f32> {
+        let layers = self
+            .falcon_layers
+            .as_ref()
+            .expect("forward_one_falcon called on non-falcon engine");
+        let hidden = self.config.hidden_size;
+        let head_dim = self.config.head_dim;
+        let n_heads = self.config.num_heads;
+        let n_kv_heads = self.config.num_kv_heads;
+        let q_dim = n_heads * head_dim;
+        let kv_dim = n_kv_heads * head_dim;
+        let eps = self.config.rms_norm_eps; // holds LayerNorm eps for Falcon
+        let theta = self.config.rope_theta;
+        let pos = kv_cache.len;
+
+        let id = token_id as usize;
+        let mut x: Vec<f32> = if id < self.config.vocab_size {
+            self.token_embed[id * hidden..(id + 1) * hidden].to_vec()
+        } else {
+            vec![0.0; hidden]
+        };
+
+        for (li, layer) in layers.iter().enumerate() {
+            // Single LayerNorm feeds both attention and FFN (parallel).
+            let normed =
+                layer_norm_single(&x, &layer.attn_norm, &layer.attn_norm_bias, eps);
+            let normed_t = Tensor::from_vec(normed.clone(), &[1, hidden])
+                .expect("normed tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move normed");
+
+            // --- Attention branch --------------------------------------
+            let mut q = layer.q_weight.matmul(&normed_t).to_vec();
+            let mut k = layer.k_weight.matmul(&normed_t).to_vec();
+            let v = layer.v_weight.matmul(&normed_t).to_vec();
+
+            // RoPE on Q (all heads) and K (single MQA head).
+            apply_rope_single(&mut q, n_heads, head_dim, theta, pos);
+            apply_rope_single(&mut k, n_kv_heads, head_dim, theta, pos);
+
+            // Append this token's K/V row into the cache.
+            kv_cache.k_cache[li].extend_from_slice(&k);
+            kv_cache.v_cache[li].extend_from_slice(&v);
+            let kv_len = kv_cache.len + 1;
+
+            let attn = single_query_attention(
+                &q,
+                &kv_cache.k_cache[li],
+                &kv_cache.v_cache[li],
+                kv_len,
+                n_heads,
+                n_kv_heads,
+                head_dim,
+            );
+
+            let attn_t = Tensor::from_vec(attn, &[1, q_dim])
+                .expect("attn tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move attn");
+            let attn_proj = layer.o_weight.matmul(&attn_t).to_vec();
+
+            // --- FFN branch (in parallel with attention) -------------
+            let ffn_mid_t = layer.ffn_up.matmul(&normed_t);
+            let mut ffn_mid_vec = ffn_mid_t.to_vec();
+            for v in ffn_mid_vec.iter_mut() {
+                *v = gelu_tanh(*v);
+            }
+            let ffn_mid_activated = Tensor::from_vec(ffn_mid_vec, ffn_mid_t.shape())
+                .expect("ffn mid tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move ffn mid");
+            let ffn_out = layer.ffn_down.matmul(&ffn_mid_activated).to_vec();
+
+            // Parallel residual: x = x + attn + ffn.
+            for d in 0..hidden {
+                x[d] += attn_proj[d] + ffn_out[d];
+            }
+
+            let _ = kv_dim; // silence in case of future use
+        }
+
+        // Final LayerNorm + LM head.
+        let bias = self
+            .output_norm_bias
+            .as_ref()
+            .expect("falcon expects output_norm_bias");
+        let final_norm = layer_norm_single(&x, &self.output_norm, bias, eps);
+        let norm_t = Tensor::from_vec(final_norm, &[1, hidden])
+            .expect("final norm tensor")
+            .to_device(self.compute_device.clone())
+            .expect("move final norm");
+        let logits = self.lm_head.matmul(&norm_t);
+
+        // After this step we've added one row to the cache.
+        kv_cache.len += 1;
+        logits.to_vec()
+    }
+
+    /// Falcon decode stream — analog of `generate_mamba_stream`. Uses
+    /// the regular `KvCache` since Falcon still has attention; the only
+    /// difference from the LLaMA path is the per-step forward function.
+    fn generate_falcon_stream<F: FnMut(u32) -> bool>(
+        &self,
+        prompt_ids: &[u32],
+        max_new_tokens: usize,
+        temperature: f32,
+        top_p: f32,
+        mut on_token: F,
+    ) {
+        let mut kv_cache = KvCache::new(self.config.num_layers);
+
+        if prompt_ids.is_empty() {
+            return;
+        }
+
+        let mut last_logits: Vec<f32> = Vec::new();
+        for &tok in prompt_ids {
+            last_logits = self.forward_one_falcon(tok, &mut kv_cache);
+        }
+
+        let stop = self.stop_tokens();
+        let mut next_id = if temperature < 0.01 {
+            argmax(&last_logits) as u32
+        } else {
+            sample_top_p(&last_logits, temperature, top_p)
+        };
+        if stop.contains(&next_id) {
+            return;
+        }
+        if !on_token(next_id) {
+            return;
+        }
+
+        for _ in 1..max_new_tokens {
+            let logits = self.forward_one_falcon(next_id, &mut kv_cache);
             next_id = if temperature < 0.01 {
                 argmax(&logits) as u32
             } else {
@@ -3478,6 +3847,31 @@ fn rms_norm_vec(x: &[f32], weight: &[f32], eps: f32, seq_len: usize, dim: usize)
 #[inline]
 fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
+}
+
+/// Exact GELU via the tanh approximation used by HuggingFace's Falcon
+/// checkpoints (`gelu_pytorch_tanh` kernel).
+///
+/// `0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x^3)))`
+#[inline]
+fn gelu_tanh(x: f32) -> f32 {
+    const K: f32 = 0.7978845608028654; // sqrt(2 / pi)
+    0.5 * x * (1.0 + ((K * (x + 0.044715 * x * x * x)).tanh()))
+}
+
+/// LayerNorm over a single flat vector: `(x - mean) / sqrt(var + eps) * gamma + beta`.
+/// Mean/var taken over the `dim`-sized vector. Used by Falcon's forward path.
+fn layer_norm_single(x: &[f32], gamma: &[f32], beta: &[f32], eps: f32) -> Vec<f32> {
+    let dim = x.len();
+    let dim_f = dim as f32;
+    let mean: f32 = x.iter().sum::<f32>() / dim_f;
+    let var: f32 = x.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / dim_f;
+    let inv = 1.0 / (var + eps).sqrt();
+    x.iter()
+        .zip(gamma.iter())
+        .zip(beta.iter())
+        .map(|((&xi, &g), &b)| (xi - mean) * inv * g + b)
+        .collect()
 }
 
 fn rms_norm_single(x: &[f32], weight: &[f32], eps: f32) -> Vec<f32> {

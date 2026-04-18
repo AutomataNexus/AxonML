@@ -745,6 +745,62 @@ pub fn dequantize_q5_k(block: &[u8], output: &mut [f32]) {
     }
 }
 
+/// Dequantize a Q5_0 block (22 bytes for 32 elements).
+///
+/// Q5_0 layout:
+///   * `d`  (f16, 2 bytes) — super-block scale
+///   * `qh` (u32-packed 5th bit per element, 4 bytes)
+///   * `qs` (16 bytes) — low-4-bit nibble per element, 2 elements per byte
+///
+/// Value: `((lo | (hi*16)) - 16) * d`, giving a signed 5-bit range
+/// `[-16, 15]` scaled by `d`. Matches llama.cpp's
+/// `dequantize_row_q5_0`.
+pub fn dequantize_q5_0(block: &[u8], output: &mut [f32]) {
+    if block.len() < 22 || output.len() < 32 {
+        return;
+    }
+    let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
+    let qh = u32::from_le_bytes([block[2], block[3], block[4], block[5]]);
+    let qs = &block[6..22]; // 16 bytes
+
+    for i in 0..16 {
+        let lo1 = qs[i] & 0x0F;
+        let lo2 = (qs[i] >> 4) & 0x0F;
+        let hi1 = ((qh >> i) & 1) as u8 * 16;
+        let hi2 = ((qh >> (i + 16)) & 1) as u8 * 16;
+        output[i]      = ((lo1 | hi1) as i32 - 16) as f32 * d;
+        output[i + 16] = ((lo2 | hi2) as i32 - 16) as f32 * d;
+    }
+}
+
+/// Dequantize a Q5_1 block (24 bytes for 32 elements).
+///
+/// Q5_1 layout:
+///   * `d`  (f16, 2 bytes) — super-block scale
+///   * `m`  (f16, 2 bytes) — super-block min (added, not subtracted)
+///   * `qh` (u32, 4 bytes) — 5th bit per element
+///   * `qs` (16 bytes) — low nibbles
+///
+/// Value: `(lo | (hi * 16)) * d + m`, unsigned 5-bit `[0, 31]` scale+shift.
+pub fn dequantize_q5_1(block: &[u8], output: &mut [f32]) {
+    if block.len() < 24 || output.len() < 32 {
+        return;
+    }
+    let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
+    let m = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
+    let qh = u32::from_le_bytes([block[4], block[5], block[6], block[7]]);
+    let qs = &block[8..24];
+
+    for i in 0..16 {
+        let lo1 = qs[i] & 0x0F;
+        let lo2 = (qs[i] >> 4) & 0x0F;
+        let hi1 = ((qh >> i) & 1) as u8 * 16;
+        let hi2 = ((qh >> (i + 16)) & 1) as u8 * 16;
+        output[i]      = (lo1 | hi1) as f32 * d + m;
+        output[i + 16] = (lo2 | hi2) as f32 * d + m;
+    }
+}
+
 /// Dequantize F16 values to F32.
 pub fn dequantize_f16(data: &[u8], output: &mut [f32]) {
     for (i, chunk) in data.chunks_exact(2).enumerate() {

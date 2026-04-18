@@ -524,7 +524,10 @@ fn dequantize_into(output: &mut [f32], raw_data: &[u8], n_elements: usize, dtype
         }
         GgmlType::Q8_0 => dequantize_blocks_par(output, raw_data, n_elements, 32, 34, gguf::dequantize_q8_0),
         GgmlType::Q4_0 => dequantize_blocks_par(output, raw_data, n_elements, 32, 18, gguf::dequantize_q4_0),
+        GgmlType::Q5_0 => dequantize_blocks_par(output, raw_data, n_elements, 32, 22, gguf::dequantize_q5_0),
+        GgmlType::Q5_1 => dequantize_blocks_par(output, raw_data, n_elements, 32, 24, gguf::dequantize_q5_1),
         GgmlType::Q4K => dequantize_blocks_par(output, raw_data, n_elements, 256, 144, gguf::dequantize_q4_k),
+        GgmlType::Q5K => dequantize_blocks_par(output, raw_data, n_elements, 256, 176, gguf::dequantize_q5_k),
         GgmlType::Q6K => dequantize_blocks_par(output, raw_data, n_elements, 256, 210, gguf::dequantize_q6_k),
         GgmlType::I2S => {
             // Unreachable in practice: `Weight::matmul` intercepts I2S and
