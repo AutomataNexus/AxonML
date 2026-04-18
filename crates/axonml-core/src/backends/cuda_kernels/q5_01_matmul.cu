@@ -110,6 +110,11 @@ __device__ __forceinline__ float q5_1_weight(
 #define Q5_1_BYTES 24u
 #define Q5_BLOCK   32u
 
+// Q5_0 GEMV v2: two warps per output row split the block range. Each
+// warp walks its half of blocks, lanes cooperate one-element-each per
+// block, then the two warps combine their partial sums via shared
+// memory. Same launch geometry as Q4_K / Q5_K v2: rows_per_cta × 2
+// warps/row × 32 threads, shared_mem = rows_per_cta * 2 * f32.
 extern "C" __global__ void q5_0_gemv_f32(
     const unsigned char* __restrict__ w,
     const float* __restrict__ a,
@@ -117,28 +122,46 @@ extern "C" __global__ void q5_0_gemv_f32(
     unsigned int out_dim,
     unsigned int in_dim
 ) {
-    const unsigned int tid     = threadIdx.x;
-    const unsigned int lane    = tid & 31u;
-    const unsigned int warp_id = tid >> 5;
-    const unsigned int j       = blockIdx.x * (blockDim.x >> 5) + warp_id;
-    if (j >= out_dim) return;
+    extern __shared__ float s_partial_q5_0[];
+
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int j            = blockIdx.x * rows_per_cta + row_in_cta;
 
     const unsigned int n_blocks  = in_dim / Q5_BLOCK;
     const unsigned int row_bytes = n_blocks * Q5_0_BYTES;
-    const unsigned char* row = w + (size_t)j * row_bytes;
 
     float sum = 0.0f;
-    for (unsigned int b = 0; b < n_blocks; ++b) {
-        const unsigned char* block = row + (size_t)b * Q5_0_BYTES;
-        float wv = q5_0_weight(block, lane);
-        float av = a[b * Q5_BLOCK + lane];
-        sum += wv * av;
+    if (j < out_dim) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        for (unsigned int b = b_start; b < b_end; ++b) {
+            const unsigned char* block = row + (size_t)b * Q5_0_BYTES;
+            float wv = q5_0_weight(block, lane);
+            float av = a[b * Q5_BLOCK + lane];
+            sum += wv * av;
+        }
     }
     #pragma unroll
     for (int off = 16; off > 0; off >>= 1) {
         sum += __shfl_xor_sync(0xffffffffu, sum, off);
     }
-    if (lane == 0) c[j] = sum;
+
+    if (lane == 0u) {
+        s_partial_q5_0[row_in_cta * 2u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (warp_in_row == 0u && lane == 0u && j < out_dim) {
+        c[j] = s_partial_q5_0[row_in_cta * 2u]
+             + s_partial_q5_0[row_in_cta * 2u + 1u];
+    }
 }
 
 extern "C" __global__ void q5_0_gemm_f32(
@@ -187,6 +210,7 @@ extern "C" __global__ void q5_0_gemm_f32(
     c[tid] = sum;
 }
 
+// Q5_1 GEMV v2 — same two-warp-per-row structure as q5_0_gemv_f32.
 extern "C" __global__ void q5_1_gemv_f32(
     const unsigned char* __restrict__ w,
     const float* __restrict__ a,
@@ -194,28 +218,46 @@ extern "C" __global__ void q5_1_gemv_f32(
     unsigned int out_dim,
     unsigned int in_dim
 ) {
-    const unsigned int tid     = threadIdx.x;
-    const unsigned int lane    = tid & 31u;
-    const unsigned int warp_id = tid >> 5;
-    const unsigned int j       = blockIdx.x * (blockDim.x >> 5) + warp_id;
-    if (j >= out_dim) return;
+    extern __shared__ float s_partial_q5_1[];
+
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int j            = blockIdx.x * rows_per_cta + row_in_cta;
 
     const unsigned int n_blocks  = in_dim / Q5_BLOCK;
     const unsigned int row_bytes = n_blocks * Q5_1_BYTES;
-    const unsigned char* row = w + (size_t)j * row_bytes;
 
     float sum = 0.0f;
-    for (unsigned int b = 0; b < n_blocks; ++b) {
-        const unsigned char* block = row + (size_t)b * Q5_1_BYTES;
-        float wv = q5_1_weight(block, lane);
-        float av = a[b * Q5_BLOCK + lane];
-        sum += wv * av;
+    if (j < out_dim) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        for (unsigned int b = b_start; b < b_end; ++b) {
+            const unsigned char* block = row + (size_t)b * Q5_1_BYTES;
+            float wv = q5_1_weight(block, lane);
+            float av = a[b * Q5_BLOCK + lane];
+            sum += wv * av;
+        }
     }
     #pragma unroll
     for (int off = 16; off > 0; off >>= 1) {
         sum += __shfl_xor_sync(0xffffffffu, sum, off);
     }
-    if (lane == 0) c[j] = sum;
+
+    if (lane == 0u) {
+        s_partial_q5_1[row_in_cta * 2u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (warp_in_row == 0u && lane == 0u && j < out_dim) {
+        c[j] = s_partial_q5_1[row_in_cta * 2u]
+             + s_partial_q5_1[row_in_cta * 2u + 1u];
+    }
 }
 
 extern "C" __global__ void q5_1_gemm_f32(
