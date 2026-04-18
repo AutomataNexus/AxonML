@@ -128,7 +128,8 @@ pub use activation::{
 
 // Loss re-exports
 pub use loss::{
-    BCELoss, BCEWithLogitsLoss, CrossEntropyLoss, L1Loss, MSELoss, NLLLoss, Reduction, SmoothL1Loss,
+    BCELoss, BCEWithLogitsLoss, CrossEntropyLoss, KLDivLoss, L1Loss, MSELoss, NLLLoss, Reduction,
+    SmoothL1Loss,
 };
 
 // Init re-exports
