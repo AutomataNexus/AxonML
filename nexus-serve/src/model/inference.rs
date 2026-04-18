@@ -1483,11 +1483,32 @@ impl InferenceEngine {
         let is_gemma = self.gemma4.is_some();
         let mut kv_cache = KvCache::new(self.config.num_layers);
 
-        // Prefill: process entire prompt at once
+        // Prefill.
+        //
+        // For the LLaMA / Qwen / BitNet family we feed prompt tokens
+        // through `forward_one` (which routes through
+        // `forward_one_gpu_resident` on CUDA). This is slower per
+        // prompt token than `forward_batch` (higher first-token
+        // latency), but it's the ONLY way to keep the prefill K/V
+        // numerically identical to what decode produces — the
+        // `forward_batch` path walks activations through CPU between
+        // kernel boundaries, and the resulting K/V drifts enough from
+        // the GPU-native path that decode's attention locks onto
+        // spurious positions (this was the root cause of Qwen3-4B
+        // degeneracy and Llama-3.2-3B looping on greedy). Gemma keeps
+        // its dedicated `forward_batch_gemma4` since its prefill has
+        // architecture-specific plumbing (altup, SWA pattern).
         let logits = if is_gemma {
             self.forward_batch_gemma4(prompt_ids, &mut kv_cache)
+        } else if prompt_ids.is_empty() {
+            // Nothing to prefill; bail out before decode.
+            return;
         } else {
-            self.forward_batch(prompt_ids, &mut kv_cache)
+            let mut last: Vec<f32> = Vec::new();
+            for &t in prompt_ids {
+                last = self.forward_one(t, &mut kv_cache);
+            }
+            last
         };
         let vocab_size = self.config.vocab_size;
         let last_logits = &logits[logits.len() - vocab_size..];
