@@ -52,6 +52,7 @@ pub use lifecycle::{LoopAction, TrainingLifecycle, TrainingLifecycleBuilder};
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use axonml_autograd::Variable;
@@ -145,6 +146,31 @@ impl TextDataset {
     pub fn from_string(corpus: &str, tokenizer: &CharTokenizer, seq_len: usize) -> Self {
         let tokens = tokenizer.encode(corpus);
         Self { tokens, seq_len }
+    }
+
+    /// Load a pre-tokenized flat uint32 stream from disk.
+    ///
+    /// Produced by `tokenize_corpus` — each 4 bytes LE is one token ID.
+    /// Intended for distillation against a real pre-trained teacher,
+    /// where the student must see the exact token IDs from the
+    /// teacher's tokenizer (not char IDs from `CharTokenizer`).
+    pub fn from_tokens_bin(path: &Path, seq_len: usize) -> io::Result<Self> {
+        let bytes = fs::read(path)?;
+        if bytes.len() % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "token bin file has {} bytes, not a multiple of 4 (corrupt?)",
+                    bytes.len()
+                ),
+            ));
+        }
+        let n_tokens = bytes.len() / 4;
+        let mut tokens: Vec<u32> = Vec::with_capacity(n_tokens);
+        for chunk in bytes.chunks_exact(4) {
+            tokens.push(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+        }
+        Ok(Self { tokens, seq_len })
     }
 
     /// Number of valid starting positions for a sliding window.

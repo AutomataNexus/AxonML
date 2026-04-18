@@ -640,6 +640,55 @@ fn qwen3_config_from_gguf(gguf: &GgufFile) -> io::Result<Qwen3Config> {
     })
 }
 
+/// Read Qwen-family GGUF tokenizer metadata: `(tokens, merges)`.
+///
+/// Returns the byte-level BPE vocabulary as `Vec<String>` (token[i] is
+/// the string for token ID `i`) and the merge rules as
+/// `Vec<(String, String)>`. Returns an empty merges vector for GGUFs
+/// that don't ship merges (some SentencePiece exports omit them; in
+/// that case the caller falls back to greedy-longest-match encoding).
+pub fn read_gguf_tokenizer(
+    path: &Path,
+) -> io::Result<(Vec<String>, Vec<(String, String)>)> {
+    let gguf = GgufFile::open(path)?;
+
+    let tokens: Vec<String> = match gguf.get_meta("tokenizer.ggml.tokens") {
+        Some(GgufValue::Array(arr)) => arr
+            .iter()
+            .map(|v| match v {
+                GgufValue::String(s) => s.clone(),
+                _ => String::new(),
+            })
+            .collect(),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "missing or malformed `tokenizer.ggml.tokens`",
+            ))
+        }
+    };
+
+    let merges: Vec<(String, String)> = match gguf.get_meta("tokenizer.ggml.merges") {
+        Some(GgufValue::Array(arr)) => arr
+            .iter()
+            .filter_map(|v| match v {
+                GgufValue::String(s) => {
+                    let parts: Vec<&str> = s.splitn(2, ' ').collect();
+                    if parts.len() == 2 {
+                        Some((parts[0].to_string(), parts[1].to_string()))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    Ok((tokens, merges))
+}
+
 /// Load a Qwen3-family GGUF into a fresh, trainable `Qwen3ForCausalLM`.
 ///
 /// Steps:
