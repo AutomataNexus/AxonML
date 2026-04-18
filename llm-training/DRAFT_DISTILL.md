@@ -112,13 +112,14 @@ A conversion utility `tools/axonml_to_gguf.rs` will live in `llm-training/tools/
 |---|---|---|
 | Qwen3 architecture in axonml-llm (training-friendly) | 1-2 days | **DONE** `7065a1b` — `qwen3.rs` with QK-norm, 4/4 tests pass |
 | KL-divergence loss head in axonml-nn | 0.5 day | **DONE** `56cfc10` — `KLDivLoss` with T² scaling, 4/4 tests pass |
-| Trainer loop (combined CE + KL, AdamW) | 0.5 day | **DONE** `5aca921` — `train_draft_distill` runs end-to-end, loss decreases on smoke corpus |
+| Trainer loop (combined CE + KL, AdamW) | 0.5 day | **DONE** `5aca921` — `train_draft_distill` runs end-to-end |
+| GGUF → Qwen3ForCausalLM loader | 1 day | **DONE** `0bdd4e8` — loads Qwen3-0.6B GGUF in 7.7s, 508 tensors, 752M elements |
+| Swap fresh-init teacher for GGUF-loaded teacher in trainer | 0.25 day | TODO — one-line change in train_draft_distill.rs + `--teacher-gguf` CLI flag |
 | Dataset prep pipeline | 1 day | TODO — download FineWeb slice, tokenize with Qwen BPE |
-| Teacher logit generation (via real frozen target) | 1 day | TODO — add GGUF→Qwen3ForCausalLM loader so teacher is pre-trained, not fresh-init |
 | GGUF export utility | 0.5 day | TODO — pack Q4_K + Qwen3 metadata for spec_bench loading |
 | Training run | 1-2 days | TODO — wall-clock during actual training |
 | Evaluation + iteration | 0.5-1 day | TODO — tune T, α, γ on spec_bench results |
-| **Total** | **~4.5-6 days remaining** | 2 days done |
+| **Total** | **~3.25-5 days remaining** | 3 days done |
 
 ## Starting point — where to resume
 
