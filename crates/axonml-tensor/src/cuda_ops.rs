@@ -3252,7 +3252,8 @@ impl Tensor<f32> {
 
         let src_guard = data.storage.as_cuda_slice();
         let w_guard = w.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        // pool_alloc_uninit: rms_norm_f32 writes every out[i] = scale*x[i]*w[i].
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.rms_norm_f32(&mut out, src_guard.slice(), w_guard.slice(), len, eps)
             .expect("CUDA rms_norm_f32 failed");
@@ -3286,7 +3287,9 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        // pool_alloc_uninit: the broadcast_copy below writes every element
+        // of `out` (it's a full copy of src), then rope mutates in place.
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         // Copy src → out, then rotate in-place on out (kernel writes both
         // halves of every pair, so we need a fresh buffer to avoid trampling
@@ -3315,7 +3318,8 @@ impl Tensor<f32> {
 
         let g_guard = g.storage.as_cuda_slice();
         let u_guard = u.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        // pool_alloc_uninit: swiglu_f32 writes every out[i] = silu(g[i])*u[i].
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.swiglu_f32(&mut out, g_guard.slice(), u_guard.slice(), len)
             .expect("CUDA swiglu_f32 failed");
@@ -3340,7 +3344,8 @@ impl Tensor<f32> {
 
         let g_guard = g.storage.as_cuda_slice();
         let u_guard = u.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        // pool_alloc_uninit: relu2_gate_f32 writes every out[i] = relu(g)²*u.
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.relu2_gate_f32(&mut out, g_guard.slice(), u_guard.slice(), len)
             .expect("CUDA relu2_gate_f32 failed");
