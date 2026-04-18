@@ -70,7 +70,7 @@ pub use llama::{LLaMA, LLaMAConfig, LLaMAForCausalLM};
 pub use mistral::{Mistral, MistralConfig, MistralForCausalLM};
 pub use phi::{Phi, PhiConfig, PhiForCausalLM};
 pub use gguf_export::export_qwen3_to_gguf;
-pub use gguf_loader::load_qwen3_from_gguf;
+pub use gguf_loader::{load_qwen3_from_gguf, read_gguf_tokenizer};
 pub use qwen3::{Qwen3, Qwen3Attention, Qwen3Config, Qwen3DecoderLayer, Qwen3ForCausalLM};
 pub use ssm::{SSMBlock, SSMConfig, SSMForCausalLM};
 pub use state_dict::{LoadResult, LoadStateDict};

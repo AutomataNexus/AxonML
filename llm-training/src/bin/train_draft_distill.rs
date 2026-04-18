@@ -116,6 +116,12 @@ struct Config {
     /// Teacher's vocab_size is propagated to the student so the KL head
     /// has shape-aligned logit distributions.
     teacher_gguf: Option<PathBuf>,
+    /// Optional path to a pre-tokenized `.bin` (flat u32 stream,
+    /// produced by `tokenize_corpus`). When set, bypasses the
+    /// char-tokenizer path — the student sees the teacher's actual
+    /// token IDs, which is required for the distillation signal to
+    /// be meaningful.
+    tokens_bin: Option<PathBuf>,
 }
 
 impl Config {
@@ -148,6 +154,7 @@ impl Config {
             resume: ResumeMode::None,
             arch_preset: "tiny".to_string(),
             teacher_gguf: None,
+            tokens_bin: None,
         };
 
         let mut i = 0;
@@ -187,6 +194,7 @@ impl Config {
                 }
                 "--arch" => { cfg.arch_preset = next(i).clone(); i += 2; }
                 "--teacher-gguf" => { cfg.teacher_gguf = Some(PathBuf::from(next(i))); i += 2; }
+                "--tokens-bin" => { cfg.tokens_bin = Some(PathBuf::from(next(i))); i += 2; }
                 other => {
                     eprintln!("Unknown flag: {other}");
                     print_help();
@@ -228,6 +236,10 @@ fn print_help() {
     eprintln!("  --teacher-gguf PATH   Load teacher from Qwen3 GGUF (pretrained).");
     eprintln!("                        When set, student vocab_size is forced to match teacher's.");
     eprintln!("                        Without this, teacher is fresh-init (pipeline smoke only).");
+    eprintln!("  --tokens-bin PATH     Pre-tokenized corpus (flat u32 LE, from tokenize_corpus).");
+    eprintln!("                        When set, bypasses --corpus + CharTokenizer; training");
+    eprintln!("                        uses the teacher's actual token IDs. Required for a");
+    eprintln!("                        useful distillation signal paired with --teacher-gguf.");
     eprintln!();
     eprintln!("CHECKPOINTING:");
     eprintln!("  --checkpoint-every-steps N  (default: {DEFAULT_CHECKPOINT_EVERY})");
@@ -368,22 +380,51 @@ fn main() {
     let device = pick_device();
     println!("Device: {}", device_name(&device));
 
-    // ---- Load corpus ----
-    let corpus_text = read_corpus(&cfg.corpus);
-    println!(
-        "Corpus: {} ({} chars)",
-        cfg.corpus.display(),
-        format_count(corpus_text.len())
-    );
-
-    // ---- Tokenizer + dataset (char-level for smoke runs; swap to Qwen BPE for real) ----
-    let tokenizer = CharTokenizer::from_corpus(&corpus_text);
-    let vocab_size = tokenizer.vocab_size();
-    println!("Vocab:  {vocab_size} chars");
-
-    let dataset = TextDataset::from_string(&corpus_text, &tokenizer, cfg.seq_len);
-    println!("Windows: {}", format_count(dataset.len()));
-    println!();
+    // ---- Load corpus / dataset ----
+    // Two paths: pre-tokenized `.bin` (Qwen BPE, matches teacher) OR
+    // char-tokenized text (smoke-only). The tokens-bin path is what
+    // produces a useful draft; the char path is for pipeline testing.
+    let (dataset, vocab_size, char_tokenizer) = if let Some(ref bin_path) = cfg.tokens_bin {
+        let dataset = TextDataset::from_tokens_bin(bin_path, cfg.seq_len).unwrap_or_else(|e| {
+            eprintln!("failed to load --tokens-bin {}: {e}", bin_path.display());
+            std::process::exit(1);
+        });
+        let n_tokens = dataset.tokens().len();
+        // vocab_size from the max ID seen, rounded up — a safer lower
+        // bound than trusting an external signal. The trainer overrides
+        // this to the teacher's vocab_size anyway when --teacher-gguf
+        // is set, so this is the fallback for no-teacher smoke runs.
+        let max_id = dataset.tokens().iter().copied().max().unwrap_or(0) as usize;
+        let inferred_vocab = max_id + 1;
+        println!(
+            "Corpus: {} (pre-tokenized, {} tokens)",
+            bin_path.display(),
+            format_count(n_tokens)
+        );
+        println!(
+            "Vocab:  {} (inferred from max token ID; overridden by teacher GGUF if set)",
+            inferred_vocab
+        );
+        println!("Windows: {}", format_count(dataset.len()));
+        println!();
+        (dataset, inferred_vocab, None)
+    } else {
+        let corpus_text = read_corpus(&cfg.corpus);
+        println!(
+            "Corpus: {} ({} chars)",
+            cfg.corpus.display(),
+            format_count(corpus_text.len())
+        );
+        let tokenizer = CharTokenizer::from_corpus(&corpus_text);
+        let vocab_size = tokenizer.vocab_size();
+        println!("Vocab:  {vocab_size} chars (CharTokenizer — pass --tokens-bin for useful distillation)");
+        let dataset = TextDataset::from_string(&corpus_text, &tokenizer, cfg.seq_len);
+        println!("Windows: {}", format_count(dataset.len()));
+        println!();
+        (dataset, vocab_size, Some(tokenizer))
+    };
+    // Keep the tokenizer alive for the sample_greedy mid-training hook.
+    let _ = &char_tokenizer;
 
     // ---- Build teacher first — its vocab_size drives the student's.  ----
     let (teacher, teacher_cfg_opt): (Qwen3ForCausalLM, Option<Qwen3Config>) =
@@ -646,9 +687,14 @@ fn main() {
             }
 
             if cfg.generate_every > 0 && step % cfg.generate_every == 0 {
-                let sample = sample_greedy(&student, &tokenizer, &device, cfg.seq_len);
-                let preview = sample.replace('\n', " ").chars().take(140).collect::<String>();
-                println!("    sample: {preview}");
+                // Mid-training greedy sample requires a decodable tokenizer.
+                // On the --tokens-bin path we don't have one here (it lives
+                // in the GGUF the tokens were produced from), so skip.
+                if let Some(ref tok) = char_tokenizer {
+                    let sample = sample_greedy(&student, tok, &device, cfg.seq_len);
+                    let preview = sample.replace('\n', " ").chars().take(140).collect::<String>();
+                    println!("    sample: {preview}");
+                }
             }
         }
 
