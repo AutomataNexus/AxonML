@@ -3585,6 +3585,16 @@ pub const Q4K_MATMUL_PTX: &str = include_str!("q4k_matmul.ptx");
 /// eager Q5_K → F32 dequant fallback on `attn_qkv`.
 pub const Q5K_MATMUL_PTX: &str = include_str!("q5k_matmul.ptx");
 
+/// Q5_0 / Q5_1 quantized matmul (dequant-in-shader).
+///
+/// Compiled from `q5_01_matmul.cu`. Block size 32 (vs 256 for Q5_K), one
+/// warp per output row, lanes cooperate one-element-each per block.
+/// Q5_0 is signed `((lo | hi*16) - 16) * d`; Q5_1 is unsigned
+/// `(lo | hi*16) * d + m`. Lands legacy-Falcon on GPU — its attn_qkv is
+/// Q5_1 and the rest (attn_output, ffn_up, token_embd) is Q5_0, both of
+/// which fell through to `cpu_dequant_matmul` before this kernel existed.
+pub const Q5_01_MATMUL_PTX: &str = include_str!("q5_01_matmul.ptx");
+
 /// Q6_K quantized matmul (dequant-in-shader).
 ///
 /// Compiled from `q6k_matmul.cu`. Same shape contract as Q4_K but with
@@ -3805,6 +3815,13 @@ impl CudaKernels {
             &["q5k_gemv_f32", "q5k_gemm_f32"],
         )?;
 
+        // Q5_0 / Q5_1 dequant-in-shader matmul — legacy Falcon bodies.
+        kernels.load_module(
+            "q5_01_matmul",
+            Q5_01_MATMUL_PTX,
+            &["q5_0_gemv_f32", "q5_0_gemm_f32", "q5_1_gemv_f32", "q5_1_gemm_f32"],
+        )?;
+
         // Q6_K dequant-in-shader matmul — LM head + higher-precision weights.
         kernels.load_module(
             "q6k_matmul",
@@ -3819,6 +3836,16 @@ impl CudaKernels {
             TRANSFORMER_OPS_PTX,
             &[
                 "rms_norm_f32",
+                // Single-token LayerNorm (mean-subtracting, gamma+beta) —
+                // Falcon arch decode. Distinct from `layer_norm_f32` in the
+                // `layernorm` module which is the batched multi-row variant
+                // used by training.
+                "layer_norm_tokenwise_f32",
+                // tanh-approximation GELU — Falcon MLP activation.
+                "gelu_tanh_f32",
+                // Parallel residual `x = x + attn + ffn` — Falcon's
+                // parallel-attn+FFN block fuses two adds into one launch.
+                "parallel_residual_add_f32",
                 "rms_norm_heads_f32",
                 "rope_split_halves_f32",
                 "swiglu_f32",

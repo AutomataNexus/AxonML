@@ -376,6 +376,35 @@ impl Weight {
                             return result.expect("q5k_{gemv,gemm}_cuda failed");
                         }
                     }
+
+                    // Q5_0 / Q5_1 GPU fast path — legacy Falcon (Falcon-
+                    // 7B/40B) bodies. Before this landed, both types
+                    // fell through to `cpu_dequant_matmul` which re-
+                    // dequants the whole weight to f32 on CPU every
+                    // call — Falcon-7B decode was 0.4 tok/s because
+                    // of this.
+                    if (*dtype == GgmlType::Q5_0 || *dtype == GgmlType::Q5_1)
+                        && dims.len() == 2
+                        && dims[0] % 32 == 0
+                        && input.device().is_gpu()
+                    {
+                        if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                            let w_gpu = gpu_cache.get_or_init(|| {
+                                cuda.htod_copy(data.as_slice())
+                                    .expect("Q5_0/Q5_1 gpu_cache htod_copy failed")
+                            });
+                            let _ = cuda;
+                            let m_shape = input.shape().first().copied().unwrap_or(1);
+                            let result = match (*dtype, m_shape) {
+                                (GgmlType::Q5_0, 1) => input.q5_0_gemv_cuda(w_gpu, dims[1], dims[0]),
+                                (GgmlType::Q5_0, _) => input.q5_0_gemm_cuda(w_gpu, dims[1], dims[0]),
+                                (GgmlType::Q5_1, 1) => input.q5_1_gemv_cuda(w_gpu, dims[1], dims[0]),
+                                (GgmlType::Q5_1, _) => input.q5_1_gemm_cuda(w_gpu, dims[1], dims[0]),
+                                _ => unreachable!(),
+                            };
+                            return result.expect("q5_{0,1}_{gemv,gemm}_cuda failed");
+                        }
+                    }
                 }
                 // BitNet I2_S fast path: the whole point of 1.58-bit is an
                 // add-only matmul that never materializes f32 weights. Skip

@@ -1246,6 +1246,109 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Q5_0 GEMV — one warp per output row, block_size=32, signed 5-bit
+    /// `((lo | hi*16) - 16) * d`. Used by legacy Falcon's `attn_output`,
+    /// `ffn_up`, and `token_embd` on Falcon-7B Q4_K_M exports.
+    pub fn q5_0_gemv_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 32 == 0, "Q5_0 GEMV requires in_dim % 32 == 0");
+        let func = self.kernels.get("q5_0_gemv_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q5_0_gemv_f32".to_string()))?;
+        const WARPS_PER_CTA: u32 = 4;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((out_dim as u32) + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1), block_dim: (THREADS_PER_CTA, 1, 1), shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream.launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&(out_dim as u32)).arg(&(in_dim as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Q5_0 GEMM (m > 1 prefill). Naive one-thread-per-output.
+    pub fn q5_0_gemm_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        m_dim: usize,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 32 == 0, "Q5_0 GEMM requires in_dim % 32 == 0");
+        let func = self.kernels.get("q5_0_gemm_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q5_0_gemm_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(m_dim * out_dim);
+        unsafe {
+            self.stream.launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&(m_dim as u32)).arg(&(out_dim as u32)).arg(&(in_dim as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Q5_1 GEMV — unsigned 5-bit `(lo | hi*16) * d + m`. Used by legacy
+    /// Falcon's `attn_qkv` (single merged Q/K/V tensor).
+    pub fn q5_1_gemv_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 32 == 0, "Q5_1 GEMV requires in_dim % 32 == 0");
+        let func = self.kernels.get("q5_1_gemv_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q5_1_gemv_f32".to_string()))?;
+        const WARPS_PER_CTA: u32 = 4;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((out_dim as u32) + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1), block_dim: (THREADS_PER_CTA, 1, 1), shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream.launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&(out_dim as u32)).arg(&(in_dim as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Q5_1 GEMM (m > 1 prefill).
+    pub fn q5_1_gemm_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        m_dim: usize,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 32 == 0, "Q5_1 GEMM requires in_dim % 32 == 0");
+        let func = self.kernels.get("q5_1_gemm_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q5_1_gemm_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(m_dim * out_dim);
+        unsafe {
+            self.stream.launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&(m_dim as u32)).arg(&(out_dim as u32)).arg(&(in_dim as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// Q6_K GEMV: one WARP per output row, lanes cooperate on each block.
     /// See `q6k_matmul.cu`.
     pub fn q6k_gemv_f32(
@@ -3161,6 +3264,102 @@ impl CudaBackend {
                 .arg(weight)
                 .arg(&(n as u32))
                 .arg(&eps)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Single-token LayerNorm. `out[i] = (x[i] - mean) / sqrt(var + eps)
+    /// * gamma[i] + beta[i]` over a single vector of length `n`. Used by
+    /// legacy Falcon's decode path. Distinct from `layer_norm_f32` above
+    /// (which takes a `num_rows` and operates on a batched `[rows, n]`
+    /// input for training).
+    ///
+    /// Same single-CTA two-pass reduction as `rms_norm_f32`; shared-mem
+    /// budget is doubled (two `n_warps * f32` arrays — mean then var).
+    pub fn layer_norm_tokenwise_f32(
+        &self,
+        out: &mut CudaSlice<f32>,
+        x: &CudaSlice<f32>,
+        gamma: &CudaSlice<f32>,
+        beta: &CudaSlice<f32>,
+        n: usize,
+        eps: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("layer_norm_tokenwise_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("layer_norm_tokenwise_f32".to_string()))?;
+        let block: u32 = 256;
+        let n_warps = (block + 31) / 32;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (1, 1, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: n_warps * 4 * 2, // mean + var
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(out)
+                .arg(x)
+                .arg(gamma)
+                .arg(beta)
+                .arg(&(n as u32))
+                .arg(&eps)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// GELU with the tanh approximation —
+    /// `0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715x³)))`.
+    /// Used by Falcon's MLP; element-wise, one thread per element.
+    pub fn gelu_tanh_f32(
+        &self,
+        out: &mut CudaSlice<f32>,
+        x: &CudaSlice<f32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("gelu_tanh_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("gelu_tanh_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(out)
+                .arg(x)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Parallel-residual add: `x[i] = x[i] + attn[i] + ffn[i]`. Element-
+    /// wise; fuses Falcon's two residual adds into one kernel launch.
+    pub fn parallel_residual_add_f32(
+        &self,
+        x: &mut CudaSlice<f32>,
+        attn: &CudaSlice<f32>,
+        ffn: &CudaSlice<f32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("parallel_residual_add_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("parallel_residual_add_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(x)
+                .arg(attn)
+                .arg(ffn)
+                .arg(&(n as u32))
                 .launch(cfg)
                 .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))

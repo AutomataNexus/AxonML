@@ -3142,41 +3142,59 @@ impl InferenceEngine {
         let n_heads = self.config.num_heads;
         let n_kv_heads = self.config.num_kv_heads;
         let q_dim = n_heads * head_dim;
-        let kv_dim = n_kv_heads * head_dim;
         let eps = self.config.rms_norm_eps; // holds LayerNorm eps for Falcon
         let theta = self.config.rope_theta;
         let pos = kv_cache.len;
 
+        // Embedding lookup → start x as a GPU Tensor so every layer op
+        // stays on-device. Round-trips to CPU only for the small K/V
+        // rows (RoPE stays on GPU, attention is still CPU for now).
         let id = token_id as usize;
-        let mut x: Vec<f32> = if id < self.config.vocab_size {
+        let x_host: Vec<f32> = if id < self.config.vocab_size {
             self.token_embed[id * hidden..(id + 1) * hidden].to_vec()
         } else {
             vec![0.0; hidden]
         };
+        let mut x_t = Tensor::from_vec(x_host, &[1, hidden])
+            .expect("embed tensor")
+            .to_device(self.compute_device.clone())
+            .expect("move embed");
 
         for (li, layer) in layers.iter().enumerate() {
-            // Single LayerNorm feeds both attention and FFN (parallel).
-            let normed =
-                layer_norm_single(&x, &layer.attn_norm, &layer.attn_norm_bias, eps);
-            let normed_t = Tensor::from_vec(normed.clone(), &[1, hidden])
-                .expect("normed tensor")
+            // Upload LayerNorm gamma/beta for this layer. Cheap (hidden
+            // f32 ≈ 18 KB) — a per-layer OnceLock would save the H2D but
+            // the round-trip isn't on any hot budget at these sizes.
+            let gamma = Tensor::from_vec(layer.attn_norm.clone(), &[hidden])
+                .expect("attn_norm")
                 .to_device(self.compute_device.clone())
-                .expect("move normed");
+                .expect("move gamma");
+            let beta = Tensor::from_vec(layer.attn_norm_bias.clone(), &[hidden])
+                .expect("attn_norm_bias")
+                .to_device(self.compute_device.clone())
+                .expect("move beta");
 
-            // --- Attention branch --------------------------------------
-            let mut q = layer.q_weight.matmul(&normed_t).to_vec();
-            let mut k = layer.k_weight.matmul(&normed_t).to_vec();
-            let v = layer.v_weight.matmul(&normed_t).to_vec();
+            // Single LayerNorm feeds both attention and FFN (parallel).
+            let normed_t = x_t.layer_norm_tokenwise(&gamma, &beta, eps);
 
-            // RoPE on Q (all heads) and K (single MQA head).
-            apply_rope_single(&mut q, n_heads, head_dim, theta, pos);
-            apply_rope_single(&mut k, n_kv_heads, head_dim, theta, pos);
+            // --- Attention branch (Q/K/V stays on GPU until RoPE) ------
+            let q_t = layer.q_weight.matmul(&normed_t);
+            let k_t = layer.k_weight.matmul(&normed_t);
+            let v_t = layer.v_weight.matmul(&normed_t);
 
-            // Append this token's K/V row into the cache.
+            // GPU RoPE on Q and K. V is not rotated.
+            let q_t = q_t.apply_rope_split_halves(n_heads, head_dim, theta, pos);
+            let k_t = k_t.apply_rope_split_halves(n_kv_heads, head_dim, theta, pos);
+
+            // Pull K/V to CPU for the existing KV cache + single_query
+            // attention path. A GPU-native KvCache + fused attention
+            // kernel would eliminate this round-trip (follow-up).
+            let k = k_t.to_vec();
+            let v = v_t.to_vec();
             kv_cache.k_cache[li].extend_from_slice(&k);
             kv_cache.v_cache[li].extend_from_slice(&v);
             let kv_len = kv_cache.len + 1;
 
+            let q = q_t.to_vec();
             let attn = single_query_attention(
                 &q,
                 &kv_cache.k_cache[li],
@@ -3186,46 +3204,37 @@ impl InferenceEngine {
                 n_kv_heads,
                 head_dim,
             );
-
             let attn_t = Tensor::from_vec(attn, &[1, q_dim])
                 .expect("attn tensor")
                 .to_device(self.compute_device.clone())
                 .expect("move attn");
-            let attn_proj = layer.o_weight.matmul(&attn_t).to_vec();
+            let attn_proj_t = layer.o_weight.matmul(&attn_t);
 
-            // --- FFN branch (in parallel with attention) -------------
+            // --- FFN branch (runs parallel to attention, same normed) --
             let ffn_mid_t = layer.ffn_up.matmul(&normed_t);
-            let mut ffn_mid_vec = ffn_mid_t.to_vec();
-            for v in ffn_mid_vec.iter_mut() {
-                *v = gelu_tanh(*v);
-            }
-            let ffn_mid_activated = Tensor::from_vec(ffn_mid_vec, ffn_mid_t.shape())
-                .expect("ffn mid tensor")
-                .to_device(self.compute_device.clone())
-                .expect("move ffn mid");
-            let ffn_out = layer.ffn_down.matmul(&ffn_mid_activated).to_vec();
+            let ffn_mid_activated = ffn_mid_t.gelu_tanh();
+            let ffn_out_t = layer.ffn_down.matmul(&ffn_mid_activated);
 
-            // Parallel residual: x = x + attn + ffn.
-            for d in 0..hidden {
-                x[d] += attn_proj[d] + ffn_out[d];
-            }
-
-            let _ = kv_dim; // silence in case of future use
+            // Parallel residual: x = x + attn + ffn (in-place, one kernel).
+            x_t.parallel_residual_add_(&attn_proj_t, &ffn_out_t);
         }
 
-        // Final LayerNorm + LM head.
-        let bias = self
+        // Final LayerNorm + LM head on GPU.
+        let bias_vec = self
             .output_norm_bias
             .as_ref()
             .expect("falcon expects output_norm_bias");
-        let final_norm = layer_norm_single(&x, &self.output_norm, bias, eps);
-        let norm_t = Tensor::from_vec(final_norm, &[1, hidden])
-            .expect("final norm tensor")
+        let out_gamma = Tensor::from_vec(self.output_norm.clone(), &[hidden])
+            .expect("output_norm")
             .to_device(self.compute_device.clone())
-            .expect("move final norm");
-        let logits = self.lm_head.matmul(&norm_t);
+            .expect("move output_norm");
+        let out_beta = Tensor::from_vec(bias_vec.clone(), &[hidden])
+            .expect("output_norm_bias")
+            .to_device(self.compute_device.clone())
+            .expect("move output_norm_bias");
+        let final_norm = x_t.layer_norm_tokenwise(&out_gamma, &out_beta, eps);
+        let logits = self.lm_head.matmul(&final_norm);
 
-        // After this step we've added one row to the cache.
         kv_cache.len += 1;
         logits.to_vec()
     }

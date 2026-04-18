@@ -797,6 +797,96 @@ impl Tensor<f32> {
 
     /// Q6_K GEMM: `self` is `[m, in]` on GPU, `w` is a device-side `[out, in]`
     /// weight matrix in raw Q6_K bytes. Returns `[m, out]` on GPU.
+    /// Q5_0 GEMV — `self` is `[1, in]` f32 on GPU, `w` is device-side
+    /// Q5_0 raw bytes `[out, in]`. Returns `[1, out]`.
+    pub fn q5_0_gemv_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu(), "q5_0_gemv_cuda: self must be on GPU");
+        assert_eq!(self.numel(), in_dim);
+        assert_eq!(in_dim % 32, 0);
+        let a_data = self.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(out_dim).expect("GPU pool alloc failed");
+        cuda.q5_0_gemv_f32(w, a_guard.slice(), &mut out, out_dim, in_dim)
+            .expect("CUDA q5_0_gemv_f32 failed");
+        let shape = Shape::from_slice(&[1, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, out_dim, self.device());
+        Ok(Self { storage, shape, strides, offset: 0 })
+    }
+
+    pub fn q5_0_gemm_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu());
+        assert_eq!(in_dim % 32, 0);
+        let a_data = self.contiguous_gpu();
+        let numel = a_data.numel();
+        assert!(numel % in_dim == 0);
+        let m = numel / in_dim;
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(m * out_dim).expect("GPU pool alloc failed");
+        cuda.q5_0_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
+            .expect("CUDA q5_0_gemm_f32 failed");
+        let shape = Shape::from_slice(&[m, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, m * out_dim, self.device());
+        Ok(Self { storage, shape, strides, offset: 0 })
+    }
+
+    pub fn q5_1_gemv_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu());
+        assert_eq!(self.numel(), in_dim);
+        assert_eq!(in_dim % 32, 0);
+        let a_data = self.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(out_dim).expect("GPU pool alloc failed");
+        cuda.q5_1_gemv_f32(w, a_guard.slice(), &mut out, out_dim, in_dim)
+            .expect("CUDA q5_1_gemv_f32 failed");
+        let shape = Shape::from_slice(&[1, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, out_dim, self.device());
+        Ok(Self { storage, shape, strides, offset: 0 })
+    }
+
+    pub fn q5_1_gemm_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu());
+        assert_eq!(in_dim % 32, 0);
+        let a_data = self.contiguous_gpu();
+        let numel = a_data.numel();
+        assert!(numel % in_dim == 0);
+        let m = numel / in_dim;
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(m * out_dim).expect("GPU pool alloc failed");
+        cuda.q5_1_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
+            .expect("CUDA q5_1_gemm_f32 failed");
+        let shape = Shape::from_slice(&[m, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, m * out_dim, self.device());
+        Ok(Self { storage, shape, strides, offset: 0 })
+    }
+
     /// Q5_K GEMM: `self` is `[m, in]` f32 on GPU, `w` is a device-side
     /// `[out, in]` weight matrix in raw Q5_K super-block bytes (176 bytes
     /// per 256-element block). Returns `[m, out]`.
@@ -3396,6 +3486,97 @@ impl Tensor<f32> {
             strides: contiguous_strides(&self.shape),
             offset: 0,
         }
+    }
+
+    /// Single-token LayerNorm on GPU:
+    /// `out[i] = (x[i] - mean) / sqrt(var + eps) * gamma[i] + beta[i]`.
+    /// Used by legacy Falcon's decode path.
+    pub(crate) fn layer_norm_tokenwise_cuda(
+        &self,
+        gamma: &Self,
+        beta: &Self,
+        eps: f32,
+    ) -> Self {
+        let data = self.contiguous_gpu();
+        let g = gamma.contiguous_gpu();
+        let b = beta.contiguous_gpu();
+        let len = data.numel();
+        debug_assert_eq!(len, g.numel(), "layer_norm: gamma length must match input");
+        debug_assert_eq!(len, b.numel(), "layer_norm: beta length must match input");
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        let g_guard = g.storage.as_cuda_slice();
+        let b_guard = b.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
+
+        cuda.layer_norm_tokenwise_f32(
+            &mut out,
+            src_guard.slice(),
+            g_guard.slice(),
+            b_guard.slice(),
+            len,
+            eps,
+        )
+        .expect("CUDA layer_norm_tokenwise_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, len, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
+    /// Element-wise tanh-approximation GELU on GPU. Returns a new tensor.
+    pub(crate) fn gelu_tanh_cuda(&self) -> Self {
+        let data = self.contiguous_gpu();
+        let len = data.numel();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
+
+        cuda.gelu_tanh_f32(&mut out, src_guard.slice(), len)
+            .expect("CUDA gelu_tanh_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, len, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
+    /// Parallel-residual in-place update for Falcon: `self += attn + ffn`.
+    /// Fuses two element-wise adds into one kernel launch. All three
+    /// tensors must be on the same GPU device and have the same numel.
+    pub(crate) fn parallel_residual_add_cuda_(&mut self, attn: &Self, ffn: &Self) {
+        debug_assert_eq!(self.numel(), attn.numel(), "parallel_residual_add: attn numel mismatch");
+        debug_assert_eq!(self.numel(), ffn.numel(), "parallel_residual_add: ffn numel mismatch");
+        let a = attn.contiguous_gpu();
+        let f = ffn.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        // `self` must be contiguous on GPU for the in-place write to be
+        // correct. Materialize a contiguous copy if needed (rare — decode
+        // tensors are built contiguous by earlier kernels).
+        if !self.is_contiguous() {
+            *self = self.contiguous();
+        }
+
+        let a_guard = a.storage.as_cuda_slice();
+        let f_guard = f.storage.as_cuda_slice();
+        let mut self_guard = self.storage.as_cuda_slice_mut();
+        cuda.parallel_residual_add_f32(
+            self_guard.slice_mut(),
+            a_guard.slice(),
+            f_guard.slice(),
+            self.numel(),
+        )
+        .expect("CUDA parallel_residual_add_f32 failed");
     }
 
     /// GPU RoPE in the LLaMA / Qwen / Mistral split-halves layout. Returns
