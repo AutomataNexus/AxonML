@@ -833,6 +833,17 @@ impl InferenceEngine {
             // convention encoded in the GGUF we can rely on.
             "llama" if self.config.vocab_size >= 128000
                    && self.config.vocab_size < 150000 => &[128001, 128009],
+            // Phi-3 family uses its own tokenizer (tiktoken-based for
+            // Phi-3, BPE for Phi-3.5-mini/medium). Common stop tokens:
+            //   2  `</s>`           (Phi-3 mini/medium SFT)
+            //   32000 `<|endoftext|>`
+            //   32001 `<|assistant|>`  (turn boundary)
+            //   32007 `<|end|>`        (turn boundary)
+            //   32010 `<|user|>`
+            // The assistant / end / user triplet is what cleanly ends
+            // the assistant turn across Phi-3-mini, Phi-3.5-mini, and
+            // Phi-3-medium. 2 is the bos/eos fallback.
+            "phi3" => &[2, 32000, 32001, 32007],
             _ => &[0, 151643, 151644, 151645, 151646],
         }
     }
@@ -1245,6 +1256,14 @@ impl InferenceEngine {
             return Self::load_gemma4(gguf, mapped, quantized_weights, config);
         }
 
+        // Phi-3 uses merged-QKV (`attn_qkv`) and merged gate/up
+        // (`ffn_up`) tensors on the GGUF side. Split both at load time
+        // into the separate q/k/v and gate/up Weights the standard
+        // forward path expects.
+        if config.architecture == "phi3" {
+            return Self::load_phi3(gguf, mapped, quantized_weights, config);
+        }
+
         // Token embeddings as flat Vec (fast lookup) — always dequantized
         let token_embed = load_vec(mapped, "token_embd.weight")?;
 
@@ -1325,6 +1344,120 @@ impl InferenceEngine {
         println!("  Model loaded: {:.2} GB in RAM ({} mode)",
             total_bytes as f64 / 1e9,
             if quantized_weights { "quantized" } else { "f32" });
+
+        Ok(Self {
+            config,
+            token_embed,
+            layers,
+            gemma4: None,
+            output_norm,
+            lm_head,
+            compute_device: Device::Cpu,
+            #[cfg(feature = "cuda")]
+            gpu_layer_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_output_norm: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            kv_quant_q8: false,
+        })
+    }
+
+    /// Phi-3 weight loader. Called from `from_gguf_with_mode` when the
+    /// architecture is `phi3`.
+    ///
+    /// Phi-3 GGUFs (as of llama.cpp's current phi3 conversion) emit two
+    /// merged tensors that the rest of the forward path expects split:
+    /// - `blk.N.attn_qkv.weight`: concatenation of Q, K, V projections
+    ///   along the output axis. Shape in GGUF dims: `[hidden, q_out+k_out+v_out]`.
+    ///   We split into three Weights (q, k, v) each of shape
+    ///   `[hidden, n_heads*head_dim]` and `[hidden, n_kv_heads*head_dim]`.
+    /// - `blk.N.ffn_up.weight`: concatenation of gate, up projections for
+    ///   SwiGLU. Shape `[hidden, 2*intermediate]`. Split into gate + up.
+    ///
+    /// Splitting happens at the byte level on quantized tensors so we
+    /// don't pay a dequant round trip. Block-quantized types (Q4_K, Q6_K,
+    /// etc.) have input-axis-aligned blocks, so splitting along the
+    /// output axis is safe at any row boundary.
+    fn load_phi3(
+        gguf: &GgufFile,
+        mapped: &MappedGguf,
+        quantized_weights: bool,
+        config: InferenceConfig,
+    ) -> Result<Self, String> {
+        let _ = gguf; // metadata already in config
+        let token_embed = load_vec(mapped, "token_embd.weight")?;
+
+        let q_out = config.num_heads * config.head_dim;
+        let k_out = config.num_kv_heads * config.head_dim;
+        let v_out = k_out;
+        let inter = config.intermediate_size;
+
+        let mut layers = Vec::with_capacity(config.num_layers);
+        for i in 0..config.num_layers {
+            let prefix = format!("blk.{i}");
+
+            let attn_norm = load_vec(mapped, &format!("{prefix}.attn_norm.weight"))?;
+
+            // Merged QKV → three separate Weights.
+            let qkv = load_weight(mapped, &format!("{prefix}.attn_qkv.weight"), quantized_weights)?;
+            let (q_weight, k_weight, v_weight) =
+                split_weight_along_output(&qkv, &[q_out, k_out, v_out])
+                    .map_err(|e| format!("{prefix}.attn_qkv split: {e}"))?
+                    .into_3()
+                    .ok_or_else(|| format!("{prefix}.attn_qkv: expected 3-way split"))?;
+
+            let o_weight = load_weight(mapped, &format!("{prefix}.attn_output.weight"), quantized_weights)?;
+
+            let ffn_norm = load_vec(mapped, &format!("{prefix}.ffn_norm.weight"))?;
+
+            // Merged gate/up → two separate Weights.
+            let gate_up = load_weight(mapped, &format!("{prefix}.ffn_up.weight"), quantized_weights)?;
+            let (gate_weight, up_weight) =
+                split_weight_along_output(&gate_up, &[inter, inter])
+                    .map_err(|e| format!("{prefix}.ffn_up split: {e}"))?
+                    .into_2()
+                    .ok_or_else(|| format!("{prefix}.ffn_up: expected 2-way split"))?;
+
+            let down_weight = load_weight(mapped, &format!("{prefix}.ffn_down.weight"), quantized_weights)?;
+
+            layers.push(LayerWeights {
+                attn_norm, q_weight, k_weight, v_weight, o_weight,
+                ffn_norm, gate_weight, up_weight, down_weight,
+                // Phi-3 has no Q/K/V biases, no sub-norms, no QK-norm.
+                q_bias: None, k_bias: None, v_bias: None,
+                attn_sub_norm: None, ffn_sub_norm: None,
+                attn_q_norm: None, attn_k_norm: None,
+            });
+
+            if (i + 1) % 7 == 0 || i + 1 == config.num_layers {
+                println!("    Loaded layer {}/{}", i + 1, config.num_layers);
+            }
+        }
+
+        let output_norm = load_vec(mapped, "output_norm.weight")?;
+        let lm_head = if mapped.has_tensor("output.weight") {
+            load_weight(mapped, "output.weight", quantized_weights)?
+        } else {
+            println!("    LM head tied to token embeddings");
+            load_weight(mapped, "token_embd.weight", quantized_weights)?
+        };
+
+        let total_bytes: usize = token_embed.len() * 4
+            + layers.iter().map(|l| {
+                l.attn_norm.len() * 4
+                + l.q_weight.bytes() + l.k_weight.bytes() + l.v_weight.bytes()
+                + l.o_weight.bytes()
+                + l.ffn_norm.len() * 4
+                + l.gate_weight.bytes() + l.up_weight.bytes() + l.down_weight.bytes()
+            }).sum::<usize>()
+            + output_norm.len() * 4
+            + lm_head.bytes();
+
+        println!(
+            "  Model loaded: {:.2} GB in RAM ({} mode, phi3)",
+            total_bytes as f64 / 1e9,
+            if quantized_weights { "quantized" } else { "f32" },
+        );
 
         Ok(Self {
             config,
@@ -3736,5 +3869,114 @@ fn load_weight(mapped: &MappedGguf, name: &str, quantized: bool) -> Result<Weigh
             Tensor::from_vec(data, &dims).map_err(|e| format!("{name}: {e}"))?
         };
         Ok(Weight::from_f32(tensor))
+    }
+}
+
+// =============================================================================
+// Split a weight along its output axis (for Phi-3's merged QKV / gate+up)
+// =============================================================================
+
+/// Result of `split_weight_along_output` — flexible small-N helper for the
+/// 2-way / 3-way splits Phi-3 needs.
+pub struct WeightSplit(Vec<Weight>);
+
+impl WeightSplit {
+    pub fn into_3(mut self) -> Option<(Weight, Weight, Weight)> {
+        if self.0.len() != 3 {
+            return None;
+        }
+        // remove(0) pops front; preserves original order (q, k, v).
+        let q = self.0.remove(0);
+        let k = self.0.remove(0);
+        let v = self.0.remove(0);
+        Some((q, k, v))
+    }
+    pub fn into_2(mut self) -> Option<(Weight, Weight)> {
+        if self.0.len() != 2 {
+            return None;
+        }
+        let a = self.0.remove(0);
+        let b = self.0.remove(0);
+        Some((a, b))
+    }
+}
+
+/// Split a 2D `Weight` along its output axis (axis 1 in GGUF dim order)
+/// into multiple contiguous pieces. For `Weight::Quantized`, slicing is
+/// at the byte level — each output "row" is one (input/block_size) ×
+/// type_size stride of bytes, so block-quantized types (Q4_K, Q6_K,
+/// etc.) split cleanly at any row boundary.
+///
+/// For `Weight::F32`, the input has already been transposed to `[in, out]`;
+/// we `narrow` along axis 1 and `contiguous()` each piece.
+///
+/// Returns `Err` if the `out_dims` don't sum to the original weight's
+/// output dim, or if the weight is not 2D.
+fn split_weight_along_output(w: &Weight, out_dims: &[usize]) -> Result<WeightSplit, String> {
+    let shape = w.shape(); // [in, out]
+    if shape.len() != 2 {
+        return Err(format!("expected 2D weight, got shape {shape:?}"));
+    }
+    let in_dim = shape[0];
+    let total_out = shape[1];
+    let sum_out: usize = out_dims.iter().sum();
+    if sum_out != total_out {
+        return Err(format!(
+            "out_dims {out_dims:?} sum to {sum_out}, but weight has total_out={total_out}"
+        ));
+    }
+
+    match w {
+        Weight::F32(tensor) => {
+            // F32 weight has already been transposed into [in, out] in
+            // load_weight. narrow along axis 1, then contiguous().
+            let mut pieces = Vec::with_capacity(out_dims.len());
+            let mut cursor = 0;
+            for &piece_out in out_dims {
+                let piece = tensor
+                    .narrow(1, cursor, piece_out)
+                    .map_err(|e| format!("narrow: {e:?}"))?
+                    .contiguous();
+                pieces.push(Weight::from_f32(piece));
+                cursor += piece_out;
+            }
+            Ok(WeightSplit(pieces))
+        }
+        Weight::Quantized { data, dims, dtype, .. } => {
+            // Byte-level split along the output axis. dims = [in, out]
+            // matches GGUF's native ordering (dims[0]=n_cols=in,
+            // dims[1]=n_rows=out). Block size is on the input axis.
+            let block_size = dtype.block_size();
+            let type_size = dtype.type_size();
+            if in_dim % block_size != 0 {
+                return Err(format!(
+                    "in_dim {in_dim} not divisible by block_size {block_size} for dtype {dtype:?}"
+                ));
+            }
+            let row_bytes = (in_dim / block_size) * type_size;
+            let mut pieces = Vec::with_capacity(out_dims.len());
+            let mut cursor_rows = 0usize;
+            for &piece_out in out_dims {
+                let start = cursor_rows * row_bytes;
+                let end = (cursor_rows + piece_out) * row_bytes;
+                if end > data.len() {
+                    return Err(format!(
+                        "split overrun: [{start}, {end}) exceeds data len {}",
+                        data.len()
+                    ));
+                }
+                let piece_bytes = data[start..end].to_vec();
+                let piece_dims = vec![dims[0], piece_out];
+                pieces.push(Weight::from_quantized(piece_bytes, piece_dims, *dtype));
+                cursor_rows += piece_out;
+            }
+            Ok(WeightSplit(pieces))
+        }
+        #[cfg(feature = "cuda")]
+        Weight::QuantizedGpu { .. } => Err(
+            "split_weight_along_output: QuantizedGpu split not implemented \
+             (Phi-3 loader calls this before the GPU-cache upload happens)"
+                .to_string(),
+        ),
     }
 }
