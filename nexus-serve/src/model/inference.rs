@@ -114,6 +114,27 @@ pub struct InferenceConfig {
     /// Gemma-family hyperparameters (sliding window, dual RoPE base, softcap,
     /// per-layer token embeddings). `None` for LLaMA/Qwen2/Mistral.
     pub gemma: Option<GemmaConfig>,
+    /// Mamba SSM hyperparameters. `None` for Transformer-family architectures.
+    /// Populated when `architecture == "mamba"`. Mamba doesn't use `num_heads`,
+    /// `num_kv_heads`, `head_dim`, or `rope_theta` — those fields are dummy
+    /// values on Mamba models.
+    pub mamba: Option<MambaConfig>,
+}
+
+/// Mamba-family SSM hyperparameters.
+///
+/// Populated when GGUF `general.architecture == "mamba"`.
+#[derive(Debug, Clone)]
+pub struct MambaConfig {
+    /// Inner dim for the SSM block (`mamba.ssm.inner_size`, typically
+    /// `2 * hidden_size`).
+    pub d_inner: usize,
+    /// SSM state dim (`mamba.ssm.state_size`, typically 16).
+    pub d_state: usize,
+    /// Depthwise-conv kernel size (`mamba.ssm.conv_kernel`, typically 4).
+    pub d_conv: usize,
+    /// Low-rank dt projection dim (`mamba.ssm.time_step_rank`).
+    pub dt_rank: usize,
 }
 
 /// Gemma-family extras not present in LLaMA/Qwen2/Mistral.
@@ -175,11 +196,13 @@ impl InferenceConfig {
 
         // head_dim: LLaMA/Qwen2 derive it from hidden/num_heads; Gemma specifies
         // it explicitly via key_length because it's decoupled from hidden_size.
+        // Mamba has no attention heads (num_heads = 0) so the divide would
+        // panic — fall back to 1 for the dummy value.
         let head_dim = gguf
             .get_meta(&format!("{prefix}.attention.key_length"))
             .and_then(|v| v.as_u32())
             .map(|v| v as usize)
-            .unwrap_or(hidden_size / num_heads);
+            .unwrap_or(if num_heads == 0 { 1 } else { hidden_size / num_heads });
 
         let intermediate_size = gguf
             .get_meta(&format!("{prefix}.feed_forward_length"))
@@ -257,6 +280,30 @@ impl InferenceConfig {
             None
         };
 
+        // Mamba: no attention, no RoPE — SSM state machine instead. GGUF
+        // exposes its SSM hyperparameters under `mamba.ssm.*`.
+        let mamba = if arch == "mamba" {
+            let d_inner = gguf
+                .get_meta("mamba.ssm.inner_size")
+                .and_then(|v| v.as_u32())
+                .unwrap_or((hidden_size * 2) as u32) as usize;
+            let d_state = gguf
+                .get_meta("mamba.ssm.state_size")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(16) as usize;
+            let d_conv = gguf
+                .get_meta("mamba.ssm.conv_kernel")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(4) as usize;
+            let dt_rank = gguf
+                .get_meta("mamba.ssm.time_step_rank")
+                .and_then(|v| v.as_u32())
+                .unwrap_or((hidden_size.div_ceil(16)) as u32) as usize;
+            Some(MambaConfig { d_inner, d_state, d_conv, dt_rank })
+        } else {
+            None
+        };
+
         Self {
             vocab_size,
             hidden_size,
@@ -271,6 +318,7 @@ impl InferenceConfig {
             architecture: arch,
             model_name,
             gemma,
+            mamba,
         }
     }
 
@@ -544,6 +592,9 @@ pub struct InferenceEngine {
     /// Per-layer weights + top-level specials for Gemma 4. `None` for
     /// LLaMA/Qwen2/Mistral. Present when `config.architecture == "gemma4"`.
     pub gemma4: Option<Gemma4Weights>,
+    /// Per-layer Mamba SSM weights. `None` for Transformer archs. Present
+    /// when `config.architecture == "mamba"`. Populated by `load_mamba`.
+    pub mamba_layers: Option<Vec<MambaLayerWeights>>,
     /// Output norm [hidden_size]
     pub output_norm: Vec<f32>,
     /// LM head — logical shape `[hidden, vocab]` (post-transpose).
@@ -738,6 +789,37 @@ pub struct Gemma4Weights {
     pub rope_freqs: Option<Vec<f32>>,
 }
 
+/// Per-layer Mamba SSM weights. Each layer's forward pass reads all of
+/// these; shapes reference `d_model = hidden_size`, `d_inner`, `d_state`,
+/// `d_conv`, `dt_rank` from `MambaConfig`.
+pub struct MambaLayerWeights {
+    /// Pre-SSM norm, shape `[d_model]`. Same RMSNorm shape as LLaMA's
+    /// attn_norm despite the GGUF key name.
+    pub attn_norm: Vec<f32>,
+    /// Input projection, `[d_model, 2 * d_inner]` — produces `[x, z]`
+    /// (each `d_inner`) after split.
+    pub ssm_in: Weight,
+    /// Output projection, `[d_inner, d_model]`.
+    pub ssm_out: Weight,
+    /// Depthwise conv1d weights, shape `[d_conv, d_inner]` (d_conv
+    /// contiguous weights per channel) and bias `[d_inner]`.
+    pub conv1d_weight: Vec<f32>,
+    pub conv1d_bias: Vec<f32>,
+    /// x_proj: `[d_inner, dt_rank + 2 * d_state]` — produces `[dt_proj,
+    /// B, C]` after splitting the output axis.
+    pub x_proj: Vec<f32>,
+    /// dt_proj weight + bias: `[dt_rank, d_inner]` + `[d_inner]`.
+    pub dt_proj_weight: Vec<f32>,
+    pub dt_proj_bias: Vec<f32>,
+    /// The `ssm_a` matrix, shape `[d_state, d_inner]`. llama.cpp's
+    /// convert script pre-applies `A = -exp(A_log)`, so this tensor
+    /// holds the negative-A values directly — no further transform
+    /// needed at inference time.
+    pub log_a: Vec<f32>,
+    /// Skip connection D, shape `[d_inner]`.
+    pub d: Vec<f32>,
+}
+
 impl Gemma4Weights {
     fn to_device(&mut self, device: Device) {
         if let Some(ref mut proj) = self.per_layer_model_proj {
@@ -854,6 +936,12 @@ impl InferenceEngine {
             // the assistant turn across Phi-3-mini, Phi-3.5-mini, and
             // Phi-3-medium. 2 is the bos/eos fallback.
             "phi3" => &[2, 32000, 32001, 32007],
+            // Mamba-130m-hf (and other state-spaces Mamba-1 checkpoints)
+            // use the GPT-NeoX/MPT vocab: token 0 is `<|endoftext|>`,
+            // used as both BOS, EOS, pad, and unknown. The GGUF sets
+            // bos_token_id = eos_token_id = padding_token_id =
+            // unknown_token_id = 0. Stop on it to avoid runaway output.
+            "mamba" => &[0],
             _ => &[0, 151643, 151644, 151645, 151646],
         }
     }
@@ -869,6 +957,19 @@ impl InferenceEngine {
         if let Some(ref mut g) = self.gemma4 {
             // Gemma 4 path: layers live on `gemma4`, main `layers` is empty.
             g.to_device(device.clone());
+        } else if let Some(ref mut mlayers) = self.mamba_layers {
+            // Mamba path: only the quantized SSM projections get moved;
+            // every other per-layer tensor (attn_norm, log_a, d, conv1d,
+            // dt_proj, x_proj) stays on CPU because the SSM recurrence
+            // is CPU-side and touches them element-wise.
+            let num = mlayers.len();
+            for (i, layer) in mlayers.iter_mut().enumerate() {
+                layer.ssm_in.to_device(device.clone());
+                layer.ssm_out.to_device(device.clone());
+                if (i + 1) % 6 == 0 || i + 1 == num {
+                    println!("    Layer {}/{}", i + 1, num);
+                }
+            }
         } else {
             // LLaMA / Qwen2 / Mistral path.
             let num_layers = self.layers.len();
@@ -1235,6 +1336,40 @@ impl KvCache {
     }
 }
 
+/// Per-generation state for Mamba architectures. No attention means no
+/// KV cache — instead Mamba needs two rolling buffers per layer:
+///
+/// * `conv_state[l]`: last `d_conv - 1` conv1d inputs per channel,
+///   shape `[d_conv - 1, d_inner]` row-major. The newest input becomes
+///   the `d_conv-1`-th position before the conv is evaluated, and the
+///   oldest gets rotated out.
+/// * `ssm_state[l]`: SSM hidden state, shape `[d_inner, d_state]`
+///   row-major. Updated as
+///   `h = exp(dt * A) * h + dt * B * x` each step.
+pub struct MambaState {
+    pub conv_state: Vec<Vec<f32>>,
+    pub ssm_state: Vec<Vec<f32>>,
+    pub d_inner: usize,
+    pub d_state: usize,
+    pub d_conv: usize,
+}
+
+impl MambaState {
+    pub fn new(num_layers: usize, d_inner: usize, d_state: usize, d_conv: usize) -> Self {
+        Self {
+            conv_state: (0..num_layers)
+                .map(|_| vec![0.0f32; (d_conv.saturating_sub(1)) * d_inner])
+                .collect(),
+            ssm_state: (0..num_layers)
+                .map(|_| vec![0.0f32; d_inner * d_state])
+                .collect(),
+            d_inner,
+            d_state,
+            d_conv,
+        }
+    }
+}
+
 impl InferenceEngine {
     /// Load a model from GGUF, fully dequantizing to f32 (fast, big).
     pub fn from_gguf(gguf: &GgufFile, mapped: &MappedGguf) -> Result<Self, String> {
@@ -1272,6 +1407,14 @@ impl InferenceEngine {
         // forward path expects.
         if config.architecture == "phi3" {
             return Self::load_phi3(gguf, mapped, quantized_weights, config);
+        }
+
+        // Mamba: SSM architecture, no attention. Completely different
+        // per-layer tensor set (`ssm_a`, `ssm_d`, `ssm_conv1d`, `ssm_dt`,
+        // `ssm_in`, `ssm_out`, `ssm_x`). Gets its own loader + forward
+        // path (`forward_one_mamba`).
+        if config.architecture == "mamba" {
+            return Self::load_mamba(gguf, mapped, quantized_weights, config);
         }
 
         // Token embeddings as flat Vec (fast lookup) — always dequantized
@@ -1360,6 +1503,7 @@ impl InferenceEngine {
             token_embed,
             layers,
             gemma4: None,
+            mamba_layers: None,
             output_norm,
             lm_head,
             compute_device: Device::Cpu,
@@ -1474,6 +1618,98 @@ impl InferenceEngine {
             token_embed,
             layers,
             gemma4: None,
+            mamba_layers: None,
+            output_norm,
+            lm_head,
+            compute_device: Device::Cpu,
+            #[cfg(feature = "cuda")]
+            gpu_layer_cache: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            gpu_output_norm: std::sync::OnceLock::new(),
+            #[cfg(feature = "cuda")]
+            kv_quant_q8: false,
+        })
+    }
+
+    /// Mamba SSM loader. Called from `from_gguf_with_mode` when the
+    /// architecture is `"mamba"`. Populates `mamba_layers` with one
+    /// `MambaLayerWeights` per block; leaves the Transformer-specific
+    /// `layers` Vec empty. Weight naming is llama.cpp's Mamba convention:
+    /// `blk.N.ssm_{a,d,conv1d,dt,in,out,x}` under `mamba.*` metadata keys.
+    fn load_mamba(
+        _gguf: &GgufFile,
+        mapped: &MappedGguf,
+        quantized_weights: bool,
+        config: InferenceConfig,
+    ) -> Result<Self, String> {
+        let token_embed = load_vec(mapped, "token_embd.weight")?;
+
+        let mut mamba_layers = Vec::with_capacity(config.num_layers);
+        for i in 0..config.num_layers {
+            let prefix = format!("blk.{i}");
+            let attn_norm = load_vec(mapped, &format!("{prefix}.attn_norm.weight"))?;
+            let ssm_in = load_weight(
+                mapped,
+                &format!("{prefix}.ssm_in.weight"),
+                quantized_weights,
+            )?;
+            let ssm_out = load_weight(
+                mapped,
+                &format!("{prefix}.ssm_out.weight"),
+                quantized_weights,
+            )?;
+            let conv1d_weight = load_vec(mapped, &format!("{prefix}.ssm_conv1d.weight"))?;
+            let conv1d_bias = load_vec(mapped, &format!("{prefix}.ssm_conv1d.bias"))?;
+            let x_proj = load_vec(mapped, &format!("{prefix}.ssm_x.weight"))?;
+            let dt_proj_weight = load_vec(mapped, &format!("{prefix}.ssm_dt.weight"))?;
+            let dt_proj_bias = load_vec(mapped, &format!("{prefix}.ssm_dt.bias"))?;
+            let log_a = load_vec(mapped, &format!("{prefix}.ssm_a"))?;
+            let d = load_vec(mapped, &format!("{prefix}.ssm_d"))?;
+
+            mamba_layers.push(MambaLayerWeights {
+                attn_norm,
+                ssm_in,
+                ssm_out,
+                conv1d_weight,
+                conv1d_bias,
+                x_proj,
+                dt_proj_weight,
+                dt_proj_bias,
+                log_a,
+                d,
+            });
+
+            if (i + 1) % 6 == 0 || i + 1 == config.num_layers {
+                println!("    Loaded layer {}/{}", i + 1, config.num_layers);
+            }
+        }
+
+        let output_norm = load_vec(mapped, "output_norm.weight")?;
+        // Mamba GGUFs tie the LM head to the token embedding — the
+        // explicit `output.weight` tensor is absent.
+        let lm_head = if mapped.has_tensor("output.weight") {
+            load_weight(mapped, "output.weight", quantized_weights)?
+        } else {
+            println!("    LM head tied to token embeddings");
+            load_weight(mapped, "token_embd.weight", quantized_weights)?
+        };
+
+        println!(
+            "  Mamba model loaded: {} layers, d_model={}, d_inner={}, d_state={}, d_conv={}, dt_rank={}",
+            config.num_layers,
+            config.hidden_size,
+            config.mamba.as_ref().map(|m| m.d_inner).unwrap_or(0),
+            config.mamba.as_ref().map(|m| m.d_state).unwrap_or(0),
+            config.mamba.as_ref().map(|m| m.d_conv).unwrap_or(0),
+            config.mamba.as_ref().map(|m| m.dt_rank).unwrap_or(0),
+        );
+
+        Ok(Self {
+            config,
+            token_embed,
+            layers: Vec::new(),
+            gemma4: None,
+            mamba_layers: Some(mamba_layers),
             output_norm,
             lm_head,
             compute_device: Device::Cpu,
@@ -1626,6 +1862,7 @@ impl InferenceEngine {
             token_embed,
             layers: Vec::new(), // LLaMA-family layers unused in Gemma path
             gemma4: Some(gemma),
+            mamba_layers: None,
             output_norm,
             lm_head,
             compute_device: Device::Cpu,
@@ -1667,6 +1904,13 @@ impl InferenceEngine {
         top_p: f32,
         mut on_token: F,
     ) {
+        // Mamba takes a completely different decode path — no KV cache,
+        // no attention. Dispatch straight through to the SSM generator.
+        if self.mamba_layers.is_some() {
+            self.generate_mamba_stream(prompt_ids, max_new_tokens, temperature, top_p, on_token);
+            return;
+        }
+
         let is_gemma = self.gemma4.is_some();
         let mut kv_cache = KvCache::new(self.config.num_layers);
 
@@ -1925,6 +2169,262 @@ impl InferenceEngine {
     ///
     /// Two paths:
     /// - `forward_one_gpu_resident` when CUDA is available and the compute
+    /// Mamba per-token forward pass. CPU for the SSM recurrence (inherently
+    /// serial over state dims) and the depthwise conv; matmuls (`ssm_in`,
+    /// `ssm_out`, `lm_head`) route through `Weight::matmul` which GPU-
+    /// dispatches for Q4K/Q5K/Q6K when the compute device is CUDA.
+    ///
+    /// Returns the final `[vocab_size]` logits vector for the given token.
+    /// `state` is updated in-place: conv1d sliding window and SSM hidden
+    /// state move forward one step per call.
+    pub fn forward_one_mamba(&self, token_id: u32, state: &mut MambaState) -> Vec<f32> {
+        let layers = self
+            .mamba_layers
+            .as_ref()
+            .expect("forward_one_mamba called on non-mamba engine");
+        let mconfig = self
+            .config
+            .mamba
+            .as_ref()
+            .expect("mamba config missing");
+        let d_model = self.config.hidden_size;
+        let d_inner = mconfig.d_inner;
+        let d_state = mconfig.d_state;
+        let d_conv = mconfig.d_conv;
+        let dt_rank = mconfig.dt_rank;
+        let x_proj_out = dt_rank + 2 * d_state;
+
+        // Embedding lookup.
+        let id = token_id as usize;
+        let mut x: Vec<f32> = if id < self.config.vocab_size {
+            self.token_embed[id * d_model..(id + 1) * d_model].to_vec()
+        } else {
+            vec![0.0; d_model]
+        };
+
+        for (li, layer) in layers.iter().enumerate() {
+            // 1. Pre-SSM RMSNorm.
+            let normed = rms_norm_single(&x, &layer.attn_norm, self.config.rms_norm_eps);
+
+            // 2. Input projection → [2*d_inner], split into (x_inner, z).
+            let normed_t = Tensor::from_vec(normed, &[1, d_model])
+                .expect("normed tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move normed to device");
+            let xz_tensor = layer.ssm_in.matmul(&normed_t);
+            let xz = xz_tensor.to_vec();
+            debug_assert_eq!(xz.len(), 2 * d_inner);
+            let x_inner: &[f32] = &xz[..d_inner];
+            let z: &[f32] = &xz[d_inner..];
+
+            // 3. Depthwise conv1d: sliding window of last d_conv inputs per
+            //    channel. Conv weight shape [d_conv, d_inner] — weight[k, c]
+            //    at flat index c * d_conv + k in GGUF (dims[0]=d_conv,
+            //    dims[1]=d_inner, so d_conv is the fastest-varying axis).
+            //    bias is [d_inner].
+            //
+            //    state.conv_state[li] stores the last (d_conv - 1) inputs
+            //    as [d_conv-1, d_inner] row-major. We assemble the full
+            //    window [conv_state, x_inner] on the fly, compute the
+            //    conv, then rotate state so x_inner becomes the newest
+            //    and the oldest entry is dropped.
+            let mut y_conv = vec![0.0f32; d_inner];
+            let cstate = &state.conv_state[li];
+            let cwtv = &layer.conv1d_weight;
+            let cbv = &layer.conv1d_bias;
+            let conv_hist_rows = d_conv - 1;
+            for c in 0..d_inner {
+                let mut acc = cbv[c];
+                for k in 0..d_conv {
+                    let v = if k < conv_hist_rows {
+                        cstate[k * d_inner + c]
+                    } else {
+                        x_inner[c]
+                    };
+                    // weight[k, c] = conv1d_weight[c * d_conv + k]
+                    acc += cwtv[c * d_conv + k] * v;
+                }
+                y_conv[c] = acc;
+            }
+            // Rotate conv_state: drop oldest, shift remaining, append
+            // x_inner as the new "d_conv-2" slot (the position just
+            // before the one the window-assembly above treats as the
+            // newest). The net effect: at the next call, cstate[0..]
+            // holds the last d_conv-1 inputs including today's x_inner.
+            {
+                let cs = &mut state.conv_state[li];
+                if conv_hist_rows > 0 {
+                    for k in 0..(conv_hist_rows - 1) {
+                        for c in 0..d_inner {
+                            cs[k * d_inner + c] = cs[(k + 1) * d_inner + c];
+                        }
+                    }
+                    let last_row = (conv_hist_rows - 1) * d_inner;
+                    for c in 0..d_inner {
+                        cs[last_row + c] = x_inner[c];
+                    }
+                }
+            }
+
+            // 4. SiLU.
+            for v in y_conv.iter_mut() {
+                *v = *v * sigmoid(*v);
+            }
+
+            // 5. x_proj: [d_inner → dt_rank + 2*d_state]. Stored as F32
+            //    with GGUF dims [d_inner, x_proj_out] — PyTorch shape
+            //    [out=x_proj_out, in=d_inner]. Element [out, in] at flat
+            //    index out * d_inner + in.
+            let x_proj = &layer.x_proj;
+            let mut x_proj_result = vec![0.0f32; x_proj_out];
+            for o in 0..x_proj_out {
+                let mut acc = 0.0f32;
+                let row = o * d_inner;
+                for in_i in 0..d_inner {
+                    acc += x_proj[row + in_i] * y_conv[in_i];
+                }
+                x_proj_result[o] = acc;
+            }
+            let dt_raw: &[f32] = &x_proj_result[..dt_rank];
+            let b_vec: &[f32] = &x_proj_result[dt_rank..dt_rank + d_state];
+            let c_vec: &[f32] = &x_proj_result[dt_rank + d_state..];
+
+            // 6. dt_proj: [dt_rank → d_inner] + softplus.
+            //    dt_proj_weight GGUF dims [dt_rank, d_inner] → PyTorch
+            //    [out=d_inner, in=dt_rank]. Element [out, in] at flat
+            //    index out * dt_rank + in.
+            let mut dt = vec![0.0f32; d_inner];
+            for d_idx in 0..d_inner {
+                let mut acc = layer.dt_proj_bias[d_idx];
+                let row = d_idx * dt_rank;
+                for r in 0..dt_rank {
+                    acc += layer.dt_proj_weight[row + r] * dt_raw[r];
+                }
+                // softplus with numerical stability.
+                dt[d_idx] = if acc > 20.0 { acc } else { (1.0 + acc.exp()).ln() };
+            }
+
+            // 7. SSM recurrence on the POST-conv-SiLU value (`y_conv`),
+            //    not the pre-conv `x_inner`. HF forward:
+            //      x = conv1d(x); x = silu(x); ssm(x, delta, B, C)
+            //    So the `x_t` that multiplies `dt * B` (and `D`) is the
+            //    post-conv activation we already computed as `y_conv`.
+            //    log_a GGUF dims [d_state, d_inner] → PyTorch
+            //    [d_inner, d_state] row-major, flat index d*d_state + s.
+            //    llama.cpp's convert script pre-applies A = -exp(A_log)
+            //    so this tensor already holds the negative-A values.
+            //    h_new = exp(dt * A) * h + dt * B * y_conv
+            //    y_ssm = C · h_new + D * y_conv
+            let mut y_ssm = vec![0.0f32; d_inner];
+            let ssm_st = &mut state.ssm_state[li];
+            for d_idx in 0..d_inner {
+                let dt_d = dt[d_idx];
+                let x_d = y_conv[d_idx];
+                let log_row = d_idx * d_state;
+                let state_row = d_idx * d_state;
+                let mut acc = 0.0f32;
+                for s in 0..d_state {
+                    let a_val = layer.log_a[log_row + s];
+                    let dt_a = (dt_d * a_val).clamp(-20.0, 0.0);
+                    let a_bar = dt_a.exp();
+                    let b_bar = dt_d * b_vec[s];
+                    let hi = state_row + s;
+                    ssm_st[hi] = a_bar * ssm_st[hi] + b_bar * x_d;
+                    acc += c_vec[s] * ssm_st[hi];
+                }
+                y_ssm[d_idx] = acc + layer.d[d_idx] * x_d;
+            }
+
+            // 8. Gate with SiLU(z).
+            for d_idx in 0..d_inner {
+                y_ssm[d_idx] *= z[d_idx] * sigmoid(z[d_idx]);
+            }
+
+            // 9. Output projection → [d_model] and residual add.
+            let y_t = Tensor::from_vec(y_ssm, &[1, d_inner])
+                .expect("y tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move y to device");
+            let out = layer.ssm_out.matmul(&y_t);
+            let out_vec = out.to_vec();
+            for d_idx in 0..d_model {
+                x[d_idx] += out_vec[d_idx];
+            }
+        }
+
+        // Final RMSNorm + LM head.
+        let final_norm = rms_norm_single(&x, &self.output_norm, self.config.rms_norm_eps);
+        let norm_t = Tensor::from_vec(final_norm, &[1, d_model])
+            .expect("final norm tensor")
+            .to_device(self.compute_device.clone())
+            .expect("move final norm to device");
+        let logits = self.lm_head.matmul(&norm_t);
+        logits.to_vec()
+    }
+
+    /// Mamba decode stream — runs prompt through `forward_one_mamba` to
+    /// warm the SSM state, then emits tokens via the same callback
+    /// protocol as `generate_stream`.
+    fn generate_mamba_stream<F: FnMut(u32) -> bool>(
+        &self,
+        prompt_ids: &[u32],
+        max_new_tokens: usize,
+        temperature: f32,
+        top_p: f32,
+        mut on_token: F,
+    ) {
+        let mconfig = self
+            .config
+            .mamba
+            .as_ref()
+            .expect("generate_mamba_stream called on non-mamba engine");
+        let mut state = MambaState::new(
+            self.config.num_layers,
+            mconfig.d_inner,
+            mconfig.d_state,
+            mconfig.d_conv,
+        );
+
+        if prompt_ids.is_empty() {
+            return;
+        }
+
+        // Prefill — feed every prompt token through the SSM. The last
+        // token's logits pick the first sampled token.
+        let mut last_logits: Vec<f32> = Vec::new();
+        for &tok in prompt_ids {
+            last_logits = self.forward_one_mamba(tok, &mut state);
+        }
+
+        let stop = self.stop_tokens();
+        let mut next_id = if temperature < 0.01 {
+            argmax(&last_logits) as u32
+        } else {
+            sample_top_p(&last_logits, temperature, top_p)
+        };
+        if stop.contains(&next_id) {
+            return;
+        }
+        if !on_token(next_id) {
+            return;
+        }
+
+        for _ in 1..max_new_tokens {
+            let logits = self.forward_one_mamba(next_id, &mut state);
+            next_id = if temperature < 0.01 {
+                argmax(&logits) as u32
+            } else {
+                sample_top_p(&logits, temperature, top_p)
+            };
+            if stop.contains(&next_id) {
+                break;
+            }
+            if !on_token(next_id) {
+                break;
+            }
+        }
+    }
+
     ///   device is a GPU. Keeps the hidden state `x` as a `Tensor<f32>` on
     ///   GPU through the whole layer loop, using the rms_norm / rope / swiglu /
     ///   relu2_gate CUDA kernels added in axonml-core/transformer_ops.cu.
@@ -2972,6 +3472,12 @@ fn rms_norm_vec(x: &[f32], weight: &[f32], eps: f32, seq_len: usize, dim: usize)
         }
     }
     out
+}
+
+/// `1 / (1 + exp(-x))`. Used by the SiLU gate in Mamba's forward pass.
+#[inline]
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
 }
 
 fn rms_norm_single(x: &[f32], weight: &[f32], eps: f32) -> Vec<f32> {
