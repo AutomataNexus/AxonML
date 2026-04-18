@@ -204,6 +204,47 @@ pub fn pool_alloc(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> 
     }
 }
 
+/// Allocate GPU memory from the pool WITHOUT zero-init.
+///
+/// Identical to [`pool_alloc`] but skips the `cuMemsetD8Async` on pool
+/// hit and uses `stream.alloc` (uninitialized) on pool miss. ONLY safe
+/// to use when the caller writes every element of the returned slice
+/// before any read — matmul output buffers, elementwise kernel outputs,
+/// etc.
+///
+/// Accumulators (anything that reads its own output before writing all
+/// positions) MUST stay on [`pool_alloc`].
+///
+/// Skipping the memset removes one `cuMemsetD8Async` call per
+/// allocation; the RTX 5070 Ti Laptop + DeepSeek-7B Q4_K_M profile
+/// shows ~4 us per memset and ~200 pool allocations per decode token,
+/// so swapping one call site is ~1 us/token saved, and a full hot-path
+/// conversion can be ~0.8 ms/token.
+#[cfg(feature = "cuda")]
+pub fn pool_alloc_uninit(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> {
+    let pool = get_memory_pool();
+
+    if let Some((ptr, capacity)) = pool.try_acquire(len) {
+        let backend =
+            super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
+        unsafe {
+            // Reconstruct at original capacity; skip the memset_zeros.
+            let slice: CudaSlice<f32> = backend.stream().upgrade_device_ptr(ptr, capacity);
+            Ok(slice)
+        }
+    } else {
+        let bucket = CudaMemoryPool::bucket_size(len);
+        let backend =
+            super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
+        unsafe {
+            backend
+                .stream()
+                .alloc::<f32>(bucket)
+                .map_err(super::cuda::CudaError::from)
+        }
+    }
+}
+
 /// Return GPU memory to the pool instead of freeing it.
 #[cfg(feature = "cuda")]
 pub fn pool_free(slice: CudaSlice<f32>) {

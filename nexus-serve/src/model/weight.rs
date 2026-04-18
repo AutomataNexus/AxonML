@@ -741,16 +741,16 @@ pub fn fused_qkv_q4k_matmul_gpu(
 
     // Read the input's GPU slice, allocate three output buffers, launch the
     // fused kernel, wrap each output as a Tensor on the same GPU device.
-    use axonml_core::backends::cuda_pool::pool_alloc;
+    use axonml_core::backends::cuda_pool::pool_alloc_uninit;
     let in_guard = input.as_cuda_slice_read();
     // Allocate through the pool so the bucket-rounded backing slice matches
     // what later pool_alloc callers expect when they reuse these buckets.
     // (Raw alloc_uninit produces an exact-size slice that, once pool_free'd,
     // poisons the next_power_of_2 bucket with an undersized block, causing
     // a length-mismatch panic in Storage::to_vec_f32 on subsequent reuse.)
-    let mut q_out_buf = pool_alloc(q_out).ok()?;
-    let mut k_out_buf = pool_alloc(k_out).ok()?;
-    let mut v_out_buf = pool_alloc(v_out).ok()?;
+    let mut q_out_buf = pool_alloc_uninit(q_out).ok()?;
+    let mut k_out_buf = pool_alloc_uninit(k_out).ok()?;
+    let mut v_out_buf = pool_alloc_uninit(v_out).ok()?;
 
     cuda.q4k_gemv_fused_qkv_f32(
         q_gpu,
@@ -806,7 +806,7 @@ pub fn fused_qkv_bias_q4k_matmul_gpu(
     v_bias: &Tensor<f32>,
 ) -> Option<(Tensor<f32>, Tensor<f32>, Tensor<f32>)> {
     use axonml_core::backends::cuda::get_cuda_backend;
-    use axonml_core::backends::cuda_pool::pool_alloc;
+    use axonml_core::backends::cuda_pool::pool_alloc_uninit;
     use axonml_core::storage::Storage;
 
     if !input.device().is_gpu()
@@ -861,9 +861,9 @@ pub fn fused_qkv_bias_q4k_matmul_gpu(
     let k_bias_guard = k_bias.as_cuda_slice_read();
     let v_bias_guard = v_bias.as_cuda_slice_read();
 
-    let mut q_out_buf = pool_alloc(q_out).ok()?;
-    let mut k_out_buf = pool_alloc(k_out).ok()?;
-    let mut v_out_buf = pool_alloc(v_out).ok()?;
+    let mut q_out_buf = pool_alloc_uninit(q_out).ok()?;
+    let mut k_out_buf = pool_alloc_uninit(k_out).ok()?;
+    let mut v_out_buf = pool_alloc_uninit(v_out).ok()?;
 
     cuda.q4k_gemv_fused_qkv_bias_f32(
         q_gpu, k_gpu, v_gpu,
@@ -941,12 +941,12 @@ pub fn fused_gate_up_q4k_matmul_gpu(
         _ => return None,
     };
 
-    use axonml_core::backends::cuda_pool::pool_alloc;
+    use axonml_core::backends::cuda_pool::pool_alloc_uninit;
     let in_guard = input.as_cuda_slice_read();
     // Pool-allocated so the bucket-rounded slice matches later pool_alloc
     // reuse — see note in fused_qkv_q4k_matmul_gpu.
-    let mut gate_out_buf = pool_alloc(inter).ok()?;
-    let mut up_out_buf = pool_alloc(inter).ok()?;
+    let mut gate_out_buf = pool_alloc_uninit(inter).ok()?;
+    let mut up_out_buf = pool_alloc_uninit(inter).ok()?;
 
     cuda.q4k_gemv_fused_gate_up_f32(
         gate_gpu,

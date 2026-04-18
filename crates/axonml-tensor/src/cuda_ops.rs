@@ -30,7 +30,7 @@ use axonml_core::Device;
 #[cfg(feature = "cuda")]
 use axonml_core::backends::cuda::get_cuda_backend;
 #[cfg(feature = "cuda")]
-use axonml_core::backends::cuda_pool::pool_alloc;
+use axonml_core::backends::cuda_pool::{pool_alloc, pool_alloc_uninit};
 #[cfg(feature = "cuda")]
 use axonml_core::error::Result;
 #[cfg(feature = "cuda")]
@@ -725,7 +725,9 @@ impl Tensor<f32> {
 
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let a_guard = a_data.storage.as_cuda_slice();
-        let mut out = pool_alloc(m * out_dim).expect("GPU pool alloc failed");
+        // pool_alloc_uninit: q4k_gemm_f32 writes every element of `out`
+        // (one thread per output element, total threads = m * out_dim).
+        let mut out = pool_alloc_uninit(m * out_dim).expect("GPU pool alloc failed");
 
         cuda.q4k_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
             .expect("CUDA q4k_gemm_f32 failed");
@@ -774,7 +776,10 @@ impl Tensor<f32> {
         let a_data = self.contiguous_gpu();
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let a_guard = a_data.storage.as_cuda_slice();
-        let mut out = pool_alloc(out_dim).expect("GPU pool alloc failed");
+        // pool_alloc_uninit is safe here: q4k_gemv_f32 writes every element
+        // of `out` in [0, out_dim) via the `c[j] = sum` store path (one
+        // warp per output row, all rows covered by the grid).
+        let mut out = pool_alloc_uninit(out_dim).expect("GPU pool alloc failed");
 
         cuda.q4k_gemv_f32(w, a_guard.slice(), &mut out, out_dim, in_dim)
             .expect("CUDA q4k_gemv_f32 failed");
@@ -817,7 +822,9 @@ impl Tensor<f32> {
 
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let a_guard = a_data.storage.as_cuda_slice();
-        let mut out = pool_alloc(m * out_dim).expect("GPU pool alloc failed");
+        // pool_alloc_uninit: q6k_gemm_f32 writes every element (same
+        // one-thread-per-output contract as q4k_gemm_f32).
+        let mut out = pool_alloc_uninit(m * out_dim).expect("GPU pool alloc failed");
 
         cuda.q6k_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
             .expect("CUDA q6k_gemm_f32 failed");
@@ -858,7 +865,9 @@ impl Tensor<f32> {
         let a_data = self.contiguous_gpu();
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let a_guard = a_data.storage.as_cuda_slice();
-        let mut out = pool_alloc(out_dim).expect("GPU pool alloc failed");
+        // pool_alloc_uninit: q6k_gemv_f32 writes every output element via
+        // the one-warp-per-row store path (same structure as q4k_gemv_f32).
+        let mut out = pool_alloc_uninit(out_dim).expect("GPU pool alloc failed");
 
         cuda.q6k_gemv_f32(w, a_guard.slice(), &mut out, out_dim, in_dim)
             .expect("CUDA q6k_gemv_f32 failed");
