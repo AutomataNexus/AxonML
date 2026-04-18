@@ -111,13 +111,14 @@ A conversion utility `tools/axonml_to_gguf.rs` will live in `llm-training/tools/
 | Component | Effort | Status |
 |---|---|---|
 | Qwen3 architecture in axonml-llm (training-friendly) | 1-2 days | **DONE** `7065a1b` — `qwen3.rs` with QK-norm, 4/4 tests pass |
+| KL-divergence loss head in axonml-nn | 0.5 day | **DONE** `56cfc10` — `KLDivLoss` with T² scaling, 4/4 tests pass |
 | Dataset prep pipeline | 1 day | TODO — download FineWeb slice, tokenize with Qwen BPE |
 | Teacher logit generation (via frozen target) | 1 day | TODO — dequant target to f16 once, teacher-forward per batch |
-| KL+CE loss head + trainer loop | 1 day | TODO — check if `axonml-nn/src/loss.rs` has KL; add if not |
+| Trainer loop (combined CE + KL) | 0.5 day | TODO — clone train_llama.rs, swap Model + Loss |
 | GGUF export utility | 0.5 day | TODO — pack Q4_K + Qwen3 metadata for spec_bench loading |
 | Training run | 1-2 days | TODO — wall-clock during actual training |
 | Evaluation + iteration | 0.5-1 day | TODO — tune T, α, γ on spec_bench results |
-| **Total** | **~6-8 days remaining** | 1 day done |
+| **Total** | **~5-7 days remaining** | 1.5 days done |
 
 ## Starting point — where to resume
 
