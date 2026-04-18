@@ -1117,6 +1117,36 @@ impl KvCache {
         // next forward pass. Dropping + reallocating on every clear would
         // defeat the whole point of pre-allocation.
     }
+
+    /// Truncate the cache to `new_len` positions. Used by speculative
+    /// decoding to roll back rejected draft tokens' K/V rows after a
+    /// verify step. The GPU buffers are over-allocated to capacity and
+    /// unused rows are overwritten on next append, so we only need to
+    /// shorten the host mirror vectors and update `len`.
+    pub fn truncate(&mut self, new_len: usize) {
+        if new_len >= self.len {
+            return;
+        }
+        for (li, k) in self.k_cache.iter_mut().enumerate() {
+            let row_stride = if self.v_cache[li].is_empty() {
+                0
+            } else {
+                self.v_cache[li].len() / self.len.max(1)
+            };
+            let target = new_len * row_stride;
+            if k.len() > target {
+                k.truncate(target);
+            }
+        }
+        for v in &mut self.v_cache {
+            let row_stride = if self.len == 0 { 0 } else { v.len() / self.len };
+            let target = new_len * row_stride;
+            if v.len() > target {
+                v.truncate(target);
+            }
+        }
+        self.len = new_len;
+    }
 }
 
 impl InferenceEngine {
@@ -1487,7 +1517,7 @@ impl InferenceEngine {
     }
 
     /// Forward pass for multiple tokens (prefill). Updates KV cache.
-    fn forward_batch(&self, token_ids: &[u32], kv_cache: &mut KvCache) -> Vec<f32> {
+    pub fn forward_batch(&self, token_ids: &[u32], kv_cache: &mut KvCache) -> Vec<f32> {
         let seq_len = token_ids.len();
         let hidden = self.config.hidden_size;
         let head_dim = self.config.head_dim;
@@ -1619,7 +1649,7 @@ impl InferenceEngine {
     ///   Eliminates ~10 of 14 per-layer host↔device round trips.
     /// - CPU path below — unchanged; still used when the engine hasn't been
     ///   moved to GPU.
-    fn forward_one(&self, token_id: u32, kv_cache: &mut KvCache) -> Vec<f32> {
+    pub fn forward_one(&self, token_id: u32, kv_cache: &mut KvCache) -> Vec<f32> {
         #[cfg(feature = "cuda")]
         if self.compute_device.is_gpu() {
             return self.forward_one_gpu_resident(token_id, kv_cache);
@@ -3139,7 +3169,7 @@ fn single_query_attention_swa(
     out
 }
 
-fn argmax(data: &[f32]) -> usize {
+pub fn argmax(data: &[f32]) -> usize {
     data.iter()
         .enumerate()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())

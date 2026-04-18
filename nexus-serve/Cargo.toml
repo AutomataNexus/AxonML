@@ -67,3 +67,7 @@ path = "src/main.rs"
 [[bin]]
 name = "gguf_inspect"
 path = "src/bin/gguf_inspect.rs"
+
+[[bin]]
+name = "spec_bench"
+path = "src/bin/spec_bench.rs"
