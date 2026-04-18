@@ -973,6 +973,50 @@ impl GpuKvCache {
         };
         v_ok
     }
+
+    /// Multi-row device-to-device append for prefill. Writes `m` consecutive
+    /// K/V rows starting at position `pos_start` from packed GPU tensors of
+    /// shape `[m, n_kv_heads * head_dim]` (row-major). Returns `false` if
+    /// any row would exceed capacity or either copy fails.
+    pub fn append_rows_device(
+        &mut self,
+        cuda: &axonml_core::backends::CudaBackend,
+        layer: usize,
+        pos_start: usize,
+        m: usize,
+        k_rows: &cudarc::driver::CudaSlice<f32>,
+        v_rows: &cudarc::driver::CudaSlice<f32>,
+    ) -> bool {
+        let total = m * self.row_stride;
+        // k_rows / v_rows come from pool_alloc_uninit which returns
+        // bucket-sized (power-of-2) slices, so their `.len()` is a ceiling
+        // rather than exactly `total`. Require at least `total` elements;
+        // the dst slice's length determines the memcpy amount.
+        if pos_start + m > self.capacity
+            || k_rows.len() < total
+            || v_rows.len() < total
+        {
+            return false;
+        }
+        let offset = pos_start * self.row_stride;
+        let end = offset + total;
+        // Take the exact [0..total] sub-view of the packed row buffers so
+        // memcpy_dtod copies precisely `total` elements from src into dst.
+        let k_src = k_rows.slice(0..total);
+        let v_src = v_rows.slice(0..total);
+        let k_ok = {
+            let mut view = self.k[layer].slice_mut(offset..end);
+            cuda.stream().memcpy_dtod(&k_src, &mut view).is_ok()
+        };
+        if !k_ok {
+            return false;
+        }
+        let v_ok = {
+            let mut view = self.v[layer].slice_mut(offset..end);
+            cuda.stream().memcpy_dtod(&v_src, &mut view).is_ok()
+        };
+        v_ok
+    }
 }
 
 /// TurboQuant Q8 GPU-resident KV cache.
@@ -1504,11 +1548,42 @@ impl InferenceEngine {
             // Nothing to prefill; bail out before decode.
             return;
         } else {
-            let mut last: Vec<f32> = Vec::new();
-            for &t in prompt_ids {
-                last = self.forward_one(t, &mut kv_cache);
+            // Try the GPU-native batched prefill first (LLaMA / Qwen
+            // family, f32 KV cache only). It produces K/V bit-identical
+            // to what decode's `forward_one_gpu_resident` would produce
+            // because every kernel on the prefill path is the same math
+            // as the decode path — no CPU-activation roundtrip. Falls
+            // back to the safe per-token `forward_one` loop if any
+            // precondition fails (Q8 KV cache, BitNet, GPU alloc,
+            // CPU-only build).
+            #[cfg(feature = "cuda")]
+            {
+                if self.compute_device.is_gpu() {
+                    if let Some(l) = self.forward_batch_gpu_resident(prompt_ids, &mut kv_cache) {
+                        l
+                    } else {
+                        let mut last: Vec<f32> = Vec::new();
+                        for &t in prompt_ids {
+                            last = self.forward_one(t, &mut kv_cache);
+                        }
+                        last
+                    }
+                } else {
+                    let mut last: Vec<f32> = Vec::new();
+                    for &t in prompt_ids {
+                        last = self.forward_one(t, &mut kv_cache);
+                    }
+                    last
+                }
             }
-            last
+            #[cfg(not(feature = "cuda"))]
+            {
+                let mut last: Vec<f32> = Vec::new();
+                for &t in prompt_ids {
+                    last = self.forward_one(t, &mut kv_cache);
+                }
+                last
+            }
         };
         let vocab_size = self.config.vocab_size;
         let last_logits = &logits[logits.len() - vocab_size..];
@@ -2165,6 +2240,213 @@ impl InferenceEngine {
         let normed = x.rms_norm(output_norm_gpu, eps);
         let logits_tensor = self.lm_head.matmul(&normed);
         logits_tensor.to_vec()
+    }
+
+    /// GPU-native prefill for m prompt tokens (LLaMA / Qwen family).
+    ///
+    /// Same layer stack as `forward_one_gpu_resident` but every op is
+    /// batched over `m`: matmul uses the m>1 path of `q4k_gemm_cuda`,
+    /// rms_norm / rms_norm_heads / rope all go through the `_batched`
+    /// kernels. The GPU KV cache gains `m` rows in one d2d copy. Attention
+    /// over prefill uses the existing `fused_attn_prefill_f32` kernel with
+    /// GPU-resident Q and cache.
+    ///
+    /// Only the last token's hidden state flows through the final RMSNorm
+    /// and LM head — the first `m-1` rows are discarded because the caller
+    /// (`generate_stream`) only needs the logits for the first decode step.
+    ///
+    /// Returns `None` if any precondition fails (GPU KV cache couldn't be
+    /// allocated, Q8 KV cache enabled, bitnet architecture, etc.); caller
+    /// falls back to the safe `forward_one` prefill loop.
+    #[cfg(feature = "cuda")]
+    fn forward_batch_gpu_resident(
+        &self,
+        token_ids: &[u32],
+        kv_cache: &mut KvCache,
+    ) -> Option<Vec<f32>> {
+        let m = token_ids.len();
+        if m == 0 {
+            return None;
+        }
+        // Q8 prefill path not wired yet — Q8 append_rows_device doesn't
+        // exist, and the Q8 attention kernel is decode-only. The single-
+        // token forward_one loop seeds the Q8 cache correctly.
+        if self.kv_quant_q8 {
+            return None;
+        }
+        // BitNet has sub-norms that work at any shape, but its I2S matmul
+        // is CPU-only — the batched GPU path doesn't apply. Fall through.
+        if self.config.architecture.starts_with("bitnet") {
+            return None;
+        }
+
+        let hidden = self.config.hidden_size;
+        let head_dim = self.config.head_dim;
+        let n_heads = self.config.num_heads;
+        let n_kv_heads = self.config.num_kv_heads;
+        let inter_size = self.config.intermediate_size;
+        let pos_start = kv_cache.len;
+        let eps = self.config.rms_norm_eps;
+        let theta = self.config.rope_theta;
+        let q_dim = n_heads * head_dim;
+        let kv_dim = n_kv_heads * head_dim;
+
+        // Lazy-populate the per-layer GPU norm/bias cache (same as the
+        // single-token path — shares the OnceLock).
+        let layer_cache = self.gpu_layer_cache.get_or_init(|| {
+            self.layers
+                .iter()
+                .map(|l| LayerGpuCache::new_for(l, &self.compute_device))
+                .collect()
+        });
+        let output_norm_gpu = self.gpu_output_norm.get_or_init(|| {
+            Tensor::from_vec(self.output_norm.clone(), &[self.output_norm.len()])
+                .expect("output_norm tensor")
+                .to_device(self.compute_device.clone())
+                .expect("move output_norm to GPU")
+        });
+
+        // Embedding lookup — assemble [m, hidden] on host then upload once.
+        let mut x_host = vec![0.0f32; m * hidden];
+        for (t, &id) in token_ids.iter().enumerate() {
+            let id = id as usize;
+            if id < self.config.vocab_size {
+                x_host[t * hidden..(t + 1) * hidden]
+                    .copy_from_slice(&self.token_embed[id * hidden..(id + 1) * hidden]);
+            }
+        }
+        let mut x = Tensor::from_vec(x_host, &[m, hidden])
+            .expect("embedding tensor")
+            .to_device(self.compute_device.clone())
+            .expect("move embedding to GPU");
+
+        // Lazy-allocate the GPU-resident KV cache; if alloc fails we bail.
+        let cap = self.config.max_seq_len.min(4096);
+        if pos_start + m > cap {
+            return None;
+        }
+        if kv_cache.gpu.is_none() {
+            if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                kv_cache.gpu = GpuKvCache::try_new(
+                    cuda, self.layers.len(), n_kv_heads, head_dim, cap,
+                );
+            }
+        }
+        let cuda = axonml_core::backends::cuda::get_cuda_backend()?;
+
+        for (li, layer) in self.layers.iter().enumerate() {
+            let lc = &layer_cache[li];
+
+            // ----- Attention sub-layer ---------------------------------------
+            let normed = x.rms_norm_batched(&lc.attn_norm, m, hidden, eps);
+
+            // Separate QKV matmuls — fused variants exist for m=1 only and
+            // we get the bulk of the batched win from q4k_gemm already.
+            let mut q = layer.q_weight.matmul(&normed);
+            let mut k = layer.k_weight.matmul(&normed);
+            let mut v = layer.v_weight.matmul(&normed);
+
+            if let Some(b) = &lc.q_bias { q = q.add_bias_batched(b, m, q_dim); }
+            if let Some(b) = &lc.k_bias { k = k.add_bias_batched(b, m, kv_dim); }
+            if let Some(b) = &lc.v_bias { v = v.add_bias_batched(b, m, kv_dim); }
+
+            // Qwen3 QK-norm per token.
+            if let Some(qn) = &lc.attn_q_norm {
+                q = q.rms_norm_heads_batched(qn, m, n_heads, head_dim, eps);
+            }
+            if let Some(kn) = &lc.attn_k_norm {
+                k = k.rms_norm_heads_batched(kn, m, n_kv_heads, head_dim, eps);
+            }
+
+            q = q.apply_rope_split_halves_batched(m, n_heads, head_dim, theta, pos_start);
+            k = k.apply_rope_split_halves_batched(m, n_kv_heads, head_dim, theta, pos_start);
+
+            // Append all m K/V rows to the GPU cache in one d2d copy.
+            let appended = {
+                let gpu_ref = kv_cache.gpu.as_mut()?;
+                let k_guard = k.as_cuda_slice_read();
+                let v_guard = v.as_cuda_slice_read();
+                gpu_ref.append_rows_device(
+                    cuda, li, pos_start, m, k_guard.slice(), v_guard.slice(),
+                )
+            };
+            if !appended {
+                return None;
+            }
+
+            // GPU-native prefill attention: m queries × (pos_start + m) KV
+            // rows with causal mask. One kernel launch handles everything.
+            let total_kv_len = pos_start + m;
+            let scale = 1.0f32 / (head_dim as f32).sqrt();
+            let attn_total = m * q_dim;
+            let attn_buf = {
+                use axonml_core::backends::cuda_pool::pool_alloc_uninit;
+                let mut out_gpu = pool_alloc_uninit(attn_total).ok()?;
+                let q_guard = q.as_cuda_slice_read();
+                let gpu_ref = kv_cache.gpu.as_ref()?;
+                cuda.fused_attn_prefill_f32(
+                    q_guard.slice(),
+                    &gpu_ref.k[li],
+                    &gpu_ref.v[li],
+                    &mut out_gpu,
+                    m,
+                    total_kv_len,
+                    n_heads,
+                    n_kv_heads,
+                    head_dim,
+                    pos_start,
+                    0,
+                    scale,
+                ).ok()?;
+                out_gpu
+            };
+            let attn_storage = axonml_core::storage::Storage::from_cuda_slice(
+                attn_buf, attn_total, self.compute_device.clone(),
+            );
+            let mut attn = Tensor::from_storage(attn_storage, &[m, q_dim]).ok()?;
+
+            if let Some(sub) = &lc.attn_sub_norm {
+                attn = attn.rms_norm_batched(sub, m, q_dim, eps);
+            }
+
+            let attn_proj = layer.o_weight.matmul(&attn);
+            x = x.add(&attn_proj).expect("residual add (attn)");
+
+            // ----- FFN sub-layer ---------------------------------------------
+            let normed2 = x.rms_norm_batched(&lc.ffn_norm, m, hidden, eps);
+            let gate = layer.gate_weight.matmul(&normed2);
+            let up = layer.up_weight.matmul(&normed2);
+
+            // SwiGLU / ReLU² are pure element-wise — the flat-len kernels
+            // handle any shape including [m, inter_size].
+            let mut ffn = gate.swiglu(&up);
+            if let Some(sub) = &lc.ffn_sub_norm {
+                ffn = ffn.rms_norm_batched(sub, m, inter_size, eps);
+            }
+
+            debug_assert_eq!(ffn.numel(), m * inter_size);
+
+            let ffn_out = layer.down_weight.matmul(&ffn);
+            x = x.add(&ffn_out).expect("residual add (ffn)");
+        }
+
+        kv_cache.len += m;
+
+        // Final norm + LM head on the LAST row only — the caller discards
+        // the first m-1 rows, so running the LM head on them is pure waste.
+        // D2H the last row of x, upload as a [1, hidden] tensor, then norm
+        // + LM head. Cheaper than slicing in GPU-land here.
+        let last_row_host: Vec<f32> = {
+            let x_host = x.to_vec();
+            x_host[(m - 1) * hidden..m * hidden].to_vec()
+        };
+        let last = Tensor::from_vec(last_row_host, &[1, hidden])
+            .expect("last row tensor")
+            .to_device(self.compute_device.clone())
+            .expect("upload last row");
+        let normed = last.rms_norm(output_norm_gpu, eps);
+        let logits_tensor = self.lm_head.matmul(&normed);
+        Some(logits_tensor.to_vec())
     }
 
     fn forward_batch_gemma4(

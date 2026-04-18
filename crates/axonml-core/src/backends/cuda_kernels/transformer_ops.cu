@@ -212,3 +212,152 @@ extern "C" __global__ void rms_norm_heads_f32(
         x_head[i] = x_head[i] * inv_rms * weight[i];
     }
 }
+
+// ============================================================================
+// Batched (prefill) kernels — process m tokens in a single launch
+//
+// These are the multi-token counterparts of the single-token kernels above.
+// They exist so prefill (prompt encoding) can stay fully GPU-resident at m>1
+// and skip the m×launch-overhead path of looping forward_one_gpu_resident.
+//
+// Shared convention: the outer grid dim varies over tokens (blockIdx.y or .z),
+// the inner grid/block dims handle per-token work identical to the m=1 case.
+// ============================================================================
+
+// One CTA per (token), same warp-reduction structure as rms_norm_f32.
+// Launch: grid = (m, 1, 1), block = (blockDim.x, 1, 1), shmem = n_warps*4.
+// x, out shape: [m, n] (contiguous row-major).
+extern "C" __global__ void rms_norm_batched_f32(
+    float* __restrict__ out,
+    const float* __restrict__ x,
+    const float* __restrict__ weight,
+    uint32_t n,
+    float eps
+) {
+    extern __shared__ float warp_sums[];
+    const int tid     = threadIdx.x;
+    const int warp_id = tid >> 5;
+    const int lane    = tid & 31;
+    const int n_warps = (blockDim.x + 31) >> 5;
+    const uint32_t row = blockIdx.x;
+
+    const float* __restrict__ x_row   = x   + (size_t)row * (size_t)n;
+    float* __restrict__       out_row = out + (size_t)row * (size_t)n;
+
+    float local = 0.0f;
+    for (int i = tid; i < (int)n; i += blockDim.x) {
+        float v = x_row[i];
+        local += v * v;
+    }
+
+    #pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        local += __shfl_xor_sync(0xFFFFFFFF, local, offset);
+    }
+
+    if (lane == 0) warp_sums[warp_id] = local;
+    __syncthreads();
+
+    float total = 0.0f;
+    if (warp_id == 0) {
+        total = (lane < n_warps) ? warp_sums[lane] : 0.0f;
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            total += __shfl_xor_sync(0xFFFFFFFF, total, offset);
+        }
+        if (lane == 0) warp_sums[0] = total;
+    }
+    __syncthreads();
+
+    float mean_sq = warp_sums[0] / (float)n;
+    float scale = rsqrtf(mean_sq + eps);
+
+    for (int i = tid; i < (int)n; i += blockDim.x) {
+        out_row[i] = (x_row[i] * scale) * weight[i];
+    }
+}
+
+// One warp per (head, token). Same structure as rms_norm_heads_f32 but the
+// (head, token) pair selects the slice inside a [m, n_heads, head_dim] tensor.
+// Launch: grid = (n_heads, m, 1), block = (32, 1, 1). In-place on x.
+extern "C" __global__ void rms_norm_heads_batched_f32(
+    float* __restrict__ x,
+    const float* __restrict__ weight,
+    unsigned int n_heads,
+    unsigned int head_dim,
+    float eps
+) {
+    const unsigned int h    = blockIdx.x;
+    const unsigned int t    = blockIdx.y;
+    const unsigned int lane = threadIdx.x;
+    float* x_head = x
+        + (size_t)t * (size_t)n_heads * (size_t)head_dim
+        + (size_t)h * (size_t)head_dim;
+
+    float local = 0.0f;
+    for (unsigned int i = lane; i < head_dim; i += 32u) {
+        float v = x_head[i];
+        local += v * v;
+    }
+
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1) {
+        local += __shfl_xor_sync(0xFFFFFFFFu, local, off);
+    }
+
+    float inv_rms = rsqrtf(local / (float)head_dim + eps);
+
+    for (unsigned int i = lane; i < head_dim; i += 32u) {
+        x_head[i] = x_head[i] * inv_rms * weight[i];
+    }
+}
+
+// Batched split-halves RoPE. Rotates x[t, h, :] at position (pos_start + t).
+// Layout: x is [m, n_heads, head_dim] row-major, flat shape [m*n_heads*head_dim].
+// Launch: grid = (n_heads, head_dim/2, m), block = (blockDim.x, 1, 1). Must
+// satisfy blockDim.x >= head_dim/2 at the user-level launcher — or set
+// gridDim.y = ceil_div(head_dim/2, blockDim.x) and compute the pair index
+// from both dims. The launcher uses the latter (mirrors rope_split_halves_f32).
+extern "C" __global__ void rope_split_halves_batched_f32(
+    float* __restrict__ x,
+    uint32_t n_heads,
+    uint32_t head_dim,
+    float theta,
+    uint32_t pos_start
+) {
+    const uint32_t head = blockIdx.x;
+    const uint32_t pair = blockIdx.y * blockDim.x + threadIdx.x;
+    const uint32_t tok  = blockIdx.z;
+    const uint32_t half = head_dim >> 1;
+    if (head >= n_heads || pair >= half) return;
+
+    const uint32_t pos = pos_start + tok;
+    const float exponent = -(float)(2u * pair) / (float)head_dim;
+    const float angle = (float)pos * powf(theta, exponent);
+    float c, s;
+    sincosf(angle, &s, &c);
+
+    const size_t row_stride = (size_t)n_heads * (size_t)head_dim;
+    const size_t base = (size_t)tok * row_stride
+                      + (size_t)head * (size_t)head_dim
+                      + (size_t)pair;
+    const float a = x[base];
+    const float b = x[base + half];
+    x[base]        = c * a - s * b;
+    x[base + half] = s * a + c * b;
+}
+
+// Broadcast per-column bias across m rows of a [m, n] matrix.
+// Launch: grid = ceil_div(m*n, 256), block = 256.
+extern "C" __global__ void add_bias_batched_f32(
+    float* __restrict__ out,
+    const float* __restrict__ bias,
+    uint32_t m,
+    uint32_t n
+) {
+    const uint64_t idx = (uint64_t)blockIdx.x * (uint64_t)blockDim.x + threadIdx.x;
+    const uint64_t total = (uint64_t)m * (uint64_t)n;
+    if (idx >= total) return;
+    const uint32_t col = (uint32_t)(idx % (uint64_t)n);
+    out[idx] += bias[col];
+}

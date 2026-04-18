@@ -3403,4 +3403,141 @@ impl Tensor<f32> {
             offset: 0,
         }
     }
+
+    /// Batched RMSNorm over `m` tokens. `self` must be `[m, n]` contiguous
+    /// on GPU; `weight` is `[n]` on GPU. Returns `[m, n]`.
+    pub(crate) fn rms_norm_batched_cuda(
+        &self,
+        weight: &Self,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> Self {
+        let data = self.contiguous_gpu();
+        let w = weight.contiguous_gpu();
+        debug_assert_eq!(data.numel(), m * n, "rms_norm_batched: expected m*n elements");
+        debug_assert_eq!(w.numel(), n, "rms_norm_batched: weight must be [n]");
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        let w_guard = w.storage.as_cuda_slice();
+        // pool_alloc_uninit: kernel writes every out[i].
+        let mut out = pool_alloc_uninit(m * n).expect("GPU pool alloc failed");
+
+        cuda.rms_norm_batched_f32(&mut out, src_guard.slice(), w_guard.slice(), m, n, eps)
+            .expect("CUDA rms_norm_batched_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, m * n, self.device());
+        Self {
+            storage,
+            shape: vec![m, n].into(),
+            strides: contiguous_strides(&[m, n]),
+            offset: 0,
+        }
+    }
+
+    /// Batched per-head RMSNorm (Qwen3 QK-norm) over `m` tokens. `self`
+    /// must be `[m, n_heads * head_dim]` contiguous GPU; `weight` is
+    /// `[head_dim]`. Returns a new tensor with the norm applied.
+    pub(crate) fn rms_norm_heads_batched_cuda(
+        &self,
+        weight: &Self,
+        m: usize,
+        n_heads: usize,
+        head_dim: usize,
+        eps: f32,
+    ) -> Self {
+        let data = self.contiguous_gpu();
+        let w = weight.contiguous_gpu();
+        let total = m * n_heads * head_dim;
+        debug_assert_eq!(data.numel(), total, "rms_norm_heads_batched: shape mismatch");
+        debug_assert_eq!(w.numel(), head_dim, "rms_norm_heads_batched: weight must be [head_dim]");
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        let w_guard = w.storage.as_cuda_slice();
+        // pool_alloc_uninit: broadcast_copy below writes every element, then
+        // rms_norm_heads_batched_f32 mutates in place.
+        let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
+
+        cuda.broadcast_copy_f32(&mut out, src_guard.slice(), total, total)
+            .expect("CUDA broadcast_copy_f32 failed");
+        cuda.rms_norm_heads_batched_f32(&mut out, w_guard.slice(), m, n_heads, head_dim, eps)
+            .expect("CUDA rms_norm_heads_batched_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, total, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
+    /// Batched split-halves RoPE. `self` must be `[m, n_heads * head_dim]`
+    /// contiguous GPU. Rotates token `t` at position `(pos_start + t)`.
+    pub(crate) fn apply_rope_split_halves_batched_cuda(
+        &self,
+        m: usize,
+        n_heads: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Self {
+        let data = self.contiguous_gpu();
+        let total = m * n_heads * head_dim;
+        debug_assert_eq!(data.numel(), total, "rope_batched: shape mismatch");
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        // pool_alloc_uninit: broadcast_copy writes every element.
+        let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
+
+        cuda.broadcast_copy_f32(&mut out, src_guard.slice(), total, total)
+            .expect("CUDA broadcast_copy_f32 failed");
+        cuda.rope_split_halves_batched_f32(&mut out, m, n_heads, head_dim, theta, pos_start)
+            .expect("CUDA rope_split_halves_batched_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, total, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
+    /// Broadcast per-column bias add for a `[m, n]` tensor. Consumes a
+    /// fresh copy — callers that already own a unique buffer should use
+    /// the in-place backend call directly.
+    pub(crate) fn add_bias_batched_cuda(
+        &self,
+        bias: &Self,
+        m: usize,
+        n: usize,
+    ) -> Self {
+        let data = self.contiguous_gpu();
+        let b = bias.contiguous_gpu();
+        debug_assert_eq!(data.numel(), m * n, "add_bias_batched: shape mismatch");
+        debug_assert_eq!(b.numel(), n, "add_bias_batched: bias must be [n]");
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        let b_guard = b.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(m * n).expect("GPU pool alloc failed");
+
+        // Copy src -> out, then add bias in place (kernel reads+writes).
+        cuda.broadcast_copy_f32(&mut out, src_guard.slice(), m * n, m * n)
+            .expect("CUDA broadcast_copy_f32 failed");
+        cuda.add_bias_batched_f32(&mut out, b_guard.slice(), m, n)
+            .expect("CUDA add_bias_batched_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, m * n, self.device());
+        Self {
+            storage,
+            shape: vec![m, n].into(),
+            strides: contiguous_strides(&[m, n]),
+            offset: 0,
+        }
+    }
 }
