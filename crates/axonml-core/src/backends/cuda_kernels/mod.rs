@@ -3812,7 +3812,7 @@ impl CudaKernels {
         kernels.load_module(
             "q5k_matmul",
             Q5K_MATMUL_PTX,
-            &["q5k_gemv_f32", "q5k_gemm_f32"],
+            &["q5k_gemv_f32", "q5k_gemm_f32", "q5k_gemv_fused_qkv_f32"],
         )?;
 
         // Q5_0 / Q5_1 dequant-in-shader matmul — legacy Falcon bodies.

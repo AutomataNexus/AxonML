@@ -1216,6 +1216,64 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Q5_K fused QKV GEMV — one launch computes Q, K, V projections
+    /// sharing the same activation. Phi-3's `attn_qkv` is Q5_K with
+    /// split `[3072, 3072, 3072]`; this collapses 3 kernel launches
+    /// per layer into 1.
+    #[allow(clippy::too_many_arguments)]
+    pub fn q5k_gemv_fused_qkv_f32(
+        &self,
+        q_w: &CudaSlice<u8>,
+        k_w: &CudaSlice<u8>,
+        v_w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        q_c: &mut CudaSlice<f32>,
+        k_c: &mut CudaSlice<f32>,
+        v_c: &mut CudaSlice<f32>,
+        q_out: usize,
+        k_out: usize,
+        v_out: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "fused QKV Q5_K GEMV requires in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q5k_gemv_fused_qkv_f32")
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("q5k_gemv_fused_qkv_f32".to_string())
+            })?;
+
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let total_out = (q_out + k_out + v_out) as u32;
+        let grid = (total_out + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(q_w)
+                .arg(k_w)
+                .arg(v_w)
+                .arg(a)
+                .arg(q_c)
+                .arg(k_c)
+                .arg(v_c)
+                .arg(&(q_out as u32))
+                .arg(&(k_out as u32))
+                .arg(&(v_out as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Q5_K GEMM: `c = a @ B^T` where a is `[m, in]` f32 and B is Q5_K
     /// `[out, in]`. One thread per output element — naive but correct;
     /// the GEMV path (m=1) above is the hot decode case. See
