@@ -3791,7 +3791,7 @@ impl CudaKernels {
         kernels.load_module(
             "transformer_ops",
             TRANSFORMER_OPS_PTX,
-            &["rms_norm_f32", "rope_split_halves_f32", "swiglu_f32", "relu2_gate_f32"],
+            &["rms_norm_f32", "rms_norm_heads_f32", "rope_split_halves_f32", "swiglu_f32", "relu2_gate_f32"],
         )?;
 
         Ok(kernels)

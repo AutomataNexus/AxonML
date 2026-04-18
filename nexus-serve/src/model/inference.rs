@@ -575,6 +575,9 @@ pub struct LayerGpuCache {
     pub v_bias: Option<Tensor<f32>>,
     pub attn_sub_norm: Option<Tensor<f32>>,
     pub ffn_sub_norm: Option<Tensor<f32>>,
+    /// Qwen3 QK-norm pair (see `LayerWeights::attn_q_norm`).
+    pub attn_q_norm: Option<Tensor<f32>>,
+    pub attn_k_norm: Option<Tensor<f32>>,
 }
 
 #[cfg(feature = "cuda")]
@@ -597,6 +600,8 @@ impl LayerGpuCache {
             v_bias: upload_opt(&layer.v_bias, device),
             attn_sub_norm: upload_opt(&layer.attn_sub_norm, device),
             ffn_sub_norm: upload_opt(&layer.ffn_sub_norm, device),
+            attn_q_norm: upload_opt(&layer.attn_q_norm, device),
+            attn_k_norm: upload_opt(&layer.attn_k_norm, device),
         }
     }
 }
@@ -627,6 +632,14 @@ pub struct LayerWeights {
     /// right BEFORE `down_weight`. Same purpose as `attn_sub_norm`. `None`
     /// for non-BitNet archs. Shape: `[intermediate_size]`.
     pub ffn_sub_norm: Option<Vec<f32>>,
+    /// Qwen3-only: per-head RMSNorm applied to Q after QKV matmul and
+    /// BEFORE RoPE. The same `[head_dim]` weight vector is broadcast to
+    /// every Q head. `None` for architectures without QK-norm (Qwen2,
+    /// Gemma, LLaMA, BitNet, …).
+    pub attn_q_norm: Option<Vec<f32>>,
+    /// Qwen3-only: per-head RMSNorm on K with the same `[head_dim]`
+    /// broadcast shape as `attn_q_norm`. Applied to every KV head.
+    pub attn_k_norm: Option<Vec<f32>>,
 }
 
 impl LayerWeights {
@@ -1211,11 +1224,19 @@ impl InferenceEngine {
             let attn_sub_norm = try_load_vec(mapped, &format!("{prefix}.attn_sub_norm.weight"));
             let ffn_sub_norm = try_load_vec(mapped, &format!("{prefix}.ffn_sub_norm.weight"));
 
+            // Qwen3 QK-norm — present only on Qwen3 GGUFs. Shape: [head_dim].
+            // Same [head_dim] weight is broadcast per-head to Q and K before
+            // RoPE. Absent on every other architecture we support; the forward
+            // pass gates on Option so other arches stay unaffected.
+            let attn_q_norm = try_load_vec(mapped, &format!("{prefix}.attn_q_norm.weight"));
+            let attn_k_norm = try_load_vec(mapped, &format!("{prefix}.attn_k_norm.weight"));
+
             layers.push(LayerWeights {
                 attn_norm, q_weight, k_weight, v_weight, o_weight,
                 ffn_norm, gate_weight, up_weight, down_weight,
                 q_bias, k_bias, v_bias,
                 attn_sub_norm, ffn_sub_norm,
+                attn_q_norm, attn_k_norm,
             });
 
             if (i + 1) % 7 == 0 || i + 1 == config.num_layers {
@@ -1554,6 +1575,20 @@ impl InferenceEngine {
             if let Some(ref b) = layer.q_bias { add_bias(&mut q_data, b, seq_len, n_heads * head_dim); }
             if let Some(ref b) = layer.k_bias { add_bias(&mut k_data_new, b, seq_len, kv_dim); }
             if let Some(ref b) = layer.v_bias { add_bias(&mut v_data_new, b, seq_len, kv_dim); }
+
+            // Qwen3 QK-norm — per-head RMSNorm before RoPE. None-gated so
+            // architectures without QK-norm (Qwen2, Gemma, LLaMA, …) stay
+            // bit-identical.
+            if let Some(ref qn) = layer.attn_q_norm {
+                apply_rms_norm_heads_inplace(
+                    &mut q_data, qn, seq_len, n_heads, head_dim, self.config.rms_norm_eps,
+                );
+            }
+            if let Some(ref kn) = layer.attn_k_norm {
+                apply_rms_norm_heads_inplace(
+                    &mut k_data_new, kn, seq_len, n_kv_heads, head_dim, self.config.rms_norm_eps,
+                );
+            }
 
             // RoPE
             apply_rope_inplace(&mut q_data, seq_len, n_heads, head_dim, self.config.rope_theta, pos_offset);
@@ -1930,6 +1965,17 @@ impl InferenceEngine {
                 if let Some(b) = &lc.v_bias { v = v.add(b).expect("v bias add"); }
                 (q, k, v)
             };
+
+            // Qwen3 QK-norm: per-head RMSNorm on Q and K AFTER the QKV
+            // projection and BEFORE RoPE. Guarded on the optional weights —
+            // absent on qwen2 / llama / gemma / bitnet, so those archs
+            // stay bit-identical.
+            if let Some(qn) = &lc.attn_q_norm {
+                q = q.rms_norm_heads(qn, n_heads, head_dim, eps);
+            }
+            if let Some(kn) = &lc.attn_k_norm {
+                k = k.rms_norm_heads(kn, n_kv_heads, head_dim, eps);
+            }
 
             q = q.apply_rope_split_halves(n_heads, head_dim, theta, pos);
             k = k.apply_rope_split_halves(n_kv_heads, head_dim, theta, pos);
@@ -2433,6 +2479,36 @@ fn add_bias(data: &mut [f32], bias: &[f32], seq_len: usize, dim: usize) {
     for s in 0..seq_len {
         for d in 0..dim {
             data[s * dim + d] += bias[d];
+        }
+    }
+}
+
+/// Qwen3 QK-norm: per-head RMS_norm applied in-place. `data` is laid out
+/// as `[seq_len, n_heads * head_dim]`; `weight` is `[head_dim]`, broadcast
+/// across every (token, head). Mirrors `Tensor::rms_norm_heads` but on
+/// a flat CPU buffer — used by the prefill path.
+fn apply_rms_norm_heads_inplace(
+    data: &mut [f32],
+    weight: &[f32],
+    seq_len: usize,
+    n_heads: usize,
+    head_dim: usize,
+    eps: f32,
+) {
+    debug_assert_eq!(weight.len(), head_dim);
+    debug_assert_eq!(data.len(), seq_len * n_heads * head_dim);
+    for s in 0..seq_len {
+        for h in 0..n_heads {
+            let base = (s * n_heads + h) * head_dim;
+            let mut sum_sq = 0.0f64;
+            for i in 0..head_dim {
+                let v = data[base + i] as f64;
+                sum_sq += v * v;
+            }
+            let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+            for i in 0..head_dim {
+                data[base + i] = data[base + i] * scale * weight[i];
+            }
         }
     }
 }

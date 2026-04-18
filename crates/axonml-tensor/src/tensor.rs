@@ -1101,6 +1101,50 @@ impl<T: Float> Tensor<T> {
         Self::from_vec(out, &self.shape).expect("rms_norm: build output tensor")
     }
 
+    /// Qwen3 QK-norm: per-head RMS_norm over the last `head_dim` axis.
+    /// `self` is `[n_heads * head_dim]` (all heads flattened); `weight`
+    /// is `[head_dim]` broadcast across every head. Returns a new tensor
+    /// with the per-head norm applied; original is unchanged.
+    #[must_use]
+    pub fn rms_norm_heads(
+        &self,
+        weight: &Self,
+        n_heads: usize,
+        head_dim: usize,
+        eps: f32,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).rms_norm_heads_cuda(
+                    gpu_ref(weight), n_heads, head_dim, eps,
+                ))
+            };
+        }
+        // CPU fallback — per-head rms_norm.
+        let x = self.to_vec();
+        let w = weight.to_vec();
+        assert_eq!(x.len(), n_heads * head_dim);
+        assert_eq!(w.len(), head_dim);
+        let mut out: Vec<T> = Vec::with_capacity(x.len());
+        for h in 0..n_heads {
+            let base = h * head_dim;
+            let mut sum_sq = 0.0f64;
+            for i in 0..head_dim {
+                let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
+                sum_sq += f * f;
+            }
+            let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+            for i in 0..head_dim {
+                let v = x[base + i].to_f32().unwrap_or(0.0) * scale
+                    * w[i].to_f32().unwrap_or(0.0);
+                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+            }
+        }
+        Self::from_vec(out, &self.shape).expect("rms_norm_heads: build output tensor")
+    }
+
     /// Rotary position embedding in the LLaMA / Qwen / Mistral split-halves
     /// layout. Returns a new tensor with the rotation applied; original is
     /// unchanged. Input is `[n_heads * head_dim]` (single-token, all heads
