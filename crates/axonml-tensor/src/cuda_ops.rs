@@ -887,6 +887,52 @@ impl Tensor<f32> {
         Ok(Self { storage, shape, strides, offset: 0 })
     }
 
+    /// Q8_0 GEMV — `self` is `[1, in]` f32 on GPU, `w` is device-side
+    /// Q8_0 raw bytes `[out, in]`. Returns `[1, out]`.
+    pub fn q8_0_gemv_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu(), "q8_0_gemv_cuda: self must be on GPU");
+        assert_eq!(self.numel(), in_dim);
+        assert_eq!(in_dim % 32, 0);
+        let a_data = self.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(out_dim).expect("GPU pool alloc failed");
+        cuda.q8_0_gemv_f32(w, a_guard.slice(), &mut out, out_dim, in_dim)
+            .expect("CUDA q8_0_gemv_f32 failed");
+        let shape = Shape::from_slice(&[1, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, out_dim, self.device());
+        Ok(Self { storage, shape, strides, offset: 0 })
+    }
+
+    pub fn q8_0_gemm_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu());
+        assert_eq!(in_dim % 32, 0);
+        let a_data = self.contiguous_gpu();
+        let numel = a_data.numel();
+        assert!(numel % in_dim == 0);
+        let m = numel / in_dim;
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(m * out_dim).expect("GPU pool alloc failed");
+        cuda.q8_0_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
+            .expect("CUDA q8_0_gemm_f32 failed");
+        let shape = Shape::from_slice(&[m, out_dim]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, m * out_dim, self.device());
+        Ok(Self { storage, shape, strides, offset: 0 })
+    }
+
     /// Q5_K GEMM: `self` is `[m, in]` f32 on GPU, `w` is a device-side
     /// `[out, in]` weight matrix in raw Q5_K super-block bytes (176 bytes
     /// per 256-element block). Returns `[m, out]`.

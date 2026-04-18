@@ -405,6 +405,31 @@ impl Weight {
                             return result.expect("q5_{0,1}_{gemv,gemm}_cuda failed");
                         }
                     }
+
+                    // Q8_0 GPU fast path — Falcon-7B LM head. Before this
+                    // landed, the 4544 × 65024 LM head re-dequanted on CPU
+                    // every decode token, dominating Falcon's 10 tok/s
+                    // budget.
+                    if *dtype == GgmlType::Q8_0
+                        && dims.len() == 2
+                        && dims[0] % 32 == 0
+                        && input.device().is_gpu()
+                    {
+                        if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                            let w_gpu = gpu_cache.get_or_init(|| {
+                                cuda.htod_copy(data.as_slice())
+                                    .expect("Q8_0 gpu_cache htod_copy failed")
+                            });
+                            let _ = cuda;
+                            let m_shape = input.shape().first().copied().unwrap_or(1);
+                            let result = if m_shape == 1 {
+                                input.q8_0_gemv_cuda(w_gpu, dims[1], dims[0])
+                            } else {
+                                input.q8_0_gemm_cuda(w_gpu, dims[1], dims[0])
+                            };
+                            return result.expect("q8_0_{gemv,gemm}_cuda failed");
+                        }
+                    }
                 }
                 // BitNet I2_S fast path: the whole point of 1.58-bit is an
                 // add-only matmul that never materializes f32 weights. Skip
