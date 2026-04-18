@@ -116,7 +116,7 @@ A conversion utility `tools/axonml_to_gguf.rs` will live in `llm-training/tools/
 | GGUF → Qwen3ForCausalLM loader | 1 day | **DONE** `0bdd4e8` — loads Qwen3-0.6B GGUF in 7.7s, 508 tensors, 752M elements |
 | Swap fresh-init teacher for GGUF-loaded teacher in trainer | 0.25 day | **DONE** `00c499a` — `--teacher-gguf` CLI flag; smoke against Qwen3-0.6B loads in 6.6s, 3 steps in 15s |
 | Qwen BPE tokenizer + dataset pipeline | 1 day | **DONE** `5e8fc66` — `tokenize_corpus` binary + `TokenBinDataset` + `--tokens-bin` flag. Smoke end-to-end with Qwen3-0.6B teacher + real BPE tokens. Downloading FineWeb is the remaining work (I/O, not code) |
-| GGUF export utility | 0.5 day | **DONE** — F16 weight export with Qwen3 metadata; roundtrip-verified; tokenizer passthrough TODO follow-up |
+| GGUF export utility | 0.5 day | **DONE** — F16 weight export with Qwen3 metadata, byte-identical tokenizer passthrough from source GGUF via `read_gguf_metadata_raw_bytes`, roundtrip-verified on qwen3-1.7b tokenizer (model/tokens/merges/bos/eos all bytes_match=true) |
 | Training run | 1-2 days | TODO — wall-clock during actual training |
 | Evaluation + iteration | 0.5-1 day | TODO — tune T, α, γ on spec_bench results |
 | **Total** | **~3.25-5 days remaining** | 3 days done |

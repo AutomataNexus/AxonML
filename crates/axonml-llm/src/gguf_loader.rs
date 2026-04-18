@@ -640,6 +640,72 @@ fn qwen3_config_from_gguf(gguf: &GgufFile) -> io::Result<Qwen3Config> {
     })
 }
 
+/// Read raw byte-encoded GGUF metadata entries for `keys` from `path`.
+///
+/// Returns `HashMap<key, encoded_kv_bytes>` where `encoded_kv_bytes` is
+/// the complete GGUF-format serialization of the `(key_string_with_len,
+/// value_type, value_body)` triple — exactly the bytes that would
+/// appear in the metadata section of the source GGUF for that entry.
+///
+/// The returned bytes can be spliced verbatim into the metadata section
+/// of a new GGUF. This is how the exporter copies tokenizer state
+/// (`tokenizer.ggml.*`) without re-serializing every value type by hand.
+///
+/// Unknown / malformed values cause an `InvalidData` error rather than
+/// silent skipping — a caller that requested a key needs to know if the
+/// source file can't produce it.
+pub fn read_gguf_metadata_raw_bytes(
+    path: &Path,
+    keys: &[&str],
+) -> io::Result<HashMap<String, Vec<u8>>> {
+    use std::io::{BufReader, Seek, SeekFrom};
+
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+
+    // --- Parse header up to the metadata table. ---
+    let magic = reader.read_u32::<LittleEndian>()?;
+    if magic != GGUF_MAGIC {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Not a GGUF file (magic 0x{magic:08x})"),
+        ));
+    }
+    let version = reader.read_u32::<LittleEndian>()?;
+    if !(2..=3).contains(&version) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Unsupported GGUF version {version}"),
+        ));
+    }
+    let _n_tensors = reader.read_u64::<LittleEndian>()?;
+    let n_metadata = reader.read_u64::<LittleEndian>()?;
+
+    let want: std::collections::HashSet<&str> = keys.iter().copied().collect();
+    let mut result: HashMap<String, Vec<u8>> = HashMap::with_capacity(want.len());
+
+    for _ in 0..n_metadata {
+        let entry_start = reader.stream_position()?;
+
+        // Parse key + value to advance the reader; we re-seek later to
+        // read the bytes back if this entry matched.
+        let key = read_gguf_string(&mut reader)?;
+        let _value = read_gguf_value(&mut reader)?;
+        let entry_end = reader.stream_position()?;
+
+        if want.contains(key.as_str()) {
+            let len = (entry_end - entry_start) as usize;
+            let mut buf = vec![0u8; len];
+            reader.seek(SeekFrom::Start(entry_start))?;
+            reader.read_exact(&mut buf)?;
+            // Reader is now at entry_end again, ready for the next iteration.
+            result.insert(key, buf);
+        }
+    }
+
+    Ok(result)
+}
+
 /// Read Qwen-family GGUF tokenizer metadata: `(tokens, merges)`.
 ///
 /// Returns the byte-level BPE vocabulary as `Vec<String>` (token[i] is
