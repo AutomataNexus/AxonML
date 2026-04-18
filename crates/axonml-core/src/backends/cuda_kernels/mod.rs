@@ -3603,6 +3603,16 @@ pub const Q5_01_MATMUL_PTX: &str = include_str!("q5_01_matmul.ptx");
 /// falls through to `cpu_dequant_matmul` on every decode token.
 pub const Q8_0_MATMUL_PTX: &str = include_str!("q8_0_matmul.ptx");
 
+/// BitNet I2_S (1.58-bit ternary) matmul kernel.
+///
+/// Compiled from `i2s_matmul.cu`. 32-byte block holding 128 ternary
+/// weights (2 bits each, group-strided layout matching Microsoft's
+/// bitnet.cpp AVX2 reference). Two warps per output row. Tensor-wide
+/// f32 scale passed as a kernel argument (not stored per-block). This
+/// is what lets BitNet move off the CPU-only `matmul_i2s` path that
+/// caps BitNet-2B decode at ~7 tok/s on WSL.
+pub const I2S_MATMUL_PTX: &str = include_str!("i2s_matmul.ptx");
+
 /// Q6_K quantized matmul (dequant-in-shader).
 ///
 /// Compiled from `q6k_matmul.cu`. Same shape contract as Q4_K but with
@@ -3836,6 +3846,13 @@ impl CudaKernels {
             "q8_0_matmul",
             Q8_0_MATMUL_PTX,
             &["q8_0_gemv_f32", "q8_0_gemm_f32"],
+        )?;
+
+        // BitNet I2_S ternary matmul — moves BitNet bodies off the CPU-only path.
+        kernels.load_module(
+            "i2s_matmul",
+            I2S_MATMUL_PTX,
+            &["i2s_gemv_f32", "i2s_gemm_f32"],
         )?;
 
         // Q6_K dequant-in-shader matmul — LM head + higher-precision weights.

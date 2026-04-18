@@ -887,6 +887,55 @@ impl Tensor<f32> {
         Ok(Self { storage, shape, strides, offset: 0 })
     }
 
+    /// BitNet I2_S GEMV — `self` is `[1, k]` f32 on GPU, `w` is device-side
+    /// packed ternary bytes `[n, k/128 * 32]` (scale NOT included). Returns
+    /// `[1, n]`. `scale` is the tensor-wide f32 scale read once at load.
+    pub fn i2s_gemv_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        scale: f32,
+        n: usize,
+        k: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu(), "i2s_gemv_cuda: self must be on GPU");
+        assert_eq!(self.numel(), k);
+        assert_eq!(k % 128, 0);
+        let a_data = self.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(n).expect("GPU pool alloc failed");
+        cuda.i2s_gemv_f32(w, a_guard.slice(), &mut out, scale, n, k)
+            .expect("CUDA i2s_gemv_f32 failed");
+        let shape = Shape::from_slice(&[1, n]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, n, self.device());
+        Ok(Self { storage, shape, strides, offset: 0 })
+    }
+
+    pub fn i2s_gemm_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        scale: f32,
+        n: usize,
+        k: usize,
+    ) -> Result<Self> {
+        assert!(self.device().is_gpu());
+        assert_eq!(k % 128, 0);
+        let a_data = self.contiguous_gpu();
+        let numel = a_data.numel();
+        assert!(numel % k == 0);
+        let m = numel / k;
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(m * n).expect("GPU pool alloc failed");
+        cuda.i2s_gemm_f32(w, a_guard.slice(), &mut out, scale, m, n, k)
+            .expect("CUDA i2s_gemm_f32 failed");
+        let shape = Shape::from_slice(&[m, n]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, m * n, self.device());
+        Ok(Self { storage, shape, strides, offset: 0 })
+    }
+
     /// Q8_0 GEMV — `self` is `[1, in]` f32 on GPU, `w` is device-side
     /// Q8_0 raw bytes `[out, in]`. Returns `[1, out]`.
     pub fn q8_0_gemv_cuda(

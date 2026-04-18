@@ -431,15 +431,45 @@ impl Weight {
                         }
                     }
                 }
-                // BitNet I2_S fast path: the whole point of 1.58-bit is an
-                // add-only matmul that never materializes f32 weights. Skip
-                // the CPU dequant+GEMM path entirely.
-                //
-                // This path is CPU-only regardless of input device; BitNet's
-                // performance story is CPU-native. If inputs are on GPU, pull
-                // them back for this layer. (A GPU ternary kernel is a
-                // future optimization — would need a CUDA port of
-                // axonml_quant::bitnet::matmul_i2s.)
+                // BitNet I2_S GPU fast path — 1.58-bit ternary matmul on
+                // GPU. Weights are 0.25 bytes/element vs Q4_K's 0.56 —
+                // memory-bandwidth-limited decode should outrun Q4_K.
+                // Falls back to the CPU `matmul_i2s` path if any precondition
+                // fails (non-GPU input, no CUDA backend, etc.).
+                #[cfg(feature = "cuda")]
+                if *dtype == GgmlType::I2S
+                    && dims.len() == 2
+                    && input.device().is_gpu()
+                    && data.len() >= 4
+                    && dims[0] % 128 == 0
+                {
+                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                        // Last 4 bytes hold the tensor-wide f32 scale.
+                        let scale_off = data.len() - 4;
+                        let scale = f32::from_le_bytes([
+                            data[scale_off], data[scale_off + 1],
+                            data[scale_off + 2], data[scale_off + 3],
+                        ]);
+                        let packed = &data[..scale_off];
+                        let w_gpu = gpu_cache.get_or_init(|| {
+                            cuda.htod_copy(packed)
+                                .expect("I2_S gpu_cache htod_copy failed")
+                        });
+                        let _ = cuda;
+                        let k = dims[0];
+                        let n = dims[1];
+                        let m_shape = input.shape().first().copied().unwrap_or(1);
+                        let result = if m_shape == 1 {
+                            input.i2s_gemv_cuda(w_gpu, scale, n, k)
+                        } else {
+                            input.i2s_gemm_cuda(w_gpu, scale, n, k)
+                        };
+                        return result.expect("i2s_{gemv,gemm}_cuda failed");
+                    }
+                }
+
+                // BitNet I2_S CPU fallback path. Pre-GPU-kernel default;
+                // also used when CUDA isn't available.
                 if *dtype == GgmlType::I2S {
                     return i2s_matmul(data, dims, input);
                 }
