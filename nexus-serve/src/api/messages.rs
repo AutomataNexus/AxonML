@@ -679,13 +679,22 @@ fn build_prompt(architecture: &str, model_name: &str, req: &MessagesRequest) -> 
 /// (`<|system|>`=32006, `<|user|>`=32010, `<|assistant|>`=32001,
 /// `<|end|>`=32007); the BPE path must keep them literal so the encoder
 /// emits the single-token ID rather than splitting them into bytes.
+///
+/// **Phi-3 REQUIRES a system prompt.** Without one the model produces
+/// fluent-but-off-topic garbage ("The Fire \" At colon interpretationalic…")
+/// because its SFT pipeline always included a system turn. If the
+/// caller didn't supply one, inject the generic "You are a helpful
+/// assistant." default so the output distribution matches training.
 fn render_phi3(system: &str, messages: &[MessagesMessage]) -> String {
     let mut out = String::new();
-    if !system.is_empty() {
-        out.push_str("<|system|>\n");
-        out.push_str(system);
-        out.push_str("<|end|>\n");
-    }
+    let effective_system: &str = if system.is_empty() {
+        "You are a helpful assistant."
+    } else {
+        system
+    };
+    out.push_str("<|system|>\n");
+    out.push_str(effective_system);
+    out.push_str("<|end|>\n");
     for m in messages {
         let role = match m.role.as_str() {
             "user" | "assistant" | "system" => m.role.as_str(),

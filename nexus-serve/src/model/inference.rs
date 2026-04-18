@@ -2458,6 +2458,20 @@ impl InferenceEngine {
         if self.config.architecture.starts_with("bitnet") {
             return None;
         }
+        // Phi-3 eagerly dequants its Q5_K attn_qkv tensors to F32. The
+        // batched-matmul GPU path hits the F32 tensor matmul (not the
+        // fused Q4K gemm), and its K/V output DIVERGES from what
+        // forward_one's decode path produces for the same prompt — by
+        // enough that decode's attention then diverges into nonsense
+        // ("Thehell, am de- de the-WTh the,0 **'ble…"). Route Phi-3
+        // prefill through the per-token `forward_one` loop — same
+        // trade-off BitNet takes (higher first-token latency) in
+        // exchange for numerically-identical K/V to decode. Proven
+        // load-bearing: reverting this re-breaks Phi-3 even with a
+        // correct system prompt and NaN-safe sampling.
+        if self.config.architecture == "phi3" {
+            return None;
+        }
 
         let hidden = self.config.hidden_size;
         let head_dim = self.config.head_dim;
@@ -3756,9 +3770,15 @@ fn single_query_attention_swa(
 }
 
 pub fn argmax(data: &[f32]) -> usize {
+    // NaN-safe: partial_cmp returns None when either side is NaN; fall
+    // back to Less so NaN values sort to the bottom instead of panicking.
+    // A NaN in the logits is a computation bug upstream, but crashing the
+    // generation loop is strictly worse than picking a wrong-but-finite
+    // token — the caller can still observe the degraded output and
+    // diagnose, rather than getting a blank response.
     data.iter()
         .enumerate()
-        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Less))
         .map(|(i, _)| i)
         .unwrap_or(0)
 }
@@ -3778,7 +3798,9 @@ fn sample_top_p(logits: &[f32], temperature: f32, top_p: f32) -> u32 {
     }
     for (_, v) in &mut probs { *v /= sum; }
 
-    probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    // NaN-safe: a NaN probability sorts to the bottom instead of
+    // panicking the generation thread. See the comment on `argmax`.
+    probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Less));
 
     let mut cumsum = 0.0f32;
     let mut cutoff = probs.len();
