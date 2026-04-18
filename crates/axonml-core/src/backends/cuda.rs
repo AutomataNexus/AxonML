@@ -1528,6 +1528,73 @@ impl CudaBackend {
         }
     }
 
+    /// BitNet I2_S (1.58-bit ternary) GEMV. Two warps per output row, each
+    /// walks half the block range. Tensor-wide f32 scale passed separately
+    /// (GGUF stores it in the last 4 bytes of the raw tensor buffer, but the
+    /// GPU-side buffer holds packed bytes only — scale is sourced once at
+    /// load time and passed here each call).
+    pub fn i2s_gemv_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        scale: f32,
+        n: usize,
+        k: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(k % 128 == 0, "I2_S GEMV requires k % 128 == 0");
+        let func = self
+            .kernels
+            .get("i2s_gemv_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("i2s_gemv_f32".to_string()))?;
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((n as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&scale)
+                .arg(&(n as u32)).arg(&(k as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// BitNet I2_S GEMM (m > 1 prefill). Naive one-thread-per-output.
+    pub fn i2s_gemm_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        scale: f32,
+        m: usize,
+        n: usize,
+        k: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(k % 128 == 0, "I2_S GEMM requires k % 128 == 0");
+        let func = self
+            .kernels
+            .get("i2s_gemm_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("i2s_gemm_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(m * n);
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&scale)
+                .arg(&(m as u32)).arg(&(n as u32)).arg(&(k as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// Q6_K GEMV: one WARP per output row, lanes cooperate on each block.
     /// See `q6k_matmul.cu`.
     pub fn q6k_gemv_f32(
