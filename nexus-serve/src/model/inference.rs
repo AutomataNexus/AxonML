@@ -3160,6 +3160,21 @@ impl InferenceEngine {
             .to_device(self.compute_device.clone())
             .expect("move embed");
 
+        // Lazy-allocate GPU KV cache on first call. Falcon-7B is MQA
+        // (n_kv_heads=1), so the per-layer cache row is just head_dim=64
+        // f32s per token — tiny.
+        #[cfg(feature = "cuda")]
+        {
+            let cap = self.config.max_seq_len.min(4096);
+            if kv_cache.gpu.is_none() && self.compute_device.is_gpu() {
+                if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                    kv_cache.gpu = GpuKvCache::try_new(
+                        cuda, self.config.num_layers, n_kv_heads, head_dim, cap,
+                    );
+                }
+            }
+        }
+
         for (li, layer) in layers.iter().enumerate() {
             // Upload LayerNorm gamma/beta for this layer. Cheap (hidden
             // f32 ≈ 18 KB) — a per-layer OnceLock would save the H2D but
@@ -3176,7 +3191,7 @@ impl InferenceEngine {
             // Single LayerNorm feeds both attention and FFN (parallel).
             let normed_t = x_t.layer_norm_tokenwise(&gamma, &beta, eps);
 
-            // --- Attention branch (Q/K/V stays on GPU until RoPE) ------
+            // --- Attention branch (all GPU-resident) ------------------
             let q_t = layer.q_weight.matmul(&normed_t);
             let k_t = layer.k_weight.matmul(&normed_t);
             let v_t = layer.v_weight.matmul(&normed_t);
@@ -3185,29 +3200,75 @@ impl InferenceEngine {
             let q_t = q_t.apply_rope_split_halves(n_heads, head_dim, theta, pos);
             let k_t = k_t.apply_rope_split_halves(n_kv_heads, head_dim, theta, pos);
 
-            // Pull K/V to CPU for the existing KV cache + single_query
-            // attention path. A GPU-native KvCache + fused attention
-            // kernel would eliminate this round-trip (follow-up).
-            let k = k_t.to_vec();
-            let v = v_t.to_vec();
-            kv_cache.k_cache[li].extend_from_slice(&k);
-            kv_cache.v_cache[li].extend_from_slice(&v);
+            // Append K/V to the GPU cache in-place, then run the fused
+            // attention kernel. Falls back to the CPU `single_query_
+            // attention` path if the GPU append fails or GPU cache
+            // isn't set up (e.g. CPU-only build).
             let kv_len = kv_cache.len + 1;
+            let attn_t: Tensor<f32> = {
+                #[cfg(feature = "cuda")]
+                {
+                    let cuda_opt = axonml_core::backends::cuda::get_cuda_backend();
+                    let gpu_ok = if let (Some(g), Some(cuda)) =
+                        (kv_cache.gpu.as_mut(), cuda_opt)
+                    {
+                        let k_guard = k_t.as_cuda_slice_read();
+                        let v_guard = v_t.as_cuda_slice_read();
+                        let appended = g.append_row_device(
+                            cuda, li, pos, k_guard.slice(), v_guard.slice(),
+                        );
+                        drop(k_guard);
+                        drop(v_guard);
+                        appended
+                    } else {
+                        false
+                    };
+                    if gpu_ok {
+                        let (cuda, gpu) = (
+                            axonml_core::backends::cuda::get_cuda_backend().unwrap(),
+                            kv_cache.gpu.as_ref().unwrap(),
+                        );
+                        let q_guard = q_t.as_cuda_slice_read();
+                        let t = try_gpu_attn_resident_gpu(
+                            cuda, q_guard.slice(), gpu, li, kv_len,
+                            n_heads, n_kv_heads, head_dim, 0,
+                        )
+                        .expect("GPU-resident attention failed");
+                        drop(q_guard);
+                        t
+                    } else {
+                        // CPU fallback: pull k/v/q, run single_query.
+                        let k = k_t.to_vec();
+                        let v = v_t.to_vec();
+                        kv_cache.k_cache[li].extend_from_slice(&k);
+                        kv_cache.v_cache[li].extend_from_slice(&v);
+                        let q = q_t.to_vec();
+                        let attn = single_query_attention(
+                            &q, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                            kv_len, n_heads, n_kv_heads, head_dim,
+                        );
+                        Tensor::from_vec(attn, &[1, q_dim])
+                            .expect("attn tensor")
+                            .to_device(self.compute_device.clone())
+                            .expect("move attn")
+                    }
+                }
+                #[cfg(not(feature = "cuda"))]
+                {
+                    let k = k_t.to_vec();
+                    let v = v_t.to_vec();
+                    kv_cache.k_cache[li].extend_from_slice(&k);
+                    kv_cache.v_cache[li].extend_from_slice(&v);
+                    let q = q_t.to_vec();
+                    let attn = single_query_attention(
+                        &q, &kv_cache.k_cache[li], &kv_cache.v_cache[li],
+                        kv_len, n_heads, n_kv_heads, head_dim,
+                    );
+                    Tensor::from_vec(attn, &[1, q_dim])
+                        .expect("attn tensor")
+                }
+            };
 
-            let q = q_t.to_vec();
-            let attn = single_query_attention(
-                &q,
-                &kv_cache.k_cache[li],
-                &kv_cache.v_cache[li],
-                kv_len,
-                n_heads,
-                n_kv_heads,
-                head_dim,
-            );
-            let attn_t = Tensor::from_vec(attn, &[1, q_dim])
-                .expect("attn tensor")
-                .to_device(self.compute_device.clone())
-                .expect("move attn");
             let attn_proj_t = layer.o_weight.matmul(&attn_t);
 
             // --- FFN branch (runs parallel to attention, same normed) --
