@@ -3776,6 +3776,14 @@ impl CudaKernels {
                 "q4k_gemv_fused_qkv_f32",
                 "q4k_gemv_fused_qkv_bias_f32",
                 "q4k_gemv_fused_gate_up_f32",
+                // Fused residual-add: x_out = x_in + matmul(a, w). Used
+                // by forward_one_gpu_resident for O-proj (post-attention
+                // residual) and down-proj (post-FFN residual).
+                "q4k_gemv_residual_f32",
+                // Fused gate/up + SwiGLU: writes ffn = silu(gate·a)*up·a
+                // directly, skipping the gate_c/up_c intermediates and
+                // the separate swiglu kernel launch.
+                "q4k_gemv_fused_gate_up_swiglu_f32",
             ],
         )?;
 

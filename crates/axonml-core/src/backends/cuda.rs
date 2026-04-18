@@ -1045,6 +1045,94 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Fused Q4_K GEMV + residual add: `x_out[j] = x_in[j] + matmul(a, w_j)`.
+    /// Absorbs the matmul + element-wise residual_add into one kernel — one
+    /// fewer launch per residual site and no intermediate projection buffer
+    /// round trip.
+    pub fn q4k_gemv_residual_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        x_in: &CudaSlice<f32>,
+        x_out: &mut CudaSlice<f32>,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "q4k_gemv_residual: in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q4k_gemv_residual_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q4k_gemv_residual_f32".to_string()))?;
+
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(x_in)
+                .arg(x_out)
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Fused Q4_K gate/up + SwiGLU: writes `ffn[j] = silu(gate_row_j · a) *
+    /// (up_row_j · a)` directly. Saves the two gate_c / up_c intermediate
+    /// buffers and the separate swiglu launch.
+    pub fn q4k_gemv_fused_gate_up_swiglu_f32(
+        &self,
+        gate_w: &CudaSlice<u8>,
+        up_w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        ffn: &mut CudaSlice<f32>,
+        inter: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "fused gate/up+swiglu: in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q4k_gemv_fused_gate_up_swiglu_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q4k_gemv_fused_gate_up_swiglu_f32".to_string()))?;
+
+        // 4 warps per output row (2 gate + 2 up).
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 4;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((inter as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 4 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(gate_w)
+                .arg(up_w)
+                .arg(a)
+                .arg(ffn)
+                .arg(&(inter as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Q6_K GEMM: `c = a @ B^T` where B is stored on-device as Q6_K super-blocks.
     /// Mirrors the Q4_K GEMM launcher — see `q6k_matmul.cu`.
     pub fn q6k_gemm_f32(

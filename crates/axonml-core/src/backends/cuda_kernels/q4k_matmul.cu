@@ -556,3 +556,135 @@ extern "C" __global__ void q4k_gemv_fused_gate_up_f32(
         c[j] = s_partial[row_in_cta * 2u] + s_partial[row_in_cta * 2u + 1u];
     }
 }
+
+// ============================================================================
+// Q4_K GEMV (fused residual): x_out[j] = x_in[j] + matmul(a, w_j). Collapses
+// the matmul + residual_add kernel pair into a single launch and eliminates
+// the temporary output buffer round trip. `x_in` and `x_out` may be the same
+// pointer (in-place residual) — the read happens before the accumulator write.
+//
+// Same warp geometry as q4k_gemv_f32: 2 warps per output row, four chunks per
+// warp, vectorized qs (uint32) + activation (float4) loads.
+// ============================================================================
+extern "C" __global__ void q4k_gemv_residual_f32(
+    const unsigned char* __restrict__ w,
+    const float*         __restrict__ a,
+    const float*         __restrict__ x_in,
+    float*               __restrict__ x_out,
+    unsigned int out_dim,
+    unsigned int in_dim
+) {
+    extern __shared__ float s_partial[];
+
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int j            = blockIdx.x * rows_per_cta + row_in_cta;
+
+    const unsigned int chunk          = lane >> 3;
+    const unsigned int lane_in_ch     = lane & 7u;
+    const unsigned int chunk_byte_off = chunk * 32u + lane_in_ch * 4u;
+    const unsigned int chunk_a_lo     = chunk * 64u + lane_in_ch * 4u;
+    const unsigned int chunk_a_hi     = chunk_a_lo + 32u;
+
+    const unsigned int n_blocks  = in_dim / 256u;
+    const unsigned int row_bytes = n_blocks * 144u;
+
+    float sum = 0.0f;
+    if (j < out_dim) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        sum = q4k_gemv_partial(
+            row, a, b_start, b_end,
+            chunk, chunk_byte_off, chunk_a_lo, chunk_a_hi
+        );
+    }
+    sum = warp_reduce_sum_f32(sum);
+
+    if (lane == 0u) {
+        s_partial[row_in_cta * 2u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (warp_in_row == 0u && lane == 0u && j < out_dim) {
+        float proj = s_partial[row_in_cta * 2u] + s_partial[row_in_cta * 2u + 1u];
+        x_out[j] = x_in[j] + proj;
+    }
+}
+
+// ============================================================================
+// Q4_K GEMV (fused gate/up + SwiGLU): produces ffn[j] = silu(gate_row[j] · a)
+// * (up_row[j] · a) directly, eliminating the gate_c/up_c intermediate
+// buffers and the SwiGLU kernel launch.
+//
+// Layout: each CTA handles `rows_per_cta` output rows (j values). For each j,
+// two warps compute gate[j] (each handles half the super-blocks) and two
+// more warps compute up[j] the same way. Partial sums land in shared memory;
+// warp 0, lane 0 in each row combines them and writes silu(gate)*up to ffn[j].
+//
+// Launch geometry: 4 warps per output row × 32 threads × rows_per_cta =
+// 128 * rows_per_cta threads/CTA. Shared mem: rows_per_cta * 4 floats.
+// Grid: ceil(inter / rows_per_cta).
+// ============================================================================
+extern "C" __global__ void q4k_gemv_fused_gate_up_swiglu_f32(
+    const unsigned char* __restrict__ gate_w,
+    const unsigned char* __restrict__ up_w,
+    const float*         __restrict__ a,
+    float*               __restrict__ ffn,
+    unsigned int inter,
+    unsigned int in_dim
+) {
+    extern __shared__ float s_partial[];
+
+    const unsigned int tid           = threadIdx.x;
+    const unsigned int lane          = tid & 31u;
+    const unsigned int warp_id       = tid >> 5;
+    const unsigned int warps_per_row = 4u;  // 2 for gate, 2 for up
+    const unsigned int row_in_cta    = warp_id / warps_per_row;
+    const unsigned int warp_in_row   = warp_id & 3u;         // 0..3
+    const unsigned int is_up         = warp_in_row >> 1;     // 0 = gate, 1 = up
+    const unsigned int half_sel      = warp_in_row & 1u;     // 0 = first half, 1 = second half
+    const unsigned int rows_per_cta  = blockDim.x / (warps_per_row * 32u);
+    const unsigned int j             = blockIdx.x * rows_per_cta + row_in_cta;
+
+    const unsigned int chunk          = lane >> 3;
+    const unsigned int lane_in_ch     = lane & 7u;
+    const unsigned int chunk_byte_off = chunk * 32u + lane_in_ch * 4u;
+    const unsigned int chunk_a_lo     = chunk * 64u + lane_in_ch * 4u;
+    const unsigned int chunk_a_hi     = chunk_a_lo + 32u;
+
+    const unsigned int n_blocks  = in_dim / 256u;
+    const unsigned int row_bytes = n_blocks * 144u;
+
+    float sum = 0.0f;
+    if (j < inter) {
+        const unsigned char* w = is_up ? up_w : gate_w;
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = half_sel ? half : 0u;
+        const unsigned int b_end   = half_sel ? n_blocks : half;
+        sum = q4k_gemv_partial(
+            row, a, b_start, b_end,
+            chunk, chunk_byte_off, chunk_a_lo, chunk_a_hi
+        );
+    }
+    sum = warp_reduce_sum_f32(sum);
+
+    // Each row has 4 partial-sum slots: [gate_lo, gate_hi, up_lo, up_hi].
+    if (lane == 0u) {
+        s_partial[row_in_cta * 4u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (j < inter && warp_in_row == 0u && lane == 0u) {
+        float gate_val = s_partial[row_in_cta * 4u + 0u] + s_partial[row_in_cta * 4u + 1u];
+        float up_val   = s_partial[row_in_cta * 4u + 2u] + s_partial[row_in_cta * 4u + 3u];
+        float silu_g = gate_val / (1.0f + __expf(-gate_val));
+        ffn[j] = silu_g * up_val;
+    }
+}
