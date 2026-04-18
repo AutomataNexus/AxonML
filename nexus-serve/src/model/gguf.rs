@@ -667,6 +667,84 @@ pub fn dequantize_q6_k(block: &[u8], output: &mut [f32]) {
     }
 }
 
+/// Dequantize a Q5_K block (256 elements per super-block, 176 bytes).
+///
+/// Q5_K layout:
+///   - 2 bytes: d (f16 super-block scale)
+///   - 2 bytes: dmin (f16 super-block min)
+///   - 12 bytes: packed 6-bit scales+mins for 8 sub-blocks (same as Q4_K)
+///   - 32 bytes: qh (high bit of each of the 256 weights, 1 bit/weight)
+///   - 128 bytes: qs (low 4 bits of each weight, 2 per byte)
+///
+/// Each weight = d_sub * ((qs_lo_or_hi_nibble | (qh_bit << 4))) - m_sub,
+/// where the qh bit for weight index i within the super-block is bit
+/// (i/32) of qh[i%32] — the four 64-element iterations shift through
+/// qh bit pairs (1,2), (4,8), (16,32), (64,128).
+///
+/// Reference: llama.cpp ggml-quants.c::dequantize_row_q5_K.
+pub fn dequantize_q5_k(block: &[u8], output: &mut [f32]) {
+    if block.len() < 176 || output.len() < 256 {
+        return;
+    }
+
+    let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
+    let dmin = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
+
+    let scales = &block[4..16];     // 12 bytes
+    let qh = &block[16..48];        // 32 bytes
+    let qs = &block[48..176];       // 128 bytes
+
+    // Same get_scale_min_k4 as Q4_K.
+    #[inline]
+    fn get_scale_min_k4(j: usize, q: &[u8]) -> (u8, u8) {
+        if j < 4 {
+            (q[j] & 63, q[j + 4] & 63)
+        } else {
+            (
+                (q[j + 4] & 0xF) | ((q[j - 4] >> 6) << 4),
+                (q[j + 4] >> 4)  | ((q[j]     >> 6) << 4),
+            )
+        }
+    }
+
+    let mut is = 0usize;
+    let mut u1: u8 = 1;
+    let mut u2: u8 = 2;
+    let mut out_idx = 0usize;
+    let mut ql_offset = 0usize;
+
+    // 4 iterations × 64 elements = 256 weights. Each iteration has its own
+    // pair of qh bit-masks (u1, u2) that shift left by 2 per iteration.
+    for _ in 0..4 {
+        let (sc1, m1) = get_scale_min_k4(is, scales);
+        let d1 = d * sc1 as f32;
+        let min1 = dmin * m1 as f32;
+        let (sc2, m2) = get_scale_min_k4(is + 1, scales);
+        let d2 = d * sc2 as f32;
+        let min2 = dmin * m2 as f32;
+
+        // First 32: low nibble + (qh bit for this iteration's u1-mask).
+        for l in 0..32 {
+            let lo = qs[ql_offset + l] & 0x0F;
+            let hi = if (qh[l] & u1) != 0 { 16u8 } else { 0u8 };
+            output[out_idx] = d1 * ((lo | hi) as f32) - min1;
+            out_idx += 1;
+        }
+        // Next 32: high nibble + (qh bit for this iteration's u2-mask).
+        for l in 0..32 {
+            let lo = (qs[ql_offset + l] >> 4) & 0x0F;
+            let hi = if (qh[l] & u2) != 0 { 16u8 } else { 0u8 };
+            output[out_idx] = d2 * ((lo | hi) as f32) - min2;
+            out_idx += 1;
+        }
+
+        ql_offset += 32;
+        is += 2;
+        u1 <<= 2;
+        u2 <<= 2;
+    }
+}
+
 /// Dequantize F16 values to F32.
 pub fn dequantize_f16(data: &[u8], output: &mut [f32]) {
     for (i, chunk) in data.chunks_exact(2).enumerate() {

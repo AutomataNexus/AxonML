@@ -449,6 +449,16 @@ impl MappedGguf {
                     }
                 }
             }
+            GgmlType::Q5K => {
+                let block_size = 256;
+                let type_size = 176;
+                for (block_idx, chunk) in raw_data.chunks_exact(type_size).enumerate() {
+                    let out_offset = block_idx * block_size;
+                    if out_offset + block_size <= n_elements {
+                        gguf::dequantize_q5_k(chunk, &mut output[out_offset..out_offset + block_size]);
+                    }
+                }
+            }
             GgmlType::Q6K => {
                 let block_size = 256;
                 let type_size = 210;
@@ -3836,11 +3846,17 @@ fn load_weight(mapped: &MappedGguf, name: &str, quantized: bool) -> Result<Weigh
     // every matmul — catastrophic for a tied LM head (e.g. BitNet's 656 MB F16
     // token_embd doubling as the LM head = 1.3 GB of f32 scratch + GEMM per
     // decode token). Keep these eager even under `--quantized`.
+    // Q5K: dequant is supported (CPU-only), but no Q5_K matmul kernel
+    // exists — so we can't take the lazy-dequant path that relies on
+    // the Weight::matmul CUDA dispatch. Force eager dequant to F32 for
+    // Q5_K tensors even under --quantized so matmul works via standard
+    // Tensor::matmul. Costs more CPU RAM per Q5_K tensor (~1.6× the
+    // packed size → f32 floats), but correctness > compactness.
     let is_block_quantized = matches!(
         info.dtype,
         GgmlType::Q4_0 | GgmlType::Q4_1 | GgmlType::Q5_0 | GgmlType::Q5_1
         | GgmlType::Q8_0 | GgmlType::Q8_1 | GgmlType::Q2K | GgmlType::Q3K
-        | GgmlType::Q4K | GgmlType::Q5K | GgmlType::Q6K | GgmlType::Q8K
+        | GgmlType::Q4K | GgmlType::Q6K | GgmlType::Q8K
         | GgmlType::I2S,
     );
 
