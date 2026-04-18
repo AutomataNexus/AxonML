@@ -108,24 +108,38 @@ A conversion utility `tools/axonml_to_gguf.rs` will live in `llm-training/tools/
 
 ## Scope & estimate
 
-| Component | Effort | Notes |
+| Component | Effort | Status |
 |---|---|---|
-| Qwen3 architecture in axonml-llm (training-friendly) | 1-2 days | Adapt from `llama.rs` + add QK-norm |
-| Dataset prep pipeline | 1 day | Download + tokenize + shuffle |
-| Teacher logit generation (via frozen target) | 1 day | Either inline f16 dequant or IPC to nexus-serve |
-| KL+CE loss head + trainer loop | 1 day | Mostly boilerplate on llm-training's scaffolding |
-| GGUF export utility | 0.5 day | Pack + metadata |
-| Training run | 1-2 days | Wall-clock during actual training |
-| Evaluation + iteration | 0.5-1 day | Tune T, α, γ on spec_bench results |
-| **Total** | **~7-10 days** | Plus wall-clock training time |
+| Qwen3 architecture in axonml-llm (training-friendly) | 1-2 days | **DONE** `7065a1b` — `qwen3.rs` with QK-norm, 4/4 tests pass |
+| Dataset prep pipeline | 1 day | TODO — download FineWeb slice, tokenize with Qwen BPE |
+| Teacher logit generation (via frozen target) | 1 day | TODO — dequant target to f16 once, teacher-forward per batch |
+| KL+CE loss head + trainer loop | 1 day | TODO — check if `axonml-nn/src/loss.rs` has KL; add if not |
+| GGUF export utility | 0.5 day | TODO — pack Q4_K + Qwen3 metadata for spec_bench loading |
+| Training run | 1-2 days | TODO — wall-clock during actual training |
+| Evaluation + iteration | 0.5-1 day | TODO — tune T, α, γ on spec_bench results |
+| **Total** | **~6-8 days remaining** | 1 day done |
 
 ## Starting point — where to resume
 
-1. `llm-training/src/bin/train_draft_distill.rs` (stub) — CLI + config struct
-2. Clone `llm-training/src/bin/train_llama.rs` as the starting template
-3. Add Qwen3 architecture module to `axonml-llm` (likely `qwen3.rs`)
-4. Implement KL-divergence loss in `axonml-nn/src/loss.rs` (may already exist — check)
-5. Wire target-logit generator: load DeepSeek-7B as `InferenceEngine` with dequant to f16, run `forward_one` per token, return logits tensor
+1. ~~Add Qwen3 architecture module to `axonml-llm`~~ → `7065a1b` lands `qwen3.rs` with:
+   - `Qwen3Config` (0.6B / 1.7B / 4B / tiny presets; head_dim first-class)
+   - `Qwen3Attention` with q_norm / k_norm applied between reshape-to-heads and RoPE
+   - `Qwen3DecoderLayer`, `Qwen3`, `Qwen3ForCausalLM` with LM-head tying
+   - 4/4 unit tests passing on tiny config
+2. **Next: dataset prep.** Download a 2-4 GB FineWeb slice, tokenize with a Qwen BPE tokenizer (reuse `nexus-serve/src/tokenizer/` or load Qwen3 tokenizer from GGUF), write flat uint32 stream to `/opt/datasets/fineweb-qwen/tokens.bin`.
+3. **Then: teacher logit generator.** Load DeepSeek-R1-Distill-Qwen-7B as a frozen `InferenceEngine` (nexus-serve's `InferenceConfig` + CUDA device). For each training batch, run `forward_batch_gpu_resident` to get teacher logits `[m, 152064]`. Dump to a pinned host buffer for the student's KL-loss head.
+4. **Then: KL + CE loss head.** Check if `axonml-nn/src/loss.rs` has a KL-divergence loss. If not, add `KLDivergenceLoss::new(temperature)` computing `sum(P * (log(P) - log(Q)))` across the vocab axis. Combine with existing `CrossEntropyLoss`:
+   ```
+   loss = 0.1 * CE(student_logits, ground_truth_ids)
+        + 0.9 * KL(teacher_logits / T, student_logits / T) * T²
+   ```
+5. **Then: trainer loop.** Clone `llm-training/src/bin/train_llama.rs` as a template. Replace:
+   - Model: `LLaMAForCausalLM::new(...)` → `Qwen3ForCausalLM::new(&Qwen3Config::qwen3_0_6b())`
+   - Init from pre-trained Qwen3-0.6B GGUF (load_weights against a Qwen3 HF-named state dict derived from the GGUF)
+   - Loss: swap from CE-only to the combined KL+CE above
+   - Optimizer: AdamW lr=3e-4, warmup 500, cosine decay to 10%, grad_clip=1.0
+   - Checkpoint every 1k steps, eval via `spec_bench` every 5k steps
+6. **Then: GGUF export utility.** `llm-training/tools/axonml_to_gguf.rs`. Reads an AxonML state dict, repacks to Q4_K bytes with Qwen3 metadata (`general.architecture = "qwen3"`, proper `.attn_q_norm.weight` / `.attn_k_norm.weight` tensor names), writes a GGUF that `spec_bench` can load as a draft.
 
 ## Related
 
