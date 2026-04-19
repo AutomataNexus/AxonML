@@ -278,16 +278,16 @@ impl Qwen3Attention {
             (k, v)
         };
 
-        // Scaled dot-product attention.
+        // Scaled dot-product attention with fused mul_scalar + causal-mask +
+        // softmax. Three separate autograd ops (+ the CPU-built mask H2D)
+        // collapse into one kernel launch; backward is one kernel too
+        // (SoftmaxCausalScaledBackward, no MulScalarBackward/AddBackward).
         let scale = 1.0 / (self.head_dim as f32).sqrt();
-        let attn_weights = q.matmul(&k.transpose(2, 3)).mul_scalar(scale);
+        let scores = q.matmul(&k.transpose(2, 3));
+        let attn_weights =
+            scores.softmax_causal_scaled(seq_len, total_seq_len, position_offset, scale);
 
-        // Causal mask.
-        let mask = create_causal_mask(seq_len, total_seq_len, position_offset);
-        let attn_weights = attn_weights.add(&Variable::new(mask, false));
-
-        // Softmax + dropout.
-        let attn_weights = attn_weights.softmax(-1);
+        // Dropout (still a separate op — training-only).
         let attn_weights = self.attn_dropout.forward(&attn_weights);
 
         // Compute output and project back to hidden.
@@ -392,6 +392,11 @@ fn repeat_kv(x: &Variable, n_rep: usize) -> Variable {
 
 /// Causal attention mask: `[1, 1, q_len, kv_len]` with `-inf` above the
 /// diagonal of the `(q_pos, k_pos)` square, accounting for position offset.
+///
+/// Kept for reference / tests. The live forward path now uses the fused
+/// `Variable::softmax_causal_scaled`, which bakes the mask into the softmax
+/// kernel and never materializes this tensor.
+#[allow(dead_code)]
 fn create_causal_mask(q_len: usize, kv_len: usize, offset: usize) -> Tensor<f32> {
     let mut mask_data = vec![0.0f32; q_len * kv_len];
     for i in 0..q_len {

@@ -511,6 +511,168 @@ extern "C" __global__ void add_bias_batched_f32(
 }
 
 // ============================================================================
+// Fused causal-scaled softmax (forward)
+//
+// Replaces the qwen3/llama sequence `scores.mul_scalar(scale).add(causal_mask)
+// .softmax(-1)` with one kernel launch. Saves the mask-alloc + H2D per
+// forward call, the mul_scalar kernel, and the broadcast-add kernel.
+//
+// scores shape: [num_rows, tk] where num_rows = B*H*Tq.
+// q_pos within a (B, H) batch = row_idx % tq.
+// For each (row, j): valid if j <= offset + q_pos, else mask to -inf.
+// Effective input: (j > offset + q_pos) ? -INF : (scores[r,j] * scale).
+// Output: softmax along last dim.
+//
+// Launch: grid = (num_rows, 1, 1), block = (blockDim.x, 1, 1),
+// shmem = n_warps * 2 * 4 bytes (running max + exp sum).
+// ============================================================================
+extern "C" __global__ void softmax_causal_scaled_f32(
+    float* __restrict__ out,
+    const float* __restrict__ scores,
+    uint32_t tq,
+    uint32_t tk,
+    uint32_t offset,
+    float scale
+) {
+    extern __shared__ float smem[];
+    const int tid     = threadIdx.x;
+    const int warp_id = tid >> 5;
+    const int lane    = tid & 31;
+    const int n_warps = (blockDim.x + 31) >> 5;
+    const uint32_t row = blockIdx.x;
+    const uint32_t q_pos = row % tq;
+    const uint32_t max_k = offset + q_pos; // inclusive upper bound on valid j
+
+    float* warp_buf = smem; // reused for max then sum
+
+    const float* __restrict__ row_in  = scores + (size_t)row * (size_t)tk;
+    float* __restrict__       row_out = out    + (size_t)row * (size_t)tk;
+
+    // Pass 1: parallel max over valid positions.
+    float local_max = -CUDART_INF_F;
+    for (int j = tid; j < (int)tk; j += blockDim.x) {
+        float v = ((uint32_t)j > max_k) ? -CUDART_INF_F : (row_in[j] * scale);
+        local_max = fmaxf(local_max, v);
+    }
+    #pragma unroll
+    for (int offs = 16; offs > 0; offs >>= 1) {
+        local_max = fmaxf(local_max, __shfl_xor_sync(0xFFFFFFFF, local_max, offs));
+    }
+    if (lane == 0) warp_buf[warp_id] = local_max;
+    __syncthreads();
+    float row_max = -CUDART_INF_F;
+    if (warp_id == 0) {
+        row_max = (lane < n_warps) ? warp_buf[lane] : -CUDART_INF_F;
+        #pragma unroll
+        for (int offs = 16; offs > 0; offs >>= 1) {
+            row_max = fmaxf(row_max, __shfl_xor_sync(0xFFFFFFFF, row_max, offs));
+        }
+        if (lane == 0) warp_buf[0] = row_max;
+    }
+    __syncthreads();
+    row_max = warp_buf[0];
+    __syncthreads();
+
+    // Pass 2: parallel sum of exp(v - row_max) over valid positions.
+    float local_sum = 0.0f;
+    for (int j = tid; j < (int)tk; j += blockDim.x) {
+        if ((uint32_t)j > max_k) continue;
+        float v = row_in[j] * scale;
+        local_sum += expf(v - row_max);
+    }
+    #pragma unroll
+    for (int offs = 16; offs > 0; offs >>= 1) {
+        local_sum += __shfl_xor_sync(0xFFFFFFFF, local_sum, offs);
+    }
+    if (lane == 0) warp_buf[warp_id] = local_sum;
+    __syncthreads();
+    float row_sum = 0.0f;
+    if (warp_id == 0) {
+        row_sum = (lane < n_warps) ? warp_buf[lane] : 0.0f;
+        #pragma unroll
+        for (int offs = 16; offs > 0; offs >>= 1) {
+            row_sum += __shfl_xor_sync(0xFFFFFFFF, row_sum, offs);
+        }
+        if (lane == 0) warp_buf[0] = row_sum;
+    }
+    __syncthreads();
+    float inv_sum = (warp_buf[0] > 0.0f) ? (1.0f / warp_buf[0]) : 0.0f;
+
+    // Pass 3: write normalized outputs; masked positions are exactly 0.
+    for (int j = tid; j < (int)tk; j += blockDim.x) {
+        float out_val;
+        if ((uint32_t)j > max_k) {
+            out_val = 0.0f;
+        } else {
+            float v = row_in[j] * scale;
+            out_val = expf(v - row_max) * inv_sum;
+        }
+        row_out[j] = out_val;
+    }
+}
+
+// ============================================================================
+// Fused causal-scaled softmax (backward, wrt raw scores)
+//
+// Given forward output `p` (masked positions already 0) and upstream gradient
+// `grad_out`, produces `grad_scores` such that
+//   grad_scores[r, j] = scale * p[r, j] * (grad_out[r, j] - Σ_k p[r, k] * grad_out[r, k])
+// No mask check needed in the write because p[r, j] is 0 for masked positions,
+// which makes the whole expression 0 automatically.
+//
+// Launch: grid = (num_rows, 1, 1), block = (blockDim.x, 1, 1),
+// shmem = n_warps * 4 bytes.
+// ============================================================================
+extern "C" __global__ void softmax_causal_scaled_bwd_f32(
+    float* __restrict__ grad_scores,
+    const float* __restrict__ p,
+    const float* __restrict__ grad_out,
+    uint32_t tk,
+    float scale
+) {
+    extern __shared__ float smem[];
+    const int tid     = threadIdx.x;
+    const int warp_id = tid >> 5;
+    const int lane    = tid & 31;
+    const int n_warps = (blockDim.x + 31) >> 5;
+    const uint32_t row = blockIdx.x;
+
+    const float* __restrict__ p_row   = p        + (size_t)row * (size_t)tk;
+    const float* __restrict__ g_row   = grad_out + (size_t)row * (size_t)tk;
+    float* __restrict__       gs_row  = grad_scores + (size_t)row * (size_t)tk;
+
+    // Parallel dot(p, grad_out). Masked positions contribute 0 because p=0.
+    float local_dot = 0.0f;
+    for (int j = tid; j < (int)tk; j += blockDim.x) {
+        local_dot += p_row[j] * g_row[j];
+    }
+    #pragma unroll
+    for (int offs = 16; offs > 0; offs >>= 1) {
+        local_dot += __shfl_xor_sync(0xFFFFFFFF, local_dot, offs);
+    }
+    if (lane == 0) smem[warp_id] = local_dot;
+    __syncthreads();
+    float dot = 0.0f;
+    if (warp_id == 0) {
+        dot = (lane < n_warps) ? smem[lane] : 0.0f;
+        #pragma unroll
+        for (int offs = 16; offs > 0; offs >>= 1) {
+            dot += __shfl_xor_sync(0xFFFFFFFF, dot, offs);
+        }
+        if (lane == 0) smem[0] = dot;
+    }
+    __syncthreads();
+    dot = smem[0];
+
+    // Write grad_scores. Chain rule: scale * p * (grad_out - dot).
+    for (int j = tid; j < (int)tk; j += blockDim.x) {
+        float pj = p_row[j];
+        float gj = g_row[j];
+        gs_row[j] = scale * pj * (gj - dot);
+    }
+}
+
+// ============================================================================
 // RMSNorm backward (batched, grad_input only)
 //
 // Forward: y_i = (x_i / rms) * w_i  with rms = sqrt(mean(x²) + eps)
