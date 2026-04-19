@@ -315,6 +315,11 @@ pub struct TrainingLifecycleBuilder {
     batch_size: usize,
     checkpoint_every_steps: u64,
     keep_last_k: usize,
+    /// When true, spawn the `nexus-training-ticker` desktop widget as a
+    /// detached child process after the control socket and monitor are
+    /// both up. The browser monitor stays on regardless — the ticker is
+    /// an additional compact viewer for the same run.
+    ticker: bool,
 }
 
 impl TrainingLifecycleBuilder {
@@ -347,6 +352,14 @@ impl TrainingLifecycleBuilder {
     /// How many rotating step-level checkpoints to keep on disk.
     pub fn keep_last_k(mut self, n: usize) -> Self {
         self.keep_last_k = n;
+        self
+    }
+    /// Spawn the `nexus-training-ticker` desktop widget for this run.
+    /// The widget attaches to the control socket via `AXONML_TICKER_SOCKET`
+    /// and polls the browser monitor's `/api/metrics` for live loss curves.
+    /// Browser monitor is unaffected — it stays on either way.
+    pub fn ticker(mut self, enabled: bool) -> Self {
+        self.ticker = enabled;
         self
     }
 
@@ -395,6 +408,21 @@ impl TrainingLifecycleBuilder {
             }
         };
 
+        // Spawn the desktop ticker widget if requested. The ticker is a
+        // detached child — we don't wait on it, and its death doesn't
+        // affect training. We pass the socket path via env var so it
+        // connects to *this* run rather than guessing via LATEST_SOCKET.
+        if self.ticker {
+            if let Some(socket_path) = &socket {
+                spawn_training_ticker(socket_path);
+            } else {
+                eprintln!(
+                    "[lifecycle] WARN: --ticker requested but control socket \
+                     failed to start; skipping ticker spawn"
+                );
+            }
+        }
+
         TrainingLifecycle {
             flags,
             monitor,
@@ -434,6 +462,7 @@ impl TrainingLifecycle {
             batch_size: 1,
             checkpoint_every_steps: 0,
             keep_last_k: 5,
+            ticker: false,
         }
     }
 
@@ -675,6 +704,70 @@ impl Drop for TrainingLifecycle {
         }
         let _ = fs::remove_file(LATEST_SOCKET);
     }
+}
+
+// =============================================================================
+// Desktop ticker spawn
+// =============================================================================
+
+/// Spawn `nexus-training-ticker` as a detached child, passing the socket
+/// path via `AXONML_TICKER_SOCKET`. Best-effort — if the binary isn't
+/// built or isn't on PATH, we log a warning and continue training.
+///
+/// Search order:
+/// 1. `NEXUS_TRAINING_TICKER_BIN` env var (absolute path)
+/// 2. Cargo workspace release build at
+///    `/opt/AxonML/nexus-agent/target/release/nexus-training-ticker`
+/// 3. `nexus-training-ticker` on `$PATH`
+fn spawn_training_ticker(socket_path: &Path) {
+    let candidates: Vec<PathBuf> = {
+        let mut v = Vec::new();
+        if let Ok(p) = std::env::var("NEXUS_TRAINING_TICKER_BIN") {
+            v.push(PathBuf::from(p));
+        }
+        v.push(PathBuf::from(
+            "/opt/AxonML/nexus-agent/target/release/nexus-training-ticker",
+        ));
+        v.push(PathBuf::from("nexus-training-ticker"));
+        v
+    };
+
+    for bin in &candidates {
+        // For absolute paths, require the file to exist before trying to
+        // spawn. For bare names, let the OS resolve via PATH.
+        if bin.is_absolute() && !bin.exists() {
+            continue;
+        }
+        match std::process::Command::new(bin)
+            .env("AXONML_TICKER_SOCKET", socket_path)
+            // Detach stdio so the child doesn't hold the tty open after
+            // training exits. Stderr is kept for the first second or two
+            // worth of crash output via the inherited handle, which is
+            // fine — it just goes to the same tty training uses.
+            .stdin(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                eprintln!(
+                    "[lifecycle] spawned training ticker (pid {}) → {}",
+                    child.id(),
+                    bin.display(),
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!(
+                    "[lifecycle] ticker spawn failed for {}: {e}",
+                    bin.display()
+                );
+                // fall through to next candidate
+            }
+        }
+    }
+    eprintln!(
+        "[lifecycle] WARN: could not spawn nexus-training-ticker — build it via \
+         `cargo build --release -p nexus-agent --bin nexus-training-ticker`"
+    );
 }
 
 // =============================================================================

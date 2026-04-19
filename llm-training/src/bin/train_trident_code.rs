@@ -169,6 +169,10 @@ struct Config {
     resume: ResumeMode,
     checkpoint_every_steps: u64,
     keep_last_k: usize,
+    /// When set via `--ticker`, lifecycle spawns the
+    /// `nexus-training-ticker` desktop widget after the control socket and
+    /// browser monitor are up. Browser monitor is unaffected.
+    ticker: bool,
 }
 
 fn default_seq_len(variant: ModelVariant) -> usize {
@@ -243,6 +247,7 @@ impl Config {
             resume: ResumeMode::Latest,
             checkpoint_every_steps: default_checkpoint_every(variant),
             keep_last_k: 5,
+            ticker: false,
         };
 
         // Second pass: apply all args.
@@ -311,6 +316,9 @@ impl Config {
                     i += 1;
                     cfg.keep_last_k = args[i].parse().unwrap();
                 }
+                "--ticker" => {
+                    cfg.ticker = true;
+                }
                 "--help" | "-h" => {
                     print_help();
                     std::process::exit(0);
@@ -353,6 +361,9 @@ Options:
   --checkpoint-every-steps N   Rotating step-level checkpoint every N steps
                                (default: 0 smoke, 1000 1b/3b)
   --keep-last-k N      Keep last N step checkpoints on disk (default: 5)
+  --ticker             Also spawn the nexus-training-ticker desktop widget
+                       (compact live loss + pause/stop/checkpoint controls).
+                       Browser monitor stays on either way.
   --help, -h           Show help"#
     );
 }
@@ -574,6 +585,7 @@ fn main() {
         .batch_size(cfg.batch_size)
         .checkpoint_every_steps(cfg.checkpoint_every_steps)
         .keep_last_k(cfg.keep_last_k)
+        .ticker(cfg.ticker)
         .start();
     println!();
 
