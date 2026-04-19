@@ -132,6 +132,33 @@ impl CudaBackend {
         unsafe {
             ctx.disable_event_tracking();
         }
+
+        // Set the device's default memory pool release threshold to
+        // "never free below this many bytes", i.e. UINT64_MAX. Without
+        // this, `cuMemAllocAsync` (which cudarc's `stream.alloc_*` calls)
+        // can free memory back to the driver between calls; under CUDA
+        // graph capture, subsequent allocations would re-enter the
+        // driver's memory-pool service stream and trigger
+        // STREAM_CAPTURE_ISOLATION. Keeping everything pool-resident
+        // makes the alloc path pool-hit-dominant and capture-friendly.
+        let dev_idx = device_index as i32;
+        unsafe {
+            use cudarc::driver::sys::{
+                CUmemPool_attribute, cuDeviceGetDefaultMemPool, cuMemPoolSetAttribute,
+            };
+            let mut pool: cudarc::driver::sys::CUmemoryPool = std::ptr::null_mut();
+            if cuDeviceGetDefaultMemPool(&mut pool, dev_idx)
+                == cudarc::driver::sys::CUresult::CUDA_SUCCESS
+                && !pool.is_null()
+            {
+                let threshold: u64 = u64::MAX;
+                let _ = cuMemPoolSetAttribute(
+                    pool,
+                    CUmemPool_attribute::CU_MEMPOOL_ATTR_RELEASE_THRESHOLD,
+                    &threshold as *const u64 as *mut std::ffi::c_void,
+                );
+            }
+        }
         // Use a non-default (named) stream so downstream callers can do
         // `stream.begin_capture(...)` for CUDA graph capture of hot-path
         // work — the default (NULL) stream cannot be captured. Performance

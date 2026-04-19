@@ -64,6 +64,87 @@ fn main() {
         run_depth(chain_depth);
         println!();
     }
+    println!("\n=== WITH POOL ALLOCATIONS (Tensor::add inside capture) ===");
+    run_tensor_api_capture();
+}
+
+/// Capture a chain of `Tensor::add` calls — i.e. the fully pooled, allocated
+/// path — not pre-bound ping-pong buffers. This tests whether the mempool-
+/// release-threshold work + event-tracking disable together make the normal
+/// allocating path capture-safe.
+fn run_tensor_api_capture() {
+    use axonml_core::backends::cuda::{cuda_sync, get_cuda_backend};
+    use cudarc::driver::sys::{CUgraphInstantiate_flags, CUstreamCaptureMode};
+
+    let n_elems = 1_048_576;
+    let chain_depth = 20;
+    let device = Device::Cuda(0);
+
+    let a0 = mkrand(&[n_elems], 0.11, device);
+    let b = mkrand(&[n_elems], 0.07, device);
+
+    // Pre-warm the pool so every bucket the captured path touches is
+    // cached. `pool_alloc_uninit` then takes the Rust-only pool-hit path
+    // (`upgrade_device_ptr`) with no CUDA API calls at all — trivially
+    // graph-safe.
+    for _ in 0..10 {
+        let mut x = a0.clone();
+        for _ in 0..chain_depth {
+            x = x.add(&b).unwrap();
+        }
+        std::hint::black_box(x);
+    }
+    cuda_sync();
+
+    let cuda = get_cuda_backend().expect("CUDA backend required");
+    let stream = cuda.stream();
+
+    cuda_sync();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        stream
+            .begin_capture(CUstreamCaptureMode::CU_STREAM_CAPTURE_MODE_RELAXED)
+            .expect("begin_capture failed");
+        let mut x = a0.clone();
+        for _ in 0..chain_depth {
+            x = x.add(&b).unwrap();
+        }
+        let graph = stream
+            .end_capture(CUgraphInstantiate_flags::CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH)
+            .expect("end_capture failed")
+            .expect("graph empty");
+        (graph, x)
+    }));
+
+    match result {
+        Ok((graph, _final)) => {
+            cuda_sync();
+            let n_iter = 100;
+            let t = Instant::now();
+            for _ in 0..n_iter {
+                graph.launch().expect("graph launch failed");
+            }
+            cuda_sync();
+            let graph_us = t.elapsed().as_micros() as f64 / n_iter as f64;
+            println!(
+                "Tensor::add chain capture+replay (depth={chain_depth}) = {graph_us:.1} µs/iter"
+            );
+        }
+        Err(e) => {
+            println!("Capture of Tensor::add chain FAILED:");
+            if let Some(s) = e.downcast_ref::<String>() {
+                println!("  {s}");
+            } else if let Some(s) = e.downcast_ref::<&'static str>() {
+                println!("  {s}");
+            }
+            println!(
+                "Expected: pool hit path should be allocation-free and graph-safe.\n\
+                 Actual panic means either (a) a bucket the chain uses wasn't\n\
+                 warmed (check pool stats), or (b) cuMemAllocAsync ran under\n\
+                 capture anyway (driver didn't honor the release-threshold\n\
+                 attr, or the bucket-size calc disagrees)."
+            );
+        }
+    }
 }
 
 fn run_depth(chain_depth: usize) {
