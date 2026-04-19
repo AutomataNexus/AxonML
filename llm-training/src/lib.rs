@@ -56,9 +56,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use axonml_autograd::Variable;
-use axonml_nn::loss::CrossEntropyLoss;
 use axonml_nn::Module;
-use axonml_serialize::{load_checkpoint, Checkpoint, TrainingState};
+use axonml_nn::loss::CrossEntropyLoss;
+use axonml_serialize::{Checkpoint, TrainingState, load_checkpoint};
 use axonml_tensor::Tensor;
 
 // =============================================================================
@@ -115,12 +115,7 @@ impl CharTokenizer {
     /// Decode a sequence of token IDs back into a string.
     pub fn decode(&self, ids: &[u32]) -> String {
         ids.iter()
-            .map(|&id| {
-                self.id_to_char
-                    .get(id as usize)
-                    .copied()
-                    .unwrap_or('\0')
-            })
+            .map(|&id| self.id_to_char.get(id as usize).copied().unwrap_or('\0'))
             .collect()
     }
 }
@@ -266,7 +261,11 @@ pub fn find_checkpoint(output_dir: &Path, mode: &ResumeMode) -> Option<PathBuf> 
             if p.exists() { Some(p) } else { None }
         }
         ResumeMode::Path(p) => {
-            if p.exists() { Some(p.clone()) } else { None }
+            if p.exists() {
+                Some(p.clone())
+            } else {
+                None
+            }
         }
     }
 }

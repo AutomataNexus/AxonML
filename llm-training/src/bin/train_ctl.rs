@@ -111,8 +111,10 @@ fn main() {
             }
             "--pid" => {
                 i += 1;
-                socket_override =
-                    Some(PathBuf::from(format!("/tmp/axonml-train-{}.sock", &argv[i])));
+                socket_override = Some(PathBuf::from(format!(
+                    "/tmp/axonml-train-{}.sock",
+                    &argv[i]
+                )));
             }
             "--help" | "-h" => print_help(),
             "list" => {

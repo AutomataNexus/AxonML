@@ -6,8 +6,8 @@
 use std::path::{Path, PathBuf};
 
 use axonml_llm::{
-    export_qwen3_to_gguf, load_qwen3_from_gguf, read_gguf_metadata_raw_bytes,
-    Qwen3Config, Qwen3ForCausalLM,
+    Qwen3Config, Qwen3ForCausalLM, export_qwen3_to_gguf, load_qwen3_from_gguf,
+    read_gguf_metadata_raw_bytes,
 };
 
 fn main() {
@@ -26,11 +26,12 @@ fn main() {
     // Pick a tokenizer-source GGUF if the environment has one handy, so
     // we exercise the metadata-passthrough path in addition to the
     // tokenizer-less (None) path.
-    let tokenizer_source: Option<PathBuf> =
-        std::env::var("TOKENIZER_SOURCE_GGUF").ok().map(PathBuf::from).or_else(|| {
-            let default = PathBuf::from(
-                "/opt/AxonML/models/qwen3-1.7b/Qwen_Qwen3-1.7B-Q4_K_M.gguf",
-            );
+    let tokenizer_source: Option<PathBuf> = std::env::var("TOKENIZER_SOURCE_GGUF")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            let default =
+                PathBuf::from("/opt/AxonML/models/qwen3-1.7b/Qwen_Qwen3-1.7B-Q4_K_M.gguf");
             default.exists().then_some(default)
         });
 
@@ -76,10 +77,18 @@ fn main() {
             let a = params[i].data().to_vec();
             let b = reloaded_params[i].data().to_vec();
             let take = a.len().min(b.len()).min(100);
-            let diff: f32 = a.iter().zip(b.iter()).take(take).map(|(x, y)| (x - y).abs()).sum::<f32>() / take as f32;
+            let diff: f32 = a
+                .iter()
+                .zip(b.iter())
+                .take(take)
+                .map(|(x, y)| (x - y).abs())
+                .sum::<f32>()
+                / take as f32;
             println!(
                 "  param[{i}]: len_orig={} len_reload={} mean_abs_diff(first {take})={:.6}",
-                a.len(), b.len(), diff
+                a.len(),
+                b.len(),
+                diff
             );
         }
     }

@@ -57,15 +57,15 @@ use std::time::Instant;
 
 use axonml_autograd::Variable;
 use axonml_llm::{BertConfig, BertForMaskedLM};
-use axonml_nn::loss::CrossEntropyLoss;
 use axonml_nn::Module;
+use axonml_nn::loss::CrossEntropyLoss;
 use axonml_optim::{Adam, Optimizer};
 use axonml_serialize::TrainingState;
 use axonml_tensor::Tensor;
 
 use llm_training::{
-    find_checkpoint, format_count, lcg_range, load_model_from_checkpoint, read_corpus,
-    CharTokenizer, LoopAction, ResumeMode, TextDataset, TrainingLifecycle,
+    CharTokenizer, LoopAction, ResumeMode, TextDataset, TrainingLifecycle, find_checkpoint,
+    format_count, lcg_range, load_model_from_checkpoint, read_corpus,
 };
 
 // =============================================================================
@@ -144,25 +144,81 @@ impl Config {
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
-                "--corpus" => { i += 1; cfg.corpus = PathBuf::from(&args[i]); }
-                "--out" => { i += 1; cfg.output_dir = PathBuf::from(&args[i]); }
-                "--seq-len" => { i += 1; cfg.seq_len = args[i].parse().unwrap(); }
-                "--hidden" | "--d-model" => { i += 1; cfg.hidden = args[i].parse().unwrap(); }
-                "--intermediate" | "--ffn" => { i += 1; cfg.intermediate = args[i].parse().unwrap(); }
-                "--layers" => { i += 1; cfg.num_layers = args[i].parse().unwrap(); }
-                "--heads" => { i += 1; cfg.num_heads = args[i].parse().unwrap(); }
-                "--bs" | "--batch-size" => { i += 1; cfg.batch_size = args[i].parse().unwrap(); }
-                "--epochs" => { i += 1; cfg.epochs = args[i].parse().unwrap(); }
-                "--lr" => { i += 1; cfg.lr = args[i].parse().unwrap(); }
-                "--steps" => { i += 1; cfg.steps_per_epoch = args[i].parse().unwrap(); }
-                "--log-every" => { i += 1; cfg.log_every = args[i].parse().unwrap(); }
-                "--mlm-prob" => { i += 1; cfg.mlm_prob = args[i].parse().unwrap(); }
-                "--seed" => { i += 1; cfg.seed = args[i].parse().unwrap(); }
-                "--resume" => { i += 1; cfg.resume = ResumeMode::from_str(&args[i]); }
-                "--fresh" => { cfg.resume = ResumeMode::None; }
-                "--checkpoint-every-steps" => { i += 1; cfg.checkpoint_every_steps = args[i].parse().unwrap(); }
-                "--keep-last-k" => { i += 1; cfg.keep_last_k = args[i].parse().unwrap(); }
-                "--help" | "-h" => { print_help(); std::process::exit(0); }
+                "--corpus" => {
+                    i += 1;
+                    cfg.corpus = PathBuf::from(&args[i]);
+                }
+                "--out" => {
+                    i += 1;
+                    cfg.output_dir = PathBuf::from(&args[i]);
+                }
+                "--seq-len" => {
+                    i += 1;
+                    cfg.seq_len = args[i].parse().unwrap();
+                }
+                "--hidden" | "--d-model" => {
+                    i += 1;
+                    cfg.hidden = args[i].parse().unwrap();
+                }
+                "--intermediate" | "--ffn" => {
+                    i += 1;
+                    cfg.intermediate = args[i].parse().unwrap();
+                }
+                "--layers" => {
+                    i += 1;
+                    cfg.num_layers = args[i].parse().unwrap();
+                }
+                "--heads" => {
+                    i += 1;
+                    cfg.num_heads = args[i].parse().unwrap();
+                }
+                "--bs" | "--batch-size" => {
+                    i += 1;
+                    cfg.batch_size = args[i].parse().unwrap();
+                }
+                "--epochs" => {
+                    i += 1;
+                    cfg.epochs = args[i].parse().unwrap();
+                }
+                "--lr" => {
+                    i += 1;
+                    cfg.lr = args[i].parse().unwrap();
+                }
+                "--steps" => {
+                    i += 1;
+                    cfg.steps_per_epoch = args[i].parse().unwrap();
+                }
+                "--log-every" => {
+                    i += 1;
+                    cfg.log_every = args[i].parse().unwrap();
+                }
+                "--mlm-prob" => {
+                    i += 1;
+                    cfg.mlm_prob = args[i].parse().unwrap();
+                }
+                "--seed" => {
+                    i += 1;
+                    cfg.seed = args[i].parse().unwrap();
+                }
+                "--resume" => {
+                    i += 1;
+                    cfg.resume = ResumeMode::from_str(&args[i]);
+                }
+                "--fresh" => {
+                    cfg.resume = ResumeMode::None;
+                }
+                "--checkpoint-every-steps" => {
+                    i += 1;
+                    cfg.checkpoint_every_steps = args[i].parse().unwrap();
+                }
+                "--keep-last-k" => {
+                    i += 1;
+                    cfg.keep_last_k = args[i].parse().unwrap();
+                }
+                "--help" | "-h" => {
+                    print_help();
+                    std::process::exit(0);
+                }
                 other => {
                     eprintln!("Unknown argument: {other}");
                     print_help();
@@ -176,7 +232,8 @@ impl Config {
 }
 
 fn print_help() {
-    println!(r#"Train BERT (Masked LM) on a text corpus.
+    println!(
+        r#"Train BERT (Masked LM) on a text corpus.
 
 Usage: train_bert [OPTIONS]
 
@@ -199,7 +256,8 @@ Options:
   --fresh             Equivalent to --resume none
   --checkpoint-every-steps N   Rotating step-level checkpoint every N steps (0 = off)
   --keep-last-k N     Keep last N step checkpoints on disk (default: 5)
-  --help, -h          Show help"#);
+  --help, -h          Show help"#
+    );
 }
 
 // =============================================================================
@@ -281,7 +339,11 @@ fn mlm_loss(logits: &Variable, labels: &[u32], vocab_size: usize) -> Variable {
     for (i, &l) in labels.iter().enumerate() {
         if l != IGNORE_INDEX {
             active_indices.push(i);
-            active_labels.push(if (l as usize) < vocab_size { l as f32 } else { 0.0 });
+            active_labels.push(if (l as usize) < vocab_size {
+                l as f32
+            } else {
+                0.0
+            });
         }
     }
 
@@ -336,7 +398,11 @@ fn main() {
 
     // ---- Load corpus ----
     let corpus_text = read_corpus(&cfg.corpus);
-    println!("Corpus: {} ({} chars)", cfg.corpus.display(), format_count(corpus_text.len()));
+    println!(
+        "Corpus: {} ({} chars)",
+        cfg.corpus.display(),
+        format_count(corpus_text.len())
+    );
 
     // ---- Tokenizer + dataset ----
     // BERT needs a [MASK] token that isn't any natural character. We use the
@@ -417,11 +483,18 @@ fn main() {
 
     println!("Training:");
     println!("  batch     : {}", cfg.batch_size);
-    println!("  epochs    : {} (starting at {})", cfg.epochs, start_epoch + 1);
+    println!(
+        "  epochs    : {} (starting at {})",
+        cfg.epochs,
+        start_epoch + 1
+    );
     println!("  steps/ep  : {}", cfg.steps_per_epoch);
     println!("  lr        : {}", cfg.lr);
     println!();
-    println!("{:>6} {:>8} {:>10} {:>10} {:>10}", "Epoch", "Step", "Loss", "PPL", "Time");
+    println!(
+        "{:>6} {:>8} {:>10} {:>10} {:>10}",
+        "Epoch", "Step", "Loss", "PPL", "Time"
+    );
     println!("{}", "-".repeat(50));
 
     let mut best_loss = training_state.best_metric.unwrap_or(f32::MAX);
@@ -465,11 +538,8 @@ fn main() {
             );
 
             // u32 token tensor stays on CPU — embedding layer handles CPU→GPU
-            let input_ids = Tensor::<u32>::from_vec(
-                masked_tokens,
-                &[cfg.batch_size, cfg.seq_len],
-            )
-            .unwrap();
+            let input_ids =
+                Tensor::<u32>::from_vec(masked_tokens, &[cfg.batch_size, cfg.seq_len]).unwrap();
 
             // Forward: masked input → logits [B, S, V]
             optimizer.zero_grad();
