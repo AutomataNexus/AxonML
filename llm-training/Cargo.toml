@@ -75,3 +75,7 @@ path = "src/bin/train_ctl.rs"
 [[bin]]
 name = "train_trident_code"
 path = "src/bin/train_trident_code.rs"
+
+[[bin]]
+name = "profile_train_step"
+path = "src/bin/profile_train_step.rs"
