@@ -141,9 +141,9 @@ impl LLaMAConfig {
 #[derive(Debug)]
 pub struct RMSNorm {
     /// Learnable scale parameter
-    weight: Tensor<f32>,
+    pub weight: Tensor<f32>,
     /// Epsilon for numerical stability
-    eps: f32,
+    pub eps: f32,
     /// Hidden size (used for serialization/debug)
     pub hidden_size: usize,
 }
@@ -386,6 +386,7 @@ impl RotaryEmbedding {
                 sin_cached: self.sin_cached.clone(),
                 rope_dim: self.dim,
                 position_offset,
+                theta: self.theta,
             });
             Variable::from_operation(q_rotated, grad_fn, true)
         } else {
@@ -399,6 +400,7 @@ impl RotaryEmbedding {
                 sin_cached: self.sin_cached.clone(),
                 rope_dim: self.dim,
                 position_offset,
+                theta: self.theta,
             });
             Variable::from_operation(k_rotated, grad_fn, true)
         } else {
@@ -418,6 +420,16 @@ impl RotaryEmbedding {
         let shape = x.shape();
         let batch_size = shape[0];
         let num_heads = shape[1];
+
+        // GPU fast path: one kernel launch, no D2H round-trip. Matches the
+        // head-major `[bs, n_heads, seq, head_dim]` layout Qwen3/LLaMA
+        // produces after their reshape+transpose chain.
+        if x.device().is_gpu() {
+            return x.apply_rope_split_halves_bhsd(
+                batch_size, num_heads, seq_len, head_dim, self.theta, offset,
+            );
+        }
+
         let x_vec = x.to_vec();
         // Only copy the needed slice of cached cos/sin tables for positions [offset..offset+seq_len]
         let cos_slice = self.cos_cached.narrow(0, offset, seq_len).unwrap();
@@ -468,6 +480,8 @@ struct RoPEBackward {
     sin_cached: Tensor<f32>,
     rope_dim: usize,
     position_offset: usize,
+    /// RoPE theta, used by the GPU kernel to recompute angles on device.
+    theta: f32,
 }
 
 impl GradientFunction for RoPEBackward {
@@ -478,6 +492,19 @@ impl GradientFunction for RoPEBackward {
         let seq_len = shape[2];
         let head_dim = shape[3];
         let half_dim = head_dim / 2;
+
+        // GPU fast path: single kernel, no D2H round-trip.
+        if grad_output.device().is_gpu() {
+            let gi = grad_output.rope_split_halves_bhsd_bwd(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                self.theta,
+                self.position_offset,
+            );
+            return vec![Some(gi)];
+        }
 
         let g_vec = grad_output.to_vec();
         // Only copy the needed slice of cached cos/sin tables

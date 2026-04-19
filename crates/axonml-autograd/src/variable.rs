@@ -977,16 +977,31 @@ impl Variable {
         }
     }
 
-    /// Fused residual-add + batched RMSNorm.
+    /// Fused residual-add + batched RMSNorm, returning **both** outputs.
     ///
-    /// Returns `RMSNorm(self + b, weight)` reshaped to the original per-token
-    /// layout. `self` and `b` must have the same shape `[..., n]` where `n`
-    /// matches `weight.len()`. Replaces the Qwen3 per-layer
-    /// `residual.add_var(&x).rms_norm(w)` chain with one kernel forward + one
-    /// kernel backward — saves a broadcast-add launch and the intermediate
-    /// sum tensor allocation.
+    /// Returns `(normed, sum)` where `normed = RMSNorm(self + b, weight)` and
+    /// `sum = self + b`. Both tensors come from a single fused kernel — the
+    /// raw sum is a free byproduct. Each return Variable has its own GradFn
+    /// that back-propagates through `a` and `b`:
+    ///
+    /// * `normed` uses `AddRMSNormBackward` (runs the RMSNorm gradient on the
+    ///   saved sum, sends the same tensor to both `a` and `b` since d(a+b)/da=1).
+    /// * `sum` uses the existing `AddBackward` (gradient flows through unchanged
+    ///   to `a` and `b` with broadcast-reduce if shapes differ).
+    ///
+    /// During backward, gradients from both outputs accumulate independently
+    /// at `a.grad` and `b.grad` — standard autograd behavior for shared inputs.
+    ///
+    /// This two-output form lets callers (e.g. Qwen3DecoderLayer's pre-norm
+    /// residual block) consume the normalized tensor for the main branch and
+    /// the raw sum as the MLP residual without redundant recomputation.
     #[must_use]
-    pub fn add_rmsnorm(&self, b: &Variable, weight: &Tensor<f32>, eps: f32) -> Variable {
+    pub fn add_rmsnorm_split(
+        &self,
+        b: &Variable,
+        weight: &Tensor<f32>,
+        eps: f32,
+    ) -> (Variable, Variable) {
         let a_data = self.data.read().clone();
         let b_data = b.data.read().clone();
         let shape = a_data.shape().to_vec();
@@ -994,7 +1009,6 @@ impl Variable {
         let n = *shape.last().expect("add_rmsnorm: empty shape");
         let m: usize = shape.iter().take(shape.len() - 1).product();
 
-        // Reshape to 2D for the kernel, then reshape output back.
         let a_2d = a_data
             .reshape(&[m as isize, n as isize])
             .expect("add_rmsnorm: reshape a");
@@ -1014,23 +1028,47 @@ impl Variable {
         let shape_isize: Vec<isize> = shape.iter().map(|&s| s as isize).collect();
         let out = out_2d
             .reshape(&shape_isize)
-            .expect("add_rmsnorm: reshape output");
+            .expect("add_rmsnorm: reshape normed output");
+        let sum = sum_2d
+            .reshape(&shape_isize)
+            .expect("add_rmsnorm: reshape sum output");
 
         let requires_grad = (self.requires_grad || b.requires_grad) && is_grad_enabled();
         if requires_grad {
-            let grad_fn = GradFn::new(AddRMSNormBackward::new(
+            // Normalized output — RMSNorm-aware gradient path.
+            let normed_fn = GradFn::new(AddRMSNormBackward::new(
                 self.grad_fn.clone(),
                 b.grad_fn.clone(),
                 sum_2d,
                 weight_dev,
+                shape.clone(),
                 m,
                 n,
                 eps,
             ));
-            Variable::from_operation(out, grad_fn, true)
+            let normed_var = Variable::from_operation(out, normed_fn, true);
+
+            // Sum output — vanilla add-style gradient, flows through.
+            let sum_fn = GradFn::new(AddBackward::new(
+                self.grad_fn.clone(),
+                b.grad_fn.clone(),
+                shape.clone(),
+                shape.clone(),
+            ));
+            let sum_var = Variable::from_operation(sum, sum_fn, true);
+
+            (normed_var, sum_var)
         } else {
-            Variable::from_tensor(out)
+            (Variable::from_tensor(out), Variable::from_tensor(sum))
         }
+    }
+
+    /// Single-output variant: returns only the normalized output of
+    /// `RMSNorm(self + b, weight)`. Useful when the raw sum isn't needed on
+    /// the forward path. See `add_rmsnorm_split` for the two-output form.
+    #[must_use]
+    pub fn add_rmsnorm(&self, b: &Variable, weight: &Tensor<f32>, eps: f32) -> Variable {
+        self.add_rmsnorm_split(b, weight, eps).0
     }
 
     /// Fused SwiGLU: `y = SiLU(self) * up`, where `self` is the gate. Replaces

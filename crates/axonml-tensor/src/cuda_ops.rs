@@ -4229,6 +4229,128 @@ impl Tensor<f32> {
         }
     }
 
+    /// Head-major split-halves RoPE backward. `self` is `grad_output`
+    /// shape `[bs, n_heads, seq, head_dim]`. Returns `grad_input`.
+    pub(crate) fn rope_split_halves_bhsd_bwd_cuda(
+        &self,
+        bs: usize,
+        n_heads: usize,
+        seq: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Self {
+        let g = self.contiguous_gpu();
+        let total = bs * n_heads * seq * head_dim;
+        debug_assert_eq!(g.numel(), total);
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let g_guard = g.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
+
+        cuda.rope_split_halves_bhsd_bwd_f32(
+            &mut out,
+            g_guard.slice(),
+            bs,
+            n_heads,
+            seq,
+            head_dim,
+            theta,
+            pos_start,
+        )
+        .expect("CUDA rope_split_halves_bhsd_bwd_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, total, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
+    /// GQA repeat_kv on GPU: expand `[bs, kv_heads, seq, head_dim]` to
+    /// `[bs, kv_heads * n_rep, seq, head_dim]`. Single kernel, no host traffic.
+    pub(crate) fn repeat_kv_cuda(
+        &self,
+        bs: usize,
+        kv_heads: usize,
+        n_rep: usize,
+        seq: usize,
+        head_dim: usize,
+    ) -> Self {
+        let data = self.contiguous_gpu();
+        let total = bs * kv_heads * n_rep * seq * head_dim;
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
+
+        cuda.repeat_kv_f32(
+            &mut out,
+            src_guard.slice(),
+            bs,
+            kv_heads,
+            n_rep,
+            seq,
+            head_dim,
+        )
+        .expect("CUDA repeat_kv_f32 failed");
+
+        let shape = vec![bs, kv_heads * n_rep, seq, head_dim];
+        let storage = Storage::from_cuda_slice(out, total, self.device());
+        Self {
+            storage,
+            shape: shape.clone().into(),
+            strides: contiguous_strides(&shape),
+            offset: 0,
+        }
+    }
+
+    /// Head-major split-halves RoPE. `self` shape `[bs, n_heads, seq, head_dim]`
+    /// contiguous on GPU. Rotates each (b, h, t) token at position
+    /// `pos_start + t`. Matches the shape Qwen3/LLaMA training produces after
+    /// reshape+transpose — avoids the transpose-to-token-major round-trip
+    /// the batched kernel would otherwise need.
+    pub(crate) fn apply_rope_split_halves_bhsd_cuda(
+        &self,
+        bs: usize,
+        n_heads: usize,
+        seq: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Self {
+        let data = self.contiguous_gpu();
+        let total = bs * n_heads * seq * head_dim;
+        debug_assert_eq!(data.numel(), total, "rope_bhsd: shape mismatch");
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        // Kernel writes every output pair.
+        let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
+
+        cuda.rope_split_halves_bhsd_f32(
+            &mut out,
+            src_guard.slice(),
+            bs,
+            n_heads,
+            seq,
+            head_dim,
+            theta,
+            pos_start,
+        )
+        .expect("CUDA rope_split_halves_bhsd_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, total, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
     /// Broadcast per-column bias add for a `[m, n]` tensor. Consumes a
     /// fresh copy — callers that already own a unique buffer should use
     /// the in-place backend call directly.

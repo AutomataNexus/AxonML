@@ -3958,6 +3958,9 @@ impl CudaKernels {
                 "softmax_causal_scaled_bwd_f32",
                 "swiglu_bwd_f32",
                 "add_rmsnorm_batched_f32",
+                "rope_split_halves_bhsd_f32",
+                "rope_split_halves_bhsd_bwd_f32",
+                "repeat_kv_f32",
             ],
         )?;
 

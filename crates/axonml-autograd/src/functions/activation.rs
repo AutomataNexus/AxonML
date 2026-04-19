@@ -453,6 +453,7 @@ pub struct AddRMSNormBackward {
     next_fns: Vec<Option<GradFn>>,
     saved_sum: Tensor<f32>,
     weight: Tensor<f32>,
+    input_shape: Vec<usize>,
     m: usize,
     n: usize,
     eps: f32,
@@ -460,12 +461,17 @@ pub struct AddRMSNormBackward {
 
 impl AddRMSNormBackward {
     /// Creates a new `AddRMSNormBackward`. `next_fns[0]` = `a`, `next_fns[1]` = `b`.
+    /// `input_shape` is the caller-visible shape of `a` / `b` (pre-flatten) —
+    /// the kernel runs on a 2D view but gradients must flow back with the
+    /// original rank so upstream grad accumulation can find matching shapes.
+    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         a_grad_fn: Option<GradFn>,
         b_grad_fn: Option<GradFn>,
         saved_sum: Tensor<f32>,
         weight: Tensor<f32>,
+        input_shape: Vec<usize>,
         m: usize,
         n: usize,
         eps: f32,
@@ -474,6 +480,7 @@ impl AddRMSNormBackward {
             next_fns: vec![a_grad_fn, b_grad_fn],
             saved_sum,
             weight,
+            input_shape,
             m,
             n,
             eps,
@@ -498,12 +505,19 @@ impl GradientFunction for AddRMSNormBackward {
                 .to_device(target)
                 .expect("backward: weight device transfer failed")
         };
-        // Saved sum is stored as [m, n] from forward; grad_output matches.
-        let grad_x = self
+        // grad_output arrives shaped like the forward output (input_shape).
+        // Flatten to [m, n] for the kernel, then reshape back for upstream.
+        let grad_2d = grad
+            .reshape(&[self.m as isize, self.n as isize])
+            .expect("AddRMSNormBackward: reshape grad_output to 2D");
+        let grad_x_2d = self
             .saved_sum
-            .rms_norm_bwd_batched(&weight, &grad, self.m, self.n, self.eps);
-        // d(a+b)/da = d(a+b)/db = 1, so both grads are the same tensor
-        // (Arc-shared — no extra work).
+            .rms_norm_bwd_batched(&weight, &grad_2d, self.m, self.n, self.eps);
+        let shape_isize: Vec<isize> = self.input_shape.iter().map(|&s| s as isize).collect();
+        let grad_x = grad_x_2d
+            .reshape(&shape_isize)
+            .expect("AddRMSNormBackward: reshape grad_x to input shape");
+        // d(a+b)/da = d(a+b)/db = 1, so both grads are the same tensor.
         vec![Some(grad_x.clone()), Some(grad_x)]
     }
 
