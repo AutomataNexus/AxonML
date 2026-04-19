@@ -60,3 +60,7 @@ path = "src/ui/ferrum_ticker.rs"
 [[bin]]
 name = "nexus-training-ticker"
 path = "src/ui/training_ticker.rs"
+
+[[bin]]
+name = "nexus-droplet-ticker"
+path = "src/ui/droplet_ticker.rs"
