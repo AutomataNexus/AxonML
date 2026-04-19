@@ -158,46 +158,60 @@ impl RMSNorm {
         }
     }
 
-    /// Forward pass.
+    /// Forward pass. GPU-accelerated via `rms_norm_batched` when input is
+    /// on device; CPU fallback computes row-wise rms for the same math.
+    /// The backward kernel recomputes rms from the saved input so we don't
+    /// need to stash per-row rms values.
     pub fn forward(&self, x: &Variable) -> Variable {
         let x_data = x.data();
         let shape = x_data.shape();
         let last_dim = shape[shape.len() - 1];
-
-        // Compute RMS: sqrt(mean(x^2))
-        let x_vec = x_data.to_vec();
         let batch_elements: usize = shape.iter().take(shape.len() - 1).product();
 
-        let mut output = vec![0.0f32; x_vec.len()];
-        let mut rms_vals = vec![0.0f32; batch_elements];
-        let weight_vec = self.weight.to_vec();
-
-        for (b, rms_val) in rms_vals.iter_mut().enumerate() {
-            let offset = b * last_dim;
-
-            // Compute mean of squares
-            let mut sum_sq = 0.0f32;
-            for i in 0..last_dim {
-                sum_sq += x_vec[offset + i] * x_vec[offset + i];
+        let output_tensor = if x_data.device().is_gpu() {
+            // GPU path: one kernel launch per forward (down from full D2H).
+            let weight_gpu = if self.weight.device().is_gpu() {
+                self.weight.clone()
+            } else {
+                self.weight
+                    .to_device(x_data.device())
+                    .expect("RMSNorm: failed to move weight to GPU")
+            };
+            let x_2d = x_data
+                .reshape(&[batch_elements as isize, last_dim as isize])
+                .expect("RMSNorm: reshape to 2D");
+            let out_2d = x_2d.rms_norm_batched(&weight_gpu, batch_elements, last_dim, self.eps);
+            let shape_isize: Vec<isize> = shape.iter().map(|&s| s as isize).collect();
+            out_2d
+                .reshape(&shape_isize)
+                .expect("RMSNorm: reshape output back to original shape")
+        } else {
+            // CPU fallback: original per-row rms computation.
+            let x_vec = x_data.to_vec();
+            let mut output = vec![0.0f32; x_vec.len()];
+            let weight_vec = self.weight.to_vec();
+            for b in 0..batch_elements {
+                let offset = b * last_dim;
+                let mut sum_sq = 0.0f32;
+                for i in 0..last_dim {
+                    sum_sq += x_vec[offset + i] * x_vec[offset + i];
+                }
+                let rms = (sum_sq / last_dim as f32 + self.eps).sqrt();
+                for i in 0..last_dim {
+                    output[offset + i] = (x_vec[offset + i] / rms) * weight_vec[i];
+                }
             }
-            let rms = (sum_sq / last_dim as f32 + self.eps).sqrt();
-            *rms_val = rms;
+            Tensor::from_vec(output, shape).unwrap()
+        };
 
-            // Normalize and scale
-            for i in 0..last_dim {
-                output[offset + i] = (x_vec[offset + i] / rms) * weight_vec[i];
-            }
-        }
-
-        let output_tensor = Tensor::from_vec(output, shape).unwrap();
         let requires_grad = x.requires_grad() && is_grad_enabled();
         if requires_grad {
             let grad_fn = GradFn::new(RMSNormBackward {
                 next_fns: vec![x.grad_fn().cloned()],
                 saved_input: x_data.clone(),
                 weight: self.weight.clone(),
-                rms_vals,
                 last_dim,
+                eps: self.eps,
             });
             Variable::from_operation(output_tensor, grad_fn, true)
         } else {
@@ -229,41 +243,52 @@ struct RMSNormBackward {
     next_fns: Vec<Option<GradFn>>,
     saved_input: Tensor<f32>,
     weight: Tensor<f32>,
-    rms_vals: Vec<f32>,
     last_dim: usize,
+    eps: f32,
 }
 
 impl GradientFunction for RMSNormBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let x_vec = self.saved_input.to_vec();
-        let w_vec = self.weight.to_vec();
-        let g_vec = grad_output.to_vec();
+        let x_shape = self.saved_input.shape();
+        let numel = self.saved_input.numel();
         let d = self.last_dim;
-        let batch_elements = self.rms_vals.len();
+        let m = numel / d;
 
-        let mut grad_input = vec![0.0f32; x_vec.len()];
+        // Reshape saved_input, weight, grad_output to canonical [m, n] for the
+        // batched kernel, then reshape result back to the saved shape.
+        let saved_2d = self
+            .saved_input
+            .reshape(&[m as isize, d as isize])
+            .expect("RMSNormBackward: reshape saved_input to 2D");
 
-        for b in 0..batch_elements {
-            let off = b * d;
-            let rms = self.rms_vals[b];
-            let rms_inv = 1.0 / rms;
-            let rms3_inv = rms_inv * rms_inv * rms_inv;
+        // Move grad_output to the saved_input's device if needed so the kernel
+        // (or CPU fallback) sees a consistent device set.
+        let target = saved_2d.device();
+        let grad_dev = if grad_output.device() == target {
+            grad_output.clone()
+        } else {
+            grad_output
+                .to_device(target)
+                .expect("RMSNormBackward: failed to move grad_output to target device")
+        };
+        let grad_2d = grad_dev
+            .reshape(&[m as isize, d as isize])
+            .expect("RMSNormBackward: reshape grad_output to 2D");
 
-            // dot product: sum_i( x_i * w_i * g_i )
-            let mut dot = 0.0f32;
-            for i in 0..d {
-                dot += x_vec[off + i] * w_vec[i] * g_vec[off + i];
-            }
+        let weight_dev = if self.weight.device() == target {
+            self.weight.clone()
+        } else {
+            self.weight
+                .to_device(target)
+                .expect("RMSNormBackward: failed to move weight to target device")
+        };
 
-            for i in 0..d {
-                // d_out/d_x_i = w_i / rms - x_i * dot / (rms^3 * D)
-                grad_input[off + i] = w_vec[i] * g_vec[off + i] * rms_inv
-                    - x_vec[off + i] * dot * rms3_inv / d as f32;
-            }
-        }
-
-        let gi = Tensor::from_vec(grad_input, self.saved_input.shape()).unwrap();
-        vec![Some(gi)]
+        let grad_input_2d = saved_2d.rms_norm_bwd_batched(&weight_dev, &grad_2d, m, d, self.eps);
+        let shape_isize: Vec<isize> = x_shape.iter().map(|&s| s as isize).collect();
+        let grad_input = grad_input_2d
+            .reshape(&shape_isize)
+            .expect("RMSNormBackward: reshape output to saved shape");
+        vec![Some(grad_input)]
     }
 
     fn name(&self) -> &'static str {

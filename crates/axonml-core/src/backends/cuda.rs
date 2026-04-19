@@ -4048,6 +4048,48 @@ impl CudaBackend {
         }
     }
 
+    /// Batched RMSNorm backward (grad_input only): for each row t in [0, m),
+    /// computes `grad_x[t, :] = w/rms * grad_y[t, :] - x[t, :]/(rms³·n) · Σ(x·w·grad_y)`.
+    /// x, grad_out shape [m, n]; weight [n]; output grad_input [m, n] all contiguous.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rms_norm_bwd_batched_f32(
+        &self,
+        grad_input: &mut CudaSlice<f32>,
+        x: &CudaSlice<f32>,
+        weight: &CudaSlice<f32>,
+        grad_out: &CudaSlice<f32>,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("rms_norm_bwd_batched_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("rms_norm_bwd_batched_f32".to_string()))?;
+        let block: u32 = 256;
+        let n_warps = (block + 31) / 32;
+        // Two reductions per row (sum_sq + dot), so 2 × n_warps × 4 bytes of shmem.
+        let shmem = 2 * n_warps * 4;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (m as u32, 1, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: shmem,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_input)
+                .arg(x)
+                .arg(weight)
+                .arg(grad_out)
+                .arg(&(n as u32))
+                .arg(&eps)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// Batched per-head RMSNorm (Qwen3 QK-norm) over `m` tokens.
     /// In-place on x of shape [m, n_heads, head_dim] row-major.
     /// `src`/`out` may alias for in-place normalize.

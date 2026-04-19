@@ -728,11 +728,17 @@ impl Qwen3ForCausalLM {
     }
 
     /// Get parameters (combined base model + LM head).
+    ///
+    /// Always includes the LM-head weight, even when `tie_word_embeddings` is
+    /// true. The tying performed in `load_weights` (via `update_data`) only
+    /// copies the embedding tensor's *data* into the LM head's Variable — they
+    /// stay as distinct Parameters backed by separate storage. A caller iterating
+    /// parameters to move them to a device would otherwise leave the LM-head
+    /// weight stranded on CPU. `Parameter::to_device` is idempotent, so exposing
+    /// it twice under a true alias (future refactor) would not hurt either.
     pub fn parameters(&self) -> Vec<Parameter> {
         let mut params = self.model.parameters();
-        if !self.config().tie_word_embeddings {
-            params.extend(self.lm_head.parameters());
-        }
+        params.extend(self.lm_head.parameters());
         params
     }
 

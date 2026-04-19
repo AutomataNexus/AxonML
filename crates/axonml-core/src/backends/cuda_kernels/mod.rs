@@ -3950,6 +3950,7 @@ impl CudaKernels {
                 // forward_batch_gpu_resident. Same math as their m=1
                 // siblings; grid dims vary over tokens.
                 "rms_norm_batched_f32",
+                "rms_norm_bwd_batched_f32",
                 "rms_norm_heads_batched_f32",
                 "rope_split_halves_batched_f32",
                 "add_bias_batched_f32",

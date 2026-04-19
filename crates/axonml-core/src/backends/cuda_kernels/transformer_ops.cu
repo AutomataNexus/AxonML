@@ -509,3 +509,95 @@ extern "C" __global__ void add_bias_batched_f32(
     const uint32_t col = (uint32_t)(idx % (uint64_t)n);
     out[idx] += bias[col];
 }
+
+// ============================================================================
+// RMSNorm backward (batched, grad_input only)
+//
+// Forward: y_i = (x_i / rms) * w_i  with rms = sqrt(mean(x²) + eps)
+// Backward wrt x:
+//   grad_x_i = (w_i / rms) * grad_y_i - (x_i / (rms^3 * N)) * Σ_j(x_j * w_j * grad_y_j)
+//
+// Launch: grid = (m, 1, 1), block = (blockDim.x, 1, 1),
+// shmem   = 2 * n_warps * 4 bytes (two parallel reductions: sum(x²) and dot(x,w,g)).
+// Replaces RMSNormBackward::apply's CPU-only path (full D2H of x, w, g per
+// call + O(m*n) CPU compute + H2D of grad_input). The prior CPU path was
+// ~61 ms/call on Qwen3-0.6B backward; this kernel is a single launch per row.
+// ============================================================================
+extern "C" __global__ void rms_norm_bwd_batched_f32(
+    float* __restrict__ grad_input,
+    const float* __restrict__ x,
+    const float* __restrict__ weight,
+    const float* __restrict__ grad_out,
+    uint32_t n,
+    float eps
+) {
+    extern __shared__ float smem[];
+    const int tid     = threadIdx.x;
+    const int warp_id = tid >> 5;
+    const int lane    = tid & 31;
+    const int n_warps = (blockDim.x + 31) >> 5;
+    const uint32_t row = blockIdx.x;
+
+    // Shared memory partitions: [warp_sum_sq | warp_dot]
+    float* warp_sum_sq = smem;
+    float* warp_dot    = smem + n_warps;
+
+    const float* __restrict__ x_row  = x        + (size_t)row * (size_t)n;
+    const float* __restrict__ g_row  = grad_out + (size_t)row * (size_t)n;
+    float* __restrict__       gi_row = grad_input + (size_t)row * (size_t)n;
+
+    // 1. Parallel reductions: sum_sq = Σ x² and dot = Σ x·w·g, across threads.
+    float local_sum_sq = 0.0f;
+    float local_dot    = 0.0f;
+    for (int i = tid; i < (int)n; i += blockDim.x) {
+        float xi = x_row[i];
+        float wi = weight[i];
+        float gi = g_row[i];
+        local_sum_sq += xi * xi;
+        local_dot    += xi * wi * gi;
+    }
+
+    // 2. Warp-level reduction for both.
+    #pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        local_sum_sq += __shfl_xor_sync(0xFFFFFFFF, local_sum_sq, offset);
+        local_dot    += __shfl_xor_sync(0xFFFFFFFF, local_dot,    offset);
+    }
+    if (lane == 0) {
+        warp_sum_sq[warp_id] = local_sum_sq;
+        warp_dot[warp_id]    = local_dot;
+    }
+    __syncthreads();
+
+    // 3. Cross-warp reduction in warp 0.
+    float total_sum_sq = 0.0f;
+    float total_dot    = 0.0f;
+    if (warp_id == 0) {
+        total_sum_sq = (lane < n_warps) ? warp_sum_sq[lane] : 0.0f;
+        total_dot    = (lane < n_warps) ? warp_dot[lane]    : 0.0f;
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            total_sum_sq += __shfl_xor_sync(0xFFFFFFFF, total_sum_sq, offset);
+            total_dot    += __shfl_xor_sync(0xFFFFFFFF, total_dot,    offset);
+        }
+        if (lane == 0) {
+            warp_sum_sq[0] = total_sum_sq;
+            warp_dot[0]    = total_dot;
+        }
+    }
+    __syncthreads();
+
+    // 4. Compute per-row constants and broadcast.
+    float mean_sq  = warp_sum_sq[0] / (float)n;
+    float rms_inv  = rsqrtf(mean_sq + eps);
+    float rms3_inv = rms_inv * rms_inv * rms_inv;
+    float dot      = warp_dot[0];
+    float dot_scaled = dot * rms3_inv / (float)n;
+
+    // 5. Each thread writes its grad_input elements.
+    for (int i = tid; i < (int)n; i += blockDim.x) {
+        float term1 = weight[i] * g_row[i] * rms_inv;
+        float term2 = x_row[i] * dot_scaled;
+        gi_row[i] = term1 - term2;
+    }
+}
