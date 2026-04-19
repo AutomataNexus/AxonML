@@ -79,3 +79,7 @@ path = "src/bin/train_trident_code.rs"
 [[bin]]
 name = "profile_train_step"
 path = "src/bin/profile_train_step.rs"
+
+[[bin]]
+name = "bench_variable_matmul"
+path = "src/bin/bench_variable_matmul.rs"

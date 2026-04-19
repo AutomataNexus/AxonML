@@ -119,31 +119,31 @@ fn run_step(
 ) -> Breakdown {
     let _ = device;
     optimizer.zero_grad();
+    // Drain any leftover GPU work before we start measuring.
+    sync();
 
     // Forward
     let t_fwd = Instant::now();
     let logits = model.forward_ids(input_ids);
-    // Force a stream drain so the timing captures the actual work.
-    let _ = logits.data().to_vec();
+    sync();
     let forward_ms = t_fwd.elapsed().as_secs_f64() * 1000.0;
 
     // Shifted CE loss: drop last logit position, use [1..] labels.
     let t_loss = Instant::now();
     let loss = shifted_cross_entropy(&logits, labels);
-    let _ = loss.data().to_vec();
+    sync();
     let loss_ms = t_loss.elapsed().as_secs_f64() * 1000.0;
 
     // Backward
     let t_bwd = Instant::now();
     loss.backward();
-    // Accumulator writes happen during backward; no additional drain
-    // needed because any GPU work is already submitted on the default
-    // stream, and AdamW's param read will sync.
+    sync();
     let backward_ms = t_bwd.elapsed().as_secs_f64() * 1000.0;
 
     // Optimizer step
     let t_opt = Instant::now();
     optimizer.step();
+    sync();
     let optim_ms = t_opt.elapsed().as_secs_f64() * 1000.0;
 
     Breakdown {
@@ -151,5 +151,13 @@ fn run_step(
         loss_ms,
         backward_ms,
         optim_ms,
+    }
+}
+
+#[inline]
+fn sync() {
+    #[cfg(feature = "cuda")]
+    {
+        let _ = axonml_core::backends::cuda::cuda_sync();
     }
 }
