@@ -1916,6 +1916,26 @@ impl<T: Float> Tensor<T> {
         self_f32.storage.as_cuda_slice()
     }
 
+    /// Write-guarded access to the underlying GPU storage as a mutable
+    /// `CudaSlice<f32>`. Same contract as `as_cuda_slice_read` but takes the
+    /// storage's write lock — used for in-place kernels and for the pre-
+    /// bound workspace-tensor path under CUDA graph capture.
+    ///
+    /// Panics if the tensor is on CPU or is not `Tensor<f32>`.
+    #[cfg(feature = "cuda")]
+    pub fn as_cuda_slice_write(&self) -> axonml_core::storage::CudaSliceWriteGuard<'_> {
+        assert!(
+            self.device().is_gpu(),
+            "as_cuda_slice_write: tensor must be on GPU"
+        );
+        assert!(
+            is_f32::<T>(),
+            "as_cuda_slice_write: GPU storage is f32-only"
+        );
+        let self_f32 = unsafe { gpu_ref(self) };
+        self_f32.storage.as_cuda_slice_mut()
+    }
+
     /// BitNet b1.58 fused gate: `out = ReLU(self)² * up`. `self` is the gate.
     #[must_use]
     pub fn relu2_gate(&self, up: &Self) -> Self {
