@@ -213,41 +213,48 @@ fn try_graph_capture_step(
         }
     };
 
+    // Route every pool_alloc_uninit through the CUDA driver's allocator
+    // (cuMemAllocAsync) for the duration of capture. That way each alloc
+    // records as a graph MemAllocNode — the replay machinery can then
+    // allocate fresh virtual addresses per launch instead of reusing
+    // whatever cached pointer our Rust pool handed out during capture.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        stream
-            .begin_capture(CUstreamCaptureMode::CU_STREAM_CAPTURE_MODE_RELAXED)
-            .expect("begin_capture");
-        if check("begin_capture") {
-            return None;
-        }
-        optimizer.zero_grad();
-        if check("zero_grad") {
-            return None;
-        }
-        let logits = model.forward_ids(input_ids);
-        if check("forward_ids") {
-            return None;
-        }
-        let loss = llm_training::shifted_cross_entropy(&logits, labels);
-        if check("shifted_cross_entropy") {
-            return None;
-        }
-        loss.backward();
-        if check("backward") {
-            return None;
-        }
-        optimizer.step();
-        if check("optimizer.step") {
-            return None;
-        }
-        Some(
+        axonml_core::backends::cuda_pool::with_driver_alloc(|| {
             stream
-                .end_capture(
-                    CUgraphInstantiate_flags::CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH,
-                )
-                .expect("end_capture")
-                .expect("graph empty"),
-        )
+                .begin_capture(CUstreamCaptureMode::CU_STREAM_CAPTURE_MODE_RELAXED)
+                .expect("begin_capture");
+            if check("begin_capture") {
+                return None;
+            }
+            optimizer.zero_grad();
+            if check("zero_grad") {
+                return None;
+            }
+            let logits = model.forward_ids(input_ids);
+            if check("forward_ids") {
+                return None;
+            }
+            let loss = llm_training::shifted_cross_entropy(&logits, labels);
+            if check("shifted_cross_entropy") {
+                return None;
+            }
+            loss.backward();
+            if check("backward") {
+                return None;
+            }
+            optimizer.step();
+            if check("optimizer.step") {
+                return None;
+            }
+            Some(
+                stream
+                    .end_capture(
+                        CUgraphInstantiate_flags::CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH,
+                    )
+                    .expect("end_capture")
+                    .expect("graph empty"),
+            )
+        })
     }));
     // Ensure any in-flight capture is ended even if we early-returned so
     // the next eager op doesn't see stale capture state.
