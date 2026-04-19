@@ -31,7 +31,7 @@ Minimum env to get something useful on screen:
 
 ```bash
 export DO_API_TOKEN="dop_v1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-export NEXUS_DROPLET_HOST="root@203.0.113.10"   # ssh target for live GPU probe
+export NEXUS_DROPLET_HOST="root@YOUR-DROPLET-IP"  # ssh target for live GPU probe
 ./target/release/nexus-droplet-ticker &
 ```
 
@@ -90,7 +90,7 @@ After=graphical-session.target
 
 [Service]
 Environment=DO_API_TOKEN=dop_v1_xxx
-Environment=NEXUS_DROPLET_HOST=root@1.2.3.4
+Environment=NEXUS_DROPLET_HOST=root@YOUR-DROPLET-IP
 Environment=NEXUS_DROPLET_SNAPSHOT_ID=123456789
 ExecStart=/opt/AxonML/nexus-agent/target/release/nexus-droplet-ticker
 Restart=always
