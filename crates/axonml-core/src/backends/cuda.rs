@@ -3980,6 +3980,45 @@ impl CudaBackend {
         }
     }
 
+    /// SwiGLU backward: produces `grad_gate` and `grad_up` given saved
+    /// forward inputs `gate`, `up` and upstream gradient `grad_out`. Replaces
+    /// the separate SiluBackward + MulBackward kernel pair on the MLP path.
+    #[allow(clippy::too_many_arguments)]
+    pub fn swiglu_bwd_f32(
+        &self,
+        grad_gate: &mut CudaSlice<f32>,
+        grad_up: &mut CudaSlice<f32>,
+        gate: &CudaSlice<f32>,
+        up: &CudaSlice<f32>,
+        grad_out: &CudaSlice<f32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("swiglu_bwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("swiglu_bwd_f32".to_string()))?;
+        let block: u32 = 256;
+        let grid: u32 = ((n as u32) + block - 1) / block;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_gate)
+                .arg(grad_up)
+                .arg(gate)
+                .arg(up)
+                .arg(grad_out)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// BitNet b1.58 fused gate: `out[i] = ReLU(gate[i])² * up[i]`.
     pub fn relu2_gate_f32(
         &self,

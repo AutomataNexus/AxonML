@@ -39,8 +39,8 @@ use crate::functions::{
     MatMulBackward, MeanBackward, MeanDimBackward, MulBackward, MulScalarBackward, NarrowBackward,
     NegBackward, PowBackward, ReluBackward, ReshapeBackward, SelectBackward, SigmoidBackward,
     SiluBackward, SoftmaxBackward, SoftmaxCausalScaledBackward, SqrtBackward, SubBackward,
-    SumBackward, SumDimBackward, TanhBackward, TransposeBackward, UnsqueezeBackward,
-    VarDimBackward,
+    SumBackward, SumDimBackward, SwigluBackward, TanhBackward, TransposeBackward,
+    UnsqueezeBackward, VarDimBackward,
 };
 use crate::grad_fn::{AccumulateGrad, GradAccumulator, GradFn};
 use crate::graph::{GraphNode, with_graph};
@@ -970,6 +970,30 @@ impl Variable {
                 self.grad_fn.clone(),
                 result.clone(),
                 dim as i64,
+            ));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
+    }
+
+    /// Fused SwiGLU: `y = SiLU(self) * up`, where `self` is the gate. Replaces
+    /// the `self.silu().mul_var(up)` pair with one kernel forward + one kernel
+    /// backward (SwigluBackward produces both `grad_gate` and `grad_up` in a
+    /// single launch). Saves 2 GradFn nodes per MLP layer.
+    #[must_use]
+    pub fn swiglu(&self, up: &Variable) -> Variable {
+        let self_data = self.data.read().clone();
+        let up_data = up.data.read().clone();
+        let result = self_data.swiglu(&up_data);
+        let requires_grad = (self.requires_grad || up.requires_grad) && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(SwigluBackward::new(
+                self.grad_fn.clone(),
+                up.grad_fn.clone(),
+                self_data,
+                up_data,
             ));
             Variable::from_operation(result, grad_fn, true)
         } else {

@@ -3839,6 +3839,49 @@ impl Tensor<f32> {
         }
     }
 
+    /// GPU SwiGLU backward. `self` is the saved forward gate; `up` is the
+    /// saved forward up; `grad_output` is `dL/dy`. Returns `(grad_gate, grad_up)`.
+    pub(crate) fn swiglu_bwd_cuda(&self, up: &Self, grad_output: &Self) -> (Self, Self) {
+        let g = self.contiguous_gpu();
+        let u = up.contiguous_gpu();
+        let go = grad_output.contiguous_gpu();
+        let len = g.numel();
+        debug_assert_eq!(len, u.numel());
+        debug_assert_eq!(len, go.numel());
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let g_guard = g.storage.as_cuda_slice();
+        let u_guard = u.storage.as_cuda_slice();
+        let go_guard = go.storage.as_cuda_slice();
+
+        let mut grad_gate = pool_alloc_uninit(len).expect("GPU pool alloc failed");
+        let mut grad_up = pool_alloc_uninit(len).expect("GPU pool alloc failed");
+
+        cuda.swiglu_bwd_f32(
+            &mut grad_gate,
+            &mut grad_up,
+            g_guard.slice(),
+            u_guard.slice(),
+            go_guard.slice(),
+            len,
+        )
+        .expect("CUDA swiglu_bwd_f32 failed");
+
+        let gg_tensor = Self {
+            storage: Storage::from_cuda_slice(grad_gate, len, self.device()),
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        };
+        let gu_tensor = Self {
+            storage: Storage::from_cuda_slice(grad_up, len, self.device()),
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        };
+        (gg_tensor, gu_tensor)
+    }
+
     /// GPU BitNet b1.58 fused gate: `out[i] = ReLU(self[i])² * up[i]`.
     /// `self` is the gate.
     pub(crate) fn relu2_gate_cuda(&self, up: &Self) -> Self {
