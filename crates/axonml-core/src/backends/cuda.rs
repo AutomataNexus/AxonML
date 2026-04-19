@@ -118,7 +118,12 @@ impl CudaBackend {
     #[cfg(feature = "cuda")]
     pub fn new(device_index: usize) -> Option<Self> {
         let ctx = CudaContext::new(device_index).ok()?;
-        let stream = ctx.default_stream();
+        // Use a non-default (named) stream so downstream callers can do
+        // `stream.begin_capture(...)` for CUDA graph capture of hot-path
+        // work — the default (NULL) stream cannot be captured. Performance
+        // is identical for our single-stream workload; only the capture
+        // capability differs.
+        let stream = ctx.new_stream().ok()?;
         let blas = CudaBlas::new(stream.clone()).ok()?;
         let kernels = match CudaKernels::load(ctx.clone()) {
             Ok(k) => k,
