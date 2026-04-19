@@ -1637,6 +1637,46 @@ impl<T: Float> Tensor<T> {
         Self::from_vec(out, &[m, n]).expect("add_bias_batched: build output")
     }
 
+    /// Fused SwiGLU backward. `self` is the saved forward gate, `up` is the
+    /// saved forward up, `grad_output` is `dL/dy`. Returns `(grad_gate, grad_up)`.
+    /// Replaces the `SiluBackward + MulBackward` kernel pair on the MLP path
+    /// with a single kernel producing both gradients.
+    #[must_use]
+    pub fn swiglu_bwd(&self, up: &Self, grad_output: &Self) -> (Self, Self) {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let (gg, gu) =
+                unsafe { gpu_ref(self).swiglu_bwd_cuda(gpu_ref(up), gpu_ref(grad_output)) };
+            return (unsafe { gpu_into(gg) }, unsafe { gpu_into(gu) });
+        }
+        assert!(
+            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            "swiglu_bwd CPU path requires f32",
+        );
+        let g = self.to_vec();
+        let u = up.to_vec();
+        let go = grad_output.to_vec();
+        let n = g.len();
+        assert_eq!(u.len(), n);
+        assert_eq!(go.len(), n);
+        let mut grad_gate: Vec<T> = Vec::with_capacity(n);
+        let mut grad_up: Vec<T> = Vec::with_capacity(n);
+        for i in 0..n {
+            let gi = g[i].to_f32().unwrap_or(0.0);
+            let ui = u[i].to_f32().unwrap_or(0.0);
+            let goi = go[i].to_f32().unwrap_or(0.0);
+            let sig = 1.0f32 / (1.0f32 + (-gi).exp());
+            let silu_g = gi * sig;
+            let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
+            grad_gate.push(num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero));
+            grad_up.push(num_traits::cast(goi * silu_g).unwrap_or_else(T::zero));
+        }
+        let gg_t = Self::from_vec(grad_gate, &self.shape).expect("swiglu_bwd: grad_gate");
+        let gu_t = Self::from_vec(grad_up, &self.shape).expect("swiglu_bwd: grad_up");
+        (gg_t, gu_t)
+    }
+
     /// Fused SwiGLU: `out = SiLU(self) * up`. `self` is the gate.
     #[must_use]
     pub fn swiglu(&self, up: &Self) -> Self {

@@ -3956,6 +3956,7 @@ impl CudaKernels {
                 "add_bias_batched_f32",
                 "softmax_causal_scaled_f32",
                 "softmax_causal_scaled_bwd_f32",
+                "swiglu_bwd_f32",
             ],
         )?;
 

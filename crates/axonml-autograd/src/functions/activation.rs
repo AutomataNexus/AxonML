@@ -437,6 +437,71 @@ impl GradientFunction for SoftmaxCausalScaledBackward {
 }
 
 // =============================================================================
+// Fused SwiGLU backward
+// =============================================================================
+
+/// Backward for `Variable::swiglu` (the fused `silu(gate) * up` MLP gate).
+/// Produces `grad_gate` and `grad_up` in a single kernel launch, replacing
+/// the SiluBackward + MulBackward chain the unfused path would emit.
+#[derive(Debug)]
+pub struct SwigluBackward {
+    next_fns: Vec<Option<GradFn>>,
+    saved_gate: Tensor<f32>,
+    saved_up: Tensor<f32>,
+}
+
+impl SwigluBackward {
+    /// Creates a new `SwigluBackward`. `next_fns[0]` = gate, `next_fns[1]` = up.
+    #[must_use]
+    pub fn new(
+        gate_grad_fn: Option<GradFn>,
+        up_grad_fn: Option<GradFn>,
+        saved_gate: Tensor<f32>,
+        saved_up: Tensor<f32>,
+    ) -> Self {
+        Self {
+            next_fns: vec![gate_grad_fn, up_grad_fn],
+            saved_gate,
+            saved_up,
+        }
+    }
+}
+
+impl GradientFunction for SwigluBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let target = self.saved_gate.device();
+        let grad = if grad_output.device() == target {
+            grad_output.clone()
+        } else {
+            grad_output
+                .to_device(target)
+                .expect("backward: grad_output device transfer failed")
+        };
+        let up = if self.saved_up.device() == target {
+            self.saved_up.clone()
+        } else {
+            self.saved_up
+                .to_device(target)
+                .expect("backward: up device transfer failed")
+        };
+        let (grad_gate, grad_up) = self.saved_gate.swiglu_bwd(&up, &grad);
+        vec![Some(grad_gate), Some(grad_up)]
+    }
+
+    fn name(&self) -> &'static str {
+        "SwigluBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+// =============================================================================
 // LeakyReLU Backward
 // =============================================================================
 

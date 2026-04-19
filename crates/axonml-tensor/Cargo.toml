@@ -76,6 +76,10 @@ required-features = ["cuda"]
 name = "bench_softmax_causal"
 required-features = ["cuda"]
 
+[[example]]
+name = "bench_swiglu_bwd"
+required-features = ["cuda"]
+
 # Controls how docs.rs builds this crate when a new version is published.
 # * default-target + targets = build only on Linux x86_64; GPU backends
 #   (cuda/vulkan/metal/wgpu) require system SDKs that docs.rs doesn't have,

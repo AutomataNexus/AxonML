@@ -154,6 +154,37 @@ extern "C" __global__ void swiglu_f32(
 }
 
 // ============================================================================
+// SwiGLU backward: given saved gate/up and grad_out, produce (grad_gate, grad_up)
+//
+// y = silu(gate) * up
+// dL/d(gate) = dL/d(y) * up * silu'(gate)
+//            = dL/d(y) * up * σ(gate) * (1 + gate * (1 - σ(gate)))
+// dL/d(up)   = dL/d(y) * silu(gate)
+//
+// One kernel produces both gradients, replacing the separate SiluBackward +
+// MulBackward chain in the MLP backward.
+// ============================================================================
+extern "C" __global__ void swiglu_bwd_f32(
+    float* __restrict__ grad_gate,
+    float* __restrict__ grad_up,
+    const float* __restrict__ gate,
+    const float* __restrict__ up,
+    const float* __restrict__ grad_out,
+    uint32_t n
+) {
+    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+    const float g   = gate[idx];
+    const float u   = up[idx];
+    const float go  = grad_out[idx];
+    const float sig = 1.0f / (1.0f + __expf(-g));
+    const float silu_g = g * sig;
+    const float silu_deriv = sig * (1.0f + g * (1.0f - sig));
+    grad_gate[idx] = go * u * silu_deriv;
+    grad_up[idx]   = go * silu_g;
+}
+
+// ============================================================================
 // BitNet b1.58 fused gate: out = ReLU(gate)² * up
 //
 // BitNet replaces SwiGLU's smooth gate with a hard ReLU² = max(0, x)². One

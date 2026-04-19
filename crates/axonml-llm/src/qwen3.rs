@@ -434,11 +434,13 @@ impl Qwen3MLP {
         }
     }
 
-    /// Forward pass: `down(silu(gate(x)) * up(x))`.
+    /// Forward pass: `down(silu(gate(x)) * up(x))`. Uses the fused SwiGLU op
+    /// (`silu + elementwise mul` collapsed into one kernel forward + one
+    /// kernel backward).
     pub fn forward(&self, x: &Variable) -> Variable {
-        let gate = self.gate_proj.forward(x).silu();
+        let gate = self.gate_proj.forward(x);
         let up = self.up_proj.forward(x);
-        let hidden = gate.mul(&up);
+        let hidden = gate.swiglu(&up);
         self.down_proj.forward(&hidden)
     }
 
