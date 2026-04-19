@@ -4167,6 +4167,131 @@ impl CudaBackend {
         }
     }
 
+    /// Head-major split-halves RoPE backward. Inverse rotation of
+    /// `rope_split_halves_bhsd_f32`. Input/output `[bs, n_heads, seq, head_dim]`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rope_split_halves_bhsd_bwd_f32(
+        &self,
+        grad_in: &mut CudaSlice<f32>,
+        grad_out: &CudaSlice<f32>,
+        bs: usize,
+        n_heads: usize,
+        seq: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("rope_split_halves_bhsd_bwd_f32")
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("rope_split_halves_bhsd_bwd_f32".to_string())
+            })?;
+        let half = (head_dim / 2) as u32;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (seq as u32, n_heads as u32, bs as u32),
+            block_dim: (half, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_out)
+                .arg(grad_in)
+                .arg(&(seq as u32))
+                .arg(&(n_heads as u32))
+                .arg(&(head_dim as u32))
+                .arg(&theta)
+                .arg(&(pos_start as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// GQA repeat_kv: duplicate each KV head `n_rep` times consecutively.
+    /// Input shape `[bs, kv_heads, seq, head_dim]`, output
+    /// `[bs, kv_heads * n_rep, seq, head_dim]`. Single kernel, no H2D/D2H.
+    #[allow(clippy::too_many_arguments)]
+    pub fn repeat_kv_f32(
+        &self,
+        out: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        bs: usize,
+        kv_heads: usize,
+        n_rep: usize,
+        seq: usize,
+        head_dim: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("repeat_kv_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("repeat_kv_f32".to_string()))?;
+        let total = bs * kv_heads * n_rep * seq * head_dim;
+        let block: u32 = 256;
+        let grid: u32 = ((total as u32) + block - 1) / block;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(out)
+                .arg(&(bs as u32))
+                .arg(&(kv_heads as u32))
+                .arg(&(n_rep as u32))
+                .arg(&(seq as u32))
+                .arg(&(head_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Head-major split-halves RoPE for Qwen3/LLaMA training forward.
+    /// Input/output shape `[bs, n_heads, seq, head_dim]` row-major on GPU.
+    /// `src` and `out` may alias for in-place rotation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rope_split_halves_bhsd_f32(
+        &self,
+        out: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        bs: usize,
+        n_heads: usize,
+        seq: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("rope_split_halves_bhsd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("rope_split_halves_bhsd_f32".to_string()))?;
+        let half = (head_dim / 2) as u32;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (seq as u32, n_heads as u32, bs as u32),
+            block_dim: (half, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(out)
+                .arg(&(seq as u32))
+                .arg(&(n_heads as u32))
+                .arg(&(head_dim as u32))
+                .arg(&theta)
+                .arg(&(pos_start as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// Fused residual-add + batched RMSNorm. For each row t in [0, m),
     /// computes `sum[t, :] = a[t, :] + b[t, :]` and
     /// `out[t, :] = sum[t, :] * weight / sqrt(mean(sum[t, :]²) + eps)`.

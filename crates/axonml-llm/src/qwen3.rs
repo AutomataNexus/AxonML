@@ -373,20 +373,10 @@ fn repeat_kv(x: &Variable, n_rep: usize) -> Variable {
     let seq_len = shape[2];
     let head_dim = shape[3];
 
-    let data_vec = data.to_vec();
-    let mut output = Vec::with_capacity(data_vec.len() * n_rep);
-    for b in 0..batch {
-        for h in 0..num_kv_heads {
-            for _ in 0..n_rep {
-                for s in 0..seq_len {
-                    let offset = ((b * num_kv_heads + h) * seq_len + s) * head_dim;
-                    output.extend_from_slice(&data_vec[offset..offset + head_dim]);
-                }
-            }
-        }
-    }
-    let shape_out = [batch, num_kv_heads * n_rep, seq_len, head_dim];
-    let t = Tensor::from_vec(output, &shape_out).unwrap();
+    // GPU fast path: one kernel, no D2H / H2D.
+    // Backward for GQA isn't gradient-tracked here (matches the existing
+    // un-fused CPU path — see comment above this function).
+    let t = data.repeat_kv(batch, num_kv_heads, n_rep, seq_len, head_dim);
     Variable::new(t, x.requires_grad())
 }
 
@@ -502,6 +492,14 @@ impl Qwen3DecoderLayer {
     }
 
     /// Forward pass with optional KV-cache.
+    ///
+    /// Uses the fused `add_rmsnorm_split` op on the post-attention residual
+    /// path. The split form returns both `normed = RMSNorm(residual + attn_out)`
+    /// (feeding the MLP) and `sum = residual + attn_out` (the un-normalized
+    /// residual that gets re-added to the MLP output at layer exit). Collapses
+    /// the un-fused `broadcast_add + rms_norm_batched` kernel pair into one
+    /// kernel launch per layer on the forward path, plus drops one AddBackward
+    /// on the backward path (its job is merged into AddRMSNormBackward).
     pub fn forward_with_cache(
         &self,
         hidden_states: &Variable,
@@ -514,23 +512,18 @@ impl Qwen3DecoderLayer {
         let hidden_states =
             self.self_attn
                 .forward_with_cache(&hidden_states, kv_cache, position_offset);
-        let hidden_states = residual.add(&hidden_states);
 
-        // MLP with pre-norm.
-        //
-        // NOTE: `Variable::add_rmsnorm` exists in axonml-autograd and the
-        // `add_rmsnorm_batched_f32` kernel is wired through to it. It is
-        // *not* used here yet because the pre-norm residual block needs
-        // the un-normalized sum `residual + attn_out` for the MLP's own
-        // residual branch, and the single-output `Variable::add_rmsnorm`
-        // only exposes the normalized tensor. Integrating the fuse here
-        // needs a 2-output autograd op (return both the normed tensor and
-        // the raw sum) so the residual path can continue from the sum.
-        // Kernel + API available for a future commit.
-        let residual = hidden_states.clone();
-        let hidden_states = self.post_attention_layernorm.forward(&hidden_states);
-        let hidden_states = self.mlp.forward(&hidden_states);
-        residual.add(&hidden_states)
+        // Fused (residual + attn_out) → post_attention_layernorm.
+        // `normed` goes into the MLP; `mlp_residual` is the raw sum used for
+        // the layer-exit add.
+        let (normed, mlp_residual) = residual.add_rmsnorm_split(
+            &hidden_states,
+            &self.post_attention_layernorm.weight,
+            self.post_attention_layernorm.eps,
+        );
+
+        let mlp_out = self.mlp.forward(&normed);
+        mlp_residual.add(&mlp_out)
     }
 
     /// Get parameters.

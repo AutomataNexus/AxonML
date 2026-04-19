@@ -526,6 +526,121 @@ extern "C" __global__ void rope_split_halves_batched_f32(
     out[base + half] = s * a + c * b;
 }
 
+// ============================================================================
+// GQA repeat_kv: expand [bs, kv_heads, seq, head_dim] → [bs, kv_heads*n_rep,
+// seq, head_dim] by duplicating each KV head `n_rep` times consecutively.
+// One thread per output element; no intermediate allocations on either side.
+//
+// Launch: grid = ceil_div(total, 256), block = 256, shmem = 0.
+// ============================================================================
+extern "C" __global__ void repeat_kv_f32(
+    const float* __restrict__ src,
+    float* __restrict__ out,
+    uint32_t bs,
+    uint32_t kv_heads,
+    uint32_t n_rep,
+    uint32_t seq,
+    uint32_t head_dim
+) {
+    const uint64_t i = (uint64_t)blockIdx.x * (uint64_t)blockDim.x + threadIdx.x;
+    const uint64_t total = (uint64_t)bs * (uint64_t)kv_heads * (uint64_t)n_rep
+                         * (uint64_t)seq * (uint64_t)head_dim;
+    if (i >= total) return;
+
+    // Decompose i into (b, h_out, t, d) in output layout.
+    uint64_t rem = i;
+    const uint32_t d     = (uint32_t)(rem % (uint64_t)head_dim); rem /= (uint64_t)head_dim;
+    const uint32_t t     = (uint32_t)(rem % (uint64_t)seq);      rem /= (uint64_t)seq;
+    const uint32_t h_out = (uint32_t)(rem % (uint64_t)(kv_heads * n_rep)); rem /= (uint64_t)(kv_heads * n_rep);
+    const uint32_t b     = (uint32_t)rem;
+    const uint32_t h_in  = h_out / n_rep;
+
+    const uint64_t src_i = (((uint64_t)b * (uint64_t)kv_heads + (uint64_t)h_in) * (uint64_t)seq + (uint64_t)t)
+                           * (uint64_t)head_dim + (uint64_t)d;
+    out[i] = src[src_i];
+}
+
+// ============================================================================
+// Head-major split-halves RoPE (Qwen3 / LLaMA training forward path)
+//
+// Input/output shape: [bs, n_heads, seq, head_dim] row-major. Each CTA
+// handles one (b, h, t) token-head; threads iterate over head_dim/2 pairs.
+// Differs from rope_split_halves_batched_f32 (token-major) which assumes
+// the [m, n_heads, head_dim] layout used by nexus-serve decode.
+//
+// Launch: grid = (seq, n_heads, bs), block = (head_dim/2, 1, 1), shmem = 0.
+// (Needs blockDim.x >= head_dim/2; Qwen3-0.6B head_dim=128 → 64 threads.)
+// ============================================================================
+extern "C" __global__ void rope_split_halves_bhsd_f32(
+    const float* __restrict__ src,
+    float* __restrict__ out,
+    uint32_t seq,
+    uint32_t n_heads,
+    uint32_t head_dim,
+    float theta,
+    uint32_t pos_start
+) {
+    const uint32_t t = blockIdx.x;
+    const uint32_t h = blockIdx.y;
+    const uint32_t b = blockIdx.z;
+    const uint32_t pair = threadIdx.x;
+    const uint32_t half = head_dim >> 1;
+    if (pair >= half) return;
+
+    const uint32_t pos = pos_start + t;
+    const float exponent = -(float)(2u * pair) / (float)head_dim;
+    const float angle = (float)pos * powf(theta, exponent);
+    float c, s;
+    sincosf(angle, &s, &c);
+
+    // Offset of (b, h, t) block in row-major [bs, n_heads, seq, head_dim].
+    const size_t base = ((size_t)b * (size_t)n_heads * (size_t)seq
+                        + (size_t)h * (size_t)seq
+                        + (size_t)t) * (size_t)head_dim
+                      + (size_t)pair;
+    const float a = src[base];
+    const float bv = src[base + half];
+    out[base]        = c * a  - s * bv;
+    out[base + half] = s * a  + c * bv;
+}
+
+// Head-major split-halves RoPE BACKWARD (same shape as forward).
+// Inverse rotation: grad_in = rotate(grad_out, -angle).
+//   cos stays the same; sin flips sign.
+//   dx1 = dy1*cos + dy2*sin,   dx2 = -dy1*sin + dy2*cos
+// Launch: grid = (seq, n_heads, bs), block = (head_dim/2, 1, 1), shmem = 0.
+extern "C" __global__ void rope_split_halves_bhsd_bwd_f32(
+    const float* __restrict__ grad_out,
+    float* __restrict__ grad_in,
+    uint32_t seq,
+    uint32_t n_heads,
+    uint32_t head_dim,
+    float theta,
+    uint32_t pos_start
+) {
+    const uint32_t t = blockIdx.x;
+    const uint32_t h = blockIdx.y;
+    const uint32_t b = blockIdx.z;
+    const uint32_t pair = threadIdx.x;
+    const uint32_t half = head_dim >> 1;
+    if (pair >= half) return;
+
+    const uint32_t pos = pos_start + t;
+    const float exponent = -(float)(2u * pair) / (float)head_dim;
+    const float angle = (float)pos * powf(theta, exponent);
+    float c, s;
+    sincosf(angle, &s, &c);
+
+    const size_t base = ((size_t)b * (size_t)n_heads * (size_t)seq
+                        + (size_t)h * (size_t)seq
+                        + (size_t)t) * (size_t)head_dim
+                      + (size_t)pair;
+    const float dy1 = grad_out[base];
+    const float dy2 = grad_out[base + half];
+    grad_in[base]        =  c * dy1 + s * dy2;
+    grad_in[base + half] = -s * dy1 + c * dy2;
+}
+
 // Broadcast per-column bias across m rows of a [m, n] matrix.
 // Launch: grid = ceil_div(m*n, 256), block = 256.
 extern "C" __global__ void add_bias_batched_f32(

@@ -1672,6 +1672,148 @@ impl<T: Float> Tensor<T> {
         Self::from_vec(x, &self.shape).expect("rope_batched: build output")
     }
 
+    /// Head-major split-halves RoPE backward (inverse rotation) for
+    /// `[bs, n_heads, seq, head_dim]`. `self` is `grad_output`.
+    #[must_use]
+    pub fn rope_split_halves_bhsd_bwd(
+        &self,
+        bs: usize,
+        n_heads: usize,
+        seq: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(
+                    gpu_ref(self).rope_split_halves_bhsd_bwd_cuda(
+                        bs, n_heads, seq, head_dim, theta, pos_start,
+                    ),
+                )
+            };
+        }
+        assert!(
+            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            "rope_split_halves_bhsd_bwd CPU path requires f32",
+        );
+        let g = self.to_vec();
+        let half = head_dim / 2;
+        let mut out: Vec<T> = g.clone();
+        for b in 0..bs {
+            for h in 0..n_heads {
+                for t in 0..seq {
+                    let pos = pos_start + t;
+                    let base = ((b * n_heads + h) * seq + t) * head_dim;
+                    for d in 0..half {
+                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                        let angle = pos as f32 * theta.powf(exponent);
+                        let (s, c) = angle.sin_cos();
+                        let dy1 = g[base + d].to_f32().unwrap_or(0.0);
+                        let dy2 = g[base + d + half].to_f32().unwrap_or(0.0);
+                        out[base + d] = num_traits::cast(c * dy1 + s * dy2).unwrap_or_else(T::zero);
+                        out[base + d + half] =
+                            num_traits::cast(-s * dy1 + c * dy2).unwrap_or_else(T::zero);
+                    }
+                }
+            }
+        }
+        Self::from_vec(out, &self.shape).expect("rope_bhsd_bwd: build output")
+    }
+
+    /// GQA `repeat_kv`: duplicate each KV head `n_rep` times consecutively.
+    /// `self` shape is `[bs, kv_heads, seq, head_dim]`, output is
+    /// `[bs, kv_heads * n_rep, seq, head_dim]`.
+    #[must_use]
+    pub fn repeat_kv(
+        &self,
+        bs: usize,
+        kv_heads: usize,
+        n_rep: usize,
+        seq: usize,
+        head_dim: usize,
+    ) -> Self {
+        if n_rep == 1 {
+            return self.clone();
+        }
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).repeat_kv_cuda(bs, kv_heads, n_rep, seq, head_dim))
+            };
+        }
+        // CPU fallback.
+        assert!(
+            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            "repeat_kv CPU path requires f32",
+        );
+        let src = self.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(bs * kv_heads * n_rep * seq * head_dim);
+        for b in 0..bs {
+            for h in 0..kv_heads {
+                for _ in 0..n_rep {
+                    for t in 0..seq {
+                        let base = ((b * kv_heads + h) * seq + t) * head_dim;
+                        for d in 0..head_dim {
+                            out.push(src[base + d]);
+                        }
+                    }
+                }
+            }
+        }
+        let shape = [bs, kv_heads * n_rep, seq, head_dim];
+        Self::from_vec(out, &shape).expect("repeat_kv: build output")
+    }
+
+    /// Head-major split-halves RoPE for Qwen3 / LLaMA training forward.
+    /// `self` is `[bs, n_heads, seq, head_dim]` contiguous. Rotates each
+    /// (b, h, t) token at position `pos_start + t`.
+    #[must_use]
+    pub fn apply_rope_split_halves_bhsd(
+        &self,
+        bs: usize,
+        n_heads: usize,
+        seq: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).apply_rope_split_halves_bhsd_cuda(
+                    bs, n_heads, seq, head_dim, theta, pos_start,
+                ))
+            };
+        }
+        // CPU fallback: same rotation math, head-major iteration order.
+        let mut x = self.to_vec();
+        let half = head_dim / 2;
+        for b in 0..bs {
+            for h in 0..n_heads {
+                for t in 0..seq {
+                    let pos = pos_start + t;
+                    let base = ((b * n_heads + h) * seq + t) * head_dim;
+                    for d in 0..half {
+                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                        let angle = pos as f32 * theta.powf(exponent);
+                        let (s, c) = angle.sin_cos();
+                        let a = x[base + d].to_f32().unwrap_or(0.0);
+                        let bv = x[base + d + half].to_f32().unwrap_or(0.0);
+                        x[base + d] = num_traits::cast(c * a - s * bv).unwrap_or_else(T::zero);
+                        x[base + d + half] =
+                            num_traits::cast(s * a + c * bv).unwrap_or_else(T::zero);
+                    }
+                }
+            }
+        }
+        Self::from_vec(x, &self.shape).expect("rope_bhsd: build output")
+    }
+
     /// Broadcast per-column bias add across `m` rows: `out[t, c] = self[t, c] + bias[c]`.
     #[must_use]
     pub fn add_bias_batched(&self, bias: &Self, m: usize, n: usize) -> Self {
