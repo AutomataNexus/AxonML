@@ -370,6 +370,73 @@ impl GradientFunction for SoftmaxBackward {
 }
 
 // =============================================================================
+// Fused causal-scaled softmax backward
+// =============================================================================
+
+/// Backward for `Variable::softmax_causal_scaled`, the fused replacement
+/// for `(scores * scale + causal_mask).softmax(-1)`. Uses the saved
+/// softmax output `p` (masked positions are already 0) plus the raw-score
+/// `scale` to compute
+///   grad_scores = scale * p * (grad_out - Σ(p · grad_out))
+/// in a single kernel per row. Forward produced no intermediate scaled /
+/// masked tensors, so this is the only backward node — it fully replaces
+/// the SoftmaxBackward + AddBackward + MulScalarBackward chain.
+#[derive(Debug)]
+pub struct SoftmaxCausalScaledBackward {
+    next_fns: Vec<Option<GradFn>>,
+    saved_output: Tensor<f32>,
+    tk: usize,
+    scale: f32,
+}
+
+impl SoftmaxCausalScaledBackward {
+    /// Creates a new `SoftmaxCausalScaledBackward` for the `scores` input.
+    #[must_use]
+    pub fn new(
+        scores_grad_fn: Option<GradFn>,
+        saved_output: Tensor<f32>,
+        tk: usize,
+        scale: f32,
+    ) -> Self {
+        Self {
+            next_fns: vec![scores_grad_fn],
+            saved_output,
+            tk,
+            scale,
+        }
+    }
+}
+
+impl GradientFunction for SoftmaxCausalScaledBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let target = self.saved_output.device();
+        let grad = if grad_output.device() == target {
+            grad_output.clone()
+        } else {
+            grad_output
+                .to_device(target)
+                .expect("backward: grad_output device transfer failed")
+        };
+        let grad_scores = self
+            .saved_output
+            .softmax_causal_scaled_bwd(&grad, self.tk, self.scale);
+        vec![Some(grad_scores)]
+    }
+
+    fn name(&self) -> &'static str {
+        "SoftmaxCausalScaledBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+// =============================================================================
 // LeakyReLU Backward
 // =============================================================================
 

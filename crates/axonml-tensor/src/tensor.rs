@@ -1313,6 +1313,115 @@ impl<T: Float> Tensor<T> {
         Self::from_vec(x, &self.shape).expect("apply_rope: build output tensor")
     }
 
+    /// Fused causal-scaled softmax. `self` is the raw attention scores
+    /// `[..., Tq, Tk]`; applies `softmax(scale * scores + causal_mask)`
+    /// over the last dim. `offset` is the KV-cache position offset (0
+    /// during training). Masked positions (j > offset + i) are exactly 0.
+    ///
+    /// Replaces the `mul_scalar(scale) + add(mask) + softmax(-1)` chain —
+    /// 3 kernels + a CPU mask alloc per call collapse to 1 kernel launch.
+    #[must_use]
+    pub fn softmax_causal_scaled(&self, tq: usize, tk: usize, offset: usize, scale: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).softmax_causal_scaled_cuda(tq, tk, offset, scale))
+            };
+        }
+        // CPU fallback: same math, row by row.
+        assert!(
+            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            "softmax_causal_scaled CPU path requires f32",
+        );
+        let total = self.numel();
+        assert!(total % tk == 0 && (total / tk) % tq == 0);
+        let num_rows = total / tk;
+        let src = self.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(total);
+        for r in 0..num_rows {
+            let q_pos = r % tq;
+            let max_k = offset + q_pos;
+            let base = r * tk;
+            let mut row_max = f32::NEG_INFINITY;
+            for j in 0..tk {
+                let v = if j > max_k {
+                    f32::NEG_INFINITY
+                } else {
+                    src[base + j].to_f32().unwrap_or(0.0) * scale
+                };
+                if v > row_max {
+                    row_max = v;
+                }
+            }
+            let mut sum = 0.0f32;
+            for j in 0..tk {
+                if j > max_k {
+                    continue;
+                }
+                let v = src[base + j].to_f32().unwrap_or(0.0) * scale;
+                sum += (v - row_max).exp();
+            }
+            let inv = if sum > 0.0 { 1.0 / sum } else { 0.0 };
+            for j in 0..tk {
+                let v = if j > max_k {
+                    0.0
+                } else {
+                    let s = src[base + j].to_f32().unwrap_or(0.0) * scale;
+                    (s - row_max).exp() * inv
+                };
+                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+            }
+        }
+        Self::from_vec(out, self.shape()).expect("softmax_causal_scaled: build output")
+    }
+
+    /// Fused causal-scaled softmax backward wrt raw scores. `self` is the
+    /// saved forward output `p` (masked positions are 0); `grad_output`
+    /// is `dL/dp`. Returns `grad_scores = scale * p * (grad_out - Σ(p·grad_out))`
+    /// per row; masked positions naturally zero because `p = 0`.
+    #[must_use]
+    pub fn softmax_causal_scaled_bwd(&self, grad_output: &Self, tk: usize, scale: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).softmax_causal_scaled_bwd_cuda(
+                    gpu_ref(grad_output),
+                    tk,
+                    scale,
+                ))
+            };
+        }
+        assert!(
+            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            "softmax_causal_scaled_bwd CPU path requires f32",
+        );
+        let total = self.numel();
+        assert_eq!(total, grad_output.numel());
+        assert!(total % tk == 0);
+        let num_rows = total / tk;
+        let p = self.to_vec();
+        let g = grad_output.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(total);
+        for r in 0..num_rows {
+            let base = r * tk;
+            let mut dot = 0.0f32;
+            for j in 0..tk {
+                let pj = p[base + j].to_f32().unwrap_or(0.0);
+                let gj = g[base + j].to_f32().unwrap_or(0.0);
+                dot += pj * gj;
+            }
+            for j in 0..tk {
+                let pj = p[base + j].to_f32().unwrap_or(0.0);
+                let gj = g[base + j].to_f32().unwrap_or(0.0);
+                let v = scale * pj * (gj - dot);
+                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+            }
+        }
+        Self::from_vec(out, self.shape()).expect("softmax_causal_scaled_bwd: build output")
+    }
+
     /// Batched RMSNorm backward (grad_input only). `self` is the saved
     /// forward input `[m, n]`, `weight` is `[n]`, `grad_output` is `[m, n]`.
     /// Returns `[m, n]` grad_input matching the CPU-only reference math in

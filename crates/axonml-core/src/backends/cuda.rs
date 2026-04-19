@@ -4048,6 +4048,86 @@ impl CudaBackend {
         }
     }
 
+    /// Fused causal-scaled softmax. Replaces the `mul_scalar(scale) +
+    /// broadcast_add(causal_mask) + softmax_row` kernel sequence with a
+    /// single launch. `scores`/`out` shape is `[num_rows, tk]` flattened
+    /// from `[B, H, Tq, Tk]` (num_rows = B*H*Tq). `q_pos = row_idx % tq`.
+    pub fn softmax_causal_scaled_f32(
+        &self,
+        out: &mut CudaSlice<f32>,
+        scores: &CudaSlice<f32>,
+        num_rows: usize,
+        tq: usize,
+        tk: usize,
+        offset: usize,
+        scale: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("softmax_causal_scaled_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("softmax_causal_scaled_f32".to_string()))?;
+        let block: u32 = 256;
+        let n_warps = (block + 31) / 32;
+        // Reuses one shmem buffer across two reductions; n_warps * 4 bytes is enough.
+        let shmem = n_warps * 4;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (num_rows as u32, 1, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: shmem,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(out)
+                .arg(scores)
+                .arg(&(tq as u32))
+                .arg(&(tk as u32))
+                .arg(&(offset as u32))
+                .arg(&scale)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Fused causal-scaled softmax backward wrt raw scores.
+    pub fn softmax_causal_scaled_bwd_f32(
+        &self,
+        grad_scores: &mut CudaSlice<f32>,
+        p: &CudaSlice<f32>,
+        grad_out: &CudaSlice<f32>,
+        num_rows: usize,
+        tk: usize,
+        scale: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("softmax_causal_scaled_bwd_f32")
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("softmax_causal_scaled_bwd_f32".to_string())
+            })?;
+        let block: u32 = 256;
+        let n_warps = (block + 31) / 32;
+        let shmem = n_warps * 4;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (num_rows as u32, 1, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: shmem,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_scores)
+                .arg(p)
+                .arg(grad_out)
+                .arg(&(tk as u32))
+                .arg(&scale)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// Batched RMSNorm backward (grad_input only): for each row t in [0, m),
     /// computes `grad_x[t, :] = w/rms * grad_y[t, :] - x[t, :]/(rms³·n) · Σ(x·w·grad_y)`.
     /// x, grad_out shape [m, n]; weight [n]; output grad_input [m, n] all contiguous.

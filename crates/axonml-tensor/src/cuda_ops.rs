@@ -3869,6 +3869,94 @@ impl Tensor<f32> {
         }
     }
 
+    /// Fused causal-scaled softmax. `self` is the raw attention scores with
+    /// shape `[B, H, Tq, Tk]` or any leading-dims + `[Tq, Tk]` layout; the
+    /// kernel treats it as `[B*H*Tq, Tk]` flattened. Returns a tensor of the
+    /// same shape, with masked positions exactly 0.
+    pub(crate) fn softmax_causal_scaled_cuda(
+        &self,
+        tq: usize,
+        tk: usize,
+        offset: usize,
+        scale: f32,
+    ) -> Self {
+        let data = self.contiguous_gpu();
+        let total = data.numel();
+        debug_assert!(
+            total % tk == 0,
+            "softmax_causal_scaled: tk must divide numel"
+        );
+        let num_rows = total / tk;
+        debug_assert!(
+            num_rows % tq == 0,
+            "softmax_causal_scaled: tq must divide num_rows"
+        );
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        // Kernel writes every output position (mask-off → 0, in-bounds → softmax).
+        let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
+
+        cuda.softmax_causal_scaled_f32(
+            &mut out,
+            src_guard.slice(),
+            num_rows,
+            tq,
+            tk,
+            offset,
+            scale,
+        )
+        .expect("CUDA softmax_causal_scaled_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, total, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
+    /// Fused causal-scaled softmax backward wrt raw scores. `self` is the
+    /// saved forward output `p` (masked positions are 0); `grad_output`
+    /// matches its shape. Returns `grad_scores` = `scale * p * (grad_out - Σ(p·grad_out))`.
+    pub(crate) fn softmax_causal_scaled_bwd_cuda(
+        &self,
+        grad_output: &Self,
+        tk: usize,
+        scale: f32,
+    ) -> Self {
+        let p = self.contiguous_gpu();
+        let g = grad_output.contiguous_gpu();
+        let total = p.numel();
+        debug_assert_eq!(total, g.numel());
+        debug_assert!(total % tk == 0);
+        let num_rows = total / tk;
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let p_guard = p.storage.as_cuda_slice();
+        let g_guard = g.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
+
+        cuda.softmax_causal_scaled_bwd_f32(
+            &mut out,
+            p_guard.slice(),
+            g_guard.slice(),
+            num_rows,
+            tk,
+            scale,
+        )
+        .expect("CUDA softmax_causal_scaled_bwd_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, total, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
     /// Batched RMSNorm backward — computes grad_input only (the current
     /// autograd path treats RMSNorm weight as a frozen parameter, matching
     /// the CPU-only RMSNormBackward in axonml-llm). `self` = saved_input

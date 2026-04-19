@@ -38,8 +38,9 @@ use crate::functions::{
     ExpBackward, ExpandBackward, GeluBackward, LeakyReluBackward, LogBackward, LogSoftmaxBackward,
     MatMulBackward, MeanBackward, MeanDimBackward, MulBackward, MulScalarBackward, NarrowBackward,
     NegBackward, PowBackward, ReluBackward, ReshapeBackward, SelectBackward, SigmoidBackward,
-    SiluBackward, SoftmaxBackward, SqrtBackward, SubBackward, SumBackward, SumDimBackward,
-    TanhBackward, TransposeBackward, UnsqueezeBackward, VarDimBackward,
+    SiluBackward, SoftmaxBackward, SoftmaxCausalScaledBackward, SqrtBackward, SubBackward,
+    SumBackward, SumDimBackward, TanhBackward, TransposeBackward, UnsqueezeBackward,
+    VarDimBackward,
 };
 use crate::grad_fn::{AccumulateGrad, GradAccumulator, GradFn};
 use crate::graph::{GraphNode, with_graph};
@@ -969,6 +970,37 @@ impl Variable {
                 self.grad_fn.clone(),
                 result.clone(),
                 dim as i64,
+            ));
+            Variable::from_operation(result, grad_fn, true)
+        } else {
+            Variable::from_tensor(result)
+        }
+    }
+
+    /// Fused causal-scaled softmax. Applies `softmax(scale * self + causal_mask)`
+    /// along the last dim in a single kernel launch. Replaces the autograd
+    /// chain `self.mul_scalar(scale).add_var(&Variable::new(mask, false)).softmax(-1)`
+    /// used by LLaMA / Qwen3 / Mistral / Phi attention — saves 2 GradFn nodes
+    /// per attention head on forward *and* backward (MulScalarBackward +
+    /// AddBackward dropped) plus avoids the per-call mask-tensor alloc & H2D.
+    #[must_use]
+    pub fn softmax_causal_scaled(
+        &self,
+        tq: usize,
+        tk: usize,
+        offset: usize,
+        scale: f32,
+    ) -> Variable {
+        let data = self.data();
+        let result = data.softmax_causal_scaled(tq, tk, offset, scale);
+        let requires_grad = self.requires_grad && is_grad_enabled();
+
+        if requires_grad {
+            let grad_fn = GradFn::new(SoftmaxCausalScaledBackward::new(
+                self.grad_fn.clone(),
+                result.clone(),
+                tk,
+                scale,
             ));
             Variable::from_operation(result, grad_fn, true)
         } else {

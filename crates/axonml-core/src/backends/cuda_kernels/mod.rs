@@ -3954,6 +3954,8 @@ impl CudaKernels {
                 "rms_norm_heads_batched_f32",
                 "rope_split_halves_batched_f32",
                 "add_bias_batched_f32",
+                "softmax_causal_scaled_f32",
+                "softmax_causal_scaled_bwd_f32",
             ],
         )?;
 
