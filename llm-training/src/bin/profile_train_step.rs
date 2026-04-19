@@ -24,8 +24,12 @@ use axonml_tensor::Tensor;
 use llm_training::shifted_cross_entropy;
 
 fn main() {
-    let bs = 4;
-    let seq = 512;
+    // Scaled down from the real distill config (bs=4 seq=512) to fit the
+    // 12 GB laptop GPU once activations live fully on-device. The per-step
+    // shape of the graph (# ops, # kernel launches) is preserved — bs and
+    // seq only change allocation size, not op count.
+    let bs = 2;
+    let seq = 256;
 
     // Qwen3-0.6B shape — the real distill target.
     let mut cfg = Qwen3Config::qwen3_0_6b();

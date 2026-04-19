@@ -3869,6 +3869,52 @@ impl Tensor<f32> {
         }
     }
 
+    /// Batched RMSNorm backward — computes grad_input only (the current
+    /// autograd path treats RMSNorm weight as a frozen parameter, matching
+    /// the CPU-only RMSNormBackward in axonml-llm). `self` = saved_input
+    /// `[m, n]`, `weight` `[n]`, `grad_output` `[m, n]` — all on GPU.
+    pub(crate) fn rms_norm_bwd_batched_cuda(
+        &self,
+        weight: &Self,
+        grad_output: &Self,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> Self {
+        let x = self.contiguous_gpu();
+        let w = weight.contiguous_gpu();
+        let g = grad_output.contiguous_gpu();
+        debug_assert_eq!(x.numel(), m * n);
+        debug_assert_eq!(w.numel(), n);
+        debug_assert_eq!(g.numel(), m * n);
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let x_guard = x.storage.as_cuda_slice();
+        let w_guard = w.storage.as_cuda_slice();
+        let g_guard = g.storage.as_cuda_slice();
+        // Kernel writes every grad_input element — uninit safe.
+        let mut out = pool_alloc_uninit(m * n).expect("GPU pool alloc failed");
+
+        cuda.rms_norm_bwd_batched_f32(
+            &mut out,
+            x_guard.slice(),
+            w_guard.slice(),
+            g_guard.slice(),
+            m,
+            n,
+            eps,
+        )
+        .expect("CUDA rms_norm_bwd_batched_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, m * n, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
     /// Batched RMSNorm over `m` tokens. `self` must be `[m, n]` contiguous
     /// on GPU; `weight` is `[n]` on GPU. Returns `[m, n]`.
     pub(crate) fn rms_norm_batched_cuda(

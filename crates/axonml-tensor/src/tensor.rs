@@ -1313,6 +1313,72 @@ impl<T: Float> Tensor<T> {
         Self::from_vec(x, &self.shape).expect("apply_rope: build output tensor")
     }
 
+    /// Batched RMSNorm backward (grad_input only). `self` is the saved
+    /// forward input `[m, n]`, `weight` is `[n]`, `grad_output` is `[m, n]`.
+    /// Returns `[m, n]` grad_input matching the CPU-only reference math in
+    /// `axonml-llm::RMSNormBackward` (weight-gradient path not required
+    /// because the existing autograd path doesn't route grads to the weight).
+    #[must_use]
+    pub fn rms_norm_bwd_batched(
+        &self,
+        weight: &Self,
+        grad_output: &Self,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return unsafe {
+                gpu_into(gpu_ref(self).rms_norm_bwd_batched_cuda(
+                    gpu_ref(weight),
+                    gpu_ref(grad_output),
+                    m,
+                    n,
+                    eps,
+                ))
+            };
+        }
+        // CPU fallback: same math as axonml-llm's RMSNormBackward::apply.
+        assert!(
+            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            "rms_norm_bwd_batched CPU path requires f32",
+        );
+        let x = self.to_vec();
+        let w = weight.to_vec();
+        let g = grad_output.to_vec();
+        assert_eq!(x.len(), m * n);
+        assert_eq!(w.len(), n);
+        assert_eq!(g.len(), m * n);
+        let mut out: Vec<T> = Vec::with_capacity(m * n);
+        let d = n as f32;
+        for t in 0..m {
+            let base = t * n;
+            let mut sum_sq = 0.0f64;
+            let mut dot = 0.0f64;
+            for i in 0..n {
+                let xi = x[base + i].to_f32().unwrap_or(0.0);
+                let wi = w[i].to_f32().unwrap_or(0.0);
+                let gi = g[base + i].to_f32().unwrap_or(0.0);
+                sum_sq += (xi as f64) * (xi as f64);
+                dot += (xi as f64) * (wi as f64) * (gi as f64);
+            }
+            let rms_inv = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+            let rms3_inv = rms_inv * rms_inv * rms_inv;
+            let dot_scaled = (dot as f32) * rms3_inv / d;
+            for i in 0..n {
+                let xi = x[base + i].to_f32().unwrap_or(0.0);
+                let wi = w[i].to_f32().unwrap_or(0.0);
+                let gi = g[base + i].to_f32().unwrap_or(0.0);
+                let term1 = wi * gi * rms_inv;
+                let term2 = xi * dot_scaled;
+                out.push(num_traits::cast(term1 - term2).unwrap_or_else(T::zero));
+            }
+        }
+        Self::from_vec(out, &[m, n]).expect("rms_norm_bwd_batched: build output")
+    }
+
     /// Batched RMSNorm over `m` tokens. `self` is `[m, n]`; `weight` is `[n]`.
     #[must_use]
     pub fn rms_norm_batched(&self, weight: &Self, m: usize, n: usize, eps: f32) -> Self {
