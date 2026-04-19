@@ -8,10 +8,13 @@
 //!
 //! **Capture still panics** on any real op with
 //! `CUDA_ERROR_STREAM_CAPTURE_ISOLATION: dependency created on uncaptured
-//! work in another stream`. Root cause: our memory pool path calls into
-//! the CUDA async allocator (`cuMemAllocAsync`) during kernel setup, and
-//! the driver's internal memory-pool service runs on its own stream,
-//! creating a cross-stream dependency the capture refuses.
+//! work in another stream`. Confirmed the failure is NOT the memory pool:
+//! this bench pre-allocates two ping-pong output tensors outside capture
+//! and only runs `cuda.add_f32(...)` directly against them during capture
+//! — zero `pool_alloc_*` calls, zero `cuMemAllocAsync` — and still gets
+//! ISOLATION. Something inside cudarc's `launch_builder` → `launch(cfg)`
+//! path itself (or the driver's implicit context/module-load state) is
+//! touching a non-captured stream on the first launch.
 //!
 //! # What this bench does
 //!
@@ -21,31 +24,47 @@
 //!    today with the ISOLATION error; the panic is intentional and left
 //!    in so the next person running this sees exactly where we stop.
 //!
+//! # Root cause (identified)
+//!
+//! cudarc 0.19's safe launch path is event-instrumented. See
+//! `cudarc::driver::safe::launch::LaunchArgs::launch` — on every kernel
+//! call it iterates `self.waits` and runs `stream.wait(event)` for each.
+//! Every `CudaSlice` / `CudaView` we pass as a kernel arg carries two
+//! sync-tracking events (attached by `PushKernelArg`). The pre-launch
+//! `stream.wait(event)` calls are the "dependency on another stream" the
+//! capture is complaining about — those events were recorded against
+//! cudarc's internal sync-tracking stream before capture began, and the
+//! capture correctly refuses to pull them in.
+//!
+//! This isn't a memory-pool problem. Stripping `pool_alloc_*` out of the
+//! captured path (as this bench does) still fails — every `arg(&slice)`
+//! call adds events whose producer stream wasn't captured.
+//!
 //! # What's needed to unblock
 //!
-//! Graph-safe memory needs one of:
+//! 1. **Bypass cudarc's safe launch under capture.** Write a direct
+//!    `cuLaunchKernel` wrapper in `axonml-core` that does NOT call
+//!    `stream.wait(event)` for slice-carried events. Args would be
+//!    marshalled manually (raw `*mut c_void` pointers + kernel
+//!    parameter layout). Loses the race-safety cudarc's events give us,
+//!    but that's the price of capture compatibility.
 //!
-//! 1. **Pre-bound workspace tensors.** Every op on the captured path
-//!    writes into a tensor allocated *before* capture starts. No
-//!    `pool_alloc_*` calls during capture. This is how PyTorch's
-//!    `CUDAGraph.capture_begin()` works — you must pre-allocate all
-//!    intermediate buffers (they expose this via the `cuda_graph_pool`
-//!    + explicit output tensors in custom ops).
+//! 2. **Upstream fix in cudarc.** A `launch_no_events()` variant, or
+//!    automatic event-skipping when the stream is under capture
+//!    (queryable via `cuStreamIsCapturing`). Either unblocks this
+//!    cleanly for all downstream users.
 //!
-//! 2. **Stream-ordered allocator with explicit memory pool.** Create a
-//!    `cudaMemPool_t` with `cudaMemPoolAttrReleaseThreshold = UINT64_MAX`
-//!    and set it as the allocator for our stream. Allocations during
-//!    capture then happen *on the captured stream* and the graph records
-//!    them as `cudaGraphAddMemAllocNode` + `cudaGraphAddMemFreeNode`.
-//!    On replay the same virtual addresses are reused deterministically.
-//!    cudarc doesn't yet expose `cudaMallocFromPoolAsync` as a safe API,
-//!    so this path would need a small unsafe wrapper around
-//!    `cuda::driver::sys::cuMemAllocFromPoolAsync` in axonml-core.
+//! 3. **Mempool integration remains needed regardless.** Even after (1)
+//!    or (2) lands, `pool_alloc_uninit` on a miss hits
+//!    `cuMemAllocAsync` which dispatches on the driver's memory-pool
+//!    service stream. Wrap `cuMemAllocFromPoolAsync` in a capture-aware
+//!    helper so allocations during capture materialize as graph
+//!    `MemAllocNode`s on the captured stream.
 //!
-//! Option (1) is the cleaner fit for this codebase because it keeps the
-//! autograd graph deterministic: the forward path would pre-compute its
-//! output shapes, allocate the workspace tensors once, then all steps
-//! share those pointers. Backward similarly.
+//! Scope: (1) is ~1 day of unsafe-Rust plumbing in `axonml-core`. (2) is
+//! the clean fix but needs upstream coordination. Parking this until the
+//! first is actually built, which needs more focused time than a
+//! perf-audit session.
 //!
 //! # Why it's still worth fixing
 //!
@@ -75,7 +94,7 @@ fn main() {
     let b = mkrand(&[n_elems], 0.07, device);
     let n_iter = 100;
 
-    // ---------- Eager baseline ----------
+    // ---------- Eager baseline (via Tensor API with pool allocs) ----------
     for _ in 0..3 {
         let mut x = a0.clone();
         for _ in 0..chain_depth {
@@ -96,40 +115,40 @@ fn main() {
     cuda_sync();
     let eager_us = t.elapsed().as_micros() as f64 / n_iter as f64;
     println!(
-        "eager chain (depth={chain_depth})          {:>9.1} µs/iter  ({:.1} µs/add)",
+        "eager chain (depth={chain_depth}, via Tensor::add)  {:>9.1} µs/iter  ({:.1} µs/add)",
         eager_us,
         eager_us / chain_depth as f64
     );
 
-    // ---------- Graph capture attempt ----------
+    // ---------- Graph capture with pre-bound buffers ----------
+    // Skip the pool entirely — pre-allocate two ping-pong output tensors
+    // OUTSIDE capture, then during capture just launch add_f32 kernels
+    // into them. No cuMemAllocAsync happens on the captured stream.
     let cuda = get_cuda_backend().expect("CUDA backend required");
     let stream = cuda.stream();
 
-    // Pre-warm the pool (doesn't help, but rules out cold allocation paths).
+    let buf0 = mkrand(&[n_elems], 0.0, device);
+    let buf1 = mkrand(&[n_elems], 0.0, device);
+
+    // Seed buf0 from a0.
+    cuda_sync();
+    let t_warm = Instant::now();
     for _ in 0..5 {
-        let mut x = a0.clone();
-        for _ in 0..chain_depth {
-            x = x.add(&b).unwrap();
-        }
-        std::hint::black_box(x);
+        eager_add_ping_pong(cuda, &a0, &b, &buf0, &buf1, chain_depth);
     }
     cuda_sync();
+    let eager_ppg_us = t_warm.elapsed().as_micros() as f64 / 5.0;
+    println!(
+        "eager ping-pong (depth={chain_depth}, raw kernel)    {:>9.1} µs/iter",
+        eager_ppg_us
+    );
 
     use cudarc::driver::sys::{CUgraphInstantiate_flags, CUstreamCaptureMode};
-    println!("\nattempting stream capture (expect STREAM_CAPTURE_ISOLATION panic);");
-    println!("see file header for what's needed to unblock this…");
+    println!("\nattempting stream capture (pre-bound buffers, no pool allocs)…");
     stream
         .begin_capture(CUstreamCaptureMode::CU_STREAM_CAPTURE_MODE_RELAXED)
-        .expect("begin_capture failed — default stream? wrong mode?");
-    let mut captured_x = a0.clone();
-    for _ in 0..chain_depth {
-        // This panics the first time around with:
-        //   CUDA_ERROR_STREAM_CAPTURE_ISOLATION — dependency created on
-        //   uncaptured work in another stream
-        // because the pool_alloc path's cuMemAllocAsync talks to the
-        // driver's memory-pool service stream.
-        captured_x = captured_x.add(&b).unwrap();
-    }
+        .expect("begin_capture failed");
+    eager_add_ping_pong(cuda, &a0, &b, &buf0, &buf1, chain_depth);
     let graph = stream
         .end_capture(CUgraphInstantiate_flags::CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH)
         .expect("end_capture failed")
@@ -143,19 +162,61 @@ fn main() {
     cuda_sync();
     let graph_us = t.elapsed().as_micros() as f64 / n_iter as f64;
     println!(
-        "graph replay (depth={chain_depth})         {:>9.1} µs/iter  ({:.1} µs/add)",
+        "graph replay (depth={chain_depth}, pre-bound)       {:>9.1} µs/iter  ({:.1} µs/add)",
         graph_us,
         graph_us / chain_depth as f64
     );
     println!(
-        "\ngraph speedup: {:.2}× on a {}-deep add chain",
-        eager_us / graph_us.max(1.0),
-        chain_depth
+        "\ngraph vs raw-eager:  {:.2}× speedup",
+        eager_ppg_us / graph_us.max(1.0)
     );
     println!(
-        "(captured_x pins output memory: shape={:?})",
-        captured_x.shape()
+        "graph vs Tensor API: {:.2}× speedup",
+        eager_us / graph_us.max(1.0)
     );
+}
+
+/// Fires `depth` `add_f32` kernels alternating between `buf0` and `buf1` as
+/// the running accumulator. First iteration reads from `a0`; subsequent
+/// iterations read from the previous output. No pool allocations, no Tensor
+/// wrapping — just raw kernel launches into pre-allocated buffers so the
+/// captured work stream is pure compute.
+fn eager_add_ping_pong(
+    cuda: &axonml_core::backends::cuda::CudaBackend,
+    a0: &Tensor<f32>,
+    b: &Tensor<f32>,
+    buf0: &Tensor<f32>,
+    buf1: &Tensor<f32>,
+    depth: usize,
+) {
+    let n = a0.numel();
+
+    // Step 0: buf0 = a0 + b — scope the guards so they release before the loop.
+    {
+        let a_slice = a0.as_cuda_slice_read();
+        let b_slice = b.as_cuda_slice_read();
+        let mut buf0_guard = buf0.as_cuda_slice_write();
+        cuda.add_f32(buf0_guard.slice_mut(), a_slice.slice(), b_slice.slice(), n)
+            .expect("add_f32 step 0");
+    }
+
+    // Ping-pong: alternate reading from buf0/buf1 and writing the other.
+    let mut src_is_buf0 = true;
+    for _ in 1..depth {
+        let b_slice = b.as_cuda_slice_read();
+        if src_is_buf0 {
+            let src_guard = buf0.as_cuda_slice_read();
+            let mut dst_guard = buf1.as_cuda_slice_write();
+            cuda.add_f32(dst_guard.slice_mut(), src_guard.slice(), b_slice.slice(), n)
+                .expect("add_f32 step");
+        } else {
+            let src_guard = buf1.as_cuda_slice_read();
+            let mut dst_guard = buf0.as_cuda_slice_write();
+            cuda.add_f32(dst_guard.slice_mut(), src_guard.slice(), b_slice.slice(), n)
+                .expect("add_f32 step");
+        }
+        src_is_buf0 = !src_is_buf0;
+    }
 }
 
 fn mkrand(shape: &[usize], seed: f32, dev: Device) -> Tensor<f32> {
