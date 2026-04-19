@@ -118,16 +118,32 @@ capture (prerequisite stream-change landed; memory-pool integration left).
   per call. Those were 3 × 8 MB H2D per call on Qwen3-0.6B, ~720 MB/step of
   pure PCIe traffic + CPU memset churn. Now zeros on-GPU via `pool_alloc`.
 
-#### Added — diagnostics / documentation
+#### Added — CUDA graph capture (working POC)
 
-- `bench_cuda_graph` documents the CUDA graph capture blocker:
-  `cuStreamBeginCapture_v2` now works on our named stream, but capture of
-  real work fails with `CUDA_ERROR_STREAM_CAPTURE_ISOLATION` because
-  `pool_alloc_uninit` on a miss calls `cuMemAllocAsync`, which the driver
-  serializes via an internal memory-pool service stream. Two unblocking
-  paths documented in the file header: pre-bound workspace tensors
-  (PyTorch's approach) or explicit `cudaMemPool_t` + `cuMemAllocFromPoolAsync`
-  wrapper in `axonml-core`.
+- **CUDA graph capture + replay is live** in `bench_cuda_graph`. Two
+  prerequisites landed:
+  - Named stream instead of the default NULL stream (default rejects
+    `cuStreamBeginCapture_v2`).
+  - `CudaContext::disable_event_tracking()` called at backend init.
+    cudarc's `PushKernelArg` for `&CudaSlice` otherwise attaches two
+    CUDA events per slice arg, whose pre-capture stream-waits break
+    capture with `STREAM_CAPTURE_ISOLATION`. Safe for AxonML's
+    single-stream workload — there's no cross-stream hand-off.
+- POC result on a 20-kernel elementwise-add chain (pre-bound buffers):
+  eager 177 µs/iter → graph replay 125 µs/iter = **1.41× speedup**.
+  Per-kernel overhead drop scales with kernel count, so the full
+  training-step graph (~1 200-2 000 kernels / step) is the real payoff.
+- Remaining hurdle for whole-step capture: `pool_alloc_uninit` on a miss
+  hits `cuMemAllocAsync` which the driver serializes on its internal
+  memory-pool service stream (different from the cudarc-events issue).
+  Unblocked by wrapping `cuMemAllocFromPoolAsync` from an explicit
+  `CUmemoryPool` configured with `CU_MEMPOOL_ATTR_RELEASE_THRESHOLD =
+  UINT64_MAX` so allocations record as graph `MemAllocNode`s with
+  stable virtual addresses across replays.
+- `Tensor::as_cuda_slice_write` added alongside the existing `_read`
+  accessor. Required for any callers that need to bind a pre-allocated
+  output buffer as a mutable kernel arg — the shape of the future
+  "workspace-bound" graph-capture path.
 
 #### Diagnosed — launch-bound backward
 

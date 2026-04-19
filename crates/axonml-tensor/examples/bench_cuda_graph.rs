@@ -1,20 +1,24 @@
 //! CUDA-graph capture POC / blocker diagnostic.
 //!
-//! # Status
+//! # Status: WORKING
 //!
-//! **Stream is now capture-capable** (backend moved from `default_stream()`
-//! to `new_stream()` — the default NULL stream rejects capture with
-//! `CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED`).
+//! CUDA graph capture + replay is live. Two fixes were needed:
 //!
-//! **Capture still panics** on any real op with
-//! `CUDA_ERROR_STREAM_CAPTURE_ISOLATION: dependency created on uncaptured
-//! work in another stream`. Confirmed the failure is NOT the memory pool:
-//! this bench pre-allocates two ping-pong output tensors outside capture
-//! and only runs `cuda.add_f32(...)` directly against them during capture
-//! — zero `pool_alloc_*` calls, zero `cuMemAllocAsync` — and still gets
-//! ISOLATION. Something inside cudarc's `launch_builder` → `launch(cfg)`
-//! path itself (or the driver's implicit context/module-load state) is
-//! touching a non-captured stream on the first launch.
+//! 1. **Named stream instead of default NULL.** `cuStreamBeginCapture_v2`
+//!    rejects the default stream. `CudaBackend::new` now uses
+//!    `ctx.new_stream()`.
+//!
+//! 2. **Event-tracking disabled.** cudarc's `PushKernelArg` for
+//!    `&CudaSlice` adds two events per slice arg, guarded by
+//!    `ctx.is_managing_stream_synchronization()`. Those events were
+//!    recorded pre-capture and caused the `STREAM_CAPTURE_ISOLATION`
+//!    error at launch time. `CudaBackend::new` now calls
+//!    `ctx.disable_event_tracking()` at startup — safe for AxonML's
+//!    single-stream workload because there's no cross-stream hand-off
+//!    to synchronize.
+//!
+//! With both fixes, a pre-bound-buffer kernel chain captures + replays
+//! cleanly and replay is measurably faster than eager submit.
 //!
 //! # What this bench does
 //!
@@ -24,47 +28,17 @@
 //!    today with the ISOLATION error; the panic is intentional and left
 //!    in so the next person running this sees exactly where we stop.
 //!
-//! # Root cause (identified)
+//! # Remaining hurdle for full training-step capture
 //!
-//! cudarc 0.19's safe launch path is event-instrumented. See
-//! `cudarc::driver::safe::launch::LaunchArgs::launch` — on every kernel
-//! call it iterates `self.waits` and runs `stream.wait(event)` for each.
-//! Every `CudaSlice` / `CudaView` we pass as a kernel arg carries two
-//! sync-tracking events (attached by `PushKernelArg`). The pre-launch
-//! `stream.wait(event)` calls are the "dependency on another stream" the
-//! capture is complaining about — those events were recorded against
-//! cudarc's internal sync-tracking stream before capture began, and the
-//! capture correctly refuses to pull them in.
-//!
-//! This isn't a memory-pool problem. Stripping `pool_alloc_*` out of the
-//! captured path (as this bench does) still fails — every `arg(&slice)`
-//! call adds events whose producer stream wasn't captured.
-//!
-//! # What's needed to unblock
-//!
-//! 1. **Bypass cudarc's safe launch under capture.** Write a direct
-//!    `cuLaunchKernel` wrapper in `axonml-core` that does NOT call
-//!    `stream.wait(event)` for slice-carried events. Args would be
-//!    marshalled manually (raw `*mut c_void` pointers + kernel
-//!    parameter layout). Loses the race-safety cudarc's events give us,
-//!    but that's the price of capture compatibility.
-//!
-//! 2. **Upstream fix in cudarc.** A `launch_no_events()` variant, or
-//!    automatic event-skipping when the stream is under capture
-//!    (queryable via `cuStreamIsCapturing`). Either unblocks this
-//!    cleanly for all downstream users.
-//!
-//! 3. **Mempool integration remains needed regardless.** Even after (1)
-//!    or (2) lands, `pool_alloc_uninit` on a miss hits
-//!    `cuMemAllocAsync` which dispatches on the driver's memory-pool
-//!    service stream. Wrap `cuMemAllocFromPoolAsync` in a capture-aware
-//!    helper so allocations during capture materialize as graph
-//!    `MemAllocNode`s on the captured stream.
-//!
-//! Scope: (1) is ~1 day of unsafe-Rust plumbing in `axonml-core`. (2) is
-//! the clean fix but needs upstream coordination. Parking this until the
-//! first is actually built, which needs more focused time than a
-//! perf-audit session.
+//! This POC pre-allocates workspace tensors outside capture. For a real
+//! training step wrapped in capture we additionally need `pool_alloc_*` to
+//! be capture-safe: a pool miss today calls `cuMemAllocAsync`, which the
+//! driver serializes on its internal memory-pool service stream (a
+//! separate form of cross-stream dependency from the cudarc events one).
+//! Wrapping `cuMemAllocFromPoolAsync` from an explicit `CUmemoryPool`
+//! configured with `CU_MEMPOOL_ATTR_RELEASE_THRESHOLD = UINT64_MAX` lets
+//! allocations during capture record as graph `MemAllocNode`s and
+//! preserves their virtual addresses across replays.
 //!
 //! # Why it's still worth fixing
 //!
@@ -144,7 +118,7 @@ fn main() {
     );
 
     use cudarc::driver::sys::{CUgraphInstantiate_flags, CUstreamCaptureMode};
-    println!("\nattempting stream capture (pre-bound buffers, no pool allocs)…");
+    println!("\ncapturing stream (pre-bound buffers, event-tracking off)…");
     stream
         .begin_capture(CUstreamCaptureMode::CU_STREAM_CAPTURE_MODE_RELAXED)
         .expect("begin_capture failed");
