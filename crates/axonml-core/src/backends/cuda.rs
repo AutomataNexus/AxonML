@@ -118,6 +118,20 @@ impl CudaBackend {
     #[cfg(feature = "cuda")]
     pub fn new(device_index: usize) -> Option<Self> {
         let ctx = CudaContext::new(device_index).ok()?;
+        // Disable cudarc's per-slice event tracking. Under capture it
+        // would insert `stream.wait(event)` calls referencing events
+        // recorded on cudarc's internal synchronization machinery, which
+        // the capture then refuses with STREAM_CAPTURE_ISOLATION. We run
+        // single-stream everywhere — no cross-stream hand-off to
+        // synchronize — so the tracking is pure overhead for our case.
+        //
+        // Safety (per cudarc docs): ensure no CudaSlice is freed before
+        // a use on another stream finishes, no inter-stream read-before-
+        // allocate, no concurrent multi-stream writes. All satisfied by
+        // AxonML's single-stream design.
+        unsafe {
+            ctx.disable_event_tracking();
+        }
         // Use a non-default (named) stream so downstream callers can do
         // `stream.begin_capture(...)` for CUDA graph capture of hot-path
         // work — the default (NULL) stream cannot be captured. Performance
