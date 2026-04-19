@@ -1714,6 +1714,7 @@ dependencies = [
  "axonml-optim",
  "axonml-serialize",
  "axonml-tensor",
+ "cudarc",
  "rand 0.8.5",
  "signal-hook",
  "tokenizers",
