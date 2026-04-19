@@ -896,9 +896,10 @@ impl SiluBackward {
 
 impl GradientFunction for SiluBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // GPU fast path: compute silu backward using tensor ops (all GPU-native)
-        // SiLU(x) = x * sigmoid(x)
-        // d/dx = sigmoid(x) * (1 + x * (1 - sigmoid(x)))
+        // GPU fast path: single fused kernel — grad_input = grad_output *
+        // σ(x) * (1 + x*(1-σ(x))). Replaces the prior 7-op chain (sigmoid
+        // + ones-H2D + sub + mul + add + mul + mul) with one launch, one
+        // pool_alloc, zero H2D copies.
         #[cfg(feature = "cuda")]
         if self.saved_input.device().is_gpu() {
             let grad_gpu = if grad_output.device().is_gpu() {
@@ -906,16 +907,7 @@ impl GradientFunction for SiluBackward {
             } else {
                 grad_output.to_device(self.saved_input.device()).unwrap()
             };
-            let x = &self.saved_input;
-            let sig = x.sigmoid();
-            let ones = Tensor::ones(x.shape()).to_device(x.device()).unwrap();
-            let one_minus_sig = ones.sub(&sig).expect("backward: tensor sub failed");
-            let x_term = x.mul(&one_minus_sig).expect("backward: tensor mul failed");
-            let bracket = ones.add(&x_term).expect("backward: tensor add failed");
-            let deriv = sig.mul(&bracket).expect("backward: tensor mul failed");
-            return vec![Some(
-                grad_gpu.mul(&deriv).expect("backward: tensor mul failed"),
-            )];
+            return vec![Some(self.saved_input.silu_backward(&grad_gpu))];
         }
 
         vec![Some(self.saved_input.zip_map(grad_output, |x, g| {

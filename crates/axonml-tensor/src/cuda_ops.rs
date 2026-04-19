@@ -548,6 +548,34 @@ impl Tensor<f32> {
         }
     }
 
+    /// Fused SiLU backward on GPU. Computes `grad_input = grad_output *
+    /// σ(x) * (1 + x*(1 - σ(x)))` in a single kernel launch. Replaces the
+    /// SiluBackward::apply chain of 7 tensor ops + ones-H2D.
+    pub(crate) fn silu_backward_cuda(&self, grad_output: &Self) -> Self {
+        assert!(self.device().is_gpu(), "silu_backward_cuda: self on GPU");
+        assert_eq!(self.shape(), grad_output.shape(), "silu_backward_cuda: shape mismatch");
+        let data = self.contiguous_gpu();
+        let g = grad_output.contiguous_gpu();
+        let len = data.numel();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let src_guard = data.storage.as_cuda_slice();
+        let g_guard = g.storage.as_cuda_slice();
+        // pool_alloc_uninit: kernel writes every element exactly once.
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
+
+        cuda.silu_backward_f32(&mut out, src_guard.slice(), g_guard.slice(), len)
+            .expect("CUDA silu_backward_f32 failed");
+
+        let storage = Storage::from_cuda_slice(out, len, self.device());
+        Self {
+            storage,
+            shape: self.shape.clone(),
+            strides: contiguous_strides(&self.shape),
+            offset: 0,
+        }
+    }
+
     /// GPU scalar multiplication — fully on-device, no CPU round-trip.
     pub(crate) fn mul_scalar_cuda(&self, scalar: f32) -> Self {
         let data = self.contiguous_gpu();
@@ -3463,10 +3491,12 @@ impl Tensor<f32> {
         let o_guard = o_contig.storage.as_cuda_slice();
         let go_guard = go_contig.storage.as_cuda_slice();
 
-        // Zero-initialized output buffers (htod_copy from zeros)
-        let mut gq_gpu = cuda.htod_copy(&vec![0.0f32; total_q]).ok()?;
-        let mut gk_gpu = cuda.htod_copy(&vec![0.0f32; total_kv]).ok()?;
-        let mut gv_gpu = cuda.htod_copy(&vec![0.0f32; total_kv]).ok()?;
+        // Zero-initialized output buffers. pool_alloc zeros on-GPU via
+        // cuMemsetD8Async (no CPU alloc / no PCIe H2D). The kernel accumulates
+        // into these buffers, so zero-init is required.
+        let mut gq_gpu = pool_alloc(total_q).ok()?;
+        let mut gk_gpu = pool_alloc(total_kv).ok()?;
+        let mut gv_gpu = pool_alloc(total_kv).ok()?;
 
         cuda.fused_attention_bwd_f32(
             q_guard.slice(),
