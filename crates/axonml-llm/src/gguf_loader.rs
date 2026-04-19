@@ -61,6 +61,7 @@ use crate::qwen3::{Qwen3Config, Qwen3ForCausalLM};
 const GGUF_MAGIC: u32 = 0x4655_4747; // 'GGUF' LE
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // GGUF spec variants — not all are destructured in current code.
 enum GgufValue {
     U8(u8),
     I8(i8),
@@ -233,7 +234,12 @@ impl GgufFile {
             let dtype = GgmlType::from_u32(file.read_u32::<LittleEndian>()?);
             let offset = file.read_u64::<LittleEndian>()?;
             tensor_index.insert(name.clone(), i as usize);
-            tensors.push(GgufTensorInfo { name, dims, dtype, offset });
+            tensors.push(GgufTensorInfo {
+                name,
+                dims,
+                dtype,
+                offset,
+            });
         }
 
         // Align data-start to the GGUF `general.alignment` boundary (32 default).
@@ -303,7 +309,7 @@ fn read_gguf_value(reader: &mut impl Read) -> io::Result<GgufValue> {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("Unknown array element type {elem_type}"),
-                        ))
+                        ));
                     }
                 };
                 arr.push(v);
@@ -435,11 +441,13 @@ fn dequantize_q6_k(block: &[u8], output: &mut [f32]) {
         for l in 0..32 {
             let is = l / 16;
             let q1 = ((block[ql_off + l] & 0xF) | (((block[qh_off + l]) & 3) << 4)) as i8 - 32;
-            let q2 = ((block[ql_off + l + 32] & 0xF) | (((block[qh_off + l] >> 2) & 3) << 4)) as i8 - 32;
+            let q2 =
+                ((block[ql_off + l + 32] & 0xF) | (((block[qh_off + l] >> 2) & 3) << 4)) as i8 - 32;
             let q3 = ((block[ql_off + l] >> 4) | (((block[qh_off + l] >> 4) & 3) << 4)) as i8 - 32;
-            let q4 = ((block[ql_off + l + 32] >> 4) | (((block[qh_off + l] >> 6) & 3) << 4)) as i8 - 32;
+            let q4 =
+                ((block[ql_off + l + 32] >> 4) | (((block[qh_off + l] >> 6) & 3) << 4)) as i8 - 32;
 
-            output[y_off + l]      = d * block[sc_off + is] as i8 as f32 * q1 as f32;
+            output[y_off + l] = d * block[sc_off + is] as i8 as f32 * q1 as f32;
             output[y_off + l + 32] = d * block[sc_off + is + 2] as i8 as f32 * q2 as f32;
             output[y_off + l + 64] = d * block[sc_off + is + 4] as i8 as f32 * q3 as f32;
             output[y_off + l + 96] = d * block[sc_off + is + 6] as i8 as f32 * q4 as f32;
@@ -564,15 +572,22 @@ fn ggml_to_hf_name(ggml_name: &str) -> Option<String> {
 /// `output.weight` tensor — tied when absent.
 fn qwen3_config_from_gguf(gguf: &GgufFile) -> io::Result<Qwen3Config> {
     fn m_u32(g: &GgufFile, key: &str) -> io::Result<u32> {
-        g.get_meta(key)
-            .and_then(GgufValue::as_u32)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing metadata `{key}`")))
+        g.get_meta(key).and_then(GgufValue::as_u32).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("missing metadata `{key}`"),
+            )
+        })
     }
     fn m_u32_or(g: &GgufFile, key: &str, default: u32) -> u32 {
-        g.get_meta(key).and_then(GgufValue::as_u32).unwrap_or(default)
+        g.get_meta(key)
+            .and_then(GgufValue::as_u32)
+            .unwrap_or(default)
     }
     fn m_f32_or(g: &GgufFile, key: &str, default: f32) -> f32 {
-        g.get_meta(key).and_then(GgufValue::as_f32).unwrap_or(default)
+        g.get_meta(key)
+            .and_then(GgufValue::as_f32)
+            .unwrap_or(default)
     }
 
     let arch = gguf
@@ -606,16 +621,13 @@ fn qwen3_config_from_gguf(gguf: &GgufFile) -> io::Result<Qwen3Config> {
 
     // Vocab size from the token embedding tensor's dims — dims[1] is the
     // num_embeddings in GGUF's (dim, n_emb) layout.
-    let tok_embd = gguf.tensor("token_embd.weight").ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "missing `token_embd.weight`")
-    })?;
+    let tok_embd = gguf
+        .tensor("token_embd.weight")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing `token_embd.weight`"))?;
     if tok_embd.dims.len() != 2 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "`token_embd.weight` must be 2D, got {:?}",
-                tok_embd.dims
-            ),
+            format!("`token_embd.weight` must be 2D, got {:?}", tok_embd.dims),
         ));
     }
     let vocab_size = tok_embd.dims[1] as usize;
@@ -706,6 +718,9 @@ pub fn read_gguf_metadata_raw_bytes(
     Ok(result)
 }
 
+/// `(tokens, merges)` — tokens keyed by id; merges as `(left, right)` pairs.
+pub type TokenizerData = (Vec<String>, Vec<(String, String)>);
+
 /// Read Qwen-family GGUF tokenizer metadata: `(tokens, merges)`.
 ///
 /// Returns the byte-level BPE vocabulary as `Vec<String>` (token[i] is
@@ -713,9 +728,7 @@ pub fn read_gguf_metadata_raw_bytes(
 /// `Vec<(String, String)>`. Returns an empty merges vector for GGUFs
 /// that don't ship merges (some SentencePiece exports omit them; in
 /// that case the caller falls back to greedy-longest-match encoding).
-pub fn read_gguf_tokenizer(
-    path: &Path,
-) -> io::Result<(Vec<String>, Vec<(String, String)>)> {
+pub fn read_gguf_tokenizer(path: &Path) -> io::Result<TokenizerData> {
     let gguf = GgufFile::open(path)?;
 
     let tokens: Vec<String> = match gguf.get_meta("tokenizer.ggml.tokens") {
@@ -730,7 +743,7 @@ pub fn read_gguf_tokenizer(
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "missing or malformed `tokenizer.ggml.tokens`",
-            ))
+            ));
         }
     };
 
@@ -802,7 +815,7 @@ pub fn load_qwen3_from_gguf(path: &Path) -> io::Result<(Qwen3ForCausalLM, Qwen3C
                         "Unsupported tensor rank {n} for `{}`; expected 1 or 2",
                         info.name
                     ),
-                ))
+                ));
             }
         };
 

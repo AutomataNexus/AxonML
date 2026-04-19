@@ -553,7 +553,11 @@ impl Tensor<f32> {
     /// SiluBackward::apply chain of 7 tensor ops + ones-H2D.
     pub(crate) fn silu_backward_cuda(&self, grad_output: &Self) -> Self {
         assert!(self.device().is_gpu(), "silu_backward_cuda: self on GPU");
-        assert_eq!(self.shape(), grad_output.shape(), "silu_backward_cuda: shape mismatch");
+        assert_eq!(
+            self.shape(),
+            grad_output.shape(),
+            "silu_backward_cuda: shape mismatch"
+        );
         let data = self.contiguous_gpu();
         let g = grad_output.contiguous_gpu();
         let len = data.numel();
@@ -834,7 +838,10 @@ impl Tensor<f32> {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<Self> {
-        assert!(self.device().is_gpu(), "q5_0_gemv_cuda: self must be on GPU");
+        assert!(
+            self.device().is_gpu(),
+            "q5_0_gemv_cuda: self must be on GPU"
+        );
         assert_eq!(self.numel(), in_dim);
         assert_eq!(in_dim % 32, 0);
         let a_data = self.contiguous_gpu();
@@ -846,7 +853,12 @@ impl Tensor<f32> {
         let shape = Shape::from_slice(&[1, out_dim]);
         let strides = contiguous_strides(&shape);
         let storage = Storage::from_cuda_slice(out, out_dim, self.device());
-        Ok(Self { storage, shape, strides, offset: 0 })
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
     }
 
     pub fn q5_0_gemm_cuda(
@@ -869,7 +881,12 @@ impl Tensor<f32> {
         let shape = Shape::from_slice(&[m, out_dim]);
         let strides = contiguous_strides(&shape);
         let storage = Storage::from_cuda_slice(out, m * out_dim, self.device());
-        Ok(Self { storage, shape, strides, offset: 0 })
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
     }
 
     pub fn q5_1_gemv_cuda(
@@ -890,7 +907,12 @@ impl Tensor<f32> {
         let shape = Shape::from_slice(&[1, out_dim]);
         let strides = contiguous_strides(&shape);
         let storage = Storage::from_cuda_slice(out, out_dim, self.device());
-        Ok(Self { storage, shape, strides, offset: 0 })
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
     }
 
     pub fn q5_1_gemm_cuda(
@@ -913,7 +935,12 @@ impl Tensor<f32> {
         let shape = Shape::from_slice(&[m, out_dim]);
         let strides = contiguous_strides(&shape);
         let storage = Storage::from_cuda_slice(out, m * out_dim, self.device());
-        Ok(Self { storage, shape, strides, offset: 0 })
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
     }
 
     /// BitNet I2_S GEMV — `self` is `[1, k]` f32 on GPU, `w` is device-side
@@ -938,7 +965,12 @@ impl Tensor<f32> {
         let shape = Shape::from_slice(&[1, n]);
         let strides = contiguous_strides(&shape);
         let storage = Storage::from_cuda_slice(out, n, self.device());
-        Ok(Self { storage, shape, strides, offset: 0 })
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
     }
 
     pub fn i2s_gemm_cuda(
@@ -962,7 +994,12 @@ impl Tensor<f32> {
         let shape = Shape::from_slice(&[m, n]);
         let strides = contiguous_strides(&shape);
         let storage = Storage::from_cuda_slice(out, m * n, self.device());
-        Ok(Self { storage, shape, strides, offset: 0 })
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
     }
 
     /// Q8_0 GEMV — `self` is `[1, in]` f32 on GPU, `w` is device-side
@@ -973,7 +1010,10 @@ impl Tensor<f32> {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<Self> {
-        assert!(self.device().is_gpu(), "q8_0_gemv_cuda: self must be on GPU");
+        assert!(
+            self.device().is_gpu(),
+            "q8_0_gemv_cuda: self must be on GPU"
+        );
         assert_eq!(self.numel(), in_dim);
         assert_eq!(in_dim % 32, 0);
         let a_data = self.contiguous_gpu();
@@ -985,7 +1025,12 @@ impl Tensor<f32> {
         let shape = Shape::from_slice(&[1, out_dim]);
         let strides = contiguous_strides(&shape);
         let storage = Storage::from_cuda_slice(out, out_dim, self.device());
-        Ok(Self { storage, shape, strides, offset: 0 })
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
     }
 
     pub fn q8_0_gemm_cuda(
@@ -1008,7 +1053,12 @@ impl Tensor<f32> {
         let shape = Shape::from_slice(&[m, out_dim]);
         let strides = contiguous_strides(&shape);
         let storage = Storage::from_cuda_slice(out, m * out_dim, self.device());
-        Ok(Self { storage, shape, strides, offset: 0 })
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
     }
 
     /// Q5_K GEMM: `self` is `[m, in]` f32 on GPU, `w` is a device-side
@@ -3586,8 +3636,15 @@ impl Tensor<f32> {
         // Kernel reads from `src`, writes to `out` — no broadcast_copy prep
         // needed. The sum-of-squares reduction completes before any write
         // to `out`, so src/out aliasing would be safe if we wanted it.
-        cuda.rms_norm_heads_f32(&mut out, src_guard.slice(), w_guard.slice(), n_heads, head_dim, eps)
-            .expect("CUDA rms_norm_heads_f32 failed");
+        cuda.rms_norm_heads_f32(
+            &mut out,
+            src_guard.slice(),
+            w_guard.slice(),
+            n_heads,
+            head_dim,
+            eps,
+        )
+        .expect("CUDA rms_norm_heads_f32 failed");
 
         let storage = Storage::from_cuda_slice(out, data.numel(), self.device());
         Self {
@@ -3625,12 +3682,7 @@ impl Tensor<f32> {
     /// Single-token LayerNorm on GPU:
     /// `out[i] = (x[i] - mean) / sqrt(var + eps) * gamma[i] + beta[i]`.
     /// Used by legacy Falcon's decode path.
-    pub(crate) fn layer_norm_tokenwise_cuda(
-        &self,
-        gamma: &Self,
-        beta: &Self,
-        eps: f32,
-    ) -> Self {
+    pub(crate) fn layer_norm_tokenwise_cuda(&self, gamma: &Self, beta: &Self, eps: f32) -> Self {
         let data = self.contiguous_gpu();
         let g = gamma.contiguous_gpu();
         let b = beta.contiguous_gpu();
@@ -3688,7 +3740,11 @@ impl Tensor<f32> {
     /// same numel. Fuses a `mul_scalar(...)` + `add(...)` kernel pair
     /// into one launch — MoE expert-accumulate hot path.
     pub(crate) fn scaled_add_inplace_cuda_(&mut self, other: &Self, scalar: f32) {
-        debug_assert_eq!(self.numel(), other.numel(), "scaled_add_inplace: numel mismatch");
+        debug_assert_eq!(
+            self.numel(),
+            other.numel(),
+            "scaled_add_inplace: numel mismatch"
+        );
         let o = other.contiguous_gpu();
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         if !self.is_contiguous() {
@@ -3709,8 +3765,16 @@ impl Tensor<f32> {
     /// Fuses two element-wise adds into one kernel launch. All three
     /// tensors must be on the same GPU device and have the same numel.
     pub(crate) fn parallel_residual_add_cuda_(&mut self, attn: &Self, ffn: &Self) {
-        debug_assert_eq!(self.numel(), attn.numel(), "parallel_residual_add: attn numel mismatch");
-        debug_assert_eq!(self.numel(), ffn.numel(), "parallel_residual_add: ffn numel mismatch");
+        debug_assert_eq!(
+            self.numel(),
+            attn.numel(),
+            "parallel_residual_add: attn numel mismatch"
+        );
+        debug_assert_eq!(
+            self.numel(),
+            ffn.numel(),
+            "parallel_residual_add: ffn numel mismatch"
+        );
         let a = attn.contiguous_gpu();
         let f = ffn.contiguous_gpu();
         let cuda = get_cuda_backend().expect("CUDA backend not available");
@@ -3805,7 +3869,11 @@ impl Tensor<f32> {
         let g = self.contiguous_gpu();
         let u = up.contiguous_gpu();
         let len = g.numel();
-        debug_assert_eq!(len, u.numel(), "relu2_gate: gate and up must be same length");
+        debug_assert_eq!(
+            len,
+            u.numel(),
+            "relu2_gate: gate and up must be same length"
+        );
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let g_guard = g.storage.as_cuda_slice();
@@ -3836,7 +3904,11 @@ impl Tensor<f32> {
     ) -> Self {
         let data = self.contiguous_gpu();
         let w = weight.contiguous_gpu();
-        debug_assert_eq!(data.numel(), m * n, "rms_norm_batched: expected m*n elements");
+        debug_assert_eq!(
+            data.numel(),
+            m * n,
+            "rms_norm_batched: expected m*n elements"
+        );
         debug_assert_eq!(w.numel(), n, "rms_norm_batched: weight must be [n]");
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
@@ -3871,8 +3943,16 @@ impl Tensor<f32> {
         let data = self.contiguous_gpu();
         let w = weight.contiguous_gpu();
         let total = m * n_heads * head_dim;
-        debug_assert_eq!(data.numel(), total, "rms_norm_heads_batched: shape mismatch");
-        debug_assert_eq!(w.numel(), head_dim, "rms_norm_heads_batched: weight must be [head_dim]");
+        debug_assert_eq!(
+            data.numel(),
+            total,
+            "rms_norm_heads_batched: shape mismatch"
+        );
+        debug_assert_eq!(
+            w.numel(),
+            head_dim,
+            "rms_norm_heads_batched: weight must be [head_dim]"
+        );
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
@@ -3882,9 +3962,15 @@ impl Tensor<f32> {
         let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
 
         cuda.rms_norm_heads_batched_f32(
-            &mut out, src_guard.slice(), w_guard.slice(),
-            m, n_heads, head_dim, eps,
-        ).expect("CUDA rms_norm_heads_batched_f32 failed");
+            &mut out,
+            src_guard.slice(),
+            w_guard.slice(),
+            m,
+            n_heads,
+            head_dim,
+            eps,
+        )
+        .expect("CUDA rms_norm_heads_batched_f32 failed");
 
         let storage = Storage::from_cuda_slice(out, total, self.device());
         Self {
@@ -3916,9 +4002,15 @@ impl Tensor<f32> {
         let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
 
         cuda.rope_split_halves_batched_f32(
-            &mut out, src_guard.slice(),
-            m, n_heads, head_dim, theta, pos_start,
-        ).expect("CUDA rope_split_halves_batched_f32 failed");
+            &mut out,
+            src_guard.slice(),
+            m,
+            n_heads,
+            head_dim,
+            theta,
+            pos_start,
+        )
+        .expect("CUDA rope_split_halves_batched_f32 failed");
 
         let storage = Storage::from_cuda_slice(out, total, self.device());
         Self {
@@ -3932,12 +4024,7 @@ impl Tensor<f32> {
     /// Broadcast per-column bias add for a `[m, n]` tensor. Consumes a
     /// fresh copy — callers that already own a unique buffer should use
     /// the in-place backend call directly.
-    pub(crate) fn add_bias_batched_cuda(
-        &self,
-        bias: &Self,
-        m: usize,
-        n: usize,
-    ) -> Self {
+    pub(crate) fn add_bias_batched_cuda(&self, bias: &Self, m: usize, n: usize) -> Self {
         let data = self.contiguous_gpu();
         let b = bias.contiguous_gpu();
         debug_assert_eq!(data.numel(), m * n, "add_bias_batched: shape mismatch");

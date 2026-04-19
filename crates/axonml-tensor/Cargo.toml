@@ -42,6 +42,24 @@ cudarc = { workspace = true, optional = true }
 [dev-dependencies]
 approx.workspace = true
 
+# CUDA-dependent microbenches — only build when the `cuda` feature is on.
+# Keeps `cargo test --workspace` (default features) green on non-CUDA hosts.
+[[example]]
+name = "bench_silu_backward"
+required-features = ["cuda"]
+
+[[example]]
+name = "bench_attention_bwd"
+required-features = ["cuda"]
+
+[[example]]
+name = "bench_contiguous_gpu"
+required-features = ["cuda"]
+
+[[example]]
+name = "bench_reduce_bias"
+required-features = ["cuda"]
+
 # Controls how docs.rs builds this crate when a new version is published.
 # * default-target + targets = build only on Linux x86_64; GPU backends
 #   (cuda/vulkan/metal/wgpu) require system SDKs that docs.rs doesn't have,

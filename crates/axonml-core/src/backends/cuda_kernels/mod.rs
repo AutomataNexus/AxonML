@@ -3881,16 +3881,25 @@ impl CudaKernels {
         kernels.load_module(
             "q5k_matmul",
             Q5K_MATMUL_PTX,
-            &["q5k_gemv_f32", "q5k_gemm_f32", "q5k_gemv_fused_qkv_f32",
-              "q5k_gemm_matched_f32"],
+            &[
+                "q5k_gemv_f32",
+                "q5k_gemm_f32",
+                "q5k_gemv_fused_qkv_f32",
+                "q5k_gemm_matched_f32",
+            ],
         )?;
 
         // Q5_0 / Q5_1 dequant-in-shader matmul — legacy Falcon bodies.
         kernels.load_module(
             "q5_01_matmul",
             Q5_01_MATMUL_PTX,
-            &["q5_0_gemv_f32", "q5_0_gemm_f32", "q5_1_gemv_f32", "q5_1_gemm_f32",
-              "q5_1_gemv_fused_qkv_f32"],
+            &[
+                "q5_0_gemv_f32",
+                "q5_0_gemm_f32",
+                "q5_1_gemv_f32",
+                "q5_1_gemm_f32",
+                "q5_1_gemv_fused_qkv_f32",
+            ],
         )?;
 
         // Q8_0 dequant-in-shader matmul — Falcon-7B LM head.

@@ -31,12 +31,11 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{self, Seek, Write};
 use std::path::Path;
 
 use byteorder::{LittleEndian, WriteBytesExt};
 
-use axonml_nn::Module;
 use axonml_tensor::Tensor;
 
 use crate::gguf_loader::read_gguf_metadata_raw_bytes;
@@ -50,13 +49,20 @@ const GGUF_MAGIC: u32 = 0x4655_4747;
 const GGUF_VERSION: u32 = 3;
 const DATA_ALIGNMENT: u64 = 32;
 
-// GGUF value type codes — match reader in gguf_loader.
+// GGUF value type codes — match reader in gguf_loader. A few of these are
+// defined for spec completeness; the current writer only emits U32/F32/STRING
+// directly. `VTYPE_U64` and `VTYPE_BOOL` are referenced by the helper fns
+// below which are kept for future emitters.
+#[allow(dead_code)]
 const VTYPE_U8: u32 = 0;
 const VTYPE_U32: u32 = 4;
 const VTYPE_F32: u32 = 6;
+#[allow(dead_code)]
 const VTYPE_BOOL: u32 = 7;
 const VTYPE_STRING: u32 = 8;
+#[allow(dead_code)]
 const VTYPE_ARRAY: u32 = 9;
+#[allow(dead_code)]
 const VTYPE_U64: u32 = 10;
 
 // GGML tensor type codes.
@@ -157,6 +163,7 @@ fn write_meta_u32<W: Write>(w: &mut W, key: &str, value: u32) -> io::Result<()> 
     w.write_u32::<LittleEndian>(value)
 }
 
+#[allow(dead_code)]
 fn write_meta_u64<W: Write>(w: &mut W, key: &str, value: u64) -> io::Result<()> {
     write_string(w, key)?;
     w.write_u32::<LittleEndian>(VTYPE_U64)?;
@@ -169,10 +176,11 @@ fn write_meta_f32<W: Write>(w: &mut W, key: &str, value: f32) -> io::Result<()> 
     w.write_f32::<LittleEndian>(value)
 }
 
+#[allow(dead_code)]
 fn write_meta_bool<W: Write>(w: &mut W, key: &str, value: bool) -> io::Result<()> {
     write_string(w, key)?;
     w.write_u32::<LittleEndian>(VTYPE_BOOL)?;
-    w.write_u8(if value { 1 } else { 0 })
+    w.write_u8(u8::from(value))
 }
 
 // =============================================================================
@@ -323,14 +331,17 @@ pub fn export_qwen3_to_gguf(
     }
 
     // ---- Decide metadata. ----
-    let mut meta_writers: Vec<Box<dyn FnOnce(&mut File) -> io::Result<()> + Send>> = Vec::new();
+    type MetaWriter = Box<dyn FnOnce(&mut File) -> io::Result<()> + Send>;
+    let mut meta_writers: Vec<MetaWriter> = Vec::new();
 
     // General.
     meta_writers.push(Box::new({
         let name = model_name.to_string();
-        move |w| write_meta_string(w, "general.architecture", "qwen3")
-            .and_then(|_| write_meta_string(w, "general.name", &name))
-            .and_then(|_| write_meta_u32(w, "general.file_type", 1 /* f16 */))
+        move |w| {
+            write_meta_string(w, "general.architecture", "qwen3")
+                .and_then(|_| write_meta_string(w, "general.name", &name))
+                .and_then(|_| write_meta_u32(w, "general.file_type", 1 /* f16 */))
+        }
     }));
 
     // Qwen3 hyperparameters.
@@ -413,7 +424,11 @@ pub fn export_qwen3_to_gguf(
         write_meta_u32(&mut meta_buf, "qwen3.attention.head_count_kv", n_kv)?;
         write_meta_u32(&mut meta_buf, "qwen3.attention.key_length", head_dim)?;
         write_meta_u32(&mut meta_buf, "qwen3.attention.value_length", head_dim)?;
-        write_meta_f32(&mut meta_buf, "qwen3.attention.layer_norm_rms_epsilon", rms_eps)?;
+        write_meta_f32(
+            &mut meta_buf,
+            "qwen3.attention.layer_norm_rms_epsilon",
+            rms_eps,
+        )?;
         write_meta_f32(&mut meta_buf, "qwen3.rope.freq_base", rope_theta)?;
         meta_count += 10;
 
@@ -501,9 +516,7 @@ pub fn export_qwen3_to_gguf(
     }
 
     if !has_tokenizer {
-        eprintln!(
-            "[gguf-export] WARNING: no --tokenizer-source; output lacks tokenizer metadata."
-        );
+        eprintln!("[gguf-export] WARNING: no --tokenizer-source; output lacks tokenizer metadata.");
         eprintln!(
             "[gguf-export] spec_bench / nexus-serve won't be able to detokenize output until a"
         );

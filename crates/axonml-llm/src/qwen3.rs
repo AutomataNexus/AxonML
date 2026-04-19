@@ -183,7 +183,6 @@ pub struct Qwen3Attention {
     num_heads: usize,
     num_kv_heads: usize,
     head_dim: usize,
-    hidden_size: usize,
     attn_dropout: Dropout,
 }
 
@@ -209,7 +208,6 @@ impl Qwen3Attention {
             num_heads: config.num_attention_heads,
             num_kv_heads: config.num_key_value_heads,
             head_dim: config.head_dim,
-            hidden_size: config.hidden_size,
             attn_dropout: Dropout::new(config.attention_dropout),
         }
     }
@@ -294,9 +292,11 @@ impl Qwen3Attention {
 
         // Compute output and project back to hidden.
         let attn_output = attn_weights.matmul(&v);
-        let attn_output = attn_output
-            .transpose(1, 2)
-            .reshape(&[batch_size, seq_len, self.num_heads * self.head_dim]);
+        let attn_output = attn_output.transpose(1, 2).reshape(&[
+            batch_size,
+            seq_len,
+            self.num_heads * self.head_dim,
+        ]);
 
         self.o_proj.forward(&attn_output)
     }
@@ -437,6 +437,7 @@ impl Qwen3MLP {
         self.down_proj.forward(&hidden)
     }
 
+    /// Trainable parameters: gate, up, and down projections.
     pub fn parameters(&self) -> Vec<Parameter> {
         let mut params = Vec::new();
         params.extend(self.gate_proj.parameters());
@@ -445,6 +446,8 @@ impl Qwen3MLP {
         params
     }
 
+    /// Load MLP weights from a flat `{prefix}.{proj}.weight` map; returns the
+    /// number of projections actually populated (gate/up/down).
     pub fn load_weights(
         &mut self,
         prefix: &str,
@@ -501,9 +504,9 @@ impl Qwen3DecoderLayer {
         // Self attention with pre-norm.
         let residual = hidden_states.clone();
         let hidden_states = self.input_layernorm.forward(hidden_states);
-        let hidden_states = self
-            .self_attn
-            .forward_with_cache(&hidden_states, kv_cache, position_offset);
+        let hidden_states =
+            self.self_attn
+                .forward_with_cache(&hidden_states, kv_cache, position_offset);
         let hidden_states = residual.add(&hidden_states);
 
         // MLP with pre-norm.
@@ -591,10 +594,7 @@ impl Qwen3 {
         // signature). Convert u32 ids → f32 Variable the same way llama.rs
         // does; Embedding's internals downcast back to an index.
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var = Variable::new(
-            Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(),
-            false,
-        );
+        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
         let mut hidden_states = self.embed_tokens.forward(&ids_var);
 
         if let Some(cache) = kv_cache {
