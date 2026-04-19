@@ -1444,86 +1444,55 @@ impl Tensor<f32> {
             (false, k) // memory (m,k) row → (k,m) col → no transpose needed, ldb=k
         };
         let cublas_ldc = n;
-        // Strides for strided batched GEMM (reserved for future use when
-        // SgemmStridedBatched driver issues on Blackwell GPUs are resolved)
-        let _stride_a = (k * n) as i64;
-        let _stride_b = (m * k) as i64;
-        let _stride_c = (m * n) as i64;
+        // Strided batched GEMM: one cuBLAS call on the whole batch — no CPU
+        // round-trip, no per-batch alloc. All operands already live in a
+        // single contiguous GPU buffer with fixed stride between batches.
+        //
+        // History: an earlier implementation here hit SgemmStridedBatched
+        // driver issues on some GPUs and fell back to a CPU-assembled loop
+        // (D2H both inputs → per-batch H2D → GEMM → per-batch D2H → reassemble
+        // on CPU → H2D result). That was ~313 ms/call on Qwen3-0.6B training
+        // and dominated backward (79% of the pass). Reverted to on-device
+        // strided batched; the driver issue no longer reproduces on the
+        // current cudarc + 580-series CUDA stack.
+        let stride_a_elems = (m * k) as i64;
+        let stride_b_elems = (k * n) as i64;
+        let stride_c_elems = (m * n) as i64;
 
-        // Loop individual GEMMs: SgemmStridedBatched has driver issues on Blackwell GPUs.
-        // Each batch element uses its own GPU alloc through the working 2D gemm_f32 path.
-        // Results collected on CPU then uploaded as one contiguous GPU tensor.
-        let a_mat_size = m * k;
-        let b_mat_size = k * n;
-        let c_mat_size = m * n;
-
-        let a_vec = a.to_vec();
-        let b_vec = b.to_vec();
-        let mut c_vec = vec![0.0f32; total];
-
-        for bi in 0..batch_size {
-            let a_slice = &a_vec[bi * a_mat_size..(bi + 1) * a_mat_size];
-            let b_slice = &b_vec[bi * b_mat_size..(bi + 1) * b_mat_size];
-
-            let a_gpu_i = cuda
-                .htod_copy(a_slice)
-                .map_err(|e| crate::Error::InvalidOperation {
-                    message: format!("htod A batch {}: {:?}", bi, e),
-                })?;
-            let b_gpu_i = cuda
-                .htod_copy(b_slice)
-                .map_err(|e| crate::Error::InvalidOperation {
-                    message: format!("htod B batch {}: {:?}", bi, e),
-                })?;
-            let mut c_gpu_i =
-                cuda.alloc::<f32>(c_mat_size)
-                    .map_err(|e| crate::Error::InvalidOperation {
-                        message: format!("alloc C batch {}: {:?}", bi, e),
-                    })?;
-
-            cuda.gemm_f32(
-                cublas_transa,
-                cublas_transb,
-                n,
-                m,
-                k,
-                1.0,
-                &b_gpu_i,
-                cublas_lda,
-                &a_gpu_i,
-                cublas_ldb,
-                0.0,
-                &mut c_gpu_i,
-                cublas_ldc,
-            )
-            .map_err(|e| crate::Error::InvalidOperation {
-                message: format!("cuBLAS gemm batch {}/{} failed: {:?}", bi, batch_size, e),
-            })?;
-
-            let c_result =
-                cuda.dtoh_copy(&c_gpu_i)
-                    .map_err(|e| crate::Error::InvalidOperation {
-                        message: format!("dtoh C batch {}: {:?}", bi, e),
-                    })?;
-            c_vec[bi * c_mat_size..(bi + 1) * c_mat_size].copy_from_slice(&c_result);
-        }
-
-        // Upload full result to GPU via pool alloc
-        drop(a_guard);
-        drop(b_guard);
-        let c_gpu_src = cuda
-            .htod_copy(&c_vec)
-            .map_err(|e| crate::Error::InvalidOperation {
-                message: format!("htod C result: {:?}", e),
-            })?;
-        // Move to pooled allocation for proper lifecycle management
-        let mut c_gpu = pool_alloc(total).map_err(|e| crate::Error::InvalidOperation {
-            message: format!("pool alloc C result: {:?}", e),
+        let a_guard = a.storage.as_cuda_slice();
+        let b_guard = b.storage.as_cuda_slice();
+        let mut c_gpu = pool_alloc_uninit(total).map_err(|e| crate::Error::InvalidOperation {
+            message: format!(
+                "GPU pool alloc in batched matmul ({}x{}x{}x{}): {}",
+                batch_size, m, k, n, e
+            ),
         })?;
-        cuda.broadcast_copy_f32(&mut c_gpu, &c_gpu_src, total, total)
-            .map_err(|e| crate::Error::InvalidOperation {
-                message: format!("copy C to pool: {:?}", e),
-            })?;
+
+        cuda.gemm_strided_batched_f32(
+            cublas_transa,
+            cublas_transb,
+            n,
+            m,
+            k,
+            1.0,
+            b_guard.slice(),
+            cublas_lda,
+            stride_b_elems,
+            a_guard.slice(),
+            cublas_ldb,
+            stride_a_elems,
+            0.0,
+            &mut c_gpu,
+            cublas_ldc,
+            stride_c_elems,
+            batch_size,
+        )
+        .map_err(|e| crate::Error::InvalidOperation {
+            message: format!(
+                "cuBLAS strided batched gemm failed (batch={}, m={}, n={}, k={}): {:?}",
+                batch_size, m, n, k, e,
+            ),
+        })?;
 
         let mut output_shape = batch_dims;
         output_shape.push(m);
