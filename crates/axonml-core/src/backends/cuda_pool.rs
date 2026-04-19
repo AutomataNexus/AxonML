@@ -222,6 +222,26 @@ pub fn pool_alloc(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> 
 /// conversion can be ~0.8 ms/token.
 #[cfg(feature = "cuda")]
 pub fn pool_alloc_uninit(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> {
+    // Under CUDA graph capture, skip the Rust-side pool cache. Its
+    // `upgrade_device_ptr` path reconstructs a CudaSlice from a cached raw
+    // pointer with no CUDA API call — capture doesn't see it, so on replay
+    // the captured kernels still reference the original pointer from
+    // capture-time, which gets reused for something else between replays
+    // → CUDA_ERROR_ILLEGAL_ADDRESS. Always go through cuMemAllocAsync so
+    // the driver records an alloc node in the captured graph, and the
+    // replay machinery can reconstruct fresh virtual addresses each launch.
+    if pool_force_driver_alloc() {
+        let bucket = CudaMemoryPool::bucket_size(len);
+        let backend =
+            super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
+        return unsafe {
+            backend
+                .stream()
+                .alloc::<f32>(bucket)
+                .map_err(super::cuda::CudaError::from)
+        };
+    }
+
     let pool = get_memory_pool();
 
     if let Some((ptr, capacity)) = pool.try_acquire(len) {
@@ -243,6 +263,34 @@ pub fn pool_alloc_uninit(len: usize) -> Result<CudaSlice<f32>, super::cuda::Cuda
                 .map_err(super::cuda::CudaError::from)
         }
     }
+}
+
+/// Thread-local flag that opts-out of the Rust-side pool cache in favor of
+/// the CUDA driver's stream-ordered allocator. Set via [`with_driver_alloc`]
+/// around work that will be captured into a CUDA graph — that way every
+/// allocation inside the scope records as a graph MemAllocNode, allowing
+/// graph replay to allocate fresh virtual addresses deterministically
+/// (`cuMemAllocAsync` with the device's default pool, release threshold
+/// maxed so the driver keeps memory pooled across allocations).
+#[cfg(feature = "cuda")]
+pub fn pool_force_driver_alloc() -> bool {
+    POOL_FORCE_DRIVER_ALLOC.with(|f| f.get())
+}
+
+#[cfg(feature = "cuda")]
+thread_local! {
+    static POOL_FORCE_DRIVER_ALLOC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with pool allocations routed through `cuMemAllocAsync` instead
+/// of the Rust pool cache. Used to make the captured-graph memory plan
+/// deterministic across replays.
+#[cfg(feature = "cuda")]
+pub fn with_driver_alloc<R>(f: impl FnOnce() -> R) -> R {
+    POOL_FORCE_DRIVER_ALLOC.with(|flag| flag.set(true));
+    let r = f();
+    POOL_FORCE_DRIVER_ALLOC.with(|flag| flag.set(false));
+    r
 }
 
 /// Return GPU memory to the pool instead of freeing it.
