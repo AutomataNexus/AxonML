@@ -88,6 +88,12 @@ fn main() {
         breakdown.forward_ms + breakdown.loss_ms + breakdown.backward_ms + breakdown.optim_ms
     );
     println!();
+    // =========================================================================
+    // CUDA-graph capture + replay of the full training step
+    // =========================================================================
+    #[cfg(feature = "cuda")]
+    try_graph_capture_step(&model, &mut optimizer, &input_ids, &labels, device);
+
     println!(
         "Set AXONML_PROFILE_BACKWARD=1 for per-backward-op breakdown. Current: {}",
         if std::env::var("AXONML_PROFILE_BACKWARD").is_ok() {
@@ -157,6 +163,130 @@ fn run_step(
         loss_ms,
         backward_ms,
         optim_ms,
+    }
+}
+
+/// Attempts CUDA-graph capture of the full training step (forward +
+/// loss + backward + optimizer.step), replays it N times, and reports
+/// wall-clock delta vs eager. Swallows `STREAM_CAPTURE_ISOLATION` panics
+/// with a diagnostic so the profiler doesn't abort if a remaining
+/// non-captured stream dependency is hit.
+#[cfg(feature = "cuda")]
+fn try_graph_capture_step(
+    model: &Qwen3ForCausalLM,
+    optimizer: &mut AdamW,
+    input_ids: &Tensor<u32>,
+    labels: &Tensor<u32>,
+    device: Device,
+) {
+    use cudarc::driver::sys::{CUgraphInstantiate_flags, CUstreamCaptureMode};
+    println!("\n--- CUDA graph capture attempt ---");
+    let cuda = match axonml_core::backends::cuda::get_cuda_backend() {
+        Some(b) => b,
+        None => {
+            println!("  (no CUDA backend; skipping)");
+            return;
+        }
+    };
+    let stream = cuda.stream();
+
+    // Extra warmup: pool needs to be saturated for every size the step
+    // touches so no cuMemAllocAsync fires during capture.
+    for _ in 0..2 {
+        run_step(model, optimizer, input_ids, labels, device);
+    }
+    sync();
+
+    // Fine-grained capture status checks to pinpoint the first op that
+    // invalidates the stream (subsequent ops all report
+    // CAPTURE_INVALIDATED which is useless for debugging).
+    use cudarc::driver::sys::CUstreamCaptureStatus;
+    let check = |tag: &str| {
+        let st = stream.capture_status().unwrap_or(
+            CUstreamCaptureStatus::CU_STREAM_CAPTURE_STATUS_INVALIDATED,
+        );
+        if st != CUstreamCaptureStatus::CU_STREAM_CAPTURE_STATUS_ACTIVE {
+            println!("  [capture dead after: {tag}] status={st:?}");
+            true
+        } else {
+            false
+        }
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        stream
+            .begin_capture(CUstreamCaptureMode::CU_STREAM_CAPTURE_MODE_RELAXED)
+            .expect("begin_capture");
+        if check("begin_capture") {
+            return None;
+        }
+        optimizer.zero_grad();
+        if check("zero_grad") {
+            return None;
+        }
+        let logits = model.forward_ids(input_ids);
+        if check("forward_ids") {
+            return None;
+        }
+        let loss = llm_training::shifted_cross_entropy(&logits, labels);
+        if check("shifted_cross_entropy") {
+            return None;
+        }
+        loss.backward();
+        if check("backward") {
+            return None;
+        }
+        optimizer.step();
+        if check("optimizer.step") {
+            return None;
+        }
+        Some(
+            stream
+                .end_capture(
+                    CUgraphInstantiate_flags::CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH,
+                )
+                .expect("end_capture")
+                .expect("graph empty"),
+        )
+    }));
+    // Ensure any in-flight capture is ended even if we early-returned so
+    // the next eager op doesn't see stale capture state.
+    let _ = stream.end_capture(CUgraphInstantiate_flags::CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH);
+    let result = result.map(|o| o.expect("graph capture short-circuited"));
+
+    match result {
+        Ok(graph) => {
+            sync();
+            let t = Instant::now();
+            let n_iter = 5;
+            for _ in 0..n_iter {
+                graph.launch().expect("graph launch");
+            }
+            sync();
+            let replay_ms = t.elapsed().as_secs_f64() * 1000.0 / n_iter as f64;
+            println!("  graph replay:  {replay_ms:>8.1} ms / step (× {n_iter} replays)");
+            println!(
+                "  (compare to eager TOTAL above; gain = launch-overhead delta × kernel count)"
+            );
+        }
+        Err(e) => {
+            let msg = panic_msg(&e);
+            println!("  capture FAILED: {msg}");
+            println!("  → pool allocation likely still hit cuMemAllocAsync mid-step.");
+            println!("    Next debugging step: instrument pool_alloc_uninit miss counter");
+            println!("    during capture to find the remaining non-warmed bucket size.");
+        }
+    }
+}
+
+#[cfg(feature = "cuda")]
+fn panic_msg(e: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = e.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = e.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "<unknown panic payload>".into()
     }
 }
 

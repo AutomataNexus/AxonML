@@ -1534,11 +1534,15 @@ impl Tensor<f32> {
         let shape = self.shape.as_slice();
         let strides = self.strides.as_slice();
 
-        // Upload shape and strides to GPU (small arrays, cheap transfer)
+        // Upload shape and strides via the backend's pre-allocated scratch
+        // buffers (async memcpy, capture-safe). The prior code path used
+        // `cuda.htod_copy` which wraps `stream.clone_htod` — that allocates
+        // a fresh CudaSlice each call, and the underlying cuMemAllocAsync
+        // invalidates an in-flight CUDA graph capture.
         let shape_u32: Vec<u32> = shape.iter().map(|&s| s as u32).collect();
         let strides_i64: Vec<i64> = strides.iter().map(|&s| s as i64).collect();
-        let shape_gpu = cuda.htod_copy(&shape_u32).expect("htod shape failed");
-        let strides_gpu = cuda.htod_copy(&strides_i64).expect("htod strides failed");
+        let shape_guard = cuda.upload_shape_scratch(&shape_u32);
+        let strides_guard = cuda.upload_strides_scratch(&strides_i64);
 
         let src_guard = self.storage.as_cuda_slice();
         // strided_gather_f32 writes every output position — uninit safe.
@@ -1547,13 +1551,15 @@ impl Tensor<f32> {
         cuda.strided_gather_f32(
             src_guard.slice(),
             &mut out,
-            &strides_gpu,
-            &shape_gpu,
+            &strides_guard,
+            &shape_guard,
             ndim,
             offset,
             total,
         )
         .expect("CUDA strided_gather_f32 failed");
+        drop(shape_guard);
+        drop(strides_guard);
 
         let storage = Storage::from_cuda_slice(out, total, self.device());
         Self {

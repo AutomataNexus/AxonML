@@ -22,6 +22,7 @@ axonml           = { path = "/opt/AxonML/crates/axonml" }
 rand = "0.8"
 signal-hook = "0.3"
 tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+cudarc = { version = "0.19", optional = true, default-features = false, features = ["std", "driver", "cuda-12060"] }
 
 [features]
 default = []
@@ -30,6 +31,7 @@ cuda = [
     "axonml-tensor/cuda",
     "axonml-autograd/cuda",
     "axonml-nn/cuda",
+    "dep:cudarc",
 ]
 
 # =============================================================================

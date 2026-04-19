@@ -86,6 +86,13 @@ pub struct CudaBackend {
     stream: Arc<CudaStream>,
     blas: CudaBlas,
     kernels: CudaKernels,
+    /// Pre-allocated scratch buffer for shape-metadata uploads (up to 16
+    /// u32 dims). Using `stream.memcpy_htod` into this pre-existing slice
+    /// replaces the capture-breaking `stream.clone_htod` in hot paths like
+    /// `contiguous_gpu`. Single-stream training serializes access —
+    /// parking_lot mutex makes that explicit for the borrow checker.
+    shape_scratch: parking_lot::Mutex<CudaSlice<u32>>,
+    strides_scratch: parking_lot::Mutex<CudaSlice<i64>>,
     #[cfg(feature = "cudnn")]
     cudnn_handle: Option<Arc<Cudnn>>,
 }
@@ -189,15 +196,64 @@ impl CudaBackend {
             }
         };
 
+        // Scratch buffers for metadata uploads (shape + strides, up to 16
+        // dimensions each). Pre-allocated once, reused via async memcpy on
+        // every `contiguous_gpu` call — avoids clone_htod's per-call alloc
+        // that would otherwise invalidate CUDA graph capture.
+        let shape_scratch = unsafe { stream.alloc::<u32>(16).ok()? };
+        let strides_scratch = unsafe { stream.alloc::<i64>(16).ok()? };
+
         Some(Self {
             device_index,
             ctx,
             stream,
             blas,
             kernels,
+            shape_scratch: parking_lot::Mutex::new(shape_scratch),
+            strides_scratch: parking_lot::Mutex::new(strides_scratch),
             #[cfg(feature = "cudnn")]
             cudnn_handle,
         })
+    }
+
+    /// Upload a shape array into the pre-allocated scratch buffer and return
+    /// a lock guard holding it. Caller passes the guard into kernel launchers
+    /// via `.slice()`. Async memcpy — capture-safe when the stream is under
+    /// capture. Fresh guard per call serializes access across training ops
+    /// (all of which happen on our single stream anyway).
+    #[cfg(feature = "cuda")]
+    pub fn upload_shape_scratch(
+        &self,
+        shape: &[u32],
+    ) -> parking_lot::MutexGuard<'_, CudaSlice<u32>> {
+        assert!(
+            shape.len() <= 16,
+            "upload_shape_scratch: max 16 dims, got {}",
+            shape.len()
+        );
+        let mut guard = self.shape_scratch.lock();
+        self.stream
+            .memcpy_htod(shape, &mut *guard)
+            .expect("memcpy_htod shape scratch");
+        guard
+    }
+
+    /// Companion to `upload_shape_scratch` for i64 stride arrays.
+    #[cfg(feature = "cuda")]
+    pub fn upload_strides_scratch(
+        &self,
+        strides: &[i64],
+    ) -> parking_lot::MutexGuard<'_, CudaSlice<i64>> {
+        assert!(
+            strides.len() <= 16,
+            "upload_strides_scratch: max 16 dims, got {}",
+            strides.len()
+        );
+        let mut guard = self.strides_scratch.lock();
+        self.stream
+            .memcpy_htod(strides, &mut *guard)
+            .expect("memcpy_htod strides scratch");
+        guard
     }
 
     /// Creates a new CUDA backend (stub, always returns None without the `cuda` feature).
@@ -252,9 +308,28 @@ impl CudaBackend {
     }
 
     /// Copies data from host to device.
+    ///
+    /// Uses `clone_htod` which allocates + syncs a new device slice. NOT
+    /// capture-safe — the inner `cuMemAllocAsync` invalidates an in-flight
+    /// CUDA graph capture. Hot-path callers under capture should use
+    /// [`htod_into`] with a pre-pooled destination instead, or one of the
+    /// dedicated scratch-buffer helpers (`upload_shape_scratch` / etc).
     #[cfg(feature = "cuda")]
     pub fn htod_copy<T: DeviceRepr>(&self, src: &[T]) -> Result<CudaSlice<T>, CudaError> {
         self.stream.clone_htod(src).map_err(CudaError::from)
+    }
+
+    /// Async host→device copy into a pre-allocated destination. Capture-safe
+    /// because there's no allocation inside the capture window — the caller
+    /// owns `dst`, typically via `pool_alloc_uninit` which hits the pool
+    /// cache on a warm training step.
+    #[cfg(feature = "cuda")]
+    pub fn htod_into<T: DeviceRepr>(
+        &self,
+        src: &[T],
+        dst: &mut CudaSlice<T>,
+    ) -> Result<(), CudaError> {
+        self.stream.memcpy_htod(src, dst).map_err(CudaError::from)
     }
 
     /// Copies data from device to host.
