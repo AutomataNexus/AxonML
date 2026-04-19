@@ -103,7 +103,10 @@ fn main() {
         let per_matmul_us = total_us / n_reps as f64 / (2 * *depth) as f64;
         println!(
             "depth={:2} × {} reps: {:>9.1} µs/run  →  {:>7.1} µs per matmul (fwd+bwd)",
-            depth, n_reps, total_us / n_reps as f64, per_matmul_us
+            depth,
+            n_reps,
+            total_us / n_reps as f64,
+            per_matmul_us
         );
     }
 }

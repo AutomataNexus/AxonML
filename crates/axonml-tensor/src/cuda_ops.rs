@@ -56,7 +56,7 @@ impl Tensor<f32> {
 
         let a_guard = a_data.storage.as_cuda_slice();
         let b_guard = b_data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.add_f32(&mut out, a_guard.slice(), b_guard.slice(), len)
             .expect("CUDA add_f32 failed");
@@ -79,7 +79,7 @@ impl Tensor<f32> {
 
         let a_guard = a_data.storage.as_cuda_slice();
         let b_guard = b_data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.sub_f32(&mut out, a_guard.slice(), b_guard.slice(), len)
             .expect("CUDA sub_f32 failed");
@@ -102,7 +102,7 @@ impl Tensor<f32> {
 
         let a_guard = a_data.storage.as_cuda_slice();
         let b_guard = b_data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.mul_f32(&mut out, a_guard.slice(), b_guard.slice(), len)
             .expect("CUDA mul_f32 failed");
@@ -125,7 +125,7 @@ impl Tensor<f32> {
 
         let a_guard = a_data.storage.as_cuda_slice();
         let b_guard = b_data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.div_f32(&mut out, a_guard.slice(), b_guard.slice(), len)
             .expect("CUDA div_f32 failed");
@@ -157,7 +157,7 @@ impl Tensor<f32> {
 
         let result_shape = crate::shape::broadcast_shape(&self.shape, &other.shape)?;
         let out_n = crate::shape::numel(&result_shape);
-        let mut out = pool_alloc(out_n).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(out_n).expect("GPU pool alloc failed");
 
         let a_guard = a.storage.as_cuda_slice();
         let b_guard = b.storage.as_cuda_slice();
@@ -206,7 +206,7 @@ impl Tensor<f32> {
 
         let result_shape = crate::shape::broadcast_shape(&self.shape, &other.shape)?;
         let out_n = crate::shape::numel(&result_shape);
-        let mut out = pool_alloc(out_n).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(out_n).expect("GPU pool alloc failed");
 
         let a_guard = a.storage.as_cuda_slice();
         let b_guard = b.storage.as_cuda_slice();
@@ -252,7 +252,7 @@ impl Tensor<f32> {
 
         let result_shape = crate::shape::broadcast_shape(&self.shape, &other.shape)?;
         let out_n = crate::shape::numel(&result_shape);
-        let mut out = pool_alloc(out_n).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(out_n).expect("GPU pool alloc failed");
 
         let a_guard = a.storage.as_cuda_slice();
         let b_guard = b.storage.as_cuda_slice();
@@ -298,7 +298,7 @@ impl Tensor<f32> {
 
         let result_shape = crate::shape::broadcast_shape(&self.shape, &other.shape)?;
         let out_n = crate::shape::numel(&result_shape);
-        let mut out = pool_alloc(out_n).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(out_n).expect("GPU pool alloc failed");
 
         let a_guard = a.storage.as_cuda_slice();
         let b_guard = b.storage.as_cuda_slice();
@@ -345,7 +345,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.neg_f32(&mut out, src_guard.slice(), len)
             .expect("CUDA neg_f32 failed");
@@ -366,7 +366,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.relu_f32(&mut out, src_guard.slice(), len)
             .expect("CUDA relu_f32 failed");
@@ -387,7 +387,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.sigmoid_f32(&mut out, src_guard.slice(), len)
             .expect("CUDA sigmoid_f32 failed");
@@ -408,7 +408,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.tanh_f32(&mut out, src_guard.slice(), len)
             .expect("CUDA tanh_f32 failed");
@@ -429,7 +429,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.exp_f32(&mut out, src_guard.slice(), len)
             .expect("CUDA exp_f32 failed");
@@ -450,7 +450,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.log_f32(&mut out, src_guard.slice(), len)
             .expect("CUDA log_f32 failed");
@@ -471,7 +471,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.sqrt_f32(&mut out, src_guard.slice(), len)
             .expect("CUDA sqrt_f32 failed");
@@ -492,7 +492,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.pow_scalar_f32(&mut out, src_guard.slice(), exp, len)
             .expect("CUDA pow_scalar_f32 failed");
@@ -513,7 +513,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.gelu_f32(&mut out, src_guard.slice(), len)
             .expect("CUDA gelu_f32 failed");
@@ -534,7 +534,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.silu_f32(&mut out, src_guard.slice(), len)
             .expect("CUDA silu_f32 failed");
@@ -587,7 +587,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         // Copy src → out on device, then scale out in-place
         cuda.broadcast_copy_f32(&mut out, src_guard.slice(), len, len)
@@ -611,7 +611,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(len).expect("GPU pool alloc failed");
+        let mut out = pool_alloc_uninit(len).expect("GPU pool alloc failed");
 
         cuda.add_scalar_f32(&mut out, src_guard.slice(), scalar, len)
             .expect("CUDA add_scalar_f32 failed");
@@ -641,7 +641,8 @@ impl Tensor<f32> {
             let cuda = get_cuda_backend().expect("CUDA backend not available");
 
             let src_guard = data.storage.as_cuda_slice();
-            let mut out = pool_alloc(total).expect("GPU pool alloc failed");
+            // broadcast_copy overwrites every byte before softmax reads it.
+            let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
 
             // Copy data to output (softmax kernel is in-place)
             cuda.broadcast_copy_f32(&mut out, src_guard.slice(), total, total)
@@ -681,7 +682,8 @@ impl Tensor<f32> {
         // This covers [N] → [M,N], [N] → [B,M,N], [M,N] → [B,M,N], etc.
         if out_len % src_len == 0 {
             let src_guard = data.storage.as_cuda_slice();
-            let mut out = pool_alloc(out_len).expect("GPU pool alloc failed");
+            // broadcast_copy overwrites every output byte — uninit safe.
+            let mut out = pool_alloc_uninit(out_len).expect("GPU pool alloc failed");
 
             cuda.broadcast_copy_f32(&mut out, src_guard.slice(), out_len, src_len)
                 .expect("CUDA broadcast_copy_f32 failed");
@@ -711,7 +713,8 @@ impl Tensor<f32> {
 
         let idx_gpu = cuda.htod_copy(&indices).expect("htod indices failed");
         let src_guard = data.storage.as_cuda_slice();
-        let mut out = pool_alloc(out_len).expect("GPU pool alloc failed");
+        // gather_contiguous writes every output element — uninit safe.
+        let mut out = pool_alloc_uninit(out_len).expect("GPU pool alloc failed");
 
         cuda.gather_contiguous_f32(&mut out, src_guard.slice(), &idx_gpu, out_len)
             .expect("CUDA gather_contiguous_f32 failed");
@@ -1331,9 +1334,11 @@ impl Tensor<f32> {
             // column-major is A_orig^T(m,k) — so we pass trans=true to undo it.
             let a_guard = a.storage.as_cuda_slice();
             let b_guard = b.storage.as_cuda_slice();
-            let mut c_gpu = pool_alloc(m * n).map_err(|e| crate::Error::InvalidOperation {
-                message: format!("GPU OOM in 2D matmul ({}x{}x{}): {}", m, k, n, e),
-            })?;
+            // cuBLAS GEMM writes every output element with beta=0 — uninit safe.
+            let mut c_gpu =
+                pool_alloc_uninit(m * n).map_err(|e| crate::Error::InvalidOperation {
+                    message: format!("GPU OOM in 2D matmul ({}x{}x{}): {}", m, k, n, e),
+                })?;
 
             // cuBLAS sees column-major data:
             // Row-major A(m,k) → col-major view as (k,m) = A^T
@@ -1536,7 +1541,8 @@ impl Tensor<f32> {
         let strides_gpu = cuda.htod_copy(&strides_i64).expect("htod strides failed");
 
         let src_guard = self.storage.as_cuda_slice();
-        let mut out = pool_alloc(total).expect("GPU pool alloc failed");
+        // strided_gather_f32 writes every output position — uninit safe.
+        let mut out = pool_alloc_uninit(total).expect("GPU pool alloc failed");
 
         cuda.strided_gather_f32(
             src_guard.slice(),
@@ -1634,7 +1640,8 @@ impl Tensor<f32> {
             .htod_copy(gather_indices)
             .expect("htod gather indices failed");
         let weight_guard = self.storage.as_cuda_slice();
-        let mut out = pool_alloc(output_size).expect("GPU pool alloc failed");
+        // gather writes every output element — uninit safe.
+        let mut out = pool_alloc_uninit(output_size).expect("GPU pool alloc failed");
 
         cuda.gather_contiguous_f32(&mut out, weight_guard.slice(), &idx_gpu, output_size)
             .expect("CUDA gather_contiguous_f32 failed");
