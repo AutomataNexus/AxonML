@@ -80,6 +80,49 @@ fn main() {
         "\nFULL 2D MatMulBackward-shaped              {:>7.2} µs/call",
         per_us(t3, n_iter + 1)
     );
+
+    // ---------- Stream-backlog test ----------
+    // Backward submits ~400 matmuls in sequence without any sync. Does the
+    // per-submit wall-clock drift upward as the stream fills?
+    use axonml_core::backends::cuda::cuda_sync;
+    println!("\n=== stream-backlog: 400 matmul submits, no sync ===");
+    cuda_sync();
+    let mut bucket_starts: Vec<std::time::Instant> = Vec::new();
+    let t_burst = Instant::now();
+    bucket_starts.push(t_burst);
+    for i in 0..400 {
+        let c = a.matmul(&b).unwrap();
+        std::hint::black_box(c);
+        if (i + 1) % 50 == 0 {
+            bucket_starts.push(Instant::now());
+        }
+    }
+    let burst_end_no_sync = Instant::now();
+    cuda_sync();
+    let after_sync = Instant::now();
+
+    for (i, w) in bucket_starts.windows(2).enumerate() {
+        let per = (w[1].duration_since(w[0])).as_micros() as f64 / 50.0;
+        println!(
+            "  calls {:>3}-{:<3}   avg {:>7.1} µs/submit",
+            i * 50,
+            (i + 1) * 50,
+            per
+        );
+    }
+    println!(
+        "  burst total (no sync)        {:.1} ms",
+        burst_end_no_sync.duration_since(t_burst).as_secs_f64() * 1000.0
+    );
+    println!(
+        "  final sync drain            +{:.1} ms",
+        after_sync.duration_since(burst_end_no_sync).as_secs_f64() * 1000.0
+    );
+    println!(
+        "  TOTAL incl. drain            {:.1} ms  ({:.1} µs/call)",
+        after_sync.duration_since(t_burst).as_secs_f64() * 1000.0,
+        after_sync.duration_since(t_burst).as_micros() as f64 / 400.0
+    );
 }
 
 fn mkrand(shape: &[usize], seed: f32, dev: Device) -> Tensor<f32> {
