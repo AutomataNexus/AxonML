@@ -437,6 +437,90 @@ impl GradientFunction for SoftmaxCausalScaledBackward {
 }
 
 // =============================================================================
+// Fused residual-add + RMSNorm backward
+// =============================================================================
+
+/// Backward for `Variable::add_rmsnorm_batched`, the fused
+/// `(a + b).rms_norm(weight)` replacement used on the Qwen3 residual path.
+///
+/// Forward produced `y = RMSNorm(a + b, w)` and saved the raw sum `x = a + b`.
+/// Backward runs the standard RMSNorm gradient on the saved sum, giving
+/// `grad_x = dL/dx`. Since `x = a + b`, the chain rule says
+/// `grad_a = grad_b = grad_x`, so we return the same tensor twice
+/// (Arc-shared, no extra allocation) to both next_fns.
+#[derive(Debug)]
+pub struct AddRMSNormBackward {
+    next_fns: Vec<Option<GradFn>>,
+    saved_sum: Tensor<f32>,
+    weight: Tensor<f32>,
+    m: usize,
+    n: usize,
+    eps: f32,
+}
+
+impl AddRMSNormBackward {
+    /// Creates a new `AddRMSNormBackward`. `next_fns[0]` = `a`, `next_fns[1]` = `b`.
+    #[must_use]
+    pub fn new(
+        a_grad_fn: Option<GradFn>,
+        b_grad_fn: Option<GradFn>,
+        saved_sum: Tensor<f32>,
+        weight: Tensor<f32>,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> Self {
+        Self {
+            next_fns: vec![a_grad_fn, b_grad_fn],
+            saved_sum,
+            weight,
+            m,
+            n,
+            eps,
+        }
+    }
+}
+
+impl GradientFunction for AddRMSNormBackward {
+    fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let target = self.saved_sum.device();
+        let grad = if grad_output.device() == target {
+            grad_output.clone()
+        } else {
+            grad_output
+                .to_device(target)
+                .expect("backward: grad_output device transfer failed")
+        };
+        let weight = if self.weight.device() == target {
+            self.weight.clone()
+        } else {
+            self.weight
+                .to_device(target)
+                .expect("backward: weight device transfer failed")
+        };
+        // Saved sum is stored as [m, n] from forward; grad_output matches.
+        let grad_x = self
+            .saved_sum
+            .rms_norm_bwd_batched(&weight, &grad, self.m, self.n, self.eps);
+        // d(a+b)/da = d(a+b)/db = 1, so both grads are the same tensor
+        // (Arc-shared — no extra work).
+        vec![Some(grad_x.clone()), Some(grad_x)]
+    }
+
+    fn name(&self) -> &'static str {
+        "AddRMSNormBackward"
+    }
+
+    fn next_functions(&self) -> &[Option<GradFn>] {
+        &self.next_fns
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+// =============================================================================
 // Fused SwiGLU backward
 // =============================================================================
 

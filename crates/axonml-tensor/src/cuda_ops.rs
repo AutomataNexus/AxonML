@@ -4000,6 +4000,61 @@ impl Tensor<f32> {
         }
     }
 
+    /// Fused residual-add + batched RMSNorm forward.
+    /// `self` and `b` are shape `[m, n]`; `weight` is `[n]`. Returns
+    /// `(normalized_output, sum = self + b)` — the sum is saved so the
+    /// backward can reconstruct rms without re-running the add.
+    pub(crate) fn add_rmsnorm_batched_cuda(
+        &self,
+        b: &Self,
+        weight: &Self,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> (Self, Self) {
+        let a = self.contiguous_gpu();
+        let bb = b.contiguous_gpu();
+        let w = weight.contiguous_gpu();
+        debug_assert_eq!(a.numel(), m * n);
+        debug_assert_eq!(bb.numel(), m * n);
+        debug_assert_eq!(w.numel(), n);
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+
+        let a_guard = a.storage.as_cuda_slice();
+        let b_guard = bb.storage.as_cuda_slice();
+        let w_guard = w.storage.as_cuda_slice();
+        // Kernel writes every element of both outputs — uninit safe.
+        let mut out = pool_alloc_uninit(m * n).expect("GPU pool alloc failed");
+        let mut sum_out = pool_alloc_uninit(m * n).expect("GPU pool alloc failed");
+
+        cuda.add_rmsnorm_batched_f32(
+            &mut out,
+            &mut sum_out,
+            a_guard.slice(),
+            b_guard.slice(),
+            w_guard.slice(),
+            m,
+            n,
+            eps,
+        )
+        .expect("CUDA add_rmsnorm_batched_f32 failed");
+
+        let shape = self.shape.clone();
+        let out_tensor = Self {
+            storage: Storage::from_cuda_slice(out, m * n, self.device()),
+            shape: shape.clone(),
+            strides: contiguous_strides(&shape),
+            offset: 0,
+        };
+        let sum_tensor = Self {
+            storage: Storage::from_cuda_slice(sum_out, m * n, self.device()),
+            shape: shape.clone(),
+            strides: contiguous_strides(&shape),
+            offset: 0,
+        };
+        (out_tensor, sum_tensor)
+    }
+
     /// Batched RMSNorm backward — computes grad_input only (the current
     /// autograd path treats RMSNorm weight as a frozen parameter, matching
     /// the CPU-only RMSNormBackward in axonml-llm). `self` = saved_input

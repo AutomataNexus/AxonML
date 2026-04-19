@@ -1313,6 +1313,64 @@ impl<T: Float> Tensor<T> {
         Self::from_vec(x, &self.shape).expect("apply_rope: build output tensor")
     }
 
+    /// Fused residual-add + batched RMSNorm: returns `(RMSNorm(self + b), self + b)`.
+    /// The raw sum is saved for the backward pass so it doesn't need to rerun
+    /// the add. `self` and `b` are `[m, n]`; `weight` is `[n]`.
+    ///
+    /// Replaces the per-layer `residual.add(x).rms_norm(weight)` pair with one
+    /// kernel — eliminates a broadcast_add + alloc + RMSNorm kernel launch per
+    /// residual path (2 × per Qwen3 layer).
+    #[must_use]
+    pub fn add_rmsnorm_batched(
+        &self,
+        b: &Self,
+        weight: &Self,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> (Self, Self) {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let (out, sum) = unsafe {
+                gpu_ref(self).add_rmsnorm_batched_cuda(gpu_ref(b), gpu_ref(weight), m, n, eps)
+            };
+            return (unsafe { gpu_into(out) }, unsafe { gpu_into(sum) });
+        }
+        assert!(
+            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            "add_rmsnorm_batched CPU path requires f32",
+        );
+        let av = self.to_vec();
+        let bv = b.to_vec();
+        let w = weight.to_vec();
+        assert_eq!(av.len(), m * n);
+        assert_eq!(bv.len(), m * n);
+        assert_eq!(w.len(), n);
+        let mut sum_out: Vec<T> = Vec::with_capacity(m * n);
+        let mut out: Vec<T> = Vec::with_capacity(m * n);
+        for t in 0..m {
+            let base = t * n;
+            let mut sum_sq = 0.0f64;
+            for i in 0..n {
+                let ai = av[base + i].to_f32().unwrap_or(0.0);
+                let bi = bv[base + i].to_f32().unwrap_or(0.0);
+                let s = ai + bi;
+                sum_out.push(num_traits::cast(s).unwrap_or_else(T::zero));
+                sum_sq += (s as f64) * (s as f64);
+            }
+            let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+            for i in 0..n {
+                let s = sum_out[base + i].to_f32().unwrap_or(0.0);
+                let wi = w[i].to_f32().unwrap_or(0.0);
+                out.push(num_traits::cast(s * scale * wi).unwrap_or_else(T::zero));
+            }
+        }
+        let out_t = Self::from_vec(out, &[m, n]).expect("add_rmsnorm_batched: build output");
+        let sum_t = Self::from_vec(sum_out, &[m, n]).expect("add_rmsnorm_batched: build sum");
+        (out_t, sum_t)
+    }
+
     /// Fused causal-scaled softmax. `self` is the raw attention scores
     /// `[..., Tq, Tk]`; applies `softmax(scale * scores + causal_mask)`
     /// over the last dim. `offset` is the KV-cache position offset (0

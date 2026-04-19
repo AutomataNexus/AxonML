@@ -542,6 +542,74 @@ extern "C" __global__ void add_bias_batched_f32(
 }
 
 // ============================================================================
+// Fused residual-add + RMSNorm (forward)
+//
+// Replaces Qwen3's `residual.add(&attn_out)` (broadcast_add kernel) followed
+// immediately by `post_attention_layernorm.forward(sum)` (rms_norm_batched
+// kernel) with a single CTA-per-row launch. The sum `x = a + b` is computed
+// on the fly, its rms is reduced across threads, and the scaled output is
+// written — all without materializing the intermediate sum tensor.
+//
+// out[i] = (a[i] + b[i]) * weight[i] / sqrt(mean((a[i]+b[i])²) + eps)
+// sum_out[i] = a[i] + b[i]   (saved separately so backward can reconstruct rms)
+//
+// Launch: grid = (m, 1, 1), block = (blockDim.x, 1, 1), shmem = n_warps*4.
+// ============================================================================
+extern "C" __global__ void add_rmsnorm_batched_f32(
+    float* __restrict__ out,
+    float* __restrict__ sum_out,
+    const float* __restrict__ a,
+    const float* __restrict__ b,
+    const float* __restrict__ weight,
+    uint32_t n,
+    float eps
+) {
+    extern __shared__ float warp_sums[];
+    const int tid     = threadIdx.x;
+    const int warp_id = tid >> 5;
+    const int lane    = tid & 31;
+    const int n_warps = (blockDim.x + 31) >> 5;
+    const uint32_t row = blockIdx.x;
+
+    const float* __restrict__ a_row = a + (size_t)row * (size_t)n;
+    const float* __restrict__ b_row = b + (size_t)row * (size_t)n;
+    float* __restrict__ s_row       = sum_out + (size_t)row * (size_t)n;
+    float* __restrict__ out_row     = out + (size_t)row * (size_t)n;
+
+    // Pass 1: parallel sum-of-squares over (a + b). Also write the sum.
+    float local_sq = 0.0f;
+    for (int i = tid; i < (int)n; i += blockDim.x) {
+        float s = a_row[i] + b_row[i];
+        s_row[i] = s;
+        local_sq += s * s;
+    }
+    #pragma unroll
+    for (int offs = 16; offs > 0; offs >>= 1) {
+        local_sq += __shfl_xor_sync(0xFFFFFFFF, local_sq, offs);
+    }
+    if (lane == 0) warp_sums[warp_id] = local_sq;
+    __syncthreads();
+    float total_sq = 0.0f;
+    if (warp_id == 0) {
+        total_sq = (lane < n_warps) ? warp_sums[lane] : 0.0f;
+        #pragma unroll
+        for (int offs = 16; offs > 0; offs >>= 1) {
+            total_sq += __shfl_xor_sync(0xFFFFFFFF, total_sq, offs);
+        }
+        if (lane == 0) warp_sums[0] = total_sq;
+    }
+    __syncthreads();
+
+    float mean_sq = warp_sums[0] / (float)n;
+    float scale = rsqrtf(mean_sq + eps);
+
+    // Pass 2: each thread writes its normalized + weighted output.
+    for (int i = tid; i < (int)n; i += blockDim.x) {
+        out_row[i] = s_row[i] * scale * weight[i];
+    }
+}
+
+// ============================================================================
 // Fused causal-scaled softmax (forward)
 //
 // Replaces the qwen3/llama sequence `scores.mul_scalar(scale).add(causal_mask)

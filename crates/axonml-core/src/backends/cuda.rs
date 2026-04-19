@@ -4167,6 +4167,50 @@ impl CudaBackend {
         }
     }
 
+    /// Fused residual-add + batched RMSNorm. For each row t in [0, m),
+    /// computes `sum[t, :] = a[t, :] + b[t, :]` and
+    /// `out[t, :] = sum[t, :] * weight / sqrt(mean(sum[t, :]²) + eps)`.
+    /// Replaces the separate `broadcast_add_f32 + rms_norm_batched_f32`
+    /// kernel pair in Qwen3's decoder layer residual path.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_rmsnorm_batched_f32(
+        &self,
+        out: &mut CudaSlice<f32>,
+        sum_out: &mut CudaSlice<f32>,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        weight: &CudaSlice<f32>,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("add_rmsnorm_batched_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("add_rmsnorm_batched_f32".to_string()))?;
+        let block: u32 = 256;
+        let n_warps = (block + 31) / 32;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (m as u32, 1, 1),
+            block_dim: (block, 1, 1),
+            shared_mem_bytes: n_warps * 4,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(out)
+                .arg(sum_out)
+                .arg(a)
+                .arg(b)
+                .arg(weight)
+                .arg(&(n as u32))
+                .arg(&eps)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// Batched RMSNorm backward (grad_input only): for each row t in [0, m),
     /// computes `grad_x[t, :] = w/rms * grad_y[t, :] - x[t, :]/(rms³·n) · Σ(x·w·grad_y)`.
     /// x, grad_out shape [m, n]; weight [n]; output grad_input [m, n] all contiguous.

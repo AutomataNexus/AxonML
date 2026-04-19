@@ -517,6 +517,16 @@ impl Qwen3DecoderLayer {
         let hidden_states = residual.add(&hidden_states);
 
         // MLP with pre-norm.
+        //
+        // NOTE: `Variable::add_rmsnorm` exists in axonml-autograd and the
+        // `add_rmsnorm_batched_f32` kernel is wired through to it. It is
+        // *not* used here yet because the pre-norm residual block needs
+        // the un-normalized sum `residual + attn_out` for the MLP's own
+        // residual branch, and the single-output `Variable::add_rmsnorm`
+        // only exposes the normalized tensor. Integrating the fuse here
+        // needs a 2-output autograd op (return both the normed tensor and
+        // the raw sum) so the residual path can continue from the sum.
+        // Kernel + API available for a future commit.
         let residual = hidden_states.clone();
         let hidden_states = self.post_attention_layernorm.forward(&hidden_states);
         let hidden_states = self.mlp.forward(&hidden_states);
