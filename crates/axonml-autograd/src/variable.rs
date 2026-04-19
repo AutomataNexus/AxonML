@@ -34,13 +34,13 @@ use parking_lot::RwLock;
 use axonml_tensor::Tensor;
 
 use crate::functions::{
-    AddBackward, AddScalarBackward, CatBackward, ClampBackward, DivBackward, EluBackward,
-    ExpBackward, ExpandBackward, GeluBackward, LeakyReluBackward, LogBackward, LogSoftmaxBackward,
-    MatMulBackward, MeanBackward, MeanDimBackward, MulBackward, MulScalarBackward, NarrowBackward,
-    NegBackward, PowBackward, ReluBackward, ReshapeBackward, SelectBackward, SigmoidBackward,
-    SiluBackward, SoftmaxBackward, SoftmaxCausalScaledBackward, SqrtBackward, SubBackward,
-    SumBackward, SumDimBackward, SwigluBackward, TanhBackward, TransposeBackward,
-    UnsqueezeBackward, VarDimBackward,
+    AddBackward, AddRMSNormBackward, AddScalarBackward, CatBackward, ClampBackward, DivBackward,
+    EluBackward, ExpBackward, ExpandBackward, GeluBackward, LeakyReluBackward, LogBackward,
+    LogSoftmaxBackward, MatMulBackward, MeanBackward, MeanDimBackward, MulBackward,
+    MulScalarBackward, NarrowBackward, NegBackward, PowBackward, ReluBackward, ReshapeBackward,
+    SelectBackward, SigmoidBackward, SiluBackward, SoftmaxBackward, SoftmaxCausalScaledBackward,
+    SqrtBackward, SubBackward, SumBackward, SumDimBackward, SwigluBackward, TanhBackward,
+    TransposeBackward, UnsqueezeBackward, VarDimBackward,
 };
 use crate::grad_fn::{AccumulateGrad, GradAccumulator, GradFn};
 use crate::graph::{GraphNode, with_graph};
@@ -974,6 +974,62 @@ impl Variable {
             Variable::from_operation(result, grad_fn, true)
         } else {
             Variable::from_tensor(result)
+        }
+    }
+
+    /// Fused residual-add + batched RMSNorm.
+    ///
+    /// Returns `RMSNorm(self + b, weight)` reshaped to the original per-token
+    /// layout. `self` and `b` must have the same shape `[..., n]` where `n`
+    /// matches `weight.len()`. Replaces the Qwen3 per-layer
+    /// `residual.add_var(&x).rms_norm(w)` chain with one kernel forward + one
+    /// kernel backward — saves a broadcast-add launch and the intermediate
+    /// sum tensor allocation.
+    #[must_use]
+    pub fn add_rmsnorm(&self, b: &Variable, weight: &Tensor<f32>, eps: f32) -> Variable {
+        let a_data = self.data.read().clone();
+        let b_data = b.data.read().clone();
+        let shape = a_data.shape().to_vec();
+        debug_assert_eq!(shape, b_data.shape());
+        let n = *shape.last().expect("add_rmsnorm: empty shape");
+        let m: usize = shape.iter().take(shape.len() - 1).product();
+
+        // Reshape to 2D for the kernel, then reshape output back.
+        let a_2d = a_data
+            .reshape(&[m as isize, n as isize])
+            .expect("add_rmsnorm: reshape a");
+        let b_2d = b_data
+            .reshape(&[m as isize, n as isize])
+            .expect("add_rmsnorm: reshape b");
+
+        let weight_dev = if weight.device() == a_2d.device() {
+            weight.clone()
+        } else {
+            weight
+                .to_device(a_2d.device())
+                .expect("add_rmsnorm: move weight to device")
+        };
+
+        let (out_2d, sum_2d) = a_2d.add_rmsnorm_batched(&b_2d, &weight_dev, m, n, eps);
+        let shape_isize: Vec<isize> = shape.iter().map(|&s| s as isize).collect();
+        let out = out_2d
+            .reshape(&shape_isize)
+            .expect("add_rmsnorm: reshape output");
+
+        let requires_grad = (self.requires_grad || b.requires_grad) && is_grad_enabled();
+        if requires_grad {
+            let grad_fn = GradFn::new(AddRMSNormBackward::new(
+                self.grad_fn.clone(),
+                b.grad_fn.clone(),
+                sum_2d,
+                weight_dev,
+                m,
+                n,
+                eps,
+            ));
+            Variable::from_operation(out, grad_fn, true)
+        } else {
+            Variable::from_tensor(out)
         }
     }
 
