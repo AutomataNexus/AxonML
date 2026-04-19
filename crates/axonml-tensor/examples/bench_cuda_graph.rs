@@ -60,8 +60,14 @@ use axonml_core::backends::cuda::{cuda_sync, get_cuda_backend};
 use axonml_tensor::Tensor;
 
 fn main() {
+    for &chain_depth in &[10usize, 20, 50, 100, 200] {
+        run_depth(chain_depth);
+        println!();
+    }
+}
+
+fn run_depth(chain_depth: usize) {
     let n_elems = 1_048_576;
-    let chain_depth = 20;
     let device = Device::Cuda(0);
 
     let a0 = mkrand(&[n_elems], 0.11, device);
