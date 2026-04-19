@@ -64,7 +64,9 @@ fn main() {
 
     // Hot step — all the numbers we care about.
     println!("\n--- hot step ---");
+    print_pool_stats("before hot step");
     let breakdown = run_step(&model, &mut optimizer, &input_ids, &labels, device);
+    print_pool_stats("after hot step");
     println!();
     println!(
         "  forward                  {:>8.1} ms",
@@ -159,5 +161,21 @@ fn sync() {
     #[cfg(feature = "cuda")]
     {
         let _ = axonml_core::backends::cuda::cuda_sync();
+    }
+}
+
+fn print_pool_stats(label: &str) {
+    #[cfg(feature = "cuda")]
+    {
+        let pool = axonml_core::backends::cuda_pool::get_memory_pool();
+        let (hits, misses, returns, bytes) = pool.stats();
+        println!(
+            "  [pool {label}] hits={hits} misses={misses} returns={returns} pooled={}MB",
+            bytes / (1024 * 1024)
+        );
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        let _ = label;
     }
 }
