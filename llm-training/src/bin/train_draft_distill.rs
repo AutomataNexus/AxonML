@@ -49,19 +49,18 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use axonml_autograd::no_grad::NoGradGuard;
 use axonml_autograd::Variable;
+use axonml_autograd::no_grad::NoGradGuard;
 use axonml_core::Device;
-use axonml_llm::{load_qwen3_from_gguf, Qwen3Config, Qwen3ForCausalLM};
+use axonml_llm::{Qwen3Config, Qwen3ForCausalLM, load_qwen3_from_gguf};
 use axonml_nn::{KLDivLoss, Module, Reduction};
 use axonml_optim::{AdamW, Optimizer};
 use axonml_serialize::TrainingState;
 use axonml_tensor::Tensor;
 
 use llm_training::{
-    find_checkpoint, format_count, load_model_from_checkpoint, read_corpus,
-    shifted_cross_entropy, CharTokenizer, LoopAction, ResumeMode, TextDataset,
-    TrainingLifecycle,
+    CharTokenizer, LoopAction, ResumeMode, TextDataset, TrainingLifecycle, find_checkpoint,
+    format_count, load_model_from_checkpoint, read_corpus, shifted_cross_entropy,
 };
 
 // =============================================================================
@@ -167,23 +166,74 @@ impl Config {
                 })
             };
             match a.as_str() {
-                "--corpus" => { cfg.corpus = PathBuf::from(next(i)); i += 2; }
-                "--output-dir" => { cfg.output_dir = PathBuf::from(next(i)); i += 2; }
-                "--seq-len" => { cfg.seq_len = next(i).parse().unwrap(); i += 2; }
-                "--bs" | "--batch-size" => { cfg.batch_size = next(i).parse().unwrap(); i += 2; }
-                "--epochs" => { cfg.epochs = next(i).parse().unwrap(); i += 2; }
-                "--steps" => { cfg.steps_per_epoch = next(i).parse().unwrap(); i += 2; }
-                "--lr" => { cfg.lr = next(i).parse().unwrap(); i += 2; }
-                "--warmup" => { cfg.warmup_steps = next(i).parse().unwrap(); i += 2; }
-                "--temperature" | "-T" => { cfg.temperature = next(i).parse().unwrap(); i += 2; }
-                "--ce-weight" | "--alpha" => { cfg.ce_weight = next(i).parse().unwrap(); i += 2; }
-                "--weight-decay" => { cfg.weight_decay = next(i).parse().unwrap(); i += 2; }
-                "--grad-clip" => { cfg.grad_clip = next(i).parse().unwrap(); i += 2; }
-                "--checkpoint-every-steps" => { cfg.checkpoint_every_steps = next(i).parse().unwrap(); i += 2; }
-                "--keep-last-k" => { cfg.keep_last_k = next(i).parse().unwrap(); i += 2; }
-                "--log-every" => { cfg.log_every = next(i).parse().unwrap(); i += 2; }
-                "--generate-every" => { cfg.generate_every = next(i).parse().unwrap(); i += 2; }
-                "--seed" => { cfg.seed = next(i).parse().unwrap(); i += 2; }
+                "--corpus" => {
+                    cfg.corpus = PathBuf::from(next(i));
+                    i += 2;
+                }
+                "--output-dir" => {
+                    cfg.output_dir = PathBuf::from(next(i));
+                    i += 2;
+                }
+                "--seq-len" => {
+                    cfg.seq_len = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--bs" | "--batch-size" => {
+                    cfg.batch_size = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--epochs" => {
+                    cfg.epochs = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--steps" => {
+                    cfg.steps_per_epoch = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--lr" => {
+                    cfg.lr = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--warmup" => {
+                    cfg.warmup_steps = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--temperature" | "-T" => {
+                    cfg.temperature = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--ce-weight" | "--alpha" => {
+                    cfg.ce_weight = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--weight-decay" => {
+                    cfg.weight_decay = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--grad-clip" => {
+                    cfg.grad_clip = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--checkpoint-every-steps" => {
+                    cfg.checkpoint_every_steps = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--keep-last-k" => {
+                    cfg.keep_last_k = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--log-every" => {
+                    cfg.log_every = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--generate-every" => {
+                    cfg.generate_every = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--seed" => {
+                    cfg.seed = next(i).parse().unwrap();
+                    i += 2;
+                }
                 "--resume" => {
                     cfg.resume = match next(i).as_str() {
                         "latest" => ResumeMode::Latest,
@@ -192,9 +242,18 @@ impl Config {
                     };
                     i += 2;
                 }
-                "--arch" => { cfg.arch_preset = next(i).clone(); i += 2; }
-                "--teacher-gguf" => { cfg.teacher_gguf = Some(PathBuf::from(next(i))); i += 2; }
-                "--tokens-bin" => { cfg.tokens_bin = Some(PathBuf::from(next(i))); i += 2; }
+                "--arch" => {
+                    cfg.arch_preset = next(i).clone();
+                    i += 2;
+                }
+                "--teacher-gguf" => {
+                    cfg.teacher_gguf = Some(PathBuf::from(next(i)));
+                    i += 2;
+                }
+                "--tokens-bin" => {
+                    cfg.tokens_bin = Some(PathBuf::from(next(i)));
+                    i += 2;
+                }
                 other => {
                     eprintln!("Unknown flag: {other}");
                     print_help();
@@ -228,8 +287,12 @@ fn print_help() {
     eprintln!("  --grad-clip F         Gradient clip norm (default: {DEFAULT_GRAD_CLIP})");
     eprintln!();
     eprintln!("DISTILLATION:");
-    eprintln!("  -T, --temperature F   Softmax temperature for KL (default: {DEFAULT_TEMPERATURE})");
-    eprintln!("  --alpha F             CE weight in combined loss; 1-α is KL weight (default: {DEFAULT_CE_WEIGHT})");
+    eprintln!(
+        "  -T, --temperature F   Softmax temperature for KL (default: {DEFAULT_TEMPERATURE})"
+    );
+    eprintln!(
+        "  --alpha F             CE weight in combined loss; 1-α is KL weight (default: {DEFAULT_CE_WEIGHT})"
+    );
     eprintln!();
     eprintln!("MODEL:");
     eprintln!("  --arch NAME           Qwen3 arch preset: tiny | 0.6b | 1.7b | 4b (default: tiny)");
@@ -357,8 +420,7 @@ fn lr_for_step(step: usize, peak: f32, warmup: usize, total: usize) -> f32 {
         peak
     } else {
         // Cosine decay from peak → 10% of peak.
-        let progress =
-            (step - warmup) as f32 / (total - warmup) as f32;
+        let progress = (step - warmup) as f32 / (total - warmup) as f32;
         let cosine = 0.5 * (1.0 + (std::f32::consts::PI * progress.min(1.0)).cos());
         peak * (0.1 + 0.9 * cosine)
     }
@@ -417,7 +479,9 @@ fn main() {
         );
         let tokenizer = CharTokenizer::from_corpus(&corpus_text);
         let vocab_size = tokenizer.vocab_size();
-        println!("Vocab:  {vocab_size} chars (CharTokenizer — pass --tokens-bin for useful distillation)");
+        println!(
+            "Vocab:  {vocab_size} chars (CharTokenizer — pass --tokens-bin for useful distillation)"
+        );
         let dataset = TextDataset::from_string(&corpus_text, &tokenizer, cfg.seq_len);
         println!("Windows: {}", format_count(dataset.len()));
         println!();
@@ -427,50 +491,56 @@ fn main() {
     let _ = &char_tokenizer;
 
     // ---- Build teacher first — its vocab_size drives the student's.  ----
-    let (teacher, teacher_cfg_opt): (Qwen3ForCausalLM, Option<Qwen3Config>) =
-        if let Some(ref gguf_path) = cfg.teacher_gguf {
-            println!("Teacher: loading pretrained GGUF from {}", gguf_path.display());
-            let t0 = Instant::now();
-            let (t, tcfg) = load_qwen3_from_gguf(gguf_path).unwrap_or_else(|e| {
-                eprintln!("Failed to load teacher GGUF: {e}");
-                std::process::exit(1);
-            });
-            let dt = t0.elapsed();
+    let (teacher, teacher_cfg_opt): (Qwen3ForCausalLM, Option<Qwen3Config>) = if let Some(
+        ref gguf_path,
+    ) =
+        cfg.teacher_gguf
+    {
+        println!(
+            "Teacher: loading pretrained GGUF from {}",
+            gguf_path.display()
+        );
+        let t0 = Instant::now();
+        let (t, tcfg) = load_qwen3_from_gguf(gguf_path).unwrap_or_else(|e| {
+            eprintln!("Failed to load teacher GGUF: {e}");
+            std::process::exit(1);
+        });
+        let dt = t0.elapsed();
+        println!(
+            "         ✓ loaded in {:.1}s — vocab={}, hidden={}, layers={}, heads={}x{}, head_dim={}, tie={}",
+            dt.as_secs_f32(),
+            tcfg.vocab_size,
+            tcfg.hidden_size,
+            tcfg.num_hidden_layers,
+            tcfg.num_attention_heads,
+            tcfg.num_key_value_heads,
+            tcfg.head_dim,
+            tcfg.tie_word_embeddings,
+        );
+        if tcfg.vocab_size != vocab_size {
             println!(
-                "         ✓ loaded in {:.1}s — vocab={}, hidden={}, layers={}, heads={}x{}, head_dim={}, tie={}",
-                dt.as_secs_f32(),
-                tcfg.vocab_size,
-                tcfg.hidden_size,
-                tcfg.num_hidden_layers,
-                tcfg.num_attention_heads,
-                tcfg.num_key_value_heads,
-                tcfg.head_dim,
-                tcfg.tie_word_embeddings,
+                "  ⚠  student's CharTokenizer vocab ({}) ≠ teacher's vocab ({}).",
+                vocab_size, tcfg.vocab_size
             );
-            if tcfg.vocab_size != vocab_size {
-                println!(
-                    "  ⚠  student's CharTokenizer vocab ({}) ≠ teacher's vocab ({}).",
-                    vocab_size, tcfg.vocab_size
-                );
-                println!(
-                    "     KL head will use teacher's vocab; student's embed/LM head will be rebuilt at that size."
-                );
-                println!(
-                    "     Until the Qwen BPE tokenizer lands, the teacher's distribution over char IDs"
-                );
-                println!(
-                    "     is mostly noise — this remains a pipeline smoke until dataset prep is done."
-                );
-            }
-            (t, Some(tcfg))
-        } else {
-            println!("Teacher: fresh Qwen3 (no --teacher-gguf → pipeline smoke only).");
             println!(
-                "         Pass --teacher-gguf PATH to load a pretrained teacher and train a useful draft."
+                "     KL head will use teacher's vocab; student's embed/LM head will be rebuilt at that size."
             );
-            let fresh_cfg = qwen3_preset(&cfg.arch_preset, vocab_size, cfg.seq_len);
-            (Qwen3ForCausalLM::new(&fresh_cfg), None)
-        };
+            println!(
+                "     Until the Qwen BPE tokenizer lands, the teacher's distribution over char IDs"
+            );
+            println!(
+                "     is mostly noise — this remains a pipeline smoke until dataset prep is done."
+            );
+        }
+        (t, Some(tcfg))
+    } else {
+        println!("Teacher: fresh Qwen3 (no --teacher-gguf → pipeline smoke only).");
+        println!(
+            "         Pass --teacher-gguf PATH to load a pretrained teacher and train a useful draft."
+        );
+        let fresh_cfg = qwen3_preset(&cfg.arch_preset, vocab_size, cfg.seq_len);
+        (Qwen3ForCausalLM::new(&fresh_cfg), None)
+    };
 
     // ---- Build student with matched vocab_size (required for KL alignment) ----
     // If the teacher is GGUF-loaded, the student inherits vocab_size + head_dim +
@@ -492,7 +562,8 @@ fn main() {
 
     let param_count: usize = student.parameters().iter().map(|p| p.data().numel()).sum();
 
-    println!("Student: Qwen3 (preset={}, vocab={}, layers={}, hidden={}, heads={}, kv={}, head_dim={})",
+    println!(
+        "Student: Qwen3 (preset={}, vocab={}, layers={}, hidden={}, heads={}, kv={}, head_dim={})",
         cfg.arch_preset,
         model_cfg.vocab_size,
         model_cfg.num_hidden_layers,
@@ -549,7 +620,11 @@ fn main() {
     let total_steps = cfg.epochs * cfg.steps_per_epoch;
     println!("Training:");
     println!("  batch         : {}", cfg.batch_size);
-    println!("  epochs        : {} (starting at {})", cfg.epochs, start_epoch + 1);
+    println!(
+        "  epochs        : {} (starting at {})",
+        cfg.epochs,
+        start_epoch + 1
+    );
     println!("  steps/ep      : {}", cfg.steps_per_epoch);
     println!("  total steps   : {total_steps}");
     println!("  peak lr       : {}", cfg.lr);
@@ -559,7 +634,11 @@ fn main() {
     println!();
     println!("Distillation:");
     println!("  T (temp)      : {}", cfg.temperature);
-    println!("  α (ce_weight) : {}  (1-α = {} for KL)", cfg.ce_weight, 1.0 - cfg.ce_weight);
+    println!(
+        "  α (ce_weight) : {}  (1-α = {} for KL)",
+        cfg.ce_weight,
+        1.0 - cfg.ce_weight
+    );
     println!();
     println!(
         "{:>6} {:>8} {:>9} {:>9} {:>9} {:>10} {:>10}",
@@ -599,16 +678,11 @@ fn main() {
 
             // Sample batch.
             let batch_data = dataset.sample_batch(cfg.batch_size, &mut rng);
-            let input_ids = Tensor::<u32>::from_vec(
-                batch_data.clone(),
-                &[cfg.batch_size, cfg.seq_len],
-            )
-            .unwrap();
-            let labels = Tensor::<u32>::from_vec(
-                batch_data,
-                &[cfg.batch_size, cfg.seq_len],
-            )
-            .unwrap();
+            let input_ids =
+                Tensor::<u32>::from_vec(batch_data.clone(), &[cfg.batch_size, cfg.seq_len])
+                    .unwrap();
+            let labels =
+                Tensor::<u32>::from_vec(batch_data, &[cfg.batch_size, cfg.seq_len]).unwrap();
 
             // Teacher forward under NoGradGuard — no autograd graph built,
             // no gradient stored, no wasted memory. Teacher logits become
@@ -635,7 +709,8 @@ fn main() {
             let total_val = loss.data().to_vec()[0];
 
             // Backward + optimizer step with per-step LR schedule.
-            let current_lr = lr_for_step(global_step as usize, cfg.lr, cfg.warmup_steps, total_steps);
+            let current_lr =
+                lr_for_step(global_step as usize, cfg.lr, cfg.warmup_steps, total_steps);
             // Adjust optimizer LR in-place via rebuild (AdamW state persists
             // across this because `.with_betas` would reset; instead we use
             // a simple approach — a proper LR-setter on the Optimizer trait
@@ -692,7 +767,11 @@ fn main() {
                 // in the GGUF the tokens were produced from), so skip.
                 if let Some(ref tok) = char_tokenizer {
                     let sample = sample_greedy(&student, tok, &device, cfg.seq_len);
-                    let preview = sample.replace('\n', " ").chars().take(140).collect::<String>();
+                    let preview = sample
+                        .replace('\n', " ")
+                        .chars()
+                        .take(140)
+                        .collect::<String>();
                     println!("    sample: {preview}");
                 }
             }
@@ -757,10 +836,13 @@ fn sample_greedy(
     let max_len = seq_len.min(64);
 
     for _ in 0..50 {
-        let ctx_start = if ids.len() > max_len { ids.len() - max_len } else { 0 };
+        let ctx_start = if ids.len() > max_len {
+            ids.len() - max_len
+        } else {
+            0
+        };
         let ctx = &ids[ctx_start..];
-        let ctx_tensor =
-            Tensor::<u32>::from_vec(ctx.to_vec(), &[1, ctx.len()]).unwrap();
+        let ctx_tensor = Tensor::<u32>::from_vec(ctx.to_vec(), &[1, ctx.len()]).unwrap();
         let logits = model.forward_ids(&ctx_tensor);
         let logits_data = logits.data();
         let shape = logits_data.shape();

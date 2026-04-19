@@ -62,8 +62,8 @@ use axonml_serialize::TrainingState;
 use axonml_tensor::Tensor;
 
 use llm_training::{
-    find_checkpoint, format_count, load_model_from_checkpoint, read_corpus, shifted_cross_entropy,
-    CharTokenizer, LoopAction, ResumeMode, TextDataset, TrainingLifecycle,
+    CharTokenizer, LoopAction, ResumeMode, TextDataset, TrainingLifecycle, find_checkpoint,
+    format_count, load_model_from_checkpoint, read_corpus, shifted_cross_entropy,
 };
 
 // =============================================================================
@@ -147,26 +147,85 @@ impl Config {
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
-                "--corpus" => { i += 1; cfg.corpus = PathBuf::from(&args[i]); }
-                "--out" => { i += 1; cfg.output_dir = PathBuf::from(&args[i]); }
-                "--seq-len" => { i += 1; cfg.seq_len = args[i].parse().unwrap(); }
-                "--d-model" => { i += 1; cfg.d_model = args[i].parse().unwrap(); }
-                "--intermediate" => { i += 1; cfg.intermediate = args[i].parse().unwrap(); }
-                "--layers" => { i += 1; cfg.num_layers = args[i].parse().unwrap(); }
-                "--heads" => { i += 1; cfg.num_heads = args[i].parse().unwrap(); }
-                "--kv-heads" => { i += 1; cfg.num_kv_heads = args[i].parse().unwrap(); }
-                "--bs" | "--batch-size" => { i += 1; cfg.batch_size = args[i].parse().unwrap(); }
-                "--epochs" => { i += 1; cfg.epochs = args[i].parse().unwrap(); }
-                "--lr" => { i += 1; cfg.lr = args[i].parse().unwrap(); }
-                "--steps" => { i += 1; cfg.steps_per_epoch = args[i].parse().unwrap(); }
-                "--log-every" => { i += 1; cfg.log_every = args[i].parse().unwrap(); }
-                "--generate-every" => { i += 1; cfg.generate_every = args[i].parse().unwrap(); }
-                "--seed" => { i += 1; cfg.seed = args[i].parse().unwrap(); }
-                "--resume" => { i += 1; cfg.resume = ResumeMode::from_str(&args[i]); }
-                "--fresh" => { cfg.resume = ResumeMode::None; }
-                "--checkpoint-every-steps" => { i += 1; cfg.checkpoint_every_steps = args[i].parse().unwrap(); }
-                "--keep-last-k" => { i += 1; cfg.keep_last_k = args[i].parse().unwrap(); }
-                "--help" | "-h" => { print_help(); std::process::exit(0); }
+                "--corpus" => {
+                    i += 1;
+                    cfg.corpus = PathBuf::from(&args[i]);
+                }
+                "--out" => {
+                    i += 1;
+                    cfg.output_dir = PathBuf::from(&args[i]);
+                }
+                "--seq-len" => {
+                    i += 1;
+                    cfg.seq_len = args[i].parse().unwrap();
+                }
+                "--d-model" => {
+                    i += 1;
+                    cfg.d_model = args[i].parse().unwrap();
+                }
+                "--intermediate" => {
+                    i += 1;
+                    cfg.intermediate = args[i].parse().unwrap();
+                }
+                "--layers" => {
+                    i += 1;
+                    cfg.num_layers = args[i].parse().unwrap();
+                }
+                "--heads" => {
+                    i += 1;
+                    cfg.num_heads = args[i].parse().unwrap();
+                }
+                "--kv-heads" => {
+                    i += 1;
+                    cfg.num_kv_heads = args[i].parse().unwrap();
+                }
+                "--bs" | "--batch-size" => {
+                    i += 1;
+                    cfg.batch_size = args[i].parse().unwrap();
+                }
+                "--epochs" => {
+                    i += 1;
+                    cfg.epochs = args[i].parse().unwrap();
+                }
+                "--lr" => {
+                    i += 1;
+                    cfg.lr = args[i].parse().unwrap();
+                }
+                "--steps" => {
+                    i += 1;
+                    cfg.steps_per_epoch = args[i].parse().unwrap();
+                }
+                "--log-every" => {
+                    i += 1;
+                    cfg.log_every = args[i].parse().unwrap();
+                }
+                "--generate-every" => {
+                    i += 1;
+                    cfg.generate_every = args[i].parse().unwrap();
+                }
+                "--seed" => {
+                    i += 1;
+                    cfg.seed = args[i].parse().unwrap();
+                }
+                "--resume" => {
+                    i += 1;
+                    cfg.resume = ResumeMode::from_str(&args[i]);
+                }
+                "--fresh" => {
+                    cfg.resume = ResumeMode::None;
+                }
+                "--checkpoint-every-steps" => {
+                    i += 1;
+                    cfg.checkpoint_every_steps = args[i].parse().unwrap();
+                }
+                "--keep-last-k" => {
+                    i += 1;
+                    cfg.keep_last_k = args[i].parse().unwrap();
+                }
+                "--help" | "-h" => {
+                    print_help();
+                    std::process::exit(0);
+                }
                 other => {
                     eprintln!("Unknown argument: {other}");
                     print_help();
@@ -180,7 +239,8 @@ impl Config {
 }
 
 fn print_help() {
-    println!(r#"Train LLaMA on a text corpus.
+    println!(
+        r#"Train LLaMA on a text corpus.
 
 Usage: train_llama [OPTIONS]
 
@@ -204,7 +264,8 @@ Options:
   --fresh              Equivalent to --resume none
   --checkpoint-every-steps N   Rotating step-level checkpoint every N steps (0 = off)
   --keep-last-k N      Keep last N step checkpoints on disk (default: 5)
-  --help, -h           Show help"#);
+  --help, -h           Show help"#
+    );
 }
 
 // =============================================================================
@@ -288,7 +349,11 @@ fn main() {
 
     // ---- Load corpus ----
     let corpus_text = read_corpus(&cfg.corpus);
-    println!("Corpus: {} ({} chars)", cfg.corpus.display(), format_count(corpus_text.len()));
+    println!(
+        "Corpus: {} ({} chars)",
+        cfg.corpus.display(),
+        format_count(corpus_text.len())
+    );
 
     // ---- Tokenizer + dataset ----
     let tokenizer = CharTokenizer::from_corpus(&corpus_text);
@@ -321,7 +386,11 @@ fn main() {
     println!("  intermediate  : {}", cfg.intermediate);
     println!("  layers        : {}", cfg.num_layers);
     println!("  heads         : {}", cfg.num_heads);
-    println!("  kv_heads      : {} (GQA ratio {}:1)", cfg.num_kv_heads, cfg.num_heads / cfg.num_kv_heads);
+    println!(
+        "  kv_heads      : {} (GQA ratio {}:1)",
+        cfg.num_kv_heads,
+        cfg.num_heads / cfg.num_kv_heads
+    );
     println!("  seq_len       : {}", cfg.seq_len);
     println!("  params        : {}", format_count(param_count));
     println!();
@@ -367,11 +436,18 @@ fn main() {
 
     println!("Training:");
     println!("  batch     : {}", cfg.batch_size);
-    println!("  epochs    : {} (starting at {})", cfg.epochs, start_epoch + 1);
+    println!(
+        "  epochs    : {} (starting at {})",
+        cfg.epochs,
+        start_epoch + 1
+    );
     println!("  steps/ep  : {}", cfg.steps_per_epoch);
     println!("  lr        : {}", cfg.lr);
     println!();
-    println!("{:>6} {:>8} {:>10} {:>10} {:>10}", "Epoch", "Step", "Loss", "PPL", "Time");
+    println!(
+        "{:>6} {:>8} {:>10} {:>10} {:>10}",
+        "Epoch", "Step", "Loss", "PPL", "Time"
+    );
     println!("{}", "-".repeat(50));
 
     let mut best_loss = training_state.best_metric.unwrap_or(f32::MAX);
@@ -409,14 +485,11 @@ fn main() {
             // u32 tensors stay on CPU — `Embedding.lookup` handles the CPU-indices →
             // GPU-weights gather internally via `embedding_gather_cuda`. Moving a
             // `Tensor<u32>` to GPU panics with "GPU tensors are only supported for f32".
-            let input_ids = Tensor::<u32>::from_vec(
-                batch_data.clone(),
-                &[cfg.batch_size, cfg.seq_len],
-            ).unwrap();
-            let labels = Tensor::<u32>::from_vec(
-                batch_data,
-                &[cfg.batch_size, cfg.seq_len],
-            ).unwrap();
+            let input_ids =
+                Tensor::<u32>::from_vec(batch_data.clone(), &[cfg.batch_size, cfg.seq_len])
+                    .unwrap();
+            let labels =
+                Tensor::<u32>::from_vec(batch_data, &[cfg.batch_size, cfg.seq_len]).unwrap();
 
             // Forward + loss (locally computed since LLaMA has no forward_with_loss)
             optimizer.zero_grad();
@@ -461,7 +534,11 @@ fn main() {
             if step % cfg.generate_every == 0 {
                 model.eval();
                 let sample = generate(&model, &tokenizer, "ROMEO:\n", 160, cfg.seq_len, &device);
-                let preview = sample.replace('\n', " ").chars().take(160).collect::<String>();
+                let preview = sample
+                    .replace('\n', " ")
+                    .chars()
+                    .take(160)
+                    .collect::<String>();
                 println!("    sample: {preview}");
                 model.train();
             }

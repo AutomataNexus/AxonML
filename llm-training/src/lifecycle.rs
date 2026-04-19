@@ -90,13 +90,13 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write as _};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axonml_nn::Module;
-use axonml_serialize::{save_checkpoint, save_model, Checkpoint, StateDict, TrainingState};
+use axonml_serialize::{Checkpoint, StateDict, TrainingState, save_checkpoint, save_model};
 
 // =============================================================================
 // Shared control flags
@@ -189,7 +189,10 @@ fn socket_path() -> PathBuf {
     PathBuf::from(format!("/tmp/axonml-train-{}.sock", std::process::id()))
 }
 
-fn start_control_socket(flags: Arc<ControlFlags>, meta: SocketMetadata) -> std::io::Result<PathBuf> {
+fn start_control_socket(
+    flags: Arc<ControlFlags>,
+    meta: SocketMetadata,
+) -> std::io::Result<PathBuf> {
     let path = socket_path();
     // Stale socket from a crashed prior run: remove it.
     let _ = fs::remove_file(&path);
@@ -244,7 +247,10 @@ fn handle_connection(stream: UnixStream, flags: Arc<ControlFlags>, meta: Arc<Soc
             "stop" => {
                 flags.should_stop.store(true, Ordering::SeqCst);
                 flags.paused.store(false, Ordering::SeqCst);
-                let _ = writeln!(writer, "ok: stopping after current step (final checkpoint will flush)");
+                let _ = writeln!(
+                    writer,
+                    "ok: stopping after current step (final checkpoint will flush)"
+                );
             }
             "checkpoint" | "checkpoint-now" => {
                 flags.checkpoint_requested.store(true, Ordering::SeqCst);
@@ -517,12 +523,7 @@ impl TrainingLifecycle {
 
     /// Save a rotating step-level checkpoint and prune older ones beyond
     /// `keep_last_k`. Non-fatal on error — prints a warning and returns.
-    pub fn save_step<M: Module>(
-        &self,
-        model: &M,
-        training_state: &TrainingState,
-        epoch: usize,
-    ) {
+    pub fn save_step<M: Module>(&self, model: &M, training_state: &TrainingState, epoch: usize) {
         let global_step = self.flags.global_step.load(Ordering::Relaxed);
         let path = self
             .output_dir
@@ -540,12 +541,7 @@ impl TrainingLifecycle {
     }
 
     /// Save the end-of-epoch "latest" + optional "epoch_NNNN" checkpoints.
-    pub fn save_epoch<M: Module>(
-        &self,
-        model: &M,
-        training_state: &TrainingState,
-        epoch: usize,
-    ) {
+    pub fn save_epoch<M: Module>(&self, model: &M, training_state: &TrainingState, epoch: usize) {
         let latest = self.output_dir.join("checkpoint_latest.axonml");
         let numbered = self
             .output_dir
@@ -595,12 +591,7 @@ impl TrainingLifecycle {
 
     /// Flush a final checkpoint on graceful stop. This is the
     /// "don't-lose-a-week-of-training" path.
-    pub fn save_final<M: Module>(
-        &self,
-        model: &M,
-        training_state: &TrainingState,
-        epoch: usize,
-    ) {
+    pub fn save_final<M: Module>(&self, model: &M, training_state: &TrainingState, epoch: usize) {
         let path = self.output_dir.join("checkpoint_final.axonml");
         let cp = Checkpoint::builder()
             .model_state(StateDict::from_module(model))
@@ -756,10 +747,7 @@ fn spawn_training_ticker(socket_path: &Path) {
                 return;
             }
             Err(e) => {
-                eprintln!(
-                    "[lifecycle] ticker spawn failed for {}: {e}",
-                    bin.display()
-                );
+                eprintln!("[lifecycle] ticker spawn failed for {}: {e}", bin.display());
                 // fall through to next candidate
             }
         }

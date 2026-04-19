@@ -102,8 +102,8 @@ use axonml_tensor::Tensor;
 use tokenizers::Tokenizer;
 
 use llm_training::{
-    find_checkpoint, format_count, lcg_range, load_model_from_checkpoint, LoopAction, ResumeMode,
-    TrainingLifecycle,
+    LoopAction, ResumeMode, TrainingLifecycle, find_checkpoint, format_count, lcg_range,
+    load_model_from_checkpoint,
 };
 
 // =============================================================================
@@ -466,12 +466,17 @@ fn sample_batch(tokens: &[u32], batch_size: usize, seq_len: usize, rng: &mut u64
 /// Cosine schedule with linear warmup. Returns LR at `step` given peak `lr`,
 /// `warmup_steps` linear-ramp, then cosine decay to `lr * min_lr_ratio` over
 /// the remaining `total_steps - warmup_steps`.
-fn cosine_lr(step: usize, total_steps: usize, warmup_steps: usize, lr: f32, min_lr_ratio: f32) -> f32 {
+fn cosine_lr(
+    step: usize,
+    total_steps: usize,
+    warmup_steps: usize,
+    lr: f32,
+    min_lr_ratio: f32,
+) -> f32 {
     if step < warmup_steps {
         return lr * (step as f32 + 1.0) / (warmup_steps as f32).max(1.0);
     }
-    let progress = (step - warmup_steps) as f32
-        / ((total_steps - warmup_steps).max(1) as f32);
+    let progress = (step - warmup_steps) as f32 / ((total_steps - warmup_steps).max(1) as f32);
     let progress = progress.clamp(0.0, 1.0);
     let cosine = 0.5 * (1.0 + (std::f32::consts::PI * progress).cos());
     let min_lr = lr * min_lr_ratio;
@@ -497,14 +502,20 @@ fn main() {
 
     // ---- Tokenizer ----
     let (tokenizer, vocab_size) = load_tokenizer(&cfg.tokenizer_path);
-    println!("Tokenizer: {} (vocab {})", cfg.tokenizer_path.display(), vocab_size);
+    println!(
+        "Tokenizer: {} (vocab {})",
+        cfg.tokenizer_path.display(),
+        vocab_size
+    );
 
     // ---- Dataset ----
     let dataset_path = match &cfg.dataset_path {
         Some(p) => p.clone(),
         None if cfg.variant == ModelVariant::Smoke => build_or_load_smoke_dataset(&tokenizer),
         None => {
-            eprintln!("--dataset is required for --config 1b/3b. Pre-tokenize with tools/pretokenize_stack_v2.py first.");
+            eprintln!(
+                "--dataset is required for --config 1b/3b. Pre-tokenize with tools/pretokenize_stack_v2.py first."
+            );
             std::process::exit(1);
         }
     };
@@ -539,12 +550,22 @@ fn main() {
     println!("  heads         : {}", model_config.num_heads);
     println!("  kv_heads      : {}", model_config.num_kv_heads);
     println!("  intermediate  : {}", model_config.intermediate_size);
-    println!("  seq_len       : {} (max {})", cfg.seq_len, model_config.max_seq_len);
+    println!(
+        "  seq_len       : {} (max {})",
+        cfg.seq_len, model_config.max_seq_len
+    );
     println!(
         "  rope          : {}  θ={}",
         model_config.use_rope, model_config.rope_theta
     );
-    println!("  ffn           : {}", if model_config.use_squared_relu { "ReLU²-gated" } else { "SiLU" });
+    println!(
+        "  ffn           : {}",
+        if model_config.use_squared_relu {
+            "ReLU²-gated"
+        } else {
+            "SiLU"
+        }
+    );
     println!("  sub_ln        : {}", model_config.use_sub_ln);
     println!("  params        : {}", format_count(param_count));
     println!();
@@ -646,8 +667,8 @@ fn main() {
         let batch = sample_batch(&tokens, cfg.batch_size, cfg.seq_len, &mut rng);
         let input_ids = Tensor::<u32>::from_vec(batch.clone(), &[cfg.batch_size, cfg.seq_len])
             .expect("input_ids shape");
-        let labels = Tensor::<u32>::from_vec(batch, &[cfg.batch_size, cfg.seq_len])
-            .expect("labels shape");
+        let labels =
+            Tensor::<u32>::from_vec(batch, &[cfg.batch_size, cfg.seq_len]).expect("labels shape");
 
         // Forward + loss — uses CrossEntropyLoss built-in (graph-tracked).
         optimizer.zero_grad();

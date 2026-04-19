@@ -73,16 +73,40 @@ impl Cli {
         };
         let mut i = 0;
         while i < args.len() {
-            let next = |i: usize| -> String { args.get(i + 1).cloned().unwrap_or_else(|| { eprintln!("missing value for {}", args[i]); std::process::exit(1); }) };
+            let next = |i: usize| -> String {
+                args.get(i + 1).cloned().unwrap_or_else(|| {
+                    eprintln!("missing value for {}", args[i]);
+                    std::process::exit(1);
+                })
+            };
             match args[i].as_str() {
-                "--gguf" => { cli.gguf = PathBuf::from(next(i)); i += 2; }
-                "--input" => { cli.input = PathBuf::from(next(i)); i += 2; }
-                "--output" => { cli.output = PathBuf::from(next(i)); i += 2; }
-                "--progress-every-mb" => { cli.progress_every_mb = next(i).parse().unwrap(); i += 2; }
-                other => { eprintln!("unknown flag: {other}"); print_help(); std::process::exit(1); }
+                "--gguf" => {
+                    cli.gguf = PathBuf::from(next(i));
+                    i += 2;
+                }
+                "--input" => {
+                    cli.input = PathBuf::from(next(i));
+                    i += 2;
+                }
+                "--output" => {
+                    cli.output = PathBuf::from(next(i));
+                    i += 2;
+                }
+                "--progress-every-mb" => {
+                    cli.progress_every_mb = next(i).parse().unwrap();
+                    i += 2;
+                }
+                other => {
+                    eprintln!("unknown flag: {other}");
+                    print_help();
+                    std::process::exit(1);
+                }
             }
         }
-        if cli.gguf.as_os_str().is_empty() || cli.input.as_os_str().is_empty() || cli.output.as_os_str().is_empty() {
+        if cli.gguf.as_os_str().is_empty()
+            || cli.input.as_os_str().is_empty()
+            || cli.output.as_os_str().is_empty()
+        {
             eprintln!("--gguf, --input, and --output are all required");
             print_help();
             std::process::exit(1);
@@ -114,9 +138,15 @@ fn print_help() {
 /// GPT-2 `bytes_to_unicode` canonical printable byte set.
 fn canonical_printable_bytes() -> Vec<u8> {
     let mut out = Vec::with_capacity(256);
-    for b in 0x21u8..=0x7E { out.push(b); }
-    for b in 0xA1u8..=0xAC { out.push(b); }
-    for b in 0xAEu8..=0xFF { out.push(b); }
+    for b in 0x21u8..=0x7E {
+        out.push(b);
+    }
+    for b in 0xA1u8..=0xAC {
+        out.push(b);
+    }
+    for b in 0xAEu8..=0xFF {
+        out.push(b);
+    }
     out
 }
 
