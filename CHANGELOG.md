@@ -7,6 +7,144 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Training-path perf audit (Qwen3-0.6B distillation target)
+
+Multi-commit investigation of the 45+ s/step wall-clock on the distill target,
+followed by an operator-fusion + launch-reduction campaign. Baseline
+`profile_train_step` went from 165 s/step (bs=4 seq=512) to ~49 s/step (bs=2
+seq=256, activations now pinned on-device) with the same graph shape. The
+remaining bottleneck is WSL2 + Blackwell per-kernel stream-submit latency, now
+isolated to MatMulBackward's two cuBLAS calls and addressable via CUDA graph
+capture (prerequisite stream-change landed; memory-pool integration left).
+
+#### Added — new CUDA kernels
+
+- `silu_backward_f32` — fused `σ(x) · (1 + x · (1 − σ(x))) · grad_out`; replaces
+  the 7-op autograd chain (sigmoid → ones-H2D → sub → mul → add → mul → mul).
+  Bench: 212 µs/call vs 3164 µs/call on Qwen3-MLP shape → **14.9×**; max_abs_diff
+  5.96e-8 vs chain.
+- `rms_norm_bwd_batched_f32` — single-CTA-per-row, dual parallel reduction
+  (Σ x² + Σ x·w·g) then per-thread grad write. Forward uses existing
+  `rms_norm_batched_f32`. Bench on `[m=2048, n=1024]`: **21 µs vs 7680 µs CPU ref
+  = 365×**; correctness 2.4e-7 / 8.2e-8.
+- `softmax_causal_scaled_f32` + `softmax_causal_scaled_bwd_f32` — fused
+  `softmax(scale · scores + causal_mask)`. Replaces `mul_scalar + broadcast_add
+  (mask) + softmax` chain; three kernel launches + a per-call CPU mask alloc /
+  H2D collapse into one. Bench on `[bs=4, heads=16, seq=512, seq=512]`:
+  **6.6× forward** (1577 µs → 239 µs); backward 444 µs. Correctness 3.7e-9 / 2.2e-10.
+- `swiglu_bwd_f32` — paired-gradient kernel producing `grad_gate` and `grad_up`
+  in one launch, replacing SiluBackward + MulBackward on the MLP path. Bench
+  on `[2048, 3072]`: 287 µs/call; correctness 9.3e-10.
+- `add_rmsnorm_batched_f32` — fused residual-add + RMSNorm in one CTA-per-row
+  pass; returns both the normed tensor and the raw sum. Bench on `[2048, 1024]`:
+  20.8 µs vs 33.2 µs reference pair. Correctness bit-identical.
+- `rope_split_halves_bhsd_f32` + `rope_split_halves_bhsd_bwd_f32` — head-major
+  RoPE + its inverse for the `[bs, n_heads, seq, head_dim]` layout Qwen3 / LLaMA
+  training produces. Replaces `Tensor::to_vec()` + CPU rotation + re-upload
+  (which was silently pulling every Q/K to CPU on every attention step).
+  Correctness 3.7e-6 / 1.6e-6.
+- `repeat_kv_f32` — head-major GQA fan-out; `[bs, kv_heads, seq, head_dim]` →
+  `[bs, kv_heads * n_rep, seq, head_dim]` in one kernel. Correctness bit-identical.
+- **Re-enabled `gemm_strided_batched_f32`** for 3D/4D batched matmul. Prior
+  workaround did `a.to_vec() + b.to_vec()` then per-batch `htod_copy + alloc +
+  gemm + dtoh_copy` then CPU reassembly + final H2D — ~313 ms/call on
+  Qwen3-0.6B MatMulBackward. Bench post-fix: **2.3 ms / call, 137×**;
+  correctness 5.0e-5 (fp32 tolerance).
+
+#### Added — autograd-level fusion
+
+- `Variable::softmax_causal_scaled(tq, tk, offset, scale)` backed by new
+  `SoftmaxCausalScaledBackward`. Drops MulScalarBackward + AddBackward + SoftmaxBackward
+  in attention's pre-softmax chain → **56 fewer GradFn nodes per step** on the
+  Qwen3-0.6B forward/backward graph.
+- `Variable::swiglu(up)` backed by new `SwigluBackward`. Drops SiluBackward +
+  MulBackward on the MLP gate path → 28 fewer GradFn nodes per step.
+- `Variable::add_rmsnorm_split(b, weight, eps)` returns `(normed, raw_sum)` as
+  two Variables sharing a single fused-kernel invocation. The `normed` side
+  uses new `AddRMSNormBackward` (RMSNorm grad on the saved sum), the `sum`
+  side uses vanilla `AddBackward` — gradients accumulate independently at
+  both inputs. Lets Qwen3DecoderLayer replace `residual.add(&x)` +
+  `post_attention_layernorm.forward` with one kernel while keeping both
+  outputs the MLP and its residual branch need.
+
+#### Added — misc infra
+
+- `CudaBackend` now uses a named (`ctx.new_stream()`) stream instead of the
+  default NULL stream. Prerequisite for CUDA graph capture work. Zero perf
+  delta for our single-stream workload.
+- `profile_train_step` binary under `llm-training/src/bin/` — phase-level,
+  sync-honest Qwen3-0.6B single-step profiler with optional per-GradFn
+  breakdown (`AXONML_PROFILE_BACKWARD=1`) and pool-stat diagnostics.
+- Correctness + perf benches: `bench_silu_backward`, `bench_attention_bwd`,
+  `bench_matmul_bwd`, `bench_linear_bwd`, `bench_rmsnorm_bwd`,
+  `bench_softmax_causal`, `bench_swiglu_bwd`, `bench_add_rmsnorm`,
+  `bench_rope_bhsd`, `bench_cuda_graph`, `bench_reduce_bias`,
+  `bench_contiguous_gpu`, `bench_variable_matmul`.
+
+#### Changed — GPU-backed training ops
+
+- `axonml-llm::llama::RMSNorm::forward` now runs on GPU when input is on
+  device (was a `to_vec()` + row-wise Rust loop + `from_vec()` CPU path on
+  every call). `RMSNormBackward::apply` similarly dispatches to the new GPU
+  kernel.
+- `RotaryEmbedding::rotate_tensor` and `RoPEBackward::apply` now run on GPU
+  via the new `rope_split_halves_bhsd_*` kernels.
+- `qwen3::repeat_kv` (GQA fan-out) runs on GPU via `Tensor::repeat_kv`.
+- `Qwen3Attention::forward_with_cache` uses `softmax_causal_scaled` in place
+  of `.mul_scalar(scale).add(mask).softmax(-1)` — no more CPU-built causal
+  mask + H2D per attention call.
+- `Qwen3MLP::forward` uses the fused `Variable::swiglu` in place of
+  `.silu().mul(&up)`.
+- `Qwen3DecoderLayer::forward_with_cache` uses `Variable::add_rmsnorm_split`
+  in place of the `residual.add(x) + post_attention_layernorm.forward` pair.
+- `Qwen3ForCausalLM::parameters()` now always includes `lm_head.weight` even
+  with `tie_word_embeddings = true`. Fix: the per-Parameter `to_device` loop
+  was stranding the LM-head weight on CPU whenever `load_weights` (which is
+  what actually ties the alias) wasn't called, e.g. profilers with fresh
+  random init.
+- `RMSNorm::weight` and `::eps` are now `pub` so external call sites can
+  construct fused residual-add-and-norm ops against a bound layer's weight.
+
+#### Changed — memory pool hot path
+
+- Converted ~19 hot-path `pool_alloc` call sites to `pool_alloc_uninit`
+  (every elementwise-output-fully-written op: add/sub/mul/div + broadcast
+  variants, all scalar + unary activations, softmax_row, broadcast_to,
+  embedding_gather, the 2D matmul output, strided contiguous). Each converted
+  site drops a `cuMemsetD8Async` kernel on pool hits. Measured step-time
+  drop: **-21 s** (165 → 144 s / step at bs=4 seq=512), ~13 %. Conservative
+  accumulators stay on `pool_alloc`.
+- `fused_attention_bwd_cuda` no longer does `cuda.htod_copy(&vec![0.0; N]) × 3`
+  per call. Those were 3 × 8 MB H2D per call on Qwen3-0.6B, ~720 MB/step of
+  pure PCIe traffic + CPU memset churn. Now zeros on-GPU via `pool_alloc`.
+
+#### Added — diagnostics / documentation
+
+- `bench_cuda_graph` documents the CUDA graph capture blocker:
+  `cuStreamBeginCapture_v2` now works on our named stream, but capture of
+  real work fails with `CUDA_ERROR_STREAM_CAPTURE_ISOLATION` because
+  `pool_alloc_uninit` on a miss calls `cuMemAllocAsync`, which the driver
+  serializes via an internal memory-pool service stream. Two unblocking
+  paths documented in the file header: pre-bound workspace tensors
+  (PyTorch's approach) or explicit `cudaMemPool_t` + `cuMemAllocFromPoolAsync`
+  wrapper in `axonml-core`.
+
+#### Diagnosed — launch-bound backward
+
+Root-cause analysis identifying WSL2 + Blackwell per-kernel stream-submit
+latency (not compute) as the remaining training ceiling:
+
+- Isolated matmul: `Tensor::matmul` submits at 9 µs / call, 1.45 ms actual
+  GPU compute per call on the Qwen3 Linear shape (via the backlog bench).
+  Autograd-wrapped `Variable::matmul + sum + backward` pair: 4 ms / call
+  including 1 fwd matmul + 1 bwd matmul + graph ops.
+- In-step Qwen3-0.6B: MatMulBackward measured at 66-313 ms / call depending
+  on session state — a consistent 30-80× multiplier over the isolated per-
+  kernel cost. The same multiplier appears uniformly across every backward
+  op class, ruling out any single slow op.
+- Kernel count per step: ~1200-2000 launches. Each pays the stream-submit
+  latency stack-up once enough work is pending.
+
 ## [0.6.2] - 2026-04-17
 
 ### Summary

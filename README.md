@@ -24,6 +24,30 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ pas
 
 ## Features
 
+### Training Perf (Unreleased)
+
+- **Fused CUDA kernels on the LLM training hot path** — `rms_norm_batched`
+  (fwd + new paired bwd), `softmax_causal_scaled` (mul_scalar + mask +
+  softmax collapsed into one launch, bwd too), `swiglu_bwd` (single-pass
+  grad_gate + grad_up), `add_rmsnorm` (residual-add + RMSNorm in one CTA
+  pass, returns both outputs so pre-norm residual architectures work),
+  `silu_backward` (replaces the 7-op autograd chain), `rope_split_halves_bhsd`
+  (head-major RoPE for training's `[bs, heads, seq, head_dim]` layout,
+  fwd + bwd), `repeat_kv` (GQA fan-out). All benched against CPU /
+  previous-kernel-pair reference with machine-precision diffs.
+- **3D/4D batched matmul** now on-device via `cublasSgemmStridedBatched`
+  (~137× vs the prior CPU-round-trip workaround that was the 313 ms/call
+  bottleneck on Qwen3-0.6B MatMulBackward).
+- **pool_alloc_uninit** on ~19 elementwise hot-path sites skips a
+  `cuMemsetD8Async` per pool hit (-13 % step time on Qwen3-0.6B).
+- **Named CUDA stream** (not default NULL) so downstream code can capture
+  into CUDA graphs — prerequisite for the next round of launch-reduction.
+- `profile_train_step` binary + sync-honest phase timing + per-GradFn
+  breakdown (`AXONML_PROFILE_BACKWARD=1`) for reproducing the measurements.
+
+See `CHANGELOG.md [Unreleased]` for the full audit trail and next-round
+blockers (CUDA graph capture + memory-pool integration).
+
 ### Core (v0.6.1)
 
 - **Tensor Operations** (`axonml-tensor`)
