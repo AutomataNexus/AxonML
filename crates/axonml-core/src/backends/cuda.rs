@@ -817,6 +817,42 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Q4_K GEMM order-matched to `q4k_gemv_f32` — bit-identical output.
+    pub fn q4k_gemm_matched_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        m_dim: usize,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "Q4_K GEMM requires in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q4k_gemm_matched_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q4k_gemm_matched_f32".to_string()))?;
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid_x = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid_x, m_dim as u32, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&(m_dim as u32))
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// Q4_K GEMV: `c = a @ B^T` where B is stored on-device as Q4_K super-blocks.
     ///
     /// Shapes (all row-major):
@@ -1168,6 +1204,41 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Q6_K GEMM order-matched to `q6k_gemv_f32` — bit-identical output.
+    pub fn q6k_gemm_matched_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        m_dim: usize,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "Q6_K GEMM requires in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q6k_gemm_matched_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q6k_gemm_matched_f32".to_string()))?;
+        const WARPS_PER_CTA: u32 = 4;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid_x = ((out_dim as u32) + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid_x, m_dim as u32, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&(m_dim as u32))
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// Q5_K GEMV: `c = a @ B^T` with B stored on-device as Q5_K super-blocks
     /// (176 bytes per 256-element block). Same warp-cooperative layout as
     /// Q6_K — one warp per output row, 32 lanes handle 8 weights each per
@@ -1309,6 +1380,46 @@ impl CudaBackend {
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
+    }
+
+    /// Q5_K GEMM order-matched to `q5k_gemv_f32` — bit-identical output
+    /// via 2D grid over `mi` dimension. Required for Phi-3 batched
+    /// prefill K/V to match decode's single-query K/V.
+    pub fn q5k_gemm_matched_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        m_dim: usize,
+        out_dim: usize,
+        in_dim: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(in_dim % 256 == 0, "Q5_K GEMM requires in_dim % 256 == 0");
+        let func = self
+            .kernels
+            .get("q5k_gemm_matched_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q5k_gemm_matched_f32".to_string()))?;
+
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid_x = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid_y = m_dim as u32;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid_x, grid_y, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w).arg(a).arg(c)
+                .arg(&(m_dim as u32))
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg).map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
     }
 
     /// Q5_0 GEMV — one warp per output row, block_size=32, signed 5-bit

@@ -290,6 +290,78 @@ extern "C" __global__ void q5k_gemv_f32(
 }
 
 // ============================================================================
+// Q5_K GEMM order-matched to `q5k_gemv_f32` — literal copy with a 2D grid
+// where `blockIdx.y = mi` selects the input/output row. Produces K/V on
+// prefill that is bit-identical (not just "close") to `q5k_gemv_f32` for
+// the same (weight-row, activation-row) pair — required for Phi-3's
+// 32-layer sensitivity tolerance. Naive `q5k_gemm_f32` produces a ~7e-6
+// max-abs-diff from GEMV which survives for Qwen3 (Q4_K analogue) but
+// compounds beyond Phi-3's tolerance threshold.
+//
+// Launch: grid = (ceil(out/ROWS_PER_CTA), m_dim, 1),
+//         block = ROWS_PER_CTA * 2 * 32,
+//         shared_mem = ROWS_PER_CTA * 2 * sizeof(f32).
+// ============================================================================
+extern "C" __global__ void q5k_gemm_matched_f32(
+    const unsigned char* __restrict__ w,
+    const float* __restrict__ a,
+    float* __restrict__ c,
+    unsigned int m_dim,
+    unsigned int out_dim,
+    unsigned int in_dim
+) {
+    extern __shared__ float s_partial[];
+
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int j            = blockIdx.x * rows_per_cta + row_in_cta;
+    const unsigned int mi           = blockIdx.y;
+
+    const unsigned int chunk            = lane >> 3;
+    const unsigned int lane_in_ch       = lane & 7u;
+    const unsigned int chunk_byte_off   = chunk * 32u + lane_in_ch * 4u;
+    const unsigned int chunk_qh_byte_off = lane_in_ch * 4u;
+    const unsigned int chunk_a_lo       = chunk * 64u + lane_in_ch * 4u;
+    const unsigned int chunk_a_hi       = chunk_a_lo + 32u;
+
+    const unsigned int n_blocks  = in_dim / 256u;
+    const unsigned int row_bytes = n_blocks * 176u;
+
+    const float* a_mi = a + (size_t)mi * in_dim;
+    float*       c_mi = c + (size_t)mi * out_dim;
+
+    float sum = 0.0f;
+    if (j < out_dim && mi < m_dim) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        sum = q5k_gemv_partial(
+            row, a_mi, b_start, b_end,
+            chunk, chunk_byte_off, chunk_qh_byte_off,
+            chunk_a_lo, chunk_a_hi
+        );
+    }
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1) {
+        sum += __shfl_xor_sync(0xffffffffu, sum, off);
+    }
+
+    if (lane == 0u) {
+        s_partial[row_in_cta * 2u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (warp_in_row == 0u && lane == 0u && j < out_dim && mi < m_dim) {
+        c_mi[j] = s_partial[row_in_cta * 2u] + s_partial[row_in_cta * 2u + 1u];
+    }
+}
+
+// ============================================================================
 // Q5_K fused QKV GEMV — one kernel launch computes q_c / k_c / v_c
 // from a shared activation `a` and three separate Q5_K weights.
 // Mirrors q4k_gemv_fused_qkv_f32's layout: warp_id in [0, q_out) →

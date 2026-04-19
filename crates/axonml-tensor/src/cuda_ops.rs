@@ -729,8 +729,9 @@ impl Tensor<f32> {
         // (one thread per output element, total threads = m * out_dim).
         let mut out = pool_alloc_uninit(m * out_dim).expect("GPU pool alloc failed");
 
-        cuda.q4k_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
-            .expect("CUDA q4k_gemm_f32 failed");
+        // Order-matched GEMM — bit-identical to per-row q4k_gemv_f32.
+        cuda.q4k_gemm_matched_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
+            .expect("CUDA q4k_gemm_matched_f32 failed");
 
         let shape = Shape::from_slice(&[m, out_dim]);
         let strides = contiguous_strides(&shape);
@@ -1012,8 +1013,15 @@ impl Tensor<f32> {
         let a_guard = a_data.storage.as_cuda_slice();
         let mut out = pool_alloc_uninit(m * out_dim).expect("GPU pool alloc failed");
 
-        cuda.q5k_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
-            .expect("CUDA q5k_gemm_f32 failed");
+        // Order-matched GEMM — bit-identical to per-row q5k_gemv_f32. The
+        // older naive q5k_gemm_f32 (one-thread-per-output) produces ~7e-6
+        // max-abs-diff per call, which is fine for Qwen3/DeepSeek but
+        // compounds over 32 layers beyond Phi-3's K/V tolerance. The
+        // matched kernel uses the same warp-cooperative reduction and
+        // split-at-half 2-warp layout as the GEMV, launched as a 2D grid
+        // with blockIdx.y selecting the batch row.
+        cuda.q5k_gemm_matched_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
+            .expect("CUDA q5k_gemm_matched_f32 failed");
 
         let shape = Shape::from_slice(&[m, out_dim]);
         let strides = contiguous_strides(&shape);
@@ -1096,8 +1104,9 @@ impl Tensor<f32> {
         // one-thread-per-output contract as q4k_gemm_f32).
         let mut out = pool_alloc_uninit(m * out_dim).expect("GPU pool alloc failed");
 
-        cuda.q6k_gemm_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
-            .expect("CUDA q6k_gemm_f32 failed");
+        // Order-matched GEMM — bit-identical to per-row q6k_gemv_f32.
+        cuda.q6k_gemm_matched_f32(w, a_guard.slice(), &mut out, m, out_dim, in_dim)
+            .expect("CUDA q6k_gemm_matched_f32 failed");
 
         let shape = Shape::from_slice(&[m, out_dim]);
         let strides = contiguous_strides(&shape);

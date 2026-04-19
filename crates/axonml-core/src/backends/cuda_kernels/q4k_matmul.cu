@@ -308,6 +308,65 @@ extern "C" __global__ void q4k_gemv_f32(
 }
 
 // ============================================================================
+// Q4_K GEMM order-matched to q4k_gemv_f32 — literal copy with 2D grid.
+// Produces K/V on prefill bit-identical to per-row q4k_gemv_f32. Required
+// for Phi-3 which is more sensitive than Qwen3 to GEMM-vs-GEMV drift.
+// ============================================================================
+extern "C" __global__ void q4k_gemm_matched_f32(
+    const unsigned char* __restrict__ w,
+    const float* __restrict__ a,
+    float* __restrict__ c,
+    unsigned int m_dim,
+    unsigned int out_dim,
+    unsigned int in_dim
+) {
+    extern __shared__ float s_partial[];
+
+    const unsigned int tid          = threadIdx.x;
+    const unsigned int lane         = tid & 31u;
+    const unsigned int warp_id      = tid >> 5;
+    const unsigned int row_in_cta   = warp_id >> 1;
+    const unsigned int warp_in_row  = warp_id & 1u;
+    const unsigned int rows_per_cta = blockDim.x >> 6;
+    const unsigned int j            = blockIdx.x * rows_per_cta + row_in_cta;
+    const unsigned int mi           = blockIdx.y;
+
+    const unsigned int chunk          = lane >> 3;
+    const unsigned int lane_in_ch     = lane & 7u;
+    const unsigned int chunk_byte_off = chunk * 32u + lane_in_ch * 4u;
+    const unsigned int chunk_a_lo     = chunk * 64u + lane_in_ch * 4u;
+    const unsigned int chunk_a_hi     = chunk_a_lo + 32u;
+
+    const unsigned int n_blocks  = in_dim / 256u;
+    const unsigned int row_bytes = n_blocks * 144u;
+
+    const float* a_mi = a + (size_t)mi * in_dim;
+    float*       c_mi = c + (size_t)mi * out_dim;
+
+    float sum = 0.0f;
+    if (j < out_dim && mi < m_dim) {
+        const unsigned char* row = w + (size_t)j * row_bytes;
+        const unsigned int half = n_blocks >> 1;
+        const unsigned int b_start = warp_in_row ? half : 0u;
+        const unsigned int b_end   = warp_in_row ? n_blocks : half;
+        sum = q4k_gemv_partial(
+            row, a_mi, b_start, b_end,
+            chunk, chunk_byte_off, chunk_a_lo, chunk_a_hi
+        );
+    }
+    sum = warp_reduce_sum_f32(sum);
+
+    if (lane == 0u) {
+        s_partial[row_in_cta * 2u + warp_in_row] = sum;
+    }
+    __syncthreads();
+
+    if (warp_in_row == 0u && lane == 0u && j < out_dim && mi < m_dim) {
+        c_mi[j] = s_partial[row_in_cta * 2u] + s_partial[row_in_cta * 2u + 1u];
+    }
+}
+
+// ============================================================================
 // Q4_K GEMV (fused QKV): one kernel launch produces Q, K, V projections.
 //
 // Q, K, V all share the same activation input `a` ([1, in_dim]) but each has

@@ -4170,6 +4170,14 @@ impl InferenceEngine {
         // produced itself. Trade: higher first-token latency, correct
         // output. The real fix is an order-matched q5k_gemm_f32 kernel,
         // queued as a follow-up.
+        // Phi-3 batched prefill still routes through forward_one loop.
+        // Matched Q4_K/Q5_K/Q6_K GEMM kernels now exist and produce
+        // bit-identical output to per-row GEMV, but enabling batched
+        // prefill for Phi-3 still produces K/V drift — bug traced to a
+        // non-matmul kernel in the batched path (RoPE_batched,
+        // fused_attn_prefill_f32, or append_rows_device). Queued as a
+        // follow-up; the matched GEMMs are a pure win for Qwen3 / DeepSeek
+        // prefill (tighter numerics than naive one-thread-per-output).
         if self.config.architecture == "phi3" {
             return None;
         }

@@ -3810,6 +3810,7 @@ impl CudaKernels {
             &[
                 "q4k_gemv_f32",
                 "q4k_gemm_f32",
+                "q4k_gemm_matched_f32",
                 "q4k_gemv_fused_qkv_f32",
                 "q4k_gemv_fused_qkv_bias_f32",
                 "q4k_gemv_fused_gate_up_f32",
@@ -3830,7 +3831,8 @@ impl CudaKernels {
         kernels.load_module(
             "q5k_matmul",
             Q5K_MATMUL_PTX,
-            &["q5k_gemv_f32", "q5k_gemm_f32", "q5k_gemv_fused_qkv_f32"],
+            &["q5k_gemv_f32", "q5k_gemm_f32", "q5k_gemv_fused_qkv_f32",
+              "q5k_gemm_matched_f32"],
         )?;
 
         // Q5_0 / Q5_1 dequant-in-shader matmul — legacy Falcon bodies.
@@ -3859,7 +3861,7 @@ impl CudaKernels {
         kernels.load_module(
             "q6k_matmul",
             Q6K_MATMUL_PTX,
-            &["q6k_gemv_f32", "q6k_gemm_f32"],
+            &["q6k_gemv_f32", "q6k_gemm_f32", "q6k_gemm_matched_f32"],
         )?;
 
         // Transformer per-layer ops — RMSNorm / RoPE / SwiGLU / ReLU² gate.

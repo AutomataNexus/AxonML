@@ -198,6 +198,82 @@ extern "C" __global__ void q6k_gemv_f32(
     if (lane == 0) c[j] = sum;
 }
 
+// ============================================================================
+// Q6_K GEMM order-matched to q6k_gemv_f32 — literal copy with 2D grid.
+// Produces K/V on prefill bit-identical to per-row q6k_gemv_f32.
+// Launch: grid = (ceil(out/warps_per_cta), m_dim, 1), block = 128.
+// ============================================================================
+extern "C" __global__ void q6k_gemm_matched_f32(
+    const unsigned char* __restrict__ w,
+    const float* __restrict__ a,
+    float* __restrict__ c,
+    unsigned int m_dim,
+    unsigned int out_dim,
+    unsigned int in_dim
+) {
+    const unsigned int tid     = threadIdx.x;
+    const unsigned int lane    = tid & 31u;
+    const unsigned int warp_id = tid >> 5;
+    const unsigned int j       = blockIdx.x * (blockDim.x >> 5) + warp_id;
+    const unsigned int mi      = blockIdx.y;
+    if (j >= out_dim || mi >= m_dim) return;
+
+    const unsigned int n_blocks = in_dim / 256;
+    const unsigned int row_bytes = n_blocks * 210;
+    const unsigned char* row = w + (size_t)j * row_bytes;
+    const float*    a_mi = a + (size_t)mi * in_dim;
+    float*          c_mi = c + (size_t)mi * out_dim;
+
+    float sum = 0.0f;
+
+    for (unsigned int b = 0; b < n_blocks; ++b) {
+        const unsigned char* block = row + b * 210;
+        const unsigned char* ql_arr = block;
+        const unsigned char* qh_arr = block + 128;
+        const signed char*   sc_arr = (const signed char*)(block + 192);
+
+        unsigned short d_bits = (unsigned short)block[208]
+                              | ((unsigned short)block[209] << 8);
+        float d = f16_bits_to_f32(d_bits);
+
+        const unsigned int is = lane >> 4;
+
+        #pragma unroll
+        for (int chunk = 0; chunk < 2; ++chunk) {
+            unsigned int ql_off = (unsigned int)chunk * 64u;
+            unsigned int qh_off = (unsigned int)chunk * 32u;
+            unsigned int sc_off = (unsigned int)chunk * 8u;
+            unsigned int a_base = b * 256u + (unsigned int)chunk * 128u;
+
+            unsigned int ql0 = ql_arr[ql_off + lane];
+            unsigned int ql1 = ql_arr[ql_off + lane + 32];
+            unsigned int qhv = qh_arr[qh_off + lane];
+
+            int q1 = (int)((ql0 & 0x0Fu) | ((qhv & 0x03u) << 4)) - 32;
+            int q2 = (int)((ql1 & 0x0Fu) | (((qhv >> 2) & 0x03u) << 4)) - 32;
+            int q3 = (int)((ql0 >> 4)    | (((qhv >> 4) & 0x03u) << 4)) - 32;
+            int q4 = (int)((ql1 >> 4)    | (((qhv >> 6) & 0x03u) << 4)) - 32;
+
+            float s1 = d * (float)sc_arr[sc_off + is];
+            float s2 = d * (float)sc_arr[sc_off + is + 2];
+            float s3 = d * (float)sc_arr[sc_off + is + 4];
+            float s4 = d * (float)sc_arr[sc_off + is + 6];
+
+            sum += a_mi[a_base + lane]      * (s1 * (float)q1);
+            sum += a_mi[a_base + lane + 32] * (s2 * (float)q2);
+            sum += a_mi[a_base + lane + 64] * (s3 * (float)q3);
+            sum += a_mi[a_base + lane + 96] * (s4 * (float)q4);
+        }
+    }
+
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1) {
+        sum += __shfl_xor_sync(0xffffffffu, sum, off);
+    }
+
+    if (lane == 0) c_mi[j] = sum;
+}
+
 // Q6_K GEMM: c = a @ B^T, where a is [m, in] and B is Q6_K [out, in].
 //
 // Shapes:
