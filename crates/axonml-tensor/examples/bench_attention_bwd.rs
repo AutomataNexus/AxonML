@@ -31,7 +31,10 @@ fn main() {
         let data: Vec<f32> = (0..numel)
             .map(|i| seed + ((i % 17) as f32) * 0.01)
             .collect();
-        Tensor::from_vec(data, &shape).unwrap().to_device(device.clone()).unwrap()
+        Tensor::from_vec(data, &shape)
+            .unwrap()
+            .to_device(device.clone())
+            .unwrap()
     };
 
     let q = mk(0.1);
@@ -42,17 +45,23 @@ fn main() {
 
     // Warm-up
     for _ in 0..5 {
-        let _ = q.fused_attention_bwd_cuda(&k, &v, &o, &go, scale, true).unwrap();
+        let _ = q
+            .fused_attention_bwd_cuda(&k, &v, &o, &go, scale, true)
+            .unwrap();
     }
 
     for n in [20, 100, 300] {
         let t0 = Instant::now();
         for _ in 0..n {
-            let (gq, _gk, _gv) = q.fused_attention_bwd_cuda(&k, &v, &o, &go, scale, true).unwrap();
+            let (gq, _gk, _gv) = q
+                .fused_attention_bwd_cuda(&k, &v, &o, &go, scale, true)
+                .unwrap();
             std::hint::black_box(gq);
         }
         // Stream drain
-        let (drain, _, _) = q.fused_attention_bwd_cuda(&k, &v, &o, &go, scale, true).unwrap();
+        let (drain, _, _) = q
+            .fused_attention_bwd_cuda(&k, &v, &o, &go, scale, true)
+            .unwrap();
         let _ = drain.to_vec();
         let dt = t0.elapsed();
         let per_call_us = dt.as_micros() as f64 / (n + 1) as f64;

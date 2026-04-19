@@ -48,9 +48,7 @@ use std::sync::Arc;
 use std::thread;
 
 use axonml_autograd::{Variable, backward};
-use axonml_distributed::{
-    Backend, DistributedDataParallel, MockBackend, ProcessGroup, ReduceOp,
-};
+use axonml_distributed::{Backend, DistributedDataParallel, MockBackend, ProcessGroup, ReduceOp};
 use axonml_nn::{CrossEntropyLoss, Linear, Module, Sequential};
 use axonml_optim::{Optimizer, SGD};
 use axonml_tensor::Tensor;
@@ -108,7 +106,10 @@ fn all_reduce_sum_across_four_ranks() {
         let result = h.join().expect("rank thread panicked");
         // 1 + 2 + 3 + 4 = 10 on every element, on every rank.
         for v in &result {
-            assert!((v - 10.0).abs() < 1e-6, "all-reduce sum: got {v}, want 10.0");
+            assert!(
+                (v - 10.0).abs() < 1e-6,
+                "all-reduce sum: got {v}, want 10.0"
+            );
         }
     }
 }
@@ -240,17 +241,10 @@ fn ddp_two_ranks_converge_to_same_weights() {
                 // local gradients, so the final weights reflect both
                 // ranks' data rather than only one rank's.
                 let x = if rank == 0 {
-                    Tensor::from_vec(
-                        vec![0.1, 0.2, 0.3, 0.4,  0.5, 0.6, 0.7, 0.8],
-                        &[2, 4],
-                    )
-                    .unwrap()
+                    Tensor::from_vec(vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], &[2, 4]).unwrap()
                 } else {
-                    Tensor::from_vec(
-                        vec![-0.3, -0.1, 0.2, 0.5,  0.9, -0.4, 0.1, -0.2],
-                        &[2, 4],
-                    )
-                    .unwrap()
+                    Tensor::from_vec(vec![-0.3, -0.1, 0.2, 0.5, 0.9, -0.4, 0.1, -0.2], &[2, 4])
+                        .unwrap()
                 };
                 let y = if rank == 0 {
                     Tensor::from_vec(vec![0.0, 1.0], &[2]).unwrap()

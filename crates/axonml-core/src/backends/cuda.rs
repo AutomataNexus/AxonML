@@ -844,11 +844,14 @@ impl CudaBackend {
         unsafe {
             self.stream
                 .launch_builder(func)
-                .arg(w).arg(a).arg(c)
+                .arg(w)
+                .arg(a)
+                .arg(c)
                 .arg(&(m_dim as u32))
                 .arg(&(out_dim as u32))
                 .arg(&(in_dim as u32))
-                .launch(cfg).map(|_| ())
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -928,7 +931,10 @@ impl CudaBackend {
         v_out: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "fused QKV GEMV requires in_dim % 256 == 0");
+        debug_assert!(
+            in_dim % 256 == 0,
+            "fused QKV GEMV requires in_dim % 256 == 0"
+        );
         let func = self
             .kernels
             .get("q4k_gemv_fused_qkv_f32")
@@ -992,7 +998,10 @@ impl CudaBackend {
         v_out: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "fused QKV+bias GEMV requires in_dim % 256 == 0");
+        debug_assert!(
+            in_dim % 256 == 0,
+            "fused QKV+bias GEMV requires in_dim % 256 == 0"
+        );
         let func = self
             .kernels
             .get("q4k_gemv_fused_qkv_bias_f32")
@@ -1048,7 +1057,10 @@ impl CudaBackend {
         inter: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "fused gate/up GEMV requires in_dim % 256 == 0");
+        debug_assert!(
+            in_dim % 256 == 0,
+            "fused gate/up GEMV requires in_dim % 256 == 0"
+        );
         let func = self
             .kernels
             .get("q4k_gemv_fused_gate_up_f32")
@@ -1141,7 +1153,9 @@ impl CudaBackend {
         let func = self
             .kernels
             .get("q4k_gemv_fused_gate_up_swiglu_f32")
-            .ok_or_else(|| CudaError::KernelNotFound("q4k_gemv_fused_gate_up_swiglu_f32".to_string()))?;
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("q4k_gemv_fused_gate_up_swiglu_f32".to_string())
+            })?;
 
         // 4 warps per output row (2 gate + 2 up).
         const ROWS_PER_CTA: u32 = 4;
@@ -1230,11 +1244,14 @@ impl CudaBackend {
         unsafe {
             self.stream
                 .launch_builder(func)
-                .arg(w).arg(a).arg(c)
+                .arg(w)
+                .arg(a)
+                .arg(c)
                 .arg(&(m_dim as u32))
                 .arg(&(out_dim as u32))
                 .arg(&(in_dim as u32))
-                .launch(cfg).map(|_| ())
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -1306,13 +1323,14 @@ impl CudaBackend {
         v_out: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "fused QKV Q5_K GEMV requires in_dim % 256 == 0");
+        debug_assert!(
+            in_dim % 256 == 0,
+            "fused QKV Q5_K GEMV requires in_dim % 256 == 0"
+        );
         let func = self
             .kernels
             .get("q5k_gemv_fused_qkv_f32")
-            .ok_or_else(|| {
-                CudaError::KernelNotFound("q5k_gemv_fused_qkv_f32".to_string())
-            })?;
+            .ok_or_else(|| CudaError::KernelNotFound("q5k_gemv_fused_qkv_f32".to_string()))?;
 
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
@@ -1413,11 +1431,14 @@ impl CudaBackend {
         unsafe {
             self.stream
                 .launch_builder(func)
-                .arg(w).arg(a).arg(c)
+                .arg(w)
+                .arg(a)
+                .arg(c)
                 .arg(&(m_dim as u32))
                 .arg(&(out_dim as u32))
                 .arg(&(in_dim as u32))
-                .launch(cfg).map(|_| ())
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -1434,7 +1455,9 @@ impl CudaBackend {
         in_dim: usize,
     ) -> Result<(), CudaError> {
         debug_assert!(in_dim % 32 == 0, "Q5_0 GEMV requires in_dim % 32 == 0");
-        let func = self.kernels.get("q5_0_gemv_f32")
+        let func = self
+            .kernels
+            .get("q5_0_gemv_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q5_0_gemv_f32".to_string()))?;
         // v2: two warps per row (split block range), rows_per_cta=4.
         const ROWS_PER_CTA: u32 = 4;
@@ -1447,10 +1470,15 @@ impl CudaBackend {
             shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
         };
         unsafe {
-            self.stream.launch_builder(func)
-                .arg(w).arg(a).arg(c)
-                .arg(&(out_dim as u32)).arg(&(in_dim as u32))
-                .launch(cfg).map(|_| ())
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -1466,14 +1494,22 @@ impl CudaBackend {
         in_dim: usize,
     ) -> Result<(), CudaError> {
         debug_assert!(in_dim % 32 == 0, "Q5_0 GEMM requires in_dim % 32 == 0");
-        let func = self.kernels.get("q5_0_gemm_f32")
+        let func = self
+            .kernels
+            .get("q5_0_gemm_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q5_0_gemm_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(m_dim * out_dim);
         unsafe {
-            self.stream.launch_builder(func)
-                .arg(w).arg(a).arg(c)
-                .arg(&(m_dim as u32)).arg(&(out_dim as u32)).arg(&(in_dim as u32))
-                .launch(cfg).map(|_| ())
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(m_dim as u32))
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -1489,7 +1525,9 @@ impl CudaBackend {
         in_dim: usize,
     ) -> Result<(), CudaError> {
         debug_assert!(in_dim % 32 == 0, "Q5_1 GEMV requires in_dim % 32 == 0");
-        let func = self.kernels.get("q5_1_gemv_f32")
+        let func = self
+            .kernels
+            .get("q5_1_gemv_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q5_1_gemv_f32".to_string()))?;
         // v2: two warps per row (split block range), rows_per_cta=4.
         const ROWS_PER_CTA: u32 = 4;
@@ -1502,10 +1540,15 @@ impl CudaBackend {
             shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
         };
         unsafe {
-            self.stream.launch_builder(func)
-                .arg(w).arg(a).arg(c)
-                .arg(&(out_dim as u32)).arg(&(in_dim as u32))
-                .launch(cfg).map(|_| ())
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -1521,14 +1564,22 @@ impl CudaBackend {
         in_dim: usize,
     ) -> Result<(), CudaError> {
         debug_assert!(in_dim % 32 == 0, "Q5_1 GEMM requires in_dim % 32 == 0");
-        let func = self.kernels.get("q5_1_gemm_f32")
+        let func = self
+            .kernels
+            .get("q5_1_gemm_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q5_1_gemm_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(m_dim * out_dim);
         unsafe {
-            self.stream.launch_builder(func)
-                .arg(w).arg(a).arg(c)
-                .arg(&(m_dim as u32)).arg(&(out_dim as u32)).arg(&(in_dim as u32))
-                .launch(cfg).map(|_| ())
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(m_dim as u32))
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -1550,13 +1601,14 @@ impl CudaBackend {
         v_out: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 32 == 0, "fused QKV Q5_1 GEMV requires in_dim % 32 == 0");
+        debug_assert!(
+            in_dim % 32 == 0,
+            "fused QKV Q5_1 GEMV requires in_dim % 32 == 0"
+        );
         let func = self
             .kernels
             .get("q5_1_gemv_fused_qkv_f32")
-            .ok_or_else(|| {
-                CudaError::KernelNotFound("q5_1_gemv_fused_qkv_f32".to_string())
-            })?;
+            .ok_or_else(|| CudaError::KernelNotFound("q5_1_gemv_fused_qkv_f32".to_string()))?;
 
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
@@ -1571,13 +1623,19 @@ impl CudaBackend {
         unsafe {
             self.stream
                 .launch_builder(func)
-                .arg(q_w).arg(k_w).arg(v_w).arg(a)
-                .arg(q_c).arg(k_c).arg(v_c)
+                .arg(q_w)
+                .arg(k_w)
+                .arg(v_w)
+                .arg(a)
+                .arg(q_c)
+                .arg(k_c)
+                .arg(v_c)
                 .arg(&(q_out as u32))
                 .arg(&(k_out as u32))
                 .arg(&(v_out as u32))
                 .arg(&(in_dim as u32))
-                .launch(cfg).map(|_| ())
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
         Ok(())
@@ -1596,7 +1654,9 @@ impl CudaBackend {
         in_dim: usize,
     ) -> Result<(), CudaError> {
         debug_assert!(in_dim % 32 == 0, "Q8_0 GEMV requires in_dim % 32 == 0");
-        let func = self.kernels.get("q8_0_gemv_f32")
+        let func = self
+            .kernels
+            .get("q8_0_gemv_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q8_0_gemv_f32".to_string()))?;
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
@@ -1608,10 +1668,15 @@ impl CudaBackend {
             shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
         };
         unsafe {
-            self.stream.launch_builder(func)
-                .arg(w).arg(a).arg(c)
-                .arg(&(out_dim as u32)).arg(&(in_dim as u32))
-                .launch(cfg).map(|_| ())
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -1627,14 +1692,22 @@ impl CudaBackend {
         in_dim: usize,
     ) -> Result<(), CudaError> {
         debug_assert!(in_dim % 32 == 0, "Q8_0 GEMM requires in_dim % 32 == 0");
-        let func = self.kernels.get("q8_0_gemm_f32")
+        let func = self
+            .kernels
+            .get("q8_0_gemm_f32")
             .ok_or_else(|| CudaError::KernelNotFound("q8_0_gemm_f32".to_string()))?;
         let cfg = cuda_kernels::launch_config(m_dim * out_dim);
         unsafe {
-            self.stream.launch_builder(func)
-                .arg(w).arg(a).arg(c)
-                .arg(&(m_dim as u32)).arg(&(out_dim as u32)).arg(&(in_dim as u32))
-                .launch(cfg).map(|_| ())
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(m_dim as u32))
+                .arg(&(out_dim as u32))
+                .arg(&(in_dim as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -1670,10 +1743,14 @@ impl CudaBackend {
         unsafe {
             self.stream
                 .launch_builder(func)
-                .arg(w).arg(a).arg(c)
+                .arg(w)
+                .arg(a)
+                .arg(c)
                 .arg(&scale)
-                .arg(&(n as u32)).arg(&(k as u32))
-                .launch(cfg).map(|_| ())
+                .arg(&(n as u32))
+                .arg(&(k as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -1698,10 +1775,15 @@ impl CudaBackend {
         unsafe {
             self.stream
                 .launch_builder(func)
-                .arg(w).arg(a).arg(c)
+                .arg(w)
+                .arg(a)
+                .arg(c)
                 .arg(&scale)
-                .arg(&(m as u32)).arg(&(n as u32)).arg(&(k as u32))
-                .launch(cfg).map(|_| ())
+                .arg(&(m as u32))
+                .arg(&(n as u32))
+                .arg(&(k as u32))
+                .launch(cfg)
+                .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
@@ -3834,7 +3916,10 @@ impl CudaBackend {
         theta: f32,
         pos: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(head_dim % 2 == 0, "head_dim must be even for split-halves RoPE");
+        debug_assert!(
+            head_dim % 2 == 0,
+            "head_dim must be even for split-halves RoPE"
+        );
         let func = self
             .kernels
             .get("rope_split_halves_f32")
@@ -4013,11 +4098,16 @@ impl CudaBackend {
         theta: f32,
         pos_start: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(head_dim % 2 == 0, "head_dim must be even for split-halves RoPE");
+        debug_assert!(
+            head_dim % 2 == 0,
+            "head_dim must be even for split-halves RoPE"
+        );
         let func = self
             .kernels
             .get("rope_split_halves_batched_f32")
-            .ok_or_else(|| CudaError::KernelNotFound("rope_split_halves_batched_f32".to_string()))?;
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("rope_split_halves_batched_f32".to_string())
+            })?;
         let half = (head_dim / 2) as u32;
         let block: u32 = half.min(128);
         let grid_y = (half + block - 1) / block;

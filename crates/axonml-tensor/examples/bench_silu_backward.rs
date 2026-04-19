@@ -28,7 +28,9 @@ fn main() {
     let device = Device::Cuda(0);
 
     // x = saved forward input (non-trivial values)
-    let x_data: Vec<f32> = (0..numel).map(|i| ((i % 1000) as f32 / 1000.0) - 0.5).collect();
+    let x_data: Vec<f32> = (0..numel)
+        .map(|i| ((i % 1000) as f32 / 1000.0) - 0.5)
+        .collect();
     let x = Tensor::from_vec(x_data, &shape)
         .unwrap()
         .to_device(device.clone())

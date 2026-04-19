@@ -244,7 +244,7 @@ impl Backend for MockBackend {
         // reduction actually writes to `buffers[self.rank]` — all ranks
         // read the same `buffers[rank]` they wrote.
         {
-            let mut state = self.state.lock().unwrap();
+            let state = self.state.lock().unwrap();
             let all_data: Vec<Vec<f32>> = (0..self.world_size)
                 .map(|r| state.buffers.get(&r).cloned().unwrap_or_default())
                 .collect();

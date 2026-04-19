@@ -492,11 +492,8 @@ impl GradientFunction for KLDivBackward {
             }
         }
 
-        let mut grad_tensor = Tensor::from_vec(
-            grad_input,
-            &[self.batch_size, self.num_classes],
-        )
-        .expect("KL grad tensor creation failed");
+        let mut grad_tensor = Tensor::from_vec(grad_input, &[self.batch_size, self.num_classes])
+            .expect("KL grad tensor creation failed");
 
         if self.student_softmax.device().is_gpu() {
             grad_tensor = grad_tensor
@@ -580,7 +577,10 @@ impl KLDivLoss {
     /// Creates `KLDivLoss` with explicit reduction mode.
     pub fn with_reduction(temperature: f32, reduction: Reduction) -> Self {
         assert!(temperature > 0.0, "KLDivLoss: temperature must be > 0");
-        Self { temperature, reduction }
+        Self {
+            temperature,
+            reduction,
+        }
     }
 
     /// Compute the temperature-scaled KL-divergence distillation loss.
@@ -588,11 +588,7 @@ impl KLDivLoss {
     /// # Arguments
     /// * `student_logits` - Student's raw logits `(N, C)` (graph-tracked).
     /// * `teacher_logits` - Frozen teacher's raw logits `(N, C)`.
-    pub fn compute(
-        &self,
-        student_logits: &Variable,
-        teacher_logits: &Variable,
-    ) -> Variable {
+    pub fn compute(&self, student_logits: &Variable, teacher_logits: &Variable) -> Variable {
         let s_data = student_logits.data();
         let t_data = teacher_logits.data();
         let shape = s_data.shape().to_vec();
@@ -685,18 +681,16 @@ impl KLDivLoss {
 
         let loss_tensor =
             Tensor::from_vec(losses, &[batch_size]).expect("KL loss tensor creation failed");
-        let student_sm_tensor =
-            Tensor::from_vec(student_sm, &[batch_size, num_classes])
-                .expect("student softmax tensor creation failed");
-        let teacher_sm_tensor =
-            Tensor::from_vec(teacher_sm, &[batch_size, num_classes])
-                .expect("teacher softmax tensor creation failed");
+        let student_sm_tensor = Tensor::from_vec(student_sm, &[batch_size, num_classes])
+            .expect("student softmax tensor creation failed");
+        let teacher_sm_tensor = Tensor::from_vec(teacher_sm, &[batch_size, num_classes])
+            .expect("teacher softmax tensor creation failed");
 
         // Place stashed softmaxes on the same device as the student input
         // so the backward's final `grad_input` lands where the upstream
         // op expects it.
         let dev = s_data.device();
-        let student_sm_tensor = student_sm_tensor.to_device(dev.clone()).unwrap();
+        let student_sm_tensor = student_sm_tensor.to_device(dev).unwrap();
         let teacher_sm_tensor = teacher_sm_tensor.to_device(dev).unwrap();
 
         let loss_var = if student_logits.requires_grad() && is_grad_enabled() {
@@ -1747,7 +1741,8 @@ mod tests {
             assert!(
                 loss.abs() < 1e-4,
                 "KL(P||P) should be 0 at T={}, got {}",
-                t, loss
+                t,
+                loss
             );
         }
     }
@@ -1765,7 +1760,11 @@ mod tests {
         );
         let kl = KLDivLoss::new(1.0);
         let loss = kl.compute(&student, &teacher).data().to_vec()[0];
-        assert!(loss > 0.0, "KL for different distributions must be > 0, got {}", loss);
+        assert!(
+            loss > 0.0,
+            "KL for different distributions must be > 0, got {}",
+            loss
+        );
         assert!(loss.is_finite(), "KL must be finite, got {}", loss);
     }
 
@@ -1785,8 +1784,14 @@ mod tests {
             Tensor::from_vec(vec![2.0, 0.5, 0.0, -1.0], &[1, 4]).unwrap(),
             false,
         );
-        let l_t1 = KLDivLoss::new(1.0).compute(&student, &teacher).data().to_vec()[0];
-        let l_t2 = KLDivLoss::new(2.0).compute(&student, &teacher).data().to_vec()[0];
+        let l_t1 = KLDivLoss::new(1.0)
+            .compute(&student, &teacher)
+            .data()
+            .to_vec()[0];
+        let l_t2 = KLDivLoss::new(2.0)
+            .compute(&student, &teacher)
+            .data()
+            .to_vec()[0];
         assert!(l_t1.is_finite() && l_t2.is_finite());
         // Both positive.
         assert!(l_t1 > 0.0 && l_t2 > 0.0);
@@ -1796,7 +1801,8 @@ mod tests {
         assert!(
             l_t2 > l_t1,
             "T=2 KL ({}) should exceed T=1 KL ({}) under T² scaling",
-            l_t2, l_t1
+            l_t2,
+            l_t1
         );
     }
 
@@ -1808,20 +1814,16 @@ mod tests {
         let classes = 5;
         let s_data: Vec<f32> = (0..(batch * classes)).map(|i| (i as f32) * 0.1).collect();
         let t_data: Vec<f32> = (0..(batch * classes)).map(|i| (i as f32) * 0.2).collect();
-        let student = Variable::new(
-            Tensor::from_vec(s_data, &[batch, classes]).unwrap(),
-            true,
-        );
-        let teacher = Variable::new(
-            Tensor::from_vec(t_data, &[batch, classes]).unwrap(),
-            false,
-        );
+        let student = Variable::new(Tensor::from_vec(s_data, &[batch, classes]).unwrap(), true);
+        let teacher = Variable::new(Tensor::from_vec(t_data, &[batch, classes]).unwrap(), false);
         let kl = KLDivLoss::new(2.0);
         let loss = kl.compute(&student, &teacher);
         let seed = Tensor::from_vec(vec![1.0], &[1]).unwrap();
         backward(&loss, &seed);
 
-        let grad = student.grad().expect("student must have a gradient after backward");
+        let grad = student
+            .grad()
+            .expect("student must have a gradient after backward");
         assert_eq!(
             grad.shape(),
             &[batch, classes],

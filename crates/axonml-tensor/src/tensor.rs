@@ -1091,14 +1091,17 @@ impl<T: Float> Tensor<T> {
             return unsafe { gpu_into(gpu_ref(self).silu_backward_cuda(go)) };
         }
         // CPU fallback: only defined for f32 (matches original SiluBackward).
-        assert!(is_f32::<T>(), "silu_backward CPU path requires f32");
-        let x_f32 = unsafe { &*(self as *const Self as *const Tensor<f32>) };
-        let g_f32 = unsafe { &*(grad_output as *const Self as *const Tensor<f32>) };
+        assert!(
+            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            "silu_backward CPU path requires f32",
+        );
+        let x_f32 = unsafe { &*std::ptr::from_ref::<Self>(self).cast::<Tensor<f32>>() };
+        let g_f32 = unsafe { &*std::ptr::from_ref::<Self>(grad_output).cast::<Tensor<f32>>() };
         let result_f32 = x_f32.zip_map(g_f32, |x, g| {
             let sig = 1.0f32 / (1.0f32 + (-x).exp());
             g * (sig + x * sig * (1.0f32 - sig))
         });
-        unsafe { std::ptr::read(&result_f32 as *const Tensor<f32> as *const Self) }
+        unsafe { std::ptr::read(std::ptr::from_ref::<Tensor<f32>>(&result_f32).cast::<Self>()) }
     }
 
     /// RMSNorm with a per-element weight scale: `out = x * w / sqrt(mean(x²) + eps)`.
@@ -1114,7 +1117,9 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe {
                 gpu_into(gpu_ref(self).layer_norm_tokenwise_cuda(
-                    gpu_ref(gamma), gpu_ref(beta), eps,
+                    gpu_ref(gamma),
+                    gpu_ref(beta),
+                    eps,
                 ))
             };
         }
@@ -1125,9 +1130,14 @@ impl<T: Float> Tensor<T> {
         let n = x.len();
         let n_f = n as f32;
         let mean: f32 = x.iter().map(|v| v.to_f32().unwrap_or(0.0)).sum::<f32>() / n_f;
-        let var: f32 = x.iter()
-            .map(|v| { let d = v.to_f32().unwrap_or(0.0) - mean; d * d })
-            .sum::<f32>() / n_f;
+        let var: f32 = x
+            .iter()
+            .map(|v| {
+                let d = v.to_f32().unwrap_or(0.0) - mean;
+                d * d
+            })
+            .sum::<f32>()
+            / n_f;
         let inv = (var + eps).sqrt().recip();
         let mut out: Vec<T> = Vec::with_capacity(n);
         for i in 0..n {
@@ -1148,7 +1158,7 @@ impl<T: Float> Tensor<T> {
             return unsafe { gpu_into(gpu_ref(self).gelu_tanh_cuda()) };
         }
         let x = self.to_vec();
-        const K: f32 = 0.7978845608028654;
+        const K: f32 = 0.797_884_6;
         let mut out: Vec<T> = Vec::with_capacity(x.len());
         for xi in &x {
             let v = xi.to_f32().unwrap_or(0.0);
@@ -1196,20 +1206,20 @@ impl<T: Float> Tensor<T> {
         let mut out: Vec<T> = Vec::with_capacity(x.len());
         for i in 0..x.len() {
             let v = x[i].to_f32().unwrap_or(0.0)
-                  + a[i].to_f32().unwrap_or(0.0)
-                  + f[i].to_f32().unwrap_or(0.0);
+                + a[i].to_f32().unwrap_or(0.0)
+                + f[i].to_f32().unwrap_or(0.0);
             out.push(num_traits::cast(v).unwrap_or_else(T::zero));
         }
         *self = Self::from_vec(out, &self.shape).expect("parallel_residual_add_: build output");
     }
 
+    /// RMSNorm with a per-element weight scale. GPU-accelerated when enabled;
+    /// CPU fallback is correct but decode-only paths should stay on GPU.
     pub fn rms_norm(&self, weight: &Self, eps: f32) -> Self {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).rms_norm_cuda(gpu_ref(weight), eps))
-            };
+            return unsafe { gpu_into(gpu_ref(self).rms_norm_cuda(gpu_ref(weight), eps)) };
         }
         // CPU fallback — kept correct, not fast (decode-only paths use GPU).
         let x = self.to_vec();
@@ -1236,20 +1246,12 @@ impl<T: Float> Tensor<T> {
     /// is `[head_dim]` broadcast across every head. Returns a new tensor
     /// with the per-head norm applied; original is unchanged.
     #[must_use]
-    pub fn rms_norm_heads(
-        &self,
-        weight: &Self,
-        n_heads: usize,
-        head_dim: usize,
-        eps: f32,
-    ) -> Self {
+    pub fn rms_norm_heads(&self, weight: &Self, n_heads: usize, head_dim: usize, eps: f32) -> Self {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe {
-                gpu_into(gpu_ref(self).rms_norm_heads_cuda(
-                    gpu_ref(weight), n_heads, head_dim, eps,
-                ))
+                gpu_into(gpu_ref(self).rms_norm_heads_cuda(gpu_ref(weight), n_heads, head_dim, eps))
             };
         }
         // CPU fallback — per-head rms_norm.
@@ -1267,8 +1269,7 @@ impl<T: Float> Tensor<T> {
             }
             let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
             for i in 0..head_dim {
-                let v = x[base + i].to_f32().unwrap_or(0.0) * scale
-                    * w[i].to_f32().unwrap_or(0.0);
+                let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
                 out.push(num_traits::cast(v).unwrap_or_else(T::zero));
             }
         }
@@ -1337,8 +1338,7 @@ impl<T: Float> Tensor<T> {
             }
             let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
             for i in 0..n {
-                let v = x[base + i].to_f32().unwrap_or(0.0) * scale
-                    * w[i].to_f32().unwrap_or(0.0);
+                let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
                 out.push(num_traits::cast(v).unwrap_or_else(T::zero));
             }
         }
@@ -1361,7 +1361,11 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe {
                 gpu_into(gpu_ref(self).rms_norm_heads_batched_cuda(
-                    gpu_ref(weight), m, n_heads, head_dim, eps,
+                    gpu_ref(weight),
+                    m,
+                    n_heads,
+                    head_dim,
+                    eps,
                 ))
             };
         }
@@ -1382,8 +1386,8 @@ impl<T: Float> Tensor<T> {
                 }
                 let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
                 for i in 0..head_dim {
-                    let v = x[base + i].to_f32().unwrap_or(0.0) * scale
-                        * w[i].to_f32().unwrap_or(0.0);
+                    let v =
+                        x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
                     out.push(num_traits::cast(v).unwrap_or_else(T::zero));
                 }
             }
@@ -1406,9 +1410,11 @@ impl<T: Float> Tensor<T> {
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe {
-                gpu_into(gpu_ref(self).apply_rope_split_halves_batched_cuda(
-                    m, n_heads, head_dim, theta, pos_start,
-                ))
+                gpu_into(
+                    gpu_ref(self).apply_rope_split_halves_batched_cuda(
+                        m, n_heads, head_dim, theta, pos_start,
+                    ),
+                )
             };
         }
         // CPU fallback.
@@ -1439,9 +1445,7 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).add_bias_batched_cuda(gpu_ref(bias), m, n))
-            };
+            return unsafe { gpu_into(gpu_ref(self).add_bias_batched_cuda(gpu_ref(bias), m, n)) };
         }
         // CPU fallback.
         let x = self.to_vec();
@@ -1488,7 +1492,10 @@ impl<T: Float> Tensor<T> {
     /// read lock on the storage for its lifetime.
     #[cfg(feature = "cuda")]
     pub fn as_cuda_slice_read(&self) -> axonml_core::storage::CudaSliceReadGuard<'_> {
-        assert!(self.device().is_gpu(), "as_cuda_slice_read: tensor must be on GPU");
+        assert!(
+            self.device().is_gpu(),
+            "as_cuda_slice_read: tensor must be on GPU"
+        );
         assert!(is_f32::<T>(), "as_cuda_slice_read: GPU storage is f32-only");
         let self_f32 = unsafe { gpu_ref(self) };
         self_f32.storage.as_cuda_slice()
@@ -1508,7 +1515,9 @@ impl<T: Float> Tensor<T> {
         let mut out: Vec<T> = Vec::with_capacity(g.len());
         for i in 0..g.len() {
             let gi = g[i].to_f32().unwrap_or(0.0).max(0.0);
-            out.push(num_traits::cast(gi * gi * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero));
+            out.push(
+                num_traits::cast(gi * gi * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero),
+            );
         }
         Self::from_vec(out, &self.shape).expect("relu2_gate: build output tensor")
     }
