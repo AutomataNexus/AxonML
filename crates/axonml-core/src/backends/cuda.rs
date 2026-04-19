@@ -2318,6 +2318,37 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Fused SiLU backward. Replaces the 7-op chain in `SiluBackward::apply`
+    /// (sigmoid + ones-H2D + sub + mul + add + mul + mul) with a single kernel
+    /// launch — one pool_alloc, zero H2D, zero intermediate tensors.
+    ///
+    /// Math: grad_input[i] = grad_output[i] * σ(x[i]) * (1 + x[i] * (1 - σ(x[i])))
+    pub fn silu_backward_f32(
+        &self,
+        grad_input: &mut CudaSlice<f32>,
+        saved_input: &CudaSlice<f32>,
+        grad_output: &CudaSlice<f32>,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("silu_backward_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("silu_backward_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(saved_input)
+                .arg(grad_output)
+                .arg(grad_input)
+                .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Scalar addition: dst[i] = src[i] + scalar.
     pub fn add_scalar_f32(
         &self,

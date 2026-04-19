@@ -1078,6 +1078,29 @@ impl<T: Float> Tensor<T> {
         crate::ops::silu(self)
     }
 
+    /// Fused SiLU backward: `grad_input = grad_output * σ(x) * (1 + x*(1-σ(x)))`
+    /// on GPU in a single kernel launch. `self` is the saved forward input `x`.
+    /// For CPU tensors callers fall back to the per-element f32 path in
+    /// `Tensor<f32>::silu_backward_cpu`.
+    #[must_use]
+    pub fn silu_backward(&self, grad_output: &Self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let go = unsafe { gpu_ref(grad_output) };
+            return unsafe { gpu_into(gpu_ref(self).silu_backward_cuda(go)) };
+        }
+        // CPU fallback: only defined for f32 (matches original SiluBackward).
+        assert!(is_f32::<T>(), "silu_backward CPU path requires f32");
+        let x_f32 = unsafe { &*(self as *const Self as *const Tensor<f32>) };
+        let g_f32 = unsafe { &*(grad_output as *const Self as *const Tensor<f32>) };
+        let result_f32 = x_f32.zip_map(g_f32, |x, g| {
+            let sig = 1.0f32 / (1.0f32 + (-x).exp());
+            g * (sig + x * sig * (1.0f32 - sig))
+        });
+        unsafe { std::ptr::read(&result_f32 as *const Tensor<f32> as *const Self) }
+    }
+
     /// RMSNorm with a per-element weight scale: `out = x * w / sqrt(mean(x²) + eps)`.
     ///
     /// Decode-step kernel — one CTA, suitable for single-token activations of

@@ -1266,6 +1266,55 @@ $L__silu_exit:
     ret;
 }
 
+// silu_backward_f32: grad_in[i] = grad_out[i] * sigmoid(x) * (1 + x * (1 - sigmoid(x)))
+// Fused replacement for the 7-op autograd chain (sigmoid, ones-H2D, sub, mul, add, mul, mul).
+.visible .entry silu_backward_f32(
+    .param .u64 silu_backward_f32_param_0,
+    .param .u64 silu_backward_f32_param_1,
+    .param .u64 silu_backward_f32_param_2,
+    .param .u32 silu_backward_f32_param_3
+)
+{
+    .reg .pred     %p<2>;
+    .reg .f32     %f<12>;
+    .reg .b32     %r<6>;
+    .reg .b64     %rd<11>;
+
+    ld.param.u64     %rd1, [silu_backward_f32_param_0];
+    ld.param.u64     %rd2, [silu_backward_f32_param_1];
+    ld.param.u64     %rd3, [silu_backward_f32_param_2];
+    ld.param.u32     %r2, [silu_backward_f32_param_3];
+    mov.u32     %r3, %ctaid.x;
+    mov.u32     %r4, %ntid.x;
+    mov.u32     %r5, %tid.x;
+    mad.lo.s32     %r1, %r3, %r4, %r5;
+    setp.ge.u32     %p1, %r1, %r2;
+    @%p1 bra     $L__silu_bwd_exit;
+
+    cvta.to.global.u64     %rd4, %rd1;
+    mul.wide.u32     %rd5, %r1, 4;
+    add.s64     %rd6, %rd4, %rd5;
+    ld.global.nc.f32     %f1, [%rd6];
+    mul.ftz.f32     %f2, %f1, 0fBFB8AA3B;
+    ex2.approx.ftz.f32     %f3, %f2;
+    add.ftz.f32     %f4, %f3, 0f3F800000;
+    mov.f32     %f5, 0f3F800000;
+    rcp.approx.ftz.f32     %f6, %f4;
+    sub.ftz.f32     %f7, %f5, %f6;
+    fma.rn.ftz.f32     %f8, %f1, %f7, 0f3F800000;
+    mul.ftz.f32     %f9, %f6, %f8;
+    cvta.to.global.u64     %rd7, %rd2;
+    add.s64     %rd8, %rd7, %rd5;
+    ld.global.nc.f32     %f10, [%rd8];
+    mul.ftz.f32     %f11, %f10, %f9;
+    cvta.to.global.u64     %rd9, %rd3;
+    add.s64     %rd10, %rd9, %rd5;
+    st.global.f32     [%rd10], %f11;
+
+$L__silu_bwd_exit:
+    ret;
+}
+
 "#;
 
 /// Embedded PTX for reduction operations (softmax, etc.)
@@ -3679,6 +3728,7 @@ impl CudaKernels {
                 "log_f32",
                 "gelu_f32",
                 "silu_f32",
+                "silu_backward_f32",
             ],
         )?;
 

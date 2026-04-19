@@ -138,6 +138,30 @@ extern "C" __global__ void silu_f32(
     }
 }
 
+// SiLU backward fused: grad_input = grad_output * sigmoid(x) * (1 + x*(1 - sigmoid(x)))
+//
+// Replaces the 7-op GPU chain that was in SiluBackward (sigmoid + ones H2D +
+// sub + mul + add + mul + final mul). Each of those ops was a separate kernel
+// launch + pool_alloc + zero-init. This fuses into one kernel, one launch,
+// one output buffer. For a 28-layer Qwen3 training run that's 6× fewer kernel
+// launches per backward step and one less H2D per call for the `ones` tensor.
+extern "C" __global__ void silu_backward_f32(
+    const float* __restrict__ saved_input,  // x from forward
+    const float* __restrict__ grad_output,
+    float* __restrict__ grad_input,
+    unsigned int n
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        float x = saved_input[idx];
+        float sig = 1.0f / (1.0f + expf(-x));
+        // silu'(x) = sigmoid(x) + x * sigmoid(x) * (1 - sigmoid(x))
+        //         = sigmoid(x) * (1 + x * (1 - sigmoid(x)))
+        float deriv = sig * (1.0f + x * (1.0f - sig));
+        grad_input[idx] = grad_output[idx] * deriv;
+    }
+}
+
 // ELU: x if x > 0, alpha * (exp(x) - 1) otherwise
 extern "C" __global__ void elu_f32(
     const float* __restrict__ input,
