@@ -123,6 +123,38 @@ pub struct InferenceConfig {
     /// Mixtral-style MoE architectures (`olmoe`, `qwen3moe`, `mixtral`).
     /// `None` for dense models.
     pub moe: Option<MoeConfig>,
+    /// Recurrent-Depth Transformer hyperparameters. Populated when
+    /// `architecture == "rdt"` — the Huginn-style prelude/core/coda split
+    /// with K-sampled core iterations. `num_layers` carries the total
+    /// `n_prelude + n_core + n_coda` for back-compat; the split lives in
+    /// this sub-struct.
+    pub rdt: Option<RdtConfig>,
+}
+
+/// Recurrent-Depth Transformer hyperparameters (task #58).
+///
+/// Populated when GGUF `general.architecture == "rdt"`. Layer counts for
+/// the three stacks (prelude/core/coda) plus the recurrent update
+/// coefficients and the K-iteration defaults. Matches the design doc
+/// at `/opt/AxonML/docs/RDT_DESIGN.md` § 4.
+#[derive(Debug, Clone)]
+pub struct RdtConfig {
+    /// Prelude layer count (`rdt.prelude.block_count`). Runs once per forward.
+    pub n_prelude: usize,
+    /// Core layer count (`rdt.core.block_count`). Shared across K iterations.
+    pub n_core: usize,
+    /// Coda layer count (`rdt.coda.block_count`). Runs once per forward.
+    pub n_coda: usize,
+    /// Default K at inference when the request doesn't set `num_steps`.
+    pub k_default: usize,
+    /// Minimum K value seen at training time (`rdt.recurrent.k_min`).
+    pub k_min: usize,
+    /// Maximum K value seen at training time (`rdt.recurrent.k_max`).
+    pub k_max: usize,
+    /// Recurrent mixing coefficient on `h_t` (`rdt.recurrent.alpha`).
+    pub alpha: f32,
+    /// Recurrent mixing coefficient on `e` (`rdt.recurrent.beta`).
+    pub beta: f32,
 }
 
 /// Mixture-of-Experts routing parameters.
@@ -339,6 +371,60 @@ impl InferenceConfig {
             None
         };
 
+        // RDT (Recurrent-Depth Transformer). When arch == "rdt", populate
+        // the prelude/core/coda layer splits + recurrent update coefficients
+        // from `rdt.*` metadata keys. `num_layers` is synthesized as the
+        // sum of the three stacks so downstream code that sizes KV caches
+        // / layer vectors by `num_layers` still works sensibly — the actual
+        // load path reconstructs the three distinct stacks from tensor
+        // name prefixes (prelude.blk.*, core.blk.*, coda.blk.*).
+        let rdt = if arch == "rdt" {
+            let n_prelude = gguf
+                .get_meta("rdt.prelude.block_count")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(2) as usize;
+            let n_core = gguf
+                .get_meta("rdt.core.block_count")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(4) as usize;
+            let n_coda = gguf
+                .get_meta("rdt.coda.block_count")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(2) as usize;
+            let k_default = gguf
+                .get_meta("rdt.recurrent.k_default")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(8) as usize;
+            let k_min = gguf
+                .get_meta("rdt.recurrent.k_min")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(4) as usize;
+            let k_max = gguf
+                .get_meta("rdt.recurrent.k_max")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(16) as usize;
+            let alpha = gguf
+                .get_meta("rdt.recurrent.alpha")
+                .and_then(|v| v.as_f32())
+                .unwrap_or(0.5);
+            let beta = gguf
+                .get_meta("rdt.recurrent.beta")
+                .and_then(|v| v.as_f32())
+                .unwrap_or(0.5);
+            Some(RdtConfig { n_prelude, n_core, n_coda, k_default, k_min, k_max, alpha, beta })
+        } else {
+            None
+        };
+
+        // RDT synthesizes num_layers from its three stacks so downstream
+        // sizing code (KV cache dimensions, parameter-count estimates)
+        // sees a consistent total.
+        let num_layers = if let Some(ref r) = rdt {
+            r.n_prelude + r.n_core + r.n_coda
+        } else {
+            num_layers
+        };
+
         Self {
             vocab_size,
             hidden_size,
@@ -355,6 +441,7 @@ impl InferenceConfig {
             gemma,
             mamba,
             moe,
+            rdt,
         }
     }
 
@@ -1664,6 +1751,28 @@ impl InferenceEngine {
         // at load time.
         if config.architecture == "olmoe" {
             return Self::load_olmoe(gguf, mapped, quantized_weights, config);
+        }
+
+        // RDT (Recurrent-Depth Transformer, task #58). Tensors are named
+        // with stack prefixes — `prelude.blk.N.*`, `core.blk.N.*`,
+        // `coda.blk.N.*` — instead of the flat `blk.N.*` the default
+        // loader below expects. Full load + forward implementation is
+        // tracked as a follow-up (task #60); for now surface a clear
+        // error instead of letting the default loader crash with a
+        // confusing "tensor not found: blk.0.attn_q.weight".
+        if config.architecture == "rdt" {
+            let r = config.rdt.as_ref().expect("rdt config populated for arch==rdt");
+            return Err(format!(
+                "RDT inference in nexus-serve is not yet wired (task #60). \
+                 The GGUF loaded its metadata successfully: \
+                 prelude={} core={} coda={} k_default={} α={} β={}. \
+                 Training the model works via `llm-training/train_rdt`; serving \
+                 will be added in a dedicated follow-up commit that implements \
+                 `forward_one_rdt` with the prelude → K-iteration core → coda \
+                 dispatch over the stack-prefixed tensor names. \
+                 See /opt/AxonML/docs/RDT_DESIGN.md §5 for the design.",
+                r.n_prelude, r.n_core, r.n_coda, r.k_default, r.alpha, r.beta
+            ));
         }
 
         // Token embeddings as flat Vec (fast lookup) — always dequantized

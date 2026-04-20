@@ -143,6 +143,16 @@ pub struct MessagesRequest {
     pub stop_sequences: Vec<String>,
     #[serde(default)]
     pub stream: bool,
+    /// RDT-specific: number of recurrent core iterations per token (K).
+    /// Only honoured when the loaded model's architecture is `rdt`; ignored
+    /// for every other architecture. When `None` (default), the model's
+    /// `rdt.recurrent.k_default` from the GGUF metadata is used. More K
+    /// trades latency for quality on hard queries — the core shares one
+    /// copy of weights regardless of iteration count, so the compute budget
+    /// scales linearly with `num_steps` but parameter count does not.
+    /// Clamped to `[1, 64]` by the handler.
+    #[serde(default)]
+    pub num_steps: Option<usize>,
 }
 
 /// Anthropic's `system` field accepts either a plain string or a content-
