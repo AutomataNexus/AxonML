@@ -199,12 +199,73 @@ Pass bar: rdt-small (~500M) at K=16 matches Oracle-7B on tool-use accuracy withi
 
 ---
 
-## 8. Open questions
+## 8. Upgrade path → OpenMythos RDT (v2/v3)
 
-1. **Shared vs per-iteration LayerNorm**: Huginn uses one shared norm across iterations; Paper Appendix B suggests per-iteration norms yielded slightly better ppl but doubled param count. Default: shared. Ablate later.
-2. **α, β learnable or fixed?** Paper learns them. v1: learnable per scalar. v2 candidate: per-head or per-layer.
-3. **Prelude/Coda weights shared with Core?** Paper keeps them separate. We follow suit.
-4. **Gradient checkpointing granularity**: per-iteration (outer loop) vs per-core-layer (inner). Per-iteration is simpler; inner cuts more memory. Start with outer.
+The landed v1 is the simplified Huginn formulation. OpenMythos (source:
+user-supplied spec, 2026-04-20) extends the architecture with six
+stability + capacity upgrades. Planned as an incremental migration —
+each bullet is landable as its own task on top of the v1 module.
+
+### v2 — Stability + capacity (high-priority)
+
+1. **A and B as learnable matrices** (not scalars).
+   `h_{t+1} = A·h_t + B·e + Block(h_t + e)`
+   A, B ∈ ℝ^{hidden × hidden}. Dramatically increases expressive capacity
+   of the recurrent update. Store as two `nn::Linear` layers without bias,
+   init to identity-scaled-by-0.5 to preserve v1 behavior at init.
+
+2. **LTI spectral-radius constraint on A** (`ρ(A) < 1`).
+   Paper reference: Parcae architecture (Prairie et al. 2026). Prevents
+   residual explosion across deep loops — the dominant training-instability
+   failure mode in looped transformers. Enforce by construction via one of:
+   - Periodic re-projection: after each optimizer step, compute
+     largest-singular-value of A and rescale if ≥ 1.
+   - Spectral normalization layer (Miyato et al. 2018 power-iteration
+     variant).
+   Start with periodic re-projection — simpler, works.
+
+3. **DeepSeekMoE FFN inside the core block** (replaces SwiGLU).
+   Fine-grained routed experts (e.g. 64 experts, top-k=6) + shared
+   always-active experts (e.g. 2 shared). Router picks different expert
+   subsets at each depth — each loop iteration is computationally
+   distinct despite shared base weights. Adds domain breadth; looping
+   gives reasoning depth.
+   Requires: `DeepSeekMoERouter`, expert weight storage that indexes by
+   `(layer_id, depth_t)` rather than just `layer_id`.
+
+### v3 — Inference efficiency + adaptive compute
+
+4. **Multi-Latent Attention (MLA)** from DeepSeek-V2 (replaces GQA).
+   Caches a compressed low-rank KV latent rather than full K/V tensors →
+   10–20× KV memory reduction at production context lengths. Requires
+   nexus-serve KV cache rework — latent space is projected down before
+   storage, projected back up inside the attention kernel.
+
+5. **Adaptive Computation Time (ACT) halting**.
+   Per-position learned scalar halting head. Each loop iteration, the
+   head predicts "should I stop here?". Positions that converged early
+   exit; hard positions keep looping. Prevents the "overthinking" failure
+   mode where excessive K drifts past the solution into noise.
+   Requires: per-position halting probabilities, cumulative-halting-sum
+   threshold (typically 1-ε), and a ponder cost loss term during training
+   so the model doesn't over-halt or under-halt systematically.
+
+6. **Depth-Wise LoRA adapters**.
+   Small rank-r (e.g. r=4 or r=8) LoRA-style adapters at each depth step,
+   giving each loop iteration slightly distinct behavior without the full
+   parameter bloat of fully-distinct per-depth weights. Bridges the gap
+   between v1's pure weight-tying (all K iterations identical) and the
+   depth-indexed DeepSeekMoE routing from v2's bullet 3.
+   Storage: K × r × hidden × 2 additional params (A, B low-rank per depth).
+
+### Remaining open questions (unchanged from v1 scope)
+
+- **Shared vs per-iteration LayerNorm**: Huginn uses one shared norm
+  across iterations. Paper Appendix B suggests per-iteration norms yield
+  slightly better ppl but double the norm-param count. v1: shared.
+- **Gradient checkpointing granularity**: per-iteration (outer loop) vs
+  per-core-layer (inner). v1: per-iteration — simpler, works in unsloth
+  wrapper. v3 candidate: inner for memory-constrained training at large K.
 
 ---
 

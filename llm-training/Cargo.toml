@@ -99,3 +99,9 @@ path = "src/bin/bench_variable_matmul.rs"
 [[bin]]
 name = "claude_trace_export"
 path = "src/bin/claude_trace_export.rs"
+
+# Recurrent-Depth Transformer trainer (task #58). K-sampled core iterations
+# per batch to generalize across test-time iteration counts.
+[[bin]]
+name = "train_rdt"
+path = "src/bin/train_rdt.rs"
