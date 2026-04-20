@@ -1642,15 +1642,26 @@ impl Tensor<f32> {
         let output_size = output_shape.iter().product::<usize>();
         let cuda = get_cuda_backend().expect("CUDA backend not available");
 
-        let idx_gpu = cuda
-            .htod_copy(gather_indices)
-            .expect("htod gather indices failed");
+        // Route the index upload through our pool (capture-safe) instead of
+        // `htod_copy` → `stream.clone_htod` → fresh cuMemAllocAsync, which
+        // invalidates CUDA graph capture and drops mid-capture (dangling
+        // cu_device_ptr host address on replay).
+        let mut idx_gpu =
+            axonml_core::backends::cuda_pool::pool_alloc_uninit_u32(gather_indices.len())
+                .expect("pool_alloc_uninit_u32 for embedding gather indices");
+        cuda.htod_into(gather_indices, &mut idx_gpu)
+            .expect("htod_into gather indices failed");
+
         let weight_guard = self.storage.as_cuda_slice();
         // gather writes every output element — uninit safe.
         let mut out = pool_alloc_uninit(output_size).expect("GPU pool alloc failed");
 
         cuda.gather_contiguous_f32(&mut out, weight_guard.slice(), &idx_gpu, output_size)
             .expect("CUDA gather_contiguous_f32 failed");
+
+        // Return idx_gpu to the pool. Under capture this pushes it into
+        // the pen so its host cu_device_ptr stays stable for graph replay.
+        axonml_core::backends::cuda_pool::pool_free_u32(idx_gpu);
 
         let storage = Storage::from_cuda_slice(out, output_size, self.device());
         Self {

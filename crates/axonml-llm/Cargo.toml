@@ -32,6 +32,9 @@ axonml-tensor = { workspace = true }
 axonml-autograd = { workspace = true }
 axonml-nn = { workspace = true }
 
+# Lightweight mutex for GPU-weight caches (no std poisoning, faster than std::sync)
+parking_lot = { workspace = true }
+
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }

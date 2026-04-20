@@ -166,6 +166,21 @@ fn run_step(
     }
 }
 
+/// Like `run_step` but with NO stream syncs — safe to call inside a CUDA
+/// stream capture region. Every `cuda_sync` invalidates capture.
+fn run_step_no_sync(
+    model: &Qwen3ForCausalLM,
+    optimizer: &mut AdamW,
+    input_ids: &Tensor<u32>,
+    labels: &Tensor<u32>,
+) {
+    optimizer.zero_grad();
+    let logits = model.forward_ids(input_ids);
+    let loss = shifted_cross_entropy(&logits, labels);
+    loss.backward();
+    optimizer.step();
+}
+
 /// Attempts CUDA-graph capture of the full training step (forward +
 /// loss + backward + optimizer.step), replays it N times, and reports
 /// wall-clock delta vs eager. Swallows `STREAM_CAPTURE_ISOLATION` panics
@@ -213,13 +228,29 @@ fn try_graph_capture_step(
         }
     };
 
-    // Route every pool_alloc_uninit through the CUDA driver's allocator
-    // (cuMemAllocAsync) for the duration of capture. That way each alloc
-    // records as a graph MemAllocNode — the replay machinery can then
-    // allocate fresh virtual addresses per launch instead of reusing
-    // whatever cached pointer our Rust pool handed out during capture.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        axonml_core::backends::cuda_pool::with_driver_alloc(|| {
+    // Keep the Rust pool active during capture — it's LIFO-deterministic
+    // per bucket, so allocations made at capture-time hand out the same
+    // pointers the replay-time allocations will also receive. The driver's
+    // cuMemAllocAsync + MemAllocNode path would let CUDA manage memory
+    // but kernel nodes in the captured graph don't re-bind to the new
+    // allocations on replay; our Rust pool dodges that by keeping the
+    // pointers stable.
+    // Pre-warm: run a few full steps so every Qwen3 bucket is populated.
+    // Pool is LIFO per bucket → subsequent captures hand out the same
+    // pointers the replay-time allocations will.
+    for _ in 0..3 {
+        run_step(model, optimizer, input_ids, labels, device);
+    }
+    sync();
+
+    // Capture pen retains every CudaSlice produced inside the capture
+    // scope so cudarc's `&slice.cu_device_ptr` kernel args stay at stable
+    // host addresses through every graph.launch() replay. Without this,
+    // intermediate tensors drop at end-of-statement and their host memory
+    // is reclaimed → graph.launch hits CUDA_ERROR_ILLEGAL_ADDRESS reading
+    // freed host bytes.
+    let (result, pen) = axonml_core::backends::cuda_pool::with_capture_pen(|| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             stream
                 .begin_capture(CUstreamCaptureMode::CU_STREAM_CAPTURE_MODE_RELAXED)
                 .expect("begin_capture");
@@ -235,7 +266,7 @@ fn try_graph_capture_step(
                 return None;
             }
             let loss = llm_training::shifted_cross_entropy(&logits, labels);
-            if check("shifted_cross_entropy") {
+            if check("shifted_ce") {
                 return None;
             }
             loss.backward();
@@ -243,19 +274,29 @@ fn try_graph_capture_step(
                 return None;
             }
             optimizer.step();
-            if check("optimizer.step") {
+            if check("optim.step") {
                 return None;
             }
+            // flags = 0 via transmute — cudarc 0.19's enum for our CUDA
+            // version only names AUTO_FREE_ON_LAUNCH. No auto-free means
+            // the graph owns its internal allocations for its whole
+            // lifetime and replay reuses the same virtual addresses.
+            let flags_zero: CUgraphInstantiate_flags =
+                unsafe { std::mem::transmute::<u32, CUgraphInstantiate_flags>(0) };
             Some(
                 stream
-                    .end_capture(
-                        CUgraphInstantiate_flags::CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH,
-                    )
+                    .end_capture(flags_zero)
                     .expect("end_capture")
                     .expect("graph empty"),
             )
-        })
-    }));
+        }))
+    });
+    println!(
+        "  capture pen retained: f32 × {}, u32 × {} (total {})",
+        pen.f32_count(),
+        pen.u32_count(),
+        pen.total()
+    );
     // Ensure any in-flight capture is ended even if we early-returned so
     // the next eager op doesn't see stale capture state.
     let _ = stream.end_capture(CUgraphInstantiate_flags::CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH);
@@ -275,13 +316,15 @@ fn try_graph_capture_step(
             println!(
                 "  (compare to eager TOTAL above; gain = launch-overhead delta × kernel count)"
             );
+            // Graph dropped here. Safe to return pen slices to the pool.
+            drop(graph);
+            pen.release();
         }
         Err(e) => {
             let msg = panic_msg(&e);
             println!("  capture FAILED: {msg}");
-            println!("  → pool allocation likely still hit cuMemAllocAsync mid-step.");
-            println!("    Next debugging step: instrument pool_alloc_uninit miss counter");
-            println!("    during capture to find the remaining non-warmed bucket size.");
+            // Still release pen slices so the pool recovers the buffers.
+            pen.release();
         }
     }
 }
