@@ -753,7 +753,7 @@ fn dequantize_blocks_par(
             // the last partial chunk cleanly).
             let out_blocks = out_chunk.len() / block_size;
             let in_blocks = in_chunk.len() / type_size;
-            let mut blocks = out_blocks.min(in_blocks);
+            let blocks = out_blocks.min(in_blocks);
             // Respect the global n_blocks cap (never dequant past the tensor).
             // Compute this chunk's starting block index from the chunk's size.
             // Since rayon `par_chunks` guarantees chunks in-order with fixed
@@ -764,15 +764,13 @@ fn dequantize_blocks_par(
             // Work through this chunk's blocks serially — they share L1/L2
             // cache state, so one worker handling BATCH of them has great
             // locality. Rayon spreads CHUNKS across workers.
-            for b in 0..blocks.max(0) {
+            for b in 0..blocks {
                 let in_off = b * type_size;
                 let out_off = b * block_size;
                 let in_block = &in_chunk[in_off..in_off + type_size];
                 let out_block = &mut out_chunk[out_off..out_off + block_size];
                 dequant_block(in_block, out_block);
             }
-            // Suppress unused warning in release.
-            blocks += 0;
         });
 }
 
@@ -896,6 +894,7 @@ pub fn fused_qkv_q4k_matmul_gpu(
     Some((q_t, k_t, v_t))
 }
 
+#[cfg(feature = "cuda")]
 static FUSED_QKV_BIAS_FIRED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
@@ -1249,6 +1248,7 @@ fn q4k_quantized_bytes(w: &Weight) -> Option<(&Vec<u8>, &Vec<usize>)> {
     }
 }
 
+#[cfg(feature = "cuda")]
 fn q5k_quantized_bytes(w: &Weight) -> Option<(&Vec<u8>, &Vec<usize>)> {
     match w {
         Weight::Quantized { data, dims, dtype, .. } if *dtype == GgmlType::Q5K && dims.len() == 2 => {
@@ -1258,6 +1258,7 @@ fn q5k_quantized_bytes(w: &Weight) -> Option<(&Vec<u8>, &Vec<usize>)> {
     }
 }
 
+#[cfg(feature = "cuda")]
 static FUSED_QKV_Q5K_FIRED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
@@ -1272,6 +1273,7 @@ static FUSED_QKV_Q5K_FIRED: std::sync::atomic::AtomicBool =
 /// don't share `in_dim`, input isn't on GPU, or CUDA isn't available —
 /// in which case the caller should fall back to three separate
 /// `Weight::matmul` calls.
+#[cfg(feature = "cuda")]
 pub fn fused_qkv_q5k_matmul_gpu(
     q_weight: &Weight,
     k_weight: &Weight,
@@ -1353,6 +1355,30 @@ pub fn fused_qkv_q5k_matmul_gpu(
     Some((q_t, k_t, v_t))
 }
 
+/// No-CUDA stub: always returns None so callers fall through to the CPU
+/// three-matmul path.
+#[cfg(not(feature = "cuda"))]
+pub fn fused_qkv_q5k_matmul_gpu(
+    _q_weight: &Weight,
+    _k_weight: &Weight,
+    _v_weight: &Weight,
+    _input: &Tensor<f32>,
+) -> Option<(Tensor<f32>, Tensor<f32>, Tensor<f32>)> {
+    None
+}
+
+/// No-CUDA stub: always returns None so callers fall through to the CPU
+/// gate/up matmul + swiglu path.
+#[cfg(not(feature = "cuda"))]
+pub fn fused_gate_up_swiglu_q4k_matmul_gpu(
+    _gate_weight: &Weight,
+    _up_weight: &Weight,
+    _input: &Tensor<f32>,
+) -> Option<Tensor<f32>> {
+    None
+}
+
+#[cfg(feature = "cuda")]
 fn q5_1_quantized_bytes(w: &Weight) -> Option<(&Vec<u8>, &Vec<usize>)> {
     match w {
         Weight::Quantized { data, dims, dtype, .. }

@@ -800,6 +800,7 @@ fn byte_decode_map() -> &'static HashMap<char, u8> {
     })
 }
 
+#[cfg(test)]
 fn decode_bpe_token(token: &str) -> String {
     // Handle byte tokens: <0xNN>
     if token.starts_with("<0x") && token.ends_with('>') && token.len() == 6 {

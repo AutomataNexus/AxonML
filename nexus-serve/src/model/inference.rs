@@ -3880,7 +3880,7 @@ impl InferenceEngine {
                 None
             };
 
-            let (mut q, mut k, mut v) = if let Some(triple) = fused_bias {
+            let (mut q, mut k, v) = if let Some(triple) = fused_bias {
                 // Biases already applied inside the matmul kernel.
                 triple
             } else {
@@ -4691,6 +4691,10 @@ fn sigmoid(x: f32) -> f32 {
 /// checkpoints (`gelu_pytorch_tanh` kernel).
 ///
 /// `0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x^3)))`
+///
+/// Preserved for CPU-only Falcon paths; unused in the current GPU-resident
+/// forward which uses `Tensor::gelu_tanh` at the axonml-nn layer.
+#[allow(dead_code)]
 #[inline]
 fn gelu_tanh(x: f32) -> f32 {
     const K: f32 = 0.7978845608028654; // sqrt(2 / pi)
@@ -4698,7 +4702,9 @@ fn gelu_tanh(x: f32) -> f32 {
 }
 
 /// LayerNorm over a single flat vector: `(x - mean) / sqrt(var + eps) * gamma + beta`.
-/// Mean/var taken over the `dim`-sized vector. Used by Falcon's forward path.
+/// Mean/var taken over the `dim`-sized vector. Used by Falcon's CPU forward path;
+/// the GPU path calls `Tensor::layer_norm` instead. Kept for CPU fallback.
+#[allow(dead_code)]
 fn layer_norm_single(x: &[f32], gamma: &[f32], beta: &[f32], eps: f32) -> Vec<f32> {
     let dim = x.len();
     let dim_f = dim as f32;

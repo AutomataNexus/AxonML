@@ -126,6 +126,8 @@ fn load_model(path: &Path, label: &str) -> Loaded {
     println!("[{label}] loading {}", path.display());
     let gguf = GgufFile::open(path).expect("gguf open");
     let mapped = MappedGguf::open(path, &gguf).expect("mmap");
+    // `mut` is consumed only by the CUDA `.to_device()` call below.
+    #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
     let mut engine =
         InferenceEngine::from_gguf_with_mode(&gguf, &mapped, /*quantized=*/ true)
             .expect("engine");
