@@ -105,3 +105,8 @@ path = "src/bin/claude_trace_export.rs"
 [[bin]]
 name = "train_rdt"
 path = "src/bin/train_rdt.rs"
+
+# K-scaling perplexity curve for a trained RDT (step 6 of task #58).
+[[bin]]
+name = "eval_rdt"
+path = "src/bin/eval_rdt.rs"
