@@ -864,6 +864,7 @@ impl Tensor<f32> {
         })
     }
 
+    /// Q5_0 dequant-in-shader GEMM on the GPU.
     pub fn q5_0_gemm_cuda(
         &self,
         w: &cudarc::driver::CudaSlice<u8>,
@@ -892,6 +893,7 @@ impl Tensor<f32> {
         })
     }
 
+    /// Q5_1 dequant-in-shader GEMV on the GPU (per-token decode path).
     pub fn q5_1_gemv_cuda(
         &self,
         w: &cudarc::driver::CudaSlice<u8>,
@@ -918,6 +920,7 @@ impl Tensor<f32> {
         })
     }
 
+    /// Q5_1 dequant-in-shader GEMM on the GPU (batched-prefill path).
     pub fn q5_1_gemm_cuda(
         &self,
         w: &cudarc::driver::CudaSlice<u8>,
@@ -976,6 +979,7 @@ impl Tensor<f32> {
         })
     }
 
+    /// I2_S ternary (BitNet b1.58) dequant-in-shader GEMM on the GPU.
     pub fn i2s_gemm_cuda(
         &self,
         w: &cudarc::driver::CudaSlice<u8>,
@@ -1036,6 +1040,7 @@ impl Tensor<f32> {
         })
     }
 
+    /// Q8_0 dequant-in-shader GEMM on the GPU.
     pub fn q8_0_gemm_cuda(
         &self,
         w: &cudarc::driver::CudaSlice<u8>,
@@ -1156,6 +1161,7 @@ impl Tensor<f32> {
         })
     }
 
+    /// Q6_K dequant-in-shader GEMM on the GPU.
     pub fn q6k_gemm_cuda(
         &self,
         w: &cudarc::driver::CudaSlice<u8>,
@@ -1411,8 +1417,12 @@ impl Tensor<f32> {
 
         let total = batch_size * m * n;
 
-        let a_guard = a.storage.as_cuda_slice();
-        let b_guard = b.storage.as_cuda_slice();
+        // Guards are held to keep the read locks alive across the cuBLAS
+        // call below — the cuBLAS handle reads directly from `a.storage`
+        // and `b.storage` via raw device pointers, so we don't dereference
+        // the guards by name, but dropping them would release the locks.
+        let _a_guard = a.storage.as_cuda_slice();
+        let _b_guard = b.storage.as_cuda_slice();
 
         // Row-major batched matmul: C[b](m,n) = A[b](m,k) @ B[b](k,n)
         //

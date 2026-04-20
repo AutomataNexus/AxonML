@@ -267,6 +267,9 @@ pub fn pool_free_u32(slice: CudaSlice<u32>) {
     pool.release(ptr, capacity);
 }
 
+/// Allocate an uninitialized f32 slice from the CUDA device pool (via
+/// `cuMemAllocAsync`), bypassing the Rust-side cache. Used by the fused
+/// decode kernels so the allocation is visible to CUDA graph capture.
 #[cfg(feature = "cuda")]
 pub fn pool_alloc_uninit(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> {
     // Under CUDA graph capture, skip the Rust-side pool cache. Its
