@@ -146,6 +146,12 @@ pub struct RMSNorm {
     pub eps: f32,
     /// Hidden size (used for serialization/debug)
     pub hidden_size: usize,
+    /// Cached GPU-side weight. Populated on first GPU forward so subsequent
+    /// forwards reuse the same device allocation — critical for CUDA graph
+    /// capture, where every kernel arg's host-side cu_device_ptr must remain
+    /// at a stable address across captures and replays.
+    #[allow(clippy::type_complexity)]
+    weight_gpu_cache: parking_lot::Mutex<Option<Tensor<f32>>>,
 }
 
 impl RMSNorm {
@@ -155,6 +161,7 @@ impl RMSNorm {
             weight: Tensor::ones(&[hidden_size]),
             eps,
             hidden_size,
+            weight_gpu_cache: parking_lot::Mutex::new(None),
         }
     }
 
@@ -170,12 +177,34 @@ impl RMSNorm {
 
         let output_tensor = if x_data.device().is_gpu() {
             // GPU path: one kernel launch per forward (down from full D2H).
-            let weight_gpu = if self.weight.device().is_gpu() {
-                self.weight.clone()
-            } else {
-                self.weight
-                    .to_device(x_data.device())
-                    .expect("RMSNorm: failed to move weight to GPU")
+            // Cache the moved weight on first GPU forward so subsequent
+            // forwards reuse the same CudaSlice (identical cu_device_ptr
+            // host address → CUDA graph capture / replay sees a stable ref).
+            let weight_gpu = {
+                let mut cache = self.weight_gpu_cache.lock();
+                if let Some(ref w) = *cache {
+                    if w.device() == x_data.device() {
+                        w.clone()
+                    } else {
+                        // device drifted — re-upload
+                        let moved = self
+                            .weight
+                            .to_device(x_data.device())
+                            .expect("RMSNorm: failed to move weight to GPU");
+                        *cache = Some(moved.clone());
+                        moved
+                    }
+                } else if self.weight.device().is_gpu() {
+                    *cache = Some(self.weight.clone());
+                    self.weight.clone()
+                } else {
+                    let moved = self
+                        .weight
+                        .to_device(x_data.device())
+                        .expect("RMSNorm: failed to move weight to GPU");
+                    *cache = Some(moved.clone());
+                    moved
+                }
             };
             let x_2d = x_data
                 .reshape(&[batch_elements as isize, last_dim as isize])
@@ -206,10 +235,24 @@ impl RMSNorm {
 
         let requires_grad = x.requires_grad() && is_grad_enabled();
         if requires_grad {
+            // Save the weight on whatever device the input was on. For a
+            // GPU forward we've already cached a GPU copy above; cloning
+            // the cache yields a stable Arc-shared GPU tensor that the
+            // backward kernel can use without another host→device upload
+            // (critical for CUDA-graph-captured steps).
+            let saved_weight = if x_data.device().is_gpu() {
+                self.weight_gpu_cache
+                    .lock()
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| self.weight.clone())
+            } else {
+                self.weight.clone()
+            };
             let grad_fn = GradFn::new(RMSNormBackward {
                 next_fns: vec![x.grad_fn().cloned()],
                 saved_input: x_data.clone(),
-                weight: self.weight.clone(),
+                weight: saved_weight,
                 last_dim,
                 eps: self.eps,
             });

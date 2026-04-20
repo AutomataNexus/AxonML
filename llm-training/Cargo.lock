@@ -274,6 +274,7 @@ dependencies = [
  "dirs",
  "half",
  "indicatif",
+ "parking_lot",
  "rand 0.8.5",
  "reqwest",
  "safetensors",

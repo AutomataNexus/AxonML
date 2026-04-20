@@ -220,6 +220,53 @@ pub fn pool_alloc(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> 
 /// shows ~4 us per memset and ~200 pool allocations per decode token,
 /// so swapping one call site is ~1 us/token saved, and a full hot-path
 /// conversion can be ~0.8 ms/token.
+/// Same layout pool as f32, but hands back `CudaSlice<u32>` — used for
+/// gather index uploads etc. The underlying bytes are identical (4 bytes
+/// per element), so we reuse the f32 bucket infrastructure and reinterpret
+/// the raw device pointer.
+///
+/// Capture-pen semantics: returned slices go through a dedicated u32
+/// `pool_free_u32` on drop. Those ALSO go into the capture pen when
+/// active, preserving cu_device_ptr host addresses for graph replay.
+#[cfg(feature = "cuda")]
+pub fn pool_alloc_uninit_u32(len: usize) -> Result<CudaSlice<u32>, super::cuda::CudaError> {
+    let pool = get_memory_pool();
+
+    if let Some((ptr, capacity)) = pool.try_acquire(len) {
+        let backend =
+            super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
+        unsafe {
+            let slice: CudaSlice<u32> = backend.stream().upgrade_device_ptr(ptr, capacity);
+            Ok(slice)
+        }
+    } else {
+        let bucket = CudaMemoryPool::bucket_size(len);
+        let backend =
+            super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
+        unsafe {
+            backend
+                .stream()
+                .alloc::<u32>(bucket)
+                .map_err(super::cuda::CudaError::from)
+        }
+    }
+}
+
+/// `pool_free`-equivalent for u32 slices. Routes to the capture pen when
+/// active (by converting to the u32 pen — separate from the f32 pen
+/// because we store them as typed `CudaSlice<u32>`).
+#[cfg(feature = "cuda")]
+pub fn pool_free_u32(slice: CudaSlice<u32>) {
+    if CAPTURE_PEN_ACTIVE.with(|c| c.get()) {
+        CAPTURE_PEN_U32.with(|pen| pen.borrow_mut().push(slice));
+        return;
+    }
+    let pool = get_memory_pool();
+    let capacity = slice.len();
+    let ptr = slice.leak();
+    pool.release(ptr, capacity);
+}
+
 #[cfg(feature = "cuda")]
 pub fn pool_alloc_uninit(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> {
     // Under CUDA graph capture, skip the Rust-side pool cache. Its
@@ -294,13 +341,98 @@ pub fn with_driver_alloc<R>(f: impl FnOnce() -> R) -> R {
 }
 
 /// Return GPU memory to the pool instead of freeing it.
+///
+/// If a graph-capture "pen" is active (see [`with_capture_pen`]), the
+/// CudaSlice is stored there intact instead of being leaked back to the
+/// bucket cache. cudarc records kernel args as `&slice.cu_device_ptr`
+/// (pointer-to-field), and graph replay dereferences that host pointer
+/// every launch. If the slice is dropped between capture and replay, the
+/// stack/heap location backing that field is freed → dangling pointer on
+/// replay (CUDA_ERROR_ILLEGAL_ADDRESS). The pen gives captured slices a
+/// stable host location for the graph's lifetime.
 #[cfg(feature = "cuda")]
 pub fn pool_free(slice: CudaSlice<f32>) {
+    if CAPTURE_PEN_ACTIVE.with(|c| c.get()) {
+        CAPTURE_PEN.with(|pen| pen.borrow_mut().push(slice));
+        return;
+    }
     let pool = get_memory_pool();
     let capacity = slice.len();
     // Leak returns the raw device pointer and prevents Drop from calling cudaFree
     let ptr = slice.leak();
     pool.release(ptr, capacity);
+}
+
+#[cfg(feature = "cuda")]
+thread_local! {
+    static CAPTURE_PEN_ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static CAPTURE_PEN: std::cell::RefCell<Vec<CudaSlice<f32>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static CAPTURE_PEN_U32: std::cell::RefCell<Vec<CudaSlice<u32>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Collection of CudaSlices retained by the capture pen across types.
+/// Keep this alive for the full lifetime of the captured graph; drop or
+/// release it only after the `CudaGraph` (CUgraphExec wrapper) is dropped.
+#[cfg(feature = "cuda")]
+pub struct CapturePen {
+    f32_slices: Vec<CudaSlice<f32>>,
+    u32_slices: Vec<CudaSlice<u32>>,
+}
+
+#[cfg(feature = "cuda")]
+impl CapturePen {
+    /// Number of f32 slices retained.
+    pub fn f32_count(&self) -> usize {
+        self.f32_slices.len()
+    }
+    /// Number of u32 slices retained.
+    pub fn u32_count(&self) -> usize {
+        self.u32_slices.len()
+    }
+    /// Total retained.
+    pub fn total(&self) -> usize {
+        self.f32_slices.len() + self.u32_slices.len()
+    }
+
+    /// Return all retained slices to the Rust pool. Safe to call only
+    /// after the captured graph's `CudaGraph` has been dropped.
+    pub fn release(self) {
+        let pool = get_memory_pool();
+        for slice in self.f32_slices {
+            let capacity = slice.len();
+            let ptr = slice.leak();
+            pool.release(ptr, capacity);
+        }
+        for slice in self.u32_slices {
+            let capacity = slice.len();
+            let ptr = slice.leak();
+            pool.release(ptr, capacity);
+        }
+    }
+}
+
+/// Scope-guarded "graph capture pen". Inside the scope, [`pool_free`] and
+/// [`pool_free_u32`] retain CudaSlices intact (their host-side
+/// cu_device_ptr stays at stable addresses) instead of leaking them back
+/// to the bucket cache. Returns the collected slices as a `CapturePen`
+/// the caller keeps alive for the captured graph's full lifetime, then
+/// releases once the graph is destroyed.
+#[cfg(feature = "cuda")]
+pub fn with_capture_pen<R>(f: impl FnOnce() -> R) -> (R, CapturePen) {
+    CAPTURE_PEN_ACTIVE.with(|c| c.set(true));
+    let r = f();
+    CAPTURE_PEN_ACTIVE.with(|c| c.set(false));
+    let f32_slices = CAPTURE_PEN.with(|pen| std::mem::take(&mut *pen.borrow_mut()));
+    let u32_slices = CAPTURE_PEN_U32.with(|pen| std::mem::take(&mut *pen.borrow_mut()));
+    (
+        r,
+        CapturePen {
+            f32_slices,
+            u32_slices,
+        },
+    )
 }
 
 /// Print pool statistics.
