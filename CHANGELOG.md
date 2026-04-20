@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Oracle → RDT distillation — enablement work (task #61)
+
+#### Step 1 of 5 — widen gguf_loader arch guard ✅ (2026-04-20)
+
+- `axonml-llm::gguf_loader::qwen3_config_from_gguf` now accepts both `qwen2`
+  and `qwen3` architectures. Arch-specific metadata keys
+  (`*.embedding_length`, `*.block_count`, `*.rope.freq_base`, etc.) are
+  looked up under the file's actual arch prefix rather than assuming
+  `qwen3.*`. Qwen2 and Qwen3 share tensor layout (GQA, RoPE, SwiGLU,
+  RMSNorm, `blk.N.*` names) so the same `Qwen3ForCausalLM` in-memory
+  struct handles both.
+- Smoke-verified by loading `DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf`
+  (qwen2 arch) end-to-end through `load_qwen3_from_gguf` — config parsed
+  cleanly (hidden=1536, 28 layers, 12Q/2KV GQA, head_dim=128,
+  rope_theta=10000 matching R1-Distill). Ran via new
+  `crates/axonml-llm/examples/smoke_load_oracle.rs`.
+- This unblocks task #61 (Oracle-7B → RDT distillation) — the "arch issue"
+  that killed earlier `train_draft_distill --teacher-gguf oracle-*.gguf`
+  attempts was this loader guard. Drive-by fixed a pre-existing clippy
+  lint in `gguf_export.rs:748` (`for (_k, v) in &map` →
+  `for v in map.values()`).
+- See `/opt/LESSONS.md` L91, `/opt/RESOURCES.md` "Oracle distillation assets".
+
+#### Step 2 of 5 — `train_rdt_distill` binary ✅ (2026-04-20)
+
+- New `llm-training/src/bin/train_rdt_distill.rs` — Oracle→RDT distillation
+  trainer. Student is `RDTForCausalLM` from `axonml-llm`; teacher is a
+  frozen `Qwen3ForCausalLM` loaded via `load_qwen3_from_gguf` (now
+  qwen2-compatible per step 1).
+- Per-batch loss:
+  `α · CE(student@K, labels) + (1 − α) · KL(student@K, teacher, T²)`
+  with α = 0.1, T = 3 per RDT_DESIGN §8a. K sampled uniformly from
+  `[k_min, k_max]` each step — the defining RDT training trick that
+  keeps the student robust across test-time iteration counts.
+- Teacher runs under `NoGradGuard` — no graph, no stored grads, no
+  wasted memory; only the student's graph carries gradients.
+- Student's `rdt_cfg.base.vocab_size` is force-matched to the teacher's
+  vocab so the KL head has shape-aligned logit distributions. The
+  pre-tokenized `corpus.tokens.bin` must use the teacher's tokenizer
+  (R1-Distill BPE) — this is the Oracle trace corpus at
+  `/opt/datasets/oracle-lora/corpus.tokens.bin` (21.6M u32 tokens,
+  first token 151646 = DeepSeek BOS).
+- CLI: `--arch {tiny|small|mid}`, `--k-min`/`--k-max`, `--seq-len`,
+  `--bs`, `--teacher-gguf`, `--tokens-bin`, `--alpha`, `--temperature`,
+  `--checkpoint-every-steps`, `--resume {latest|best|PATH}`. Reuses
+  `TrainingLifecycle` (monitor + pause/resume/stop + rotating ckpts)
+  and `AdamW` with `weight_decay` + cosine LR schedule (logged; AdamW
+  in-place LR setter is a future refactor).
+- Defaults target the production Oracle run: teacher
+  `/opt/AxonML/models/oracle-distill/oracle-r1-distill-q4km.gguf`,
+  corpus `/opt/datasets/oracle-lora/corpus.tokens.bin`, arch `small`,
+  seq 512, bs 2.
+- Release build + `--help` smoke PASS.
+
+**Next (Step 3 of 5):** commit + push steps 1-2 under
+`feat(llm-training): train_rdt_distill + qwen2 loader widening
+(task #61)`. Five files: `gguf_loader.rs`, `gguf_export.rs` (drive-by),
+`smoke_load_oracle.rs` (new example), `train_rdt_distill.rs` (new bin),
+plus docs (CHANGELOG, LESSONS, RESOURCES, WORK_STATE). Step 4 is the
+Colab notebook; step 5 is the A100 80GB training kick.
+
+
+
 ### Training-path perf audit (Qwen3-0.6B distillation target)
 
 Multi-commit investigation of the 45+ s/step wall-clock on the distill target,

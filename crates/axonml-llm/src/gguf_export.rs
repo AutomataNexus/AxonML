@@ -745,7 +745,7 @@ pub fn export_rdt_to_gguf(
     meta_count += 5;
 
     // Tokenizer passthrough.
-    for (_key, raw_bytes) in &tokenizer_meta {
+    for raw_bytes in tokenizer_meta.values() {
         meta_buf.extend_from_slice(raw_bytes);
         meta_count += 1;
     }
