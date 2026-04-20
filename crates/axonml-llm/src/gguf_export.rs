@@ -562,6 +562,261 @@ fn is_norm_name(ggml_name: &str) -> bool {
     ggml_name.ends_with("_norm.weight") || ggml_name == "output_norm.weight"
 }
 
+// =============================================================================
+// RDT → GGUF exporter
+// =============================================================================
+
+/// Produce the ordered list of GGML tensor names for an `RDTForCausalLM`,
+/// matching the walk order of `RDT::parameters` + `RDTForCausalLM::parameters`.
+///
+/// Shape:
+///
+/// ```text
+///   token_embd.weight
+///   prelude.blk.{i}.{attn_q,attn_k,attn_v,attn_output,attn_q_norm,
+///                    attn_k_norm,ffn_gate,ffn_up,ffn_down,
+///                    attn_norm,ffn_norm}.weight   (11 per layer × n_prelude)
+///   core.blk.{i}.…                                 (11 per layer × n_core)
+///   coda.blk.{i}.…                                 (11 per layer × n_coda)
+///   output_norm.weight
+///   output.weight                                   (lm_head, always present — RDT doesn't tie)
+/// ```
+///
+/// The `prelude.blk.` / `core.blk.` / `coda.blk.` prefixes tell the GGUF
+/// reader which stack each layer belongs to; nexus-serve's RDT load path
+/// uses this to build the three separate layer stacks.
+fn expected_rdt_ggml_names(cfg: &crate::rdt::RDTConfig) -> Vec<String> {
+    let stack_layer_names = |stack: &str, n: usize| -> Vec<String> {
+        let mut v = Vec::with_capacity(n * 11);
+        for i in 0..n {
+            // Order matches Qwen3Attention → Qwen3DecoderLayer::parameters.
+            v.push(format!("{stack}.blk.{i}.attn_q.weight"));
+            v.push(format!("{stack}.blk.{i}.attn_k.weight"));
+            v.push(format!("{stack}.blk.{i}.attn_v.weight"));
+            v.push(format!("{stack}.blk.{i}.attn_output.weight"));
+            v.push(format!("{stack}.blk.{i}.attn_q_norm.weight"));
+            v.push(format!("{stack}.blk.{i}.attn_k_norm.weight"));
+            v.push(format!("{stack}.blk.{i}.ffn_gate.weight"));
+            v.push(format!("{stack}.blk.{i}.ffn_up.weight"));
+            v.push(format!("{stack}.blk.{i}.ffn_down.weight"));
+            v.push(format!("{stack}.blk.{i}.attn_norm.weight"));
+            v.push(format!("{stack}.blk.{i}.ffn_norm.weight"));
+        }
+        v
+    };
+
+    let mut names = Vec::new();
+    names.push("token_embd.weight".to_string());
+    names.extend(stack_layer_names("prelude", cfg.n_prelude));
+    names.extend(stack_layer_names("core", cfg.n_core));
+    names.extend(stack_layer_names("coda", cfg.n_coda));
+    names.push("output_norm.weight".to_string());
+    names.push("output.weight".to_string());
+    names
+}
+
+/// Export a trained `RDTForCausalLM` to GGUF v3 under architecture id `rdt`.
+///
+/// Metadata written (design doc §4):
+///
+/// ```text
+///   general.architecture          "rdt"
+///   general.name                  <model_name>
+///   general.file_type             1 (f16)
+///   general.alignment             DATA_ALIGNMENT
+///   rdt.context_length            u32
+///   rdt.embedding_length          u32
+///   rdt.feed_forward_length       u32
+///   rdt.prelude.block_count       u32
+///   rdt.core.block_count          u32
+///   rdt.coda.block_count          u32
+///   rdt.attention.head_count      u32
+///   rdt.attention.head_count_kv   u32
+///   rdt.attention.key_length      u32
+///   rdt.attention.value_length    u32
+///   rdt.attention.layer_norm_rms_epsilon  f32
+///   rdt.rope.freq_base            f32
+///   rdt.recurrent.k_default       u32
+///   rdt.recurrent.k_min           u32
+///   rdt.recurrent.k_max           u32
+///   rdt.recurrent.alpha           f32
+///   rdt.recurrent.beta            f32
+/// ```
+///
+/// Plus optional tokenizer passthrough from `tokenizer_source` (same
+/// mechanism as `export_qwen3_to_gguf`).
+///
+/// Body weights are stored F16 (same rationale as Qwen3 export);
+/// RMSNorm weights stay F32 to preserve near-1.0 magnitudes.
+pub fn export_rdt_to_gguf(
+    model: &crate::rdt::RDTForCausalLM,
+    output: &Path,
+    model_name: &str,
+    tokenizer_source: Option<&Path>,
+) -> io::Result<()> {
+    let cfg = model.config().clone();
+    let params = model.parameters();
+    let expected_names = expected_rdt_ggml_names(&cfg);
+
+    if params.len() != expected_names.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "RDT parameter count mismatch: model has {} params, expected {} \
+                 (check prelude={} core={} coda={} matches RDT::parameters order)",
+                params.len(),
+                expected_names.len(),
+                cfg.n_prelude, cfg.n_core, cfg.n_coda,
+            ),
+        ));
+    }
+
+    // Build tensor manifest.
+    let mut manifest: Vec<TensorEntry<'_>> = Vec::with_capacity(expected_names.len());
+    for (i, ggml_name) in expected_names.iter().enumerate() {
+        let p = &params[i];
+        let data = p.data();
+        let shape: Vec<usize> = data.shape().to_vec();
+        let half_precision = !is_norm_name(ggml_name);
+        manifest.push(TensorEntry {
+            ggml_name: ggml_name.clone(),
+            shape,
+            tensor: data,
+            half_precision,
+            _marker: std::marker::PhantomData,
+        });
+    }
+
+    // Tokenizer passthrough (optional).
+    let tokenizer_meta: HashMap<String, Vec<u8>> = match tokenizer_source {
+        Some(src) => {
+            let raw = read_gguf_metadata_raw_bytes(src, TOKENIZER_META_KEYS)?;
+            if raw.is_empty() {
+                eprintln!(
+                    "[gguf-export] WARNING: --tokenizer-source {} has no tokenizer.ggml.* keys.",
+                    src.display()
+                );
+            }
+            raw
+        }
+        None => HashMap::new(),
+    };
+
+    // ---- Header + metadata buffer. ----
+    let mut header_buf: Vec<u8> = Vec::with_capacity(4096);
+    header_buf.write_u32::<LittleEndian>(GGUF_MAGIC)?;
+    header_buf.write_u32::<LittleEndian>(GGUF_VERSION)?;
+    header_buf.write_u64::<LittleEndian>(manifest.len() as u64)?;
+
+    let mut meta_buf: Vec<u8> = Vec::with_capacity(4096);
+    let mut meta_count: u64 = 0;
+
+    // General.
+    write_meta_string(&mut meta_buf, "general.architecture", "rdt")?;
+    write_meta_string(&mut meta_buf, "general.name", model_name)?;
+    write_meta_u32(&mut meta_buf, "general.file_type", 1)?;
+    write_meta_u32(&mut meta_buf, "general.alignment", DATA_ALIGNMENT as u32)?;
+    meta_count += 4;
+
+    // Base transformer hyperparameters.
+    write_meta_u32(&mut meta_buf, "rdt.context_length", cfg.base.max_position_embeddings as u32)?;
+    write_meta_u32(&mut meta_buf, "rdt.embedding_length", cfg.base.hidden_size as u32)?;
+    write_meta_u32(&mut meta_buf, "rdt.feed_forward_length", cfg.base.intermediate_size as u32)?;
+    write_meta_u32(&mut meta_buf, "rdt.attention.head_count", cfg.base.num_attention_heads as u32)?;
+    write_meta_u32(&mut meta_buf, "rdt.attention.head_count_kv", cfg.base.num_key_value_heads as u32)?;
+    write_meta_u32(&mut meta_buf, "rdt.attention.key_length", cfg.base.head_dim as u32)?;
+    write_meta_u32(&mut meta_buf, "rdt.attention.value_length", cfg.base.head_dim as u32)?;
+    write_meta_f32(&mut meta_buf, "rdt.attention.layer_norm_rms_epsilon", cfg.base.rms_norm_eps)?;
+    write_meta_f32(&mut meta_buf, "rdt.rope.freq_base", cfg.base.rope_theta)?;
+    meta_count += 9;
+
+    // RDT-specific layer splits.
+    write_meta_u32(&mut meta_buf, "rdt.prelude.block_count", cfg.n_prelude as u32)?;
+    write_meta_u32(&mut meta_buf, "rdt.core.block_count", cfg.n_core as u32)?;
+    write_meta_u32(&mut meta_buf, "rdt.coda.block_count", cfg.n_coda as u32)?;
+    meta_count += 3;
+
+    // Recurrent update params.
+    write_meta_u32(&mut meta_buf, "rdt.recurrent.k_default", cfg.k_default as u32)?;
+    write_meta_u32(&mut meta_buf, "rdt.recurrent.k_min", cfg.k_min as u32)?;
+    write_meta_u32(&mut meta_buf, "rdt.recurrent.k_max", cfg.k_max as u32)?;
+    write_meta_f32(&mut meta_buf, "rdt.recurrent.alpha", cfg.alpha)?;
+    write_meta_f32(&mut meta_buf, "rdt.recurrent.beta", cfg.beta)?;
+    meta_count += 5;
+
+    // Tokenizer passthrough.
+    for (_key, raw_bytes) in &tokenizer_meta {
+        meta_buf.extend_from_slice(raw_bytes);
+        meta_count += 1;
+    }
+
+    header_buf.write_u64::<LittleEndian>(meta_count)?;
+    header_buf.extend_from_slice(&meta_buf);
+
+    // ---- Tensor directory. ----
+    let mut tensor_dir_buf: Vec<u8> = Vec::with_capacity(manifest.len() * 128);
+    let mut running_offset: u64 = 0;
+    for entry in &manifest {
+        write_string(&mut tensor_dir_buf, &entry.ggml_name)?;
+        let dims = entry.gguf_dims();
+        tensor_dir_buf.write_u32::<LittleEndian>(dims.len() as u32)?;
+        for d in &dims {
+            tensor_dir_buf.write_u64::<LittleEndian>(*d)?;
+        }
+        tensor_dir_buf.write_u32::<LittleEndian>(entry.dtype_code())?;
+        tensor_dir_buf.write_u64::<LittleEndian>(running_offset)?;
+
+        let bytes = entry.byte_len() as u64;
+        running_offset += bytes;
+        running_offset = running_offset.div_ceil(DATA_ALIGNMENT) * DATA_ALIGNMENT;
+    }
+
+    // ---- Write file. ----
+    let mut file = File::create(output)?;
+    file.write_all(&header_buf)?;
+    file.write_all(&tensor_dir_buf)?;
+
+    let header_and_dir_len = file.stream_position()?;
+    let data_start = header_and_dir_len.div_ceil(DATA_ALIGNMENT) * DATA_ALIGNMENT;
+    let padding = (data_start - header_and_dir_len) as usize;
+    if padding > 0 {
+        file.write_all(&vec![0u8; padding])?;
+    }
+
+    for entry in &manifest {
+        let data_f32 = entry.tensor.to_vec();
+        if entry.half_precision {
+            let mut buf: Vec<u8> = Vec::with_capacity(data_f32.len() * 2);
+            for &v in &data_f32 {
+                buf.write_u16::<LittleEndian>(f32_to_f16(v))?;
+            }
+            file.write_all(&buf)?;
+        } else {
+            let mut buf: Vec<u8> = Vec::with_capacity(data_f32.len() * 4);
+            for &v in &data_f32 {
+                buf.write_f32::<LittleEndian>(v)?;
+            }
+            file.write_all(&buf)?;
+        }
+        let pos = file.stream_position()?;
+        let aligned = pos.div_ceil(DATA_ALIGNMENT) * DATA_ALIGNMENT;
+        let pad = (aligned - pos) as usize;
+        if pad > 0 {
+            file.write_all(&vec![0u8; pad])?;
+        }
+    }
+
+    if tokenizer_meta.is_empty() {
+        eprintln!(
+            "[gguf-export] WARNING: no --tokenizer-source; RDT output at {} lacks tokenizer metadata.",
+            output.display()
+        );
+    }
+
+    file.sync_all()?;
+    Ok(())
+}
+
 // TODO: copy_tokenizer_metadata — round-trip parsed GgufValues from a
 // source GGUF back out as encoded bytes. Requires exposing GgufValue +
 // its writer from gguf_loader. Follow-up session.
