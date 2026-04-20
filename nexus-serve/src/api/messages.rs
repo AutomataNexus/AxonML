@@ -653,8 +653,16 @@ fn build_prompt(architecture: &str, model_name: &str, req: &MessagesRequest) -> 
     // learned as distractors in the SFT data. `general.architecture` is
     // plain "qwen2" — indistinguishable from base Qwen2-Instruct — so we
     // disambiguate on `general.name`.
-    let is_deepseek_r1 = model_name.contains("DeepSeek")
-        && (model_name.contains("R1") || model_name.contains("Distill"));
+    // Primary match: GGUFs published by DeepSeek with the canonical name.
+    // Secondary match: `Oracle ...` — models we LoRA-fine-tuned on top of
+    // DeepSeek-R1-Distill-Qwen-7B and merged via Unsloth, which rewrites
+    // `general.name` to "Oracle Merged" at save time. Those models still
+    // speak DeepSeek-R1's full-width-pipe chat template, so they need the
+    // same render path even though "DeepSeek" / "R1" / "Distill" no longer
+    // appears in the name.
+    let is_deepseek_r1 = (model_name.contains("DeepSeek")
+        && (model_name.contains("R1") || model_name.contains("Distill")))
+        || model_name.contains("Oracle");
     let is_llama3 = architecture.starts_with("bitnet")
         || architecture == "llama3"
         || architecture.starts_with("llama-3");
@@ -832,6 +840,55 @@ fn flatten_message_content(content: &MessageContent) -> String {
     }
 }
 
+/// Strip DeepSeek-R1 chat-template tags that can leak into the final
+/// assistant text when the sampler doesn't catch the stop token in time.
+///
+/// R1-Distill's template uses full-width-pipe (U+FF5C) wrappers:
+///
+/// ```text
+///   <｜begin▁of▁sentence｜>    <｜end▁of▁sentence｜>
+///   <｜User｜>                 <｜Assistant｜>
+///   <｜tool▁calls▁begin｜>     <｜tool▁calls▁end｜>
+///   <｜tool▁call▁begin｜>      <｜tool▁call▁end｜>
+///   <｜tool▁sep｜>
+///   <｜tool▁outputs▁begin｜>   <｜tool▁outputs▁end｜>
+///   <｜tool▁output▁begin｜>    <｜tool▁output▁end｜>
+/// ```
+///
+/// All share the `<｜...｜>` shape with U+FF5C as the delimiter, which no
+/// non-DeepSeek architecture uses in its template — so this is a cheap
+/// scan that's a no-op for Llama / Qwen2 / Phi / Gemma / etc.
+///
+/// Scan algorithm: walk the string, any time we hit `<｜` followed later
+/// by `｜>`, drop the whole `<｜…｜>` chunk. A stray `<` without the
+/// full-width pipe is preserved (so HTML / XML / code samples survive).
+fn strip_deepseek_tags(s: &str) -> String {
+    const OPEN: &str  = "<｜";
+    const CLOSE: &str = "｜>";
+    if !s.contains(OPEN) {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(idx) = rest.find('<') {
+        out.push_str(&rest[..idx]);
+        let after = &rest[idx..];
+        if after.starts_with(OPEN) {
+            if let Some(end_rel) = after[OPEN.len()..].find(CLOSE) {
+                // Swallow the entire tag including `<｜` and `｜>`.
+                let skip = OPEN.len() + end_rel + CLOSE.len();
+                rest = &after[skip..];
+                continue;
+            }
+        }
+        // Not a DeepSeek tag — keep the `<` and continue past it.
+        out.push('<');
+        rest = &after[1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 // =============================================================================
 // Output parsing: raw text -> content blocks
 // =============================================================================
@@ -855,6 +912,15 @@ fn flatten_message_content(content: &MessageContent) -> String {
 fn parse_assistant_output(raw: &str, output_tokens: usize, max_tokens: usize)
     -> (Vec<ContentBlock>, String)
 {
+    // Belt-and-suspenders strip of DeepSeek-R1 chat-template tags that can
+    // leak into generated text when the sampler doesn't catch the stop
+    // token in time (e.g. `<｜User｜>`, `<｜end▁of▁sentence｜>` appearing
+    // mid-response). These use full-width-pipe U+FF5C which no other
+    // architecture uses in its template, so the strip is safe across all
+    // models — it's a no-op unless DeepSeek tags actually appear.
+    let stripped = strip_deepseek_tags(raw);
+    let raw = stripped.as_str();
+
     // Reasoning-model guard: R1-Distill / QwQ / o1-style models emit a
     // `<think>...</think>` block containing internal chain-of-thought
     // before their actual answer. They routinely quote the `<tool_use>`
@@ -1093,6 +1159,26 @@ fn default_temperature() -> f32 { 1.0 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_deepseek_tags_removes_all_template_markers() {
+        let s = "<｜begin▁of▁sentence｜>hello<｜User｜>what?<｜Assistant｜>ok<｜end▁of▁sentence｜>";
+        assert_eq!(strip_deepseek_tags(s), "hellowhat?ok");
+    }
+
+    #[test]
+    fn strip_deepseek_tags_passes_through_non_deepseek_text() {
+        // No full-width pipes = no-op.
+        let s = "plain text with <html> and <tool_use>{}</tool_use>";
+        assert_eq!(strip_deepseek_tags(s), s);
+    }
+
+    #[test]
+    fn strip_deepseek_tags_preserves_angle_brackets_without_fwp() {
+        // `<something>` without U+FF5C survives intact.
+        let s = "see <think> block and <｜User｜> tag";
+        assert_eq!(strip_deepseek_tags(s), "see <think> block and  tag");
+    }
 
     #[test]
     fn parse_plain_text_is_end_turn() {
