@@ -120,24 +120,66 @@ impl TrainConfig {
                 })
             };
             match a.as_str() {
-                "--corpus" => { cfg.corpus = PathBuf::from(next(i)); i += 2; }
-                "--tokens-bin" => { cfg.tokens_bin = Some(PathBuf::from(next(i))); i += 2; }
-                "--output-dir" => { cfg.output_dir = PathBuf::from(next(i)); i += 2; }
-                "--arch" => { cfg.arch = next(i); i += 2; }
-                "--seq-len" => { cfg.seq_len = next(i).parse().unwrap(); i += 2; }
-                "--bs" | "--batch-size" => { cfg.batch_size = next(i).parse().unwrap(); i += 2; }
-                "--epochs" => { cfg.epochs = next(i).parse().unwrap(); i += 2; }
-                "--steps" => { cfg.steps_per_epoch = next(i).parse().unwrap(); i += 2; }
-                "--lr" => { cfg.lr = next(i).parse().unwrap(); i += 2; }
-                "--weight-decay" => { cfg.weight_decay = next(i).parse().unwrap(); i += 2; }
-                "--k-min" => { cfg.k_min = Some(next(i).parse().unwrap()); i += 2; }
-                "--k-max" => { cfg.k_max = Some(next(i).parse().unwrap()); i += 2; }
+                "--corpus" => {
+                    cfg.corpus = PathBuf::from(next(i));
+                    i += 2;
+                }
+                "--tokens-bin" => {
+                    cfg.tokens_bin = Some(PathBuf::from(next(i)));
+                    i += 2;
+                }
+                "--output-dir" => {
+                    cfg.output_dir = PathBuf::from(next(i));
+                    i += 2;
+                }
+                "--arch" => {
+                    cfg.arch = next(i);
+                    i += 2;
+                }
+                "--seq-len" => {
+                    cfg.seq_len = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--bs" | "--batch-size" => {
+                    cfg.batch_size = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--epochs" => {
+                    cfg.epochs = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--steps" => {
+                    cfg.steps_per_epoch = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--lr" => {
+                    cfg.lr = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--weight-decay" => {
+                    cfg.weight_decay = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--k-min" => {
+                    cfg.k_min = Some(next(i).parse().unwrap());
+                    i += 2;
+                }
+                "--k-max" => {
+                    cfg.k_max = Some(next(i).parse().unwrap());
+                    i += 2;
+                }
                 "--checkpoint-every-steps" => {
                     cfg.checkpoint_every_steps = next(i).parse().unwrap();
                     i += 2;
                 }
-                "--keep-last-k" => { cfg.keep_last_k = next(i).parse().unwrap(); i += 2; }
-                "--seed" => { cfg.seed = next(i).parse().unwrap(); i += 2; }
+                "--keep-last-k" => {
+                    cfg.keep_last_k = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--seed" => {
+                    cfg.seed = next(i).parse().unwrap();
+                    i += 2;
+                }
                 _ => {
                     eprintln!("Unknown arg: {a}");
                     print_help();
@@ -158,8 +200,12 @@ impl TrainConfig {
                 std::process::exit(1);
             }
         };
-        if let Some(k) = self.k_min { c.k_min = k; }
-        if let Some(k) = self.k_max { c.k_max = k; }
+        if let Some(k) = self.k_min {
+            c.k_min = k;
+        }
+        if let Some(k) = self.k_max {
+            c.k_max = k;
+        }
         assert!(c.k_min <= c.k_max, "k_min must be <= k_max");
         c
     }
@@ -183,11 +229,17 @@ fn print_help() {
 
 #[cfg(feature = "cuda")]
 fn pick_device() -> Device {
-    if axonml_core::backends::cuda::is_available() { Device::Cuda(0) } else { Device::Cpu }
+    if axonml_core::backends::cuda::is_available() {
+        Device::Cuda(0)
+    } else {
+        Device::Cpu
+    }
 }
 
 #[cfg(not(feature = "cuda"))]
-fn pick_device() -> Device { Device::Cpu }
+fn pick_device() -> Device {
+    Device::Cpu
+}
 
 // =============================================================================
 // Main
@@ -230,18 +282,35 @@ fn main() {
          epochs × steps:   {} × {}  (total = {})\n\
          lr:               {}   weight_decay: {}\n\
          corpus tokens:    {}\n",
-        cfg.arch, rdt_cfg.n_prelude, rdt_cfg.n_core, rdt_cfg.n_coda,
-        rdt_cfg.k_min, rdt_cfg.k_max,
-        rdt_cfg.base.hidden_size, rdt_cfg.base.vocab_size,
-        cfg.seq_len, cfg.batch_size,
-        cfg.epochs, cfg.steps_per_epoch, cfg.epochs * cfg.steps_per_epoch,
-        cfg.lr, cfg.weight_decay,
+        cfg.arch,
+        rdt_cfg.n_prelude,
+        rdt_cfg.n_core,
+        rdt_cfg.n_coda,
+        rdt_cfg.k_min,
+        rdt_cfg.k_max,
+        rdt_cfg.base.hidden_size,
+        rdt_cfg.base.vocab_size,
+        cfg.seq_len,
+        cfg.batch_size,
+        cfg.epochs,
+        cfg.steps_per_epoch,
+        cfg.epochs * cfg.steps_per_epoch,
+        cfg.lr,
+        cfg.weight_decay,
         format_count(dataset.tokens().len()),
     );
 
     let model = RDTForCausalLM::new(&rdt_cfg);
-    let param_count: usize = model.parameters().iter().map(|p| p.data().shape().iter().product::<usize>()).sum();
-    println!("trainable params: {} ({:.2}M)", format_count(param_count), param_count as f64 / 1e6);
+    let param_count: usize = model
+        .parameters()
+        .iter()
+        .map(|p| p.data().shape().iter().product::<usize>())
+        .sum();
+    println!(
+        "trainable params: {} ({:.2}M)",
+        format_count(param_count),
+        param_count as f64 / 1e6
+    );
 
     // Move to device.
     for p in model.parameters() {
@@ -296,8 +365,7 @@ fn main() {
 
             // Sample batch.
             let flat = dataset.sample_batch(cfg.batch_size, &mut rng_batch);
-            let input_ids =
-                Tensor::from_vec(flat, &[cfg.batch_size, cfg.seq_len]).unwrap();
+            let input_ids = Tensor::from_vec(flat, &[cfg.batch_size, cfg.seq_len]).unwrap();
             let labels = input_ids.clone();
 
             // Forward at sampled K.

@@ -595,29 +595,52 @@ fn qwen3_config_from_gguf(gguf: &GgufFile) -> io::Result<Qwen3Config> {
         .and_then(GgufValue::as_str)
         .unwrap_or("")
         .to_string();
-    if !(arch == "qwen3" || arch.starts_with("qwen3")) {
+    // Accept qwen2 + qwen3 under the same loader (Qwen3ForCausalLM struct) —
+    // the two archs share tensor layout (GQA, RoPE, SwiGLU, RMSNorm, `blk.N.*`
+    // names). R1-Distill-Qwen series ships as `qwen2`; a hard qwen3 guard was
+    // the blocker for Oracle teacher-distill loads (LESSONS L91). Prefix-
+    // matching covers future variants (qwen3.5 etc).
+    let arch_ok = arch == "qwen2"
+        || arch.starts_with("qwen2")
+        || arch == "qwen3"
+        || arch.starts_with("qwen3");
+    if !arch_ok {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("not a Qwen3 GGUF — architecture = `{arch}`"),
+            format!("not a Qwen2/Qwen3 GGUF — architecture = `{arch}`"),
         ));
     }
 
-    let hidden_size = m_u32(gguf, "qwen3.embedding_length")? as usize;
-    let intermediate = m_u32(gguf, "qwen3.feed_forward_length")? as usize;
-    let num_layers = m_u32(gguf, "qwen3.block_count")? as usize;
-    let n_heads = m_u32(gguf, "qwen3.attention.head_count")? as usize;
-    let n_kv_heads = m_u32_or(gguf, "qwen3.attention.head_count_kv", n_heads as u32) as usize;
+    // llama.cpp convention is to prefix arch-specific metadata keys with the
+    // architecture name. Look up each field under the file's actual arch
+    // rather than assuming `qwen3.*`.
+    let prefix = if arch.starts_with("qwen2") {
+        "qwen2"
+    } else {
+        "qwen3"
+    };
+    let k_embed = format!("{prefix}.embedding_length");
+    let k_ffn = format!("{prefix}.feed_forward_length");
+    let k_blocks = format!("{prefix}.block_count");
+    let k_heads = format!("{prefix}.attention.head_count");
+    let k_heads_kv = format!("{prefix}.attention.head_count_kv");
+    let k_keylen = format!("{prefix}.attention.key_length");
+    let k_ctx = format!("{prefix}.context_length");
+    let k_rms_eps = format!("{prefix}.attention.layer_norm_rms_epsilon");
+    let k_rope = format!("{prefix}.rope.freq_base");
+
+    let hidden_size = m_u32(gguf, &k_embed)? as usize;
+    let intermediate = m_u32(gguf, &k_ffn)? as usize;
+    let num_layers = m_u32(gguf, &k_blocks)? as usize;
+    let n_heads = m_u32(gguf, &k_heads)? as usize;
+    let n_kv_heads = m_u32_or(gguf, &k_heads_kv, n_heads as u32) as usize;
 
     // Prefer explicit key_length; fall back to hidden / n_heads.
-    let head_dim = m_u32_or(
-        gguf,
-        "qwen3.attention.key_length",
-        (hidden_size / n_heads) as u32,
-    ) as usize;
+    let head_dim = m_u32_or(gguf, &k_keylen, (hidden_size / n_heads) as u32) as usize;
 
-    let context_len = m_u32_or(gguf, "qwen3.context_length", 32_768) as usize;
-    let rms_eps = m_f32_or(gguf, "qwen3.attention.layer_norm_rms_epsilon", 1e-6);
-    let rope_theta = m_f32_or(gguf, "qwen3.rope.freq_base", 1_000_000.0);
+    let context_len = m_u32_or(gguf, &k_ctx, 32_768) as usize;
+    let rms_eps = m_f32_or(gguf, &k_rms_eps, 1e-6);
+    let rope_theta = m_f32_or(gguf, &k_rope, 1_000_000.0);
 
     // Vocab size from the token embedding tensor's dims — dims[1] is the
     // num_embeddings in GGUF's (dim, n_emb) layout.
