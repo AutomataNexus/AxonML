@@ -62,6 +62,7 @@
 
 use axonml_autograd::Variable;
 use axonml_nn::{Embedding, Linear, Module, Parameter};
+// (Linear is imported via the paths below; used through a bias-less `with_bias`.)
 use axonml_tensor::Tensor;
 
 use crate::attention::LayerKVCache;
@@ -417,7 +418,10 @@ impl RDTForCausalLM {
     pub fn new(cfg: &RDTConfig) -> Self {
         Self {
             model: RDT::new(cfg),
-            lm_head: Linear::new(cfg.base.hidden_size, cfg.base.vocab_size),
+            // LM heads are bias-less by convention (LLaMA/Qwen family).
+            // Keeping with_bias=false also keeps the parameter count
+            // predictable for the GGUF exporter manifest.
+            lm_head: Linear::with_bias(cfg.base.hidden_size, cfg.base.vocab_size, false),
         }
     }
 
@@ -518,5 +522,29 @@ mod tests {
     fn total_layer_count_sums_stacks() {
         let cfg = RDTConfig::rdt_small();
         assert_eq!(cfg.total_layer_count(), cfg.n_prelude + cfg.n_core + cfg.n_coda);
+    }
+
+    #[test]
+    fn rdt_exports_to_gguf_and_file_is_valid() {
+        // Round-trip check: fresh rdt-tiny → export_rdt_to_gguf → verify
+        // the file starts with the GGUF magic and has a non-trivial size.
+        // Full nexus-serve load-side round-trip comes with the inference
+        // dispatch work (task #58 step 5).
+        use std::fs;
+        let cfg = RDTConfig::rdt_tiny();
+        let model = RDTForCausalLM::new(&cfg);
+        let tmp = std::env::temp_dir().join("rdt_export_test.gguf");
+        let _ = fs::remove_file(&tmp);
+        crate::gguf_export::export_rdt_to_gguf(&model, &tmp, "rdt-tiny-test", None)
+            .expect("export should succeed");
+
+        let bytes = fs::read(&tmp).expect("read exported file");
+        assert!(bytes.len() > 1024, "exported file unexpectedly small: {} bytes", bytes.len());
+        // GGUF magic = 0x4655_4747 little-endian = "GGUF"
+        assert_eq!(&bytes[0..4], b"GGUF", "missing GGUF magic at start of file");
+        // Version = 3 at offset 4 (u32 LE)
+        let version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        assert_eq!(version, 3, "GGUF version should be 3");
+        let _ = fs::remove_file(&tmp);
     }
 }
