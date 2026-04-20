@@ -269,6 +269,74 @@ each bullet is landable as its own task on top of the v1 module.
 
 ---
 
+## 8a. Production Oracle path — distillation from Oracle-7B
+
+The baseline `train_rdt` binary (landed, task #58) does from-scratch
+next-token training. Good for pipeline validation but insufficient for a
+production Oracle — 18 M tokens of Claude Code traces against an
+rdt-mid (~1.2 B params) from scratch underfits the model capacity.
+
+Production flow uses **knowledge distillation from the already-trained
+Oracle-7B teacher** onto the rdt-mid student. Pieces:
+
+1. **New binary `train_rdt_distill`** (task #61) — a fusion of
+   `train_rdt`'s K-sampling core-iteration loop with
+   `train_draft_distill`'s CE+KL dual-loss head:
+
+   ```text
+   L = α · CE(student_logits_at_K, next_token_labels)
+     + (1 − α) · KL(student_logits_at_K, teacher_logits, T)
+   ```
+
+   Teacher (Oracle-7B) loaded frozen from its GGUF via
+   `load_qwen3_from_gguf`. Student (rdt-mid) sampled at K each batch.
+   Teacher produces logits once per batch (no K dimension since target
+   has fixed depth); student's K-th iteration logits are matched
+   against it. Same α=0.1, T=3 defaults as the non-RDT draft distill
+   trainer.
+
+2. **Colab A100 runbook** — memory budget:
+
+   | Component | bf16 | GB |
+   |---|---|---|
+   | Oracle-7B teacher | fp16 weights | 14 |
+   | rdt-mid student weights | bf16 | 2.4 |
+   | AdamW optimizer state (β1, β2, m, v) | fp32 shadow | 9.6 |
+   | Activations at K=16, seq=1024, bs=4 | bf16 | 5 |
+   | **Total** | | **~31 GB** — fits A100 40 GB with 9 GB headroom |
+
+   Training time: ~4–6 hours for 5 epochs on 18 M tokens. Using 3 K-values
+   per step (mixed micro-batch) instead of single K reduces K-distribution
+   mismatch without tripling wallclock.
+
+3. **Weight export**: run `export_rdt_to_gguf` on the trained student to
+   produce `oracle-rdt-mid-q4km.gguf` (quantized via llama.cpp's
+   `llama-quantize Q4_K_M` after an fp16 export — same as the existing
+   Oracle pipeline).
+
+4. **nexus-serve wiring**: task #60 must land before the production
+   rdt-mid can actually serve. `num_steps` request param routes to the
+   runtime K value; default = `rdt.recurrent.k_default` from GGUF
+   metadata.
+
+5. **Deploy to NexusOracle**: replace `oracle-r1-distill-q4km.gguf` in
+   the `claude_local_base_url` pointer target with the rdt-mid GGUF.
+   The Oracle app's reasoning toggle (task #53, landed) still works;
+   the new model swaps in at the nexus-serve layer.
+
+### Why distillation beats from-scratch for this corpus
+
+- 18 M tokens is ~2 orders of magnitude too small for from-scratch
+  pretraining of a 1.2 B-param model (typical Qwen2.5-1.5B pretraining
+  budget is ~2 T tokens).
+- Oracle-7B already captures the DeepSeek-R1-Distill reasoning style and
+  the tool-use convention from our LoRA fine-tune. Distilling those
+  behaviors transfers capability density per token much more efficiently
+  than ground-truth CE alone.
+- Test-time K at inference then gives us the *additional* compute lever
+  the fixed-depth Oracle-7B doesn't have — that's the Oracle→RDT upgrade
+  value.
+
 ## 9. Ordering / gating
 
 1. ⏳ Oracle-7B v2 Colab run finishes → baseline GGUF at `/opt/AxonML/models/oracle-distill/oracle-r1-distill-q4km.gguf`
