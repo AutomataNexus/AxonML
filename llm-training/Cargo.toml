@@ -10,14 +10,14 @@ rust-version = "1.85"
 [workspace]
 
 [dependencies]
-axonml-core      = { path = "/opt/AxonML/crates/axonml-core" }
-axonml-tensor    = { path = "/opt/AxonML/crates/axonml-tensor" }
-axonml-autograd  = { path = "/opt/AxonML/crates/axonml-autograd" }
-axonml-nn        = { path = "/opt/AxonML/crates/axonml-nn" }
-axonml-optim     = { path = "/opt/AxonML/crates/axonml-optim" }
-axonml-llm       = { path = "/opt/AxonML/crates/axonml-llm" }
-axonml-serialize = { path = "/opt/AxonML/crates/axonml-serialize" }
-axonml           = { path = "/opt/AxonML/crates/axonml" }
+axonml-core      = { path = "../crates/axonml-core" }
+axonml-tensor    = { path = "../crates/axonml-tensor" }
+axonml-autograd  = { path = "../crates/axonml-autograd" }
+axonml-nn        = { path = "../crates/axonml-nn" }
+axonml-optim     = { path = "../crates/axonml-optim" }
+axonml-llm       = { path = "../crates/axonml-llm" }
+axonml-serialize = { path = "../crates/axonml-serialize" }
+axonml           = { path = "../crates/axonml" }
 
 rand = "0.8"
 signal-hook = "0.3"
@@ -110,3 +110,9 @@ path = "src/bin/train_rdt.rs"
 [[bin]]
 name = "eval_rdt"
 path = "src/bin/eval_rdt.rs"
+
+# Oracle-7B teacher → RDT student distillation (task #61). α·CE + (1−α)·KL(T²)
+# with K∈[k_min,k_max] sampled per batch per RDT_DESIGN §8a.
+[[bin]]
+name = "train_rdt_distill"
+path = "src/bin/train_rdt_distill.rs"
