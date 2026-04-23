@@ -239,7 +239,11 @@ impl RDTCore {
     /// Build a fresh core with `n` transformer layers.
     pub fn new(cfg: &Qwen3Config, n: usize, alpha: f32, beta: f32) -> Self {
         let layers = (0..n).map(|_| Qwen3DecoderLayer::new(cfg)).collect();
-        Self { layers, alpha, beta }
+        Self {
+            layers,
+            alpha,
+            beta,
+        }
     }
 
     /// Run one core iteration: compute `Block(h_t + e)`. The caller handles
@@ -345,8 +349,7 @@ impl RDT {
     /// head.
     pub fn forward_ids(&self, input_ids: &Tensor<u32>, k: usize) -> Variable {
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var =
-            Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
+        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
         let embeds = self.embed_tokens.forward(&ids_var);
 
         // e := Prelude(Embed(input))  — frozen across the K iterations.
@@ -470,7 +473,11 @@ mod tests {
 
     #[test]
     fn config_presets_produce_valid_layer_counts() {
-        for cfg in [RDTConfig::rdt_tiny(), RDTConfig::rdt_small(), RDTConfig::rdt_mid()] {
+        for cfg in [
+            RDTConfig::rdt_tiny(),
+            RDTConfig::rdt_small(),
+            RDTConfig::rdt_mid(),
+        ] {
             assert!(cfg.n_prelude >= 1);
             assert!(cfg.n_core >= 1);
             assert!(cfg.n_coda >= 1);
@@ -521,7 +528,10 @@ mod tests {
     #[test]
     fn total_layer_count_sums_stacks() {
         let cfg = RDTConfig::rdt_small();
-        assert_eq!(cfg.total_layer_count(), cfg.n_prelude + cfg.n_core + cfg.n_coda);
+        assert_eq!(
+            cfg.total_layer_count(),
+            cfg.n_prelude + cfg.n_core + cfg.n_coda
+        );
     }
 
     #[test]
@@ -539,7 +549,11 @@ mod tests {
             .expect("export should succeed");
 
         let bytes = fs::read(&tmp).expect("read exported file");
-        assert!(bytes.len() > 1024, "exported file unexpectedly small: {} bytes", bytes.len());
+        assert!(
+            bytes.len() > 1024,
+            "exported file unexpectedly small: {} bytes",
+            bytes.len()
+        );
         // GGUF magic = 0x4655_4747 little-endian = "GGUF"
         assert_eq!(&bytes[0..4], b"GGUF", "missing GGUF magic at start of file");
         // Version = 3 at offset 4 (u32 LE)

@@ -666,7 +666,9 @@ pub fn export_rdt_to_gguf(
                  (check prelude={} core={} coda={} matches RDT::parameters order)",
                 params.len(),
                 expected_names.len(),
-                cfg.n_prelude, cfg.n_core, cfg.n_coda,
+                cfg.n_prelude,
+                cfg.n_core,
+                cfg.n_coda,
             ),
         ));
     }
@@ -719,25 +721,65 @@ pub fn export_rdt_to_gguf(
     meta_count += 4;
 
     // Base transformer hyperparameters.
-    write_meta_u32(&mut meta_buf, "rdt.context_length", cfg.base.max_position_embeddings as u32)?;
-    write_meta_u32(&mut meta_buf, "rdt.embedding_length", cfg.base.hidden_size as u32)?;
-    write_meta_u32(&mut meta_buf, "rdt.feed_forward_length", cfg.base.intermediate_size as u32)?;
-    write_meta_u32(&mut meta_buf, "rdt.attention.head_count", cfg.base.num_attention_heads as u32)?;
-    write_meta_u32(&mut meta_buf, "rdt.attention.head_count_kv", cfg.base.num_key_value_heads as u32)?;
-    write_meta_u32(&mut meta_buf, "rdt.attention.key_length", cfg.base.head_dim as u32)?;
-    write_meta_u32(&mut meta_buf, "rdt.attention.value_length", cfg.base.head_dim as u32)?;
-    write_meta_f32(&mut meta_buf, "rdt.attention.layer_norm_rms_epsilon", cfg.base.rms_norm_eps)?;
+    write_meta_u32(
+        &mut meta_buf,
+        "rdt.context_length",
+        cfg.base.max_position_embeddings as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "rdt.embedding_length",
+        cfg.base.hidden_size as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "rdt.feed_forward_length",
+        cfg.base.intermediate_size as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "rdt.attention.head_count",
+        cfg.base.num_attention_heads as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "rdt.attention.head_count_kv",
+        cfg.base.num_key_value_heads as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "rdt.attention.key_length",
+        cfg.base.head_dim as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "rdt.attention.value_length",
+        cfg.base.head_dim as u32,
+    )?;
+    write_meta_f32(
+        &mut meta_buf,
+        "rdt.attention.layer_norm_rms_epsilon",
+        cfg.base.rms_norm_eps,
+    )?;
     write_meta_f32(&mut meta_buf, "rdt.rope.freq_base", cfg.base.rope_theta)?;
     meta_count += 9;
 
     // RDT-specific layer splits.
-    write_meta_u32(&mut meta_buf, "rdt.prelude.block_count", cfg.n_prelude as u32)?;
+    write_meta_u32(
+        &mut meta_buf,
+        "rdt.prelude.block_count",
+        cfg.n_prelude as u32,
+    )?;
     write_meta_u32(&mut meta_buf, "rdt.core.block_count", cfg.n_core as u32)?;
     write_meta_u32(&mut meta_buf, "rdt.coda.block_count", cfg.n_coda as u32)?;
     meta_count += 3;
 
     // Recurrent update params.
-    write_meta_u32(&mut meta_buf, "rdt.recurrent.k_default", cfg.k_default as u32)?;
+    write_meta_u32(
+        &mut meta_buf,
+        "rdt.recurrent.k_default",
+        cfg.k_default as u32,
+    )?;
     write_meta_u32(&mut meta_buf, "rdt.recurrent.k_min", cfg.k_min as u32)?;
     write_meta_u32(&mut meta_buf, "rdt.recurrent.k_max", cfg.k_max as u32)?;
     write_meta_f32(&mut meta_buf, "rdt.recurrent.alpha", cfg.alpha)?;
