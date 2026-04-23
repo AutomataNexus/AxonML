@@ -378,6 +378,30 @@ struct Shared {
     /// Per-tech disable state, keyed lowercase — mirrors the daemon's
     /// ~/.nexusoracle/tech_overrides.json. Populated by poll_tech_overrides.
     disabled_techs: HashMap<String, String>, // name-lowercase → reason
+    /// Recent agent sessions pulled from `/api/v1/agent/sessions-recent` (newest
+    /// first). Shown in the expandable debug console at the bottom of the
+    /// widget.
+    recent_sessions: Vec<RecentSession>,
+    /// Toggle for the debug console panel.
+    show_console: bool,
+    /// Which session in `recent_sessions` is expanded (index). None = list view.
+    console_expanded_index: Option<usize>,
+    last_sessions_error: Option<String>,
+}
+
+/// Mirrors the daemon's `/api/v1/agent/sessions-recent` JSON shape.
+#[derive(Clone, Default, Deserialize)]
+pub struct RecentSession {
+    #[serde(default)]
+    pub timestamp: String,
+    #[serde(default)]
+    pub equipment: String,
+    #[serde(default)]
+    pub location: String,
+    #[serde(default)]
+    pub user_request: String,
+    #[serde(default)]
+    pub analysis: String,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -418,6 +442,10 @@ impl TechApp {
             last_relay_error: None,
             show_events: false,
             disabled_techs: HashMap::new(),
+            recent_sessions: Vec::new(),
+            show_console: false,
+            console_expanded_index: None,
+            last_sessions_error: None,
         }));
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -461,6 +489,16 @@ impl TechApp {
             loop {
                 refresh_tech_overrides(&s4).await;
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            }
+        });
+
+        // Recent-sessions poller — drives the debug console so Andrew can
+        // see field techs' agent questions + responses in real time.
+        let s5 = state.clone();
+        runtime.spawn(async move {
+            loop {
+                refresh_recent_sessions(&s5).await;
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
             }
         });
 
@@ -609,6 +647,45 @@ fn persist_last_seen(ts: chrono::DateTime<chrono::Utc>) {
 
 /// Poll the daemon for current tech-access disable overrides so the ticker
 /// can render the Disable button in the correct on/off state.
+/// Poll the daemon's `/api/v1/agent/sessions-recent` endpoint and stash the
+/// newest sessions in Shared for the debug console to render.
+async fn refresh_recent_sessions(state: &Arc<Mutex<Shared>>) {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let resp = client
+        .get(format!("{DAEMON_URL}/api/v1/agent/sessions-recent?limit=25"))
+        .header("Authorization", format!("Bearer {OWNER_API_KEY}"))
+        .send()
+        .await;
+    match resp {
+        Ok(r) if r.status().is_success() => match r.json::<Vec<RecentSession>>().await {
+            Ok(list) => {
+                if let Ok(mut s) = state.lock() {
+                    s.recent_sessions = list;
+                    s.last_sessions_error = None;
+                }
+            }
+            Err(e) => {
+                if let Ok(mut s) = state.lock() {
+                    s.last_sessions_error = Some(format!("decode: {e}"));
+                }
+            }
+        },
+        Ok(r) => {
+            if let Ok(mut s) = state.lock() {
+                s.last_sessions_error = Some(format!("HTTP {}", r.status()));
+            }
+        }
+        Err(e) => {
+            if let Ok(mut s) = state.lock() {
+                s.last_sessions_error = Some(e.to_string());
+            }
+        }
+    }
+}
+
 async fn refresh_tech_overrides(state: &Arc<Mutex<Shared>>) {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -1061,6 +1138,11 @@ impl eframe::App for TechApp {
                         .color(TEXT_DIM()),
                 );
             });
+
+            // ── Debug console — collapsible at the bottom ──────────────
+            ui.add_space(4.0);
+            ui.separator();
+            self.draw_debug_console(ui);
             }); // closes outer_frame.show
         });
 
@@ -1070,6 +1152,130 @@ impl eframe::App for TechApp {
 }
 
 impl TechApp {
+    /// Collapsible debug console at the bottom — shows recent techs' agent
+    /// questions + responses pulled from the daemon's
+    /// `/api/v1/agent/sessions-recent` endpoint, so Andrew can shoulder-surf
+    /// field troubleshooting in real time.
+    fn draw_debug_console(&self, ui: &mut egui::Ui) {
+        let (show, sessions, err, expanded_idx) = {
+            let s = self.state.lock().unwrap();
+            (
+                s.show_console,
+                s.recent_sessions.clone(),
+                s.last_sessions_error.clone(),
+                s.console_expanded_index,
+            )
+        };
+
+        ui.horizontal(|ui| {
+            let arrow = if show { "▾" } else { "▸" };
+            let label = format!("{arrow} CONSOLE");
+            let btn = ui.add(
+                egui::Button::new(
+                    egui::RichText::new(label)
+                        .size(9.0)
+                        .color(active_palette().accent),
+                )
+                .frame(false),
+            );
+            if btn.clicked() {
+                if let Ok(mut s) = self.state.lock() {
+                    s.show_console = !s.show_console;
+                }
+            }
+            ui.add_space(4.0);
+            let meta = if let Some(e) = &err {
+                egui::RichText::new(format!("⚠ {e}"))
+                    .size(8.0)
+                    .color(active_palette().alert)
+            } else {
+                egui::RichText::new(format!("{} sessions", sessions.len()))
+                    .size(8.0)
+                    .color(active_palette().text_dim)
+            };
+            ui.label(meta);
+        });
+
+        if !show {
+            return;
+        }
+
+        egui::ScrollArea::vertical()
+            .id_salt("debug-console-scroll")
+            .max_height(240.0)
+            .show(ui, |ui| {
+                if sessions.is_empty() {
+                    ui.label(
+                        egui::RichText::new("no sessions yet — techs' agent requests will appear here")
+                            .size(9.0)
+                            .color(active_palette().text_dim),
+                    );
+                    return;
+                }
+                for (idx, sess) in sessions.iter().enumerate() {
+                    let ts_local = chrono::DateTime::parse_from_rfc3339(&sess.timestamp)
+                        .ok()
+                        .map(|d| d.with_timezone(&chrono::Local).format("%H:%M:%S").to_string())
+                        .unwrap_or_else(|| "--:--:--".to_string());
+                    let header = format!(
+                        "{ts_local}  {}  ({})",
+                        sess.equipment, sess.location
+                    );
+                    let is_expanded = expanded_idx == Some(idx);
+                    let arrow = if is_expanded { "▾" } else { "▸" };
+                    let row = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new(format!("{arrow} {header}"))
+                                .size(9.0)
+                                .color(active_palette().text),
+                        )
+                        .frame(false),
+                    );
+                    if row.clicked() {
+                        if let Ok(mut s) = self.state.lock() {
+                            s.console_expanded_index = if is_expanded { None } else { Some(idx) };
+                        }
+                    }
+                    if !is_expanded {
+                        // One-line preview of the tech's question.
+                        let preview: String = sess
+                            .user_request
+                            .chars()
+                            .take(80)
+                            .collect();
+                        ui.label(
+                            egui::RichText::new(format!("  Q: {preview}"))
+                                .size(8.5)
+                                .color(active_palette().text_dim),
+                        );
+                    } else {
+                        ui.label(
+                            egui::RichText::new("  Q:")
+                                .size(9.0)
+                                .color(active_palette().accent),
+                        );
+                        ui.label(
+                            egui::RichText::new(&sess.user_request)
+                                .size(9.0)
+                                .color(active_palette().text),
+                        );
+                        ui.add_space(2.0);
+                        ui.label(
+                            egui::RichText::new("  A:")
+                                .size(9.0)
+                                .color(active_palette().accent),
+                        );
+                        ui.label(
+                            egui::RichText::new(&sess.analysis)
+                                .size(9.0)
+                                .color(active_palette().text),
+                        );
+                    }
+                    ui.add_space(3.0);
+                }
+            });
+    }
+
     fn draw_tech_row(
         &self,
         ui: &mut egui::Ui,
