@@ -61,12 +61,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seq 512, bs 2.
 - Release build + `--help` smoke PASS.
 
-**Next (Step 3 of 5):** commit + push steps 1-2 under
-`feat(llm-training): train_rdt_distill + qwen2 loader widening
-(task #61)`. Five files: `gguf_loader.rs`, `gguf_export.rs` (drive-by),
-`smoke_load_oracle.rs` (new example), `train_rdt_distill.rs` (new bin),
-plus docs (CHANGELOG, LESSONS, RESOURCES, WORK_STATE). Step 4 is the
-Colab notebook; step 5 is the A100 80GB training kick.
+#### Step 3 of 5 — commit + push ✅ (2026-04-20)
+
+- Committed as `9a6731e feat(llm-training): train_rdt_distill +
+  qwen2-compatible gguf_loader (task #61)` — 6 files, +927/−45:
+  `gguf_loader.rs`, `gguf_export.rs` (drive-by), new
+  `smoke_load_oracle.rs` example, new `train_rdt_distill.rs` binary,
+  `train_rdt.rs` (cargo-fmt whitespace), `CHANGELOG.md`.
+- Pushed to `origin/main` (AutomataNexus/AxonML).
+- `/opt/*.md` cross-project docs (LESSONS, RESOURCES, WORK_STATE) are
+  outside the AxonML git repo and update in place.
+
+#### Step 4 of 5 — Colab notebook ✅ (2026-04-20)
+
+- New `llm-training/notebooks/rdt_distill_oracle_colab.ipynb` (19 cells,
+  nbformat 4.5, validates clean). Flow:
+  (1) A100 80GB sanity check + VRAM assertion;
+  (2) Drive mount + path plumbing — teacher GGUF and `corpus.tokens.bin`
+      pre-uploaded to `/MyDrive/axonml-rdt-distill/`, ckpts write back
+      to the same Drive dir so session recycle loses ≤25 min;
+  (3) rustup install of stable toolchain + PATH patch;
+  (4) `git clone AutomataNexus/AxonML` pinned to step-3 commit `9a6731e`;
+  (5) `cargo build --release --features cuda --bin train_rdt_distill`
+      (~8-12 min cold on A100);
+  (6) kick via `nohup … &` with `--arch mid --seq-len 512 --bs 2
+      --k-min 4 --k-max 12 --alpha 0.1 --temperature 3.0
+      --checkpoint-every-steps 50`; logs to `CKPT_DIR/train.log` on
+      Drive;
+  (7) tail-log cell for status checks (re-runnable);
+  (8) resume-after-recycle cell with `--resume latest` pre-wired;
+  (9) next-steps markdown pointing at GGUF export + nexus-serve task #60
+      + `eval_rdt` K-scaling perplexity benchmark.
+- Unlike `oracle_draft_r1_distill_1_5b_colab.ipynb` (Unsloth/HF/LoRA
+  path producing a GGUF draft), this notebook is a pure Rust AxonML
+  training flow — no HF, no Unsloth, no pip deps beyond the default
+  Colab image + rustup.
+
+**Next (Step 5 of 5):** kick the run on A100 80GB Colab.
+Prereq: upload both `/opt/AxonML/models/oracle-distill/oracle-r1-distill-q4km.gguf`
+(≈4.6 GB) and `/opt/datasets/oracle-lora/corpus.tokens.bin` (87 MB) to
+`/MyDrive/axonml-rdt-distill/` on Drive. Then open the notebook and
+run cells top-to-bottom. Expected walltime for one full pass (21.6 M
+tokens, bs=2 seq=512, ~1.75 M windows) ≈ 8-12 h.
 
 
 

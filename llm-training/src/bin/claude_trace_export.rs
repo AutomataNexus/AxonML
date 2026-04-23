@@ -274,11 +274,7 @@ fn main() -> Result<()> {
 // Session parsing & filtering
 // =============================================================================
 
-fn process_session(
-    path: &Path,
-    args: &Args,
-    stats: &mut Stats,
-) -> Result<Option<String>> {
+fn process_session(path: &Path, args: &Args, stats: &mut Stats) -> Result<Option<String>> {
     let f = File::open(path)?;
     let rdr = BufReader::new(f);
 
@@ -288,9 +284,7 @@ fn process_session(
     // events ARE the main conversation. Only filter sidechain events out
     // of top-level session files, where they're duplicates of the subagent
     // file's content.
-    let is_subagent_file = path
-        .components()
-        .any(|c| c.as_os_str() == "subagents");
+    let is_subagent_file = path.components().any(|c| c.as_os_str() == "subagents");
 
     // Walk the file line-by-line and collapse consecutive same-role events
     // into single semantic turns. Claude Code emits one JSON event per
@@ -387,7 +381,9 @@ fn extract_blocks(msg: &Value, max_tool_result_chars: usize) -> Vec<Block> {
         }
         Some(Value::Array(items)) => {
             for item in items {
-                let Some(obj) = item.as_object() else { continue };
+                let Some(obj) = item.as_object() else {
+                    continue;
+                };
                 match obj.get("type").and_then(|v| v.as_str()) {
                     Some("text") => {
                         if let Some(t) = obj.get("text").and_then(|v| v.as_str()) {
@@ -416,10 +412,8 @@ fn extract_blocks(msg: &Value, max_tool_result_chars: usize) -> Vec<Block> {
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let text = flatten_result_content(
-                            obj.get("content"),
-                            max_tool_result_chars,
-                        );
+                        let text =
+                            flatten_result_content(obj.get("content"), max_tool_result_chars);
                         out.push(Block::ToolResult {
                             tool_use_id: id,
                             content: text,
@@ -470,11 +464,12 @@ fn flatten_result_content(content: Option<&Value>, max_chars: usize) -> String {
 }
 
 fn is_interrupted(turns: &[Turn]) -> bool {
-    let Some(last) = turns.last() else { return false };
+    let Some(last) = turns.last() else {
+        return false;
+    };
     last.blocks.iter().any(|b| match b {
         Block::Text(t) => {
-            t.contains("[Request interrupted by user]")
-                || t.contains("Request interrupted")
+            t.contains("[Request interrupted by user]") || t.contains("Request interrupted")
         }
         _ => false,
     })
@@ -546,7 +541,10 @@ fn render_user_blocks(blocks: &[Block], out: &mut String) {
         first = false;
         match b {
             Block::Text(t) => out.push_str(t),
-            Block::ToolResult { tool_use_id, content } => {
+            Block::ToolResult {
+                tool_use_id,
+                content,
+            } => {
                 out.push_str("<tool_result id=\"");
                 out.push_str(tool_use_id);
                 out.push_str("\">\n");
@@ -579,9 +577,7 @@ fn render_assistant_blocks(blocks: &[Block], out: &mut String) {
             Block::Text(t) => out.push_str(t),
             Block::ToolUse { name, input } => {
                 out.push_str("<tool_use>");
-                out.push_str(
-                    &serde_json::json!({ "name": name, "input": input }).to_string(),
-                );
+                out.push_str(&serde_json::json!({ "name": name, "input": input }).to_string());
                 out.push_str("</tool_use>");
             }
             // tool_result doesn't belong in an assistant turn; skip.
@@ -595,8 +591,7 @@ fn render_assistant_blocks(blocks: &[Block], out: &mut String) {
 // =============================================================================
 
 fn write_jsonl(path: &Path, samples: &[String]) -> Result<usize> {
-    let f = File::create(path)
-        .with_context(|| format!("creating {}", path.display()))?;
+    let f = File::create(path).with_context(|| format!("creating {}", path.display()))?;
     let mut w = BufWriter::new(f);
     let mut total = 0usize;
     for s in samples {
