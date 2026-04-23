@@ -217,9 +217,9 @@ fn try_graph_capture_step(
     // CAPTURE_INVALIDATED which is useless for debugging).
     use cudarc::driver::sys::CUstreamCaptureStatus;
     let check = |tag: &str| {
-        let st = stream.capture_status().unwrap_or(
-            CUstreamCaptureStatus::CU_STREAM_CAPTURE_STATUS_INVALIDATED,
-        );
+        let st = stream
+            .capture_status()
+            .unwrap_or(CUstreamCaptureStatus::CU_STREAM_CAPTURE_STATUS_INVALIDATED);
         if st != CUstreamCaptureStatus::CU_STREAM_CAPTURE_STATUS_ACTIVE {
             println!("  [capture dead after: {tag}] status={st:?}");
             true
@@ -299,7 +299,8 @@ fn try_graph_capture_step(
     );
     // Ensure any in-flight capture is ended even if we early-returned so
     // the next eager op doesn't see stale capture state.
-    let _ = stream.end_capture(CUgraphInstantiate_flags::CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH);
+    let _ = stream
+        .end_capture(CUgraphInstantiate_flags::CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH);
     let result = result.map(|o| o.expect("graph capture short-circuited"));
 
     match result {

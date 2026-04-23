@@ -48,8 +48,8 @@ use axonml_llm::{RDTConfig, RDTForCausalLM};
 use axonml_tensor::Tensor;
 
 use llm_training::{
-    ResumeMode, TextDataset, find_checkpoint, format_count,
-    load_model_from_checkpoint, shifted_cross_entropy,
+    ResumeMode, TextDataset, find_checkpoint, format_count, load_model_from_checkpoint,
+    shifted_cross_entropy,
 };
 
 // =============================================================================
@@ -95,12 +95,30 @@ impl Args {
                 })
             };
             match arg.as_str() {
-                "--arch" => { a.arch = next(i); i += 2; }
-                "--checkpoint" => { a.checkpoint = Some(PathBuf::from(next(i))); i += 2; }
-                "--checkpoint-dir" => { a.checkpoint_dir = Some(PathBuf::from(next(i))); i += 2; }
-                "--tokens-bin" => { a.tokens_bin = PathBuf::from(next(i)); i += 2; }
-                "--seq-len" => { a.seq_len = next(i).parse().unwrap(); i += 2; }
-                "--val-windows" | "-n" => { a.val_windows = next(i).parse().unwrap(); i += 2; }
+                "--arch" => {
+                    a.arch = next(i);
+                    i += 2;
+                }
+                "--checkpoint" => {
+                    a.checkpoint = Some(PathBuf::from(next(i)));
+                    i += 2;
+                }
+                "--checkpoint-dir" => {
+                    a.checkpoint_dir = Some(PathBuf::from(next(i)));
+                    i += 2;
+                }
+                "--tokens-bin" => {
+                    a.tokens_bin = PathBuf::from(next(i));
+                    i += 2;
+                }
+                "--seq-len" => {
+                    a.seq_len = next(i).parse().unwrap();
+                    i += 2;
+                }
+                "--val-windows" | "-n" => {
+                    a.val_windows = next(i).parse().unwrap();
+                    i += 2;
+                }
                 "--k" => {
                     a.k_values = next(i)
                         .split(',')
@@ -108,7 +126,10 @@ impl Args {
                         .collect();
                     i += 2;
                 }
-                "--seed" => { a.seed = next(i).parse().unwrap(); i += 2; }
+                "--seed" => {
+                    a.seed = next(i).parse().unwrap();
+                    i += 2;
+                }
                 _ => {
                     eprintln!("unknown arg: {arg}");
                     print_help();
@@ -152,11 +173,10 @@ fn main() {
         path.clone()
     } else {
         let dir = args.checkpoint_dir.as_ref().unwrap();
-        find_checkpoint(dir, &ResumeMode::Latest)
-            .unwrap_or_else(|| {
-                eprintln!("no checkpoint in {}", dir.display());
-                std::process::exit(1);
-            })
+        find_checkpoint(dir, &ResumeMode::Latest).unwrap_or_else(|| {
+            eprintln!("no checkpoint in {}", dir.display());
+            std::process::exit(1);
+        })
     };
     println!("checkpoint: {}", ckpt.display());
 
@@ -165,12 +185,18 @@ fn main() {
         "tiny" => RDTConfig::rdt_tiny(),
         "small" => RDTConfig::rdt_small(),
         "mid" => RDTConfig::rdt_mid(),
-        other => { eprintln!("unknown --arch '{other}'"); std::process::exit(1); }
+        other => {
+            eprintln!("unknown --arch '{other}'");
+            std::process::exit(1);
+        }
     };
 
     // Dataset — vocab inferred from max token ID, same override as train_rdt.
-    let dataset = TextDataset::from_tokens_bin(&args.tokens_bin, args.seq_len)
-        .unwrap_or_else(|e| { eprintln!("load tokens bin: {e}"); std::process::exit(1); });
+    let dataset =
+        TextDataset::from_tokens_bin(&args.tokens_bin, args.seq_len).unwrap_or_else(|e| {
+            eprintln!("load tokens bin: {e}");
+            std::process::exit(1);
+        });
     let max_id = dataset.tokens().iter().copied().max().unwrap_or(0) as usize;
     let vocab_size = max_id + 1;
 
@@ -179,17 +205,26 @@ fn main() {
 
     println!(
         "arch={}  hidden={}  vocab={}  prelude/core/coda = {}/{}/{}",
-        args.arch, rdt_cfg.base.hidden_size, rdt_cfg.base.vocab_size,
-        rdt_cfg.n_prelude, rdt_cfg.n_core, rdt_cfg.n_coda
+        args.arch,
+        rdt_cfg.base.hidden_size,
+        rdt_cfg.base.vocab_size,
+        rdt_cfg.n_prelude,
+        rdt_cfg.n_core,
+        rdt_cfg.n_coda
     );
 
     let mut model = RDTForCausalLM::new(&rdt_cfg);
-    let n_params: usize =
-        model.parameters().iter().map(|p| p.data().shape().iter().product::<usize>()).sum();
+    let n_params: usize = model
+        .parameters()
+        .iter()
+        .map(|p| p.data().shape().iter().product::<usize>())
+        .sum();
     println!(
         "params: {} ({:.2}M)   val windows: {}   seq_len: {}",
-        format_count(n_params), n_params as f64 / 1e6,
-        args.val_windows, args.seq_len
+        format_count(n_params),
+        n_params as f64 / 1e6,
+        args.val_windows,
+        args.seq_len
     );
 
     // Load checkpoint into model.
@@ -221,7 +256,10 @@ fn main() {
         .collect();
 
     println!();
-    println!("{:<6}{:>12}{:>12}{:>10}{:>10}", "K", "CE (nats)", "ppl", "seq/s", "tok/s");
+    println!(
+        "{:<6}{:>12}{:>12}{:>10}{:>10}",
+        "K", "CE (nats)", "ppl", "seq/s", "tok/s"
+    );
     println!("{}", "-".repeat(50));
 
     for &k in &args.k_values {
@@ -249,6 +287,10 @@ fn main() {
     println!();
     println!("eval complete. Interpretation:");
     println!("- CE should decrease monotonically with K (more compute → better predictions)");
-    println!("- Plateau past some K = diminishing returns; the model has 'converged' at that depth");
-    println!("- If CE INCREASES past some K = overthinking (v1 has no ACT; v3's ACT halting fixes this)");
+    println!(
+        "- Plateau past some K = diminishing returns; the model has 'converged' at that depth"
+    );
+    println!(
+        "- If CE INCREASES past some K = overthinking (v1 has no ACT; v3's ACT halting fixes this)"
+    );
 }
