@@ -7,6 +7,186 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-04-25
+
+### Personal-model deployment chain — Trident-Coder Path 1 fully operational
+
+End-to-end pipeline for a from-scratch 1.58-bit ternary personal model on
+the user's own corpus, all on commodity hardware. Six steps now wired:
+personal corpus → `train_trident_code` → `.axonml` checkpoint →
+`export_trident_gguf` → BitNet b1.58 GGUF → `nexus-serve` → token
+round-trip. Verified locally on a 5070 Ti Laptop at the new
+`trident_laptop` (~37 M params) variant.
+
+#### PrismML Q1_0 1-bit kernel (Bonsai-8B family) — `ccb0d30` … `5575874`
+
+- New `axonml-quant::q1_0` module: `Q1_0Block { d: f16, qs: [u8; 16] }`,
+  rayon-parallel dequant, reference CPU matmul, 6 unit tests
+  covering pack/unpack roundtrip, dequant correctness, parallel agreement,
+  matmul vs hand-computed dot, byte-size arithmetic, misalignment rejection.
+- New `axonml-core` CUDA kernels:
+  - `q1_0_matmul.cu`        — production v2: 2-warp-per-row gemv with
+                              float4 activation reads + nibble-extracted
+                              signs (nibble per lane covers 4 contiguous
+                              elements). 1.44× over the v1 sign-expand.
+  - `q1_0_matmul_dp4a.cu`   — int8 sign-expand + `__dp4a` against Q8_0
+                              activations (online quantize). Shelved at
+                              m=1 — the extra launch + scratch alloc
+                              negates the inner-loop saving on
+                              launch-overhead-bound decode.
+  - `q1_0_matmul_fused.cu`  — fused single-launch DP4A with smem-resident
+                              quantized acts. Also shelved (smem
+                              occupancy + `__syncthreads` fence regress
+                              the v2 baseline on consumer GPUs).
+- `nexus-serve` registers `GgmlType::Q1_0 = 41` + `dequantize_q1_0` +
+  GPU dispatch (htod_copy + GEMV/GEMM). Eager-load + lazy-load
+  whitelists both updated so a Q1_0 GGUF stays packed in RAM at
+  3.5 GB instead of decompressing to f32 (would have been 32 GB).
+- `Tensor::q1_0_gemv_cuda` / `q1_0_gemm_cuda` / DP4A / fused-DP4A
+  wrappers in `axonml-tensor`.
+- Bonsai-8B Q1_0 decode bench, RTX 5070 Ti Laptop, greedy temp=0,
+  128-tok decode after warmup, 5 runs:
+    v1: 33.83 / 33.47 / 39.11 / 36.44 / 38.64 → median 36.4 tok/s
+    v2: 50.04 / 52.22 / 55.82 / 52.46 / 56.34 → median 52.5 tok/s
+  Bonsai-8B now lands second on the model scoreboard, behind only
+  Qwen3-0.6B (105 t/s).
+
+#### GPU TernaryLinear (axonml-nn) — `aabaf67` … `22548b4`
+
+- `TridentAttention::repeat_kv` now dispatches through
+  `Tensor::repeat_kv` (the `repeat_kv_f32` PTX in `transformer_ops.ptx`)
+  instead of round-tripping CPU on every layer. Autograd preserved
+  via existing `RepeatKVBackward`.
+- `axonml-nn::layers::ternary::TernaryLinear`:
+  - `ternary_matmul` rayon-parallel via flat `par_iter_mut` over
+    `(batch × out_features)` work units.
+  - `TernaryLinearBackward::apply` rayon-parallel over each of the
+    three gradient streams (grad_input, grad_weight, grad_bias).
+  - `forward_training` GPU fast path: when both input and shadow
+    live on Cuda(0), runs the new ternary CUDA kernels.
+  - `Backward::apply` GPU fast path: ternary grad_input + cuBLAS
+    grad_weight + ternary grad_bias on device, no host roundtrip.
+- New `axonml-core` kernels:
+  - `ternary_matmul.cu`     — gemv/gemm + grad_input + grad_bias
+                              for raw-i8 ternary × f32, sign-aware
+                              add/sub on per-element branches.
+  - `ternary_quantize.cu`   — abssum reduce + threshold quantize on
+                              device. Eliminates the per-step 4 GB
+                              GPU→CPU `to_vec()` of the shadow
+                              weight that would gate 1B at scale.
+- `axonml-optim::Adam` CPU step is now rayon-parallel
+  (separate AMSGrad + standard branches because the chained `zip`
+  count differs).
+- Trident smoke step time, 30 M model, bs=8 seq=64, 24-core CPU:
+    pre-session  : 13.5 s/step
+    + parallel forward    : 8.2 s/step  (1.6×)
+    + parallel backward   : 2.6 s/step  (5.2× cumulative)
+    + parallel Adam       : 2.6 s/step  (no measurable Δ)
+- All 12/12 `axonml-nn::ternary` + 11/11 `axonml-llm::trident` tests
+  pass after every step of the chain.
+
+#### Trident → BitNet b1.58 GGUF export pipeline — `f01df7a` … `4636616`
+
+- New `axonml_llm::gguf_export::export_trident_to_gguf(model, output,
+  name, tokenizer_source)` writes a GGUF nexus-serve loads via the
+  existing I2_S dispatch. Walks `TridentModel::parameters()` in the
+  model's emit order (token_embd → per-block (attn_norm, qkvo
+  [+sub_norm], mlp_norm, up [+gate]/down [+sub_norm]) →
+  output_norm → output) with per-tensor dtype routing:
+    norms (RMSNorm)        → F32
+    embeddings + LM head   → F16
+    Ternary linears        → I2_S (ggml dtype 36)
+- I2_S pack: per-tensor absmean scale, 128-elem blocks of 32 bytes
+  each in BitNet group-strided 2-bit codes
+  (`temp = q << (6-2*g)`, encoding `0→-1, 1→0, 2→+1`), trailing
+  tensor-wide f32 scale that nexus-serve reads from
+  `offset + total_bytes`. Identical layout to
+  `microsoft/bitnet-b1.58-2B-4T-gguf`.
+- `tokenizer_source` auto-detects by extension:
+    `.json` → new `read_trident_bpe_tokenizer` parses HF
+    tokenizers schema and emits a clean `tokenizer.ggml.*`
+    block (model="gpt2", pre="default", tokens, merges,
+    bos/eos/pad).
+    `.gguf` → existing verbatim passthrough.
+- New `write_meta_array_of_strings` helper (VTYPE_ARRAY of
+  VTYPE_STRING) — fills the gap that previously caused
+  "Unknown GGUF value type 21" on tokenizer passthroughs from
+  newer reference GGUFs.
+- New `llm-training/src/bin/export_trident_gguf` CLI with
+  `--config smoke|laptop|1b|3b`, `--checkpoint`, `--out`,
+  `--tokenizer`, `--name`, `--vocab-size` flags.
+- End-to-end verified: laptop checkpoint → 50.85 MB GGUF →
+  nexus-serve loads as `bitnet-b1.58`, hidden=384, layers=8,
+  heads=6/2, vocab=32 000, ctx=512, "Tokenizer: GGUF BPE
+  (32 000 tokens)", `/v1/completions` returns text.
+
+#### `TridentConfig::trident_laptop` — `96957c3`, resized in `1fd078e`
+
+- New laptop-trainable Trident variant that fits 12 GB consumer GPUs
+  end-to-end (autograd + cuBLAS scratch + Adam moments combined).
+- Final shape (after the bs=2 OOM resize):
+    d_model         384
+    intermediate    1024
+    layers          8
+    heads           6 / 2 KV (GQA 3:1, head_dim=64, kv_hidden=128)
+    max_seq_len     512
+    RoPE θ=500 000, ReLU²-gated FFN, SubLN — same architecture
+    switches as `trident_1b` / `trident_3b`, just smaller.
+  Total params ≈ 37 M. Empirically trains at ~8 s/step on a
+  5070 Ti Laptop at bs=2 seq=256 with no OOM.
+- Wired into both binaries (`train_trident_code --config laptop`
+  and `export_trident_gguf --config laptop`) with appropriate
+  defaults (50 k steps, 500-step rotating ckpts, bs=2 seq=256).
+
+#### Colab A100 kit for the 1B run — `38551c5`
+
+- New `llm-training/notebooks/trident_personal_colab/`:
+    `go.sh` — six-phase idempotent entry script. Re-runs after
+    Colab VM recycle skip rustup / clone / sm_80 PTX regen
+    / cargo build / dataset copy. Knobs as env vars
+    (`COMMIT`, `TRIDENT_CFG`, `TRIDENT_STEPS`, `TRIDENT_SEQ`,
+    `TRIDENT_BS`, `TRIDENT_LR`, …).
+    `README.md` — Drive staging instructions, Colab one-liner
+    cell, knob table, `train_ctl` ops, post-training export
+    recipe, hyperparam rationale.
+- Mirrors the RDT distill 2026-04-23 go.sh shape; LESSONS
+  L112 (Cargo.toml relative paths), L113 (standalone workspace
+  target/), L114 (sm_80 PTX regen for A100), L115 (FUSE-vs-NVMe)
+  baked in.
+
+### Security — `c4f1e84`
+
+All 34 open Dependabot advisories cleared. 7 unique CVEs collapsed
+to a single commit by bumping transitive dep versions inside the
+existing minor-version constraints (no `Cargo.toml` changes needed):
+
+  openssl 0.10.75/76 → 0.10.78  (5 CVEs × 5 lockfiles = 25 alerts):
+    GHSA-pqf5-4pqq-29f5  Deriver::derive overflow OpenSSL 1.1.1 (high)
+    GHSA-hppc-g8h3-xhp3  PSK/cookie callback length leaks memory (high)
+    GHSA-ghm9-cr32-g9qj  MdCtxRef::digest_final past caller buffer (high)
+    GHSA-8c75-8mhr-p7r9  AES key wrap incorrect bounds assertion (high)
+    GHSA-xmgf-hq76-4vx2  PEM password callback OOB read (low)
+  rustls-webpki 0.103.12 → 0.103.13  (5 alerts):
+    GHSA-82j2-j2ch-gfr8  DoS via panic on malformed CRL BIT STRING (high)
+  rand 0.8.5 → 0.8.6  (4 alerts; nexus-agent has no rand 0.8):
+    GHSA-cq8v-f236-94qc  Unsound with rand::rng() under custom logger (low)
+
+GitHub Dependabot API confirms 0 open alerts post-push.
+
+### Personal corpus + tokenizer — `infrastructure`
+
+- `pretokenize_personal.py` → 25.58 M-token `personal-trident.bin`
+  (97.6 MB, trident-coder-bpe pre-tokenized) at
+  `/opt/datasets/personal-trident.bin`. Combines Oracle-LoRA
+  Claude Code traces (24.16 M tokens) + project-context corpus
+  (1.42 M). Tooling lives at `/home/devops/personal-tools/`
+  (NOT checked in — private workflow data).
+- Trident-coder-bpe tokenizer at
+  `/opt/AxonML/tokenizers/trident-coder-bpe/tokenizer.json` (32 k
+  vocab byte-level BPE, 31 736 merges, special tokens at IDs 0-7).
+
+## [Oracle → RDT distillation — earlier work, task #61]
+
 ### Oracle → RDT distillation — enablement work (task #61)
 
 #### Step 1 of 5 — widen gguf_loader arch guard ✅ (2026-04-20)
