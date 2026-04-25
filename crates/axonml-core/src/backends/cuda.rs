@@ -1999,6 +1999,51 @@ impl CudaBackend {
         }
     }
 
+    /// Q1_0 fused single-launch DP4A GEMV.
+    ///
+    /// Caller passes f32 activations; the kernel quantizes them into
+    /// shared memory then runs the dp4a matmul. Same launch shape as
+    /// `q1_0_gemv_dp4a_f32` (4 rows per CTA, 2 warps per row), with
+    /// dynamic smem = `k + (k/32)*2 + rows_per_cta * 2 * 4` bytes.
+    pub fn q1_0_gemv_fused_dp4a_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        n: usize,
+        k: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(k % 128 == 0, "Q1_0 fused DP4A GEMV requires k % 128 == 0");
+        let func = self
+            .kernels
+            .get("q1_0_gemv_fused_dp4a_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q1_0_gemv_fused_dp4a_f32".to_string()))?;
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((n as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        // smem layout: k bytes int8 acts + (k/32)*2 bytes fp16 scales
+        //            + rows_per_cta * 2 * 4 bytes partials
+        let smem_bytes = (k as u32) + ((k as u32) / 32) * 2 + ROWS_PER_CTA * 2 * 4;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: smem_bytes,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(n as u32))
+                .arg(&(k as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// PrismML Q1_0 GEMM (m > 1 prefill). Naive one-thread-per-output;
     /// same shape as `i2s_gemm_f32`.
     pub fn q1_0_gemm_f32(
