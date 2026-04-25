@@ -2120,9 +2120,9 @@ impl CudaBackend {
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
         }
 
-        // Pull the single scalar back to host. Sync via memcpy_dtoh which
-        // is implicitly stream-ordered.
-        let sum_host: Vec<f32> = self.stream.memcpy_dtov(&sum_buf).map_err(CudaError::from)?;
+        // Pull the single scalar back to host. `clone_dtoh` is implicitly
+        // stream-ordered (replaces the deprecated `memcpy_dtov`).
+        let sum_host: Vec<f32> = self.stream.clone_dtoh(&sum_buf).map_err(CudaError::from)?;
         let abs_mean = sum_host[0] / (n as f32);
         let scale = abs_mean.max(1e-8);
 

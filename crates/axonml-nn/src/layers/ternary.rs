@@ -422,7 +422,7 @@ impl TernaryLinear {
                         .expect("CUDA backend not available");
                     let raw_u8: Vec<u8> = cuda
                         .stream()
-                        .memcpy_dtov(&ternary_gpu)
+                        .clone_dtoh(&ternary_gpu)
                         .expect("dtoh ternary buffer failed");
                     // Reinterpret u8 → i8 (same bit pattern).
                     raw_u8.into_iter().map(|b| b as i8).collect()

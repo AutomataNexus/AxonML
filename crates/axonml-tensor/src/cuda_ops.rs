@@ -1269,6 +1269,17 @@ impl Tensor<f32> {
         })
     }
 
+    /// Raw-i8 ternary matmul on GPU — host weights uploaded per call.
+    ///
+    /// `self` is `[m, k]` f32 GPU activation; `w_i8` is host-side
+    /// `&[i8]` of length `n * k` (axonml-nn TernaryLinear's
+    /// shadow-quantize output). `scale` is the tensor-wide absmean.
+    /// Picks GEMV (m=1) or GEMM (m>1) based on `self`'s leading axis.
+    /// Returns `[m, n]` on GPU.
+    ///
+    /// Per-call htod_copy of n*k bytes — cheap vs the matmul cost at
+    /// realistic shapes; for the keep-buffer-on-GPU path use
+    /// `ternary_matmul_cuda_buf` paired with `quantize_to_ternary_cuda`.
     pub fn ternary_matmul_cuda(&self, w_i8: &[i8], scale: f32, n: usize, k: usize) -> Result<Self> {
         assert!(
             self.device().is_gpu(),

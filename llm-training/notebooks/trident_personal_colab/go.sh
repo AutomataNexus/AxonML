@@ -60,8 +60,26 @@ if [ ! -d "$LOCAL_REPO/.git" ]; then
 fi
 cd "$LOCAL_REPO"
 git fetch origin --depth 200
-git checkout "$COMMIT"
-echo "[go.sh] Repo at $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
+PRE_HEAD="$(git rev-parse HEAD)"
+if [ "$COMMIT" = "HEAD" ]; then
+  # Default: always fast-forward to origin/main so re-runs pick up
+  # latest pushed fixes. Reset is safe because PTX files (the only
+  # things go.sh modifies in-tree) are regenerated below from the
+  # source .cu files.
+  git checkout main 2>/dev/null || true
+  git reset --hard origin/main
+else
+  git checkout "$COMMIT"
+fi
+POST_HEAD="$(git rev-parse HEAD)"
+if [ "$PRE_HEAD" != "$POST_HEAD" ]; then
+  echo "[go.sh] Repo updated $PRE_HEAD..$POST_HEAD — clearing PTX sentinel + stale binaries."
+  rm -f "$LOCAL_REPO/.sm80_ptx_done"
+  rm -f "$LOCAL_REPO/llm-training/target/release/train_trident_code"
+  rm -f "$LOCAL_REPO/llm-training/target/release/export_trident_gguf"
+  rm -f "$LOCAL_REPO/llm-training/target/release/train_ctl"
+fi
+echo "[go.sh] Repo at $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'detached')"
 
 # ---------------------------------------------------------------------------
 # 3. Regenerate sm_80 PTX (LESSONS L114)
