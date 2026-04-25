@@ -162,9 +162,11 @@ pub struct TernaryLinear {
     out_features: usize,
     /// Whether to use packed inference mode.
     inference_mode: bool,
-    /// Per-process instance ID. Assigned at construction, used by the
-    /// one-shot CPU/GPU forward diagnostic to identify *which* layer
-    /// is keeping its shadow on CPU when the rest moved to GPU.
+    /// Per-process instance ID. Assigned at construction, read by the
+    /// one-shot CPU/GPU forward diagnostic gated behind the
+    /// `cuda` feature + `TRIDENT_TERNARY_TRACE=1`. Allowed under
+    /// dead_code because non-CUDA builds intentionally never read it.
+    #[allow(dead_code)]
     instance_id: usize,
 }
 
