@@ -185,7 +185,11 @@ fn default_seq_len(variant: ModelVariant) -> usize {
     match variant {
         ModelVariant::Smoke => 64,
         ModelVariant::Laptop => 256,
-        ModelVariant::OneB | ModelVariant::ThreeB => 4096,
+        // 1B/3B: AxonML autograd retains every intermediate, so peak
+        // activation memory at seq=4096 × bs=4 = ~100 GB even on A100
+        // 80 GB. Default to 2048 / bs=1 for safety; users with larger
+        // VRAM can override via TRIDENT_SEQ / TRIDENT_BS in go.sh.
+        ModelVariant::OneB | ModelVariant::ThreeB => 2048,
     }
 }
 
@@ -193,8 +197,7 @@ fn default_batch_size(variant: ModelVariant) -> usize {
     match variant {
         ModelVariant::Smoke => 8,
         ModelVariant::Laptop => 2,
-        ModelVariant::OneB => 4,
-        ModelVariant::ThreeB => 2,
+        ModelVariant::OneB | ModelVariant::ThreeB => 1,
     }
 }
 
@@ -363,8 +366,11 @@ Options:
                        If omitted, smoke mode tokenizes shakespeare.txt
                        on the fly and caches at /tmp/shakespeare.trident-bpe.bin.
   --out PATH           Checkpoint directory (default: .../checkpoints/trident-{{variant}})
-  --seq-len N          Context window (default: 64 smoke, 1024 laptop, 4096 1b/3b)
-  --batch-size N       Micro-batch size (default: 8 smoke, 2 laptop, 4 1b, 2 3b)
+  --seq-len N          Context window (default: 64 smoke, 256 laptop, 2048 1b/3b)
+  --batch-size N       Micro-batch size (default: 8 smoke, 2 laptop, 1 1b/3b)
+                       NB: 1b/3b at default fits A100 80 GB. seq=4096 bs=4
+                       OOMs because AxonML autograd retains every
+                       intermediate — bump only if you've benched headroom.
   --lr FLOAT           Peak learning rate (default: 3e-4)
   --steps N            Total opt steps (default: 1000 smoke, 100000 1b/3b)
   --warmup-steps N     Linear warmup steps (default: 100)

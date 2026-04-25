@@ -121,8 +121,11 @@ fi
 # ---------------------------------------------------------------------------
 CFG="${TRIDENT_CFG:-1b}"        # smoke | laptop | 1b | 3b
 STEPS="${TRIDENT_STEPS:-100000}"
-SEQ="${TRIDENT_SEQ:-4096}"
-BS="${TRIDENT_BS:-4}"
+# A100 80 GB-safe defaults. AxonML autograd retains every intermediate,
+# so bs=4 seq=4096 OOMs even at 1.19 B params. Larger VRAM (H100, A100
+# 80 GB pair, etc.) can bump these — but bench memory headroom first.
+SEQ="${TRIDENT_SEQ:-2048}"
+BS="${TRIDENT_BS:-1}"
 LR="${TRIDENT_LR:-3e-4}"
 WARMUP="${TRIDENT_WARMUP:-1000}"
 CKPT_EVERY="${TRIDENT_CKPT_EVERY:-1000}"
