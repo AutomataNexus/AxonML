@@ -8,26 +8,27 @@
 //
 // Decode per weight: w = bit ? d : -d
 //
-// Kernel: two warps per output row (matches i2s_matmul.cu / Q5_0 / Q8_0).
-// Inner work: each lane handles 4 sign bits at strides of 32 within the
-// block. Bit `b` lives at qs[b/8] bit `b%8`. For lane `l` and stride-set
-// {l, l+32, l+64, l+96}: all four bits sit at the SAME bit position `l%8`
-// in four different bytes (l/8, l/8+4, l/8+8, l/8+12). 8 lanes share each
-// byte read → L1 dedupes cleanly. Activation reads at lane,lane+32/64/96
-// are fully coalesced f32.
+// v2 layout (2026-04-24 fine-tune): lane-l processes 4 contiguous elements
+// `[l*4 .. l*4+3]` per Q1_0 block. Activation reads collapse to ONE 16-byte
+// `float4` load per lane per block (vs four separate f32 loads in v1). Sign
+// bits for those 4 contiguous elements live in nibble (l*4)/8 = l/2 of the
+// `qs` byte at intra-byte offset (l*4)%8 ∈ {0, 4} — i.e. low or high nibble
+// of byte qs[l/2]. Even lanes take the low nibble, odd lanes the high.
+// Halving the global-load count is the main bandwidth win on the lane side;
+// the sign-extraction math is one byte load + four predicated selects.
 //
 // Bandwidth analysis for single-query decode (m=1) on Bonsai-8B (k=4096):
-//   Per row: (k/128)=32 blocks × 18 bytes = 576 bytes
-//   Q1_0 is 1.8× smaller than I2_S (640 B/row at the same k=2560 scale)
-//   and 4.0× smaller than Q4_K (~2304 B/row at k=4096).
-//   Memory-bandwidth-limited decode should outrun every other quant on
-//   weight-bandwidth alone.
+//   Per row: (k/128)=32 blocks × 18 bytes = 576 bytes weight
+//   Activations are read once per CTA (not per row) — amortized to ~free
+//   on the n=4096 axis. Q1_0 is 1.8× narrower than I2_S and 4× narrower
+//   than Q4_K, so this kernel sits squarely on the DRAM ceiling once
+//   launch overhead is amortized.
 //
-// Compile: nvcc -ptx -arch=sm_80 --use_fast_math q1_0_matmul.cu -o q1_0_matmul.ptx
+// Compile: nvcc -ptx -arch=sm_89 --use_fast_math q1_0_matmul.cu -o q1_0_matmul.ptx
 
 #include <cuda_fp16.h>
 
-#define Q1_0_BLOCK_SIZE   128u
+#define Q1_0_BLOCK_SIZE      128u
 #define Q1_0_BYTES_PER_BLOCK 18u
 
 extern "C" __global__ void q1_0_gemv_f32(
@@ -50,15 +51,18 @@ extern "C" __global__ void q1_0_gemv_f32(
     const unsigned int n_blocks  = k / Q1_0_BLOCK_SIZE;
     const unsigned int row_bytes = n_blocks * Q1_0_BYTES_PER_BLOCK;
 
+    // Lane→nibble mapping. Lane l covers 4 contiguous elements [l*4..l*4+3].
+    // Those 4 sign bits sit in qs[byte_idx] at low (lo_nibble=true) or high
+    // nibble depending on parity.
+    const unsigned int byte_idx  = lane >> 1;      // (l*4)/8 = l/2
+    const unsigned int nibble_sh = (lane & 1u) << 2; // 0 if even lane, 4 if odd
+
     float sum = 0.0f;
     if (j < n) {
         const unsigned char* row = w + (size_t)j * row_bytes;
         const unsigned int half = n_blocks >> 1;
         const unsigned int b_start = warp_in_row ? half : 0u;
         const unsigned int b_end   = warp_in_row ? n_blocks : half;
-
-        const unsigned int byte_idx = lane >> 3;          // l/8
-        const unsigned int bit_idx  = lane & 7u;          // l%8
 
         for (unsigned int b = b_start; b < b_end; ++b) {
             const unsigned char* block = row + (size_t)b * Q1_0_BYTES_PER_BLOCK;
@@ -68,23 +72,21 @@ extern "C" __global__ void q1_0_gemv_f32(
             float neg_d = -d;
             const unsigned char* qs = block + 2;
 
-            // Pull bit at position byte_idx + {0,4,8,12} for this lane.
-            unsigned int byte0 = (unsigned int)qs[byte_idx + 0];
-            unsigned int byte1 = (unsigned int)qs[byte_idx + 4];
-            unsigned int byte2 = (unsigned int)qs[byte_idx + 8];
-            unsigned int byte3 = (unsigned int)qs[byte_idx + 12];
+            // 4 sign bits for [l*4 .. l*4+3]: nibble at (qs[l/2] >> nibble_sh) & 0xF
+            unsigned int nibble = ((unsigned int)qs[byte_idx] >> nibble_sh) & 0xFu;
 
-            float s0 = ((byte0 >> bit_idx) & 1u) ? d : neg_d;
-            float s1 = ((byte1 >> bit_idx) & 1u) ? d : neg_d;
-            float s2 = ((byte2 >> bit_idx) & 1u) ? d : neg_d;
-            float s3 = ((byte3 >> bit_idx) & 1u) ? d : neg_d;
+            // Vectorized 16-byte activation read for [l*4 .. l*4+3].
+            const float4 a4 = reinterpret_cast<const float4*>(a + b * Q1_0_BLOCK_SIZE)[lane];
 
-            const unsigned int k_base = b * Q1_0_BLOCK_SIZE;
-            // Lane-stride-1 activation reads → fully coalesced.
-            sum += a[k_base + lane]         * s0;
-            sum += a[k_base + lane + 32u]   * s1;
-            sum += a[k_base + lane + 64u]   * s2;
-            sum += a[k_base + lane + 96u]   * s3;
+            float s0 = (nibble & 0x1u) ? d : neg_d;
+            float s1 = (nibble & 0x2u) ? d : neg_d;
+            float s2 = (nibble & 0x4u) ? d : neg_d;
+            float s3 = (nibble & 0x8u) ? d : neg_d;
+
+            sum = fmaf(a4.x, s0, sum);
+            sum = fmaf(a4.y, s1, sum);
+            sum = fmaf(a4.z, s2, sum);
+            sum = fmaf(a4.w, s3, sum);
         }
     }
 
@@ -141,7 +143,7 @@ extern "C" __global__ void q1_0_gemm_f32(
             #pragma unroll
             for (unsigned int bit = 0; bit < 8; ++bit) {
                 float s = ((byte >> bit) & 1u) ? d : neg_d;
-                sum += acts[k_base + byte_off * 8u + bit] * s;
+                sum = fmaf(acts[k_base + byte_off * 8u + bit], s, sum);
             }
         }
     }
