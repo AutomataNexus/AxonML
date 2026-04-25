@@ -169,32 +169,37 @@ impl TridentConfig {
         }
     }
 
-    /// ~110 M-parameter laptop-trainable config. I2_S-deployable shapes
-    /// (every TernaryLinear's `in_features` is a multiple of 128) and a
-    /// memory budget that fits a 12 GB consumer GPU (RTX 5070 Ti Laptop)
-    /// at `bs=1 / seq=512`, leaving headroom for autograd + optimizer
-    /// state under the GPU TernaryLinear path.
+    /// ~30 M-parameter laptop-trainable config. I2_S-deployable shapes
+    /// (every TernaryLinear's `in_features` is a multiple of 128) at
+    /// the smallest architecturally-faithful size that still exercises
+    /// the full Trident pipeline (RoPE + GQA + ReLU²-gated FFN +
+    /// SubLN), end-to-end on a 12 GB consumer GPU WITHOUT OOM.
+    ///
+    /// Earlier 110 M / 250 M variants OOM'd on a 5070 Ti Laptop even at
+    /// bs=1 seq=512 — the AxonML autograd retains every intermediate
+    /// (gate × up products, attention scores, repeat_kv expansions,
+    /// softmax outputs) and combined with cuBLAS scratch + Adam moments
+    /// that easily exceeds 12 GB at the larger shapes. This is the
+    /// smallest config that retains every BitNet-shape architecture
+    /// switch while staying inside the 12 GB budget at bs=2 seq=256.
     ///
     /// Hyperparams:
-    /// - d_model 768, intermediate 2048 (≈ 2.67× expansion, both
-    ///   multiples of 128)
-    /// - 12 layers, 12 heads / 4 KV heads (GQA 3:1), head_dim=64,
-    ///   kv_hidden = 256
-    /// - max_seq_len 1024, RoPE θ=500 000, ReLU²-gated FFN, SubLN on
+    /// - d_model 384, intermediate 1024 (both multiples of 128)
+    /// - 8 layers, 6 heads / 2 KV heads (GQA 3:1, head_dim=64,
+    ///   kv_hidden = 128)
+    /// - max_seq_len 512, RoPE θ=500 000, ReLU²-gated FFN, SubLN on
     ///
-    /// Total params ≈ embeddings (32 768·768 ≈ 25 M) + 12 × per-layer
-    /// (~7 M attn + ferrum) ≈ 110 M. Empirically this fits a 12 GB
-    /// laptop GPU at `bs=1 seq=512`; bumping to bs=2 / longer seqs
-    /// will OOM on this hardware.
+    /// Total params ≈ 32 000·384 embed + 8·(2·384² + 2·384·128 attn +
+    /// 3·384·1024 ffn + norms) + 32 000·384 head ≈ 30 M.
     pub fn trident_laptop(vocab_size: usize) -> Self {
         Self {
             vocab_size,
-            d_model: 768,
-            num_layers: 12,
-            num_heads: 12,
-            num_kv_heads: 4,
-            intermediate_size: 2048,
-            max_seq_len: 1024,
+            d_model: 384,
+            num_layers: 8,
+            num_heads: 6,
+            num_kv_heads: 2,
+            intermediate_size: 1024,
+            max_seq_len: 512,
             rms_norm_eps: 1e-5,
             use_rope: true,
             rope_theta: 500_000.0,

@@ -184,7 +184,7 @@ struct Config {
 fn default_seq_len(variant: ModelVariant) -> usize {
     match variant {
         ModelVariant::Smoke => 64,
-        ModelVariant::Laptop => 512,
+        ModelVariant::Laptop => 256,
         ModelVariant::OneB | ModelVariant::ThreeB => 4096,
     }
 }
@@ -192,7 +192,7 @@ fn default_seq_len(variant: ModelVariant) -> usize {
 fn default_batch_size(variant: ModelVariant) -> usize {
     match variant {
         ModelVariant::Smoke => 8,
-        ModelVariant::Laptop => 1,
+        ModelVariant::Laptop => 2,
         ModelVariant::OneB => 4,
         ModelVariant::ThreeB => 2,
     }
