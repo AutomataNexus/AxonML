@@ -3662,6 +3662,15 @@ pub const Q8_0_MATMUL_PTX: &str = include_str!("q8_0_matmul.ptx");
 /// caps BitNet-2B decode at ~7 tok/s on WSL.
 pub const I2S_MATMUL_PTX: &str = include_str!("i2s_matmul.ptx");
 
+/// PrismML Q1_0 (1-bit) matmul kernel.
+///
+/// Compiled from `q1_0_matmul.cu`. 18-byte block holding 128 weights
+/// (1 bit each, linear bit-order) plus a per-block fp16 scale. Two warps
+/// per output row, same v2 layout as I2_S. No tensor-wide scale — each
+/// block carries its own. Primary consumer: PrismML Bonsai-8B family
+/// (Qwen3-8B QAT'd to Q1_0). Effective bits/weight: 1.125.
+pub const Q1_0_MATMUL_PTX: &str = include_str!("q1_0_matmul.ptx");
+
 /// Q6_K quantized matmul (dequant-in-shader).
 ///
 /// Compiled from `q6k_matmul.cu`. Same shape contract as Q4_K but with
@@ -3914,6 +3923,13 @@ impl CudaKernels {
             "i2s_matmul",
             I2S_MATMUL_PTX,
             &["i2s_gemv_f32", "i2s_gemm_f32"],
+        )?;
+
+        // PrismML Q1_0 (1-bit, 1.125 bpw) matmul — Bonsai-8B family.
+        kernels.load_module(
+            "q1_0_matmul",
+            Q1_0_MATMUL_PTX,
+            &["q1_0_gemv_f32", "q1_0_gemm_f32"],
         )?;
 
         // Q6_K dequant-in-shader matmul — LM head + higher-precision weights.

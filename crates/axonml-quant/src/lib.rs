@@ -34,6 +34,7 @@ pub mod calibration;
 pub mod dequantize;
 pub mod error;
 pub mod inference;
+pub mod q1_0;
 pub mod quantize;
 pub mod types;
 
