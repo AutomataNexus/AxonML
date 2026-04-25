@@ -438,21 +438,11 @@ impl TridentAttention {
         let seq_len = shape[2];
         let head_dim = shape[3];
 
-        let data_vec = data.to_vec();
-        let mut output = Vec::with_capacity(data_vec.len() * n_rep);
-        for b in 0..batch {
-            for h in 0..num_kv_heads {
-                for _ in 0..n_rep {
-                    for s in 0..seq_len {
-                        let offset = ((b * num_kv_heads + h) * seq_len + s) * head_dim;
-                        output.extend_from_slice(&data_vec[offset..offset + head_dim]);
-                    }
-                }
-            }
-        }
-
-        let output_tensor =
-            Tensor::from_vec(output, &[batch, num_kv_heads * n_rep, seq_len, head_dim]).unwrap();
+        // Device-aware GQA broadcast — `Tensor::repeat_kv` dispatches to
+        // `repeat_kv_f32` PTX on GPU tensors and to a contiguous CPU walk
+        // otherwise. Eliminates the per-layer CPU round-trip that
+        // dominated step time on `Cuda(0)` (smoke=13.8 s/step).
+        let output_tensor = data.repeat_kv(batch, num_kv_heads, n_rep, seq_len, head_dim);
 
         if x.requires_grad() && is_grad_enabled() {
             let grad_fn = GradFn::new(RepeatKVBackward {
