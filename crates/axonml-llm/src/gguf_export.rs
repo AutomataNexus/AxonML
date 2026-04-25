@@ -1072,15 +1072,11 @@ fn read_trident_bpe_tokenizer(path: &Path) -> io::Result<TridentTokenizerMeta> {
                 bos = Some(*id as u32);
                 eos = Some(*id as u32);
             }
-            "<s>" | "<|begin_of_text|>" | "<|user|>" => {
-                if bos.is_none() {
-                    bos = Some(*id as u32);
-                }
+            "<s>" | "<|begin_of_text|>" | "<|user|>" if bos.is_none() => {
+                bos = Some(*id as u32);
             }
-            "</s>" | "<|end_of_text|>" | "<|tool_end|>" => {
-                if eos.is_none() {
-                    eos = Some(*id as u32);
-                }
+            "</s>" | "<|end_of_text|>" | "<|tool_end|>" if eos.is_none() => {
+                eos = Some(*id as u32);
             }
             "<|pad|>" | "<pad>" => {
                 pad = Some(*id as u32);
@@ -1121,7 +1117,7 @@ fn write_meta_array_of_strings<W: Write>(
 /// per-tensor absmean scale, then group-strided 2-bit codes (128 weights
 /// per 32-byte block), then 4 trailing scale bytes.
 fn pack_ternary_i2s(values: &[f32], _out_features: usize, in_features: usize) -> Vec<u8> {
-    assert!(in_features.is_multiple_of(I2S_BLOCK_SIZE));
+    assert!(in_features % I2S_BLOCK_SIZE == 0);
 
     // Tensor-wide absmean scale (BitNet b1.58 absmean rule).
     let n = values.len();
@@ -1456,7 +1452,7 @@ pub fn export_trident_to_gguf(
                 }
                 let out_features = entry.shape[0];
                 let in_features = entry.shape[1];
-                if !in_features.is_multiple_of(I2S_BLOCK_SIZE) {
+                if in_features % I2S_BLOCK_SIZE != 0 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!(
