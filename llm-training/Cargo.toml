@@ -87,6 +87,14 @@ path = "src/bin/train_ctl.rs"
 name = "train_trident_code"
 path = "src/bin/train_trident_code.rs"
 
+# Trident-Coder .axonml checkpoint → BitNet b1.58 GGUF exporter.
+# Loads the saved shadow weights, walks the model in TridentModel
+# parameters() order, and emits a GGUF that nexus-serve can load via
+# the existing I2_S dispatch.
+[[bin]]
+name = "export_trident_gguf"
+path = "src/bin/export_trident_gguf.rs"
+
 [[bin]]
 name = "profile_train_step"
 path = "src/bin/profile_train_step.rs"

@@ -63,7 +63,7 @@ pub use config::{BertConfig, GPT2Config, TransformerConfig};
 pub use embedding::{BertEmbedding, GPT2Embedding, PositionalEmbedding, TokenEmbedding};
 pub use error::{LLMError, LLMResult};
 pub use generation::{GenerationConfig, TextGenerator};
-pub use gguf_export::{export_qwen3_to_gguf, export_rdt_to_gguf};
+pub use gguf_export::{export_qwen3_to_gguf, export_rdt_to_gguf, export_trident_to_gguf};
 pub use gguf_loader::{load_qwen3_from_gguf, read_gguf_metadata_raw_bytes, read_gguf_tokenizer};
 pub use gpt2::{GPT2, GPT2LMHead};
 pub use hf_loader::{HFLoader, load_llama_from_hf, load_mistral_from_hf};
