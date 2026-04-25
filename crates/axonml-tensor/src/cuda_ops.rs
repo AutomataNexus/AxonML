@@ -1160,6 +1160,115 @@ impl Tensor<f32> {
     /// (i8 reinterpret); freed at fn-scope end. Per call, but each
     /// upload is k×n bytes which is cheap vs the matmul cost on
     /// realistic shapes.
+    /// Quantize an f32 shadow weight `self` to ternary `{-1, 0, +1}` i8
+    /// on GPU using absmean. `self` must be GPU-resident. Returns the
+    /// new GPU-resident i8 buffer (as `CudaSlice<u8>` reinterpret) plus
+    /// the f32 scale. Pass to `ternary_matmul_cuda_buf` /
+    /// `ternary_grad_input_cuda_buf` without a host upload.
+    pub fn quantize_to_ternary_cuda(&self) -> Result<(cudarc::driver::CudaSlice<u8>, f32)> {
+        assert!(
+            self.device().is_gpu(),
+            "quantize_to_ternary_cuda: self must be on GPU"
+        );
+        let n = self.numel();
+        let data = self.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let guard = data.storage.as_cuda_slice();
+        let mut out_i8: cudarc::driver::CudaSlice<u8> = unsafe { cuda.stream().alloc::<u8>(n) }
+            .map_err(|e| axonml_core::error::Error::InvalidOperation {
+                message: format!("stream alloc u8 (ternary quant) failed: {e}"),
+            })?;
+        let scale = cuda
+            .ternary_quantize_weights(guard.slice(), &mut out_i8, n)
+            .map_err(|e| axonml_core::error::Error::InvalidOperation {
+                message: format!("ternary_quantize_weights failed: {e}"),
+            })?;
+        Ok((out_i8, scale))
+    }
+
+    /// `ternary_matmul_cuda` variant that takes a pre-uploaded GPU
+    /// ternary buffer. Skips per-call htod_copy. Same shape contract.
+    pub fn ternary_matmul_cuda_buf(
+        &self,
+        w_gpu: &cudarc::driver::CudaSlice<u8>,
+        scale: f32,
+        n: usize,
+        k: usize,
+    ) -> Result<Self> {
+        assert!(
+            self.device().is_gpu(),
+            "ternary_matmul_cuda_buf: self must be on GPU"
+        );
+        let a_data = self.contiguous_gpu();
+        let numel = a_data.numel();
+        assert!(numel % k == 0);
+        let m = numel / k;
+
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(m * n).expect("GPU pool alloc failed");
+        if m == 1 {
+            cuda.ternary_gemv_f32(w_gpu, a_guard.slice(), &mut out, scale, n, k)
+                .expect("CUDA ternary_gemv_f32 failed");
+        } else {
+            cuda.ternary_gemm_f32(w_gpu, a_guard.slice(), &mut out, scale, m, n, k)
+                .expect("CUDA ternary_gemm_f32 failed");
+        }
+
+        let shape = Shape::from_slice(&[m, n]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, m * n, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
+    /// `ternary_grad_input_cuda` variant that takes a pre-uploaded GPU
+    /// ternary buffer. Skips per-call htod_copy.
+    pub fn ternary_grad_input_cuda_buf(
+        &self,
+        w_gpu: &cudarc::driver::CudaSlice<u8>,
+        scale: f32,
+        in_features: usize,
+        out_features: usize,
+    ) -> Result<Self> {
+        assert!(
+            self.device().is_gpu(),
+            "ternary_grad_input_cuda_buf: self must be on GPU"
+        );
+        let g_data = self.contiguous_gpu();
+        let numel = g_data.numel();
+        assert!(numel % out_features == 0);
+        let batch_size = numel / out_features;
+
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let g_guard = g_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(batch_size * in_features).expect("GPU pool alloc failed");
+        cuda.ternary_grad_input_f32(
+            w_gpu,
+            g_guard.slice(),
+            &mut out,
+            scale,
+            batch_size,
+            in_features,
+            out_features,
+        )
+        .expect("CUDA ternary_grad_input_f32 failed");
+
+        let shape = Shape::from_slice(&[batch_size, in_features]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, batch_size * in_features, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
     pub fn ternary_matmul_cuda(&self, w_i8: &[i8], scale: f32, n: usize, k: usize) -> Result<Self> {
         assert!(
             self.device().is_gpu(),

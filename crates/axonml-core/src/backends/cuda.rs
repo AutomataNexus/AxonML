@@ -2076,6 +2076,72 @@ impl CudaBackend {
         }
     }
 
+    /// Quantize an f32 shadow weight tensor to ternary `{-1, 0, +1}` i8
+    /// in-place on GPU. Two kernel launches: an abssum reduction
+    /// followed by a per-element threshold using the resulting absmean.
+    /// Returns the f32 scale (= absmean, clamped to ≥ 1e-8) the caller
+    /// will multiply by during the matmul.
+    ///
+    /// `out_i8` must already be allocated with capacity ≥ `n` bytes.
+    pub fn ternary_quantize_weights(
+        &self,
+        shadow: &CudaSlice<f32>,
+        out_i8: &mut CudaSlice<u8>,
+        n: usize,
+    ) -> Result<f32, CudaError> {
+        let reduce_func = self
+            .kernels
+            .get("f32_abssum_reduce")
+            .ok_or_else(|| CudaError::KernelNotFound("f32_abssum_reduce".to_string()))?;
+        let quant_func = self
+            .kernels
+            .get("f32_quantize_ternary")
+            .ok_or_else(|| CudaError::KernelNotFound("f32_quantize_ternary".to_string()))?;
+
+        const THREADS_PER_CTA: u32 = 256;
+        let n_u32 = n as u32;
+        let grid = (n_u32 + THREADS_PER_CTA - 1) / THREADS_PER_CTA;
+
+        // Stage 1 — sum |w| into a single device scalar.
+        let mut sum_buf: CudaSlice<f32> =
+            self.stream.alloc_zeros::<f32>(1).map_err(CudaError::from)?;
+        let cfg_reduce = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: (THREADS_PER_CTA / 32) * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(reduce_func)
+                .arg(shadow)
+                .arg(&mut sum_buf)
+                .arg(&n_u32)
+                .launch(cfg_reduce)
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+
+        // Pull the single scalar back to host. Sync via memcpy_dtoh which
+        // is implicitly stream-ordered.
+        let sum_host: Vec<f32> = self.stream.memcpy_dtov(&sum_buf).map_err(CudaError::from)?;
+        let abs_mean = sum_host[0] / (n as f32);
+        let scale = abs_mean.max(1e-8);
+
+        // Stage 2 — threshold each element to ±1 / 0 i8.
+        let cfg_quant = cuda_kernels::launch_config(n);
+        unsafe {
+            self.stream
+                .launch_builder(quant_func)
+                .arg(shadow)
+                .arg(out_i8)
+                .arg(&n_u32)
+                .arg(&scale)
+                .launch(cfg_quant)
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+
+        Ok(scale)
+    }
+
     /// Raw-i8 ternary GEMV (m=1 decode/training-decode).
     pub fn ternary_gemv_f32(
         &self,
