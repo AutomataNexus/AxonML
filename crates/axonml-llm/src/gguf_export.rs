@@ -36,6 +36,7 @@ use std::path::Path;
 
 use byteorder::{LittleEndian, WriteBytesExt};
 
+use axonml_nn::Module;
 use axonml_tensor::Tensor;
 
 use crate::gguf_loader::read_gguf_metadata_raw_bytes;
@@ -862,3 +863,441 @@ pub fn export_rdt_to_gguf(
 // TODO: copy_tokenizer_metadata — round-trip parsed GgufValues from a
 // source GGUF back out as encoded bytes. Requires exposing GgufValue +
 // its writer from gguf_loader. Follow-up session.
+
+// =============================================================================
+// Trident → BitNet b1.58 GGUF exporter
+// =============================================================================
+
+const GGML_I2S: u32 = 36;
+const I2S_BLOCK_SIZE: usize = 128;
+const I2S_BYTES_PER_BLOCK: usize = 32;
+
+/// One tensor entry for the Trident exporter — extends `TensorEntry`
+/// with an `I2S` ternary variant (BitNet b1.58 dtype 36) on top of the
+/// existing F32/F16 cases.
+enum TridentTensorDType {
+    F32,
+    F16,
+    /// 1.58-bit ternary, group-strided 2-bit blocks, trailing tensor-wide
+    /// f32 scale. Matches `axonml_quant::bitnet::I2sBlock` byte layout.
+    I2S,
+}
+
+struct TridentTensorEntry {
+    ggml_name: String,
+    /// Row-major physical shape `[out, in]` for 2D, `[n]` for 1D.
+    shape: Vec<usize>,
+    tensor: Tensor<f32>,
+    dtype: TridentTensorDType,
+}
+
+impl TridentTensorEntry {
+    fn dtype_code(&self) -> u32 {
+        match self.dtype {
+            TridentTensorDType::F32 => GGML_F32,
+            TridentTensorDType::F16 => GGML_F16,
+            TridentTensorDType::I2S => GGML_I2S,
+        }
+    }
+
+    /// On-disk byte length INCLUDING the trailing tensor-wide scale for
+    /// I2_S. `dequantize_i2s` in nexus-serve reads `total_bytes()` to
+    /// load the packed region, then reads 4 more bytes from the GGUF
+    /// alignment pad to recover the scale.
+    fn byte_len(&self) -> usize {
+        let n: usize = self.shape.iter().product();
+        match self.dtype {
+            TridentTensorDType::F32 => n * 4,
+            TridentTensorDType::F16 => n * 2,
+            TridentTensorDType::I2S => {
+                let blocks = n / I2S_BLOCK_SIZE;
+                blocks * I2S_BYTES_PER_BLOCK + 4
+            }
+        }
+    }
+
+    fn gguf_dims(&self) -> Vec<u64> {
+        match self.shape.len() {
+            1 => vec![self.shape[0] as u64],
+            2 => vec![self.shape[1] as u64, self.shape[0] as u64],
+            _ => panic!("Unsupported tensor rank for Trident GGUF export"),
+        }
+    }
+}
+
+/// Pack a row-major `[out, in]` f32 weight into BitNet I2_S bytes:
+/// per-tensor absmean scale, then group-strided 2-bit codes (128 weights
+/// per 32-byte block), then 4 trailing scale bytes.
+fn pack_ternary_i2s(values: &[f32], _out_features: usize, in_features: usize) -> Vec<u8> {
+    assert!(in_features.is_multiple_of(I2S_BLOCK_SIZE));
+
+    // Tensor-wide absmean scale (BitNet b1.58 absmean rule).
+    let n = values.len();
+    let abs_sum: f32 = values.iter().map(|v| v.abs()).sum();
+    let scale = (abs_sum / n as f32).max(1e-8);
+    let inv_scale = 1.0 / scale;
+
+    // Quantize to {-1, 0, +1}.
+    let mut trits: Vec<i8> = Vec::with_capacity(n);
+    for &v in values {
+        let normalized = (v.abs() * inv_scale).round().min(1.0);
+        let mag = normalized as i8;
+        let trit = if v > 0.0 {
+            mag
+        } else if v < 0.0 {
+            -mag
+        } else {
+            0
+        };
+        trits.push(trit);
+    }
+
+    // Pack each row into the BitNet I2_S group-strided 2-bit layout.
+    // Encoding: 0 → -1, 1 → 0, 2 → +1.
+    let n_blocks = n / I2S_BLOCK_SIZE;
+    let mut out = Vec::with_capacity(n_blocks * I2S_BYTES_PER_BLOCK + 4);
+    for b in 0..n_blocks {
+        let block = &trits[b * I2S_BLOCK_SIZE..(b + 1) * I2S_BLOCK_SIZE];
+        let mut bytes = [0u8; I2S_BYTES_PER_BLOCK];
+        for group_idx in 0..4 {
+            let shift = (6 - 2 * group_idx) as u8;
+            for group_pos in 0..32 {
+                let trit = block[group_idx * 32 + group_pos];
+                let code: u8 = if trit > 0 {
+                    2
+                } else if trit < 0 {
+                    0
+                } else {
+                    1
+                };
+                bytes[group_pos] |= code << shift;
+            }
+        }
+        out.extend_from_slice(&bytes);
+    }
+
+    // Trailing tensor-wide f32 scale (read from `offset + total_bytes`
+    // by `MappedGguf::load_tensor_f32` in nexus-serve).
+    out.extend_from_slice(&scale.to_le_bytes());
+    out
+}
+
+/// Export a trained `TridentModel` as a BitNet b1.58 GGUF.
+///
+/// Produces a file `nexus-serve` can load via the existing I2_S dispatch
+/// path. All ternary linear weights (Q/K/V/O projections + FFN gate/up/
+/// down) are written as ggml dtype 36 (I2_S, 128-elem blocks, 32-byte
+/// stride + trailing tensor-wide f32 scale, group-strided 2-bit codes).
+/// RMSNorm weights stay F32. Embedding + LM head are F16 to match the
+/// official `microsoft/bitnet-b1.58-2B-4T-gguf` layout.
+///
+/// Walks `model.parameters()` in the order produced by `TridentModel`'s
+/// `parameters()` impl (embed_tokens → per-block (attn_norm, attn:
+/// q/k/v/o[+sub_norm], mlp_norm, mlp: up[+gate]/down[+sub_norm]) →
+/// final_norm → lm_head). If you change that ordering, update this
+/// function in lockstep — the unit test
+/// `axonml_llm::trident::tests::test_trident_1b_config_shapes` covers
+/// the count but not the order.
+pub fn export_trident_to_gguf(
+    model: &crate::trident::TridentModel,
+    output: &Path,
+    model_name: &str,
+    tokenizer_source: Option<&Path>,
+) -> io::Result<()> {
+    let cfg = model.config().clone();
+    let params = model.parameters();
+
+    // Build the expected (ggml_name, dtype) sequence in the exact
+    // order TridentModel::parameters() emits them.
+    let mut expected: Vec<(String, TridentTensorDType)> = Vec::new();
+    expected.push(("token_embd.weight".to_string(), TridentTensorDType::F16));
+    for i in 0..cfg.num_layers {
+        expected.push((format!("blk.{i}.attn_norm.weight"), TridentTensorDType::F32));
+        expected.push((format!("blk.{i}.attn_q.weight"), TridentTensorDType::I2S));
+        expected.push((format!("blk.{i}.attn_k.weight"), TridentTensorDType::I2S));
+        expected.push((format!("blk.{i}.attn_v.weight"), TridentTensorDType::I2S));
+        expected.push((
+            format!("blk.{i}.attn_output.weight"),
+            TridentTensorDType::I2S,
+        ));
+        if cfg.use_sub_ln {
+            expected.push((
+                format!("blk.{i}.attn_sub_norm.weight"),
+                TridentTensorDType::F32,
+            ));
+        }
+        expected.push((format!("blk.{i}.ffn_norm.weight"), TridentTensorDType::F32));
+        expected.push((format!("blk.{i}.ffn_up.weight"), TridentTensorDType::I2S));
+        if cfg.use_squared_relu {
+            expected.push((format!("blk.{i}.ffn_gate.weight"), TridentTensorDType::I2S));
+        }
+        expected.push((format!("blk.{i}.ffn_down.weight"), TridentTensorDType::I2S));
+        if cfg.use_sub_ln {
+            expected.push((
+                format!("blk.{i}.ffn_sub_norm.weight"),
+                TridentTensorDType::F32,
+            ));
+        }
+    }
+    expected.push(("output_norm.weight".to_string(), TridentTensorDType::F32));
+    expected.push(("output.weight".to_string(), TridentTensorDType::F16));
+
+    if params.len() != expected.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Trident parameter count mismatch: model has {} params, exporter expects {} \
+                 (config: layers={} sub_ln={} squared_relu={})",
+                params.len(),
+                expected.len(),
+                cfg.num_layers,
+                cfg.use_sub_ln,
+                cfg.use_squared_relu,
+            ),
+        ));
+    }
+
+    let mut manifest: Vec<TridentTensorEntry> = Vec::with_capacity(expected.len());
+    for (i, (ggml_name, dtype)) in expected.into_iter().enumerate() {
+        let p = &params[i];
+        let data = p.data();
+        let shape: Vec<usize> = data.shape().to_vec();
+        manifest.push(TridentTensorEntry {
+            ggml_name,
+            shape,
+            tensor: data,
+            dtype,
+        });
+    }
+
+    // Optional tokenizer passthrough — same shape as export_rdt_to_gguf.
+    let tokenizer_meta: HashMap<String, Vec<u8>> = match tokenizer_source {
+        Some(src) => {
+            let raw = read_gguf_metadata_raw_bytes(src, TOKENIZER_META_KEYS)?;
+            if raw.is_empty() {
+                eprintln!(
+                    "[gguf-export] WARNING: --tokenizer-source {} has no tokenizer.ggml.* keys.",
+                    src.display()
+                );
+            }
+            raw
+        }
+        None => HashMap::new(),
+    };
+
+    // ---- Header + metadata ----
+    let mut header_buf: Vec<u8> = Vec::with_capacity(4096);
+    header_buf.write_u32::<LittleEndian>(GGUF_MAGIC)?;
+    header_buf.write_u32::<LittleEndian>(GGUF_VERSION)?;
+    header_buf.write_u64::<LittleEndian>(manifest.len() as u64)?;
+
+    let mut meta_buf: Vec<u8> = Vec::with_capacity(4096);
+    let mut meta_count: u64 = 0;
+
+    write_meta_string(&mut meta_buf, "general.architecture", "bitnet-b1.58")?;
+    write_meta_string(&mut meta_buf, "general.name", model_name)?;
+    write_meta_u32(&mut meta_buf, "general.file_type", 1)?;
+    write_meta_u32(&mut meta_buf, "general.alignment", DATA_ALIGNMENT as u32)?;
+    meta_count += 4;
+
+    write_meta_u32(
+        &mut meta_buf,
+        "bitnet-b1.58.context_length",
+        cfg.max_seq_len as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "bitnet-b1.58.embedding_length",
+        cfg.d_model as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "bitnet-b1.58.feed_forward_length",
+        cfg.intermediate_size as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "bitnet-b1.58.block_count",
+        cfg.num_layers as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "bitnet-b1.58.attention.head_count",
+        cfg.num_heads as u32,
+    )?;
+    write_meta_u32(
+        &mut meta_buf,
+        "bitnet-b1.58.attention.head_count_kv",
+        cfg.num_kv_heads as u32,
+    )?;
+    write_meta_f32(
+        &mut meta_buf,
+        "bitnet-b1.58.attention.layer_norm_rms_epsilon",
+        cfg.rms_norm_eps,
+    )?;
+    write_meta_f32(&mut meta_buf, "bitnet-b1.58.rope.freq_base", cfg.rope_theta)?;
+    meta_count += 8;
+
+    // Tokenizer passthrough.
+    for (key, raw) in &tokenizer_meta {
+        write_string(&mut meta_buf, key)?;
+        meta_buf.write_all(raw)?;
+        meta_count += 1;
+    }
+
+    header_buf.write_u64::<LittleEndian>(meta_count)?;
+    header_buf.extend_from_slice(&meta_buf);
+
+    // ---- Tensor directory ----
+    let mut tensor_dir_buf: Vec<u8> = Vec::with_capacity(4096);
+    let mut running_offset: u64 = 0;
+    for entry in &manifest {
+        write_string(&mut tensor_dir_buf, &entry.ggml_name)?;
+        let dims = entry.gguf_dims();
+        tensor_dir_buf.write_u32::<LittleEndian>(dims.len() as u32)?;
+        for d in &dims {
+            tensor_dir_buf.write_u64::<LittleEndian>(*d)?;
+        }
+        tensor_dir_buf.write_u32::<LittleEndian>(entry.dtype_code())?;
+        tensor_dir_buf.write_u64::<LittleEndian>(running_offset)?;
+
+        let bytes = entry.byte_len() as u64;
+        running_offset += bytes;
+        running_offset = running_offset.div_ceil(DATA_ALIGNMENT) * DATA_ALIGNMENT;
+    }
+
+    // ---- Write file ----
+    let mut file = File::create(output)?;
+    file.write_all(&header_buf)?;
+    file.write_all(&tensor_dir_buf)?;
+
+    let header_and_dir_len = file.stream_position()?;
+    let data_start = header_and_dir_len.div_ceil(DATA_ALIGNMENT) * DATA_ALIGNMENT;
+    let padding = (data_start - header_and_dir_len) as usize;
+    if padding > 0 {
+        file.write_all(&vec![0u8; padding])?;
+    }
+
+    for entry in &manifest {
+        let data_f32 = entry.tensor.to_vec();
+        match entry.dtype {
+            TridentTensorDType::F32 => {
+                let mut buf: Vec<u8> = Vec::with_capacity(data_f32.len() * 4);
+                for &v in &data_f32 {
+                    buf.write_f32::<LittleEndian>(v)?;
+                }
+                file.write_all(&buf)?;
+            }
+            TridentTensorDType::F16 => {
+                let mut buf: Vec<u8> = Vec::with_capacity(data_f32.len() * 2);
+                for &v in &data_f32 {
+                    buf.write_u16::<LittleEndian>(f32_to_f16(v))?;
+                }
+                file.write_all(&buf)?;
+            }
+            TridentTensorDType::I2S => {
+                // I2_S only valid for 2D weights with `in_features %
+                // 128 == 0`. Trident's TernaryLinear shapes always
+                // satisfy this for real configs (256 / 2048 / etc).
+                if entry.shape.len() != 2 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "{}: I2_S export requires 2D, got rank {}",
+                            entry.ggml_name,
+                            entry.shape.len()
+                        ),
+                    ));
+                }
+                let out_features = entry.shape[0];
+                let in_features = entry.shape[1];
+                if !in_features.is_multiple_of(I2S_BLOCK_SIZE) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "{}: in_features={} must be a multiple of 128 for I2_S",
+                            entry.ggml_name, in_features
+                        ),
+                    ));
+                }
+                let bytes = pack_ternary_i2s(&data_f32, out_features, in_features);
+                file.write_all(&bytes)?;
+            }
+        }
+        let pos = file.stream_position()?;
+        let aligned = pos.div_ceil(DATA_ALIGNMENT) * DATA_ALIGNMENT;
+        let pad = (aligned - pos) as usize;
+        if pad > 0 {
+            file.write_all(&vec![0u8; pad])?;
+        }
+    }
+
+    if tokenizer_meta.is_empty() {
+        eprintln!(
+            "[gguf-export] WARNING: no --tokenizer-source; Trident output at {} lacks tokenizer metadata.",
+            output.display()
+        );
+    }
+
+    file.sync_all()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod trident_export_tests {
+    use super::*;
+
+    #[test]
+    fn export_trident_smoke_roundtrips_magic_and_arch() {
+        // Build a tiny TridentModel with shapes valid for the BitNet
+        // I2_S 128-block format (every TernaryLinear's `in_features`
+        // must be a multiple of 128). Smoke/tiny configs use shapes
+        // smaller than 128 so we hand-build a minimum-valid config.
+        use crate::trident::{TridentConfig, TridentModel};
+        use std::fs;
+
+        let cfg = TridentConfig {
+            vocab_size: 64,
+            d_model: 128,
+            num_layers: 1,
+            num_heads: 4,
+            num_kv_heads: 4,        // kv_hidden = 4 * 32 = 128, multiple of 128 ✓
+            intermediate_size: 256, // multiple of 128 ✓
+            max_seq_len: 64,
+            rms_norm_eps: 1e-5,
+            use_rope: true,
+            rope_theta: 500_000.0,
+            use_squared_relu: true,
+            use_sub_ln: true,
+        };
+        let model = TridentModel::new(&cfg);
+
+        let tmp = std::env::temp_dir().join("trident_smoke_export.gguf");
+        let _ = fs::remove_file(&tmp);
+        export_trident_to_gguf(&model, &tmp, "trident-smoke", None)
+            .expect("export_trident_to_gguf failed");
+
+        let bytes = fs::read(&tmp).expect("read tmp gguf");
+        assert!(
+            bytes.len() > 64,
+            "gguf should be > 64 bytes, got {}",
+            bytes.len()
+        );
+
+        // GGUF magic + version.
+        let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        assert_eq!(magic, GGUF_MAGIC, "magic mismatch");
+        assert_eq!(version, GGUF_VERSION, "version mismatch");
+
+        // Architecture string somewhere in the header.
+        let head = &bytes[..bytes.len().min(8192)];
+        let needle = b"bitnet-b1.58";
+        assert!(
+            head.windows(needle.len()).any(|w| w == needle),
+            "GGUF header missing 'bitnet-b1.58' architecture string",
+        );
+
+        let _ = fs::remove_file(&tmp);
+    }
+}
