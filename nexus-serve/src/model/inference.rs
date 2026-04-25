@@ -682,6 +682,12 @@ impl MappedGguf {
                 ]);
                 axonml_quant::bitnet::dequantize_i2s(raw_data, scale, &mut output);
             }
+            GgmlType::Q1_0 => {
+                // PrismML 1-bit. Per-block fp16 scale embedded; no tensor-
+                // wide tail scale (unlike I2_S). `raw_data` is the full
+                // packed region; `dequantize_q1_0` walks it block-by-block.
+                axonml_quant::q1_0::dequantize_q1_0(raw_data, &mut output);
+            }
             other => {
                 eprintln!("  WARNING: unsupported quantization {:?} for tensor {}, filling with zeros", other, name);
             }
@@ -5734,7 +5740,7 @@ fn load_weight(mapped: &MappedGguf, name: &str, quantized: bool) -> Result<Weigh
         GgmlType::Q4_0 | GgmlType::Q4_1 | GgmlType::Q5_0 | GgmlType::Q5_1
         | GgmlType::Q8_0 | GgmlType::Q8_1 | GgmlType::Q2K | GgmlType::Q3K
         | GgmlType::Q4K | GgmlType::Q5K | GgmlType::Q6K | GgmlType::Q8K
-        | GgmlType::I2S,
+        | GgmlType::I2S | GgmlType::Q1_0,
     );
 
     // Allow 3D quantized tensors on the lazy path — OLMoE's packed
