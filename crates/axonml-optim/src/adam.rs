@@ -22,6 +22,7 @@
 
 use axonml_nn::Parameter;
 use axonml_tensor::Tensor;
+use rayon::prelude::*;
 
 use crate::optimizer::Optimizer;
 
@@ -262,24 +263,40 @@ impl Optimizer for Adam {
                 Vec::new()
             };
 
-            for i in 0..param_vec.len() {
-                let g = if wd == 0.0 {
-                    grad_vec[i]
-                } else {
-                    grad_vec[i] + wd * param_vec[i]
-                };
-                exp_avg_vec[i] = beta1 * exp_avg_vec[i] + one_minus_beta1 * g;
-                exp_avg_sq_vec[i] = beta2 * exp_avg_sq_vec[i] + one_minus_beta2 * g * g;
-
-                let v_hat = if self.amsgrad {
-                    max_sq_vec[i] = max_sq_vec[i].max(exp_avg_sq_vec[i]);
-                    max_sq_vec[i] / bias_correction2
-                } else {
-                    exp_avg_sq_vec[i] / bias_correction2
-                };
-
-                let denom = v_hat.sqrt() + eps;
-                param_vec[i] -= step_size * exp_avg_vec[i] / denom;
+            // Rayon-parallel fused per-element Adam update. The four mutable
+            // streams (param / exp_avg / exp_avg_sq / max_sq) are each
+            // disjoint; combining via `par_iter_mut().zip(...)` keeps every
+            // element on the same worker thread for cache locality.
+            if self.amsgrad {
+                param_vec
+                    .par_iter_mut()
+                    .zip(exp_avg_vec.par_iter_mut())
+                    .zip(exp_avg_sq_vec.par_iter_mut())
+                    .zip(max_sq_vec.par_iter_mut())
+                    .zip(grad_vec.par_iter())
+                    .for_each(|((((p, ea), eas), mx), &gr)| {
+                        let g = if wd == 0.0 { gr } else { gr + wd * *p };
+                        *ea = beta1 * *ea + one_minus_beta1 * g;
+                        *eas = beta2 * *eas + one_minus_beta2 * g * g;
+                        *mx = mx.max(*eas);
+                        let v_hat = *mx / bias_correction2;
+                        let denom = v_hat.sqrt() + eps;
+                        *p -= step_size * *ea / denom;
+                    });
+            } else {
+                param_vec
+                    .par_iter_mut()
+                    .zip(exp_avg_vec.par_iter_mut())
+                    .zip(exp_avg_sq_vec.par_iter_mut())
+                    .zip(grad_vec.par_iter())
+                    .for_each(|(((p, ea), eas), &gr)| {
+                        let g = if wd == 0.0 { gr } else { gr + wd * *p };
+                        *ea = beta1 * *ea + one_minus_beta1 * g;
+                        *eas = beta2 * *eas + one_minus_beta2 * g * g;
+                        let v_hat = *eas / bias_correction2;
+                        let denom = v_hat.sqrt() + eps;
+                        *p -= step_size * *ea / denom;
+                    });
             }
 
             state.exp_avg =

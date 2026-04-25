@@ -517,60 +517,79 @@ impl GradientFunction for TernaryLinearBackward {
         let g_vec = grad_output.to_vec();
         let x_vec = self.saved_input.to_vec();
 
-        // 1. grad_input = scale * ternary_W^T @ grad_output
-        //    For each batch element and input dimension:
-        //    grad_input[b,j] = scale * sum_o(ternary[o,j] * grad_output[b,o])
-        let mut grad_input = vec![0.0f32; self.total_batch * self.in_features];
-        for b in 0..self.total_batch {
-            let g_off = b * self.out_features;
-            let gi_off = b * self.in_features;
+        let bs = self.total_batch;
+        let in_f = self.in_features;
+        let out_f = self.out_features;
+        let scale = self.saved_scale;
+        let ternary = &self.saved_ternary;
 
-            for j in 0..self.in_features {
+        // 1. grad_input = scale * ternary_W^T @ grad_output
+        //    grad_input[b,j] = scale * sum_o(ternary[o,j] * grad_output[b,o])
+        //
+        // Flat parallelism over (batch × in_features). Each worker owns
+        // grad_input[b,j], reads its column of `ternary` (out_features
+        // strided by in_features) and the b-th row of `g_vec`. Disjoint
+        // writes — no synchronization.
+        let mut grad_input = vec![0.0f32; bs * in_f];
+        grad_input
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(idx, slot)| {
+                let b = idx / in_f;
+                let j = idx % in_f;
+                let g_off = b * out_f;
                 let mut sum = 0.0f32;
-                for o in 0..self.out_features {
-                    let w = self.saved_ternary[o * self.in_features + j];
+                for o in 0..out_f {
+                    let w = ternary[o * in_f + j];
                     if w == 1 {
                         sum += g_vec[g_off + o];
                     } else if w == -1 {
                         sum -= g_vec[g_off + o];
                     }
+                    // w == 0: skip
                 }
-                grad_input[gi_off + j] = self.saved_scale * sum;
-            }
-        }
+                *slot = scale * sum;
+            });
 
         let gi_tensor = Tensor::from_vec(grad_input, self.saved_input.shape()).unwrap();
 
         // 2. grad_weight (STE): grad_output^T @ input
         //    grad_weight[o,j] = sum_b(grad_output[b,o] * input[b,j])
-        let mut grad_weight = vec![0.0f32; self.out_features * self.in_features];
-        for b in 0..self.total_batch {
-            let g_off = b * self.out_features;
-            let x_off = b * self.in_features;
-
-            for o in 0..self.out_features {
-                let go = g_vec[g_off + o];
-                let w_off = o * self.in_features;
-                for j in 0..self.in_features {
-                    grad_weight[w_off + j] += go * x_vec[x_off + j];
+        //
+        // Flat parallelism over (out_features × in_features). Each worker
+        // owns grad_weight[o,j], reads strided columns of g_vec (`o`-th
+        // out across all batches) and x_vec (`j`-th input across all
+        // batches). Disjoint writes.
+        let mut grad_weight = vec![0.0f32; out_f * in_f];
+        grad_weight
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(idx, slot)| {
+                let o = idx / in_f;
+                let j = idx % in_f;
+                let mut sum = 0.0f32;
+                for b in 0..bs {
+                    sum += g_vec[b * out_f + o] * x_vec[b * in_f + j];
                 }
-            }
-        }
-        let gw_tensor = Tensor::from_vec(grad_weight, &[self.out_features, self.in_features])
-            .expect("tensor creation failed");
+                *slot = sum;
+            });
+        let gw_tensor =
+            Tensor::from_vec(grad_weight, &[out_f, in_f]).expect("tensor creation failed");
 
         let mut results: Vec<Option<Tensor<f32>>> = vec![Some(gi_tensor), Some(gw_tensor)];
 
-        // 3. grad_bias = sum(grad_output, dim=0)
+        // 3. grad_bias = sum(grad_output, dim=0). Per-output-feature
+        // parallelism across batches.
         if self.has_bias {
-            let mut grad_bias = vec![0.0f32; self.out_features];
-            for b in 0..self.total_batch {
-                for o in 0..self.out_features {
-                    grad_bias[o] += g_vec[b * self.out_features + o];
+            let mut grad_bias = vec![0.0f32; out_f];
+            grad_bias.par_iter_mut().enumerate().for_each(|(o, slot)| {
+                let mut sum = 0.0f32;
+                for b in 0..bs {
+                    sum += g_vec[b * out_f + o];
                 }
-            }
-            let gb_tensor =
-                Tensor::from_vec(grad_bias, &[self.out_features]).expect("tensor creation failed");
+                *slot = sum;
+            });
+            let gb_tensor = Tensor::from_vec(grad_bias, &[out_f]).expect("tensor creation failed");
             results.push(Some(gb_tensor));
         }
 
