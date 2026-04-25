@@ -1088,6 +1088,40 @@ impl Tensor<f32> {
         })
     }
 
+    /// Q1_0 fused single-launch DP4A GEMV.
+    ///
+    /// Same shape contract as `q1_0_gemv_cuda`. Activation quant
+    /// happens inside the kernel, in shared memory — no scratch
+    /// allocation. Single launch.
+    pub fn q1_0_gemv_fused_dp4a_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        n: usize,
+        k: usize,
+    ) -> Result<Self> {
+        assert!(
+            self.device().is_gpu(),
+            "q1_0_gemv_fused_dp4a_cuda: self must be on GPU"
+        );
+        assert_eq!(self.numel(), k);
+        assert_eq!(k % 128, 0);
+        let a_data = self.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(n).expect("GPU pool alloc failed");
+        cuda.q1_0_gemv_fused_dp4a_f32(w, a_guard.slice(), &mut out, n, k)
+            .expect("CUDA q1_0_gemv_fused_dp4a_f32 failed");
+        let shape = Shape::from_slice(&[1, n]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, n, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
     /// PrismML Q1_0 dequant-in-shader GEMM on the GPU.
     pub fn q1_0_gemm_cuda(
         &self,

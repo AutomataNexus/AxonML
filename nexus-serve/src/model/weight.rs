@@ -451,15 +451,16 @@ impl Weight {
                         let n = dims[1];
                         let m_shape = input.shape().first().copied().unwrap_or(1);
                         let result = if m_shape == 1 {
-                            // v2 (float4 acts + nibble-extracted signs) is the
-                            // production path: 52.5 tok/s on Bonsai-8B decode
-                            // (RTX 5070 Ti Laptop). DP4A int8 path
-                            // (`q1_0_gemv_dp4a_cuda`) is implemented but loses
-                            // by ~12% at m=1 because the per-matmul activation-
-                            // quant launch + scratch alloc cost outweighs the
-                            // dp4a inner-loop saving when we're launch-overhead
-                            // bound. Revisit once we have CUDA-graph capture or
-                            // fused per-layer activation quant.
+                            // v2 (float4 acts + nibble signs) remains
+                            // production at ~52 tok/s on Bonsai-8B decode.
+                            // DP4A path (`q1_0_gemv_dp4a_cuda`) loses by ~12%
+                            // to launch overhead at m=1; fused single-launch
+                            // DP4A (`q1_0_gemv_fused_dp4a_cuda`) loses ~37%
+                            // — empirical on RTX 5070 Ti Laptop, root cause
+                            // not yet pinned (occupancy / smem barrier /
+                            // warp-grouping overhead all suspect). Both
+                            // alternates stay in tree as ready-to-flip when
+                            // CUDA graph capture lands or hardware changes.
                             input.q1_0_gemv_cuda(w_gpu, n, k)
                         } else {
                             input.q1_0_gemm_cuda(w_gpu, n, k)

@@ -3682,6 +3682,16 @@ pub const Q1_0_MATMUL_PTX: &str = include_str!("q1_0_matmul.ptx");
 /// activations (binary weights have zero DC term so no `s` correction).
 pub const Q1_0_MATMUL_DP4A_PTX: &str = include_str!("q1_0_matmul_dp4a.ptx");
 
+/// Q1_0 fused single-launch DP4A path.
+///
+/// Compiled from `q1_0_matmul_fused.cu`. Combines activation quant +
+/// dp4a gemv into one kernel: each CTA cooperatively quantizes the
+/// f32 activation row into shared memory once, then all warps in the
+/// CTA do the dp4a matmul against smem-resident acts. Eliminates the
+/// extra launch + global scratch allocation that made the standalone
+/// DP4A path lose to v2 on launch-overhead-bound decode.
+pub const Q1_0_MATMUL_FUSED_PTX: &str = include_str!("q1_0_matmul_fused.ptx");
+
 /// Q6_K quantized matmul (dequant-in-shader).
 ///
 /// Compiled from `q6k_matmul.cu`. Same shape contract as Q4_K but with
@@ -3948,6 +3958,13 @@ impl CudaKernels {
             "q1_0_matmul_dp4a",
             Q1_0_MATMUL_DP4A_PTX,
             &["q1_0_quantize_acts_q8", "q1_0_gemv_dp4a_f32"],
+        )?;
+
+        // Q1_0 fused single-launch DP4A — smem-resident int8 acts.
+        kernels.load_module(
+            "q1_0_matmul_fused",
+            Q1_0_MATMUL_FUSED_PTX,
+            &["q1_0_gemv_fused_dp4a_f32"],
         )?;
 
         // Q6_K dequant-in-shader matmul — LM head + higher-precision weights.
