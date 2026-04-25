@@ -142,7 +142,7 @@ dependencies = [
 
 [[package]]
 name = "axonml"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-audio",
  "axonml-autograd",
@@ -167,18 +167,18 @@ dependencies = [
 
 [[package]]
 name = "axonml-audio"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "axonml-data",
  "axonml-tensor",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rustfft",
 ]
 
 [[package]]
 name = "axonml-autograd"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -189,7 +189,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-core"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "bytemuck",
  "cudarc",
@@ -205,17 +205,17 @@ dependencies = [
 
 [[package]]
 name = "axonml-data"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rayon",
 ]
 
 [[package]]
 name = "axonml-distributed"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -225,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-fusion"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -236,18 +236,18 @@ dependencies = [
 
 [[package]]
 name = "axonml-hvac"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
  "axonml-nn",
  "axonml-tensor",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
 name = "axonml-jit"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-llm"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -272,7 +272,8 @@ dependencies = [
  "dirs",
  "half",
  "indicatif",
- "rand 0.8.5",
+ "parking_lot",
+ "rand 0.8.6",
  "reqwest",
  "safetensors",
  "serde",
@@ -282,20 +283,20 @@ dependencies = [
 
 [[package]]
 name = "axonml-nn"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
  "axonml-tensor",
  "parking_lot",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rayon",
  "rustfft",
 ]
 
 [[package]]
 name = "axonml-onnx"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -312,17 +313,18 @@ dependencies = [
 
 [[package]]
 name = "axonml-optim"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
  "axonml-nn",
  "axonml-tensor",
+ "rayon",
 ]
 
 [[package]]
 name = "axonml-profile"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "axonml-tensor",
@@ -334,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-quant"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -348,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-serialize"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "axonml-nn",
@@ -360,34 +362,34 @@ dependencies = [
 
 [[package]]
 name = "axonml-tensor"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-core",
  "cudarc",
  "half",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_distr",
  "smallvec",
 ]
 
 [[package]]
 name = "axonml-text"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
  "axonml-data",
  "axonml-nn",
  "axonml-tensor",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "axonml-train"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -398,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "axonml-vision"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "axonml-autograd",
  "axonml-core",
@@ -411,7 +413,7 @@ dependencies = [
  "flate2",
  "image",
  "libc",
- "rand 0.8.5",
+ "rand 0.8.6",
  "reqwest",
  "serde",
  "serde_json",
@@ -444,7 +446,7 @@ dependencies = [
  "axonml-serialize",
  "axonml-tensor",
  "axonml-vision",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
@@ -1844,9 +1846,9 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openssl"
-version = "0.10.76"
+version = "0.10.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "951c002c75e16ea2c65b8c7e4d3d51d5530d8dfa7d060b4776828c88cfb18ecf"
+checksum = "f38c4372413cdaaf3cc79dd92d29d7d9f5ab09b51b10dded508fb90bb70b9222"
 dependencies = [
  "bitflags 2.11.0",
  "cfg-if",
@@ -1876,9 +1878,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.112"
+version = "0.9.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57d55af3b3e226502be1526dfdba67ab0e9c96fc293004e79576b2b9edb0dbdb"
+checksum = "13ce1245cd07fcc4cfdb438f7507b0c7e4f3849a69fd84d52374c66d83741bb6"
 dependencies = [
  "cc",
  "libc",
@@ -2135,9 +2137,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -2199,7 +2201,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
 dependencies = [
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
@@ -2478,9 +2480,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.12"
+version = "0.103.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8279bb85272c9f10811ae6a6c547ff594d6a7f3c6c6b02ee9726d1d0dcfcdd06"
+checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
 dependencies = [
  "ring",
  "rustls-pki-types",
