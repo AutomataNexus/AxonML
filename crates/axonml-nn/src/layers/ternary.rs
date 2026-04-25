@@ -162,6 +162,10 @@ pub struct TernaryLinear {
     out_features: usize,
     /// Whether to use packed inference mode.
     inference_mode: bool,
+    /// Per-process instance ID. Assigned at construction, used by the
+    /// one-shot CPU/GPU forward diagnostic to identify *which* layer
+    /// is keeping its shadow on CPU when the rest moved to GPU.
+    instance_id: usize,
 }
 
 impl TernaryLinear {
@@ -172,6 +176,10 @@ impl TernaryLinear {
 
     /// Creates a new TernaryLinear layer with optional bias.
     pub fn with_bias(in_features: usize, out_features: usize, bias: bool) -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static INSTANCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let instance_id = INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
+
         let weight_data = kaiming_uniform(out_features, in_features);
         let shadow_weight = Parameter::named("shadow_weight", weight_data, true);
 
@@ -189,6 +197,7 @@ impl TernaryLinear {
             in_features,
             out_features,
             inference_mode: false,
+            instance_id,
         }
     }
 
@@ -326,6 +335,42 @@ impl TernaryLinear {
 
         let mut out_shape = batch_dims.clone();
         out_shape.push(self.out_features);
+
+        // Per-instance forward-path diagnostic. Off by default; enable
+        // with `TRIDENT_TERNARY_TRACE=1` to print one line per
+        // TernaryLinear on its first forward pass — catches regressions
+        // where some submodule's shadow_weight isn't migrated to GPU.
+        #[cfg(feature = "cuda")]
+        {
+            use std::collections::HashSet;
+            use std::sync::Mutex;
+            use std::sync::OnceLock;
+            static TRACE_ENABLED: OnceLock<bool> = OnceLock::new();
+            let enabled = *TRACE_ENABLED.get_or_init(|| {
+                std::env::var("TRIDENT_TERNARY_TRACE")
+                    .map(|v| !v.is_empty() && v != "0")
+                    .unwrap_or(false)
+            });
+            if enabled {
+                static FIRED_INSTANCES: Mutex<Option<HashSet<usize>>> = Mutex::new(None);
+                let mut guard = FIRED_INSTANCES.lock().unwrap();
+                let set = guard.get_or_insert_with(HashSet::new);
+                if set.insert(self.instance_id) {
+                    let shadow_dev = self.shadow_weight.data().device();
+                    let input_dev = input_data.device();
+                    let on_gpu = input_dev.is_gpu() && shadow_dev.is_gpu();
+                    eprintln!(
+                        "[TernaryLinear #{:03}] {} forward shapes=[{}, {}] shadow={:?} input={:?}",
+                        self.instance_id,
+                        if on_gpu { "GPU" } else { "CPU" },
+                        self.in_features,
+                        self.out_features,
+                        shadow_dev,
+                        input_dev,
+                    );
+                }
+            }
+        }
 
         // GPU fast path: if BOTH the activation AND the shadow weights live
         // on Cuda(0), do the absmean quantize + ternary matmul + bias add

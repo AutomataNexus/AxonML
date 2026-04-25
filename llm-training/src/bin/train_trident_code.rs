@@ -112,6 +112,7 @@ use llm_training::{
 
 const DEFAULT_TOKENIZER: &str = "/opt/AxonML/tokenizers/trident-coder-bpe/tokenizer.json";
 const DEFAULT_OUTPUT_DIR_SMOKE: &str = "/opt/AxonML/llm-training/checkpoints/trident-smoke";
+const DEFAULT_OUTPUT_DIR_LAPTOP: &str = "/opt/AxonML/llm-training/checkpoints/trident-laptop";
 const DEFAULT_OUTPUT_DIR_1B: &str = "/opt/AxonML/llm-training/checkpoints/trident-1b";
 const DEFAULT_OUTPUT_DIR_3B: &str = "/opt/AxonML/llm-training/checkpoints/trident-3b";
 const DEFAULT_SMOKE_CORPUS: &str = "/opt/datasets/text/shakespeare.txt";
@@ -127,6 +128,7 @@ const DEFAULT_LOG_EVERY: usize = 10;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ModelVariant {
     Smoke,
+    Laptop,
     OneB,
     ThreeB,
 }
@@ -135,10 +137,13 @@ impl ModelVariant {
     fn from_str(s: &str) -> Self {
         match s {
             "smoke" => Self::Smoke,
+            "laptop" | "Laptop" | "LAPTOP" => Self::Laptop,
             "1b" | "1B" => Self::OneB,
             "3b" | "3B" => Self::ThreeB,
             other => {
-                eprintln!("unknown --config {other:?}; expected smoke | 1b | 3b");
+                eprintln!(
+                    "unknown --config {other:?}; expected smoke | laptop | 1b | 3b"
+                );
                 std::process::exit(1);
             }
         }
@@ -147,6 +152,7 @@ impl ModelVariant {
     fn label(&self) -> &'static str {
         match self {
             Self::Smoke => "smoke",
+            Self::Laptop => "laptop",
             Self::OneB => "1b",
             Self::ThreeB => "3b",
         }
@@ -178,6 +184,7 @@ struct Config {
 fn default_seq_len(variant: ModelVariant) -> usize {
     match variant {
         ModelVariant::Smoke => 64,
+        ModelVariant::Laptop => 512,
         ModelVariant::OneB | ModelVariant::ThreeB => 4096,
     }
 }
@@ -185,6 +192,7 @@ fn default_seq_len(variant: ModelVariant) -> usize {
 fn default_batch_size(variant: ModelVariant) -> usize {
     match variant {
         ModelVariant::Smoke => 8,
+        ModelVariant::Laptop => 1,
         ModelVariant::OneB => 4,
         ModelVariant::ThreeB => 2,
     }
@@ -193,6 +201,7 @@ fn default_batch_size(variant: ModelVariant) -> usize {
 fn default_steps(variant: ModelVariant) -> usize {
     match variant {
         ModelVariant::Smoke => 1000,
+        ModelVariant::Laptop => 50_000,
         ModelVariant::OneB => 100_000,
         ModelVariant::ThreeB => 100_000,
     }
@@ -201,6 +210,7 @@ fn default_steps(variant: ModelVariant) -> usize {
 fn default_checkpoint_every(variant: ModelVariant) -> u64 {
     match variant {
         ModelVariant::Smoke => 0,
+        ModelVariant::Laptop => 500,
         ModelVariant::OneB | ModelVariant::ThreeB => 1000,
     }
 }
@@ -208,6 +218,7 @@ fn default_checkpoint_every(variant: ModelVariant) -> u64 {
 fn default_output_dir(variant: ModelVariant) -> PathBuf {
     PathBuf::from(match variant {
         ModelVariant::Smoke => DEFAULT_OUTPUT_DIR_SMOKE,
+        ModelVariant::Laptop => DEFAULT_OUTPUT_DIR_LAPTOP,
         ModelVariant::OneB => DEFAULT_OUTPUT_DIR_1B,
         ModelVariant::ThreeB => DEFAULT_OUTPUT_DIR_3B,
     })
@@ -342,14 +353,18 @@ fn print_help() {
 Usage: train_trident_code [OPTIONS]
 
 Options:
-  --config MODE        Model size: smoke | 1b | 3b (default: smoke)
+  --config MODE        Model size: smoke | laptop | 1b | 3b (default: smoke)
+                         smoke   : ~30M, CPU-friendly toy
+                         laptop  : ~250M, fits 12 GB consumer GPU at bs=2 seq=1024
+                         1b      : 1B from-scratch run target (Colab A100)
+                         3b      : 3B stub for later scaling
   --tokenizer PATH     Tokenizer JSON (default: /opt/AxonML/tokenizers/trident-coder-bpe/tokenizer.json)
   --dataset PATH       Pre-tokenized corpus (.bin of u32 LE token IDs).
                        If omitted, smoke mode tokenizes shakespeare.txt
                        on the fly and caches at /tmp/shakespeare.trident-bpe.bin.
   --out PATH           Checkpoint directory (default: .../checkpoints/trident-{{variant}})
-  --seq-len N          Context window (default: 64 smoke, 4096 1b/3b)
-  --batch-size N       Micro-batch size (default: 8 smoke, 4 1b, 2 3b)
+  --seq-len N          Context window (default: 64 smoke, 1024 laptop, 4096 1b/3b)
+  --batch-size N       Micro-batch size (default: 8 smoke, 2 laptop, 4 1b, 2 3b)
   --lr FLOAT           Peak learning rate (default: 3e-4)
   --steps N            Total opt steps (default: 1000 smoke, 100000 1b/3b)
   --warmup-steps N     Linear warmup steps (default: 100)
@@ -538,6 +553,7 @@ fn main() {
     // ---- Model ----
     let model_config = match cfg.variant {
         ModelVariant::Smoke => TridentConfig::smoke(vocab_size),
+        ModelVariant::Laptop => TridentConfig::trident_laptop(vocab_size),
         ModelVariant::OneB => TridentConfig::trident_1b(vocab_size),
         ModelVariant::ThreeB => TridentConfig::trident_3b(vocab_size),
     };

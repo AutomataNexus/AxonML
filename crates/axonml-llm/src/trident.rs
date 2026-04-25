@@ -169,6 +169,40 @@ impl TridentConfig {
         }
     }
 
+    /// ~110 M-parameter laptop-trainable config. I2_S-deployable shapes
+    /// (every TernaryLinear's `in_features` is a multiple of 128) and a
+    /// memory budget that fits a 12 GB consumer GPU (RTX 5070 Ti Laptop)
+    /// at `bs=1 / seq=512`, leaving headroom for autograd + optimizer
+    /// state under the GPU TernaryLinear path.
+    ///
+    /// Hyperparams:
+    /// - d_model 768, intermediate 2048 (≈ 2.67× expansion, both
+    ///   multiples of 128)
+    /// - 12 layers, 12 heads / 4 KV heads (GQA 3:1), head_dim=64,
+    ///   kv_hidden = 256
+    /// - max_seq_len 1024, RoPE θ=500 000, ReLU²-gated FFN, SubLN on
+    ///
+    /// Total params ≈ embeddings (32 768·768 ≈ 25 M) + 12 × per-layer
+    /// (~7 M attn + ferrum) ≈ 110 M. Empirically this fits a 12 GB
+    /// laptop GPU at `bs=1 seq=512`; bumping to bs=2 / longer seqs
+    /// will OOM on this hardware.
+    pub fn trident_laptop(vocab_size: usize) -> Self {
+        Self {
+            vocab_size,
+            d_model: 768,
+            num_layers: 12,
+            num_heads: 12,
+            num_kv_heads: 4,
+            intermediate_size: 2048,
+            max_seq_len: 1024,
+            rms_norm_eps: 1e-5,
+            use_rope: true,
+            rope_theta: 500_000.0,
+            use_squared_relu: true,
+            use_sub_ln: true,
+        }
+    }
+
     /// 3B-parameter config — stub for later scaling. Not trained yet.
     pub fn trident_3b(vocab_size: usize) -> Self {
         Self {
