@@ -48,7 +48,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ pas
 See `CHANGELOG.md [Unreleased]` for the full audit trail and next-round
 blockers (CUDA graph capture + memory-pool integration).
 
-### Core (v0.6.1)
+### Core (v0.6.3)
 
 - **Tensor Operations** (`axonml-tensor`)
   - N-dimensional tensors with arbitrary shapes
@@ -863,4 +863,4 @@ at your option.
 
 **Axonml** - Forging the future of ML in Rust.
 
-_Last updated: 2026-04-16 (v0.6.1)_
+_Last updated: 2026-04-25 (v0.6.3)_
