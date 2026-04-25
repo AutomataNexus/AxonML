@@ -3671,6 +3671,17 @@ pub const I2S_MATMUL_PTX: &str = include_str!("i2s_matmul.ptx");
 /// (Qwen3-8B QAT'd to Q1_0). Effective bits/weight: 1.125.
 pub const Q1_0_MATMUL_PTX: &str = include_str!("q1_0_matmul.ptx");
 
+/// Q1_0 DP4A path — int8 activations + `__dp4a` accumulate.
+///
+/// Compiled from `q1_0_matmul_dp4a.cu`. Companion to Q1_0_MATMUL_PTX:
+/// adds an online `q1_0_quantize_acts_q8` step that converts the f32
+/// activation row to int8 + per-32-chunk fp16 scales, and a
+/// `q1_0_gemv_dp4a_f32` matmul that uses `__dp4a` for the inner loop
+/// (4× int8 MAC per PTX instruction on the integer pipeline). Mirrors
+/// PrismML's `vec_dot_q1_0_q8_1` math with Q8_0-style scale-only
+/// activations (binary weights have zero DC term so no `s` correction).
+pub const Q1_0_MATMUL_DP4A_PTX: &str = include_str!("q1_0_matmul_dp4a.ptx");
+
 /// Q6_K quantized matmul (dequant-in-shader).
 ///
 /// Compiled from `q6k_matmul.cu`. Same shape contract as Q4_K but with
@@ -3930,6 +3941,13 @@ impl CudaKernels {
             "q1_0_matmul",
             Q1_0_MATMUL_PTX,
             &["q1_0_gemv_f32", "q1_0_gemm_f32"],
+        )?;
+
+        // Q1_0 DP4A path — online int8 act quant + dp4a-based matmul.
+        kernels.load_module(
+            "q1_0_matmul_dp4a",
+            Q1_0_MATMUL_DP4A_PTX,
+            &["q1_0_quantize_acts_q8", "q1_0_gemv_dp4a_f32"],
         )?;
 
         // Q6_K dequant-in-shader matmul — LM head + higher-precision weights.
