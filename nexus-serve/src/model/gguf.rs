@@ -167,6 +167,10 @@ pub enum GgmlType {
     /// 256-element blocks × (f16 scale + 64 data bytes) = 66 bytes per block.
     /// See `axonml_quant::bitnet` for the dequant + fused-matmul kernels.
     I2S = 36,
+    /// PrismML 1-bit Q1_0 (Bonsai-8B family, dtype 41).
+    /// 128-element blocks × (f16 scale + 16 sign bytes) = 18 bytes per block.
+    /// Pure binary {−d, +d} — no zero state. See `axonml_quant::q1_0`.
+    Q1_0 = 41,
     Unknown = 255,
 }
 
@@ -194,6 +198,7 @@ impl GgmlType {
             28 => Self::F64,
             30 => Self::BF16,
             36 => Self::I2S,
+            41 => Self::Q1_0,
             _ => Self::Unknown,
         }
     }
@@ -217,6 +222,7 @@ impl GgmlType {
             Self::Q6K => 210,
             Self::Q8K => 292,
             Self::I2S => 32, // 128 × 2-bit trits, no per-block scale (one f32 per tensor at tail)
+            Self::Q1_0 => 18, // 128 × 1-bit signs (16 B) + per-block fp16 scale (2 B)
             Self::I8 => 1,
             Self::I16 => 2,
             Self::I32 => 4,
@@ -236,6 +242,7 @@ impl GgmlType {
             Self::Q2K | Self::Q3K | Self::Q4K | Self::Q5K
             | Self::Q6K | Self::Q8K => 256,
             Self::I2S => 128,
+            Self::Q1_0 => 128,
             _ => 1,
         }
     }
@@ -770,6 +777,26 @@ pub fn dequantize_q5_0(block: &[u8], output: &mut [f32]) {
         let hi2 = ((qh >> (i + 16)) & 1) as u8 * 16;
         output[i]      = ((lo1 | hi1) as i32 - 16) as f32 * d;
         output[i + 16] = ((lo2 | hi2) as i32 - 16) as f32 * d;
+    }
+}
+
+/// Dequantize a Q1_0 block (18 bytes for 128 elements).
+///
+/// PrismML Q1_0 layout (matches their `llama.cpp` fork):
+///   * `d`  (f16, 2 bytes) — per-block scale
+///   * `qs` (16 bytes)     — 128 sign bits, element `j` at `qs[j/8]` bit `j%8`
+///
+/// Value: `bit ? +d : -d`. Pure binary, no zero state. The encoding is
+/// identical to `block_q1_0` in `PrismML-Eng/llama.cpp`'s `ggml-quants.c`.
+pub fn dequantize_q1_0(block: &[u8], output: &mut [f32]) {
+    if block.len() < 18 || output.len() < 128 {
+        return;
+    }
+    let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
+    let neg_d = -d;
+    for (j, slot) in output.iter_mut().enumerate().take(128) {
+        let bit = (block[2 + j / 8] >> (j % 8)) & 1;
+        *slot = if bit == 1 { d } else { neg_d };
     }
 }
 

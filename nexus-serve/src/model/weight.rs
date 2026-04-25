@@ -431,6 +431,34 @@ impl Weight {
                         }
                     }
                 }
+                // PrismML Q1_0 GPU fast path — 1-bit (1.125 bpw) matmul.
+                // Per-block fp16 scale embedded in the weight bytes (no
+                // tensor-wide tail scale unlike I2_S). Bonsai-8B (Qwen3-8B
+                // QAT'd) is the primary consumer.
+                #[cfg(feature = "cuda")]
+                if *dtype == GgmlType::Q1_0
+                    && dims.len() == 2
+                    && input.device().is_gpu()
+                    && dims[0] % 128 == 0
+                {
+                    if let Some(cuda) = axonml_core::backends::cuda::get_cuda_backend() {
+                        let w_gpu = gpu_cache.get_or_init(|| {
+                            cuda.htod_copy(data.as_slice())
+                                .expect("Q1_0 gpu_cache htod_copy failed")
+                        });
+                        let _ = cuda;
+                        let k = dims[0];
+                        let n = dims[1];
+                        let m_shape = input.shape().first().copied().unwrap_or(1);
+                        let result = if m_shape == 1 {
+                            input.q1_0_gemv_cuda(w_gpu, n, k)
+                        } else {
+                            input.q1_0_gemm_cuda(w_gpu, n, k)
+                        };
+                        return result.expect("q1_0_{gemv,gemm}_cuda failed");
+                    }
+                }
+
                 // BitNet I2_S GPU fast path — 1.58-bit ternary matmul on
                 // GPU. Weights are 0.25 bytes/element vs Q4_K's 0.56 —
                 // memory-bandwidth-limited decode should outrun Q4_K.
@@ -613,6 +641,7 @@ fn dequantize_into(output: &mut [f32], raw_data: &[u8], n_elements: usize, dtype
         GgmlType::Q4K => dequantize_blocks_par(output, raw_data, n_elements, 256, 144, gguf::dequantize_q4_k),
         GgmlType::Q5K => dequantize_blocks_par(output, raw_data, n_elements, 256, 176, gguf::dequantize_q5_k),
         GgmlType::Q6K => dequantize_blocks_par(output, raw_data, n_elements, 256, 210, gguf::dequantize_q6_k),
+        GgmlType::Q1_0 => dequantize_blocks_par(output, raw_data, n_elements, 128, 18, gguf::dequantize_q1_0),
         GgmlType::I2S => {
             // Unreachable in practice: `Weight::matmul` intercepts I2S and
             // routes to the fused `i2s_matmul` path (which handles the

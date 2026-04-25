@@ -1876,6 +1876,78 @@ impl CudaBackend {
         }
     }
 
+    /// PrismML Q1_0 (1-bit) GEMV — `w` is `n × n_blocks × 18` raw GGUF
+    /// Q1_0 bytes (per-block fp16 scale embedded). Two warps per output
+    /// row, lane-stride-32 activation reads. Same launch shape as
+    /// `i2s_gemv_f32`.
+    pub fn q1_0_gemv_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        n: usize,
+        k: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(k % 128 == 0, "Q1_0 GEMV requires k % 128 == 0");
+        let func = self
+            .kernels
+            .get("q1_0_gemv_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q1_0_gemv_f32".to_string()))?;
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((n as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(n as u32))
+                .arg(&(k as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// PrismML Q1_0 GEMM (m > 1 prefill). Naive one-thread-per-output;
+    /// same shape as `i2s_gemm_f32`.
+    pub fn q1_0_gemm_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        m: usize,
+        n: usize,
+        k: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(k % 128 == 0, "Q1_0 GEMM requires k % 128 == 0");
+        let func = self
+            .kernels
+            .get("q1_0_gemm_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q1_0_gemm_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(m * n);
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&(m as u32))
+                .arg(&(n as u32))
+                .arg(&(k as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// BitNet I2_S GEMM (m > 1 prefill). Naive one-thread-per-output.
     pub fn i2s_gemm_f32(
         &self,
