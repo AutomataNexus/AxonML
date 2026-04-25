@@ -925,6 +925,198 @@ impl TridentTensorEntry {
     }
 }
 
+/// Trident-coder-BPE tokenizer metadata extracted from a HuggingFace
+/// `tokenizer.json` file (the format the trident-coder-bpe trainer
+/// emits). Stripped down to exactly the fields BitNet b1.58 / llama.cpp
+/// readers need.
+struct TridentTokenizerMeta {
+    /// `tokenizer.ggml.model` — usually `"gpt2"` for byte-level BPE.
+    model: String,
+    /// `tokenizer.ggml.pre` — pre-tokenizer family. Set to `"default"`
+    /// when the tokenizer.json lists a ByteLevel pre-tokenizer; matches
+    /// llama.cpp's expectation for GPT-2 / LLaMA-3 family.
+    pre: String,
+    /// `tokenizer.ggml.tokens` — vocab strings sorted by id.
+    tokens: Vec<String>,
+    /// `tokenizer.ggml.merges` — BPE merges, each `"piece1 piece2"`.
+    merges: Vec<String>,
+    bos_token_id: u32,
+    eos_token_id: u32,
+    pad_token_id: Option<u32>,
+}
+
+/// Read a HuggingFace `tokenizer.json` (BPE + ByteLevel) and translate
+/// it into the GGUF `tokenizer.ggml.*` schema.
+///
+/// Schema we expect (matches the trident-coder-bpe trainer output):
+/// - `model.type == "BPE"`
+/// - `model.vocab` = `{ token_string -> id }`
+/// - `model.merges` = `[[piece1, piece2], ...]` OR `["piece1 piece2", ...]`
+/// - `pre_tokenizer.type == "ByteLevel"`
+/// - `added_tokens` carries the BOS/EOS specials at fixed ids
+///
+/// trident-coder-bpe convention (from
+/// `/opt/AxonML/tokenizers/trident-coder-bpe`):
+/// id 0 = `<|endoftext|>`, used as both BOS and EOS (GPT-2 style).
+fn read_trident_bpe_tokenizer(path: &Path) -> io::Result<TridentTokenizerMeta> {
+    let text = std::fs::read_to_string(path)?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("tokenizer.json parse failed: {e}"),
+        )
+    })?;
+
+    let model = v.get("model").ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "tokenizer.json: missing `model`",
+        )
+    })?;
+    let model_type = model.get("type").and_then(|x| x.as_str()).unwrap_or("");
+    if model_type != "BPE" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("tokenizer.json: model.type must be BPE, got {model_type}"),
+        ));
+    }
+
+    // vocab → tokens sorted by id.
+    let vocab_obj = model
+        .get("vocab")
+        .and_then(|x| x.as_object())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "tokenizer.json: missing model.vocab",
+            )
+        })?;
+    let mut pairs: Vec<(String, u64)> = Vec::with_capacity(vocab_obj.len());
+    for (tok, id_val) in vocab_obj {
+        let id = id_val.as_u64().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("vocab id for {tok} not an integer"),
+            )
+        })?;
+        pairs.push((tok.clone(), id));
+    }
+    pairs.sort_by_key(|(_, id)| *id);
+    // Sanity: ids must be 0..vocab_size with no gaps.
+    for (i, (_, id)) in pairs.iter().enumerate() {
+        if *id != i as u64 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("vocab id gap at index {i}: got id {}", id),
+            ));
+        }
+    }
+    let tokens: Vec<String> = pairs.into_iter().map(|(t, _)| t).collect();
+
+    // merges → space-joined "p1 p2" strings (HF JSON gives 2-element
+    // arrays; older / canonical files give pre-joined strings).
+    let merges_val = model.get("merges").ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "tokenizer.json: missing model.merges",
+        )
+    })?;
+    let merges_arr = merges_val.as_array().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "tokenizer.json: model.merges not an array",
+        )
+    })?;
+    let mut merges: Vec<String> = Vec::with_capacity(merges_arr.len());
+    for m in merges_arr {
+        if let Some(pair) = m.as_array() {
+            if pair.len() == 2 {
+                let a = pair[0].as_str().unwrap_or("");
+                let b = pair[1].as_str().unwrap_or("");
+                merges.push(format!("{a} {b}"));
+                continue;
+            }
+        }
+        if let Some(s) = m.as_str() {
+            merges.push(s.to_string());
+            continue;
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "tokenizer.json: merge entry is neither [str, str] nor str",
+        ));
+    }
+
+    // BOS / EOS / PAD via added_tokens lookup. Falls back to id 0 for
+    // BOS+EOS if no `<|endoftext|>` is found (GPT-2 style default).
+    let added: Vec<(u64, String)> = v
+        .get("added_tokens")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| {
+                    let id = t.get("id")?.as_u64()?;
+                    let content = t.get("content")?.as_str()?.to_string();
+                    Some((id, content))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut bos: Option<u32> = None;
+    let mut eos: Option<u32> = None;
+    let mut pad: Option<u32> = None;
+    for (id, content) in &added {
+        match content.as_str() {
+            "<|endoftext|>" => {
+                bos = Some(*id as u32);
+                eos = Some(*id as u32);
+            }
+            "<s>" | "<|begin_of_text|>" | "<|user|>" => {
+                if bos.is_none() {
+                    bos = Some(*id as u32);
+                }
+            }
+            "</s>" | "<|end_of_text|>" | "<|tool_end|>" => {
+                if eos.is_none() {
+                    eos = Some(*id as u32);
+                }
+            }
+            "<|pad|>" | "<pad>" => {
+                pad = Some(*id as u32);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(TridentTokenizerMeta {
+        model: "gpt2".to_string(),
+        pre: "default".to_string(),
+        tokens,
+        merges,
+        bos_token_id: bos.unwrap_or(0),
+        eos_token_id: eos.unwrap_or(0),
+        pad_token_id: pad,
+    })
+}
+
+/// Encode a `tokenizer.ggml.tokens` / `…merges` array of strings into
+/// the GGUF metadata buffer (VTYPE_ARRAY of VTYPE_STRING).
+fn write_meta_array_of_strings<W: Write>(
+    w: &mut W,
+    key: &str,
+    values: &[String],
+) -> io::Result<()> {
+    write_string(w, key)?;
+    w.write_u32::<LittleEndian>(VTYPE_ARRAY)?;
+    w.write_u32::<LittleEndian>(VTYPE_STRING)?;
+    w.write_u64::<LittleEndian>(values.len() as u64)?;
+    for s in values {
+        write_string(w, s)?;
+    }
+    Ok(())
+}
+
 /// Pack a row-major `[out, in]` f32 weight into BitNet I2_S bytes:
 /// per-tensor absmean scale, then group-strided 2-bit codes (128 weights
 /// per 32-byte block), then 4 trailing scale bytes.
@@ -1004,6 +1196,29 @@ pub fn export_trident_to_gguf(
     model_name: &str,
     tokenizer_source: Option<&Path>,
 ) -> io::Result<()> {
+    // Support either a sibling `.gguf` (pull tokenizer.ggml.* keys
+    // verbatim — limited by reader-side knowledge of value type 21)
+    // OR a HuggingFace `.json` (translated to ggml schema by
+    // `read_trident_bpe_tokenizer`).  Auto-detect by extension.
+    let tokenizer_json: Option<&Path> = tokenizer_source.filter(|p| {
+        p.extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+    });
+    let tokenizer_gguf: Option<&Path> = tokenizer_source.filter(|p| {
+        p.extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("gguf"))
+    });
+    if let Some(ts) = tokenizer_source {
+        if tokenizer_json.is_none() && tokenizer_gguf.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "tokenizer-source must be a .json (HF tokenizer) or .gguf, got {}",
+                    ts.display()
+                ),
+            ));
+        }
+    }
     let cfg = model.config().clone();
     let params = model.parameters();
 
@@ -1070,19 +1285,26 @@ pub fn export_trident_to_gguf(
         });
     }
 
-    // Optional tokenizer passthrough — same shape as export_rdt_to_gguf.
-    let tokenizer_meta: HashMap<String, Vec<u8>> = match tokenizer_source {
-        Some(src) => {
-            let raw = read_gguf_metadata_raw_bytes(src, TOKENIZER_META_KEYS)?;
-            if raw.is_empty() {
-                eprintln!(
-                    "[gguf-export] WARNING: --tokenizer-source {} has no tokenizer.ggml.* keys.",
-                    src.display()
-                );
-            }
-            raw
+    // Tokenizer source can be either a HF tokenizer.json (preferred —
+    // we own the encoding and emit a clean `tokenizer.ggml.*` block)
+    // or a sibling .gguf (verbatim passthrough; constrained by what the
+    // reader knows about value types).
+    let tokenizer_json_meta: Option<TridentTokenizerMeta> = if let Some(p) = tokenizer_json {
+        Some(read_trident_bpe_tokenizer(p)?)
+    } else {
+        None
+    };
+    let tokenizer_gguf_meta: HashMap<String, Vec<u8>> = if let Some(src) = tokenizer_gguf {
+        let raw = read_gguf_metadata_raw_bytes(src, TOKENIZER_META_KEYS)?;
+        if raw.is_empty() {
+            eprintln!(
+                "[gguf-export] WARNING: --tokenizer-source {} has no tokenizer.ggml.* keys.",
+                src.display()
+            );
         }
-        None => HashMap::new(),
+        raw
+    } else {
+        HashMap::new()
     };
 
     // ---- Header + metadata ----
@@ -1138,11 +1360,34 @@ pub fn export_trident_to_gguf(
     write_meta_f32(&mut meta_buf, "bitnet-b1.58.rope.freq_base", cfg.rope_theta)?;
     meta_count += 8;
 
-    // Tokenizer passthrough.
-    for (key, raw) in &tokenizer_meta {
-        write_string(&mut meta_buf, key)?;
-        meta_buf.write_all(raw)?;
-        meta_count += 1;
+    // Tokenizer — preferred path: HF tokenizer.json → ggml schema.
+    // Fallback path: verbatim passthrough from another GGUF.
+    if let Some(tk) = &tokenizer_json_meta {
+        write_meta_string(&mut meta_buf, "tokenizer.ggml.model", &tk.model)?;
+        write_meta_string(&mut meta_buf, "tokenizer.ggml.pre", &tk.pre)?;
+        write_meta_array_of_strings(&mut meta_buf, "tokenizer.ggml.tokens", &tk.tokens)?;
+        write_meta_array_of_strings(&mut meta_buf, "tokenizer.ggml.merges", &tk.merges)?;
+        write_meta_u32(
+            &mut meta_buf,
+            "tokenizer.ggml.bos_token_id",
+            tk.bos_token_id,
+        )?;
+        write_meta_u32(
+            &mut meta_buf,
+            "tokenizer.ggml.eos_token_id",
+            tk.eos_token_id,
+        )?;
+        meta_count += 6;
+        if let Some(pad) = tk.pad_token_id {
+            write_meta_u32(&mut meta_buf, "tokenizer.ggml.padding_token_id", pad)?;
+            meta_count += 1;
+        }
+    } else {
+        for (key, raw) in &tokenizer_gguf_meta {
+            write_string(&mut meta_buf, key)?;
+            meta_buf.write_all(raw)?;
+            meta_count += 1;
+        }
     }
 
     header_buf.write_u64::<LittleEndian>(meta_count)?;
@@ -1232,7 +1477,7 @@ pub fn export_trident_to_gguf(
         }
     }
 
-    if tokenizer_meta.is_empty() {
+    if tokenizer_json_meta.is_none() && tokenizer_gguf_meta.is_empty() {
         eprintln!(
             "[gguf-export] WARNING: no --tokenizer-source; Trident output at {} lacks tokenizer metadata.",
             output.display()
