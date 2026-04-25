@@ -324,38 +324,97 @@ impl TernaryLinear {
         let batch_dims: Vec<usize> = input_shape[..input_shape.len() - 1].to_vec();
         let total_batch: usize = batch_dims.iter().product();
 
-        // Quantize shadow weights to ternary
+        // Quantize shadow weights to ternary (CPU walk over shadow_weight;
+        // can be moved to GPU in a follow-up pass).
         let (ternary, scale) = self.quantize_weights();
 
-        // Flatten input to 2D
-        let input_vec = input_data.to_vec();
-
-        // Ternary matmul
-        let output_vec = Self::ternary_matmul(
-            &input_vec,
-            &ternary,
-            scale,
-            total_batch,
-            self.in_features,
-            self.out_features,
-        );
-
-        // Build output tensor
         let mut out_shape = batch_dims.clone();
         out_shape.push(self.out_features);
-        let output_tensor =
-            Tensor::from_vec(output_vec, &out_shape).expect("tensor creation failed");
 
-        // Add bias
-        let output_tensor = if let Some(ref bias) = self.bias {
-            let bias_vec = bias.data().to_vec();
-            let mut out = output_tensor.to_vec();
-            for b in 0..total_batch {
-                for o in 0..self.out_features {
-                    out[b * self.out_features + o] += bias_vec[o];
+        // GPU fast path: if the activation lives on Cuda(0), do the matmul
+        // and bias-add on GPU. The ternary weights are uploaded inside
+        // `Tensor::ternary_matmul_cuda` per call (n*k bytes — cheap vs
+        // the matmul cost at every realistic axonml-nn shape).
+        let output_tensor = {
+            #[cfg(feature = "cuda")]
+            {
+                if input_data.device().is_gpu() {
+                    let flat = input_data
+                        .reshape(&[total_batch as isize, self.in_features as isize])
+                        .expect("ternary forward: reshape input failed");
+                    let out_2d = flat
+                        .ternary_matmul_cuda(&ternary, scale, self.out_features, self.in_features)
+                        .expect("ternary_matmul_cuda failed");
+                    let out_shape_isize: Vec<isize> =
+                        out_shape.iter().map(|&d| d as isize).collect();
+                    out_2d
+                        .reshape(&out_shape_isize)
+                        .expect("ternary forward: reshape output failed")
+                } else {
+                    let input_vec = input_data.to_vec();
+                    let output_vec = Self::ternary_matmul(
+                        &input_vec,
+                        &ternary,
+                        scale,
+                        total_batch,
+                        self.in_features,
+                        self.out_features,
+                    );
+                    Tensor::from_vec(output_vec, &out_shape).expect("tensor creation failed")
                 }
             }
-            Tensor::from_vec(out, &out_shape).expect("tensor creation failed")
+            #[cfg(not(feature = "cuda"))]
+            {
+                let input_vec = input_data.to_vec();
+                let output_vec = Self::ternary_matmul(
+                    &input_vec,
+                    &ternary,
+                    scale,
+                    total_batch,
+                    self.in_features,
+                    self.out_features,
+                );
+                Tensor::from_vec(output_vec, &out_shape).expect("tensor creation failed")
+            }
+        };
+
+        // Bias add. On GPU we use the broadcasted Tensor add; on CPU keep
+        // the existing in-place loop.
+        let output_tensor = if let Some(ref bias) = self.bias {
+            #[cfg(feature = "cuda")]
+            {
+                if output_tensor.device().is_gpu() {
+                    let bias_data = bias.data();
+                    let bias_gpu = if bias_data.device().is_gpu() {
+                        bias_data.clone()
+                    } else {
+                        bias_data
+                            .to_device(output_tensor.device())
+                            .expect("bias to_device failed")
+                    };
+                    output_tensor.add(&bias_gpu).expect("bias add failed")
+                } else {
+                    let bias_vec = bias.data().to_vec();
+                    let mut out = output_tensor.to_vec();
+                    for b in 0..total_batch {
+                        for o in 0..self.out_features {
+                            out[b * self.out_features + o] += bias_vec[o];
+                        }
+                    }
+                    Tensor::from_vec(out, &out_shape).expect("tensor creation failed")
+                }
+            }
+            #[cfg(not(feature = "cuda"))]
+            {
+                let bias_vec = bias.data().to_vec();
+                let mut out = output_tensor.to_vec();
+                for b in 0..total_batch {
+                    for o in 0..self.out_features {
+                        out[b * self.out_features + o] += bias_vec[o];
+                    }
+                }
+                Tensor::from_vec(out, &out_shape).expect("tensor creation failed")
+            }
         } else {
             output_tensor
         };
@@ -514,14 +573,71 @@ struct TernaryLinearBackward {
 
 impl GradientFunction for TernaryLinearBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let g_vec = grad_output.to_vec();
-        let x_vec = self.saved_input.to_vec();
-
         let bs = self.total_batch;
         let in_f = self.in_features;
         let out_f = self.out_features;
         let scale = self.saved_scale;
         let ternary = &self.saved_ternary;
+
+        // GPU fast path: keep saved_input + grad_output on GPU, do the
+        // ternary-aware grad_input via the dedicated kernel and the
+        // STE grad_weight via Tensor::matmul (cuBLAS / GPU GEMM).
+        // Falls through to the rayon CPU path if either tensor is CPU
+        // or CUDA isn't compiled in.
+        #[cfg(feature = "cuda")]
+        {
+            if grad_output.device().is_gpu() && self.saved_input.device().is_gpu() {
+                // Reshape grad_output to a flat 2D [bs, out_f] for the kernels.
+                let g2d = grad_output
+                    .reshape(&[bs as isize, out_f as isize])
+                    .expect("ternary backward: reshape grad_output failed");
+                let x2d = self
+                    .saved_input
+                    .reshape(&[bs as isize, in_f as isize])
+                    .expect("ternary backward: reshape saved_input failed");
+
+                // 1. grad_input — fused ternary_grad_input_f32.
+                let gi_2d = g2d
+                    .ternary_grad_input_cuda(ternary, scale, in_f, out_f)
+                    .expect("ternary_grad_input_cuda failed");
+                let saved_shape: Vec<isize> = self
+                    .saved_input
+                    .shape()
+                    .iter()
+                    .map(|&d| d as isize)
+                    .collect();
+                let gi_tensor = gi_2d
+                    .reshape(&saved_shape)
+                    .expect("ternary backward: reshape grad_input failed");
+
+                // 2. grad_weight = grad_output^T @ saved_input. Use the
+                //    framework GPU matmul. Shapes: [out_f, bs] @ [bs, in_f]
+                //    → [out_f, in_f]. Build the transpose explicitly so
+                //    the matmul sees contiguous inputs.
+                let g_t = g2d
+                    .transpose(0, 1)
+                    .expect("ternary backward: transpose grad_output failed")
+                    .contiguous();
+                let gw_tensor = g_t
+                    .matmul(&x2d)
+                    .expect("ternary backward: grad_weight matmul failed");
+
+                let mut results: Vec<Option<Tensor<f32>>> = vec![Some(gi_tensor), Some(gw_tensor)];
+
+                // 3. grad_bias — sum over batch axis.
+                if self.has_bias {
+                    let gb_tensor = g2d
+                        .ternary_grad_bias_cuda(out_f)
+                        .expect("ternary_grad_bias_cuda failed");
+                    results.push(Some(gb_tensor));
+                }
+
+                return results;
+            }
+        }
+
+        let g_vec = grad_output.to_vec();
+        let x_vec = self.saved_input.to_vec();
 
         // 1. grad_input = scale * ternary_W^T @ grad_output
         //    grad_input[b,j] = scale * sum_o(ternary[o,j] * grad_output[b,o])

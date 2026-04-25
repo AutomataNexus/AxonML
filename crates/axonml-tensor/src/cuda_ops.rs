@@ -1151,6 +1151,138 @@ impl Tensor<f32> {
         })
     }
 
+    /// Raw-i8 ternary matmul — `self` is `[m, k]` f32 on GPU, `w` is a
+    /// host-side `&[i8]` of length `n * k` (axonml-nn TernaryLinear's
+    /// shadow-quantize output). Picks GEMV (m=1) or GEMM (m>1) based on
+    /// the leading axis of `self`. Returns `[m, n]` on GPU.
+    ///
+    /// Internally uploads `w` to a stream-allocated `CudaSlice<u8>`
+    /// (i8 reinterpret); freed at fn-scope end. Per call, but each
+    /// upload is k×n bytes which is cheap vs the matmul cost on
+    /// realistic shapes.
+    pub fn ternary_matmul_cuda(&self, w_i8: &[i8], scale: f32, n: usize, k: usize) -> Result<Self> {
+        assert!(
+            self.device().is_gpu(),
+            "ternary_matmul_cuda: self must be on GPU"
+        );
+        assert_eq!(w_i8.len(), n * k, "ternary weight shape mismatch");
+        let a_data = self.contiguous_gpu();
+        let numel = a_data.numel();
+        assert!(numel % k == 0);
+        let m = numel / k;
+
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+
+        // Upload ternary as u8 (reinterpret on kernel side as signed char).
+        let w_bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(w_i8.as_ptr() as *const u8, w_i8.len()) };
+        let w_gpu = cuda
+            .htod_copy(w_bytes)
+            .expect("htod_copy ternary weights failed");
+
+        let mut out = pool_alloc_uninit(m * n).expect("GPU pool alloc failed");
+        if m == 1 {
+            cuda.ternary_gemv_f32(&w_gpu, a_guard.slice(), &mut out, scale, n, k)
+                .expect("CUDA ternary_gemv_f32 failed");
+        } else {
+            cuda.ternary_gemm_f32(&w_gpu, a_guard.slice(), &mut out, scale, m, n, k)
+                .expect("CUDA ternary_gemm_f32 failed");
+        }
+
+        let shape = Shape::from_slice(&[m, n]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, m * n, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
+    /// Backward grad_input for raw-i8 TernaryLinear:
+    /// `grad_in = scale * ternary^T @ grad_output`. `self` is the
+    /// `[batch, out]` grad_output on GPU; weights uploaded internally.
+    /// Returns `[batch, in]` on GPU.
+    pub fn ternary_grad_input_cuda(
+        &self,
+        w_i8: &[i8],
+        scale: f32,
+        in_features: usize,
+        out_features: usize,
+    ) -> Result<Self> {
+        assert!(
+            self.device().is_gpu(),
+            "ternary_grad_input_cuda: self must be on GPU"
+        );
+        assert_eq!(w_i8.len(), out_features * in_features);
+        let g_data = self.contiguous_gpu();
+        let numel = g_data.numel();
+        assert!(numel % out_features == 0);
+        let batch_size = numel / out_features;
+
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let g_guard = g_data.storage.as_cuda_slice();
+
+        let w_bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(w_i8.as_ptr() as *const u8, w_i8.len()) };
+        let w_gpu = cuda
+            .htod_copy(w_bytes)
+            .expect("htod_copy ternary weights failed");
+
+        let mut out = pool_alloc_uninit(batch_size * in_features).expect("GPU pool alloc failed");
+        cuda.ternary_grad_input_f32(
+            &w_gpu,
+            g_guard.slice(),
+            &mut out,
+            scale,
+            batch_size,
+            in_features,
+            out_features,
+        )
+        .expect("CUDA ternary_grad_input_f32 failed");
+
+        let shape = Shape::from_slice(&[batch_size, in_features]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, batch_size * in_features, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
+    /// Backward grad_bias for TernaryLinear: sum across the batch axis.
+    /// `self` is `[batch, out]` grad_output on GPU. Returns `[out]`.
+    pub fn ternary_grad_bias_cuda(&self, out_features: usize) -> Result<Self> {
+        assert!(
+            self.device().is_gpu(),
+            "ternary_grad_bias_cuda: self must be on GPU"
+        );
+        let g_data = self.contiguous_gpu();
+        let numel = g_data.numel();
+        assert!(numel % out_features == 0);
+        let batch_size = numel / out_features;
+
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let g_guard = g_data.storage.as_cuda_slice();
+        let mut out = pool_alloc_uninit(out_features).expect("GPU pool alloc failed");
+        cuda.ternary_grad_bias_f32(g_guard.slice(), &mut out, batch_size, out_features)
+            .expect("CUDA ternary_grad_bias_f32 failed");
+
+        let shape = Shape::from_slice(&[out_features]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, out_features, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
     /// Q8_0 GEMV — `self` is `[1, in]` f32 on GPU, `w` is device-side
     /// Q8_0 raw bytes `[out, in]`. Returns `[1, out]`.
     pub fn q8_0_gemv_cuda(

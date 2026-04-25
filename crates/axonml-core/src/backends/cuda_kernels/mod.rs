@@ -3662,6 +3662,16 @@ pub const Q8_0_MATMUL_PTX: &str = include_str!("q8_0_matmul.ptx");
 /// caps BitNet-2B decode at ~7 tok/s on WSL.
 pub const I2S_MATMUL_PTX: &str = include_str!("i2s_matmul.ptx");
 
+/// Raw-i8 ternary matmul kernels for `axonml-nn::layers::ternary::TernaryLinear`.
+///
+/// Compiled from `ternary_matmul.cu`. Distinct from the BitNet I2_S
+/// kernels — TernaryLinear stores ternary weights as a flat `Vec<i8>`
+/// in `{-1, 0, +1}` plus a tensor-wide f32 scale. The kernels here
+/// branch on each i8 byte and add/subtract/skip the activation, then
+/// scale at the end. Forward (gemv/gemm), backward grad_input, and
+/// backward grad_bias all live in this module.
+pub const TERNARY_MATMUL_PTX: &str = include_str!("ternary_matmul.ptx");
+
 /// PrismML Q1_0 (1-bit) matmul kernel.
 ///
 /// Compiled from `q1_0_matmul.cu`. 18-byte block holding 128 weights
@@ -3944,6 +3954,18 @@ impl CudaKernels {
             "i2s_matmul",
             I2S_MATMUL_PTX,
             &["i2s_gemv_f32", "i2s_gemm_f32"],
+        )?;
+
+        // axonml-nn TernaryLinear (raw-i8) — Trident training fast path.
+        kernels.load_module(
+            "ternary_matmul",
+            TERNARY_MATMUL_PTX,
+            &[
+                "ternary_gemv_f32",
+                "ternary_gemm_f32",
+                "ternary_grad_input_f32",
+                "ternary_grad_bias_f32",
+            ],
         )?;
 
         // PrismML Q1_0 (1-bit, 1.125 bpw) matmul — Bonsai-8B family.

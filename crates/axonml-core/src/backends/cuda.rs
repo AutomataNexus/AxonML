@@ -2076,6 +2076,134 @@ impl CudaBackend {
         }
     }
 
+    /// Raw-i8 ternary GEMV (m=1 decode/training-decode).
+    pub fn ternary_gemv_f32(
+        &self,
+        w: &CudaSlice<u8>, // i8 weights, reinterpreted on kernel side
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        scale: f32,
+        n: usize,
+        k: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("ternary_gemv_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("ternary_gemv_f32".to_string()))?;
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((n as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&scale)
+                .arg(&(n as u32))
+                .arg(&(k as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Raw-i8 ternary GEMM (m>1 prefill / training fwd).
+    pub fn ternary_gemm_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a: &CudaSlice<f32>,
+        c: &mut CudaSlice<f32>,
+        scale: f32,
+        m: usize,
+        n: usize,
+        k: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("ternary_gemm_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("ternary_gemm_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(m * n);
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a)
+                .arg(c)
+                .arg(&scale)
+                .arg(&(m as u32))
+                .arg(&(n as u32))
+                .arg(&(k as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Raw-i8 ternary backward grad_input — `scale * ternary^T @ grad_output`.
+    pub fn ternary_grad_input_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        grad_out: &CudaSlice<f32>,
+        grad_in: &mut CudaSlice<f32>,
+        scale: f32,
+        batch_size: usize,
+        in_features: usize,
+        out_features: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("ternary_grad_input_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("ternary_grad_input_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(batch_size * in_features);
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(grad_out)
+                .arg(grad_in)
+                .arg(&scale)
+                .arg(&(batch_size as u32))
+                .arg(&(in_features as u32))
+                .arg(&(out_features as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Raw-i8 ternary backward grad_bias — sum over batch axis.
+    pub fn ternary_grad_bias_f32(
+        &self,
+        grad_out: &CudaSlice<f32>,
+        grad_bias: &mut CudaSlice<f32>,
+        batch_size: usize,
+        out_features: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("ternary_grad_bias_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("ternary_grad_bias_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(out_features);
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_out)
+                .arg(grad_bias)
+                .arg(&(batch_size as u32))
+                .arg(&(out_features as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// BitNet I2_S GEMM (m > 1 prefill). Naive one-thread-per-output.
     pub fn i2s_gemm_f32(
         &self,
