@@ -1916,6 +1916,89 @@ impl CudaBackend {
         }
     }
 
+    /// PrismML Q1_0 DP4A path — online int8 activation quant.
+    ///
+    /// Quantizes a f32 activation row `a [k]` to int8 with per-32-chunk
+    /// fp16 scales. One warp per 32-element chunk, lane-stride-1
+    /// coalesced loads/stores. Produces buffers consumed by
+    /// `q1_0_gemv_dp4a_f32`.
+    pub fn q1_0_quantize_acts_q8(
+        &self,
+        a: &CudaSlice<f32>,
+        a_q: &mut CudaSlice<u8>,
+        a_d: &mut CudaSlice<u16>,
+        k: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(k % 32 == 0, "q8 act-quant requires k % 32 == 0");
+        let func = self
+            .kernels
+            .get("q1_0_quantize_acts_q8")
+            .ok_or_else(|| CudaError::KernelNotFound("q1_0_quantize_acts_q8".to_string()))?;
+        let n_chunks = (k / 32) as u32;
+        const THREADS_PER_CTA: u32 = 128;
+        let warps_per_cta: u32 = THREADS_PER_CTA / 32;
+        let grid = (n_chunks + warps_per_cta - 1) / warps_per_cta;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(a)
+                .arg(a_q)
+                .arg(a_d)
+                .arg(&(k as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Q1_0 DP4A GEMV — sign-bit weights × int8 activations via `__dp4a`.
+    ///
+    /// Same launch shape as `q1_0_gemv_f32` (two warps per output row,
+    /// 4 rows per CTA). Caller must run `q1_0_quantize_acts_q8` on the
+    /// activation row first to produce `a_q` + `a_d`.
+    pub fn q1_0_gemv_dp4a_f32(
+        &self,
+        w: &CudaSlice<u8>,
+        a_q: &CudaSlice<u8>,
+        a_d: &CudaSlice<u16>,
+        c: &mut CudaSlice<f32>,
+        n: usize,
+        k: usize,
+    ) -> Result<(), CudaError> {
+        debug_assert!(k % 128 == 0, "Q1_0 DP4A GEMV requires k % 128 == 0");
+        let func = self
+            .kernels
+            .get("q1_0_gemv_dp4a_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("q1_0_gemv_dp4a_f32".to_string()))?;
+        const ROWS_PER_CTA: u32 = 4;
+        const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
+        const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
+        let grid = ((n as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (grid, 1, 1),
+            block_dim: (THREADS_PER_CTA, 1, 1),
+            shared_mem_bytes: ROWS_PER_CTA * 2 * std::mem::size_of::<f32>() as u32,
+        };
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(w)
+                .arg(a_q)
+                .arg(a_d)
+                .arg(c)
+                .arg(&(n as u32))
+                .arg(&(k as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
     /// PrismML Q1_0 GEMM (m > 1 prefill). Naive one-thread-per-output;
     /// same shape as `i2s_gemm_f32`.
     pub fn q1_0_gemm_f32(

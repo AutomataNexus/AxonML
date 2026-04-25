@@ -1041,6 +1041,53 @@ impl Tensor<f32> {
         })
     }
 
+    /// PrismML Q1_0 DP4A path — int8 activation quant + dp4a GEMV.
+    ///
+    /// Same shape contract as `q1_0_gemv_cuda`: `self` is `[1, k]` f32 on
+    /// GPU. Internally allocates int8 acts + fp16 scale buffers via the
+    /// stream allocator (per-matmul scratch — short-lived, freed at fn
+    /// scope end), fires `q1_0_quantize_acts_q8`, then `q1_0_gemv_dp4a_f32`.
+    /// Returns `[1, n]`.
+    pub fn q1_0_gemv_dp4a_cuda(
+        &self,
+        w: &cudarc::driver::CudaSlice<u8>,
+        n: usize,
+        k: usize,
+    ) -> Result<Self> {
+        assert!(
+            self.device().is_gpu(),
+            "q1_0_gemv_dp4a_cuda: self must be on GPU"
+        );
+        assert_eq!(self.numel(), k);
+        assert_eq!(k % 128, 0);
+        let a_data = self.contiguous_gpu();
+        let cuda = get_cuda_backend().expect("CUDA backend not available");
+        let a_guard = a_data.storage.as_cuda_slice();
+
+        // Stream-allocated scratch — bypasses the f32-typed pool, freed
+        // at end of this function via Drop.
+        let mut a_q: cudarc::driver::CudaSlice<u8> =
+            unsafe { cuda.stream().alloc::<u8>(k) }.expect("stream alloc u8 (int8 acts) failed");
+        let mut a_d: cudarc::driver::CudaSlice<u16> = unsafe { cuda.stream().alloc::<u16>(k / 32) }
+            .expect("stream alloc u16 (fp16-as-bits) failed");
+
+        cuda.q1_0_quantize_acts_q8(a_guard.slice(), &mut a_q, &mut a_d, k)
+            .expect("CUDA q1_0_quantize_acts_q8 failed");
+
+        let mut out = pool_alloc_uninit(n).expect("GPU pool alloc failed");
+        cuda.q1_0_gemv_dp4a_f32(w, &a_q, &a_d, &mut out, n, k)
+            .expect("CUDA q1_0_gemv_dp4a_f32 failed");
+        let shape = Shape::from_slice(&[1, n]);
+        let strides = contiguous_strides(&shape);
+        let storage = Storage::from_cuda_slice(out, n, self.device());
+        Ok(Self {
+            storage,
+            shape,
+            strides,
+            offset: 0,
+        })
+    }
+
     /// PrismML Q1_0 dequant-in-shader GEMM on the GPU.
     pub fn q1_0_gemm_cuda(
         &self,
