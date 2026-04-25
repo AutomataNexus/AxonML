@@ -3672,6 +3672,15 @@ pub const I2S_MATMUL_PTX: &str = include_str!("i2s_matmul.ptx");
 /// backward grad_bias all live in this module.
 pub const TERNARY_MATMUL_PTX: &str = include_str!("ternary_matmul.ptx");
 
+/// GPU shadow-weight ternary quantizer for `axonml-nn::layers::ternary`.
+///
+/// Compiled from `ternary_quantize.cu`. Stage 1 reduces the f32 shadow
+/// weight tensor to a single absolute-sum scalar (host divides by N to
+/// get absmean); stage 2 thresholds each element to a `{-1, 0, +1}` i8
+/// byte using that scale. Eliminates the per-step 4 GB GPU→CPU copy
+/// that would otherwise gate `quantize_weights` on the 1B run.
+pub const TERNARY_QUANTIZE_PTX: &str = include_str!("ternary_quantize.ptx");
+
 /// PrismML Q1_0 (1-bit) matmul kernel.
 ///
 /// Compiled from `q1_0_matmul.cu`. 18-byte block holding 128 weights
@@ -3966,6 +3975,14 @@ impl CudaKernels {
                 "ternary_grad_input_f32",
                 "ternary_grad_bias_f32",
             ],
+        )?;
+
+        // GPU absmean quantizer for TernaryLinear shadow weights —
+        // eliminates the 4 GB GPU→CPU `to_vec` per step at 1B scale.
+        kernels.load_module(
+            "ternary_quantize",
+            TERNARY_QUANTIZE_PTX,
+            &["f32_abssum_reduce", "f32_quantize_ternary"],
         )?;
 
         // PrismML Q1_0 (1-bit, 1.125 bpw) matmul — Bonsai-8B family.
