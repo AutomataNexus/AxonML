@@ -155,10 +155,14 @@ LR="${TRIDENT_LR:-3e-4}"
 WARMUP="${TRIDENT_WARMUP:-1000}"
 CKPT_EVERY="${TRIDENT_CKPT_EVERY:-1000}"
 KEEP_K="${TRIDENT_KEEP_K:-5}"
+# Default to log every step so first-step latency, recompute overhead,
+# and any CUDA JIT stalls are visible immediately. Set TRIDENT_LOG_EVERY
+# to a higher integer once a steady cadence is confirmed.
+LOG_EVERY="${TRIDENT_LOG_EVERY:-1}"
 
 echo "[go.sh] Launching trainer:"
 echo "         config=$CFG steps=$STEPS seq=$SEQ bs=$BS lr=$LR warmup=$WARMUP"
-echo "         ckpt_every=$CKPT_EVERY keep_last=$KEEP_K"
+echo "         ckpt_every=$CKPT_EVERY keep_last=$KEEP_K log_every=$LOG_EVERY"
 echo "         output → $DRIVE/ckpts"
 echo "         log    → $DRIVE/train.log (tee, appended)"
 
@@ -173,6 +177,7 @@ cd "$LOCAL_REPO/llm-training"
   --steps "$STEPS" \
   --warmup-steps "$WARMUP" \
   --lr "$LR" \
+  --log-every "$LOG_EVERY" \
   --checkpoint-every-steps "$CKPT_EVERY" \
   --keep-last-k "$KEEP_K" \
   --resume latest \
