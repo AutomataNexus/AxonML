@@ -149,6 +149,7 @@ impl PackedTernaryWeights {
 /// let input = Variable::new(Tensor::randn(&[2, 512]), true);
 /// let output = layer.forward(&input);  // Shape: [2, 512]
 /// ```
+#[derive(Clone)]
 pub struct TernaryLinear {
     /// Shadow weight (fp32) for training — holds the latent continuous weights.
     pub shadow_weight: Parameter,

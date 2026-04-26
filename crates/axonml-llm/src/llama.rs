@@ -154,6 +154,21 @@ pub struct RMSNorm {
     weight_gpu_cache: parking_lot::Mutex<Option<Tensor<f32>>>,
 }
 
+// Manual Clone — `weight_gpu_cache` (parking_lot::Mutex) is not Clone.
+// Cloning resets the cache; the new instance will re-populate it on first
+// GPU forward, which is the same behavior as a freshly-constructed RMSNorm.
+// Cheap because Tensor::clone is Arc-shared.
+impl Clone for RMSNorm {
+    fn clone(&self) -> Self {
+        Self {
+            weight: self.weight.clone(),
+            eps: self.eps,
+            hidden_size: self.hidden_size,
+            weight_gpu_cache: parking_lot::Mutex::new(None),
+        }
+    }
+}
+
 impl RMSNorm {
     /// Create new RMSNorm layer.
     pub fn new(hidden_size: usize, eps: f32) -> Self {
@@ -354,7 +369,7 @@ impl GradientFunction for RMSNormBackward {
 /// Rotary Position Embedding.
 ///
 /// Encodes position information by rotating pairs of dimensions.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RotaryEmbedding {
     /// Dimension of the embedding
     dim: usize,

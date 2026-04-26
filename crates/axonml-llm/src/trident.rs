@@ -32,6 +32,7 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+use axonml_autograd::checkpoint::checkpoint;
 use axonml_autograd::no_grad::is_grad_enabled;
 use axonml_autograd::{GradFn, Variable};
 use axonml_nn::layers::ternary::TernaryLinear;
@@ -389,7 +390,7 @@ impl TridentConfig {
 /// - Rotary position embedding (RoPE) when `config.use_rope`
 /// - BitNet SubLN (RMSNorm) before the output projection when
 ///   `config.use_sub_ln`
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TridentAttention {
     /// Query projection (ternary)
     q_proj: TernaryLinear,
@@ -601,7 +602,7 @@ impl TridentAttention {
 /// - **BitNet ReLU² gated (3-linear)**: `gate_act = relu(gate)^2`,
 ///   `inner = ffn_sub_norm(gate_act * up)`, `out = down(inner)`. Matches
 ///   Microsoft BitNet b1.58-2B-4T.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TridentMLP {
     /// Up projection (ternary)
     up_proj: TernaryLinear,
@@ -694,7 +695,7 @@ impl TridentMLP {
 /// Architecture (pre-norm):
 ///   residual + TridentAttention(RMSNorm(x))
 ///   residual + TridentMLP(RMSNorm(x))
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TridentBlock {
     /// Pre-attention normalization
     attn_norm: RMSNorm,
@@ -801,9 +802,24 @@ impl TridentModel {
         // Embed tokens
         let mut hidden = self.embed_tokens.forward(&ids_var);
 
-        // Pass through transformer blocks
+        // Pass through transformer blocks. During training (grad enabled +
+        // requires_grad activation chain) we wrap each block in
+        // `checkpoint()` so the autograd graph holds only the per-block
+        // input — not every block's attention scores, softmax outputs,
+        // MLP intermediates, and residual stream. At trident_1b shape
+        // (bs=1, seq=2048, 24 blocks) this drops in-graph activation
+        // memory from ~22 GB to ~24 × 16 MB block-input snapshots plus
+        // one block's working set on the active recompute, ≈ 1 GB total.
+        // Inference (is_grad_enabled() == false) is unaffected — checkpoint
+        // is a no-op there since the autograd graph isn't being built.
+        let use_checkpoint = is_grad_enabled() && hidden.requires_grad();
         for block in &self.blocks {
-            hidden = block.forward(&hidden);
+            hidden = if use_checkpoint {
+                let block_clone = block.clone();
+                checkpoint(move |x| block_clone.forward(x), &hidden)
+            } else {
+                block.forward(&hidden)
+            };
         }
 
         // Final norm

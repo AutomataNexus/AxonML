@@ -137,15 +137,18 @@ fi
 #    nohup, but they DO survive across step-level checkpoints, so we just
 #    keep things visible.
 # ---------------------------------------------------------------------------
-CFG="${TRIDENT_CFG:-500m}"      # smoke | laptop | 500m | 1b | 3b
-STEPS="${TRIDENT_STEPS:-80000}"
-# A100 80 GB-safe defaults for the 500m variant (~525 M ternary params,
-# d_model=1536, 20 layers). Even at bs=1 seq=2048 this fits comfortably
-# (~30 GB activations + ~6 GB shadow + ~12 GB Adam moments + ~10 GB
-# cuBLAS scratch ≈ 60 GB used, ~20 GB headroom). The 1B variant OOMs
-# on the same hardware without gradient checkpointing — see the
-# saved_input CPU-staging fix in fda225e for the smaller per-layer
-# allocation pressure that 500m benefits from too.
+CFG="${TRIDENT_CFG:-1b}"        # smoke | laptop | 300m | 500m | 1b | 3b
+STEPS="${TRIDENT_STEPS:-100000}"
+# A100 80 GB defaults with the per-block gradient checkpointing landed in
+# the next commit. Checkpointing wraps each TridentBlock in a re-runnable
+# closure: forward stores only the per-block input, backward recomputes
+# intermediates inside that block and immediately drops them. At
+# trident_1b shape (bs=1, seq=2048, 24 blocks) this drops in-graph
+# activation memory from ~22 GB to ~24 × 16 MB block-input snapshots
+# plus one block's working set on the active recompute. Cost: ~17 %
+# extra wall time per step (forward done twice). 1B / bs=1 / seq=2048
+# now fits with margin; reduce TRIDENT_BS or TRIDENT_SEQ here only if
+# nvidia-smi says you got handed a smaller GPU than 80 GB.
 SEQ="${TRIDENT_SEQ:-2048}"
 BS="${TRIDENT_BS:-1}"
 LR="${TRIDENT_LR:-3e-4}"
