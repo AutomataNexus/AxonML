@@ -137,15 +137,16 @@ fi
 #    nohup, but they DO survive across step-level checkpoints, so we just
 #    keep things visible.
 # ---------------------------------------------------------------------------
-CFG="${TRIDENT_CFG:-1b}"        # smoke | laptop | 1b | 3b
-STEPS="${TRIDENT_STEPS:-100000}"
-# A100 80 GB-safe defaults. AxonML autograd retains every intermediate
-# (full [bs, heads, seq, seq] attention scores at every layer ≈ 256 MB
-# at seq=2048, ×24 layers = 6 GB just for scores). seq=1024 cuts that
-# to 1.5 GB. Combined with the TernaryLinear saved_input CPU staging
-# fix that frees ~2.3 GB at backward time, seq=1024 / bs=1 leaves
-# ~50 GB headroom on A100 80 GB. Bench memory before bumping.
-SEQ="${TRIDENT_SEQ:-1024}"
+CFG="${TRIDENT_CFG:-500m}"      # smoke | laptop | 500m | 1b | 3b
+STEPS="${TRIDENT_STEPS:-80000}"
+# A100 80 GB-safe defaults for the 500m variant (~525 M ternary params,
+# d_model=1536, 20 layers). Even at bs=1 seq=2048 this fits comfortably
+# (~30 GB activations + ~6 GB shadow + ~12 GB Adam moments + ~10 GB
+# cuBLAS scratch ≈ 60 GB used, ~20 GB headroom). The 1B variant OOMs
+# on the same hardware without gradient checkpointing — see the
+# saved_input CPU-staging fix in fda225e for the smaller per-layer
+# allocation pressure that 500m benefits from too.
+SEQ="${TRIDENT_SEQ:-2048}"
 BS="${TRIDENT_BS:-1}"
 LR="${TRIDENT_LR:-3e-4}"
 WARMUP="${TRIDENT_WARMUP:-1000}"

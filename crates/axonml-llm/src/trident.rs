@@ -169,6 +169,39 @@ impl TridentConfig {
         }
     }
 
+    /// ~500 M-parameter config — sized to fit A100 80 GB at bs=1 seq=2048
+    /// WITHOUT gradient checkpointing. The 1B variant OOMs on the same
+    /// hardware because AxonML's autograd retains every intermediate;
+    /// dropping d_model 2048 → 1536, layers 24 → 20, intermediate
+    /// 5504 → 4096 cuts both shadow weights AND retained activations
+    /// roughly in half, leaving ~30 GB of A100 80 GB free for cuBLAS
+    /// scratch and pool fragmentation.
+    ///
+    /// Hyperparams:
+    /// - d_model 1536, intermediate 4096 (both multiples of 128)
+    /// - 20 layers, 12 heads / 2 KV heads (GQA 6:1, head_dim=128,
+    ///   kv_hidden = 256)
+    /// - max_seq_len 4096, RoPE θ=500 000, ReLU²-gated FFN, SubLN on
+    ///
+    /// Total params ≈ 32 000·1536 embed + 20·(2·1536² + 2·1536·256
+    /// attn + 3·1536·4096 ffn + norms) + 32 000·1536 head ≈ 525 M.
+    pub fn trident_500m(vocab_size: usize) -> Self {
+        Self {
+            vocab_size,
+            d_model: 1536,
+            num_layers: 20,
+            num_heads: 12,
+            num_kv_heads: 2,
+            intermediate_size: 4096,
+            max_seq_len: 4096,
+            rms_norm_eps: 1e-5,
+            use_rope: true,
+            rope_theta: 500_000.0,
+            use_squared_relu: true,
+            use_sub_ln: true,
+        }
+    }
+
     /// ~30 M-parameter laptop-trainable config. I2_S-deployable shapes
     /// (every TernaryLinear's `in_features` is a multiple of 128) at
     /// the smallest architecturally-faithful size that still exercises
