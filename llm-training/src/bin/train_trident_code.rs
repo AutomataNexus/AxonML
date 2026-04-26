@@ -186,10 +186,14 @@ fn default_seq_len(variant: ModelVariant) -> usize {
         ModelVariant::Smoke => 64,
         ModelVariant::Laptop => 256,
         // 1B/3B: AxonML autograd retains every intermediate, so peak
-        // activation memory at seq=4096 × bs=4 = ~100 GB even on A100
-        // 80 GB. Default to 2048 / bs=1 for safety; users with larger
-        // VRAM can override via TRIDENT_SEQ / TRIDENT_BS in go.sh.
-        ModelVariant::OneB | ModelVariant::ThreeB => 2048,
+        // activation memory grows quadratically with seq via the full
+        // [bs, heads, seq, seq] attention scores tensor. At 1B-bs1:
+        //   seq=2048 → 256 MB/layer × 24 = 6.1 GB just for scores
+        //   seq=1024 → 64 MB/layer × 24 = 1.5 GB
+        // Combined with the TernaryLinear saved_input CPU-staging
+        // optimization (saves another ~2.3 GB), seq=1024 leaves ~50 GB
+        // free on A100 80 GB. Override via TRIDENT_SEQ in go.sh.
+        ModelVariant::OneB | ModelVariant::ThreeB => 1024,
     }
 }
 
@@ -366,11 +370,12 @@ Options:
                        If omitted, smoke mode tokenizes shakespeare.txt
                        on the fly and caches at /tmp/shakespeare.trident-bpe.bin.
   --out PATH           Checkpoint directory (default: .../checkpoints/trident-{{variant}})
-  --seq-len N          Context window (default: 64 smoke, 256 laptop, 2048 1b/3b)
+  --seq-len N          Context window (default: 64 smoke, 256 laptop, 1024 1b/3b)
   --batch-size N       Micro-batch size (default: 8 smoke, 2 laptop, 1 1b/3b)
-                       NB: 1b/3b at default fits A100 80 GB. seq=4096 bs=4
-                       OOMs because AxonML autograd retains every
-                       intermediate — bump only if you've benched headroom.
+                       NB: 1b/3b defaults fit A100 80 GB with ~50 GB headroom.
+                       seq scales attention-scores memory quadratically
+                       ([bs,heads,seq,seq] per layer × 24 layers), so doubling
+                       seq quadruples score memory — bench before bumping.
   --lr FLOAT           Peak learning rate (default: 3e-4)
   --steps N            Total opt steps (default: 1000 smoke, 100000 1b/3b)
   --warmup-steps N     Linear warmup steps (default: 100)
