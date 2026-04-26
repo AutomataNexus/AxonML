@@ -341,9 +341,21 @@ impl Storage<f32> {
                 let backend = crate::backends::cuda::get_cuda_backend()
                     .ok_or(Error::DeviceNotAvailable { device })?;
                 let slice = &cpu_data[self.offset..self.offset + self.len];
-                let cuda_slice = backend
-                    .htod_copy(slice)
-                    .map_err(|_| Error::DeviceNotAvailable { device })?;
+                let cuda_slice = backend.htod_copy(slice).map_err(|e| {
+                    // Surface the underlying cudarc error stderr-side so an
+                    // OOM doesn't get silently re-wrapped. Then return the
+                    // structured error.
+                    eprintln!(
+                        "[storage] htod_copy failed for {} bytes on {:?}: {:?}",
+                        self.len * std::mem::size_of::<f32>(),
+                        device,
+                        e
+                    );
+                    Error::AllocationFailed {
+                        size: self.len * std::mem::size_of::<f32>(),
+                        device,
+                    }
+                })?;
                 let len = self.len;
                 Ok(Self {
                     inner: Arc::new(RwLock::new(StorageInner {
