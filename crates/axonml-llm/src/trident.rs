@@ -813,13 +813,25 @@ impl TridentModel {
         // Inference (is_grad_enabled() == false) is unaffected — checkpoint
         // is a no-op there since the autograd graph isn't being built.
         let use_checkpoint = is_grad_enabled() && hidden.requires_grad();
-        for block in &self.blocks {
+        // Optional per-block stderr trace, gated on TRIDENT_BLOCK_TRACE=1.
+        // Lets us localise hangs to a specific block index (which block of
+        // the 24 didn't return) without spamming steady-state runs.
+        let trace_blocks = std::env::var("TRIDENT_BLOCK_TRACE")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+        for (i, block) in self.blocks.iter().enumerate() {
+            if trace_blocks {
+                eprintln!("[trace] block {} forward starting", i);
+            }
             hidden = if use_checkpoint {
                 let block_clone = block.clone();
                 checkpoint(move |x| block_clone.forward(x), &hidden)
             } else {
                 block.forward(&hidden)
             };
+            if trace_blocks {
+                eprintln!("[trace] block {} forward done", i);
+            }
         }
 
         // Final norm
