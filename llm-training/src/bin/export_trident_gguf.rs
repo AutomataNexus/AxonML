@@ -37,6 +37,7 @@ use llm_training::load_model_from_checkpoint;
 enum Variant {
     Smoke,
     Laptop,
+    FiveHundredM,
     OneB,
     ThreeB,
 }
@@ -46,10 +47,11 @@ impl Variant {
         match s.to_ascii_lowercase().as_str() {
             "smoke" => Ok(Self::Smoke),
             "laptop" | "trident_laptop" => Ok(Self::Laptop),
+            "500m" | "med" | "medium" | "trident_500m" => Ok(Self::FiveHundredM),
             "1b" | "trident_1b" => Ok(Self::OneB),
             "3b" | "trident_3b" => Ok(Self::ThreeB),
             other => Err(format!(
-                "Unknown --config '{other}'; expected smoke|laptop|1b|3b"
+                "Unknown --config '{other}'; expected smoke|laptop|500m|1b|3b"
             )),
         }
     }
@@ -58,6 +60,7 @@ impl Variant {
         match self {
             Self::Smoke => TridentConfig::smoke(vocab_size),
             Self::Laptop => TridentConfig::trident_laptop(vocab_size),
+            Self::FiveHundredM => TridentConfig::trident_500m(vocab_size),
             Self::OneB => TridentConfig::trident_1b(vocab_size),
             Self::ThreeB => TridentConfig::trident_3b(vocab_size),
         }

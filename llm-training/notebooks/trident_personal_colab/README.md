@@ -44,9 +44,9 @@ the only thing a VM recycle costs is the time since the last
 
 ```bash
 COMMIT=89c1230               # pin a specific axonml commit (default: HEAD)
-TRIDENT_CFG=1b               # smoke | laptop | 1b | 3b (default: 1b)
-TRIDENT_STEPS=100000         # total optimizer steps
-TRIDENT_SEQ=1024             # context length (A100-safe default)
+TRIDENT_CFG=500m             # smoke | laptop | 500m | 1b | 3b (default: 500m)
+TRIDENT_STEPS=80000          # total optimizer steps
+TRIDENT_SEQ=2048             # context length (A100-safe at 500m)
 TRIDENT_BS=1                 # micro-batch (A100-safe default)
 TRIDENT_LR=3e-4              # peak LR
 TRIDENT_WARMUP=1000          # linear warmup steps
