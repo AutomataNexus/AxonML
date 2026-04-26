@@ -113,6 +113,7 @@ use llm_training::{
 const DEFAULT_TOKENIZER: &str = "/opt/AxonML/tokenizers/trident-coder-bpe/tokenizer.json";
 const DEFAULT_OUTPUT_DIR_SMOKE: &str = "/opt/AxonML/llm-training/checkpoints/trident-smoke";
 const DEFAULT_OUTPUT_DIR_LAPTOP: &str = "/opt/AxonML/llm-training/checkpoints/trident-laptop";
+const DEFAULT_OUTPUT_DIR_300M: &str = "/opt/AxonML/llm-training/checkpoints/trident-300m";
 const DEFAULT_OUTPUT_DIR_500M: &str = "/opt/AxonML/llm-training/checkpoints/trident-500m";
 const DEFAULT_OUTPUT_DIR_1B: &str = "/opt/AxonML/llm-training/checkpoints/trident-1b";
 const DEFAULT_OUTPUT_DIR_3B: &str = "/opt/AxonML/llm-training/checkpoints/trident-3b";
@@ -130,6 +131,7 @@ const DEFAULT_LOG_EVERY: usize = 10;
 enum ModelVariant {
     Smoke,
     Laptop,
+    ThreeHundredM,
     FiveHundredM,
     OneB,
     ThreeB,
@@ -140,6 +142,7 @@ impl ModelVariant {
         match s {
             "smoke" => Self::Smoke,
             "laptop" | "Laptop" | "LAPTOP" => Self::Laptop,
+            "300m" | "300M" | "small" => Self::ThreeHundredM,
             "500m" | "500M" | "med" | "medium" => Self::FiveHundredM,
             "1b" | "1B" => Self::OneB,
             "3b" | "3B" => Self::ThreeB,
@@ -156,6 +159,7 @@ impl ModelVariant {
         match self {
             Self::Smoke => "smoke",
             Self::Laptop => "laptop",
+            Self::ThreeHundredM => "300m",
             Self::FiveHundredM => "500m",
             Self::OneB => "1b",
             Self::ThreeB => "3b",
@@ -189,6 +193,7 @@ fn default_seq_len(variant: ModelVariant) -> usize {
     match variant {
         ModelVariant::Smoke => 64,
         ModelVariant::Laptop => 256,
+        ModelVariant::ThreeHundredM => 2048,
         ModelVariant::FiveHundredM => 2048,
         // 1B/3B: AxonML autograd retains every intermediate, so peak
         // activation memory grows quadratically with seq via the full
@@ -206,6 +211,7 @@ fn default_batch_size(variant: ModelVariant) -> usize {
     match variant {
         ModelVariant::Smoke => 8,
         ModelVariant::Laptop => 2,
+        ModelVariant::ThreeHundredM => 1,
         ModelVariant::FiveHundredM => 1,
         ModelVariant::OneB | ModelVariant::ThreeB => 1,
     }
@@ -215,6 +221,7 @@ fn default_steps(variant: ModelVariant) -> usize {
     match variant {
         ModelVariant::Smoke => 1000,
         ModelVariant::Laptop => 50_000,
+        ModelVariant::ThreeHundredM => 60_000,
         ModelVariant::FiveHundredM => 80_000,
         ModelVariant::OneB => 100_000,
         ModelVariant::ThreeB => 100_000,
@@ -225,6 +232,7 @@ fn default_checkpoint_every(variant: ModelVariant) -> u64 {
     match variant {
         ModelVariant::Smoke => 0,
         ModelVariant::Laptop => 500,
+        ModelVariant::ThreeHundredM => 1000,
         ModelVariant::FiveHundredM => 1000,
         ModelVariant::OneB | ModelVariant::ThreeB => 1000,
     }
@@ -234,6 +242,7 @@ fn default_output_dir(variant: ModelVariant) -> PathBuf {
     PathBuf::from(match variant {
         ModelVariant::Smoke => DEFAULT_OUTPUT_DIR_SMOKE,
         ModelVariant::Laptop => DEFAULT_OUTPUT_DIR_LAPTOP,
+        ModelVariant::ThreeHundredM => DEFAULT_OUTPUT_DIR_300M,
         ModelVariant::FiveHundredM => DEFAULT_OUTPUT_DIR_500M,
         ModelVariant::OneB => DEFAULT_OUTPUT_DIR_1B,
         ModelVariant::ThreeB => DEFAULT_OUTPUT_DIR_3B,
@@ -578,6 +587,7 @@ fn main() {
     let model_config = match cfg.variant {
         ModelVariant::Smoke => TridentConfig::smoke(vocab_size),
         ModelVariant::Laptop => TridentConfig::trident_laptop(vocab_size),
+        ModelVariant::ThreeHundredM => TridentConfig::trident_300m(vocab_size),
         ModelVariant::FiveHundredM => TridentConfig::trident_500m(vocab_size),
         ModelVariant::OneB => TridentConfig::trident_1b(vocab_size),
         ModelVariant::ThreeB => TridentConfig::trident_3b(vocab_size),

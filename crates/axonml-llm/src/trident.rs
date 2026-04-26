@@ -202,6 +202,36 @@ impl TridentConfig {
         }
     }
 
+    /// ~300 M-parameter config — half-step down from 500m, conservative
+    /// memory budget to prove training runs end-to-end on Colab A100
+    /// 80 GB before scaling up. Fits even with AxonML autograd's full
+    /// activation retention at bs=1 seq=2048.
+    ///
+    /// Hyperparams:
+    /// - d_model 1024, intermediate 2816 (both multiples of 128)
+    /// - 18 layers, 8 heads / 2 KV heads (GQA 4:1, head_dim=128,
+    ///   kv_hidden = 256)
+    /// - max_seq_len 4096, RoPE θ=500 000, ReLU²-gated FFN, SubLN on
+    ///
+    /// Total params ≈ 32 000·1024 embed + 18·(2·1024² + 2·1024·256
+    /// attn + 3·1024·2816 ffn + norms) + 32 000·1024 head ≈ 280 M.
+    pub fn trident_300m(vocab_size: usize) -> Self {
+        Self {
+            vocab_size,
+            d_model: 1024,
+            num_layers: 18,
+            num_heads: 8,
+            num_kv_heads: 2,
+            intermediate_size: 2816,
+            max_seq_len: 4096,
+            rms_norm_eps: 1e-5,
+            use_rope: true,
+            rope_theta: 500_000.0,
+            use_squared_relu: true,
+            use_sub_ln: true,
+        }
+    }
+
     /// ~30 M-parameter laptop-trainable config. I2_S-deployable shapes
     /// (every TernaryLinear's `in_features` is a multiple of 128) at
     /// the smallest architecturally-faithful size that still exercises
