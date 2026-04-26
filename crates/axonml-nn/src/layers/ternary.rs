@@ -435,13 +435,17 @@ impl TernaryLinear {
 
                 let requires_grad = input.requires_grad() && is_grad_enabled();
                 if requires_grad {
-                    // Stage saved_input to CPU. At 1B-trident scale the per-layer
-                    // f32 input clone runs ~16 MB, and 24 layers × ~5 TernaryLinear
-                    // calls each pin ~2.3 GB on GPU through to backward. CPU
-                    // residency frees that for activations; backward re-uploads.
-                    let saved_input = input_data
-                        .cpu()
-                        .expect("ternary forward: stage saved_input to CPU failed");
+                    // Keep saved_input GPU-resident. Earlier CPU-staging
+                    // (fda225e) traded ~2.3 GB of activation memory for a
+                    // synchronous dtoh per ternary forward + matching htod
+                    // per backward — fine in isolation, but stacks badly
+                    // with the per-block gradient checkpointing in 7263fbb
+                    // (~240 dtoh+htod round-trips per training step at 1B
+                    // scale; observed as a hang on Colab A100). Checkpoint
+                    // already drops the recompute graph's saved_inputs as
+                    // soon as the block's backward finishes, so the GPU
+                    // residency is bounded to one block's working set.
+                    let saved_input = input_data.clone();
                     let in_f = self.in_features;
                     let out_f = self.out_features;
                     let shadow_grad_fn = self.shadow_weight.variable().grad_fn().cloned();
@@ -690,25 +694,17 @@ impl GradientFunction for TernaryLinearBackward {
         // GPU fast path: keep saved_input + grad_output on GPU, do the
         // ternary-aware grad_input via the dedicated kernel and the
         // STE grad_weight via Tensor::matmul (cuBLAS / GPU GEMM).
-        // Falls through to the rayon CPU path if grad_output is CPU
-        // or CUDA isn't compiled in. saved_input itself is held on CPU
-        // between forward and backward (memory-pressure relief at 1B
-        // scale) — re-uploaded here so the kernels see GPU storage.
+        // Falls through to the rayon CPU path if either tensor is CPU
+        // or CUDA isn't compiled in.
         #[cfg(feature = "cuda")]
         {
-            if grad_output.device().is_gpu() {
+            if grad_output.device().is_gpu() && self.saved_input.device().is_gpu() {
                 // Reshape grad_output to a flat 2D [bs, out_f] for the kernels.
                 let g2d = grad_output
                     .reshape(&[bs as isize, out_f as isize])
                     .expect("ternary backward: reshape grad_output failed");
-                let saved_input_gpu = if self.saved_input.device().is_gpu() {
-                    self.saved_input.clone()
-                } else {
-                    self.saved_input
-                        .to_device(grad_output.device())
-                        .expect("ternary backward: upload saved_input to GPU failed")
-                };
-                let x2d = saved_input_gpu
+                let x2d = self
+                    .saved_input
                     .reshape(&[bs as isize, in_f as isize])
                     .expect("ternary backward: reshape saved_input failed");
 
