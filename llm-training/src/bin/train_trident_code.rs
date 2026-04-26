@@ -121,7 +121,7 @@ const DEFAULT_SMOKE_CORPUS: &str = "/opt/datasets/text/shakespeare.txt";
 const DEFAULT_SMOKE_DATASET_CACHE: &str = "/tmp/shakespeare.trident-bpe.bin";
 
 const DEFAULT_SEED: u64 = 1337;
-const DEFAULT_LOG_EVERY: usize = 10;
+const DEFAULT_LOG_EVERY: usize = 1;
 
 // =============================================================================
 // Config / CLI
@@ -721,13 +721,38 @@ fn main() {
         let labels =
             Tensor::<u32>::from_vec(batch, &[cfg.batch_size, cfg.seq_len]).expect("labels shape");
 
+        // Per-phase heartbeat (stderr, unbuffered). Lets us tell at a glance
+        // whether a step is hung in forward, backward, or optimizer.step
+        // versus just slow. Only emits for the first 3 steps so steady-state
+        // logs aren't polluted.
+        let trace_phases = global_step < 3;
+        if trace_phases {
+            eprintln!("[trace] step {} forward starting", global_step + 1);
+        }
+
         // Forward + loss — uses CrossEntropyLoss built-in (graph-tracked).
         optimizer.zero_grad();
         let (_logits, loss) = model.forward_with_loss(&input_ids, &labels);
         let loss_val = loss.data().to_vec()[0];
+        if trace_phases {
+            eprintln!(
+                "[trace] step {} forward done (loss={:.4}), backward starting",
+                global_step + 1,
+                loss_val
+            );
+        }
 
         loss.backward();
+        if trace_phases {
+            eprintln!(
+                "[trace] step {} backward done, optimizer.step starting",
+                global_step + 1
+            );
+        }
         optimizer.step();
+        if trace_phases {
+            eprintln!("[trace] step {} optimizer.step done", global_step + 1);
+        }
 
         global_step += 1;
         training_state.next_step();
