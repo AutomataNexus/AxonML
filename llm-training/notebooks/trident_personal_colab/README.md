@@ -46,8 +46,8 @@ the only thing a VM recycle costs is the time since the last
 COMMIT=89c1230               # pin a specific axonml commit (default: HEAD)
 TRIDENT_CFG=1b               # smoke | laptop | 1b | 3b (default: 1b)
 TRIDENT_STEPS=100000         # total optimizer steps
-TRIDENT_SEQ=4096             # context length
-TRIDENT_BS=4                 # micro-batch
+TRIDENT_SEQ=1024             # context length (A100-safe default)
+TRIDENT_BS=1                 # micro-batch (A100-safe default)
 TRIDENT_LR=3e-4              # peak LR
 TRIDENT_WARMUP=1000          # linear warmup steps
 TRIDENT_CKPT_EVERY=1000      # rotating step-level checkpoint cadence
@@ -101,8 +101,8 @@ in `project_perf_push_2026_04_18.md`).
 | Knob | Default | Reason |
 |---|---:|---|
 | `--steps` | 100 000 | 4 epochs over 25.58 M tokens at bs=4 seq=4096 ≈ 4 × 25.58 M / (4 × 4096) ≈ 6 250 steps × 16 grad-accum-equivalent ≈ 100 k |
-| `--seq-len` | 4096 | Trident-Coder 1B was designed for 4 k context (`max_seq_len` field in `TridentConfig::trident_1b`) |
-| `--batch-size` | 4 | A100 80GB headroom: 1B params × 4 bytes shadow + 2× momentum = 12 GB; bs=4 seq=4096 activations ≈ 30-40 GB; ~25 GB headroom for autograd / KV / scratch |
+| `--seq-len` | 1024 | A100 80 GB-safe. seq scales activations quadratically via `[bs,heads,seq,seq]` scores — 1024 → 1.5 GB scores total; 2048 → 6 GB. Code training works fine at 1024. |
+| `--batch-size` | 1 | A100 80 GB headroom at the new default: shadow ≈ 4 GB + Adam moments ≈ 8 GB + scores 1.5 GB + saved-input now CPU-staged + activations ≈ 4 GB ⇒ ~50 GB free for scratch/cuBLAS. |
 | `--lr` | 3e-4 | Canonical for 1B-class from-scratch with cosine + warmup (matches the published Unsloth recipe used by `ORACLE_LORA_FINETUNE.md`) |
 | `--warmup-steps` | 1 000 | 1 % of total — standard for 100 k step runs |
 | `--checkpoint-every-steps` | 1 000 | Colab VM recycles can hit at any point; loses at most 1 000 × ~3-5 s/step = <90 min of progress |
