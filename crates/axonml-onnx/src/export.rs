@@ -87,6 +87,8 @@ pub struct OnnxExporter {
     initializers: Vec<TensorProto>,
     /// Optional documentation.
     doc_string: Option<String>,
+    /// Opset version override (defaults to SUPPORTED_OPSET_VERSION).
+    opset_version: i64,
 }
 
 impl OnnxExporter {
@@ -100,6 +102,7 @@ impl OnnxExporter {
             outputs: Vec::new(),
             nodes: Vec::new(),
             initializers: Vec::new(),
+            opset_version: SUPPORTED_OPSET_VERSION,
             doc_string: None,
         }
     }
@@ -114,6 +117,12 @@ impl OnnxExporter {
     /// Sets the documentation string.
     pub fn with_doc_string(mut self, doc: &str) -> Self {
         self.doc_string = Some(doc.to_string());
+        self
+    }
+
+    /// Override the ONNX opset version (default: SUPPORTED_OPSET_VERSION).
+    pub fn with_opset(mut self, version: i64) -> Self {
+        self.opset_version = version;
         self
     }
 
@@ -182,6 +191,22 @@ impl OnnxExporter {
         self.initializers.push(proto);
     }
 
+    /// Adds an int64 initializer (e.g. Reshape shape tensors).
+    pub fn add_initializer_int64(&mut self, name: &str, shape: &[i64], data: &[i64]) {
+        let proto = TensorProto {
+            name: name.to_string(),
+            dims: shape.to_vec(),
+            data_type: TensorDataType::Int64 as i32,
+            float_data: Vec::new(),
+            int32_data: Vec::new(),
+            int64_data: data.to_vec(),
+            double_data: Vec::new(),
+            raw_data: Vec::new(),
+            doc_string: None,
+        };
+        self.initializers.push(proto);
+    }
+
     /// Adds an initializer with explicit data.
     pub fn add_initializer_data(&mut self, name: &str, shape: &[i64], data: &[f32]) {
         let proto = TensorProto {
@@ -222,7 +247,7 @@ impl OnnxExporter {
             ir_version: 8,
             opset_import: vec![OperatorSetIdProto {
                 domain: None,
-                version: SUPPORTED_OPSET_VERSION,
+                version: self.opset_version,
             }],
             producer_name: Some(self.producer_name.clone()),
             producer_version: Some(self.producer_version.clone()),

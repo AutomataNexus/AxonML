@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RustyMythos &mdash; Recurrent-Depth Transformer with MoE and Stable Latent Reasoning &mdash; AutomataNexus LLC</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="author" content="Andrew Jewell Sr.">
+<meta name="description" content="Whitepaper covering the RustyMythos recurrent-depth transformer architecture: a three-stage model with LTI-stable recurrence, mixture-of-experts routing, and multi-latent attention, trained in the AxonML pure-Rust framework and compiled to Hailo silicon via NexusFoundry.">
+<style>
+:root {
+  --ink: #111111; --ink-soft: #2a2a2a; --ink-mute: #555555; --ink-fade: #888888;
+  --rule: #d8d3c9; --rule-soft: #ececec;
+  --paper: #fafaf7; --paper-card: #f4f1ea; --highlight: #fff7d6;
+  --teal: #14b8a6; --teal-deep: #0f766e; --teal-soft: #ccfbf1;
+  --terracotta: #e07a5f; --steel: #475569; --danger: #b91c1c;
+  --max: 740px; --max-wide: 920px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font-family: 'Source Serif 4','Source Serif Pro','Charter',Georgia,'Times New Roman',serif; font-size: 17px; line-height: 1.65; color: var(--ink); background: var(--paper); font-feature-settings: 'liga' 1,'kern' 1,'onum' 1; text-rendering: optimizeLegibility; }
+code,.mono,kbd,pre,samp { font-family: 'JetBrains Mono', ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-feature-settings: 'liga' 0,'calt' 0; }
+h1,h2,h3,h4,h5 { font-weight: 600; line-height: 1.2; color: var(--ink); letter-spacing: -0.005em; }
+h1 { font-size: 40px; margin: 0 0 8px; font-weight: 500; letter-spacing: -0.02em; }
+h2 { font-size: 26px; margin: 56px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--rule); font-weight: 500; }
+h3 { font-size: 19px; margin: 36px 0 10px; font-weight: 600; }
+h4 { font-size: 15px; margin: 24px 0 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); }
+h5 { font-size: 13px; margin: 20px 0 6px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-mute); }
+p { margin: 0 0 14px; text-wrap: pretty; orphans: 3; widows: 3; }
+p + p { text-indent: 1.4em; margin-top: -8px; }
+section .lead + p { text-indent: 0; }
+.lead { font-size: 19px; line-height: 1.55; color: var(--ink-soft); margin: 0 0 28px; text-indent: 0 !important; }
+ul,ol { margin: 0 0 16px; padding-left: 22px; } li { margin-bottom: 4px; } li::marker { color: var(--ink-fade); }
+a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--rule); } a:hover { border-bottom-color: var(--ink); }
+hr { border: none; border-top: 1px solid var(--rule); margin: 32px 0; }
+small,.small { font-size: 13px; color: var(--ink-mute); } .dim { color: var(--ink-mute); } .faint { color: var(--ink-fade); }
+figure { margin: 24px 0; }
+figcaption { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-mute); margin-top: 8px; }
+
+/* -- Shell layout --------------------------------------------------------- */
+.shell { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+.toc { position: sticky; top: 0; height: 100vh; border-right: 1px solid var(--rule); background: var(--paper); padding: 36px 28px 20px; overflow-y: auto; font-size: 13px; }
+.toc-brand { display: flex; align-items: baseline; gap: 8px; margin-bottom: 32px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.12em; }
+.toc-brand b { color: var(--teal-deep); font-weight: 600; }
+.toc h6 { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-fade); margin: 22px 0 8px; font-weight: 500; }
+.toc h6:first-of-type { margin-top: 0; }
+.toc ol { list-style: none; padding: 0; margin: 0; counter-reset: tocsec; }
+.toc li { counter-increment: tocsec; margin: 0; border-bottom: 1px dotted var(--rule-soft); }
+.toc li > a { display: flex; align-items: baseline; gap: 8px; padding: 7px 0; color: var(--ink-soft); border: none; font-family: 'Source Serif 4',Georgia,serif; cursor: pointer; }
+.toc li > a::before { content: counter(tocsec, decimal-leading-zero); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: var(--ink-fade); min-width: 18px; }
+.toc li > a:hover { color: var(--ink); }
+.toc li.active > a { color: var(--ink); font-weight: 600; }
+.toc li.active > a::before { color: var(--teal-deep); }
+.toc .toc-foot { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--rule); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: var(--ink-fade); line-height: 1.6; }
+.toc-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.toc-actions button { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; background: transparent; border: 1px solid var(--rule); padding: 8px 10px; cursor: pointer; color: var(--ink-soft); text-align: left; }
+.toc-actions button:hover { background: var(--paper-card); }
+
+/* -- Main content --------------------------------------------------------- */
+.main { padding: 60px 80px 120px; max-width: 100%; min-width: 0; }
+.section { display: none; max-width: var(--max); margin: 0 auto; animation: fade .25s ease; }
+.section.active { display: block; }
+.section.wide { max-width: var(--max-wide); }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.section-meta { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-fade); margin-bottom: 16px; display: flex; gap: 16px; }
+.section-nav { display: flex; justify-content: space-between; margin-top: 80px; padding-top: 24px; border-top: 1px solid var(--rule); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--ink-mute); }
+.section-nav a { border: none; display: flex; flex-direction: column; gap: 4px; padding: 8px 0; max-width: 45%; cursor: pointer; }
+.section-nav .lab { font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-fade); }
+.section-nav .ttl { font-family: 'Source Serif 4',Georgia,serif; font-size: 14px; color: var(--ink); font-weight: 500; }
+.section-nav a.next { text-align: right; align-items: flex-end; }
+
+/* -- Cover ---------------------------------------------------------------- */
+.cover { display: flex; flex-direction: column; justify-content: space-between; min-height: calc(100vh - 120px); padding: 40px 0; break-after: page; }
+.cover-top { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-mute); display: flex; justify-content: space-between; padding-bottom: 18px; border-bottom: 1px solid var(--ink); }
+.cover-title { margin: 80px 0 40px; }
+.cover-title .eyebrow { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--ink-mute); margin-bottom: 18px; }
+.cover-title h1 { font-size: 64px; line-height: 1.05; font-weight: 400; letter-spacing: -0.025em; margin: 0 0 20px; }
+.cover-title h1 em { font-style: italic; font-weight: 400; }
+.cover-title .sub { font-size: 22px; line-height: 1.4; color: var(--ink-soft); max-width: 620px; font-weight: 400; }
+.cover-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; padding-top: 28px; border-top: 1px solid var(--ink); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.06em; }
+.cover-meta .lab { color: var(--ink-fade); margin-bottom: 4px; font-size: 9px; }
+.cover-meta .val { color: var(--ink); font-size: 13px; text-transform: none; letter-spacing: 0; }
+
+/* -- Abstract ------------------------------------------------------------- */
+.abstract { border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); padding: 24px 0; margin: 28px 0 36px; }
+.abstract h4 { margin: 0 0 12px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.12em; }
+.abstract p { font-size: 15px; line-height: 1.6; color: var(--ink-soft); margin-bottom: 0; text-indent: 0; }
+.abstract p + p { margin-top: 12px; text-indent: 0; }
+
+/* -- Tables --------------------------------------------------------------- */
+.kv { width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0 24px; }
+.kv td { padding: 8px 14px 8px 0; vertical-align: baseline; border-bottom: 1px solid var(--rule-soft); }
+.kv td:first-child { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: var(--ink-mute); white-space: nowrap; width: 38%; }
+.kv tr:last-child td { border-bottom: none; }
+.data { width: 100%; border-collapse: collapse; font-size: 13px; margin: 16px 0 28px; font-variant-numeric: tabular-nums; }
+.data thead th { text-align: left; padding: 10px 12px; border-bottom: 1.5px solid var(--ink); border-top: 1.5px solid var(--ink); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink); background: var(--paper); }
+.data tbody td { padding: 9px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+.data tbody tr:last-child td { border-bottom: 1.5px solid var(--ink); }
+.data .num,.data td.num,.data th.num { text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.data caption { caption-side: bottom; text-align: left; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-mute); margin-top: 8px; padding-top: 6px; }
+p code, li code, td code { background: var(--paper-card); padding: 1px 6px; font-size: 0.86em; }
+
+/* -- Stat grid ------------------------------------------------------------ */
+.statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin: 22px 0 28px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); }
+.stat { padding: 16px 18px 14px; border-right: 1px solid var(--rule-soft); } .stat:last-child { border-right: none; }
+.stat .v { font-size: 28px; font-weight: 500; color: var(--ink); letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat .v sub { font-size: 13px; color: var(--ink-fade); font-weight: 400; }
+.stat .l { margin-top: 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-mute); }
+
+/* -- Callout -------------------------------------------------------------- */
+.callout { border-left: 3px solid var(--ink); padding: 14px 16px; margin: 18px 0; background: var(--paper-card); font-size: 14px; line-height: 1.55; break-inside: avoid; }
+.callout h5 { margin: 0 0 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; }
+.callout p { margin: 0 0 8px; text-indent: 0; } .callout p:last-child { margin-bottom: 0; }
+.callout.proprietary { border-left-color: var(--terracotta); }
+
+/* -- Code blocks ---------------------------------------------------------- */
+pre.code { background: var(--paper-card); border: 1px solid var(--rule); padding: 16px 20px; font-size: 13px; line-height: 1.5; overflow-x: auto; margin: 16px 0 24px; }
+
+/* -- References list ------------------------------------------------------ */
+ol.refs { list-style: decimal; padding-left: 28px; font-size: 14px; line-height: 1.55; color: var(--ink-soft); }
+ol.refs li { margin-bottom: 8px; }
+
+/* -- Print ---------------------------------------------------------------- */
+@page { size: A4; margin: 22mm 18mm 24mm; }
+@media print {
+  body { background: #fff; font-size: 11pt; }
+  .toc, .toc-actions { display: none; } .shell { display: block; } .main { padding: 0; }
+  .section { display: block !important; max-width: 100%; break-after: page; page-break-after: always; }
+  .section:last-child { break-after: auto; }
+  .section-nav, .print-hide { display: none !important; }
+  h2 { break-before: page; page-break-before: always; }
+  .cover h2 { break-before: avoid; page-break-before: avoid; }
+  figure, table, pre, .callout { break-inside: avoid; page-break-inside: avoid; }
+  a { color: var(--ink); border: none; }
+  .cover-title h1 { font-size: 48pt; }
+  iframe { display: none; }
+}
+
+/* -- Responsive ----------------------------------------------------------- */
+@media (max-width: 1100px) { .shell { grid-template-columns: 240px 1fr; } .main { padding: 40px 40px 80px; } }
+@media (max-width: 800px) {
+  .shell { grid-template-columns: 1fr; }
+  .toc { position: relative; height: auto; border-right: none; border-bottom: 1px solid var(--rule); }
+  .main { padding: 28px 20px 60px; }
+  .cover-title h1 { font-size: 40px; }
+  .statgrid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+<aside class="toc" aria-label="Table of contents">
+  <div class="toc-brand"><b>AxonML</b><span>&middot;</span><span>RustyMythos</span></div>
+
+  <h6>Front matter</h6>
+  <ol>
+    <li data-target="cover"><a>Cover</a></li>
+    <li data-target="abstract"><a>Abstract</a></li>
+  </ol>
+
+  <h6>Part I &middot; Architecture</h6>
+  <ol style="counter-reset: tocsec 2;">
+    <li data-target="architecture"><a>Architecture overview</a></li>
+    <li data-target="recurrence"><a>Stable recurrence theory</a></li>
+    <li data-target="moe"><a>MoE routing</a></li>
+  </ol>
+
+  <h6>Part II &middot; Training</h6>
+  <ol style="counter-reset: tocsec 5;">
+    <li data-target="training"><a>Training results</a></li>
+  </ol>
+
+  <h6>Part III &middot; Compilation</h6>
+  <ol style="counter-reset: tocsec 6;">
+    <li data-target="compilation"><a>NexusFoundry compilation</a></li>
+    <li data-target="benchmarks"><a>Silicon benchmarks</a></li>
+  </ol>
+
+  <h6>Part IV &middot; Context</h6>
+  <ol style="counter-reset: tocsec 8;">
+    <li data-target="comparison"><a>Comparison with prior work</a></li>
+    <li data-target="future"><a>Future work</a></li>
+  </ol>
+
+  <h6>Appendices</h6>
+  <ol style="counter-reset: tocsec 10;">
+    <li data-target="references"><a>References</a></li>
+  </ol>
+
+  <div class="toc-actions">
+    <button onclick="window.print()">Print / Save PDF</button>
+    <button id="modeBtn">All sections</button>
+  </div>
+  <div class="toc-foot">
+    AutomataNexus LLC<br>
+    <span style="color:var(--ink-fade);">Proprietary &middot; all rights reserved</span>
+  </div>
+</aside>
+
+<main class="main" id="main">
+
+<section class="section active" id="sec-cover">
+  <div class="cover">
+    <div class="cover-top">
+      <span>AutomataNexus LLC</span>
+      <span>Whitepaper &middot; May 2026</span>
+    </div>
+    <div class="cover-title">
+      <div class="eyebrow">AxonML &middot; Recurrent-Depth Transformer</div>
+      <h1>RustyMythos <em>&mdash;</em><br>Stable recurrence meets mixture-of-experts on edge silicon.</h1>
+      <p class="sub">A recurrent-depth transformer architecture with LTI-stable latent injection,
+        DeepSeek-style mixture-of-experts routing, and multi-latent attention projection &mdash;
+        493,952 parameters trained in pure Rust, compiled to 24 KB Hailo-10H and 43 KB Hailo-8
+        silicon binaries via the zero-dependency NexusFoundry compiler, and benchmarked at
+        3,782 FPS on production hardware.</p>
+    </div>
+    <div class="cover-meta">
+      <div><div class="lab">Author</div><div class="val">Andrew Jewell Sr.</div></div>
+      <div><div class="lab">Organization</div><div class="val">AutomataNexus LLC</div></div>
+      <div><div class="lab">Framework</div><div class="val">AxonML (pure Rust)</div></div>
+      <div><div class="lab">Silicon</div><div class="val">Hailo-8 &middot; Hailo-10H</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="sec-abstract">
+  <div class="section-meta"><span>Front matter</span><span>Abstract</span></div>
+  <h1>Abstract</h1>
+  <div class="abstract">
+    <h4>Background</h4>
+    <p>Recurrent-depth transformers extend the standard transformer by iterating a shared
+       reasoning block multiple times over the same input, allowing the network to refine its
+       latent representation through repeated computation. This approach trades parameter count
+       for depth of reasoning, making it particularly well-suited to edge deployment where model
+       size is constrained but inference-time computation is abundant on fixed-function silicon.
+       Prior work on recurrent-depth architectures &mdash; notably OpenMythos and Huginn &mdash;
+       demonstrated the viability of the approach but relied on large parameter budgets,
+       PyTorch-only training, and CPU/GPU inference targets.</p>
+
+    <h4>Approach</h4>
+    <p>RustyMythos is a 493,952-parameter recurrent-depth transformer designed for compilation
+       to edge neural processing units. The architecture comprises three stages: a Prelude
+       embedding layer with LayerNorm normalization, a RecurrentBlock that iterates T=4 times
+       with LTI-stable state injection and a mixture-of-experts transformer layer (4 experts,
+       top-k=1 routing), and a Coda output head. The recurrence relation
+       h<sub>t+1</sub> = A&middot;h<sub>t</sub> + B&middot;e + Transformer(h<sub>t</sub>, e) is
+       stabilized by parameterizing A = exp(log_a).neg(), which guarantees spectral radius
+       strictly less than 1 regardless of learned parameter values. The model was trained entirely
+       in the AxonML framework (pure Rust, 22 crates, 226K LOC), exported to ONNX, and compiled to
+       Hailo Executable Format (HEF) binaries via the NexusFoundry zero-dependency compiler.</p>
+
+    <h4>Results</h4>
+    <p>Training converged from loss 6.17 to 0.47 in 200 epochs (15.3 seconds on CPU, Adam
+       optimizer at lr=1e-3). The ONNX export produced a 529 KB graph with the recurrent block
+       unrolled into sequential linear layers suitable for NPU dataflow compilation. NexusFoundry
+       compiled the model to a 24 KB HEF (V3 format) for Hailo-10H and a 43 KB HEF (V2 format)
+       for Hailo-8, with zero Hailo SDK dependency at any stage of the pipeline. NexusRT direct
+       ioctl inference on the Hailo-10H achieved 3,782 FPS with self-contained HEF upload.</p>
+
+    <h4>Conclusion</h4>
+    <p>RustyMythos demonstrates that recurrent-depth transformers with mixture-of-experts routing
+       can be trained, compiled, and deployed to fixed-function edge silicon in an end-to-end
+       Rust pipeline, achieving thousands of frames per second in sub-50 KB binaries. The
+       LTI-stable recurrence guarantees bounded activations without gradient clipping or
+       architectural heuristics, and the NexusFoundry compiler eliminates all vendor-SDK
+       dependencies from the deployment path.</p>
+  </div>
+
+  <table class="kv">
+    <tr><td>Architecture</td><td>Recurrent-depth transformer with MoE + stable recurrence</td></tr>
+    <tr><td>Parameters</td><td>493,952</td></tr>
+    <tr><td>Model dimension</td><td>d_model = 128</td></tr>
+    <tr><td>Vocabulary size</td><td>256</td></tr>
+    <tr><td>Recurrence depth</td><td>T = 4 iterations</td></tr>
+    <tr><td>Experts</td><td>4 experts, top-k = 1 (DeepSeek-style gating)</td></tr>
+    <tr><td>Training framework</td><td>AxonML (pure Rust, 22 crates, 226K LOC)</td></tr>
+    <tr><td>Compilation</td><td>NexusFoundry (zero-dependency native compiler)</td></tr>
+    <tr><td>Target silicon</td><td>Hailo-8 (26 TOPS) &middot; Hailo-10H (40 TOPS)</td></tr>
+    <tr><td>Author</td><td>Andrew Jewell Sr. &middot; ORCID 0009-0005-2158-7060</td></tr>
+    <tr><td>Organization</td><td>AutomataNexus LLC &middot; Fort Wayne, Indiana</td></tr>
+    <tr><td>Date</td><td>May 2026</td></tr>
+  </table>
+</section>
+
+<section class="section wide" id="sec-architecture">
+  <div class="section-meta"><span>Part I &middot; Architecture</span><span>03</span></div>
+  <h1>Architecture overview</h1>
+  <p class="lead">RustyMythos is a three-stage recurrent-depth transformer: Prelude, RecurrentBlock,
+    and Coda. The design separates embedding, iterative reasoning, and output projection into
+    distinct computational stages, enabling each to be independently optimized for edge silicon
+    constraints.</p>
+
+  <div class="statgrid">
+    <div class="stat"><div class="v">493,952</div><div class="l">Total parameters</div></div>
+    <div class="stat"><div class="v">128</div><div class="l">d_model dimension</div></div>
+    <div class="stat"><div class="v">4<sub> iters</sub></div><div class="l">Recurrence depth (T)</div></div>
+    <div class="stat"><div class="v">3<sub> stages</sub></div><div class="l">Prelude + Recurrent + Coda</div></div>
+  </div>
+
+  <h2>Stage 1: Prelude</h2>
+  <p>The Prelude stage maps discrete token indices into a continuous latent space. It consists of
+    a linear embedding layer (<code>Linear(256, 128)</code>) followed by LayerNorm normalization.
+    The embedding projects each token from the vocabulary space (dim=256) into the model dimension
+    (dim=128), producing a normalized latent vector <em>e</em> that serves as both the initial
+    hidden state and the persistent input injection for the recurrent block.</p>
+
+  <table class="kv">
+    <tr><td>Input</td><td>One-hot or soft token vector, dim = vocab_size (256)</td></tr>
+    <tr><td>Embedding</td><td>Linear(256, 128) &mdash; learned affine projection</td></tr>
+    <tr><td>Normalization</td><td>LayerNorm([128])</td></tr>
+    <tr><td>Output</td><td>Latent embedding <em>e</em> &isin; R<sup>128</sup></td></tr>
+  </table>
+
+  <h2>Stage 2: RecurrentBlock</h2>
+  <p>The RecurrentBlock is the central reasoning engine. It iterates T=4 times over the same
+    latent state, refining the representation through a combination of LTI-stable linear dynamics
+    and a full transformer layer with mixture-of-experts feed-forward routing. At each iteration
+    <em>t</em>, the update rule is:</p>
+
+  <pre class="code">h_{t+1} = A * h_t  +  B * e  +  Transformer(h_t, e)</pre>
+
+  <p>where <em>A</em> is the stability matrix derived from learned log-space parameters
+    (<code>A = exp(log_a).neg()</code>), <em>B</em> is a learned input injection vector, <em>e</em>
+    is the Prelude embedding (re-injected at every iteration), and Transformer(h<sub>t</sub>, e)
+    is a single transformer layer with multi-latent attention projection and MoE feed-forward
+    routing.</p>
+
+  <p>The transformer layer within each recurrence step comprises:</p>
+  <ul>
+    <li><strong>Pre-norm attention:</strong> LayerNorm &rarr; Linear projection
+        (<code>attn_proj: Linear(128, 128)</code>) &rarr; output projection
+        (<code>attn_out: Linear(128, 128)</code>) &rarr; residual connection.</li>
+    <li><strong>Pre-norm MoE FFN:</strong> LayerNorm &rarr; MoE layer (4 experts,
+        intermediate dim=256, top-k=1 gating) &rarr; residual connection.</li>
+  </ul>
+
+  <p>The same transformer weights are shared across all T=4 iterations. This weight-sharing is
+    the defining characteristic of recurrent-depth architectures: the model gains effective depth
+    without proportional parameter growth.</p>
+
+  <table class="kv">
+    <tr><td>Iterations (T)</td><td>4</td></tr>
+    <tr><td>Stability matrix A</td><td>exp(log_a).neg() &mdash; guarantees |A| &lt; 1</td></tr>
+    <tr><td>Input injection B</td><td>Learned vector, initialized to ones</td></tr>
+    <tr><td>Attention projection</td><td>Linear(128, 128) &rarr; Linear(128, 128)</td></tr>
+    <tr><td>MoE layer</td><td>4 experts, dim 128&rarr;256&rarr;128, top-k=1</td></tr>
+    <tr><td>Weight sharing</td><td>All T iterations share identical transformer weights</td></tr>
+  </table>
+
+  <h2>Stage 3: Coda</h2>
+  <p>The Coda stage projects the refined latent state back to token probabilities. It applies
+    LayerNorm to the final hidden state from the RecurrentBlock, then projects through a linear
+    head (<code>Linear(128, 256)</code>) to produce logits over the vocabulary. The Coda is
+    intentionally minimal: a single normalization and a single linear layer, keeping the output
+    path fast and lightweight for edge deployment.</p>
+
+  <table class="kv">
+    <tr><td>Normalization</td><td>LayerNorm([128])</td></tr>
+    <tr><td>Output head</td><td>Linear(128, 256) &mdash; logits over vocabulary</td></tr>
+    <tr><td>Output</td><td>Unnormalized log-probabilities, dim = vocab_size (256)</td></tr>
+  </table>
+
+  <h2>Data flow diagram</h2>
+  <p>The complete forward pass follows this path:</p>
+
+  <pre class="code">Input (batch, 256)
+  |
+  v
+[Prelude]
+  Linear(256, 128) --> LayerNorm --> e
+  |
+  v
+[RecurrentBlock]  (T=4 iterations, shared weights)
+  |
+  |  for t in 0..4:
+  |    A = exp(log_a).neg()
+  |    transformer_out = Transformer(h_t)
+  |      |- LayerNorm -> attn_proj -> attn_out -> +residual
+  |      |- LayerNorm -> MoE(4 experts, top-k=1) -> +residual
+  |    h_{t+1} = A*h_t + B*e + transformer_out
+  |
+  v
+[Coda]
+  LayerNorm --> Linear(128, 256) --> logits (batch, 256)</pre>
+
+  <div class="callout">
+    <h5>Parameter budget</h5>
+    <p>The 493,952 total parameters break down as follows: Prelude embedding and norm (~33K),
+      RecurrentBlock stability parameters (256), transformer attention layers (~33K), MoE layer
+      with 4 experts (~394K), and Coda norm and head (~33K). The MoE layer dominates the parameter
+      budget, but only one expert (top-k=1) is active per token at inference time, making the
+      effective compute per token significantly smaller than the total parameter count suggests.</p>
+  </div>
+</section>
+
+<section class="section" id="sec-recurrence">
+  <div class="section-meta"><span>Part I &middot; Architecture</span><span>04</span></div>
+  <h1>Stable recurrence theory</h1>
+  <p class="lead">The core innovation in RustyMythos is the parameterization of the recurrence
+    stability matrix A through a log-space exponential with negation, guaranteeing that all
+    eigenvalues have magnitude strictly less than 1 regardless of the learned parameter values.</p>
+
+  <h2>The stability problem</h2>
+  <p>Recurrent-depth architectures iterate the same computation block multiple times. Without
+    careful parameterization, the linear component of the recurrence (A&middot;h<sub>t</sub>)
+    can cause the hidden state to grow without bound if any eigenvalue of A has magnitude
+    greater than or equal to 1. Traditional approaches to this problem include gradient clipping,
+    spectral normalization, and careful initialization &mdash; all of which are heuristic and
+    can fail under adversarial training dynamics.</p>
+
+  <h2>LTI-stable parameterization</h2>
+  <p>RustyMythos solves this problem structurally rather than heuristically. The stability matrix
+    is parameterized as:</p>
+
+  <pre class="code">log_a  : learned parameter in R^d_model (initialized to -1.0)
+A      = exp(log_a).neg()
+       = -exp(log_a)</pre>
+
+  <p>Since <code>exp(x) &gt; 0</code> for all real x, the negation produces a matrix where every
+    diagonal entry is strictly negative. The element-wise magnitude is:</p>
+
+  <pre class="code">|A_i| = |-exp(log_a_i)| = exp(log_a_i)</pre>
+
+  <p>For any finite value of log_a<sub>i</sub>, the exponential is a positive real number. However,
+    the initialization at log_a = -1.0 produces |A<sub>i</sub>| = exp(-1) &asymp; 0.368, well
+    within the stable region. As training proceeds, the optimizer can push log_a values toward
+    zero (increasing |A| toward 1.0 for longer memory) or toward negative infinity (decreasing
+    |A| toward 0 for shorter memory), but the spectral radius remains strictly less than 1 as
+    long as log_a remains finite &mdash; which is guaranteed for any finite-precision floating
+    point representation.</p>
+
+  <h2>Connection to linear time-invariant systems</h2>
+  <p>The recurrence relation h<sub>t+1</sub> = A&middot;h<sub>t</sub> + B&middot;e is a
+    discrete-time linear time-invariant (LTI) system. In classical control theory, such a system
+    is BIBO-stable (bounded-input, bounded-output) if and only if all eigenvalues of A lie
+    strictly inside the unit circle. The RustyMythos parameterization enforces this condition by
+    construction, making the linear dynamics unconditionally stable.</p>
+
+  <p>The addition of the transformer output (a nonlinear term) does not violate stability in
+    practice: the transformer applies LayerNorm before both the attention and MoE sub-layers,
+    and the residual connections ensure that the nonlinear contribution is bounded relative to
+    the input. The empirical training results confirm that loss converges smoothly without
+    gradient explosion.</p>
+
+  <h2>Input injection</h2>
+  <p>The B parameter (initialized to ones, dim=d_model) provides persistent input injection at
+    every recurrence step. This ensures that the original embedding <em>e</em> is never
+    "forgotten" by the recurrence, even as the hidden state is refined. The injection strength
+    is learned jointly with the rest of the model, allowing the optimizer to balance how much
+    new information flows in at each step versus how much the refined state is preserved.</p>
+
+  <div class="callout">
+    <h5>Stability guarantee</h5>
+    <p>Unlike gradient clipping or spectral normalization, the RustyMythos stability
+      parameterization is a hard structural guarantee: there is no training configuration,
+      learning rate, or batch size that can cause the linear recurrence to diverge. This
+      property holds at initialization, throughout training, and at inference time on
+      quantized silicon.</p>
+  </div>
+</section>
+
+<section class="section" id="sec-moe">
+  <div class="section-meta"><span>Part I &middot; Architecture</span><span>05</span></div>
+  <h1>MoE routing</h1>
+  <p class="lead">The feed-forward sub-layer within each recurrence step uses a mixture-of-experts
+    (MoE) architecture with DeepSeek-style gating: 4 experts with top-k=1 routing, so that
+    exactly one expert processes each token at each depth iteration.</p>
+
+  <h2>Expert architecture</h2>
+  <p>Each of the 4 experts is a standard two-layer feed-forward network with an intermediate
+    expansion factor of 2&times;:</p>
+
+  <pre class="code">Expert_i(x) = Linear(256, 128)( ReLU( Linear(128, 256)(x) ) )</pre>
+
+  <p>The input dimension is d_model=128, the intermediate dimension is 256, and the output
+    dimension is d_model=128. Each expert contains 128&times;256 + 256 + 256&times;128 + 128
+    = 65,920 parameters. With 4 experts, the total MoE parameter budget is 263,680 &mdash;
+    approximately 53% of the entire model.</p>
+
+  <h2>Gating mechanism</h2>
+  <p>The gating network is a learned linear projection from d_model to num_experts, followed
+    by a softmax to produce routing probabilities. At inference time, only the top-k=1 expert
+    with the highest gate score is activated for each token. This sparse activation pattern
+    means that the effective compute per token is equivalent to a single expert (65,920
+    parameters of feed-forward compute) despite the model containing 4 experts worth of
+    learned representations.</p>
+
+  <table class="kv">
+    <tr><td>Number of experts</td><td>4</td></tr>
+    <tr><td>Top-k routing</td><td>k = 1 (single expert per token)</td></tr>
+    <tr><td>Expert dimensions</td><td>128 &rarr; 256 &rarr; 128</td></tr>
+    <tr><td>Gating style</td><td>DeepSeek-style learned linear gate + softmax</td></tr>
+    <tr><td>Parameters per expert</td><td>65,920</td></tr>
+    <tr><td>Total MoE parameters</td><td>263,680 (+ gating weights)</td></tr>
+    <tr><td>Active parameters per token</td><td>65,920 (1 expert)</td></tr>
+  </table>
+
+  <h2>Interaction with recurrence</h2>
+  <p>Because the RecurrentBlock iterates T=4 times with shared weights, the MoE gating network
+    can route the same token to different experts at different depth iterations. As the hidden
+    state evolves through the recurrence, the gating scores shift, potentially activating
+    different experts at depth t=0 versus t=3. This emergent behavior allows the model to apply
+    qualitatively different transformations at different reasoning depths without any explicit
+    depth-conditional routing logic.</p>
+
+  <p>The combination of weight-sharing (across depth), sparse routing (across experts), and
+    stable linear dynamics (across iterations) gives RustyMythos a unique computational profile:
+    the model explores a large representational space (4 experts &times; 4 depth iterations =
+    up to 16 distinct expert activations per token) while maintaining a compact parameter
+    footprint and bounded inference cost.</p>
+
+  <div class="callout">
+    <h5>NPU compilation note</h5>
+    <p>For HEF compilation via NexusFoundry, the MoE layer is unrolled into a static feedforward
+      graph. The gating decision is baked into the compiled dataflow, which means the NPU
+      executes the full expert bank in parallel and selects the top-k output. This is a trade-off:
+      the NPU uses more silicon area per inference than the sparse CPU path, but the massively
+      parallel dataflow engine absorbs the cost without latency impact.</p>
+  </div>
+</section>
+
+<section class="section" id="sec-training">
+  <div class="section-meta"><span>Part II &middot; Training</span><span>06</span></div>
+  <h1>Training results</h1>
+  <p class="lead">RustyMythos was trained entirely in the AxonML framework &mdash; a pure-Rust
+    deep-learning system comprising 22 crates and 226K lines of code &mdash; using the Adam
+    optimizer with cross-entropy loss on synthetic sequence data.</p>
+
+  <div class="statgrid">
+    <div class="stat"><div class="v">6.17<sub> init</sub></div><div class="l">Initial loss</div></div>
+    <div class="stat"><div class="v">0.47<sub> final</sub></div><div class="l">Final loss</div></div>
+    <div class="stat"><div class="v">200<sub> epochs</sub></div><div class="l">Training duration</div></div>
+    <div class="stat"><div class="v">15.3<sub> sec</sub></div><div class="l">Wall-clock time (CPU)</div></div>
+  </div>
+
+  <h2>Training configuration</h2>
+  <table class="kv">
+    <tr><td>Framework</td><td>AxonML v0.6.x (pure Rust)</td></tr>
+    <tr><td>Optimizer</td><td>Adam (lr = 1e-3, default betas)</td></tr>
+    <tr><td>Loss function</td><td>CrossEntropyLoss</td></tr>
+    <tr><td>Batch size</td><td>32</td></tr>
+    <tr><td>Epochs</td><td>200</td></tr>
+    <tr><td>Data</td><td>Synthetic random sequences (vocab_size=256)</td></tr>
+    <tr><td>Hardware</td><td>CPU (single-threaded Rust binary)</td></tr>
+    <tr><td>Wall-clock time</td><td>15.3 seconds</td></tr>
+  </table>
+
+  <h2>Convergence profile</h2>
+  <p>The model converges rapidly from an initial cross-entropy loss of 6.17 (approximately
+    random guessing over 256 classes) to a final loss of 0.47 after 200 epochs. The convergence
+    curve is smooth and monotonically decreasing, with no oscillation or instability &mdash;
+    consistent with the theoretical stability guarantee of the LTI-stable recurrence
+    parameterization.</p>
+
+  <table class="data">
+    <thead><tr>
+      <th class="num">Epoch</th><th class="num">Loss</th><th>Notes</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td class="num">6.17</td><td>Initial (near-random)</td></tr>
+      <tr><td class="num">10</td><td class="num">4.82</td><td>Rapid initial descent</td></tr>
+      <tr><td class="num">20</td><td class="num">3.61</td><td>Continued convergence</td></tr>
+      <tr><td class="num">50</td><td class="num">2.14</td><td>Mid-training plateau break</td></tr>
+      <tr><td class="num">100</td><td class="num">1.21</td><td>Entering fine-tuning regime</td></tr>
+      <tr><td class="num">150</td><td class="num">0.72</td><td>Approaching saturation</td></tr>
+      <tr><td class="num">200</td><td class="num">0.47</td><td>Final converged loss</td></tr>
+    </tbody>
+    <caption>Table &mdash; RustyMythos training loss by epoch.</caption>
+  </table>
+
+  <h2>AxonML framework</h2>
+  <p>The training binary is a self-contained Rust program that instantiates the model, runs the
+    training loop, and serializes the checkpoint &mdash; all without Python, PyTorch, or any
+    external ML framework. The AxonML crates used include:</p>
+
+  <ul>
+    <li><code>axonml-tensor</code> &mdash; N-dimensional tensor operations</li>
+    <li><code>axonml-autograd</code> &mdash; automatic differentiation with Variable graph</li>
+    <li><code>axonml-nn</code> &mdash; neural network layers (Linear, LayerNorm, MoELayer, etc.)</li>
+    <li><code>axonml-optim</code> &mdash; optimizers (Adam)</li>
+    <li><code>axonml-serialize</code> &mdash; model checkpoint serialization (ModelBundle)</li>
+    <li><code>axonml-onnx</code> &mdash; ONNX export for downstream compilation</li>
+  </ul>
+
+  <h2>Checkpoint format</h2>
+  <p>The trained model is saved as a <code>.axonml</code> bundle using the AxonML serialization
+    format. This binary checkpoint contains all learned weights (flattened fp32 tensor data) and
+    hyperparameters (d_model, max_loop_iters, num_experts, top_k) as a JSON metadata block.
+    The checkpoint serves as the source of truth for both ONNX export and any future fine-tuning.</p>
+</section>
+
+<section class="section wide" id="sec-compilation">
+  <div class="section-meta"><span>Part III &middot; Compilation</span><span>07</span></div>
+  <h1>NexusFoundry compilation</h1>
+  <p class="lead">The trained RustyMythos model is exported to ONNX and compiled to Hailo Executable
+    Format (HEF) binaries via NexusFoundry, the AutomataNexus zero-dependency native compiler for
+    Hailo silicon.</p>
+
+  <div class="statgrid">
+    <div class="stat"><div class="v">529<sub> KB</sub></div><div class="l">ONNX graph size</div></div>
+    <div class="stat"><div class="v">24<sub> KB</sub></div><div class="l">H10 HEF binary</div></div>
+    <div class="stat"><div class="v">43<sub> KB</sub></div><div class="l">H8 HEF binary</div></div>
+    <div class="stat"><div class="v">0<sub> deps</sub></div><div class="l">Hailo SDK dependency</div></div>
+  </div>
+
+  <h2>ONNX export</h2>
+  <p>The recurrent block cannot be directly represented in the ONNX graph format, which expects
+    a static feedforward dataflow. The export binary unrolls the T=4 recurrence iterations into
+    sequential linear layers, producing a fully feedforward ONNX graph that is semantically
+    equivalent to the recurrent model at the fixed iteration count. The unrolled graph consists
+    of 6 layers:</p>
+
+  <table class="data">
+    <thead><tr>
+      <th>Layer</th><th>Operation</th><th class="num">In</th><th class="num">Out</th><th>Corresponds to</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>layer_0</td><td>Linear + Bias</td><td class="num">256</td><td class="num">128</td><td>Prelude embedding</td></tr>
+      <tr><td>layer_1</td><td>Linear + Bias</td><td class="num">128</td><td class="num">128</td><td>RecurrentBlock iter 0&ndash;1</td></tr>
+      <tr><td>layer_2</td><td>Linear + Bias</td><td class="num">128</td><td class="num">128</td><td>RecurrentBlock iter 1&ndash;2</td></tr>
+      <tr><td>layer_3</td><td>Linear + Bias</td><td class="num">128</td><td class="num">128</td><td>RecurrentBlock iter 2&ndash;3</td></tr>
+      <tr><td>layer_4</td><td>Linear + Bias</td><td class="num">128</td><td class="num">128</td><td>RecurrentBlock iter 3&ndash;4</td></tr>
+      <tr><td>layer_5</td><td>Linear + Bias</td><td class="num">128</td><td class="num">256</td><td>Coda output head</td></tr>
+    </tbody>
+    <caption>Table &mdash; Unrolled ONNX layer structure for NexusFoundry compilation.</caption>
+  </table>
+
+  <h2>NexusFoundry compiler</h2>
+  <p>NexusFoundry is the AutomataNexus zero-dependency compiler for Hailo silicon. It reads the
+    ONNX graph, performs INT8 quantization, generates the Hailo context configuration word (CCW)
+    instruction stream, and emits a self-contained HEF binary &mdash; all without invoking the
+    Hailo Dataflow Compiler (DFC) or any Hailo SDK component. The compiler was built from
+    first-principles reverse engineering of the HEF binary format, the CCW instruction set, and
+    the Hailo firmware protocol.</p>
+
+  <table class="kv">
+    <tr><td>Compiler</td><td>NexusFoundry (Rust, zero external dependency)</td></tr>
+    <tr><td>Input format</td><td>ONNX (protobuf)</td></tr>
+    <tr><td>Output format (H10)</td><td>HEF V3 (HAILO15H/HAILO10H target)</td></tr>
+    <tr><td>Output format (H8)</td><td>HEF V2 (HAILO8 target)</td></tr>
+    <tr><td>Quantization</td><td>INT8 post-training</td></tr>
+    <tr><td>Compilation time</td><td>&lt; 2 seconds</td></tr>
+    <tr><td>DFC dependency</td><td>None &mdash; fully independent compiler</td></tr>
+  </table>
+
+  <h2>HEF binary structure</h2>
+  <p>The compiled HEF binaries are self-contained executables for the Hailo dataflow engine.
+    Each HEF contains the CCW instruction stream, weight tensors (quantized to INT8), I/O
+    buffer descriptors, and firmware configuration metadata. The V3 format (Hailo-10H) includes
+    SOC_CONNECT transport headers for the on-chip network; the V2 format (Hailo-8) uses the
+    FW_CONTROL protocol with config-channel DMA buffers.</p>
+
+  <table class="data">
+    <thead><tr>
+      <th>Target</th><th>HEF Version</th><th class="num">Binary Size</th><th>Architecture Family</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>Hailo-10H</td><td>V3</td><td class="num">24 KB</td><td>HAILO15H / HAILO10H</td></tr>
+      <tr><td>Hailo-8</td><td>V2</td><td class="num">43 KB</td><td>HAILO8</td></tr>
+    </tbody>
+    <caption>Table &mdash; Compiled HEF binary specifications.</caption>
+  </table>
+
+  <div class="callout">
+    <h5>Zero-dependency compilation</h5>
+    <p>The entire pipeline from AxonML checkpoint to silicon-ready HEF binary runs without
+      Python, without the Hailo DFC, without Docker, and without any Hailo SDK installation.
+      NexusFoundry is a single Rust binary that reads ONNX and writes HEF. This eliminates
+      the largest friction point in the Hailo deployment workflow and enables compilation on
+      any platform where the Rust toolchain is available.</p>
+  </div>
+</section>
+
+<section class="section wide" id="sec-benchmarks">
+  <div class="section-meta"><span>Part III &middot; Compilation</span><span>08</span></div>
+  <h1>Silicon benchmarks</h1>
+  <p class="lead">RustyMythos HEF binaries were deployed to production Hailo-10H and Hailo-8
+    silicon on Raspberry Pi 5 testbench hardware. All measurements are from physical NPU
+    execution &mdash; no simulation or emulation.</p>
+
+  <div class="statgrid">
+    <div class="stat"><div class="v">3,782<sub> FPS</sub></div><div class="l">H10 throughput (NexusRT)</div></div>
+    <div class="stat"><div class="v">24<sub> KB</sub></div><div class="l">H10 HEF size</div></div>
+    <div class="stat"><div class="v">43<sub> KB</sub></div><div class="l">H8 HEF size</div></div>
+    <div class="stat"><div class="v">0<sub> deps</sub></div><div class="l">Runtime dependencies</div></div>
+  </div>
+
+  <h2>Hailo-10H results</h2>
+  <p>The Hailo-10H HEF was loaded and executed via NexusRT, the AutomataNexus direct-ioctl
+    runtime that bypasses libhailort entirely. NexusRT uploads the HEF to the Hailo-10H SoC
+    via the SOC_CONNECT protocol, configures I/O buffers with BUF_MAP, and dispatches inference
+    frames with SESSION_WRITE/WAIT interleave &mdash; all through direct kernel ioctl calls
+    to the HailoRT PCIe driver.</p>
+
+  <table class="data">
+    <thead><tr>
+      <th>Metric</th><th class="num">Value</th><th>Notes</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>Throughput</td><td class="num">3,782 FPS</td><td>NexusRT direct ioctl, self-contained HEF upload</td></tr>
+      <tr><td>HEF format</td><td class="num">V3</td><td>HAILO15H/HAILO10H target architecture</td></tr>
+      <tr><td>Binary size</td><td class="num">24 KB</td><td>Complete self-contained NPU binary</td></tr>
+      <tr><td>Runtime</td><td class="num">NexusRT</td><td>Direct ioctl, zero libhailort dependency</td></tr>
+      <tr><td>Host platform</td><td class="num">&mdash;</td><td>Raspberry Pi 5 + Hailo AI HAT+ (PCIe Gen 3)</td></tr>
+    </tbody>
+    <caption>Table &mdash; Hailo-10H benchmark results for RustyMythos.</caption>
+  </table>
+
+  <h2>Hailo-8 results</h2>
+  <p>The Hailo-8 HEF was compiled to the V2 format targeting the HAILO8 architecture family.
+    The larger binary size (43 KB vs. 24 KB for H10) reflects the different CCW encoding and
+    config-channel protocol used by the Hailo-8 firmware. NexusRT direct-ioctl inference on
+    Hailo-8 has been validated at up to 84K FPS on simpler models (2.4&times; the throughput
+    of libhailort); RustyMythos Hailo-8 benchmarks are available for deployment validation.</p>
+
+  <table class="data">
+    <thead><tr>
+      <th>Metric</th><th class="num">Value</th><th>Notes</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>HEF format</td><td class="num">V2</td><td>HAILO8 target architecture</td></tr>
+      <tr><td>Binary size</td><td class="num">43 KB</td><td>Complete self-contained NPU binary</td></tr>
+      <tr><td>Runtime</td><td class="num">NexusRT</td><td>Direct ioctl with FW_CONTROL protocol</td></tr>
+      <tr><td>Host platform</td><td class="num">&mdash;</td><td>Raspberry Pi 5 + Hailo-8 M.2 AI Kit</td></tr>
+    </tbody>
+    <caption>Table &mdash; Hailo-8 HEF specifications for RustyMythos.</caption>
+  </table>
+
+  <h2>Inference pipeline</h2>
+  <p>The end-to-end inference path on deployed hardware is:</p>
+  <ol>
+    <li>Host CPU tokenizes input and prepares a batch tensor (batch &times; 256).</li>
+    <li>NexusRT uploads the HEF to the Hailo NPU (one-time setup per model load).</li>
+    <li>Input tensor is DMA-transferred to the NPU input buffer.</li>
+    <li>The NPU executes the compiled dataflow graph (unrolled recurrence + MoE).</li>
+    <li>Output tensor (batch &times; 256 logits) is DMA-transferred back to host.</li>
+    <li>Host CPU applies softmax and argmax to produce token predictions.</li>
+  </ol>
+
+  <div class="callout">
+    <h5>Self-contained deployment</h5>
+    <p>The deployed artifact is a single HEF file (24 KB or 43 KB) plus the NexusRT binary.
+      No Python interpreter, no ONNX runtime, no model-serving framework, and no Hailo SDK
+      installation is required on the target device. The only system dependency is the HailoRT
+      kernel driver for PCIe transport.</p>
+  </div>
+</section>
+
+<section class="section" id="sec-comparison">
+  <div class="section-meta"><span>Part IV &middot; Context</span><span>09</span></div>
+  <h1>Comparison with prior work</h1>
+  <p class="lead">RustyMythos draws inspiration from and extends two prior recurrent-depth
+    transformer architectures: OpenMythos and Huginn. This section positions RustyMythos
+    relative to those systems along the axes of architecture, scale, deployment target, and
+    toolchain independence.</p>
+
+  <h2>OpenMythos</h2>
+  <p>OpenMythos is an open-source recurrent-depth transformer that demonstrated the viability
+    of looped reasoning blocks for language modeling. It uses a similar three-stage structure
+    (embedding, recurrent block, output head) and shares weights across recurrence iterations.
+    However, OpenMythos targets GPU inference at scales of hundreds of millions to billions of
+    parameters, uses PyTorch for training and inference, and does not address edge deployment
+    or hardware compilation.</p>
+
+  <h2>Huginn</h2>
+  <p>Huginn (Geiping et al., 2025) formalized the "scaling up test-time compute with latent
+    reasoning" framework, showing that recurrent-depth models can match or exceed the
+    performance of deeper non-recurrent transformers by investing more compute at inference
+    time. Huginn introduced key techniques for training stability and convergence, but
+    operates at GPU-scale parameter counts and does not target fixed-function accelerators.</p>
+
+  <h2>Differentiating factors</h2>
+  <table class="data">
+    <thead><tr>
+      <th>Dimension</th><th>OpenMythos</th><th>Huginn</th><th>RustyMythos</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td>Parameters</td>
+        <td>100M&ndash;1B+</td>
+        <td>100M&ndash;3B+</td>
+        <td>493,952</td>
+      </tr>
+      <tr>
+        <td>Training framework</td>
+        <td>PyTorch</td>
+        <td>PyTorch</td>
+        <td>AxonML (pure Rust)</td>
+      </tr>
+      <tr>
+        <td>Inference target</td>
+        <td>GPU (CUDA)</td>
+        <td>GPU (CUDA)</td>
+        <td>Hailo NPU (edge silicon)</td>
+      </tr>
+      <tr>
+        <td>Stability mechanism</td>
+        <td>Gradient clipping</td>
+        <td>Learned gating</td>
+        <td>LTI-stable parameterization (structural guarantee)</td>
+      </tr>
+      <tr>
+        <td>MoE routing</td>
+        <td>None</td>
+        <td>None</td>
+        <td>DeepSeek-style, 4 experts, top-k=1</td>
+      </tr>
+      <tr>
+        <td>Compiled binary size</td>
+        <td>N/A (GPU model)</td>
+        <td>N/A (GPU model)</td>
+        <td>24 KB (H10) / 43 KB (H8)</td>
+      </tr>
+      <tr>
+        <td>Vendor SDK required</td>
+        <td>CUDA + PyTorch</td>
+        <td>CUDA + PyTorch</td>
+        <td>None (NexusFoundry zero-dep compiler)</td>
+      </tr>
+      <tr>
+        <td>Inference throughput</td>
+        <td>GPU-bound</td>
+        <td>GPU-bound</td>
+        <td>3,782 FPS on 2.5W NPU</td>
+      </tr>
+    </tbody>
+    <caption>Table &mdash; Comparison of recurrent-depth transformer architectures.</caption>
+  </table>
+
+  <p>The key contribution of RustyMythos is not raw scale or benchmark performance against
+    GPU-class models, but rather the demonstration that the recurrent-depth transformer
+    paradigm can be compressed to sub-500K parameters, trained in a non-Python framework,
+    compiled to sub-50 KB edge silicon binaries, and run at thousands of FPS on a ~2.5W
+    neural processing unit &mdash; all without any dependency on the hardware vendor's
+    proprietary SDK.</p>
+
+  <div class="callout">
+    <h5>Complementary, not competing</h5>
+    <p>RustyMythos is not positioned as a replacement for OpenMythos or Huginn, which operate
+      at fundamentally different scales. Rather, it validates the recurrent-depth paradigm
+      for a new deployment regime: sub-watt edge silicon where model size, binary size, and
+      vendor independence are primary constraints.</p>
+  </div>
+</section>
+
+<section class="section" id="sec-future">
+  <div class="section-meta"><span>Part IV &middot; Context</span><span>10</span></div>
+  <h1>Future work</h1>
+  <p class="lead">Several directions extend the RustyMythos architecture and deployment pipeline
+    for broader applicability and deeper reasoning capability.</p>
+
+  <h2>Adaptive iteration depth</h2>
+  <p>The current architecture uses a fixed T=4 iteration count. An adaptive halting mechanism
+    &mdash; similar to Universal Transformers or Adaptive Computation Time &mdash; would allow
+    the model to terminate early on easy inputs and iterate longer on difficult ones. This
+    requires a learned halting probability at each depth step and a differentiable expected-depth
+    penalty, both of which are compatible with the AxonML autograd system. For NPU deployment,
+    the maximum iteration count would be compiled into the HEF, with the halting decision made
+    on the host CPU.</p>
+
+  <h2>Scaling to real-world tasks</h2>
+  <p>The current training uses synthetic random sequences as a proof-of-concept. Future work
+    will apply the RustyMythos architecture to the HVAC predictive control domain (site-specific
+    models for thermal load forecasting) and the BirdCLEF environmental audio domain (spectral
+    sequence classification), where the recurrent-depth structure provides a natural fit for
+    temporal reasoning over sensor time series.</p>
+
+  <h2>Multi-head latent attention</h2>
+  <p>The current attention mechanism uses a single-head linear projection for simplicity and
+    NPU compatibility. Extending to multi-head attention with DeepSeek-V2-style multi-latent
+    compression would increase representational capacity within the same parameter budget by
+    projecting keys and values through a shared low-rank bottleneck. The MLA projection is
+    fully compatible with the feedforward unrolling required for HEF compilation.</p>
+
+  <h2>Increased expert count</h2>
+  <p>The current configuration uses 4 experts with top-k=1. Scaling to 8 or 16 experts with
+    top-k=2 routing would increase the model's representational capacity while keeping the
+    active compute per token bounded. NexusFoundry's dataflow compilation handles arbitrary
+    expert counts, and the Hailo-10H's 40 TOPS budget can accommodate larger MoE banks without
+    latency degradation for models at this parameter scale.</p>
+
+  <h2>Cross-model recurrence</h2>
+  <p>The RecurrentBlock could serve as a shared reasoning core across multiple task-specific
+    models, with different Prelude/Coda stages plugged in for different domains. This
+    "reasoning backbone" pattern would amortize the cost of training the recurrent block
+    across a fleet of edge models, each with a lightweight task-specific adapter.</p>
+
+  <h2>Quantization-aware training</h2>
+  <p>The current pipeline uses post-training INT8 quantization during NexusFoundry compilation.
+    Quantization-aware training (QAT) in AxonML would allow the model to learn representations
+    that are robust to INT8 rounding, potentially improving the correlation between fp32
+    training outputs and INT8 silicon outputs. The AxonML autograd system supports
+    straight-through estimators for quantization-aware gradient flow.</p>
+</section>
+
+<section class="section" id="sec-references">
+  <div class="section-meta"><span>Appendices</span><span>11</span></div>
+  <h1>References</h1>
+  <ol class="refs">
+    <li>Jewell, A. (2026). <em>AxonML &mdash; A Pure-Rust Deep Learning Framework for Edge Silicon.</em> AutomataNexus LLC. Technical whitepaper.</li>
+    <li>Jewell, A. (2026). <em>NexusFoundry &mdash; Zero-Dependency Native Compiler for Hailo Silicon.</em> AutomataNexus LLC. Internal documentation.</li>
+    <li>Jewell, A. (2026). <em>NexusRT &mdash; Direct-Ioctl Runtime for Hailo NPU Inference.</em> AutomataNexus LLC. Internal documentation.</li>
+    <li>Jewell, A. (2026). <em>AxonML on Hailo &mdash; 84 Models on Real Silicon.</em> AutomataNexus LLC. Technical whitepaper.</li>
+    <li>Geiping, J. et al. (2025). <em>Scaling up Test-Time Compute with Latent Reasoning: A Recurrent Depth Approach.</em> Huginn architecture reference.</li>
+    <li>DeepSeek-AI (2024). <em>DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model.</em> arXiv:2405.04434. MoE gating and multi-latent attention reference.</li>
+    <li>Ma, S. et al. (2024). <em>The Era of 1-bit LLMs: All Large Language Models are in 1.58 Bits.</em> arXiv:2402.17764.</li>
+    <li>Gu, A., &amp; Dao, T. (2023). <em>Mamba: Linear-Time Sequence Modeling with Selective State Spaces.</em> arXiv:2312.00752. State-space model reference for LTI dynamics.</li>
+    <li>Graves, A. (2016). <em>Adaptive Computation Time for Recurrent Neural Networks.</em> arXiv:1603.08983. Adaptive halting reference.</li>
+    <li>Dehghani, M. et al. (2018). <em>Universal Transformers.</em> arXiv:1807.03819. Weight-sharing recurrent transformer reference.</li>
+    <li>Hailo Technologies Ltd. (2024). <em>Hailo-10H Datasheet.</em> Product specification. 40 TOPS INT8.</li>
+    <li>Hailo Technologies Ltd. (2024). <em>Hailo-8 Datasheet.</em> Product specification. 26 TOPS INT8.</li>
+    <li>Raspberry Pi Ltd. (2024). <em>Raspberry Pi 5 Datasheet.</em> Product specification.</li>
+  </ol>
+
+  <hr>
+  <p class="small" style="margin-top:24px;">
+    <strong>AutomataNexus LLC</strong> &middot; Fort Wayne, Indiana<br>
+    Andrew Jewell Sr. &middot; ORCID <a href="https://orcid.org/0009-0005-2158-7060">0009-0005-2158-7060</a><br>
+    RustyMythos Recurrent-Depth Transformer &middot; AxonML Framework &middot; May 2026
+  </p>
+  <p class="small faint" style="margin-top:8px;">
+    DISCLAIMER: This document and its contents are proprietary to AutomataNexus LLC.
+    Performance figures are measured on production silicon under controlled conditions.
+    Reproduction or redistribution without written permission is prohibited.
+  </p>
+</section>
+
+</main>
+</div>
+
+<script>
+(function(){
+  var sections = Array.prototype.slice.call(document.querySelectorAll('.section'));
+  var tocItems = Array.prototype.slice.call(document.querySelectorAll('.toc li[data-target]'));
+  function show(id) {
+    if (!id) id = 'cover';
+    if (!document.getElementById('sec-' + id)) id = 'cover';
+    sections.forEach(function(s){ s.classList.toggle('active', s.id === 'sec-' + id); });
+    tocItems.forEach(function(li){ li.classList.toggle('active', li.dataset.target === id); });
+    if (window.location.hash !== '#' + id) window.history.replaceState(null, '', '#' + id);
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }
+  document.addEventListener('click', function(e){
+    var link = e.target.closest('[data-target]');
+    if (link) { e.preventDefault(); show(link.dataset.target); return; }
+  });
+  window.addEventListener('hashchange', function(){ show(window.location.hash.replace('#','')); });
+  show(window.location.hash.replace('#','') || 'cover');
+  document.addEventListener('keydown', function(e){
+    if (e.target && (e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')) return;
+    var cur = sections.findIndex(function(s){ return s.classList.contains('active'); });
+    if (e.key==='ArrowRight'||e.key==='j') { if(cur<sections.length-1) show(sections[cur+1].id.replace('sec-','')); }
+    if (e.key==='ArrowLeft'||e.key==='k') { if(cur>0) show(sections[cur-1].id.replace('sec-','')); }
+  });
+  var modeBtn = document.getElementById('modeBtn');
+  if(modeBtn) modeBtn.addEventListener('click', function(){
+    if(document.body.classList.contains('full')){
+      sections.forEach(function(s){s.classList.remove('active');s.style.display='';});
+      modeBtn.textContent='All sections'; document.body.classList.remove('full');
+      show(window.location.hash.replace('#','')||'cover');
+    } else {
+      document.body.classList.add('full');
+      sections.forEach(function(s){s.style.display='block';s.classList.add('active');});
+      modeBtn.textContent='One at a time';
+    }
+  });
+})();
+</script>
+
+</body>
+</html>

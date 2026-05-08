@@ -1816,6 +1816,7 @@ dependencies = [
  "axonml-core",
  "axonml-llm",
  "axonml-nn",
+ "axonml-onnx",
  "axonml-optim",
  "axonml-serialize",
  "axonml-tensor",

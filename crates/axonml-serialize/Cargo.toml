@@ -32,6 +32,8 @@ safetensors = ["dep:safetensors"]
 
 [dev-dependencies]
 tempfile = "3.0"
+axonml = { path = "../axonml" }
+serde_json = "1.0"
 
 # Controls how docs.rs builds this crate when a new version is published.
 # * default-target + targets = build only on Linux x86_64; GPU backends

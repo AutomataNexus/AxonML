@@ -35,7 +35,11 @@
 //! ORCID: 0009-0005-2158-7060
 //!
 //! # Updated
-//! April 16, 2026 11:15 PM EST
+//! April 27, 2026 — added optional `graph` field to `ModelBundle` carrying full
+//! compute-graph topology (nodes, inputs/outputs, initializers as named tensors).
+//! Backwards compatible: legacy bundles without `graph` still load via
+//! `#[serde(default)]`. The graph field is what NexusFoundry's AxonML frontend
+//! reads to compile to HEF without needing a Python rebuilder.
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -134,6 +138,156 @@ pub struct BundleHeader {
 }
 
 // =============================================================================
+// Graph payload (optional — for NexusFoundry direct-compile path)
+// =============================================================================
+
+/// A named tensor with explicit shape + dtype. Used for graph initializers
+/// (weights, biases, batchnorm params) and for declaring graph I/O shapes.
+///
+/// `dtype` is currently always `"f32"`; reserved for future quantized variants.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamedTensor {
+    /// Tensor shape (row-major / NCHW for 4D conv weights).
+    pub shape: Vec<i64>,
+    /// Element dtype as a short string (currently always `"f32"`).
+    #[serde(default = "default_dtype_f32")]
+    pub dtype: String,
+    /// Flat row-major data buffer.
+    pub data: Vec<f32>,
+}
+
+fn default_dtype_f32() -> String {
+    "f32".to_string()
+}
+
+/// A graph-level input or output declaration. Shape may contain -1 for dynamic
+/// dimensions (commonly the batch dim).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphIo {
+    /// Tensor name as referenced by graph nodes.
+    pub name: String,
+    /// Shape with `-1` denoting a dynamic (batch) dimension.
+    pub shape: Vec<i64>,
+    /// Element dtype as a short string (currently always `"f32"`).
+    #[serde(default = "default_dtype_f32")]
+    pub dtype: String,
+}
+
+/// A single compute node. `op` matches a NexusFoundry `IrOp` variant name
+/// (e.g. `"Conv2d"`, `"BatchNorm"`, `"Relu"`, `"MaxPool"`, `"GlobalAvgPool"`,
+/// `"Gemm"`). `attrs` is op-specific JSON; consumers parse based on `op`.
+///
+/// `inputs`/`outputs` are tensor names — both activations (declared in
+/// `BundleGraph::inputs` or produced by an earlier node) and initializers
+/// (declared in `BundleGraph::initializers`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphNode {
+    /// Unique node name.
+    pub name: String,
+    /// Op kind, matching a NexusFoundry `IrOp` variant name verbatim.
+    pub op: String,
+    /// Op-specific attribute bag (kernel_shape / strides / padding / etc).
+    #[serde(default)]
+    pub attrs: serde_json::Value,
+    /// Input tensor names (activations + initializers, in op-defined order).
+    pub inputs: Vec<String>,
+    /// Output tensor names (one per produced activation).
+    pub outputs: Vec<String>,
+}
+
+/// Full compute graph topology: I/O declarations + topologically-ordered
+/// compute nodes + named weight tensors.
+///
+/// This is what NexusFoundry's AxonML frontend consumes to build a populated
+/// FoundryIR. Without `graph`, the AxonML file is weights-only and the parser
+/// can only return raw tensors (which the rest of the compile pipeline drops
+/// because there are zero compute nodes).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BundleGraph {
+    /// Graph-level input declarations.
+    pub inputs: Vec<GraphIo>,
+    /// Graph-level output declarations.
+    pub outputs: Vec<GraphIo>,
+    /// Compute nodes in topological order.
+    pub nodes: Vec<GraphNode>,
+    /// Named initializer tensors (weights, biases, BN params).
+    pub initializers: HashMap<String, NamedTensor>,
+}
+
+impl BundleGraph {
+    /// Create an empty graph (no I/O, no nodes, no initializers).
+    pub fn new() -> Self {
+        Self {
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            nodes: Vec::new(),
+            initializers: HashMap::new(),
+        }
+    }
+
+    /// Add a graph-level input tensor (fp32).
+    pub fn add_input(&mut self, name: &str, shape: Vec<i64>) {
+        self.inputs.push(GraphIo {
+            name: name.into(),
+            shape,
+            dtype: "f32".into(),
+        });
+    }
+
+    /// Add a graph-level output tensor (fp32).
+    pub fn add_output(&mut self, name: &str, shape: Vec<i64>) {
+        self.outputs.push(GraphIo {
+            name: name.into(),
+            shape,
+            dtype: "f32".into(),
+        });
+    }
+
+    /// Append a compute node to the graph (caller is responsible for topological order).
+    pub fn add_node(
+        &mut self,
+        name: &str,
+        op: &str,
+        attrs: serde_json::Value,
+        inputs: Vec<&str>,
+        outputs: Vec<&str>,
+    ) {
+        self.nodes.push(GraphNode {
+            name: name.into(),
+            op: op.into(),
+            attrs,
+            inputs: inputs.into_iter().map(String::from).collect(),
+            outputs: outputs.into_iter().map(String::from).collect(),
+        });
+    }
+
+    /// Insert a named initializer (weight / bias / BN param). Asserts shape matches data length.
+    pub fn add_initializer(&mut self, name: &str, shape: Vec<i64>, data: Vec<f32>) {
+        let expected: usize = shape.iter().map(|&d| d as usize).product();
+        debug_assert_eq!(
+            expected,
+            data.len(),
+            "initializer {name}: shape product {expected} != data length {}",
+            data.len()
+        );
+        self.initializers.insert(
+            name.into(),
+            NamedTensor {
+                shape,
+                dtype: "f32".into(),
+                data,
+            },
+        );
+    }
+}
+
+impl Default for BundleGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =============================================================================
 // Bundle (full payload)
 // =============================================================================
 
@@ -163,6 +317,15 @@ pub struct ModelBundle {
     /// Anomaly/decision threshold for binary models (optional).
     #[serde(default)]
     pub anomaly_threshold: Option<f32>,
+    /// Optional full compute-graph topology + named initializer tensors.
+    ///
+    /// When present, `weights` may be empty — the canonical weight payload
+    /// lives under `graph.initializers` (named tensors with shape + data).
+    /// When absent, the bundle is in legacy "flat-weights + Python rebuilder"
+    /// mode and the architecture must be reconstructed by name from the
+    /// `architecture` tag (see `tools/model_converter/convert.py`).
+    #[serde(default)]
+    pub graph: Option<BundleGraph>,
 }
 
 impl ModelBundle {
@@ -176,6 +339,7 @@ impl ModelBundle {
             norm_means: Vec::new(),
             norm_stds: Vec::new(),
             anomaly_threshold: None,
+            graph: None,
         }
     }
 
@@ -195,6 +359,12 @@ impl ModelBundle {
     /// Attach an anomaly/decision threshold.
     pub fn with_threshold(mut self, threshold: f32) -> Self {
         self.anomaly_threshold = Some(threshold);
+        self
+    }
+
+    /// Attach a full compute graph (replacing any previously attached graph).
+    pub fn with_graph(mut self, graph: BundleGraph) -> Self {
+        self.graph = Some(graph);
         self
     }
 
@@ -420,5 +590,118 @@ mod tests {
         let final_path = save_bundle(&bundle, &no_ext).unwrap();
         assert_eq!(final_path.extension().unwrap(), "axonml");
         assert!(final_path.exists());
+    }
+
+    #[test]
+    fn round_trip_bundle_with_graph() {
+        // Conv2d -> BatchNorm -> Relu -> GlobalAvgPool -> Gemm — the same skeleton
+        // the NexusFoundry e2e_pipeline test uses for its synthetic IR.
+        let mut graph = BundleGraph::new();
+
+        graph.add_input("input", vec![-1, 3, 32, 32]);
+        graph.add_output("logits", vec![-1, 10]);
+
+        graph.add_initializer(
+            "conv.weight",
+            vec![16, 3, 3, 3],
+            (0..16 * 3 * 3 * 3).map(|i| i as f32 * 0.01).collect(),
+        );
+        graph.add_initializer("conv.bias", vec![16], vec![0.0; 16]);
+        graph.add_initializer("bn.weight", vec![16], vec![1.0; 16]);
+        graph.add_initializer("bn.bias", vec![16], vec![0.0; 16]);
+        graph.add_initializer("bn.running_mean", vec![16], vec![0.0; 16]);
+        graph.add_initializer("bn.running_var", vec![16], vec![1.0; 16]);
+        graph.add_initializer(
+            "fc.weight",
+            vec![10, 16],
+            (0..160).map(|i| i as f32 * 0.001).collect(),
+        );
+        graph.add_initializer("fc.bias", vec![10], vec![0.0; 10]);
+
+        graph.add_node(
+            "conv1",
+            "Conv2d",
+            serde_json::json!({
+                "kernel_shape": [3, 3],
+                "strides": [1, 1],
+                "padding": [1, 1, 1, 1],
+                "group": 1,
+            }),
+            vec!["input", "conv.weight", "conv.bias"],
+            vec!["conv_out"],
+        );
+        graph.add_node(
+            "bn1",
+            "BatchNorm",
+            serde_json::json!({"epsilon": 1e-5, "momentum": 0.9}),
+            vec![
+                "conv_out",
+                "bn.weight",
+                "bn.bias",
+                "bn.running_mean",
+                "bn.running_var",
+            ],
+            vec!["bn_out"],
+        );
+        graph.add_node("relu1", "Relu", serde_json::Value::Null, vec!["bn_out"], vec!["relu_out"]);
+        graph.add_node(
+            "gap1",
+            "GlobalAvgPool",
+            serde_json::Value::Null,
+            vec!["relu_out"],
+            vec!["pooled"],
+        );
+        graph.add_node(
+            "fc1",
+            "Gemm",
+            serde_json::json!({"alpha": 1.0, "beta": 1.0, "trans_a": false, "trans_b": true}),
+            vec!["pooled", "fc.weight", "fc.bias"],
+            vec!["logits"],
+        );
+
+        let bundle =
+            ModelBundle::new("conv2d", 3, Vec::new()) // weights vec empty when graph is present
+                .with_hyperparam("input_h", 32)
+                .with_hyperparam("input_w", 32)
+                .with_hyperparam("num_classes", 10)
+                .with_graph(graph);
+
+        let tmp = NamedTempFile::new().unwrap();
+        let final_path = save_bundle(&bundle, tmp.path()).unwrap();
+
+        let (header, loaded) = load_bundle(&final_path).unwrap();
+        assert_eq!(header.architecture, "conv2d");
+        assert!(loaded.graph.is_some(), "graph should round-trip");
+
+        let g = loaded.graph.as_ref().unwrap();
+        assert_eq!(g.inputs.len(), 1);
+        assert_eq!(g.outputs.len(), 1);
+        assert_eq!(g.nodes.len(), 5);
+        assert_eq!(g.initializers.len(), 8);
+
+        // Spot-check ops appear in the right order
+        assert_eq!(g.nodes[0].op, "Conv2d");
+        assert_eq!(g.nodes[1].op, "BatchNorm");
+        assert_eq!(g.nodes[2].op, "Relu");
+        assert_eq!(g.nodes[3].op, "GlobalAvgPool");
+        assert_eq!(g.nodes[4].op, "Gemm");
+
+        // Initializer data round-trips exactly
+        let conv_w = g.initializers.get("conv.weight").unwrap();
+        assert_eq!(conv_w.shape, vec![16, 3, 3, 3]);
+        assert_eq!(conv_w.data.len(), 16 * 3 * 3 * 3);
+        assert!((conv_w.data[5] - 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn legacy_bundle_without_graph_loads_with_graph_none() {
+        // A pre-2026-04-27 bundle (no graph field). Must still load.
+        let bundle = ModelBundle::new("sentinel", 11, vec![1.0, 2.0, 3.0]);
+        let tmp = NamedTempFile::new().unwrap();
+        save_bundle(&bundle, tmp.path()).unwrap();
+
+        let (_, loaded) = load_bundle(tmp.path().with_extension("axonml")).unwrap();
+        assert!(loaded.graph.is_none());
+        assert_eq!(loaded.weights, vec![1.0, 2.0, 3.0]);
     }
 }
