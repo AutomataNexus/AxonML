@@ -112,3 +112,35 @@ papers/
 
 # Media artifacts (YouTube scripts, narration mp3s, etc.) — not project code
 media/
+
+# Claude Code session state
+.claude/
+
+# Hailo SDK logs
+hailo_sdk.*.log
+
+# NexusFoundry / Hailo compilation artifacts
+prometheus_sae_dfc_*.json
+prometheus_sae_hailo*_manifest.json
+prometheus_sae_hailo*_quant_report.json
+prometheus_sae_hailo*_schedule.json
+estimation.csv
+
+# LLM training (tracked separately, notebooks are local/Colab tooling)
+llm-training/
+
+# Nexus Agent (separate project)
+nexus-agent/
+
+# Lock/unlock scripts (machine-local)
+unlock-crates.sh
+lock-crates.sh
+
+# RustyMythos build artifacts
+axonml-models/rusty-mythos/scaled_models/
+axonml-models/rusty-mythos/profiler_reports/
+axonml-models/rusty-mythos/*.axonml
+
+# Wider Face dataset archive
+wider_face_split.zip
+to_be_verified/

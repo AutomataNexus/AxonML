@@ -1,15 +1,20 @@
 //! Axonml HVAC — Domain-Specific HVAC Diagnostic Models
 //!
-//! Top-level crate module aggregating nine named neural-network models for
-//! HVAC fault detection and diagnostic reasoning on top of the AxonML deep
-//! learning framework. `apollo` hosts the primary fault classifier, `aquilo`
-//! the airflow anomaly detector, `boreas` the cold-side cooling specialist,
-//! `colossus` a large transformer diagnostician, `gaia` an environmental
-//! context encoder, `naiad` the water-side hydronic specialist, `panoptes`
-//! the observability / multi-signal fusion model, `vulcan` the heat-side
-//! specialist, and `zephyrus` the temporal predictor / autoencoder.
-//! Supporting modules are `data` (the `HvacSensorData`, `HvacLabels`,
-//! `PipelineOutput`, and `SyntheticHvacGenerator` types), `panoptes_datagen`
+//! Top-level crate module aggregating fourteen named neural-network models for
+//! HVAC fault detection, diagnostic reasoning, and site-specific control on
+//! top of the AxonML deep learning framework. `apollo` hosts the primary fault
+//! classifier, `aquilo` the airflow anomaly detector, `boreas` the cold-side
+//! cooling specialist, `colossus` a large transformer diagnostician, `gaia` an
+//! environmental context encoder, `naiad` the water-side hydronic specialist,
+//! `panoptes` the observability / multi-signal fusion model, `vulcan` the
+//! heat-side specialist, and `zephyrus` the temporal predictor / autoencoder.
+//! Site-specific controllers include `taylor_greenhouse` (Taylor University
+//! greenhouse), `taylor_natorium` (Taylor University indoor pool),
+//! `taylor_chiller` (Taylor University chiller plant),
+//! `peabody_cooling_towers` (Peabody Retirement Community cooling towers), and
+//! `peabody_boilers` (Peabody Retirement Community boiler plant). Supporting
+//! modules are `data` (the `HvacSensorData`, `HvacLabels`, `PipelineOutput`,
+//! and `SyntheticHvacGenerator` types), `panoptes_datagen`
 //! (`PanoptesTrainingData` + the `WarrenSimulator` HVAC scenario engine), and
 //! `pipeline` which wires the models into the end-to-end `HvacPipeline`. The
 //! crate re-exports each model struct alongside these helpers as the public
@@ -63,7 +68,12 @@ pub mod gaia;
 pub mod naiad;
 pub mod panoptes;
 pub mod panoptes_datagen;
+pub mod peabody_boilers;
+pub mod peabody_cooling_towers;
 pub mod pipeline;
+pub mod taylor_chiller;
+pub mod taylor_greenhouse;
+pub mod taylor_natorium;
 pub mod vulcan;
 pub mod zephyrus;
 
@@ -80,6 +90,11 @@ pub use gaia::Gaia;
 pub use naiad::Naiad;
 pub use panoptes::Panoptes;
 pub use panoptes_datagen::{PanoptesTrainingData, WarrenSimulator};
+pub use peabody_boilers::PeabodyBoilers;
+pub use peabody_cooling_towers::PeabodyCoolingTowers;
 pub use pipeline::HvacPipeline;
+pub use taylor_chiller::TaylorChiller;
+pub use taylor_greenhouse::TaylorGreenhouse;
+pub use taylor_natorium::TaylorNatorium;
 pub use vulcan::Vulcan;
 pub use zephyrus::Zephyrus;

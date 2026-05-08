@@ -42,3 +42,29 @@ pub mod gguf;
 pub mod inference;
 pub mod registry;
 pub mod weight;
+
+/// Raw FFI declarations matching `hailo_genai_shim.cpp`. Not used directly —
+/// consumed by [`hailo10h::Hailo10hEngine`].
+#[cfg(feature = "hailo_genai")]
+pub mod hailo_ffi;
+
+/// Hailo-10H NPU LLM backend — replaces hailo-ollama (Python) with pure Rust.
+/// Uses HailoRT's GenAI C++ API via the C++ shim. Requires hailo_genai feature
+/// AND the GenAI C++ shim compiled and linked.
+#[cfg(feature = "hailo_genai")]
+pub mod hailo10h;
+
+/// Raw FFI for standard HailoRT inference (non-GenAI) — custom HEFs.
+#[cfg(feature = "hailo10h")]
+pub mod hailo_infer_ffi;
+
+/// Standard HailoRT inference for custom AxonML/NexusFoundry HEFs.
+/// Uses VDevice → InferModel → Bindings (not the GenAI LLM API).
+#[cfg(feature = "hailo10h")]
+pub mod hailo_custom;
+
+/// NexusRT direct-ioctl inference backend — zero libhailort dependency.
+/// Loads any HEF and runs inference on Hailo-8 or Hailo-10H via direct ioctl.
+/// This is the production path: AxonML → NexusFoundry → NexusRT → silicon.
+#[cfg(feature = "nexusrt")]
+pub mod nexusrt_engine;

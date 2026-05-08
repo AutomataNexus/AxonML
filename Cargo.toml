@@ -37,6 +37,7 @@ members = [
     "crates/axonml-hvac",
     "crates/axonml-train",
     "crates/axonml",
+    "axonml-models/rusty-mythos",
 ]
 
 [workspace.package]

@@ -63,6 +63,16 @@ pub struct AppState {
     pub engines: tokio::sync::RwLock<std::collections::HashMap<String, Arc<InferenceEngine>>>,
     /// Active tokenizers keyed by model ID.
     pub tokenizers: tokio::sync::RwLock<std::collections::HashMap<String, Arc<Tokenizer>>>,
+    /// Hailo-10H NPU engine (when `--hailo <hef>` is used). Replaces hailo-ollama.
+    /// Only one LLM can be loaded on the NPU at a time.
+    #[cfg(feature = "hailo_genai")]
+    pub hailo_engine: Option<Arc<crate::model::hailo10h::Hailo10hEngine>>,
+    /// Hailo-10H custom HEF engine (when `--hailo-custom <hef>` is used).
+    /// For AxonML/NexusFoundry-compiled models using standard HailoRT inference.
+    #[cfg(feature = "hailo10h")]
+    pub hailo_custom_engine: Option<Arc<crate::model::hailo_custom::HailoCustomEngine>>,
+    #[cfg(feature = "nexusrt")]
+    pub nexusrt_engine: Option<Arc<crate::model::nexusrt_engine::NexusRtEngine>>,
 }
 
 // =============================================================================
@@ -124,6 +134,67 @@ pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, (StatusCode, Json<ApiError>)> {
+    // Hailo-10H NPU fast path: if a Hailo engine is loaded, route through it
+    // instead of the CPU/CUDA GGUF path. The NPU handles tokenization, KV-cache,
+    // and sampling entirely on-device.
+    #[cfg(feature = "hailo_genai")]
+    if let Some(ref hailo) = state.hailo_engine {
+        // Try structured write_chat first; the HEF's embedded template handles formatting.
+        // If the model has no template or write_chat produces bad output, falls back to
+        // generate_raw with manual LLaMA-3 template.
+        let messages: Vec<String> = req.messages.iter().map(|m| {
+            serde_json::json!({"role": m.role, "content": m.content}).to_string()
+        }).collect();
+        let temperature = req.temperature;
+        let max_tokens = req.max_tokens as u32;
+        let top_p = req.top_p.unwrap_or(0.9);
+        let hailo = hailo.clone();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+
+        if req.stream {
+            let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
+            let model_name = req.model.clone().unwrap_or_else(|| "hailo".to_string());
+            tokio::task::spawn_blocking(move || {
+                let _ = hailo.generate_chat(&messages, &[], temperature, top_p, 40, max_tokens, |text| {
+                    // Filter leaked stop tokens from streaming chunks
+                    let text = text.replace("<|eot_id|>", "").replace("<|end_of_text|>", "").replace("<|im_end|>", "");
+                    if text.is_empty() { return; }
+                    let chunk = serde_json::json!({
+                        "id": format!("chatcmpl-hailo-{now}"),
+                        "object": "chat.completion.chunk",
+                        "created": now,
+                        "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": serde_json::Value::Null}]
+                    });
+                    let _ = tx.blocking_send(format!("data: {}\n\n", chunk));
+                });
+                let _ = tx.blocking_send("data: [DONE]\n\n".to_string());
+            });
+            let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+            let body = axum::body::Body::from_stream(stream.map(Ok::<_, std::convert::Infallible>));
+            return Ok(axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .header("cache-control", "no-cache")
+                .body(body)
+                .unwrap());
+        } else {
+            let hailo_c = hailo.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                hailo_c.generate_chat(&messages, &[], temperature, top_p, 40, max_tokens, |_| {})
+            }).await.unwrap();
+            let text = result.map_err(|e| api_error(500, &format!("Hailo generate failed: {e}")))?;
+            return Ok(Json(serde_json::json!({
+                "id": format!("chatcmpl-hailo-{now}"),
+                "object": "chat.completion",
+                "created": now,
+                "model": req.model.unwrap_or_else(|| "hailo".to_string()),
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            })).into_response());
+        }
+    }
+
     // Resolve the requested model or alias (e.g., "sage" → "Qwen2.5 Coder 1.5B Instruct"),
     // or fall back to the default model if none specified.
     let requested = match req.model.as_deref() {
@@ -488,4 +559,37 @@ fn api_error(code: u16, message: &str) -> (StatusCode, Json<ApiError>) {
             },
         }),
     )
+}
+
+// =============================================================================
+// POST /v1/hailo/infer — Raw tensor inference on custom Hailo HEF
+// =============================================================================
+
+#[cfg(feature = "hailo10h")]
+pub async fn hailo_infer(
+    State(state): State<Arc<AppState>>,
+    body: axum::body::Bytes,
+) -> Result<Response, (StatusCode, Json<ApiError>)> {
+    let engine = state.hailo_custom_engine.as_ref().ok_or_else(|| {
+        api_error(503, "No custom Hailo HEF loaded. Use --hailo-custom <hef>")
+    })?;
+
+    let input_data = body.to_vec();
+    let out_size = engine.output_frame_size();
+    let mut output_data = vec![0u8; if out_size > 0 { out_size } else { input_data.len() }];
+
+    let engine = engine.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        engine.infer(&input_data, &mut output_data)?;
+        Ok::<Vec<u8>, anyhow::Error>(output_data)
+    })
+    .await
+    .map_err(|e| api_error(500, &format!("Task join error: {e}")))?
+    .map_err(|e| api_error(500, &format!("Inference error: {e}")))?;
+
+    Ok(Response::builder()
+        .status(200)
+        .header("content-type", "application/octet-stream")
+        .body(axum::body::Body::from(result))
+        .unwrap())
 }

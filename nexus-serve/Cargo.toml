@@ -27,6 +27,9 @@ futures = "0.3"
 # Parallel dequantization
 rayon = "1.10"
 
+# mlock support
+libc = "0.2"
+
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -53,6 +56,19 @@ cuda = [
     "axonml-nn/cuda",
     "dep:cudarc",
 ]
+# Hailo-10H NPU backend (Pi-1 testbench / GenAI on-edge target).
+# Gated to keep host-side builds free of HailoRT (it's only available on the
+# deployed Pi anyway). Enable on the Pi: `cargo build --release --features hailo10h`.
+hailo10h = ["dep:parking_lot"]
+nexusrt = ["dep:nexus-rt"]
+
+[dependencies.parking_lot]
+version = "0.12"
+optional = true
+
+[dependencies.nexus-rt]
+path = "/opt/NexusRT"
+optional = true
 
 [dependencies.cudarc]
 version = "0.19"

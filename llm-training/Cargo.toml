@@ -18,6 +18,7 @@ axonml-optim     = { path = "../crates/axonml-optim" }
 axonml-llm       = { path = "../crates/axonml-llm" }
 axonml-serialize = { path = "../crates/axonml-serialize" }
 axonml           = { path = "../crates/axonml" }
+axonml-onnx      = { path = "../crates/axonml-onnx" }
 
 rand = "0.8"
 signal-hook = "0.3"
@@ -124,3 +125,7 @@ path = "src/bin/eval_rdt.rs"
 [[bin]]
 name = "train_rdt_distill"
 path = "src/bin/train_rdt_distill.rs"
+
+[[bin]]
+name = "export_llm_onnx"
+path = "src/bin/export_llm_onnx.rs"

@@ -104,6 +104,23 @@ struct Config {
     /// Enable TurboQuant Q8 KV cache: store KV as int8 with per-(token,head)
     /// f32 scales. ~3.9× compression, correctness-equivalent at decode.
     kv_quant_q8: bool,
+    /// TurboQuant key bits (0=disabled, 3=Q3, 4=Q4). Random rotation + aggressive quant.
+    kv_turbo_keys: u8,
+    /// TurboQuant value bits (0=disabled, 3=Q3).
+    kv_turbo_values: u8,
+    /// Lock model weights in RAM (mlock). Prevents the kernel from paging
+    /// expert weights to disk during long-running inference sessions.
+    mlock: bool,
+    /// Preload entire GGUF into RAM instead of mmap. Eliminates page faults
+    /// during inference at the cost of higher startup time and RSS.
+    no_mmap: bool,
+    /// Number of transformer layers to place on GPU. Remaining layers stay on CPU.
+    /// `None` = all layers on GPU (if CUDA available) or all on CPU.
+    n_gpu_layers: Option<usize>,
+    /// For MoE models: number of layers whose experts are pinned to CPU while
+    /// attention stays on GPU. Reduces VRAM usage at the cost of PCIe transfers.
+    /// `None` = all experts follow their layer's device.
+    n_cpu_moe: Option<usize>,
     /// Number of CPU threads for matmul/dequant. `None` = rayon default (all cores).
     threads: Option<usize>,
     /// Explicit config file path from --config. If `None`, falls back to
@@ -113,6 +130,14 @@ struct Config {
     hw_cores: Option<usize>,
     hw_cpu: Option<String>,
     hw_ram_gb: Option<usize>,
+    /// Hailo-10H HEF path. When set, nexus-serve uses the Hailo NPU backend
+    /// instead of CPU/CUDA GGUF inference. Requires `--features hailo10h`.
+    #[cfg(feature = "hailo_genai")]
+    hailo_hef: Option<PathBuf>,
+    #[cfg(feature = "hailo10h")]
+    hailo_custom_hef: Option<PathBuf>,
+    #[cfg(feature = "nexusrt")]
+    nexusrt_hef: Option<PathBuf>,
     /// Per-key source tracking so startup can echo where each value came from.
     src_port: Source,
     src_host: Source,
@@ -130,11 +155,23 @@ impl Config {
             host: "0.0.0.0".to_string(),
             quantized_weights: false,
             kv_quant_q8: false,
+            kv_turbo_keys: 0,
+            kv_turbo_values: 0,
+            mlock: false,
+            no_mmap: false,
+            n_gpu_layers: None,
+            n_cpu_moe: None,
             threads: None,
             config_path: None,
             hw_cores: None,
             hw_cpu: None,
             hw_ram_gb: None,
+            #[cfg(feature = "hailo_genai")]
+            hailo_hef: None,
+            #[cfg(feature = "hailo10h")]
+            hailo_custom_hef: None,
+            #[cfg(feature = "nexusrt")]
+            nexusrt_hef: None,
             src_port: Source::Default,
             src_host: Source::Default,
             src_threads: Source::Default,
@@ -197,10 +234,20 @@ impl Config {
                     i += 1;
                     match args[i].as_str() {
                         "q8" => cfg.kv_quant_q8 = true,
+                        "turbo" | "turbo4" => {
+                            cfg.kv_quant_q8 = false;
+                            cfg.kv_turbo_keys = 4;
+                            cfg.kv_turbo_values = 3;
+                        }
+                        "turbo3" => {
+                            cfg.kv_quant_q8 = false;
+                            cfg.kv_turbo_keys = 3;
+                            cfg.kv_turbo_values = 3;
+                        }
                         "none" | "f32" => cfg.kv_quant_q8 = false,
                         other => {
                             eprintln!(
-                                "Unknown --kv-quant value: {other} (expected q8 or none)"
+                                "Unknown --kv-quant value: {other} (expected q8, turbo, turbo3, or none)"
                             );
                             std::process::exit(1);
                         }
@@ -210,6 +257,35 @@ impl Config {
                     i += 1;
                     cfg.threads = Some(args[i].parse().expect("Invalid --threads"));
                     cfg.src_threads = Source::Cli;
+                }
+                "--mlock" => {
+                    cfg.mlock = true;
+                }
+                "--no-mmap" => {
+                    cfg.no_mmap = true;
+                }
+                "--n-gpu-layers" | "-ngl" => {
+                    i += 1;
+                    cfg.n_gpu_layers = Some(args[i].parse().expect("Invalid --n-gpu-layers"));
+                }
+                "--n-cpu-moe" => {
+                    i += 1;
+                    cfg.n_cpu_moe = Some(args[i].parse().expect("Invalid --n-cpu-moe"));
+                }
+                #[cfg(feature = "hailo_genai")]
+                "--hailo" => {
+                    i += 1;
+                    cfg.hailo_hef = Some(PathBuf::from(&args[i]));
+                }
+                #[cfg(feature = "hailo10h")]
+                "--hailo-custom" => {
+                    i += 1;
+                    cfg.hailo_custom_hef = Some(PathBuf::from(&args[i]));
+                }
+                #[cfg(feature = "nexusrt")]
+                "--nexusrt" => {
+                    i += 1;
+                    cfg.nexusrt_hef = Some(PathBuf::from(&args[i]));
                 }
                 "--help" | "-h" => {
                     print_help();
@@ -507,6 +583,79 @@ async fn main() {
     // Registry + Engine Maps
     // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // Hailo-10H NPU backend (when --hailo <hef> is passed)
+    // -------------------------------------------------------------------------
+
+    #[cfg(feature = "hailo_genai")]
+    let hailo_engine: Option<Arc<nexus_serve::model::hailo10h::Hailo10hEngine>> = {
+        if let Some(ref hef_path) = cfg.hailo_hef {
+            println!("Loading Hailo-10H LLM from: {}", hef_path.display());
+            match nexus_serve::model::hailo10h::Hailo10hEngine::load(hef_path) {
+                Ok(engine) => {
+                    println!("  ✓ Hailo-10H engine loaded (max context: {} tokens)", engine.max_context());
+                    if let Some(tmpl) = engine.prompt_template() {
+                        println!("  prompt template: {}", &tmpl[..tmpl.len().min(80)]);
+                    }
+                    Some(Arc::new(engine))
+                }
+                Err(e) => {
+                    eprintln!("  ✗ Failed to load Hailo-10H engine: {e}");
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            None
+        }
+    };
+
+    // -------------------------------------------------------------------------
+    // Hailo-10H custom HEF backend (when --hailo-custom <hef> is passed)
+    // -------------------------------------------------------------------------
+
+    #[cfg(feature = "hailo10h")]
+    let hailo_custom_engine: Option<Arc<nexus_serve::model::hailo_custom::HailoCustomEngine>> = {
+        if let Some(ref hef_path) = cfg.hailo_custom_hef {
+            println!("Loading Hailo custom HEF from: {}", hef_path.display());
+            match nexus_serve::model::hailo_custom::HailoCustomEngine::load(hef_path) {
+                Ok(engine) => {
+                    println!("  ✓ Hailo custom engine loaded: {}", engine.hef_path());
+                    Some(Arc::new(engine))
+                }
+                Err(e) => {
+                    eprintln!("  ✗ Failed to load Hailo custom engine: {e}");
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            None
+        }
+    };
+
+    // -------------------------------------------------------------------------
+    // NexusRT direct-ioctl backend (when --nexusrt <hef> is passed)
+    // -------------------------------------------------------------------------
+
+    #[cfg(feature = "nexusrt")]
+    let nexusrt_engine: Option<Arc<nexus_serve::model::nexusrt_engine::NexusRtEngine>> = {
+        if let Some(ref hef_path) = cfg.nexusrt_hef {
+            println!("Loading HEF via NexusRT (zero libhailort): {}", hef_path.display());
+            match nexus_serve::model::nexusrt_engine::NexusRtEngine::load(hef_path) {
+                Ok(engine) => {
+                    let arch = if engine.is_h10() { "Hailo-10H" } else { "Hailo-8" };
+                    println!("  NexusRT engine ready: {} on {}", engine.hef_path(), arch);
+                    Some(Arc::new(engine))
+                }
+                Err(e) => {
+                    eprintln!("  Failed to load NexusRT engine: {e}");
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            None
+        }
+    };
+
     let registry = ModelRegistry::new();
     let mut engines: std::collections::HashMap<String, Arc<InferenceEngine>> = std::collections::HashMap::new();
     let mut tokenizer_map: std::collections::HashMap<String, Arc<Tokenizer>> = std::collections::HashMap::new();
@@ -592,7 +741,7 @@ async fn main() {
                     println!("  Registered as: {}", model_name);
 
                     // Load inference engine (dequantize weights → f32, or keep quantized)
-                    match MappedGguf::open(path, &gguf) {
+                    match MappedGguf::open_with_opts(path, &gguf, cfg.no_mmap, cfg.mlock) {
                         Ok(mapped) => {
                             match InferenceEngine::from_gguf_with_mode(&gguf, &mapped, cfg.quantized_weights) {
                                 #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
@@ -713,14 +862,27 @@ async fn main() {
         registry,
         engines: tokio::sync::RwLock::new(engines),
         tokenizers: tokio::sync::RwLock::new(tokenizer_map),
+        #[cfg(feature = "hailo_genai")]
+        hailo_engine,
+        #[cfg(feature = "hailo10h")]
+        hailo_custom_engine,
+        #[cfg(feature = "nexusrt")]
+        nexusrt_engine,
     });
 
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/health", get(routes::health))
         .route("/v1/models", get(routes::list_models))
         .route("/v1/chat/completions", post(routes::chat_completions))
         .route("/v1/completions", post(routes::completions))
-        .route("/v1/messages", post(nexus_serve::api::messages::messages))
+        .route("/v1/messages", post(nexus_serve::api::messages::messages));
+
+    #[cfg(feature = "hailo10h")]
+    {
+        app = app.route("/v1/hailo/infer", post(routes::hailo_infer));
+    }
+
+    let app = app
         .layer(CorsLayer::permissive())
         .with_state(state);
 
