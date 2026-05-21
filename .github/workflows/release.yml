@@ -1,16 +1,32 @@
 name: Release
 
-# Triggered by pushing a semver tag like `v0.6.2` or via manual dispatch.
-# Pre-release tags (e.g. `v0.7.0-rc1`) also run the workflow; the crates.io
-# publish job skips pre-releases — only the GitHub release + SLSA artifacts
-# are produced for them.
+# SLSA Build Level 3 release pipeline.
+#
+# L3 requirements satisfied:
+#   1. All actions pinned by full SHA — tags can be moved, SHAs cannot
+#   2. persist-credentials: false on every checkout — no token leakage
+#   3. Minimal per-job permissions (principle of least privilege)
+#   4. Builds on GitHub-hosted ephemeral runners (isolated, non-reusable)
+#   5. Provenance via slsa-github-generator reusable workflow (OIDC-signed,
+#      non-falsifiable, generated outside caller-controlled code)
+#   6. GitHub native attestation via actions/attest-build-provenance
+#   7. No third-party release actions — uses gh CLI directly
+#   8. Source tarball via git archive (deterministic, no build artifacts)
 #
 # Deliverables:
 #   * Cross-platform axonml-cli + axonml-server binaries
 #     (linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64, windows-x86_64)
 #   * SHA256 checksum per archive
-#   * SLSA v1.0 provenance (intoto attestation) covering every artifact
-#   * GitHub release with auto-generated notes + all of the above attached
+#   * SLSA v1.0 provenance (.intoto.jsonl) — verifiable with slsa-verifier
+#   * GitHub artifact attestation — verifiable with gh attestation verify
+#   * Source tarball (git archive, reproducible)
+#
+# Verification:
+#   slsa-verifier verify-artifact <artifact> \
+#     --provenance-path <intoto.jsonl> \
+#     --source-uri github.com/AutomataNexus/AxonML
+#
+#   gh attestation verify <artifact> -o AutomataNexus
 
 on:
   push:
@@ -22,7 +38,7 @@ on:
         description: 'Version tag (must already exist, e.g. v0.6.2)'
         required: true
 
-permissions: read-all
+permissions: {}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -55,12 +71,13 @@ jobs:
             target: x86_64-pc-windows-msvc
             name: windows-x86_64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
 
       - name: Setup Rust toolchain (pinned via rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master 2025-05-21
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
@@ -70,7 +87,7 @@ jobs:
         run: cargo install cross --locked
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -106,8 +123,6 @@ jobs:
           mkdir -p "$OUT"
 
           if [ "$NAME" = "windows-x86_64" ]; then
-            CLI_BIN="target/${{ matrix.target }}/release/axonml.exe"
-            SERVER_BIN="target/${{ matrix.target }}/release/axonml-server.exe"
             CLI_ARCHIVE="axonml-cli-${VERSION}-${NAME}.zip"
             SERVER_ARCHIVE="axonml-server-${VERSION}-${NAME}.zip"
             (cd target/${{ matrix.target }}/release && 7z a -tzip "../../../$OUT/$CLI_ARCHIVE" axonml.exe)
@@ -119,14 +134,13 @@ jobs:
             tar -C "target/${{ matrix.target }}/release" -czf "$OUT/$SERVER_ARCHIVE" axonml-server
           fi
 
-          # Per-archive sha256 (for transparency outside SLSA)
           (cd "$OUT" && for f in *.tar.gz *.zip; do
             [ -e "$f" ] || continue
             sha256sum "$f" > "$f.sha256" 2>/dev/null || shasum -a 256 "$f" > "$f.sha256"
           done)
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: binaries-${{ matrix.name }}
           path: dist/*
@@ -134,9 +148,9 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # Collect everything into a single artifact and compute the base64 manifest
-  # that the SLSA generator signs. This MUST be one job with all archives in
-  # one directory so the provenance covers the full release at once.
+  # Collect all platform artifacts into one directory, compute the base64-
+  # encoded SHA256 manifest that the SLSA generator signs. Single job ensures
+  # provenance covers the entire release atomically.
   # ---------------------------------------------------------------------------
   collect:
     name: Collect hashes
@@ -147,7 +161,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: binaries-*
           merge-multiple: true
@@ -156,21 +170,31 @@ jobs:
       - name: Compute hash manifest
         id: hash
         run: |
+          set -euo pipefail
           cd dist
+          # Only hash the archives, not the .sha256 sidecar files
           HASHES=$(sha256sum *.tar.gz *.zip 2>/dev/null | base64 -w0)
           echo "hashes=$HASHES" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist
           path: dist/*
           retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # SLSA v1.0 provenance. slsa-framework/slsa-github-generator does the signing
-  # inside a GitHub-provided OIDC identity, so this workflow never sees a key.
-  # `upload-assets: true` attaches the `.intoto.jsonl` to the GitHub Release
-  # created by the final step.
+  # SLSA v1.0 Build L3 provenance.
+  #
+  # The slsa-github-generator reusable workflow runs in its own isolated
+  # GitHub-managed environment. It:
+  #   1. Receives only the hash manifest (base64-subjects) from the caller
+  #   2. Generates provenance using GitHub's OIDC identity (no keys)
+  #   3. Signs via Sigstore Fulcio + Rekor (transparency log)
+  #   4. Uploads .intoto.jsonl to the GitHub Release
+  #
+  # This is L3 because the provenance generator is a reusable workflow
+  # (runs in an isolated job, not inline steps the caller can tamper with)
+  # on GitHub-hosted ephemeral runners.
   # ---------------------------------------------------------------------------
   provenance:
     name: SLSA provenance
@@ -179,35 +203,61 @@ jobs:
       actions: read
       id-token: write
       contents: write
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a # v2.1.0
     with:
       base64-subjects: ${{ needs.collect.outputs.hashes }}
       upload-assets: true
 
   # ---------------------------------------------------------------------------
-  # Source tarball (clean `git archive`, no build artifacts) + final GitHub
-  # release assembly. Runs after provenance so the release already has the
-  # SLSA attestation attached when this step uploads the binaries + source.
+  # GitHub native artifact attestation (supplements SLSA provenance).
+  # Creates Sigstore-backed attestations verifiable via `gh attestation verify`.
+  # Each binary archive gets its own attestation.
+  # ---------------------------------------------------------------------------
+  attest:
+    name: Artifact attestation
+    needs: collect
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+
+      - name: Attest build provenance for each archive
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: 'dist/*.tar.gz,dist/*.zip'
+
+  # ---------------------------------------------------------------------------
+  # Source tarball + GitHub Release assembly. Runs after provenance + attest
+  # so the release already has SLSA attestation when binaries are uploaded.
+  # Uses gh CLI directly — no third-party release actions in the supply chain.
   # ---------------------------------------------------------------------------
   release:
     name: GitHub Release
-    needs: [collect, provenance]
+    needs: [collect, provenance, attest]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dist
           path: dist
 
       - name: Build source tarball
         run: |
+          set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
           SRC="axonml-${VERSION}-source"
@@ -215,11 +265,30 @@ jobs:
           (cd dist && sha256sum "${SRC}.tar.gz" > "${SRC}.tar.gz.sha256")
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: AxonML ${{ github.event.inputs.tag || github.ref_name }}
-          generate_release_notes: true
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') || contains(github.event.inputs.tag, '-') }}
-          files: dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          PRERELEASE=""
+          case "$TAG" in *-*) PRERELEASE="--prerelease" ;; esac
+
+          gh release create "$TAG" \
+            --title "AxonML $TAG" \
+            --generate-notes \
+            $PRERELEASE \
+            dist/*
+
+          echo "## Verification" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### SLSA provenance (Level 3)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo "slsa-verifier verify-artifact <artifact> \\" >> "$GITHUB_STEP_SUMMARY"
+          echo "  --provenance-path <intoto.jsonl> \\" >> "$GITHUB_STEP_SUMMARY"
+          echo "  --source-uri github.com/AutomataNexus/AxonML" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### GitHub attestation" >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo "gh attestation verify <artifact> -o AutomataNexus" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

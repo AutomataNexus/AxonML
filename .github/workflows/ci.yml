@@ -11,56 +11,42 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # NOTE: we are NOT enabling `-D warnings` in RUSTDOCFLAGS yet. axonml-vision
-  # has ~52 legitimate "unresolved link" warnings from tensor-shape notation in
-  # doc comments (`[B, 1, H, W]` etc.) that rustdoc tries to resolve as
-  # intra-doc links. Cleaning those up is a separate chore; in the meantime,
-  # `cargo doc` without `-D warnings` still catches real breakage (missing
-  # crates, renamed types, malformed markdown) without failing on style.
 
 jobs:
-  # Rust toolchain used by every job is pinned via rust-toolchain.toml at the
-  # workspace root. `dtolnay/rust-toolchain@stable` honors that file — CI and
-  # local devs always resolve to the same version.
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
       - name: Check
         run: cargo check --workspace
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-
-      # `cargo-nextest` is the de-facto Rust test runner (used by tokio,
-      # rust-lang, ripgrep, etc.). vs `cargo test`:
-      #   * --retries 2 — flaky tests (e.g. convergence tests using unseeded
-      #     thread_rng() for weight init) pass if they succeed on any of the
-      #     three attempts. A test fails CI only if it fails 3× in a row,
-      #     correctly separating flakes from real regressions.
-      #   * Parallelizes across tests, not within, which is faster on CI.
-      #   * JUnit-compatible output.
-      #
-      # NOTE: the real fix for the convergence flake is seeded RNG in
-      # `axonml_nn::init` (thread_rng → ChaCha8 seeded from test-scoped env).
-      # That's a legit follow-up that touches 20+ call sites in axonml-nn and
-      # axonml-tensor; nextest retries unblock CI while we plan that refactor.
-      - uses: taiki-e/install-action@nextest
-
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 # v2.79.3
+        with:
+          tool: nextest
       - name: Run tests
         run: cargo nextest run --workspace --retries 2 -E 'not test(coco_bench)'
         timeout-minutes: 25
@@ -68,10 +54,13 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
+          persist-credentials: false
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
           components: rustfmt
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -79,13 +68,16 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
+          persist-credentials: false
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
           components: clippy
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -95,22 +87,23 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
 
-  # Catches broken intra-doc links, missing doc summaries, and any rustdoc
-  # warning that would otherwise only surface on docs.rs after publishing.
-  # Runs before publish.yml so we don't ship a release with broken rustdoc.
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
-      - name: Build docs (rustdoc warnings = errors)
+      - name: Build docs
         run: cargo doc --workspace --no-deps --document-private-items
