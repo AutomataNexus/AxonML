@@ -126,13 +126,14 @@ jobs:
       CARGO_REGISTRIES_CRATES_IO_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ needs.guard.outputs.tag }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Setup Rust (pinned via rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
 
