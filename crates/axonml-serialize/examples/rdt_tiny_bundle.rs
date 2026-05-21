@@ -75,10 +75,14 @@ const K_ITERS: usize = 4;
 
 fn init_kaiming(n: usize, fan_in: usize, seed: u64) -> Vec<f32> {
     let k = (2.0 / fan_in as f64).sqrt() as f32;
-    let mut state = seed.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+    let mut state = seed
+        .wrapping_mul(2862933555777941757)
+        .wrapping_add(3037000493);
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let bits = (state >> 32) as u32;
         let f = (bits as f32) / (u32::MAX as f32) * 2.0 - 1.0;
         out.push(f * k);
@@ -92,13 +96,7 @@ fn init_kaiming(n: usize, fan_in: usize, seed: u64) -> Vec<f32> {
 
 /// Add BatchNorm parameters and node.
 /// Returns the output tensor name.
-fn add_batchnorm(
-    g: &mut BundleGraph,
-    name: &str,
-    channels: i64,
-    in_act: &str,
-    out_act: &str,
-) {
+fn add_batchnorm(g: &mut BundleGraph, name: &str, channels: i64, in_act: &str, out_act: &str) {
     let bn_w = format!("{name}.weight");
     let bn_b = format!("{name}.bias");
     let bn_m = format!("{name}.running_mean");
@@ -195,8 +193,12 @@ fn add_decoder_layer(
     add_conv2d(
         g,
         &format!("{prefix}.attn_spatial"),
-        h, h, 3, 1,
-        &bn1_out, &spatial_out,
+        h,
+        h,
+        3,
+        1,
+        &bn1_out,
+        &spatial_out,
         seed,
     );
 
@@ -215,8 +217,12 @@ fn add_decoder_layer(
     add_conv2d(
         g,
         &format!("{prefix}.attn_out"),
-        h, h, 1, 0,
-        &relu1_out, &channel_out,
+        h,
+        h,
+        1,
+        0,
+        &relu1_out,
+        &channel_out,
         seed + 1,
     );
 
@@ -240,8 +246,12 @@ fn add_decoder_layer(
     add_conv2d(
         g,
         &format!("{prefix}.mlp_gate"),
-        h, inter, 1, 0,
-        &bn2_out, &gate_out,
+        h,
+        inter,
+        1,
+        0,
+        &bn2_out,
+        &gate_out,
         seed + 2,
     );
 
@@ -250,8 +260,12 @@ fn add_decoder_layer(
     add_conv2d(
         g,
         &format!("{prefix}.mlp_up"),
-        h, inter, 1, 0,
-        &bn2_out, &up_out,
+        h,
+        inter,
+        1,
+        0,
+        &bn2_out,
+        &up_out,
         seed + 3,
     );
 
@@ -280,8 +294,12 @@ fn add_decoder_layer(
     add_conv2d(
         g,
         &format!("{prefix}.mlp_down"),
-        inter, h, 1, 0,
-        &gated_out, &down_out,
+        inter,
+        h,
+        1,
+        0,
+        &gated_out,
+        &down_out,
         seed + 4,
     );
 
@@ -421,11 +439,19 @@ fn build_rdt_tiny() -> ModelBundle {
     println!("RDT-tiny graph summary:");
     println!("  hidden={HIDDEN}, intermediate={INTERMEDIATE}, seq_len={SEQ_LEN}");
     println!("  prelude={N_PRELUDE}, core={N_CORE}x{K_ITERS} iters, coda={N_CODA}");
-    println!("  total layer applications: {} + {}*{} + {} = {}",
-        N_PRELUDE, N_CORE, K_ITERS, N_CODA,
-        N_PRELUDE + N_CORE * K_ITERS + N_CODA);
+    println!(
+        "  total layer applications: {} + {}*{} + {} = {}",
+        N_PRELUDE,
+        N_CORE,
+        K_ITERS,
+        N_CODA,
+        N_PRELUDE + N_CORE * K_ITERS + N_CODA
+    );
     println!("  nodes={n_nodes}, initializers={n_init}, params={total_params}");
-    println!("  param bytes (f32): {} MB", (total_params * 4) / (1024 * 1024));
+    println!(
+        "  param bytes (f32): {} MB",
+        (total_params * 4) / (1024 * 1024)
+    );
 
     ModelBundle::new("rdt_tiny", HIDDEN as usize, Vec::new())
         .with_hyperparam("architecture", "rdt_tiny")
@@ -441,12 +467,15 @@ fn build_rdt_tiny() -> ModelBundle {
         .with_hyperparam("head_dim", 64)
         .with_hyperparam("recurrent_alpha", 0.5)
         .with_hyperparam("topology", "huginn_rdt")
-        .with_hyperparam("note", format!(
-            "RDT-tiny Huginn-style recurrent-depth transformer; \
+        .with_hyperparam(
+            "note",
+            format!(
+                "RDT-tiny Huginn-style recurrent-depth transformer; \
              Conv2d spatial+channel mixing proxy for attention; \
              {N_CORE} core layers shared across {K_ITERS} iterations; \
              total_params={total_params}"
-        ))
+            ),
+        )
         .with_graph(g)
 }
 
@@ -470,5 +499,10 @@ fn main() {
     save_bundle(&bundle, &path).expect("save_bundle failed");
 
     let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    println!("saved: {} ({} bytes, {:.1} MB)", path.display(), size, size as f64 / (1024.0 * 1024.0));
+    println!(
+        "saved: {} ({} bytes, {:.1} MB)",
+        path.display(),
+        size,
+        size as f64 / (1024.0 * 1024.0)
+    );
 }

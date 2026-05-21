@@ -53,7 +53,10 @@ fn main() {
         graph.outputs.len(),
     );
 
-    let has_rnn = graph.nodes.iter().any(|n| matches!(n.op.as_str(), "GRU" | "LSTM"));
+    let has_rnn = graph
+        .nodes
+        .iter()
+        .any(|n| matches!(n.op.as_str(), "GRU" | "LSTM"));
     let mut exporter = OnnxExporter::new(&header.architecture)
         .with_producer("axonml-bundle-to-onnx", env!("CARGO_PKG_VERSION"))
         .with_opset(if has_rnn { 11 } else { 17 });
@@ -122,7 +125,11 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
             );
             attrs.insert(
                 "strides".into(),
-                AttributeValue::Ints(if n.attrs.get("strides").is_some() { as_i64_vec(&n.attrs["strides"]) } else { vec![1] }),
+                AttributeValue::Ints(if n.attrs.get("strides").is_some() {
+                    as_i64_vec(&n.attrs["strides"])
+                } else {
+                    vec![1]
+                }),
             );
             let pads = if n.attrs.get("pads").map(|v| v.is_array()).unwrap_or(false) {
                 as_i64_vec(&n.attrs["pads"])
@@ -133,11 +140,16 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
             };
             attrs.insert("pads".into(), AttributeValue::Ints(pads));
             if n.attrs.get("dilations").is_some() {
-                attrs.insert("dilations".into(), AttributeValue::Ints(as_i64_vec(&n.attrs["dilations"])));
+                attrs.insert(
+                    "dilations".into(),
+                    AttributeValue::Ints(as_i64_vec(&n.attrs["dilations"])),
+                );
             }
             attrs.insert(
                 "group".into(),
-                AttributeValue::Int(as_i64(&n.attrs.get("group").unwrap_or(&Value::Null)).unwrap_or(1)),
+                AttributeValue::Int(
+                    as_i64(&n.attrs.get("group").unwrap_or(&Value::Null)).unwrap_or(1),
+                ),
             );
             "Conv"
         }
@@ -254,10 +266,7 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
         "Reshape" => "Reshape",
         "Transpose" => {
             if let Some(perm) = n.attrs.get("perm") {
-                attrs.insert(
-                    "perm".into(),
-                    AttributeValue::Ints(as_i64_vec(perm)),
-                );
+                attrs.insert("perm".into(), AttributeValue::Ints(as_i64_vec(perm)));
             }
             "Transpose"
         }
@@ -273,10 +282,7 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
                 // Since our initializer API uses f32, we'll add axes as an attribute
                 // and let the exporter handle opset compatibility.
                 // For DFC compatibility, just pass axes as attribute (DFC accepts both).
-                attrs.insert(
-                    "axes".into(),
-                    AttributeValue::Ints(axes_vec),
-                );
+                attrs.insert("axes".into(), AttributeValue::Ints(axes_vec));
             }
             "Squeeze"
         }
@@ -288,9 +294,7 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
             if let Some(dir) = n.attrs.get("direction") {
                 attrs.insert(
                     "direction".into(),
-                    AttributeValue::String(
-                        dir.as_str().unwrap_or("forward").to_string(),
-                    ),
+                    AttributeValue::String(dir.as_str().unwrap_or("forward").to_string()),
                 );
             }
             attrs.insert(
@@ -307,9 +311,7 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
             if let Some(dir) = n.attrs.get("direction") {
                 attrs.insert(
                     "direction".into(),
-                    AttributeValue::String(
-                        dir.as_str().unwrap_or("forward").to_string(),
-                    ),
+                    AttributeValue::String(dir.as_str().unwrap_or("forward").to_string()),
                 );
             }
             "LSTM"
@@ -340,12 +342,7 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
         "Resize" => {
             attrs.insert(
                 "mode".into(),
-                AttributeValue::String(
-                    n.attrs["mode"]
-                        .as_str()
-                        .unwrap_or("nearest")
-                        .to_string(),
-                ),
+                AttributeValue::String(n.attrs["mode"].as_str().unwrap_or("nearest").to_string()),
             );
             attrs.insert(
                 "coordinate_transformation_mode".into(),

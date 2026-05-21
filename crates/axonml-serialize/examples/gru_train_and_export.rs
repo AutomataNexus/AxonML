@@ -424,17 +424,14 @@ fn train_model(
                 by[i] = y_imm[start + i];
             }
 
-            let x_t = Tensor::from_vec(bx, &[batch_size, SEQ_LEN, cfg.num_features])
-                .expect("tensor");
+            let x_t =
+                Tensor::from_vec(bx, &[batch_size, SEQ_LEN, cfg.num_features]).expect("tensor");
             let x_v = Variable::new(x_t, true);
 
             let (logits, _, _) = model.forward_multi(&x_v);
 
-            let y_t = Tensor::from_vec(
-                by.iter().map(|&y| y as f32).collect(),
-                &[batch_size],
-            )
-            .expect("label tensor");
+            let y_t = Tensor::from_vec(by.iter().map(|&y| y as f32).collect(), &[batch_size])
+                .expect("label tensor");
             let y_v = Variable::new(y_t, false);
 
             let loss = loss_fn.compute(&logits, &y_v);
@@ -465,10 +462,14 @@ fn train_model(
 /// Deterministic Kaiming-uniform init seeded by `seed`.
 fn init_kaiming(n: usize, fan_in: usize, seed: u64) -> Vec<f32> {
     let k = (2.0 / fan_in as f64).sqrt() as f32;
-    let mut state = seed.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+    let mut state = seed
+        .wrapping_mul(2862933555777941757)
+        .wrapping_add(3037000493);
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let bits = (state >> 32) as u32;
         let f = (bits as f32) / (u32::MAX as f32) * 2.0 - 1.0;
         out.push(f * k);
@@ -600,7 +601,11 @@ fn build_gru_graph(cfg: &SiteConfig, seed_base: u64) -> BundleGraph {
         g.add_initializer(
             &gru_w,
             vec![1, 3 * h, prev_input_dim],
-            init_kaiming(w_size, prev_input_dim as usize, seed_base + 10 + layer as u64 * 3),
+            init_kaiming(
+                w_size,
+                prev_input_dim as usize,
+                seed_base + 10 + layer as u64 * 3,
+            ),
         );
         g.add_initializer(
             &gru_r,
@@ -655,7 +660,11 @@ fn build_gru_graph(cfg: &SiteConfig, seed_base: u64) -> BundleGraph {
     // Use Reshape with a shape tensor. The 0s mean "copy from input dim".
     // Actually, ONNX Reshape 0-means-copy only when allowzero=0 (default).
     // We need explicit dims. Use -1 for batch.
-    g.add_initializer("pool_4d_shape", vec![4], vec![-1.0, h as f32, seq as f32, 1.0]);
+    g.add_initializer(
+        "pool_4d_shape",
+        vec![4],
+        vec![-1.0, h as f32, seq as f32, 1.0],
+    );
     g.add_node(
         "reshape_to_4d",
         "Reshape",
@@ -830,9 +839,7 @@ fn main() {
         .with_hyperparam("dropout", DROPOUT as f64)
         .with_hyperparam(
             "note",
-            format!(
-                "GRU multi-horizon predictor; total_graph_params={total_params}"
-            ),
+            format!("GRU multi-horizon predictor; total_graph_params={total_params}"),
         )
         .with_graph(graph);
 
@@ -840,11 +847,7 @@ fn main() {
         let file_size = std::fs::metadata(&bundle_path)
             .map(|m| m.len())
             .unwrap_or(0);
-        println!(
-            "  saved: {} ({} bytes)",
-            bundle_path.display(),
-            file_size
-        );
+        println!("  saved: {} ({} bytes)", bundle_path.display(), file_size);
         println!();
     }
 

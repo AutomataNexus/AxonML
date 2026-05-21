@@ -125,11 +125,7 @@ fn main() {
         vec!["pooled"],
         vec!["pooled_flat"],
     );
-    graph.add_initializer(
-        "fc.weight",
-        vec![128, 48],
-        init_kaiming(128 * 48, 48, 99),
-    );
+    graph.add_initializer("fc.weight", vec![128, 48], init_kaiming(128 * 48, 48, 99));
     graph.add_initializer("fc.bias", vec![128], vec![0.0; 128]);
     graph.add_node(
         "fc",
@@ -143,8 +139,11 @@ fn main() {
         .with_hyperparam("input_h", 64)
         .with_hyperparam("input_w", 64)
         .with_hyperparam("embedding_dim", 128)
-        .with_hyperparam("notes", "v2 face encoder — drops v1's GRU temporal head; \
-                                    NF-only ops; L2-norm runs host-side post-NPU")
+        .with_hyperparam(
+            "notes",
+            "v2 face encoder — drops v1's GRU temporal head; \
+                                    NF-only ops; L2-norm runs host-side post-NPU",
+        )
         .with_graph(graph);
 
     let final_path = save_bundle(&bundle, PathBuf::from(&out)).expect("save_bundle failed");
@@ -157,12 +156,18 @@ fn main() {
         .map(|t| t.data.len())
         .sum();
     println!("wrote bundle: {}", final_path.display());
-    println!("file size: {} bytes", std::fs::metadata(&final_path).unwrap().len());
+    println!(
+        "file size: {} bytes",
+        std::fs::metadata(&final_path).unwrap().len()
+    );
     println!(
         "compute nodes: {}",
         bundle.graph.as_ref().unwrap().nodes.len()
     );
-    println!("initializers: {}", bundle.graph.as_ref().unwrap().initializers.len());
+    println!(
+        "initializers: {}",
+        bundle.graph.as_ref().unwrap().initializers.len()
+    );
     println!("total params: {total_params}");
 }
 
@@ -170,10 +175,14 @@ fn main() {
 /// Deterministic per `seed` so consecutive runs produce byte-identical bundles.
 fn init_kaiming(n: usize, fan_in: usize, seed: u64) -> Vec<f32> {
     let k = (2.0 / fan_in as f64).sqrt() as f32;
-    let mut state = seed.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+    let mut state = seed
+        .wrapping_mul(2862933555777941757)
+        .wrapping_add(3037000493);
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let bits = (state >> 32) as u32;
         // map u32 → [-1, 1)
         let f = (bits as f32) / (u32::MAX as f32) * 2.0 - 1.0;

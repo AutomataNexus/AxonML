@@ -159,7 +159,7 @@ impl TaylorChiller {
         // Bottleneck blocks
         let bottleneck1 = BottleneckBlock::new(512, 128, 512);
         let bottleneck2 = BottleneckBlock::new(512, 128, 512);
-        let bottleneck3 = BottleneckBlock::new(512, 64, 256);  // downsample
+        let bottleneck3 = BottleneckBlock::new(512, 64, 256); // downsample
         let bottleneck4 = BottleneckBlock::new(256, 64, 256);
 
         // Shared trunk: 256 → 192
@@ -170,15 +170,11 @@ impl TaylorChiller {
             .add(Dropout::new(0.2));
 
         // COP prediction head: 192 → 96 → 8
-        let cop_hidden = Sequential::new()
-            .add(Linear::new(192, 96))
-            .add(ReLU);
+        let cop_hidden = Sequential::new().add(Linear::new(192, 96)).add(ReLU);
         let cop_head = Linear::new(96, 8);
 
         // Staging recommendation head: 192 → 96 → 8
-        let staging_hidden = Sequential::new()
-            .add(Linear::new(192, 96))
-            .add(ReLU);
+        let staging_hidden = Sequential::new().add(Linear::new(192, 96)).add(ReLU);
         let staging_head = Linear::new(96, 8);
 
         Self {
@@ -199,28 +195,25 @@ impl TaylorChiller {
     /// Forward pass returning all output heads.
     ///
     /// Returns (cop_prediction, staging_recommendation, embedding)
-    pub fn forward_all(
-        &self,
-        input: &Variable,
-    ) -> (Variable, Variable, Variable) {
+    pub fn forward_all(&self, input: &Variable) -> (Variable, Variable, Variable) {
         // Input projection
-        let h = self.input_proj.forward(input);           // (batch, 512)
+        let h = self.input_proj.forward(input); // (batch, 512)
 
         // Bottleneck blocks
-        let h = self.bottleneck1.forward(&h);             // (batch, 512)
-        let h = self.bottleneck2.forward(&h);             // (batch, 512)
-        let h = self.bottleneck3.forward(&h);             // (batch, 256)
-        let h = self.bottleneck4.forward(&h);             // (batch, 256)
+        let h = self.bottleneck1.forward(&h); // (batch, 512)
+        let h = self.bottleneck2.forward(&h); // (batch, 512)
+        let h = self.bottleneck3.forward(&h); // (batch, 256)
+        let h = self.bottleneck4.forward(&h); // (batch, 256)
 
         // Shared trunk
-        let embedding = self.shared_trunk.forward(&h);    // (batch, 192)
+        let embedding = self.shared_trunk.forward(&h); // (batch, 192)
 
         // Dual output heads
-        let cop_h = self.cop_hidden.forward(&embedding);  // (batch, 96)
-        let cop = self.cop_head.forward(&cop_h);           // (batch, 8)
+        let cop_h = self.cop_hidden.forward(&embedding); // (batch, 96)
+        let cop = self.cop_head.forward(&cop_h); // (batch, 8)
 
         let stg_h = self.staging_hidden.forward(&embedding); // (batch, 96)
-        let staging = self.staging_head.forward(&stg_h);     // (batch, 8)
+        let staging = self.staging_head.forward(&stg_h); // (batch, 8)
 
         (cop, staging, embedding)
     }

@@ -351,7 +351,10 @@ impl RDT {
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
         let mut ids_tensor = Tensor::from_vec(ids_f32, input_ids.shape()).unwrap();
         // Move input to same device as model parameters (embedding weight).
-        let model_device = self.embed_tokens.parameters().first()
+        let model_device = self
+            .embed_tokens
+            .parameters()
+            .first()
             .map(|p| p.data().device())
             .unwrap_or(axonml_core::Device::Cpu);
         if !matches!(model_device, axonml_core::Device::Cpu) {

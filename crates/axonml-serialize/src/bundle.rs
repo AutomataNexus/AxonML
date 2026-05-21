@@ -643,7 +643,13 @@ mod tests {
             ],
             vec!["bn_out"],
         );
-        graph.add_node("relu1", "Relu", serde_json::Value::Null, vec!["bn_out"], vec!["relu_out"]);
+        graph.add_node(
+            "relu1",
+            "Relu",
+            serde_json::Value::Null,
+            vec!["bn_out"],
+            vec!["relu_out"],
+        );
         graph.add_node(
             "gap1",
             "GlobalAvgPool",
@@ -659,12 +665,11 @@ mod tests {
             vec!["logits"],
         );
 
-        let bundle =
-            ModelBundle::new("conv2d", 3, Vec::new()) // weights vec empty when graph is present
-                .with_hyperparam("input_h", 32)
-                .with_hyperparam("input_w", 32)
-                .with_hyperparam("num_classes", 10)
-                .with_graph(graph);
+        let bundle = ModelBundle::new("conv2d", 3, Vec::new()) // weights vec empty when graph is present
+            .with_hyperparam("input_h", 32)
+            .with_hyperparam("input_w", 32)
+            .with_hyperparam("num_classes", 10)
+            .with_graph(graph);
 
         let tmp = NamedTempFile::new().unwrap();
         let final_path = save_bundle(&bundle, tmp.path()).unwrap();

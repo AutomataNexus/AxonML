@@ -81,19 +81,149 @@ const N_HORIZONS: i64 = 3; // 5 / 15 / 30 min — fixed
 
 const LOCATIONS: &[LocConfig] = &[
     // Warren
-    LocConfig { slug: "warren-innis",                anomaly_name: "Nyx",       predictor_name: "Chronos",   n_features: 28, n_classes: 20, anomaly_hidden: 64, anomaly_latent: 16, predictor_hidden: 128, predictor_attn: 64 },
-    LocConfig { slug: "warren-ahu1",                 anomaly_name: "Aether",    predictor_name: "Moros",     n_features: 11, n_classes: 11, anomaly_hidden: 32, anomaly_latent: 8,  predictor_hidden: 64,  predictor_attn: 32 },
-    LocConfig { slug: "warren-ahu2",                 anomaly_name: "Phanes",    predictor_name: "Hecate",    n_features: 16, n_classes: 13, anomaly_hidden: 48, anomaly_latent: 12, predictor_hidden: 96,  predictor_attn: 48 },
-    LocConfig { slug: "warren-ahu4",                 anomaly_name: "Nyctos",    predictor_name: "Cassandra", n_features: 11, n_classes: 10, anomaly_hidden: 32, anomaly_latent: 8,  predictor_hidden: 64,  predictor_attn: 32 },
-    LocConfig { slug: "warren-ahu7",                 anomaly_name: "Poseidon",  predictor_name: "Triton",    n_features: 8,  n_classes: 9,  anomaly_hidden: 32, anomaly_latent: 8,  predictor_hidden: 64,  predictor_attn: 32 },
-    LocConfig { slug: "warren-chapel",               anomaly_name: "Apollo",    predictor_name: "Sibyl",     n_features: 27, n_classes: 14, anomaly_hidden: 64, anomaly_latent: 16, predictor_hidden: 128, predictor_attn: 64 },
-    LocConfig { slug: "warren-cove",                 anomaly_name: "Demeter",   predictor_name: "Persephone",n_features: 15, n_classes: 12, anomaly_hidden: 48, anomaly_latent: 12, predictor_hidden: 96,  predictor_attn: 48 },
-    LocConfig { slug: "warren-a-basement",           anomaly_name: "Athena",    predictor_name: "Ares",      n_features: 29, n_classes: 16, anomaly_hidden: 64, anomaly_latent: 16, predictor_hidden: 128, predictor_attn: 64 },
-    LocConfig { slug: "warren-activity-rooms",       anomaly_name: "Hermes",    predictor_name: "Tyche",     n_features: 15, n_classes: 13, anomaly_hidden: 48, anomaly_latent: 12, predictor_hidden: 96,  predictor_attn: 48 },
-    LocConfig { slug: "warren-chompson-steambundle", anomaly_name: "Pyrrha",    predictor_name: "Clotho",    n_features: 5,  n_classes: 8,  anomaly_hidden: 32, anomaly_latent: 8,  predictor_hidden: 64,  predictor_attn: 32 },
-    LocConfig { slug: "warren-executive-offices",    anomaly_name: "Calliope",  predictor_name: "Lachesis",  n_features: 8,  n_classes: 10, anomaly_hidden: 32, anomaly_latent: 8,  predictor_hidden: 64,  predictor_attn: 32 },
-    LocConfig { slug: "warren-fahl-steambundle",     anomaly_name: "Kratos",    predictor_name: "Atropos",   n_features: 6,  n_classes: 9,  anomaly_hidden: 32, anomaly_latent: 8,  predictor_hidden: 64,  predictor_attn: 32 },
-    LocConfig { slug: "warren-innis-mechroom",       anomaly_name: "Daedalus",  predictor_name: "Pythia",    n_features: 17, n_classes: 15, anomaly_hidden: 48, anomaly_latent: 12, predictor_hidden: 96,  predictor_attn: 48 },
+    LocConfig {
+        slug: "warren-innis",
+        anomaly_name: "Nyx",
+        predictor_name: "Chronos",
+        n_features: 28,
+        n_classes: 20,
+        anomaly_hidden: 64,
+        anomaly_latent: 16,
+        predictor_hidden: 128,
+        predictor_attn: 64,
+    },
+    LocConfig {
+        slug: "warren-ahu1",
+        anomaly_name: "Aether",
+        predictor_name: "Moros",
+        n_features: 11,
+        n_classes: 11,
+        anomaly_hidden: 32,
+        anomaly_latent: 8,
+        predictor_hidden: 64,
+        predictor_attn: 32,
+    },
+    LocConfig {
+        slug: "warren-ahu2",
+        anomaly_name: "Phanes",
+        predictor_name: "Hecate",
+        n_features: 16,
+        n_classes: 13,
+        anomaly_hidden: 48,
+        anomaly_latent: 12,
+        predictor_hidden: 96,
+        predictor_attn: 48,
+    },
+    LocConfig {
+        slug: "warren-ahu4",
+        anomaly_name: "Nyctos",
+        predictor_name: "Cassandra",
+        n_features: 11,
+        n_classes: 10,
+        anomaly_hidden: 32,
+        anomaly_latent: 8,
+        predictor_hidden: 64,
+        predictor_attn: 32,
+    },
+    LocConfig {
+        slug: "warren-ahu7",
+        anomaly_name: "Poseidon",
+        predictor_name: "Triton",
+        n_features: 8,
+        n_classes: 9,
+        anomaly_hidden: 32,
+        anomaly_latent: 8,
+        predictor_hidden: 64,
+        predictor_attn: 32,
+    },
+    LocConfig {
+        slug: "warren-chapel",
+        anomaly_name: "Apollo",
+        predictor_name: "Sibyl",
+        n_features: 27,
+        n_classes: 14,
+        anomaly_hidden: 64,
+        anomaly_latent: 16,
+        predictor_hidden: 128,
+        predictor_attn: 64,
+    },
+    LocConfig {
+        slug: "warren-cove",
+        anomaly_name: "Demeter",
+        predictor_name: "Persephone",
+        n_features: 15,
+        n_classes: 12,
+        anomaly_hidden: 48,
+        anomaly_latent: 12,
+        predictor_hidden: 96,
+        predictor_attn: 48,
+    },
+    LocConfig {
+        slug: "warren-a-basement",
+        anomaly_name: "Athena",
+        predictor_name: "Ares",
+        n_features: 29,
+        n_classes: 16,
+        anomaly_hidden: 64,
+        anomaly_latent: 16,
+        predictor_hidden: 128,
+        predictor_attn: 64,
+    },
+    LocConfig {
+        slug: "warren-activity-rooms",
+        anomaly_name: "Hermes",
+        predictor_name: "Tyche",
+        n_features: 15,
+        n_classes: 13,
+        anomaly_hidden: 48,
+        anomaly_latent: 12,
+        predictor_hidden: 96,
+        predictor_attn: 48,
+    },
+    LocConfig {
+        slug: "warren-chompson-steambundle",
+        anomaly_name: "Pyrrha",
+        predictor_name: "Clotho",
+        n_features: 5,
+        n_classes: 8,
+        anomaly_hidden: 32,
+        anomaly_latent: 8,
+        predictor_hidden: 64,
+        predictor_attn: 32,
+    },
+    LocConfig {
+        slug: "warren-executive-offices",
+        anomaly_name: "Calliope",
+        predictor_name: "Lachesis",
+        n_features: 8,
+        n_classes: 10,
+        anomaly_hidden: 32,
+        anomaly_latent: 8,
+        predictor_hidden: 64,
+        predictor_attn: 32,
+    },
+    LocConfig {
+        slug: "warren-fahl-steambundle",
+        anomaly_name: "Kratos",
+        predictor_name: "Atropos",
+        n_features: 6,
+        n_classes: 9,
+        anomaly_hidden: 32,
+        anomaly_latent: 8,
+        predictor_hidden: 64,
+        predictor_attn: 32,
+    },
+    LocConfig {
+        slug: "warren-innis-mechroom",
+        anomaly_name: "Daedalus",
+        predictor_name: "Pythia",
+        n_features: 17,
+        n_classes: 15,
+        anomaly_hidden: 48,
+        anomaly_latent: 12,
+        predictor_hidden: 96,
+        predictor_attn: 48,
+    },
     // (Add remaining 20 locations here as MODELS.md is consolidated. Pattern is:
     //  small locations → 32/8 + 64/32, medium → 48/12 + 96/48, large → 64/16 + 128/64.)
 ];
@@ -117,16 +247,50 @@ fn build_anomaly_bundle(c: &LocConfig, seed_base: u64) -> ModelBundle {
     g.add_output("reconstructed", vec![-1, f, 1, ANOM_SEQ]);
 
     // Encoder: f → h → h → l
-    add_conv_bn_relu(&mut g, "enc1", f, h, /*stride*/ 2, "sensor_seq", "enc1_out", seed_base + 1);
-    add_conv_bn_relu(&mut g, "enc2", h, h, /*stride*/ 2, "enc1_out_relu", "enc2_out", seed_base + 2);
-    add_conv_pointwise_bn_relu(&mut g, "bottleneck", h, l, "enc2_out_relu", "bottleneck_out", seed_base + 3);
+    add_conv_bn_relu(
+        &mut g,
+        "enc1",
+        f,
+        h,
+        /*stride*/ 2,
+        "sensor_seq",
+        "enc1_out",
+        seed_base + 1,
+    );
+    add_conv_bn_relu(
+        &mut g,
+        "enc2",
+        h,
+        h,
+        /*stride*/ 2,
+        "enc1_out_relu",
+        "enc2_out",
+        seed_base + 2,
+    );
+    add_conv_pointwise_bn_relu(
+        &mut g,
+        "bottleneck",
+        h,
+        l,
+        "enc2_out_relu",
+        "bottleneck_out",
+        seed_base + 3,
+    );
 
     // Decoder: l → h → h → f
     // DFC 5.3.0's compiler stage chokes on TransposedConv2d (TypeError: NoneType
     // in compiled-graph emit). Replace with Resize(scale=2) + Conv2d, which is
     // structurally equivalent (nearest-neighbor upsample then learnable refine)
     // and emits cleanly through every DFC stage.
-    add_conv_pointwise_bn_relu(&mut g, "dec0", l, h, "bottleneck_out_relu", "dec0_out", seed_base + 4);
+    add_conv_pointwise_bn_relu(
+        &mut g,
+        "dec0",
+        l,
+        h,
+        "bottleneck_out_relu",
+        "dec0_out",
+        seed_base + 4,
+    );
 
     // Upsample × 2 via Resize, then refine with Conv2d-BN-Relu
     add_resize_2x_w(&mut g, "up1", "dec0_out_relu", "up1_out");
@@ -134,18 +298,33 @@ fn build_anomaly_bundle(c: &LocConfig, seed_base: u64) -> ModelBundle {
 
     // Final upsample × 2 + linear-output Conv to reconstruct
     add_resize_2x_w(&mut g, "up2", "dec1_out_relu", "up2_out");
-    add_conv_linear_same(&mut g, "dec2", h, f, "up2_out", "reconstructed", seed_base + 6);
+    add_conv_linear_same(
+        &mut g,
+        "dec2",
+        h,
+        f,
+        "up2_out",
+        "reconstructed",
+        seed_base + 6,
+    );
 
     let total_params: usize = g.initializers.values().map(|t| t.data.len()).sum();
-    ModelBundle::new(&format!("hvac_v3_anomaly_{}", c.slug), f as usize, Vec::new())
-        .with_hyperparam("location_slug", c.slug)
-        .with_hyperparam("model_role", c.anomaly_name)
-        .with_hyperparam("seq_len", ANOM_SEQ)
-        .with_hyperparam("n_features", f)
-        .with_hyperparam("hidden", h)
-        .with_hyperparam("latent", l)
-        .with_hyperparam("note", format!("v3 TCN-AE replacing v1/v2 LSTM-AE; total_params={total_params}"))
-        .with_graph(g)
+    ModelBundle::new(
+        &format!("hvac_v3_anomaly_{}", c.slug),
+        f as usize,
+        Vec::new(),
+    )
+    .with_hyperparam("location_slug", c.slug)
+    .with_hyperparam("model_role", c.anomaly_name)
+    .with_hyperparam("seq_len", ANOM_SEQ)
+    .with_hyperparam("n_features", f)
+    .with_hyperparam("hidden", h)
+    .with_hyperparam("latent", l)
+    .with_hyperparam(
+        "note",
+        format!("v3 TCN-AE replacing v1/v2 LSTM-AE; total_params={total_params}"),
+    )
+    .with_graph(g)
 }
 
 /// Build a TCN-style multi-horizon predictor bundle for the given location.
@@ -167,49 +346,103 @@ fn build_predictor_bundle(c: &LocConfig, seed_base: u64) -> ModelBundle {
     g.add_output("health_score", vec![-1, 1]);
 
     // Encoder: f → h → h → a   (3 stride-2 stages = 8× temporal downsampling)
-    add_conv_bn_relu(&mut g, "enc1", f, h, 2, "sensor_seq",      "enc1_out", seed_base + 1);
-    add_conv_bn_relu(&mut g, "enc2", h, h, 2, "enc1_out_relu",   "enc2_out", seed_base + 2);
-    add_conv_bn_relu(&mut g, "enc3", h, a, 2, "enc2_out_relu",   "enc3_out", seed_base + 3);
+    add_conv_bn_relu(
+        &mut g,
+        "enc1",
+        f,
+        h,
+        2,
+        "sensor_seq",
+        "enc1_out",
+        seed_base + 1,
+    );
+    add_conv_bn_relu(
+        &mut g,
+        "enc2",
+        h,
+        h,
+        2,
+        "enc1_out_relu",
+        "enc2_out",
+        seed_base + 2,
+    );
+    add_conv_bn_relu(
+        &mut g,
+        "enc3",
+        h,
+        a,
+        2,
+        "enc2_out_relu",
+        "enc3_out",
+        seed_base + 3,
+    );
 
     // Pool to per-channel scalar:  [B, a, 1, T/8]  →  [B, a, 1, 1]
-    g.add_node("gap", "GlobalAvgPool", serde_json::Value::Null,
-               vec!["enc3_out_relu"], vec!["pooled"]);
+    g.add_node(
+        "gap",
+        "GlobalAvgPool",
+        serde_json::Value::Null,
+        vec!["enc3_out_relu"],
+        vec!["pooled"],
+    );
 
     // Flatten [B, a, 1, 1] → [B, a]. DFC parser rejects Gemm directly on rank-4 input;
     // Flatten(axis=1) is the canonical NF/DFC-friendly bridge.
-    g.add_node("flatten", "Flatten", serde_json::json!({"axis": 1}),
-               vec!["pooled"], vec!["pooled_flat"]);
+    g.add_node(
+        "flatten",
+        "Flatten",
+        serde_json::json!({"axis": 1}),
+        vec!["pooled"],
+        vec!["pooled_flat"],
+    );
 
     // 4 heads, each Gemm(a → out)
     for (head, out_dim, out_name) in &[
         ("imminent", n_cls, "imminent_logits"),
-        ("warning",  n_cls, "warning_logits"),
-        ("early",    n_cls, "early_logits"),
-        ("health",   1i64,  "health_score"),
+        ("warning", n_cls, "warning_logits"),
+        ("early", n_cls, "early_logits"),
+        ("health", 1i64, "health_score"),
     ] {
         let w = format!("head_{head}.weight");
         let b = format!("head_{head}.bias");
-        g.add_initializer(&w, vec![*out_dim, a],
-            init_kaiming((*out_dim as usize) * (a as usize), a as usize, seed_base + 100 + head.len() as u64));
+        g.add_initializer(
+            &w,
+            vec![*out_dim, a],
+            init_kaiming(
+                (*out_dim as usize) * (a as usize),
+                a as usize,
+                seed_base + 100 + head.len() as u64,
+            ),
+        );
         g.add_initializer(&b, vec![*out_dim], vec![0.0; *out_dim as usize]);
-        g.add_node(&format!("head_{head}"), "Gemm",
-                   serde_json::json!({"alpha": 1.0, "beta": 1.0, "trans_a": false, "trans_b": true}),
-                   vec!["pooled_flat", &w, &b],
-                   vec![*out_name]);
+        g.add_node(
+            &format!("head_{head}"),
+            "Gemm",
+            serde_json::json!({"alpha": 1.0, "beta": 1.0, "trans_a": false, "trans_b": true}),
+            vec!["pooled_flat", &w, &b],
+            vec![*out_name],
+        );
     }
 
     let total_params: usize = g.initializers.values().map(|t| t.data.len()).sum();
-    ModelBundle::new(&format!("hvac_v3_predictor_{}", c.slug), f as usize, Vec::new())
-        .with_hyperparam("location_slug", c.slug)
-        .with_hyperparam("model_role", c.predictor_name)
-        .with_hyperparam("seq_len", PRED_SEQ)
-        .with_hyperparam("n_features", f)
-        .with_hyperparam("hidden", h)
-        .with_hyperparam("attn", a)
-        .with_hyperparam("n_classes", n_cls)
-        .with_hyperparam("n_horizons", N_HORIZONS)
-        .with_hyperparam("note", format!("v3 TCN-MultiHorizon replacing v1/v2 GRU; total_params={total_params}"))
-        .with_graph(g)
+    ModelBundle::new(
+        &format!("hvac_v3_predictor_{}", c.slug),
+        f as usize,
+        Vec::new(),
+    )
+    .with_hyperparam("location_slug", c.slug)
+    .with_hyperparam("model_role", c.predictor_name)
+    .with_hyperparam("seq_len", PRED_SEQ)
+    .with_hyperparam("n_features", f)
+    .with_hyperparam("hidden", h)
+    .with_hyperparam("attn", a)
+    .with_hyperparam("n_classes", n_cls)
+    .with_hyperparam("n_horizons", N_HORIZONS)
+    .with_hyperparam(
+        "note",
+        format!("v3 TCN-MultiHorizon replacing v1/v2 GRU; total_params={total_params}"),
+    )
+    .with_graph(g)
 }
 
 // ---------------------------------------------------------------------------
@@ -237,15 +470,20 @@ fn add_conv_bn_relu(
 
     // Conv weight: [out_c, in_c, 1, 3]
     let w_n = (out_c * in_c * 1 * 3) as usize;
-    g.add_initializer(&cw, vec![out_c, in_c, 1, 3],
-        init_kaiming(w_n, (in_c * 3) as usize, seed));
+    g.add_initializer(
+        &cw,
+        vec![out_c, in_c, 1, 3],
+        init_kaiming(w_n, (in_c * 3) as usize, seed),
+    );
     g.add_initializer(&cb, vec![out_c], vec![0.0; out_c as usize]);
     g.add_initializer(&bn_w, vec![out_c], vec![1.0; out_c as usize]);
     g.add_initializer(&bn_b, vec![out_c], vec![0.0; out_c as usize]);
     g.add_initializer(&bn_m, vec![out_c], vec![0.0; out_c as usize]);
     g.add_initializer(&bn_v, vec![out_c], vec![1.0; out_c as usize]);
 
-    g.add_node(&format!("{name}_conv"), "Conv2d",
+    g.add_node(
+        &format!("{name}_conv"),
+        "Conv2d",
         serde_json::json!({
             "kernel_shape": [1, 3],
             "strides": [1, stride],
@@ -253,12 +491,23 @@ fn add_conv_bn_relu(
             "dilations": [1, 1],
             "group": 1,
         }),
-        vec![in_act, &cw, &cb], vec![out_act]);
-    g.add_node(&format!("{name}_bn"), "BatchNorm",
+        vec![in_act, &cw, &cb],
+        vec![out_act],
+    );
+    g.add_node(
+        &format!("{name}_bn"),
+        "BatchNorm",
         serde_json::json!({"epsilon": 1e-5, "momentum": 0.1}),
-        vec![out_act, &bn_w, &bn_b, &bn_m, &bn_v], vec![&bn_out]);
-    g.add_node(&format!("{name}_relu"), "Relu", serde_json::Value::Null,
-        vec![&bn_out], vec![&relu_out]);
+        vec![out_act, &bn_w, &bn_b, &bn_m, &bn_v],
+        vec![&bn_out],
+    );
+    g.add_node(
+        &format!("{name}_relu"),
+        "Relu",
+        serde_json::Value::Null,
+        vec![&bn_out],
+        vec![&relu_out],
+    );
 }
 
 /// 1×1 pointwise Conv2d + BN + Relu — used at the bottleneck where we squeeze channels.
@@ -280,8 +529,11 @@ fn add_conv_pointwise_bn_relu(
     let bn_out = format!("{name}_bn_out");
     let relu_out = format!("{out_act}_relu");
 
-    g.add_initializer(&cw, vec![out_c, in_c, 1, 1],
-        init_kaiming((out_c * in_c) as usize, in_c as usize, seed));
+    g.add_initializer(
+        &cw,
+        vec![out_c, in_c, 1, 1],
+        init_kaiming((out_c * in_c) as usize, in_c as usize, seed),
+    );
     g.add_initializer(&cb, vec![out_c], vec![0.0; out_c as usize]);
     g.add_initializer(&bn_w, vec![out_c], vec![1.0; out_c as usize]);
     g.add_initializer(&bn_b, vec![out_c], vec![0.0; out_c as usize]);
@@ -291,11 +543,20 @@ fn add_conv_pointwise_bn_relu(
     g.add_node(&format!("{name}_conv"), "Conv2d",
         serde_json::json!({"kernel_shape": [1, 1], "strides": [1, 1], "pads": [0, 0, 0, 0], "dilations": [1, 1], "group": 1}),
         vec![in_act, &cw, &cb], vec![out_act]);
-    g.add_node(&format!("{name}_bn"), "BatchNorm",
+    g.add_node(
+        &format!("{name}_bn"),
+        "BatchNorm",
         serde_json::json!({"epsilon": 1e-5, "momentum": 0.1}),
-        vec![out_act, &bn_w, &bn_b, &bn_m, &bn_v], vec![&bn_out]);
-    g.add_node(&format!("{name}_relu"), "Relu", serde_json::Value::Null,
-        vec![&bn_out], vec![&relu_out]);
+        vec![out_act, &bn_w, &bn_b, &bn_m, &bn_v],
+        vec![&bn_out],
+    );
+    g.add_node(
+        &format!("{name}_relu"),
+        "Relu",
+        serde_json::Value::Null,
+        vec![&bn_out],
+        vec![&relu_out],
+    );
 }
 
 /// TransposedConv2d (decoder upsample) + BN + Relu.
@@ -320,15 +581,20 @@ fn add_tconv_bn_relu(
 
     // TransposedConv weight layout in ONNX: [in_c, out_c, kH, kW]
     let w_n = (in_c * out_c * 1 * 3) as usize;
-    g.add_initializer(&cw, vec![in_c, out_c, 1, 3],
-        init_kaiming(w_n, (in_c * 3) as usize, seed));
+    g.add_initializer(
+        &cw,
+        vec![in_c, out_c, 1, 3],
+        init_kaiming(w_n, (in_c * 3) as usize, seed),
+    );
     g.add_initializer(&cb, vec![out_c], vec![0.0; out_c as usize]);
     g.add_initializer(&bn_w, vec![out_c], vec![1.0; out_c as usize]);
     g.add_initializer(&bn_b, vec![out_c], vec![0.0; out_c as usize]);
     g.add_initializer(&bn_m, vec![out_c], vec![0.0; out_c as usize]);
     g.add_initializer(&bn_v, vec![out_c], vec![1.0; out_c as usize]);
 
-    g.add_node(&format!("{name}_tconv"), "TransposedConv2d",
+    g.add_node(
+        &format!("{name}_tconv"),
+        "TransposedConv2d",
         serde_json::json!({
             "kernel_shape": [1, 3],
             "strides": [1, stride],
@@ -336,12 +602,23 @@ fn add_tconv_bn_relu(
             "dilations": [1, 1],
             "group": 1,
         }),
-        vec![in_act, &cw, &cb], vec![out_act]);
-    g.add_node(&format!("{name}_bn"), "BatchNorm",
+        vec![in_act, &cw, &cb],
+        vec![out_act],
+    );
+    g.add_node(
+        &format!("{name}_bn"),
+        "BatchNorm",
         serde_json::json!({"epsilon": 1e-5, "momentum": 0.1}),
-        vec![out_act, &bn_w, &bn_b, &bn_m, &bn_v], vec![&bn_out]);
-    g.add_node(&format!("{name}_relu"), "Relu", serde_json::Value::Null,
-        vec![&bn_out], vec![&relu_out]);
+        vec![out_act, &bn_w, &bn_b, &bn_m, &bn_v],
+        vec![&bn_out],
+    );
+    g.add_node(
+        &format!("{name}_relu"),
+        "Relu",
+        serde_json::Value::Null,
+        vec![&bn_out],
+        vec![&relu_out],
+    );
 }
 
 /// Resize × 2 along the W dimension only (we keep H=1 for our 1D-as-2D layout).
@@ -387,15 +664,20 @@ fn add_conv_bn_relu_same(
     let relu_out = format!("{out_act}_relu");
 
     let w_n = (out_c * in_c * 1 * 3) as usize;
-    g.add_initializer(&cw, vec![out_c, in_c, 1, 3],
-        init_kaiming(w_n, (in_c * 3) as usize, seed));
+    g.add_initializer(
+        &cw,
+        vec![out_c, in_c, 1, 3],
+        init_kaiming(w_n, (in_c * 3) as usize, seed),
+    );
     g.add_initializer(&cb, vec![out_c], vec![0.0; out_c as usize]);
     g.add_initializer(&bn_w, vec![out_c], vec![1.0; out_c as usize]);
     g.add_initializer(&bn_b, vec![out_c], vec![0.0; out_c as usize]);
     g.add_initializer(&bn_m, vec![out_c], vec![0.0; out_c as usize]);
     g.add_initializer(&bn_v, vec![out_c], vec![1.0; out_c as usize]);
 
-    g.add_node(&format!("{name}_conv"), "Conv2d",
+    g.add_node(
+        &format!("{name}_conv"),
+        "Conv2d",
         serde_json::json!({
             "kernel_shape": [1, 3],
             "strides": [1, 1],
@@ -403,12 +685,23 @@ fn add_conv_bn_relu_same(
             "dilations": [1, 1],
             "group": 1,
         }),
-        vec![in_act, &cw, &cb], vec![out_act]);
-    g.add_node(&format!("{name}_bn"), "BatchNorm",
+        vec![in_act, &cw, &cb],
+        vec![out_act],
+    );
+    g.add_node(
+        &format!("{name}_bn"),
+        "BatchNorm",
         serde_json::json!({"epsilon": 1e-5, "momentum": 0.1}),
-        vec![out_act, &bn_w, &bn_b, &bn_m, &bn_v], vec![&bn_out]);
-    g.add_node(&format!("{name}_relu"), "Relu", serde_json::Value::Null,
-        vec![&bn_out], vec![&relu_out]);
+        vec![out_act, &bn_w, &bn_b, &bn_m, &bn_v],
+        vec![&bn_out],
+    );
+    g.add_node(
+        &format!("{name}_relu"),
+        "Relu",
+        serde_json::Value::Null,
+        vec![&bn_out],
+        vec![&relu_out],
+    );
 }
 
 /// Linear-output Conv2d (no BN/Relu) — reconstruction head emits raw signal.
@@ -424,10 +717,15 @@ fn add_conv_linear_same(
     let cw = format!("{name}.conv.weight");
     let cb = format!("{name}.conv.bias");
     let w_n = (out_c * in_c * 1 * 3) as usize;
-    g.add_initializer(&cw, vec![out_c, in_c, 1, 3],
-        init_kaiming(w_n, (in_c * 3) as usize, seed));
+    g.add_initializer(
+        &cw,
+        vec![out_c, in_c, 1, 3],
+        init_kaiming(w_n, (in_c * 3) as usize, seed),
+    );
     g.add_initializer(&cb, vec![out_c], vec![0.0; out_c as usize]);
-    g.add_node(&format!("{name}_conv"), "Conv2d",
+    g.add_node(
+        &format!("{name}_conv"),
+        "Conv2d",
         serde_json::json!({
             "kernel_shape": [1, 3],
             "strides": [1, 1],
@@ -435,16 +733,22 @@ fn add_conv_linear_same(
             "dilations": [1, 1],
             "group": 1,
         }),
-        vec![in_act, &cw, &cb], vec![out_act]);
+        vec![in_act, &cw, &cb],
+        vec![out_act],
+    );
 }
 
 /// Deterministic Kaiming-uniform init seeded by `seed`.
 fn init_kaiming(n: usize, fan_in: usize, seed: u64) -> Vec<f32> {
     let k = (2.0 / fan_in as f64).sqrt() as f32;
-    let mut state = seed.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+    let mut state = seed
+        .wrapping_mul(2862933555777941757)
+        .wrapping_add(3037000493);
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let bits = (state >> 32) as u32;
         let f = (bits as f32) / (u32::MAX as f32) * 2.0 - 1.0;
         out.push(f * k);
@@ -495,12 +799,27 @@ fn main() {
         save_bundle(&anom, &anom_path).expect("save anomaly bundle");
         save_bundle(&pred, &pred_path).expect("save predictor bundle");
 
-        let a_params: usize = anom.graph.as_ref().unwrap().initializers.values().map(|t| t.data.len()).sum();
-        let p_params: usize = pred.graph.as_ref().unwrap().initializers.values().map(|t| t.data.len()).sum();
+        let a_params: usize = anom
+            .graph
+            .as_ref()
+            .unwrap()
+            .initializers
+            .values()
+            .map(|t| t.data.len())
+            .sum();
+        let p_params: usize = pred
+            .graph
+            .as_ref()
+            .unwrap()
+            .initializers
+            .values()
+            .map(|t| t.data.len())
+            .sum();
         total_anomaly += a_params;
         total_predictor += p_params;
 
-        println!("{:32}  anomaly={:>7}p ({} nodes)  predictor={:>7}p ({} nodes)",
+        println!(
+            "{:32}  anomaly={:>7}p ({} nodes)  predictor={:>7}p ({} nodes)",
             c.slug,
             a_params,
             anom.graph.as_ref().unwrap().nodes.len(),
@@ -509,5 +828,8 @@ fn main() {
         );
     }
     println!("---");
-    println!("built {} location(s) — anomaly Σ={total_anomaly}p, predictor Σ={total_predictor}p", to_build.len());
+    println!(
+        "built {} location(s) — anomaly Σ={total_anomaly}p, predictor Σ={total_predictor}p",
+        to_build.len()
+    );
 }

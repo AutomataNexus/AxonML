@@ -33,7 +33,7 @@ use super::aquilo::concat_variables;
 /// - Humidity branch:     Linear chain (360 -> 128 -> 64)
 /// - Environmental branch: Linear chain (840 -> 256 -> 128 -> 64)
 /// - Squeeze-excite:      Fused(192) -> squeeze(32) -> ReLU -> excite(192) -> sigmoid
-///                         Element-wise multiply with fused features
+///   Element-wise multiply with fused features
 /// - Post-SE MLP:         192 -> 128 -> ReLU
 ///
 /// Input: (batch, 1680) — flattened 120 timesteps x 14 features
@@ -130,10 +130,7 @@ impl TaylorGreenhouse {
     /// Forward pass returning all output heads.
     ///
     /// Returns (zone_temps, humidity_targets, ventilation, embedding)
-    pub fn forward_all(
-        &self,
-        input: &Variable,
-    ) -> (Variable, Variable, Variable, Variable) {
+    pub fn forward_all(&self, input: &Variable) -> (Variable, Variable, Variable, Variable) {
         let shape = input.shape();
         let batch = shape[0];
 
@@ -143,20 +140,20 @@ impl TaylorGreenhouse {
         let env_in = input.narrow(1, 840, 840);
 
         // Branch forward passes
-        let temp_out = self.temp_branch.forward(&temp_in);       // (batch, 64)
-        let hum_out = self.humidity_branch.forward(&hum_in);     // (batch, 64)
-        let env_out = self.env_branch.forward(&env_in);          // (batch, 64)
+        let temp_out = self.temp_branch.forward(&temp_in); // (batch, 64)
+        let hum_out = self.humidity_branch.forward(&hum_in); // (batch, 64)
+        let env_out = self.env_branch.forward(&env_in); // (batch, 64)
 
         // Fuse branches: concat -> (batch, 192)
         let fused = concat_variables(&[&temp_out, &hum_out, &env_out], batch);
 
         // Squeeze-excite attention
-        let squeezed = self.se_squeeze.forward(&fused).relu();   // (batch, 32)
+        let squeezed = self.se_squeeze.forward(&fused).relu(); // (batch, 32)
         let excited = self.se_excite.forward(&squeezed).sigmoid(); // (batch, 192)
-        let attended = &fused * &excited;                        // element-wise
+        let attended = &fused * &excited; // element-wise
 
         // Post-SE MLP
-        let embedding = self.post_se.forward(&attended);         // (batch, 128)
+        let embedding = self.post_se.forward(&attended); // (batch, 128)
 
         // Output heads
         let zone_temps = self.zone_temps_head.forward(&embedding);

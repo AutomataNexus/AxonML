@@ -170,7 +170,12 @@ impl GradientFunction for CrossEntropyLossBackward {
                 .unwrap();
 
             // Targets: cast i64 → f32 then move to GPU
-            let target_f32_vec: Vec<f32> = self.saved_target.to_vec().iter().map(|&x| x as f32).collect();
+            let target_f32_vec: Vec<f32> = self
+                .saved_target
+                .to_vec()
+                .iter()
+                .map(|&x| x as f32)
+                .collect();
             let target_on_gpu = Tensor::from_vec(target_f32_vec, &[batch_size])
                 .unwrap()
                 .to_device(self.saved_softmax.device())
@@ -178,7 +183,9 @@ impl GradientFunction for CrossEntropyLossBackward {
 
             // Reshape softmax to [batch, classes] if flat
             let softmax_2d = if self.saved_softmax.shape().len() == 1 {
-                self.saved_softmax.reshape(&[batch_size as isize, num_classes as isize]).unwrap()
+                self.saved_softmax
+                    .reshape(&[batch_size as isize, num_classes as isize])
+                    .unwrap()
             } else {
                 self.saved_softmax.clone()
             };
@@ -202,7 +209,9 @@ impl GradientFunction for CrossEntropyLossBackward {
                 data[idx] = (data[idx] - if c == tc { 1.0 } else { 0.0 }) * scale;
             }
         }
-        vec![Some(Tensor::from_vec(data, self.saved_softmax.shape()).unwrap())]
+        vec![Some(
+            Tensor::from_vec(data, self.saved_softmax.shape()).unwrap(),
+        )]
     }
 
     fn name(&self) -> &'static str {

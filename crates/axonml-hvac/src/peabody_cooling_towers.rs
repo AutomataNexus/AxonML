@@ -41,9 +41,9 @@ use axonml_nn::{BatchNorm1d, Dropout, Linear, Module, Parameter, ReLU, Sequentia
 /// Outputs: water_prediction(10), fan_staging(10)
 pub struct PeabodyCoolingTowers {
     // Multi-scale parallel paths
-    path_a: Sequential,  // narrow/deep
-    path_b: Sequential,  // medium
-    path_c: Sequential,  // wide/shallow
+    path_a: Sequential, // narrow/deep
+    path_b: Sequential, // medium
+    path_c: Sequential, // wide/shallow
     // Learned attention gate
     attn_gate: Sequential,
     attn_softmax: Linear,
@@ -95,9 +95,7 @@ impl PeabodyCoolingTowers {
             .add(ReLU);
 
         // Attention gate: input → 64 → 3 weights (one per path)
-        let attn_gate = Sequential::new()
-            .add(Linear::new(1920, 64))
-            .add(ReLU);
+        let attn_gate = Sequential::new().add(Linear::new(1920, 64)).add(ReLU);
         let attn_softmax = Linear::new(64, 3);
 
         // Post-fusion MLP: 128 → 192 → 128
@@ -129,19 +127,16 @@ impl PeabodyCoolingTowers {
     /// Forward pass returning all output heads.
     ///
     /// Returns (water_prediction, fan_staging, embedding)
-    pub fn forward_all(
-        &self,
-        input: &Variable,
-    ) -> (Variable, Variable, Variable) {
+    pub fn forward_all(&self, input: &Variable) -> (Variable, Variable, Variable) {
         // Multi-scale parallel paths
-        let out_a = self.path_a.forward(input);  // (batch, 128)
-        let out_b = self.path_b.forward(input);  // (batch, 128)
-        let out_c = self.path_c.forward(input);  // (batch, 128)
+        let out_a = self.path_a.forward(input); // (batch, 128)
+        let out_b = self.path_b.forward(input); // (batch, 128)
+        let out_c = self.path_c.forward(input); // (batch, 128)
 
         // Attention gate: compute 3 weights via softmax
-        let gate_hidden = self.attn_gate.forward(input);         // (batch, 64)
+        let gate_hidden = self.attn_gate.forward(input); // (batch, 64)
         let gate_logits = self.attn_softmax.forward(&gate_hidden); // (batch, 3)
-        let gate_weights = gate_logits.softmax(1);                 // (batch, 3)
+        let gate_weights = gate_logits.softmax(1); // (batch, 3)
 
         // Extract per-path weights: narrow on dim 1
         let w_a = gate_weights.narrow(1, 0, 1); // (batch, 1)

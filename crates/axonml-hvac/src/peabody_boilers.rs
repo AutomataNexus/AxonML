@@ -122,24 +122,21 @@ impl PeabodyBoilers {
     /// Forward pass returning all output heads.
     ///
     /// Returns (efficiency, staging, safety, embedding)
-    pub fn forward_all(
-        &self,
-        input: &Variable,
-    ) -> (Variable, Variable, Variable, Variable) {
+    pub fn forward_all(&self, input: &Variable) -> (Variable, Variable, Variable, Variable) {
         // Progressive compression
-        let h = self.compress1.forward(input);   // (batch, 512)
-        let h = self.compress2.forward(&h);      // (batch, 256)
+        let h = self.compress1.forward(input); // (batch, 512)
+        let h = self.compress2.forward(&h); // (batch, 256)
         let embedding = self.compress3.forward(&h); // (batch, 128)
 
         // Per-head expansion
         let eff_h = self.efficiency_mlp.forward(&embedding); // (batch, 64)
         let efficiency = self.efficiency_head.forward(&eff_h); // (batch, 10)
 
-        let stg_h = self.staging_mlp.forward(&embedding);     // (batch, 64)
-        let staging = self.staging_head.forward(&stg_h);       // (batch, 10)
+        let stg_h = self.staging_mlp.forward(&embedding); // (batch, 64)
+        let staging = self.staging_head.forward(&stg_h); // (batch, 10)
 
-        let saf_h = self.safety_mlp.forward(&embedding);      // (batch, 64)
-        let safety = self.safety_head.forward(&saf_h);         // (batch, 10)
+        let saf_h = self.safety_mlp.forward(&embedding); // (batch, 64)
+        let safety = self.safety_head.forward(&saf_h); // (batch, 10)
 
         (efficiency, staging, safety, embedding)
     }

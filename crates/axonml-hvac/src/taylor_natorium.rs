@@ -203,26 +203,23 @@ impl TaylorNatorium {
     /// Forward pass returning all output heads.
     ///
     /// Returns (climate, ventilation, chemical_dosing, embedding)
-    pub fn forward_all(
-        &self,
-        input: &Variable,
-    ) -> (Variable, Variable, Variable, Variable) {
+    pub fn forward_all(&self, input: &Variable) -> (Variable, Variable, Variable, Variable) {
         // Input projection
-        let h = self.input_proj.forward(input);          // (batch, 512)
+        let h = self.input_proj.forward(input); // (batch, 512)
 
         // Residual blocks
-        let h = self.res_block1.forward(&h);             // (batch, 512)
-        let h = self.res_block2.forward(&h);             // (batch, 512)
-        let h = self.res_block3.forward(&h);             // (batch, 256)
-        let h = self.res_block4.forward(&h);             // (batch, 256)
+        let h = self.res_block1.forward(&h); // (batch, 512)
+        let h = self.res_block2.forward(&h); // (batch, 512)
+        let h = self.res_block3.forward(&h); // (batch, 256)
+        let h = self.res_block4.forward(&h); // (batch, 256)
 
         // Depthwise-style mixing: sum of two parallel paths
-        let mix_a = self.mix_path_a.forward(&h);         // (batch, 256)
-        let mix_b = self.mix_path_b.forward(&h);         // (batch, 256)
-        let mixed = (&mix_a + &mix_b).relu();            // (batch, 256)
+        let mix_a = self.mix_path_a.forward(&h); // (batch, 256)
+        let mix_b = self.mix_path_b.forward(&h); // (batch, 256)
+        let mixed = (&mix_a + &mix_b).relu(); // (batch, 256)
 
         // Final compression
-        let embedding = self.final_net.forward(&mixed);  // (batch, 128)
+        let embedding = self.final_net.forward(&mixed); // (batch, 128)
 
         // Output heads
         let climate = self.climate_head.forward(&embedding);
