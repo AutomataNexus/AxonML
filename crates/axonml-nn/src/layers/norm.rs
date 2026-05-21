@@ -100,6 +100,16 @@ impl BatchNorm1d {
     pub fn num_features(&self) -> usize {
         self.num_features
     }
+
+    /// Returns a clone of the running mean tensor.
+    pub fn running_mean(&self) -> Tensor<f32> {
+        self.running_mean.read().clone()
+    }
+
+    /// Returns a clone of the running variance tensor.
+    pub fn running_var(&self) -> Tensor<f32> {
+        self.running_var.read().clone()
+    }
 }
 
 impl Module for BatchNorm1d {

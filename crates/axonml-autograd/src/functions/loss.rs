@@ -144,43 +144,65 @@ impl CrossEntropyLossBackward {
 
 impl GradientFunction for CrossEntropyLossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        let target_data = self.saved_target.to_vec();
         let batch_size = self.saved_target.numel();
         let num_classes = self.saved_softmax.numel() / batch_size;
 
-        // Build the one-hot subtraction tensor on CPU (targets are always small i64 indices)
-        let mut one_hot = vec![0.0f32; batch_size * num_classes];
-        for i in 0..batch_size {
-            let target_class = target_data[i] as usize;
-            one_hot[i * num_classes + target_class] = -1.0;
-        }
-        let one_hot_tensor = Tensor::from_vec(one_hot, self.saved_softmax.shape()).unwrap();
-
-        // grad = softmax + one_hot (i.e., softmax - 1 at target positions)
-        // If softmax is on GPU, move one_hot there and do GPU add
-        let grad = if self.saved_softmax.device().is_gpu() {
-            let one_hot_gpu = one_hot_tensor
+        // GPU fast path: use the CUDA cross_entropy_bwd kernel directly.
+        // This computes grad = (softmax - one_hot) * grad_output entirely
+        // on GPU with zero CPU round-trips.
+        #[cfg(feature = "cuda")]
+        if self.saved_softmax.device().is_gpu() {
+            // The CUDA kernel expects:
+            //   softmax [batch, classes] on GPU
+            //   targets [batch] on GPU (as f32 cast of class indices)
+            //   grad_output [batch] on GPU (per-sample gradient, or scalar broadcast)
+            //
+            // For reduction=Mean, grad_output is scalar 1/N. Build a per-batch
+            // grad_output tensor on GPU.
+            let grad_out_vec = match self.reduction {
+                Reduction::Mean => vec![1.0 / batch_size as f32; batch_size],
+                Reduction::Sum => vec![1.0f32; batch_size],
+                Reduction::None => grad_output.to_vec(),
+            };
+            let grad_out_t = Tensor::from_vec(grad_out_vec, &[batch_size])
+                .unwrap()
                 .to_device(self.saved_softmax.device())
                 .unwrap();
-            self.saved_softmax
-                .add(&one_hot_gpu)
-                .expect("backward: tensor add failed")
-        } else {
-            self.saved_softmax
-                .add(&one_hot_tensor)
-                .expect("backward: tensor add failed")
-        };
 
-        // Scale by grad_output / batch_size (scalar)
+            // Targets: cast i64 → f32 then move to GPU
+            let target_f32_vec: Vec<f32> = self.saved_target.to_vec().iter().map(|&x| x as f32).collect();
+            let target_on_gpu = Tensor::from_vec(target_f32_vec, &[batch_size])
+                .unwrap()
+                .to_device(self.saved_softmax.device())
+                .unwrap();
+
+            // Reshape softmax to [batch, classes] if flat
+            let softmax_2d = if self.saved_softmax.shape().len() == 1 {
+                self.saved_softmax.reshape(&[batch_size as isize, num_classes as isize]).unwrap()
+            } else {
+                self.saved_softmax.clone()
+            };
+
+            let grad = softmax_2d.cross_entropy_bwd_cuda(&target_on_gpu, &grad_out_t);
+            return vec![Some(grad)];
+        }
+
+        // CPU fallback
+        let target_data = self.saved_target.to_vec();
         let scale = match self.reduction {
             Reduction::Mean => grad_output.to_vec()[0] / batch_size as f32,
             Reduction::Sum => grad_output.to_vec()[0],
             Reduction::None => 1.0,
         };
-
-        let grad = grad.mul_scalar(scale);
-
-        vec![Some(grad)]
+        let mut data = self.saved_softmax.to_vec();
+        for i in 0..batch_size {
+            let tc = target_data[i] as usize;
+            for c in 0..num_classes {
+                let idx = i * num_classes + c;
+                data[idx] = (data[idx] - if c == tc { 1.0 } else { 0.0 }) * scale;
+            }
+        }
+        vec![Some(Tensor::from_vec(data, self.saved_softmax.shape()).unwrap())]
     }
 
     fn name(&self) -> &'static str {

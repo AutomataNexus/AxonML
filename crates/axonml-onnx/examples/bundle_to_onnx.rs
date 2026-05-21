@@ -115,28 +115,29 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
     let as_bool = |v: &Value| v.as_bool();
 
     let onnx_op = match n.op.as_str() {
-        "Conv2d" => {
+        "Conv" | "Conv2d" => {
             attrs.insert(
                 "kernel_shape".into(),
                 AttributeValue::Ints(as_i64_vec(&n.attrs["kernel_shape"])),
             );
             attrs.insert(
                 "strides".into(),
-                AttributeValue::Ints(as_i64_vec(&n.attrs["strides"])),
+                AttributeValue::Ints(if n.attrs.get("strides").is_some() { as_i64_vec(&n.attrs["strides"]) } else { vec![1] }),
             );
-            let pads = if n.attrs["pads"].is_array() {
+            let pads = if n.attrs.get("pads").map(|v| v.is_array()).unwrap_or(false) {
                 as_i64_vec(&n.attrs["pads"])
-            } else {
+            } else if n.attrs.get("padding").is_some() {
                 as_i64_vec(&n.attrs["padding"])
+            } else {
+                vec![0, 0]
             };
             attrs.insert("pads".into(), AttributeValue::Ints(pads));
-            attrs.insert(
-                "dilations".into(),
-                AttributeValue::Ints(as_i64_vec(&n.attrs["dilations"])),
-            );
+            if n.attrs.get("dilations").is_some() {
+                attrs.insert("dilations".into(), AttributeValue::Ints(as_i64_vec(&n.attrs["dilations"])));
+            }
             attrs.insert(
                 "group".into(),
-                AttributeValue::Int(as_i64(&n.attrs["group"]).unwrap_or(1)),
+                AttributeValue::Int(as_i64(&n.attrs.get("group").unwrap_or(&Value::Null)).unwrap_or(1)),
             );
             "Conv"
         }
@@ -165,7 +166,7 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
             );
             "ConvTranspose"
         }
-        "BatchNorm" => {
+        "BatchNorm" | "BatchNormalization" => {
             attrs.insert(
                 "epsilon".into(),
                 AttributeValue::Float(as_f32(&n.attrs["epsilon"]).unwrap_or(1e-5)),
@@ -179,6 +180,7 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
         "Relu" => "Relu",
         "Sigmoid" => "Sigmoid",
         "Tanh" => "Tanh",
+        "Unsqueeze" => "Unsqueeze",
         "Add" => "Add",
         "Sub" => "Sub",
         "Mul" => "Mul",
