@@ -78,6 +78,13 @@ struct AdamState {
     step: usize,
 }
 
+/// Maximum parameter size (in elements) that gets GPU-resident Adam state.
+/// Parameters larger than this (e.g. 152K×2048 embedding/LM-head) keep
+/// their momentum buffers on CPU and use the CPU Adam path. This prevents
+/// OOM from Adam state on large-vocab models while keeping GPU Adam fast
+/// for the transformer layers where it matters.
+const GPU_ADAM_STATE_MAX_ELEMENTS: usize = 64 * 1024 * 1024; // 64M elements = 256MB per buffer
+
 impl AdamState {
     fn new(shape: &[usize], device: axonml_core::Device) -> Self {
         let size: usize = shape.iter().product();
@@ -85,7 +92,7 @@ impl AdamState {
             Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
         let mut exp_avg_sq =
             Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
-        if device.is_gpu() {
+        if device.is_gpu() && size <= GPU_ADAM_STATE_MAX_ELEMENTS {
             exp_avg = exp_avg.to_device(device).expect("device transfer failed");
             exp_avg_sq = exp_avg_sq
                 .to_device(device)
@@ -94,7 +101,7 @@ impl AdamState {
         Self {
             exp_avg,
             exp_avg_sq,
-            max_exp_avg_sq: None, // Initialized on first use if amsgrad=true
+            max_exp_avg_sq: None,
             step: 0,
         }
     }

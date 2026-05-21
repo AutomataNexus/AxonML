@@ -600,11 +600,17 @@ impl Qwen3 {
     ) -> (Variable, usize) {
         let position_offset = kv_cache.as_ref().map(|c| c.seq_len()).unwrap_or(0);
 
-        // Embedding lookup needs Variable<f32> input (Embedding::forward's
-        // signature). Convert u32 ids → f32 Variable the same way llama.rs
-        // does; Embedding's internals downcast back to an index.
+        // Embedding lookup needs Variable<f32> input. Convert u32 ids → f32
+        // and move to the model's device so the entire forward stays on GPU.
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
+        let mut ids_tensor = Tensor::from_vec(ids_f32, input_ids.shape()).unwrap();
+        let model_device = self.embed_tokens.parameters().first()
+            .map(|p| p.data().device())
+            .unwrap_or(axonml_core::Device::Cpu);
+        if !matches!(model_device, axonml_core::Device::Cpu) {
+            ids_tensor = ids_tensor.to_device(model_device).unwrap();
+        }
+        let ids_var = Variable::new(ids_tensor, false);
         let mut hidden_states = self.embed_tokens.forward(&ids_var);
 
         if let Some(cache) = kv_cache {

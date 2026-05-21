@@ -349,7 +349,15 @@ impl RDT {
     /// head.
     pub fn forward_ids(&self, input_ids: &Tensor<u32>, k: usize) -> Variable {
         let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
-        let ids_var = Variable::new(Tensor::from_vec(ids_f32, input_ids.shape()).unwrap(), false);
+        let mut ids_tensor = Tensor::from_vec(ids_f32, input_ids.shape()).unwrap();
+        // Move input to same device as model parameters (embedding weight).
+        let model_device = self.embed_tokens.parameters().first()
+            .map(|p| p.data().device())
+            .unwrap_or(axonml_core::Device::Cpu);
+        if !matches!(model_device, axonml_core::Device::Cpu) {
+            ids_tensor = ids_tensor.to_device(model_device).unwrap();
+        }
+        let ids_var = Variable::new(ids_tensor, false);
         let embeds = self.embed_tokens.forward(&ids_var);
 
         // e := Prelude(Embed(input))  — frozen across the K iterations.

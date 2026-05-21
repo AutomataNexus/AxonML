@@ -5333,8 +5333,9 @@ fn apply_altup_to_hidden(
     }
 
     // Matmul x [seq_len, hidden] @ proj [hidden, expected_out] → gate_all [seq_len, expected_out].
+    // Keep on CPU — x is a CPU slice and downstream writes back into x on CPU.
     let x_t = Tensor::from_vec(x.to_vec(), &[seq_len, hidden]).expect("altup: x shape");
-    let gate_all = proj.matmul(&x_t).to_vec();
+    let gate_all = proj.matmul_on_cpu(&x_t).to_vec();
 
     // Per-position, add the layer-l gate * per-layer-embedding into x.
     for pos in 0..seq_len {

@@ -228,6 +228,30 @@ impl Weight {
         }
     }
 
+    /// CPU-only matmul. Moves both operands to CPU before computing.
+    /// Used by altup and other paths where the result feeds a CPU loop.
+    pub fn matmul_on_cpu(&self, input: &Tensor<f32>) -> Tensor<f32> {
+        let cpu_input = if input.device().is_gpu() {
+            Tensor::from_vec(input.to_vec(), input.shape()).unwrap()
+        } else {
+            input.clone()
+        };
+        match self {
+            Weight::F32(t) => {
+                let cpu_w = if t.device().is_gpu() {
+                    Tensor::from_vec(t.to_vec(), t.shape()).unwrap()
+                } else {
+                    t.clone()
+                };
+                cpu_input.matmul(&cpu_w).expect("matmul_on_cpu failed")
+            }
+            _ => {
+                // Quantized weights dequant to CPU in the normal matmul path
+                self.matmul(&cpu_input)
+            }
+        }
+    }
+
     /// Matmul: input `[m, in]` @ self `[in, out]` → output `[m, out]`.
     ///
     /// Dispatch:

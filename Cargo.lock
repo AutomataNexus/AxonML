@@ -519,6 +519,7 @@ dependencies = [
  "axonml-serialize",
  "axonml-tensor",
  "rand 0.8.6",
+ "serde_json",
 ]
 
 [[package]]

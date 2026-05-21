@@ -37,6 +37,7 @@ rand = { workspace = true }
 axonml-optim = { workspace = true }
 axonml-serialize = { workspace = true }
 axonml = { path = "../axonml" }
+serde_json = "1.0"
 
 [features]
 default = []

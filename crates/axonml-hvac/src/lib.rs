@@ -75,6 +75,9 @@ pub mod taylor_chiller;
 pub mod taylor_greenhouse;
 pub mod taylor_natorium;
 pub mod vulcan;
+pub mod sentinel;
+pub mod sentinel_datagen;
+pub mod sentinel_datagen_ext;
 pub mod zephyrus;
 
 // =============================================================================
@@ -97,4 +100,6 @@ pub use taylor_chiller::TaylorChiller;
 pub use taylor_greenhouse::TaylorGreenhouse;
 pub use taylor_natorium::TaylorNatorium;
 pub use vulcan::Vulcan;
+pub use sentinel::{EquipmentType, Sentinel};
+pub use sentinel_datagen::SentinelDatagen;
 pub use zephyrus::Zephyrus;
