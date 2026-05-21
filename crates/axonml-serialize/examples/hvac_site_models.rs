@@ -52,14 +52,18 @@
 // Imports
 // =============================================================================
 
+use axonml::TrainingMonitor;
 use axonml::autograd::Variable;
-use axonml::nn::{CrossEntropyLoss, Dropout, GRU, LSTM, LayerNorm, Linear, Module, Parameter, ReLU};
+use axonml::nn::{
+    CrossEntropyLoss, Dropout, GRU, LSTM, LayerNorm, Linear, Module, Parameter, ReLU,
+};
 use axonml::optim::{Adam, Optimizer};
 use axonml::tensor::Tensor;
-use axonml::TrainingMonitor;
 
-use axonml_serialize::{BundleGraph, ModelBundle, save_bundle, save_checkpoint, load_checkpoint,
-                       Checkpoint, CheckpointBuilder, StateDict, TensorData};
+use axonml_serialize::{
+    BundleGraph, Checkpoint, CheckpointBuilder, ModelBundle, StateDict, TensorData,
+    load_checkpoint, save_bundle, save_checkpoint,
+};
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -528,7 +532,11 @@ fn train_lstm(
         return;
     }
 
-    let param_count: usize = model.parameters().iter().map(|p| p.variable().data().numel()).sum();
+    let param_count: usize = model
+        .parameters()
+        .iter()
+        .map(|p| p.variable().data().numel())
+        .sum();
     let monitor = TrainingMonitor::new(&format!("{}_lstm", cfg.slug), param_count)
         .total_epochs(epochs)
         .batch_size(batch_size)
@@ -556,17 +564,14 @@ fn train_lstm(
                 by[i] = y_imm[start + i];
             }
 
-            let x_t = Tensor::from_vec(bx, &[batch_size, SEQ_LEN, cfg.num_features])
-                .expect("tensor");
+            let x_t =
+                Tensor::from_vec(bx, &[batch_size, SEQ_LEN, cfg.num_features]).expect("tensor");
             let x_v = Variable::new(x_t, true);
 
             let (logits, _, _) = model.forward_multi(&x_v);
 
-            let y_t = Tensor::from_vec(
-                by.iter().map(|&y| y as f32).collect(),
-                &[batch_size],
-            )
-            .expect("label tensor");
+            let y_t = Tensor::from_vec(by.iter().map(|&y| y as f32).collect(), &[batch_size])
+                .expect("label tensor");
             let y_v = Variable::new(y_t, false);
 
             let loss = loss_fn.compute(&logits, &y_v);
@@ -593,7 +598,11 @@ fn train_lstm(
                 .model_state(sd)
                 .epoch(epoch)
                 .build();
-            let ckpt_path = format!("/tmp/hvac_ckpts/{}_lstm/epoch_{:04}.ckpt", cfg.slug, epoch + 1);
+            let ckpt_path = format!(
+                "/tmp/hvac_ckpts/{}_lstm/epoch_{:04}.ckpt",
+                cfg.slug,
+                epoch + 1
+            );
             std::fs::create_dir_all(format!("/tmp/hvac_ckpts/{}_lstm", cfg.slug)).ok();
             if save_checkpoint(&ckpt, &ckpt_path).is_ok() {
                 println!("  checkpoint: {ckpt_path}");
@@ -603,7 +612,11 @@ fn train_lstm(
         if (epoch + 1) % 5 == 0 || epoch == 0 {
             println!(
                 "  epoch {}/{}: loss={:.4}, acc={:.1}% [{:?}]",
-                epoch + 1, epochs, avg_loss, avg_acc, t0.elapsed()
+                epoch + 1,
+                epochs,
+                avg_loss,
+                avg_acc,
+                t0.elapsed()
             );
         }
     }
@@ -626,7 +639,11 @@ fn train_gru(
         return;
     }
 
-    let param_count: usize = model.parameters().iter().map(|p| p.variable().data().numel()).sum();
+    let param_count: usize = model
+        .parameters()
+        .iter()
+        .map(|p| p.variable().data().numel())
+        .sum();
     let monitor = TrainingMonitor::new(&format!("{}_gru", cfg.slug), param_count)
         .total_epochs(epochs)
         .batch_size(batch_size)
@@ -654,17 +671,14 @@ fn train_gru(
                 by[i] = y_imm[start + i];
             }
 
-            let x_t = Tensor::from_vec(bx, &[batch_size, SEQ_LEN, cfg.num_features])
-                .expect("tensor");
+            let x_t =
+                Tensor::from_vec(bx, &[batch_size, SEQ_LEN, cfg.num_features]).expect("tensor");
             let x_v = Variable::new(x_t, true);
 
             let (logits, _, _) = model.forward_multi(&x_v);
 
-            let y_t = Tensor::from_vec(
-                by.iter().map(|&y| y as f32).collect(),
-                &[batch_size],
-            )
-            .expect("label tensor");
+            let y_t = Tensor::from_vec(by.iter().map(|&y| y as f32).collect(), &[batch_size])
+                .expect("label tensor");
             let y_v = Variable::new(y_t, false);
 
             let loss = loss_fn.compute(&logits, &y_v);
@@ -691,7 +705,11 @@ fn train_gru(
                 .model_state(sd)
                 .epoch(epoch)
                 .build();
-            let ckpt_path = format!("/tmp/hvac_ckpts/{}_gru/epoch_{:04}.ckpt", cfg.slug, epoch + 1);
+            let ckpt_path = format!(
+                "/tmp/hvac_ckpts/{}_gru/epoch_{:04}.ckpt",
+                cfg.slug,
+                epoch + 1
+            );
             std::fs::create_dir_all(format!("/tmp/hvac_ckpts/{}_gru", cfg.slug)).ok();
             if save_checkpoint(&ckpt, &ckpt_path).is_ok() {
                 println!("  checkpoint: {ckpt_path}");
@@ -701,7 +719,11 @@ fn train_gru(
         if (epoch + 1) % 5 == 0 || epoch == 0 {
             println!(
                 "  epoch {}/{}: loss={:.4}, acc={:.1}% [{:?}]",
-                epoch + 1, epochs, avg_loss, avg_acc, t0.elapsed()
+                epoch + 1,
+                epochs,
+                avg_loss,
+                avg_acc,
+                t0.elapsed()
             );
         }
     }
@@ -715,10 +737,14 @@ fn train_gru(
 /// Deterministic Kaiming-uniform init seeded by `seed`.
 fn init_kaiming(n: usize, fan_in: usize, seed: u64) -> Vec<f32> {
     let k = (2.0 / fan_in as f64).sqrt() as f32;
-    let mut state = seed.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+    let mut state = seed
+        .wrapping_mul(2862933555777941757)
+        .wrapping_add(3037000493);
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let bits = (state >> 32) as u32;
         let f = (bits as f32) / (u32::MAX as f32) * 2.0 - 1.0;
         out.push(f * k);
@@ -805,12 +831,7 @@ fn build_input_proj_subgraph(
 }
 
 /// Add the three classification heads to `g` reading from `pooled_flat`.
-fn build_classification_heads(
-    g: &mut BundleGraph,
-    n_cls: i64,
-    h: i64,
-    seed_base: u64,
-) {
+fn build_classification_heads(g: &mut BundleGraph, n_cls: i64, h: i64, seed_base: u64) {
     for (head, out_name) in &[
         ("imminent", "imminent_logits"),
         ("warning", "warning_logits"),
@@ -895,7 +916,11 @@ fn build_lstm_graph(cfg: &SiteConfig, seed_base: u64) -> BundleGraph {
         g.add_initializer(
             &lstm_w,
             vec![1, 4 * h, prev_input_dim],
-            init_kaiming(w_size, prev_input_dim as usize, seed_base + 10 + layer as u64 * 3),
+            init_kaiming(
+                w_size,
+                prev_input_dim as usize,
+                seed_base + 10 + layer as u64 * 3,
+            ),
         );
         g.add_initializer(
             &lstm_r,
@@ -1013,7 +1038,11 @@ fn build_gru_graph(cfg: &SiteConfig, seed_base: u64) -> BundleGraph {
         g.add_initializer(
             &gru_w,
             vec![1, 3 * h, prev_input_dim],
-            init_kaiming(w_size, prev_input_dim as usize, seed_base + 10 + layer as u64 * 3),
+            init_kaiming(
+                w_size,
+                prev_input_dim as usize,
+                seed_base + 10 + layer as u64 * 3,
+            ),
         );
         g.add_initializer(
             &gru_r,
@@ -1060,7 +1089,11 @@ fn build_gru_graph(cfg: &SiteConfig, seed_base: u64) -> BundleGraph {
         vec![pool_transpose_out],
     );
     // Reshape (B, H, S) -> (B, H, S, 1) then GlobalAvgPool -> (B, H, 1, 1)
-    g.add_initializer("pool_4d_shape", vec![4], vec![-1.0, h as f32, seq as f32, 1.0]);
+    g.add_initializer(
+        "pool_4d_shape",
+        vec![4],
+        vec![-1.0, h as f32, seq as f32, 1.0],
+    );
     g.add_node(
         "reshape_to_4d",
         "Reshape",
@@ -1196,11 +1229,7 @@ fn run_one(cfg: &SiteConfig, arch: Arch, out_dir: &PathBuf) {
     let file_size = std::fs::metadata(&bundle_path)
         .map(|m| m.len())
         .unwrap_or(0);
-    println!(
-        "  saved: {} ({} bytes)",
-        bundle_path.display(),
-        file_size
-    );
+    println!("  saved: {} ({} bytes)", bundle_path.display(), file_size);
     println!();
 }
 
@@ -1216,9 +1245,7 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!(
-            "usage: hvac_site_models <site|all> <arch|all>"
-        );
+        eprintln!("usage: hvac_site_models <site|all> <arch|all>");
         eprintln!("       site: fcog-mechroom | taylor-greenhouse | peabody-mechroom | all");
         eprintln!("       arch: lstm | gru | all");
         eprintln!();
@@ -1243,7 +1270,10 @@ fn main() {
     let sites_to_build: Vec<&SiteConfig> = if target_site == "all" {
         SITES.iter().collect()
     } else {
-        SITES.iter().filter(|s| s.slug == target_site.as_str()).collect()
+        SITES
+            .iter()
+            .filter(|s| s.slug == target_site.as_str())
+            .collect()
     };
 
     if sites_to_build.is_empty() {

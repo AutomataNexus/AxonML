@@ -70,10 +70,14 @@ use axonml_serialize::{BundleGraph, ModelBundle, save_bundle};
 
 fn init_kaiming(n: usize, fan_in: usize, seed: u64) -> Vec<f32> {
     let k = (2.0 / fan_in as f64).sqrt() as f32;
-    let mut state = seed.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+    let mut state = seed
+        .wrapping_mul(2862933555777941757)
+        .wrapping_add(3037000493);
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let bits = (state >> 32) as u32;
         let f = (bits as f32) / (u32::MAX as f32) * 2.0 - 1.0;
         out.push(f * k);
@@ -86,13 +90,7 @@ fn init_kaiming(n: usize, fan_in: usize, seed: u64) -> Vec<f32> {
 // ============================================================================
 
 /// Add BatchNorm parameters and node.
-fn add_batchnorm(
-    g: &mut BundleGraph,
-    name: &str,
-    channels: i64,
-    in_act: &str,
-    out_act: &str,
-) {
+fn add_batchnorm(g: &mut BundleGraph, name: &str, channels: i64, in_act: &str, out_act: &str) {
     let bn_w = format!("{name}.weight");
     let bn_b = format!("{name}.bias");
     let bn_m = format!("{name}.running_mean");
@@ -179,8 +177,12 @@ fn add_decoder_layer(
     add_conv2d(
         g,
         &format!("{prefix}.attn_spatial"),
-        hidden, hidden, 3, 1,
-        &bn1_out, &spatial_out,
+        hidden,
+        hidden,
+        3,
+        1,
+        &bn1_out,
+        &spatial_out,
         seed,
     );
 
@@ -197,8 +199,12 @@ fn add_decoder_layer(
     add_conv2d(
         g,
         &format!("{prefix}.attn_out"),
-        hidden, hidden, 1, 0,
-        &relu1_out, &channel_out,
+        hidden,
+        hidden,
+        1,
+        0,
+        &relu1_out,
+        &channel_out,
         seed + 1,
     );
 
@@ -219,8 +225,12 @@ fn add_decoder_layer(
     add_conv2d(
         g,
         &format!("{prefix}.mlp_gate"),
-        hidden, inter, 1, 0,
-        &bn2_out, &gate_out,
+        hidden,
+        inter,
+        1,
+        0,
+        &bn2_out,
+        &gate_out,
         seed + 2,
     );
 
@@ -228,8 +238,12 @@ fn add_decoder_layer(
     add_conv2d(
         g,
         &format!("{prefix}.mlp_up"),
-        hidden, inter, 1, 0,
-        &bn2_out, &up_out,
+        hidden,
+        inter,
+        1,
+        0,
+        &bn2_out,
+        &up_out,
         seed + 3,
     );
 
@@ -264,8 +278,12 @@ fn add_decoder_layer(
     add_conv2d(
         g,
         &format!("{prefix}.mlp_down"),
-        inter, hidden, 1, 0,
-        &gated_out, &down_out,
+        inter,
+        hidden,
+        1,
+        0,
+        &gated_out,
+        &down_out,
         seed + 4,
     );
 
@@ -305,8 +323,13 @@ fn build_gpt2_tiny() -> ModelBundle {
         let node_prefix = format!("layer_{i}");
         let seed = 0x6F72_0000_u64.wrapping_add((i as u64) * 100);
         current = add_decoder_layer(
-            &mut g, GPT2_HIDDEN, GPT2_INTER,
-            &prefix, &node_prefix, &current, seed,
+            &mut g,
+            GPT2_HIDDEN,
+            GPT2_INTER,
+            &prefix,
+            &node_prefix,
+            &current,
+            seed,
         );
     }
 
@@ -332,11 +355,14 @@ fn build_gpt2_tiny() -> ModelBundle {
         .with_hyperparam("heads", GPT2_HEADS as i64)
         .with_hyperparam("head_dim", GPT2_HD as i64)
         .with_hyperparam("topology", "decoder_only")
-        .with_hyperparam("note", format!(
-            "GPT-2 tiny decoder-only transformer; \
+        .with_hyperparam(
+            "note",
+            format!(
+                "GPT-2 tiny decoder-only transformer; \
              Conv2d spatial+channel mixing proxy for attention; \
              {GPT2_LAYERS} layers; total_params={total_params}"
-        ))
+            ),
+        )
         .with_graph(g)
 }
 
@@ -363,8 +389,13 @@ fn build_phi_tiny() -> ModelBundle {
         let node_prefix = format!("layer_{i}");
         let seed = 0xF100_0000_u64.wrapping_add((i as u64) * 100);
         current = add_decoder_layer(
-            &mut g, PHI_HIDDEN, PHI_INTER,
-            &prefix, &node_prefix, &current, seed,
+            &mut g,
+            PHI_HIDDEN,
+            PHI_INTER,
+            &prefix,
+            &node_prefix,
+            &current,
+            seed,
         );
     }
 
@@ -391,11 +422,14 @@ fn build_phi_tiny() -> ModelBundle {
         .with_hyperparam("head_dim", PHI_HD as i64)
         .with_hyperparam("rope", true)
         .with_hyperparam("topology", "decoder_only")
-        .with_hyperparam("note", format!(
-            "Phi tiny decoder-only transformer with RoPE; \
+        .with_hyperparam(
+            "note",
+            format!(
+                "Phi tiny decoder-only transformer with RoPE; \
              Conv2d spatial+channel mixing proxy for attention; \
              {PHI_LAYERS} layers; total_params={total_params}"
-        ))
+            ),
+        )
         .with_graph(g)
 }
 
@@ -418,7 +452,12 @@ fn main() {
     let gpt2_path = out_dir.join("gpt2_tiny.axonml");
     save_bundle(&gpt2, &gpt2_path).expect("save_bundle gpt2_tiny failed");
     let gpt2_size = std::fs::metadata(&gpt2_path).map(|m| m.len()).unwrap_or(0);
-    println!("saved: {} ({} bytes, {:.1} KB)", gpt2_path.display(), gpt2_size, gpt2_size as f64 / 1024.0);
+    println!(
+        "saved: {} ({} bytes, {:.1} KB)",
+        gpt2_path.display(),
+        gpt2_size,
+        gpt2_size as f64 / 1024.0
+    );
 
     println!();
 
@@ -427,5 +466,10 @@ fn main() {
     let phi_path = out_dir.join("phi_tiny.axonml");
     save_bundle(&phi, &phi_path).expect("save_bundle phi_tiny failed");
     let phi_size = std::fs::metadata(&phi_path).map(|m| m.len()).unwrap_or(0);
-    println!("saved: {} ({} bytes, {:.1} KB)", phi_path.display(), phi_size, phi_size as f64 / 1024.0);
+    println!(
+        "saved: {} ({} bytes, {:.1} KB)",
+        phi_path.display(),
+        phi_size,
+        phi_size as f64 / 1024.0
+    );
 }

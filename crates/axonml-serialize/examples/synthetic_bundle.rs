@@ -56,11 +56,7 @@ fn main() {
         vec![n_classes, conv_c],
         (0..fc_n).map(|i| (i as f32) * 0.001).collect(),
     );
-    graph.add_initializer(
-        "fc.bias",
-        vec![n_classes],
-        vec![0.0; n_classes as usize],
-    );
+    graph.add_initializer("fc.bias", vec![n_classes], vec![0.0; n_classes as usize]);
 
     // Compute nodes
     graph.add_node(

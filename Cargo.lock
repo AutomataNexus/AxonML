@@ -3169,8 +3169,6 @@ checksum = "7714e70437a7dc3ac8eb7e6f8df75fd8eb422675fc7678aff7364301092b1017"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.1",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -3997,25 +3995,6 @@ name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
-
-[[package]]
-name = "nexusfoundry-core"
-version = "0.1.0"
-dependencies = [
- "indexmap",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "nexusfoundry-profiler"
-version = "0.1.0"
-dependencies = [
- "nexusfoundry-core",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "nix"
@@ -5705,22 +5684,6 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
-
-[[package]]
-name = "rusty-mythos"
-version = "0.1.0"
-dependencies = [
- "axonml",
- "axonml-autograd",
- "axonml-data",
- "axonml-nn",
- "axonml-onnx",
- "axonml-optim",
- "axonml-serialize",
- "axonml-tensor",
- "nexusfoundry-profiler",
- "serde_json",
-]
 
 [[package]]
 name = "ryu"
