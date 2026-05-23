@@ -1,5 +1,8 @@
 name: Release
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # SLSA Build Level 3 release pipeline.
 #
 # L3 requirements satisfied:
@@ -211,7 +214,7 @@ jobs:
       actions: read
       id-token: write
       contents: write
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a # v2.1.0
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: ${{ needs.collect.outputs.hashes }}
       upload-assets: true
@@ -248,7 +251,6 @@ jobs:
   release:
     name: GitHub Release
     needs: [collect, provenance, attest]
-    if: ${{ always() && needs.collect.result == 'success' && needs.attest.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
