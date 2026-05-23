@@ -33,6 +33,11 @@ path = "src/main.rs"
 # Users can create a shell alias: alias axon='axonml'
 
 [dependencies]
+# W&B / HTTP integration (optional, cross-platform)
+reqwest = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+
 # Internal crates
 axonml-core = { workspace = true }
 axonml-tensor = { workspace = true }
@@ -90,11 +95,6 @@ dirs = { workspace = true }
 # Unix process management (for dashboard commands)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
-# W&B integration (optional)
-reqwest = { workspace = true, optional = true }
-chrono = { workspace = true, optional = true }
-uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"
