@@ -248,6 +248,7 @@ jobs:
   release:
     name: GitHub Release
     needs: [collect, provenance, attest]
+    if: ${{ always() && needs.collect.result == 'success' && needs.attest.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
