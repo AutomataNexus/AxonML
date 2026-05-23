@@ -9,17 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.4] - 2026-05-23
 
-### HVAC domain expansion
+### HVAC domain models
 
-- **Peabody Retirement Community**: boiler plant controller (`peabody_boilers.rs`)
-  and cooling tower controller (`peabody_cooling_towers.rs`) — deep MLP with
-  progressive temporal compression + multi-head output (efficiency, staging,
-  safety).
-- **Taylor sites**: chiller plant (`taylor_chiller.rs`), greenhouse climate
-  (`taylor_greenhouse.rs`), natorium dehumidification (`taylor_natorium.rs`) —
-  site-specific HVAC fault detection and optimization models.
-- All HVAC models use the established pattern: BatchNorm1d + ReLU + Dropout
-  compression stages → per-head expansion MLPs.
+- New site-specific HVAC controller models added to `axonml-hvac`.
+- Deep MLP architecture with progressive temporal compression + multi-head
+  output (efficiency, staging, safety).
 
 ### RustyMythos — recurrent-depth transformer with MoE
 
