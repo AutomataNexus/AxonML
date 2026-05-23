@@ -276,7 +276,7 @@ pub struct RandomHorizontalFlip {
 }
 
 impl RandomHorizontalFlip {
-    /// Creates a new `RandomHorizontalFlip` with probability 0.5.
+    /// Creates a new `RandomHorizontalFlip` with the given probability (default 0.5).
     #[must_use]
     pub fn new() -> Self {
         Self { probability: 0.5 }
@@ -288,6 +288,12 @@ impl RandomHorizontalFlip {
         Self {
             probability: probability.clamp(0.0, 1.0),
         }
+    }
+
+    /// Creates a `RandomHorizontalFlip` with probability p (PyTorch-style constructor).
+    #[must_use]
+    pub fn p(probability: f32) -> Self {
+        Self::with_probability(probability)
     }
 }
 
@@ -358,6 +364,12 @@ impl RandomVerticalFlip {
             probability: probability.clamp(0.0, 1.0),
         }
     }
+
+    /// Creates a `RandomVerticalFlip` with probability p (PyTorch-style).
+    #[must_use]
+    pub fn p(probability: f32) -> Self {
+        Self::with_probability(probability)
+    }
 }
 
 impl Default for RandomVerticalFlip {
@@ -420,6 +432,19 @@ impl RandomRotation {
     pub fn new() -> Self {
         Self {
             angles: vec![0, 90, 180, 270],
+        }
+    }
+
+    /// Creates a `RandomRotation` limited to the given max degrees (PyTorch-style).
+    /// Allows rotation by 0, 90, 180, or 270 degrees up to the specified max.
+    #[must_use]
+    pub fn degrees(max_degrees: i32) -> Self {
+        let angles: Vec<i32> = vec![0, 90, 180, 270]
+            .into_iter()
+            .filter(|&a| (a as i32).abs() <= (max_degrees as i32).abs())
+            .collect();
+        Self {
+            angles: if angles.is_empty() { vec![0] } else { angles },
         }
     }
 

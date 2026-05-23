@@ -64,9 +64,13 @@ pub struct StepLR {
 }
 
 impl StepLR {
-    /// Creates a new `StepLR` scheduler.
+    /// Creates a new `StepLR` scheduler from an optimizer.
     pub fn new<O: Optimizer>(optimizer: &O, step_size: usize, gamma: f32) -> Self {
-        let initial_lr = optimizer.get_lr();
+        Self::with_lr(optimizer.get_lr(), step_size, gamma)
+    }
+
+    /// Creates a standalone `StepLR` with an explicit initial learning rate.
+    pub fn with_lr(initial_lr: f32, step_size: usize, gamma: f32) -> Self {
         Self {
             initial_lr,
             step_size,
@@ -74,6 +78,12 @@ impl StepLR {
             current_step: 0,
             last_lr: initial_lr,
         }
+    }
+
+    /// Returns the LR for a given epoch (stateless query).
+    pub fn get_lr(&self, epoch: usize) -> f32 {
+        let num_decays = epoch / self.step_size;
+        self.initial_lr * self.gamma.powi(num_decays as i32)
     }
 }
 
@@ -210,14 +220,18 @@ pub struct CosineAnnealingLR {
 }
 
 impl CosineAnnealingLR {
-    /// Creates a new `CosineAnnealingLR` scheduler.
+    /// Creates a new `CosineAnnealingLR` scheduler from an optimizer.
     pub fn new<O: Optimizer>(optimizer: &O, t_max: usize) -> Self {
         Self::with_eta_min(optimizer, t_max, 0.0)
     }
 
     /// Creates a `CosineAnnealingLR` with minimum learning rate.
     pub fn with_eta_min<O: Optimizer>(optimizer: &O, t_max: usize, eta_min: f32) -> Self {
-        let initial_lr = optimizer.get_lr();
+        Self::with_lr(optimizer.get_lr(), t_max, eta_min)
+    }
+
+    /// Creates a standalone `CosineAnnealingLR` with explicit initial LR.
+    pub fn with_lr(initial_lr: f32, t_max: usize, eta_min: f32) -> Self {
         Self {
             initial_lr,
             t_max,
@@ -225,6 +239,13 @@ impl CosineAnnealingLR {
             current_step: 0,
             last_lr: initial_lr,
         }
+    }
+
+    /// Returns the LR for a given epoch (stateless query).
+    pub fn get_lr(&self, epoch: usize) -> f32 {
+        let t = epoch.min(self.t_max) as f32;
+        let t_max = self.t_max as f32;
+        self.eta_min + (self.initial_lr - self.eta_min) * (1.0 + (std::f32::consts::PI * t / t_max).cos()) / 2.0
     }
 }
 

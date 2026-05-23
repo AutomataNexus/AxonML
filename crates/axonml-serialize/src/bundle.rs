@@ -439,6 +439,13 @@ pub fn load_bundle<P: AsRef<Path>>(path: P) -> BundleResult<(BundleHeader, Model
     load_bundle_from_bytes(&data)
 }
 
+/// Load a bundle, returning just the `ModelBundle` (discards the header).
+/// Convenience wrapper for users who don't need version/format metadata.
+pub fn load_bundle_simple<P: AsRef<Path>>(path: P) -> BundleResult<ModelBundle> {
+    let (_, bundle) = load_bundle(path)?;
+    Ok(bundle)
+}
+
 /// In-memory variant of [`load_bundle`] — useful for HTTP handlers or tests.
 pub fn load_bundle_from_bytes(data: &[u8]) -> BundleResult<(BundleHeader, ModelBundle)> {
     if data.len() < 11 {
