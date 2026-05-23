@@ -98,8 +98,8 @@ mod state_dict;
 
 pub use bundle::{
     AXONML_BUNDLE_VERSION, AXONML_MAGIC, BundleError, BundleGraph, BundleHeader, BundleResult,
-    GraphIo, GraphNode, ModelBundle, NamedTensor, load_bundle, load_bundle_from_bytes, load_header,
-    load_bundle_simple, save_bundle,
+    GraphIo, GraphNode, ModelBundle, NamedTensor, load_bundle, load_bundle_from_bytes,
+    load_bundle_simple, load_header, save_bundle,
 };
 pub use checkpoint::{Checkpoint, CheckpointBuilder, TrainingState};
 pub use convert::{

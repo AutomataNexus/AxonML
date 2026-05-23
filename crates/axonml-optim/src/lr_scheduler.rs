@@ -245,7 +245,9 @@ impl CosineAnnealingLR {
     pub fn get_lr(&self, epoch: usize) -> f32 {
         let t = epoch.min(self.t_max) as f32;
         let t_max = self.t_max as f32;
-        self.eta_min + (self.initial_lr - self.eta_min) * (1.0 + (std::f32::consts::PI * t / t_max).cos()) / 2.0
+        self.eta_min
+            + (self.initial_lr - self.eta_min) * (1.0 + (std::f32::consts::PI * t / t_max).cos())
+                / 2.0
     }
 }
 
