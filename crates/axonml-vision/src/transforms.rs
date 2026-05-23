@@ -441,7 +441,7 @@ impl RandomRotation {
     pub fn degrees(max_degrees: i32) -> Self {
         let angles: Vec<i32> = vec![0, 90, 180, 270]
             .into_iter()
-            .filter(|&a| (a as i32).abs() <= (max_degrees as i32).abs())
+            .filter(|a: &i32| a.abs() <= max_degrees.abs())
             .collect();
         Self {
             angles: if angles.is_empty() { vec![0] } else { angles },
@@ -598,6 +598,38 @@ impl Transform for ColorJitter {
                     data[0 * h * w + y * w + x] = (gray + (r - gray) * factor).clamp(0.0, 1.0);
                     data[h * w + y * w + x] = (gray + (g - gray) * factor).clamp(0.0, 1.0);
                     data[2 * h * w + y * w + x] = (gray + (b - gray) * factor).clamp(0.0, 1.0);
+                }
+            }
+        }
+
+        // Apply hue adjustment (simplified rotation in RGB space)
+        if self.hue > 0.0 && shape.len() == 3 && shape[0] == 3 {
+            let angle = rng.gen_range(-self.hue..self.hue) * std::f32::consts::PI;
+            let cos_a = angle.cos();
+            let sin_a = angle.sin();
+            let (h, w) = (shape[1], shape[2]);
+
+            for y in 0..h {
+                for x in 0..w {
+                    let r = data[y * w + x];
+                    let g = data[h * w + y * w + x];
+                    let b = data[2 * h * w + y * w + x];
+                    // Approximate hue rotation via Rodrigues
+                    let nr = (r * (cos_a + (1.0 - cos_a) / 3.0)
+                        + g * ((1.0 - cos_a) / 3.0 - (3.0_f32).sqrt() * sin_a / 3.0)
+                        + b * ((1.0 - cos_a) / 3.0 + (3.0_f32).sqrt() * sin_a / 3.0))
+                        .clamp(0.0, 1.0);
+                    let ng = (r * ((1.0 - cos_a) / 3.0 + (3.0_f32).sqrt() * sin_a / 3.0)
+                        + g * (cos_a + (1.0 - cos_a) / 3.0)
+                        + b * ((1.0 - cos_a) / 3.0 - (3.0_f32).sqrt() * sin_a / 3.0))
+                        .clamp(0.0, 1.0);
+                    let nb = (r * ((1.0 - cos_a) / 3.0 - (3.0_f32).sqrt() * sin_a / 3.0)
+                        + g * ((1.0 - cos_a) / 3.0 + (3.0_f32).sqrt() * sin_a / 3.0)
+                        + b * (cos_a + (1.0 - cos_a) / 3.0))
+                        .clamp(0.0, 1.0);
+                    data[y * w + x] = nr;
+                    data[h * w + y * w + x] = ng;
+                    data[2 * h * w + y * w + x] = nb;
                 }
             }
         }
