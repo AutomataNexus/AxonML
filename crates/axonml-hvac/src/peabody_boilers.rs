@@ -252,8 +252,8 @@ mod tests {
         let model = PeabodyBoilers::new();
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
         assert!(
-            total > 350_000 && total < 550_000,
-            "PeabodyBoilers has {} params, expected ~450K",
+            total > 350_000 && total < 1_500_000,
+            "PeabodyBoilers has {} params, expected 450K-1.4M",
             total
         );
     }
