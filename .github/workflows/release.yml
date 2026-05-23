@@ -96,6 +96,8 @@ jobs:
 
       - name: Build axonml-cli
         shell: bash
+        env:
+          OPENSSL_STATIC: "1"
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
             cross build --release --package axonml-cli --target ${{ matrix.target }}
@@ -105,6 +107,8 @@ jobs:
 
       - name: Build axonml-server
         shell: bash
+        env:
+          OPENSSL_STATIC: "1"
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
             cross build --release --package axonml-server --target ${{ matrix.target }}

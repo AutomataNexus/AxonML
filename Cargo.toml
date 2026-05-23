@@ -91,7 +91,7 @@ rustc-hash = "2.1"
 
 # GPU backends
 cudarc = { version = "0.19", features = ["std", "driver", "cublas", "curand", "cudnn", "nvrtc", "cuda-12060"] }
-wgpu = "29.0"
+wgpu = { version = "29.0", default-features = false, features = ["vulkan", "metal", "wgsl"] }
 ash = "0.38"
 gpu-allocator = "0.27"
 
