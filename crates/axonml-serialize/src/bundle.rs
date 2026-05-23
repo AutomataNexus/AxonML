@@ -299,7 +299,8 @@ impl Default for BundleGraph {
 /// the Python converter's expectations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelBundle {
-    /// Architecture tag (same as `BundleHeader::architecture`).
+    /// Model name / architecture tag (same as `BundleHeader::architecture`).
+    /// Access via `.name()` for convenience or `.architecture` directly.
     pub architecture: String,
     /// Number of input features.
     pub input_features: usize,
@@ -341,6 +342,11 @@ impl ModelBundle {
             anomaly_threshold: None,
             graph: None,
         }
+    }
+
+    /// Returns the model name (alias for `architecture`).
+    pub fn name(&self) -> &str {
+        &self.architecture
     }
 
     /// Set a single hyperparameter (overwrites any existing value).

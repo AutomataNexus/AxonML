@@ -169,6 +169,11 @@ impl Vocab {
         0 // Default to first token if no UNK
     }
 
+    /// Returns `Some(index)` if the token exists, `None` if unknown.
+    pub fn try_token_to_index(&self, token: &str) -> Option<usize> {
+        self.token_to_idx.get(token).copied()
+    }
+
     /// Returns the token for an index.
     #[must_use]
     pub fn index_to_token(&self, idx: usize) -> Option<&str> {

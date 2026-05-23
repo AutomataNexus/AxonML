@@ -113,6 +113,8 @@ pub use transforms::{
 
 pub use datasets::{CIFAR10, CIFAR100, FashionMNIST, MNIST, SyntheticCIFAR, SyntheticMNIST};
 
+pub use axonml_data::{Compose, DataLoader, Dataset, Transform};
+
 // =============================================================================
 // Re-exports — Models
 // =============================================================================
