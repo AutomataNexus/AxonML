@@ -88,7 +88,7 @@ rustc_version_runtime = "0.3"
 num_cpus = "1.16"
 
 # GPU support
-wgpu = "29"
+wgpu = { version = "29", default-features = false, features = ["vulkan", "metal", "wgsl"] }
 pollster = "0.4"
 bytemuck = { version = "1.14", features = ["derive"] }
 
