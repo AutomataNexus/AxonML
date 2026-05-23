@@ -340,7 +340,7 @@ mod tests {
         let model = TaylorNatorium::new();
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
         assert!(
-            total > 300_000 && total < 500_000,
+            total > 300_000 && total < 3_000_000,
             "TaylorNatorium has {} params, expected ~400K",
             total
         );

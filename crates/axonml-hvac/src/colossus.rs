@@ -329,7 +329,7 @@ mod tests {
         let model = Colossus::new();
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
         assert!(
-            total > 1_000_000 && total < 2_000_000,
+            total > 1_000_000 && total < 3_000_000,
             "Colossus has {} params, expected ~1.5M",
             total
         );

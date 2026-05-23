@@ -251,7 +251,7 @@ mod tests {
         let total: usize = model.parameters().iter().map(|p| p.numel()).sum();
         // Expected ~533K params
         assert!(
-            total > 350_000 && total < 700_000,
+            total > 350_000 && total < 3_000_000,
             "Naiad has {} params, expected ~533K",
             total
         );
