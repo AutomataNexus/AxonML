@@ -26,16 +26,13 @@ serde_json = "1"
 byteorder = "1.5"
 flate2 = "1.0"
 dirs.workspace = true
+reqwest = { workspace = true, optional = true }
 
 [features]
 default = ["download"]
 download = ["reqwest"]
 cuda = ["axonml-tensor/cuda", "axonml-nn/cuda", "axonml-autograd/cuda", "axonml-core/cuda"]
 
-[dependencies.reqwest]
-version = "0.12"
-features = ["blocking"]
-optional = true
 
 [dev-dependencies]
 axonml = { path = "../axonml" }
