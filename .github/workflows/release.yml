@@ -61,7 +61,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
             name: linux-aarch64
             cross: true
-          - os: macos-latest
+          - os: macos-13
             target: x86_64-apple-darwin
             name: macos-x86_64
           - os: macos-latest
