@@ -506,16 +506,30 @@ pub struct ColorJitter {
     brightness: f32,
     contrast: f32,
     saturation: f32,
+    hue: f32,
 }
 
 impl ColorJitter {
     /// Creates a new `ColorJitter` with specified ranges.
+    /// Matches PyTorch signature: `ColorJitter(brightness, contrast, saturation, hue)`.
     #[must_use]
     pub fn new(brightness: f32, contrast: f32, saturation: f32) -> Self {
         Self {
             brightness: brightness.abs(),
             contrast: contrast.abs(),
             saturation: saturation.abs(),
+            hue: 0.0,
+        }
+    }
+
+    /// Creates a `ColorJitter` with all four parameters including hue.
+    #[must_use]
+    pub fn with_hue(brightness: f32, contrast: f32, saturation: f32, hue: f32) -> Self {
+        Self {
+            brightness: brightness.abs(),
+            contrast: contrast.abs(),
+            saturation: saturation.abs(),
+            hue: hue.abs().min(0.5),
         }
     }
 }

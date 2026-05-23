@@ -284,6 +284,25 @@ impl EarlyStopping {
         self.mode = mode.to_string();
         self
     }
+
+    /// Check if training should stop given the current loss.
+    /// Convenience method that wraps the `Callback::on_epoch_end` logic.
+    pub fn should_stop(&mut self, current_loss: f32) -> bool {
+        let improved = if self.mode == "min" {
+            current_loss < self.best_loss - self.min_delta
+        } else {
+            current_loss > self.best_loss + self.min_delta
+        };
+
+        if improved {
+            self.best_loss = current_loss;
+            self.counter = 0;
+            false
+        } else {
+            self.counter += 1;
+            self.counter >= self.patience
+        }
+    }
 }
 
 impl Callback for EarlyStopping {

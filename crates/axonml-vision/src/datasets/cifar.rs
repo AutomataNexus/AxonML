@@ -305,6 +305,13 @@ pub struct SyntheticCIFAR {
 
 impl SyntheticCIFAR {
     /// Creates a synthetic CIFAR-10 dataset with the specified size.
+    /// Alias for [`cifar10`](Self::cifar10).
+    #[must_use]
+    pub fn new(size: usize) -> Self {
+        Self::cifar10(size)
+    }
+
+    /// Creates a synthetic CIFAR-10 dataset with the specified size.
     #[must_use]
     pub fn cifar10(size: usize) -> Self {
         Self {
