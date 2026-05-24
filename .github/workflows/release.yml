@@ -281,11 +281,17 @@ jobs:
           PRERELEASE=""
           case "$TAG" in *-*) PRERELEASE="--prerelease" ;; esac
 
-          gh release create "$TAG" \
-            --title "AxonML $TAG" \
-            --generate-notes \
-            $PRERELEASE \
-            dist/*
+          if gh release view "$TAG" &>/dev/null; then
+            # SLSA generator created a draft release — upload binaries and publish
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --title "AxonML $TAG" --draft=false $PRERELEASE
+          else
+            gh release create "$TAG" \
+              --title "AxonML $TAG" \
+              --generate-notes \
+              $PRERELEASE \
+              dist/*
+          fi
 
           echo "## Verification" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
