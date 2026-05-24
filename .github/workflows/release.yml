@@ -1,8 +1,5 @@
 name: Release
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 # SLSA Build Level 3 release pipeline.
 #
 # L3 requirements satisfied:
