@@ -49,6 +49,7 @@ jobs:
       - name: Build Jekyll site
         run: cd docs && bundle exec jekyll build --destination ../_site
         env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
           JEKYLL_ENV: production
 
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
