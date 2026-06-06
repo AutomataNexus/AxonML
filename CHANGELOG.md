@@ -13,11 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CPU: parallelized SwiGLU and RMSNorm (including heads/batched variants) CPU fallbacks in the tensor layer — hot paths for every modern LLM FFN and norm layer.
 - CPU: `CpuBackend::apply_rope_split_halves_f32` entry point (for future full parallelization over heads/tokens); tensor CPU rope paths now delegate to it. Improves pure-CPU decode and provides fast/consistent reference forward when training or validating models for Hailo.
 - CPU: batched/bhsd RoPE (and bwds) now parallelized over tokens using par_chunks_mut in CPU fallbacks (outer parallelism for prefill etc.).
-- CPU: routed additional GradFn CPU paths (e.g. CrossEntropyLossBackward) to rayon par_iter_mut instead of sequential for loops.
+- CPU: routed additional GradFn CPU paths (e.g. CrossEntropyLossBackward, MeanDimBackward) to rayon par_iter_mut instead of sequential for loops.
 - CPU: parallel argmax/argmin in CpuBackend via par_iter + reduce.
-- Hailo: pre-allocate Vecs in BundleGraph::new (inputs/outputs/nodes) to reduce CPU reallocs during graph build for large models targeting HEF via NexusFoundry. Parallel CPU math (above) speeds ref execution for calibration/validation.
+- Hailo: pre-allocate Vecs in BundleGraph::new (inputs/outputs/nodes, initializers) to reduce CPU reallocs during graph build for large models targeting HEF via NexusFoundry. Parallel CPU math speeds ref for calibration/validation.
 - Generalized the device-native FAF principle (GPU stay-on-device, CPU be fast+parallel, Hailo export/reference optimal) and reduced cross-device thrashing patterns.
-- Benchmarks: CPU measurement runs (tensor tests exercising rms/rope etc. + profile_util_signature sampler) to verify parallel paths.
+- Benchmarks/measure: CPU runs with autograd/tensor tests + profile_util_signature sampler to verify/quantify parallel gains (e.g. reductions, norms, rope, GradFn).
+- /opt md cleanup: removed/updated obsolete CPU bottleneck descriptions (L82, L138 historical autograd walk, CE roundtrips, GH200 notes, StateDict) now mitigated by FAF/parallel work.
 
 ## [0.6.4] - 2026-05-23
 
