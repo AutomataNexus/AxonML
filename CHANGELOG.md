@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance (CPU + Hailo silicon)
+
+- CPU: added rayon-parallel reductions (sum, mean, max, min, prod) in `CpuBackend` (above 4K elements threshold) for serious pure-CPU performance in inference and training fallbacks.
+- CPU: parallelized SwiGLU and RMSNorm (including heads/batched variants) CPU fallbacks in the tensor layer — hot paths for every modern LLM FFN and norm layer.
+- CPU: `CpuBackend::apply_rope_split_halves_f32` entry point (for future full parallelization over heads/tokens); tensor CPU rope paths now delegate to it. Improves pure-CPU decode and provides fast/consistent reference forward when training or validating models for Hailo.
+- Hailo: the above CPU reference path improvements directly benefit workflows that use AxonML to produce models for Hailo (via `axonml-onnx` export or `axonml-serialize::BundleGraph` direct to NexusFoundry). Faster CPU execution speeds up training loops, calibration data generation, and "CPU golden vs HEF" validation on edge targets (NexusEdge Hailo fleet etc.). BundleGraph remains the optimized path for low-overhead HEF compilation.
+- Generalized the device-native FAF principle (GPU stay-on-device, CPU be fast+parallel, Hailo export/reference optimal) and reduced cross-device thrashing patterns.
+
 ## [0.6.4] - 2026-05-23
 
 ### HVAC domain models

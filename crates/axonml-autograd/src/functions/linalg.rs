@@ -102,20 +102,24 @@ impl GradientFunction for MatMulBackward {
         };
 
         // Ensure all operands are on the same device for matmul.
-        // If ANY tensor is on GPU, move all to GPU. This handles cases where
-        // the forward pass saved GPU tensors but the grad came back on CPU
-        // (or vice versa).
+        // Strong preference for GPU if the *saved* forward tensors were on GPU.
+        // This is part of the FAF (Fully Accelerated Forward/Backward) contract:
+        // once a forward was GPU-resident, the corresponding backward math
+        // (the two grad matmuls) must also run on GPU with no host roundtrip
+        // for the large tensors.
+        let saved_was_gpu = self.saved_lhs.device().is_gpu() || self.saved_rhs.device().is_gpu();
         let go_dev = grad_output.device();
         let rt_dev = rhs_t.device();
         let lt_dev = lhs_t.device();
-        let target = if go_dev.is_gpu() {
-            go_dev
-        } else if rt_dev.is_gpu() {
-            rt_dev
-        } else if lt_dev.is_gpu() {
-            lt_dev
+
+        let target = if saved_was_gpu || go_dev.is_gpu() || rt_dev.is_gpu() || lt_dev.is_gpu() {
+            // Prefer any GPU device present (usually Cuda(0))
+            if go_dev.is_gpu() { go_dev }
+            else if rt_dev.is_gpu() { rt_dev }
+            else if lt_dev.is_gpu() { lt_dev }
+            else { self.saved_lhs.device() }
         } else {
-            go_dev // all CPU
+            go_dev // pure CPU
         };
 
         let go = if grad_output.device() == target {
@@ -150,6 +154,13 @@ impl GradientFunction for MatMulBackward {
         // by summing over the extra leading (batch) dimensions.
         let grad_lhs = reduce_matmul_grad(&grad_lhs_raw, &self.saved_lhs);
         let grad_rhs = reduce_matmul_grad(&grad_rhs_raw, &self.saved_rhs);
+
+        // FAF guard (debug): if we were supposed to stay on GPU, the outputs should be too.
+        #[cfg(debug_assertions)]
+        if saved_was_gpu {
+            debug_assert!(grad_lhs.device().is_gpu(), "MatMulBackward grad_lhs left GPU");
+            debug_assert!(grad_rhs.device().is_gpu(), "MatMulBackward grad_rhs left GPU");
+        }
 
         vec![Some(grad_lhs), Some(grad_rhs)]
     }

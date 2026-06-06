@@ -37,6 +37,7 @@ rand.workspace = true
 rand_distr.workspace = true
 smallvec.workspace = true
 half.workspace = true
+rayon.workspace = true
 cudarc = { workspace = true, optional = true }
 
 [dev-dependencies]

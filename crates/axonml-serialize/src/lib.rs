@@ -162,10 +162,20 @@ pub fn load_model<M: Module, P: AsRef<Path>>(model: &M, path: P) -> Result<usize
     }
 
     // If named_parameters returned empty (model doesn't implement it),
-    // fall back to positional parameter matching
+    // fall back to positional parameter matching.
+    // Sort any "param_N" keys by numeric index so the zip order matches the
+    // deterministic order of parameters() at save time (HashMap iteration is
+    // not insertion-order stable across all Rust versions / hash seeds).
     if named_params.is_empty() {
         let params = model.parameters();
-        let entries: Vec<_> = state_dict.entries().collect();
+        let mut entries: Vec<_> = state_dict.entries().collect();
+        entries.sort_by_key(|(name, _)| {
+            if let Some(rest) = name.strip_prefix("param_") {
+                rest.parse::<usize>().unwrap_or(usize::MAX)
+            } else {
+                usize::MAX
+            }
+        });
         for ((_name, entry), param) in entries.iter().zip(params.iter()) {
             if let Ok(tensor) = entry.data.to_tensor() {
                 if tensor.shape() == param.data().shape() {
