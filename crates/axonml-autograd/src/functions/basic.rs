@@ -1005,23 +1005,60 @@ fn reduce_grad_for_broadcast(grad: &Tensor<f32>, target_shape: &[usize]) -> Tens
     let mut padded_target = vec![1usize; pad];
     padded_target.extend_from_slice(target_shape);
 
-    // General case: pad target_shape, sum over broadcast dims
-    let pad = grad_ndim.saturating_sub(target_ndim);
-    let mut padded_target = vec![1usize; pad];
-    padded_target.extend_from_slice(target_shape);
-
     if !grad.device().is_gpu() {
-        // CPU: use fast contiguous data + the (now parallel) iterative sum_dim.
-        // The leading case (hot path for bias) has a direct par reduction above.
-        // General broadcast (rarer) benefits from parallel sum_dim in CpuBackend; ndim is small so the control loop is negligible.
-        // To keep a "direct" flavor for large grads, we materialize once with fast path and let the sums do their par work.
-        let mut res = grad.clone();  // clone is cheap if we later optimize tensor clone; sum_dim will use fast paths internally
-        for d in 0..grad_ndim {
-            if padded_target[d] == 1 && res.shape()[d] > 1 {
-                res = res.sum_dim(d as i32, true);
+        // Direct single-pass parallel reduction for CPU general case (complete the broadcast bwd cleanup; matches the leading hot-path style).
+        // Par over grad elements; each maps to its collapsed target bin (reduce dims are ignored in the target flat calc) and accumulates.
+        // Uses thread-local vecs + reduce (lock-free, like VarDim means pass).
+        let g_data: Vec<f32> = grad.to_vec();
+        let out_numel = target_numel;
+        if grad_numel >= 4096 {
+            use rayon::prelude::*;
+            // Precompute target strides for the kept dims.
+            let mut t_strides = vec![1usize; target_ndim];
+            if target_ndim > 0 {
+                for i in (0..target_ndim-1).rev() {
+                    t_strides[i] = t_strides[i+1] * target_shape[i+1];
+                }
             }
+            let merged = (0..grad_numel).into_par_iter().fold(
+                || vec![0.0f32; out_numel],
+                |mut local, g_flat| {
+                    // Decompose g_flat -> coords
+                    let mut coords = vec![0usize; grad_ndim];
+                    let mut rem = g_flat;
+                    for d in (0..grad_ndim).rev() {
+                        coords[d] = rem % grad_shape[d];
+                        rem /= grad_shape[d];
+                    }
+                    // t_flat only from kept dims (padded_target[d]==1 means this is a reduce dim -> do not add its coord*stride)
+                    let mut t_f = 0usize;
+                    let mut t_d = 0;
+                    for d in 0..grad_ndim {
+                        if padded_target[d] != 1 {
+                            t_f += coords[d] * t_strides[t_d];
+                            t_d += 1;
+                        }
+                    }
+                    local[t_f] += g_data[g_flat];
+                    local
+                }
+            ).reduce(
+                || vec![0.0f32; out_numel],
+                |mut a, b| {
+                    for i in 0..out_numel { a[i] += b[i]; }
+                    a
+                }
+            );
+            return Tensor::from_vec(merged, target_shape).expect("reduce_grad general cpu direct par");
+        } else {
+            let mut res = grad.clone();
+            for d in 0..grad_ndim {
+                if padded_target[d] == 1 && res.shape()[d] > 1 {
+                    res = res.sum_dim(d as i32, true);
+                }
+            }
+            return res;
         }
-        return res;
     }
 
     let mut result = grad.clone();
