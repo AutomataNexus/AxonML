@@ -129,9 +129,10 @@ impl StateDict {
         let named = module.named_parameters();
         if named.is_empty() {
             // Fallback for modules that don't implement named_parameters.
-            // Always use indexed keys (param_0, param_1, ...) to avoid HashMap
-            // collisions when multiple sub-modules share parameter names like
-            // "weight" and "bias".
+            // Use indexed keys (param_0, param_1, ...) to avoid HashMap collisions
+            // on duplicate leaf names ("weight"/"bias" across submodules).
+            // Load side (load_model) sorts by numeric suffix before zipping so
+            // restore order matches the parameters() traversal used here.
             for (i, param) in module.parameters().iter().enumerate() {
                 let name = format!("param_{i}");
                 let tensor_data = TensorData::from_tensor(&param.data());

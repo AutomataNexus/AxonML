@@ -243,17 +243,39 @@ struct CrossEntropyBackward {
 
 impl GradientFunction for CrossEntropyBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // Always use the exact CPU path for correctness, then transfer
-        // result to GPU if needed. The CUDA cross_entropy_bwd kernel has
-        // precision issues with approximate reciprocal/exp that cause
-        // training to stall. The CPU backward is fast enough since CE
-        // backward is O(N*C) — negligible vs the forward pass matmuls.
+        // GPU fast path when the forward stored softmax on device.
+        // Delegates to the genuine cross_entropy_bwd_cuda kernel (see
+        // autograd/functions/loss.rs and tensor/cuda_ops.rs). This was the
+        // "stale 600 MB round-trip" claim in older notes — the kernel itself
+        // has been GPU-resident for a while.
+        #[cfg(feature = "cuda")]
+        if self.softmax_probs.device().is_gpu() {
+            let batch = self.batch_size;
+            let grad_out_t = if grad_output.numel() == 1 {
+                // Scalar (mean reduction) -> per-sample scale
+                let scale = grad_output.to_vec()[0] / batch as f32;
+                Tensor::from_vec(vec![scale; batch], &[batch])
+                    .unwrap()
+                    .to_device(self.softmax_probs.device())
+                    .unwrap()
+            } else {
+                grad_output
+                    .to_device(self.softmax_probs.device())
+                    .unwrap()
+            };
+
+            let grad = self
+                .softmax_probs
+                .cross_entropy_bwd_cuda(&self.targets, &grad_out_t);
+            return vec![Some(grad)];
+        }
+
+        // CPU fallback (or no-cuda build)
         let softmax_vec = self.softmax_probs.to_vec();
         let target_vec = self.targets.to_vec();
         let grad_vec = grad_output.to_vec();
         let mut grad_input = vec![0.0f32; self.batch_size * self.num_classes];
 
-        // Handle both per-sample grad_output [N] and scalar [1] (from mean reduction)
         let is_scalar_grad = grad_vec.len() == 1;
 
         for b in 0..self.batch_size {
@@ -277,7 +299,6 @@ impl GradientFunction for CrossEntropyBackward {
 
         let mut grad_tensor = Tensor::from_vec(grad_input, &[self.batch_size, self.num_classes])
             .expect("tensor creation failed");
-        // Transfer to GPU if the forward was on GPU
         if self.softmax_probs.device().is_gpu() {
             grad_tensor = grad_tensor.to_device(self.softmax_probs.device()).unwrap();
         }

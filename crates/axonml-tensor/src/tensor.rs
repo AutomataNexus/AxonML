@@ -703,7 +703,14 @@ impl<T: Scalar> Tensor<T> {
 
         #[cfg(feature = "cuda")]
         if self.storage.is_gpu() || device.is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            if !is_f32::<T>() {
+                return Err(Error::invalid_operation(format!(
+                    "Tensor<{}>.to_device(GPU) is not supported (GPU tensors are f32-only). \
+                     Keep token IDs / integer tensors on CPU; Embedding::lookup and the autograd \
+                     cross-entropy path handle the CPU-index → GPU-weight crossing internally.",
+                    std::any::type_name::<T>()
+                )));
+            }
             let self_f32 = unsafe { gpu_ref(self) };
             let result = self_f32.to_device_f32(device)?;
             return Ok(unsafe { gpu_into(result) });
@@ -1221,22 +1228,47 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe { gpu_into(gpu_ref(self).rms_norm_cuda(gpu_ref(weight), eps)) };
         }
-        // CPU fallback — kept correct, not fast (decode-only paths use GPU).
+        // CPU fallback — parallelized for serious pure-CPU / Hailo-host performance.
+        // (decode on big GPU should still prefer the CUDA path)
         let x = self.to_vec();
         let w = weight.to_vec();
         assert_eq!(x.len(), w.len(), "rms_norm: weight length must match input");
         let n = x.len();
-        // x² accumulator in f64 to avoid catastrophic cancellation on large hiddens.
-        let mut sum_sq = 0.0f64;
-        for v in &x {
-            let f: f64 = v.to_f32().unwrap_or(0.0).into();
-            sum_sq += f * f;
-        }
+
+        // Parallel sum of squares (f64 for numerical stability on large hidden dims)
+        let sum_sq = if n >= 4096 {
+            use rayon::prelude::*;
+            x.par_iter()
+                .map(|v| {
+                    let f: f64 = v.to_f32().unwrap_or(0.0).into();
+                    f * f
+                })
+                .reduce(|| 0.0, |a, b| a + b)
+        } else {
+            let mut s = 0.0f64;
+            for v in &x {
+                let f: f64 = v.to_f32().unwrap_or(0.0).into();
+                s += f * f;
+            }
+            s
+        };
+
         let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-        let mut out: Vec<T> = Vec::with_capacity(n);
-        for i in 0..n {
-            let v = x[i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
-            out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+
+        let mut out: Vec<T> = vec![T::zero(); n];
+        if n >= 4096 {
+            use rayon::prelude::*;
+            out.par_iter_mut()
+                .zip(x.par_iter().zip(w.par_iter()))
+                .for_each(|(o, (xi, wi))| {
+                    let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
+                    *o = num_traits::cast(v).unwrap_or_else(T::zero);
+                });
+        } else {
+            for i in 0..n {
+                let v = x[i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
+            }
         }
         Self::from_vec(out, &self.shape).expect("rms_norm: build output tensor")
     }
@@ -1295,19 +1327,29 @@ impl<T: Float> Tensor<T> {
                 gpu_into(gpu_ref(self).rope_split_halves_cuda(n_heads, head_dim, theta, pos))
             };
         }
-        // CPU fallback.
+        // CPU fallback - delegates to CpuBackend (will be parallelized for large cases;
+        // currently efficient sequential over heads). Important for pure CPU use and
+        // as reference forward when AxonML models target Hailo via NexusFoundry.
         let mut x = self.to_vec();
-        let half = head_dim / 2;
-        for h in 0..n_heads {
-            for d in 0..half {
-                let base = h * head_dim + d;
-                let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                let angle = pos as f32 * theta.powf(exponent);
-                let (s, c) = angle.sin_cos();
-                let a = x[base].to_f32().unwrap_or(0.0);
-                let b = x[base + half].to_f32().unwrap_or(0.0);
-                x[base] = num_traits::cast(c * a - s * b).unwrap_or_else(T::zero);
-                x[base + half] = num_traits::cast(s * a + c * b).unwrap_or_else(T::zero);
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
+            // SAFETY: checked + identical repr for f32 slice.
+            let x_f32: &mut [f32] = unsafe {
+                std::slice::from_raw_parts_mut(x.as_mut_ptr() as *mut f32, x.len())
+            };
+            CpuBackend::apply_rope_split_halves_f32(x_f32, n_heads, head_dim, theta, pos);
+        } else {
+            let half = head_dim / 2;
+            for h in 0..n_heads {
+                for d in 0..half {
+                    let base = h * head_dim + d;
+                    let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                    let angle = pos as f32 * theta.powf(exponent);
+                    let (s, c) = angle.sin_cos();
+                    let a = x[base].to_f32().unwrap_or(0.0);
+                    let b = x[base + half].to_f32().unwrap_or(0.0);
+                    x[base] = num_traits::cast(c * a - s * b).unwrap_or_else(T::zero);
+                    x[base + half] = num_traits::cast(s * a + c * b).unwrap_or_else(T::zero);
+                }
             }
         }
         Self::from_vec(x, &self.shape).expect("apply_rope: build output tensor")
@@ -1885,14 +1927,26 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe { gpu_into(gpu_ref(self).swiglu_cuda(gpu_ref(up))) };
         }
-        // CPU fallback: silu(gate) * up.
+        // CPU fallback: silu(gate) * up. Parallelized for serious CPU performance.
         let g = self.to_vec();
         let u = up.to_vec();
-        let mut out: Vec<T> = Vec::with_capacity(g.len());
-        for i in 0..g.len() {
-            let gi = g[i].to_f32().unwrap_or(0.0);
-            let silu = gi / (1.0 + (-gi).exp());
-            out.push(num_traits::cast(silu * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero));
+        let mut out: Vec<T> = vec![T::zero(); g.len()];
+
+        if g.len() >= 4096 {
+            use rayon::prelude::*;
+            out.par_iter_mut()
+                .zip(g.par_iter().zip(u.par_iter()))
+                .for_each(|(o, (gi, ui))| {
+                    let g32 = gi.to_f32().unwrap_or(0.0);
+                    let silu = g32 / (1.0 + (-g32).exp());
+                    *o = num_traits::cast(silu * ui.to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero);
+                });
+        } else {
+            for i in 0..g.len() {
+                let gi = g[i].to_f32().unwrap_or(0.0);
+                let silu = gi / (1.0 + (-gi).exp());
+                out[i] = num_traits::cast(silu * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero);
+            }
         }
         Self::from_vec(out, &self.shape).expect("swiglu: build output tensor")
     }
@@ -3069,5 +3123,22 @@ mod tests {
         assert!(s.is_scalar());
         assert_eq!(s.numel(), 1);
         assert_eq!(s.item().unwrap(), 42.0);
+    }
+
+    // Regression test for L15 footgun hardening (deficiency #5):
+    // Tensor<u32>.to_device(GPU) must return a clear Error (was assert panic).
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_u32_to_gpu_is_error_not_panic() {
+        let ids: Tensor<u32> = Tensor::from_vec(vec![1u32, 2, 3], &[3]).unwrap();
+        let dev = Device::Cuda(0);
+        let res = ids.to_device(dev);
+        assert!(res.is_err());
+        let msg = res.unwrap_err().to_string();
+        assert!(
+            msg.contains("GPU tensors are f32-only") || msg.contains("not supported"),
+            "expected helpful error, got: {}",
+            msg
+        );
     }
 }
