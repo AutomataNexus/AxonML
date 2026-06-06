@@ -525,23 +525,45 @@ impl GradientFunction for MeanDimBackward {
             }
         }
 
-        for flat_idx in 0..numel {
-            let mut remaining = flat_idx;
-            let mut out_flat = 0usize;
-            let mut out_d = 0;
-            for d in 0..ndim {
-                let coord = remaining / strides[d];
-                remaining %= strides[d];
-                if d == self.dim {
-                    if self.keepdim {
+        if numel >= 4096 {
+            use rayon::prelude::*;
+            grad_input.par_iter_mut().enumerate().for_each(|(flat_idx, gi)| {
+                let mut remaining = flat_idx;
+                let mut out_flat = 0usize;
+                let mut out_d = 0;
+                for d in 0..ndim {
+                    let coord = remaining / strides[d];
+                    remaining %= strides[d];
+                    if d == self.dim {
+                        if self.keepdim {
+                            out_d += 1;
+                        }
+                    } else {
+                        out_flat += coord * out_strides[out_d];
                         out_d += 1;
                     }
-                } else {
-                    out_flat += coord * out_strides[out_d];
-                    out_d += 1;
                 }
+                *gi = grad_vec[out_flat] * scale;
+            });
+        } else {
+            for flat_idx in 0..numel {
+                let mut remaining = flat_idx;
+                let mut out_flat = 0usize;
+                let mut out_d = 0;
+                for d in 0..ndim {
+                    let coord = remaining / strides[d];
+                    remaining %= strides[d];
+                    if d == self.dim {
+                        if self.keepdim {
+                            out_d += 1;
+                        }
+                    } else {
+                        out_flat += coord * out_strides[out_d];
+                        out_d += 1;
+                    }
+                }
+                grad_input[flat_idx] = grad_vec[out_flat] * scale;
             }
-            grad_input[flat_idx] = grad_vec[out_flat] * scale;
         }
 
         let grad = Tensor::from_vec(grad_input, &self.input_shape)

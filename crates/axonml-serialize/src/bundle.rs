@@ -223,7 +223,7 @@ impl BundleGraph {
             inputs: Vec::with_capacity(4),
             outputs: Vec::with_capacity(4),
             nodes: Vec::with_capacity(64),
-            initializers: HashMap::new(),
+            initializers: HashMap::with_capacity(32),
         }
     }
 
