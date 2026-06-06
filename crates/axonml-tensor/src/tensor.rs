@@ -965,7 +965,11 @@ impl<T: Numeric> Tensor<T> {
 
         let mut dim_offset = 0;
         for t in tensors {
-            let t_data = t.contiguous().to_vec();
+            let ts = t.storage.as_slice();
+            let tf = t.is_contiguous() && t.offset == 0;
+            let tslice: &[T] = if tf { &ts[..t.numel()] } else { &[] };
+            let to: Option<Vec<T>> = if tf { None } else { Some(t.contiguous().to_vec()) };
+            let t_data: &[T] = to.as_deref().unwrap_or(tslice);
             let t_dim_size = t.shape[dim];
             for outer in 0..outer_size {
                 for d in 0..t_dim_size {
