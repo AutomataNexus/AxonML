@@ -825,8 +825,12 @@ impl<T: Numeric> Tensor<T> {
             return unsafe { gpu_into(t) };
         }
 
-        let data = self.to_vec();
-        let result = CpuBackend::sum(&data);
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let result = CpuBackend::sum(data);
         Self::scalar(result)
     }
 
@@ -835,8 +839,12 @@ impl<T: Numeric> Tensor<T> {
     /// GPU: D2H round-trip (no CUDA prod reduction kernel yet).
     #[must_use]
     pub fn prod(&self) -> Self {
-        let data = self.to_vec();
-        let result = CpuBackend::prod(&data);
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let result = CpuBackend::prod(data);
         let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
@@ -985,8 +993,12 @@ impl<T: Float> Tensor<T> {
             return Ok(s.mul_scalar(T::from(1.0 / n as f64).unwrap_or(T::zero())));
         }
 
-        let data = self.to_vec();
-        let result = CpuBackend::mean(&data).expect("mean on non-empty tensor");
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let result = CpuBackend::mean(data).expect("mean on non-empty tensor");
         Ok(Self::scalar(result))
     }
 
