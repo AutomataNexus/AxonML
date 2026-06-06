@@ -1850,23 +1850,56 @@ impl<T: Float> Tensor<T> {
                 gpu_into(gpu_ref(self).rms_norm_batched_cuda(gpu_ref(weight), m, n, eps))
             };
         }
-        // CPU fallback: independent rms_norm over each of m rows.
-        let x = self.to_vec();
-        let w = weight.to_vec();
+        // CPU fallback: independent rms_norm over each of m rows. Fast + par over t.
+        let xs = self.storage.as_slice();
+        let xf = self.is_contiguous() && self.offset == 0;
+        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
+        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
+        let x: &[T] = xo.as_deref().unwrap_or(xslice);
+
+        let ws = weight.storage.as_slice();
+        let wf = weight.is_contiguous() && weight.offset == 0;
+        let wslice: &[T] = if wf { &ws[..weight.numel()] } else { &[] };
+        let wo: Option<Vec<T>> = if wf { None } else { Some(weight.to_vec()) };
+        let w: &[T] = wo.as_deref().unwrap_or(wslice);
+
         assert_eq!(x.len(), m * n, "rms_norm_batched: expected m*n");
         assert_eq!(w.len(), n, "rms_norm_batched: weight len mismatch");
-        let mut out: Vec<T> = Vec::with_capacity(m * n);
-        for t in 0..m {
-            let base = t * n;
-            let mut sum_sq = 0.0f64;
-            for i in 0..n {
-                let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
-                sum_sq += f * f;
-            }
-            let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-            for i in 0..n {
-                let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
-                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+        let mut out: Vec<T> = vec![T::zero(); m * n];
+        if m >= 2 || (m * n) >= 4096 {
+            use rayon::prelude::*;
+            let out_ptr = out.as_mut_ptr() as usize;
+            let x_ptr = x.as_ptr() as usize;
+            let w_ptr = w.as_ptr() as usize;
+            (0..m).into_par_iter().for_each(|t| {
+                let out_ptr = out_ptr as *mut T;
+                let x_ptr = x_ptr as *const T;
+                let w_ptr = w_ptr as *const T;
+                let base = t * n;
+                let mut sum_sq = 0.0f64;
+                for i in 0..n {
+                    let f: f64 = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0).into();
+                    sum_sq += f * f;
+                }
+                let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+                for i in 0..n {
+                    let v = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0) * scale * unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
+                    unsafe { *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero); }
+                }
+            });
+        } else {
+            for t in 0..m {
+                let base = t * n;
+                let mut sum_sq = 0.0f64;
+                for i in 0..n {
+                    let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
+                    sum_sq += f * f;
+                }
+                let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+                for i in 0..n {
+                    let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                    out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
+                }
             }
         }
         Self::from_vec(out, &[m, n]).expect("rms_norm_batched: build output")
