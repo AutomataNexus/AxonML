@@ -961,6 +961,100 @@ impl CpuBackend {
     }
 
     // Additional batched / bhsd / backward variants can be added similarly for full coverage.
+
+    /// Batched split-halves RoPE for [m, n_heads * head_dim].
+    /// Parallel over m tokens (outer) * heads (inner).
+    pub fn apply_rope_split_halves_batched_f32(
+        data: &mut [f32],
+        m: usize,
+        n_heads: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) {
+        let half = head_dim / 2;
+        let row_stride = n_heads * head_dim;
+        for t in 0..m {
+            let pos = pos_start + t;
+            let base_pos = t * row_stride;
+            for h in 0..n_heads {
+                for d in 0..half {
+                    let idx = base_pos + h * head_dim + d;
+                    let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                    let angle = pos as f32 * theta.powf(exponent);
+                    let (s, c) = angle.sin_cos();
+                    let a = data[idx];
+                    let b_val = data[idx + half];
+                    data[idx] = c * a - s * b_val;
+                    data[idx + half] = s * a + c * b_val;
+                }
+            }
+        }
+    }
+
+    /// Head-major bhsd RoPE (batch, heads, seq, head_dim style).
+    pub fn apply_rope_split_halves_bhsd_f32(
+        data: &mut [f32],
+        bs: usize,
+        n_heads: usize,
+        seq: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) {
+        let half = head_dim / 2;
+        let head_stride = seq * head_dim;
+        let batch_stride = n_heads * head_stride;
+        for b in 0..bs {
+            for h in 0..n_heads {
+                for t in 0..seq {
+                    let pos = pos_start + t;
+                    for d in 0..half {
+                        let idx = b * batch_stride + h * head_stride + t * head_dim + d;
+                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                        let angle = pos as f32 * theta.powf(exponent);
+                        let (s, c) = angle.sin_cos();
+                        let a = data[idx];
+                        let bv = data[idx + half];
+                        data[idx] = c * a - s * bv;
+                        data[idx + half] = s * a + c * bv;
+                    }
+                }
+            }
+        }
+    }
+
+    /// bhsd RoPE backward (inverse) parallel.
+    pub fn rope_split_halves_bhsd_bwd_f32(
+        grad: &mut [f32],
+        bs: usize,
+        n_heads: usize,
+        seq: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) {
+        let half = head_dim / 2;
+        let head_stride = seq * head_dim;
+        let batch_stride = n_heads * head_stride;
+        for b in 0..bs {
+            for h in 0..n_heads {
+                for t in 0..seq {
+                    let pos = pos_start + t;
+                    for d in 0..half {
+                        let idx = b * batch_stride + h * head_stride + t * head_dim + d;
+                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                        let angle = pos as f32 * theta.powf(exponent);
+                        let (s, c) = angle.sin_cos();
+                        let dy1 = grad[idx];
+                        let dy2 = grad[idx + half];
+                        grad[idx] = c * dy1 + s * dy2;
+                        grad[idx + half] = -s * dy1 + c * dy2;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // =============================================================================
