@@ -1704,22 +1704,21 @@ impl<T: Float> Tensor<T> {
             let x_f32: &mut [f32] = unsafe {
                 std::slice::from_raw_parts_mut(x.as_mut_ptr() as *mut f32, x.len())
             };
-            for t in 0..m {
+            x_f32.par_chunks_mut(row_stride).enumerate().for_each(|(t, chunk)| {
                 let pos = pos_start + t;
-                let base_pos = t * row_stride;
                 for h in 0..n_heads {
                     for d in 0..half {
-                        let idx = base_pos + h * head_dim + d;
+                        let base = h * head_dim + d;
                         let exponent = -(2.0f32 * d as f32) / head_dim as f32;
                         let angle = pos as f32 * theta.powf(exponent);
                         let (s, c) = angle.sin_cos();
-                        let a = x_f32[idx];
-                        let b_val = x_f32[idx + half];
-                        x_f32[idx] = c * a - s * b_val;
-                        x_f32[idx + half] = s * a + c * b_val;
+                        let a = chunk[base];
+                        let b_val = chunk[base + half];
+                        chunk[base] = c * a - s * b_val;
+                        chunk[base + half] = s * a + c * b_val;
                     }
                 }
-            }
+            });
         } else {
             for t in 0..m {
                 let pos = pos_start + t;
@@ -1773,29 +1772,26 @@ impl<T: Float> Tensor<T> {
         let half = head_dim / 2;
         if out.len() >= 4096 && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
             use rayon::prelude::*;
-            // Sequential for layout; see reductions for parallel examples.
+            // Parallel over tokens using par_chunks_mut.
             let out_f32: &mut [f32] = unsafe {
                 std::slice::from_raw_parts_mut(out.as_mut_ptr() as *mut f32, out.len())
             };
-            let head_stride = seq * head_dim;
-            let batch_stride = n_heads * head_stride;
-            for b in 0..bs {
-                for h in 0..n_heads {
-                    for t in 0..seq {
-                        let pos = pos_start + t;
-                        for d in 0..half {
-                            let idx = b * batch_stride + h * head_stride + t * head_dim + d;
-                            let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                            let angle = pos as f32 * theta.powf(exponent);
-                            let (s, c) = angle.sin_cos();
-                            let dy1 = out_f32[idx];
-                            let dy2 = out_f32[idx + half];
-                            out_f32[idx] = c * dy1 + s * dy2;
-                            out_f32[idx + half] = -s * dy1 + c * dy2;
-                        }
-                    }
+            let tokens = bs * n_heads * seq;
+            out_f32.par_chunks_mut(head_dim).enumerate().for_each(|(tok, chunk)| {
+                let b = tok / (n_heads * seq);
+                let h = (tok / seq) % n_heads;
+                let t = tok % seq;
+                let pos = pos_start + t;
+                for d in 0..half {
+                    let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                    let angle = pos as f32 * theta.powf(exponent);
+                    let (s, c) = angle.sin_cos();
+                    let dy1 = chunk[d];
+                    let dy2 = chunk[d + half];
+                    chunk[d] = c * dy1 + s * dy2;
+                    chunk[d + half] = -s * dy1 + c * dy2;
                 }
-            }
+            });
         } else {
             for b in 0..bs {
                 for h in 0..n_heads {
@@ -1892,29 +1888,26 @@ impl<T: Float> Tensor<T> {
         let half = head_dim / 2;
         if x.len() >= 4096 && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
             use rayon::prelude::*;
-            // Sequential for complex layout; reductions etc have parallel.
+            // Parallel over tokens (b*h*t) using par_chunks_mut on head_dim chunks.
             let x_f32: &mut [f32] = unsafe {
                 std::slice::from_raw_parts_mut(x.as_mut_ptr() as *mut f32, x.len())
             };
-            let head_stride = seq * head_dim;
-            let batch_stride = n_heads * head_stride;
-            for b in 0..bs {
-                for h in 0..n_heads {
-                    for t in 0..seq {
-                        let pos = pos_start + t;
-                        for d in 0..half {
-                            let idx = b * batch_stride + h * head_stride + t * head_dim + d;
-                            let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                            let angle = pos as f32 * theta.powf(exponent);
-                            let (s, c) = angle.sin_cos();
-                            let a = x_f32[idx];
-                            let bv = x_f32[idx + half];
-                            x_f32[idx] = c * a - s * bv;
-                            x_f32[idx + half] = s * a + c * bv;
-                        }
-                    }
+            let tokens = bs * n_heads * seq;
+            x_f32.par_chunks_mut(head_dim).enumerate().for_each(|(tok, chunk)| {
+                let b = tok / (n_heads * seq);
+                let h = (tok / seq) % n_heads;
+                let t = tok % seq;
+                let pos = pos_start + t;
+                for d in 0..half {
+                    let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                    let angle = pos as f32 * theta.powf(exponent);
+                    let (s, c) = angle.sin_cos();
+                    let a = chunk[d];
+                    let bv = chunk[d + half];
+                    chunk[d] = c * a - s * bv;
+                    chunk[d + half] = s * a + c * bv;
                 }
-            }
+            });
         } else {
             let half = head_dim / 2;
             for b in 0..bs {
