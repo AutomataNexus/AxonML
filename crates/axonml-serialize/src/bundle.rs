@@ -216,11 +216,13 @@ pub struct BundleGraph {
 
 impl BundleGraph {
     /// Create an empty graph (no I/O, no nodes, no initializers).
+    /// Pre-allocates for typical model sizes to reduce CPU reallocs during
+    /// graph construction for large Hailo-targeted exports (via NexusFoundry).
     pub fn new() -> Self {
         Self {
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            nodes: Vec::new(),
+            inputs: Vec::with_capacity(4),
+            outputs: Vec::with_capacity(4),
+            nodes: Vec::with_capacity(64),
             initializers: HashMap::new(),
         }
     }

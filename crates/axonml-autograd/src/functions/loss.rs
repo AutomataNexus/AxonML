@@ -204,7 +204,8 @@ impl GradientFunction for CrossEntropyLossBackward {
             return vec![Some(grad)];
         }
 
-        // CPU fallback
+        // CPU fallback - parallelized with rayon over the (batch, class) elements.
+        // Routes the grad computation to parallel CPU path (part of FAF for CPU).
         let target_data = self.saved_target.to_vec();
         let scale = match self.reduction {
             Reduction::Mean => {
@@ -221,13 +222,14 @@ impl GradientFunction for CrossEntropyLossBackward {
             Reduction::None => 1.0,
         };
         let mut data = self.saved_softmax.to_vec();
-        for i in 0..batch_size {
-            let tc = target_data[i] as usize;
-            for c in 0..num_classes {
-                let idx = i * num_classes + c;
-                data[idx] = (data[idx] - if c == tc { 1.0 } else { 0.0 }) * scale;
-            }
-        }
+        use rayon::prelude::*;
+        data.par_iter_mut().enumerate().for_each(|(i, val)| {
+            let b = i / num_classes;
+            let c = i % num_classes;
+            let tc = target_data[b] as usize;
+            let sub = if c == tc { 1.0 } else { 0.0 };
+            *val = (*val - sub) * scale;
+        });
         vec![Some(
             Tensor::from_vec(data, self.saved_softmax.shape()).unwrap(),
         )]

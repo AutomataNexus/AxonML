@@ -498,37 +498,56 @@ impl CpuBackend {
     }
 
     /// Finds the index of the maximum element.
-    pub fn argmax<T: Numeric>(a: &[T]) -> Option<usize> {
+    /// Parallel version for large arrays using rayon reduce.
+    pub fn argmax<T: Numeric + Sync + Send>(a: &[T]) -> Option<usize> {
         if a.is_empty() {
             return None;
         }
-
-        let mut max_idx = 0;
-        let mut max_val = a[0];
-        for (i, &val) in a.iter().enumerate().skip(1) {
-            if val > max_val {
-                max_val = val;
-                max_idx = i;
+        if a.len() >= PARALLEL_THRESHOLD {
+            Some(
+                a.par_iter()
+                    .enumerate()
+                    .map(|(i, v)| (v, i))
+                    .reduce(|| (&a[0], 0), |x, y| if y.0 > x.0 { y } else { x })
+                    .1,
+            )
+        } else {
+            let mut max_idx = 0;
+            let mut max_val = a[0];
+            for (i, &val) in a.iter().enumerate().skip(1) {
+                if val > max_val {
+                    max_val = val;
+                    max_idx = i;
+                }
             }
+            Some(max_idx)
         }
-        Some(max_idx)
     }
 
     /// Finds the index of the minimum element.
-    pub fn argmin<T: Numeric>(a: &[T]) -> Option<usize> {
+    pub fn argmin<T: Numeric + Sync + Send>(a: &[T]) -> Option<usize> {
         if a.is_empty() {
             return None;
         }
-
-        let mut min_idx = 0;
-        let mut min_val = a[0];
-        for (i, &val) in a.iter().enumerate().skip(1) {
-            if val < min_val {
-                min_val = val;
-                min_idx = i;
+        if a.len() >= PARALLEL_THRESHOLD {
+            Some(
+                a.par_iter()
+                    .enumerate()
+                    .map(|(i, v)| (v, i))
+                    .reduce(|| (&a[0], 0), |x, y| if y.0 < x.0 { y } else { x })
+                    .1,
+            )
+        } else {
+            let mut min_idx = 0;
+            let mut min_val = a[0];
+            for (i, &val) in a.iter().enumerate().skip(1) {
+                if val < min_val {
+                    min_val = val;
+                    min_idx = i;
+                }
             }
+            Some(min_idx)
         }
-        Some(min_idx)
     }
 }
 
