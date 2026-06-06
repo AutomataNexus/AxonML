@@ -1005,6 +1005,25 @@ fn reduce_grad_for_broadcast(grad: &Tensor<f32>, target_shape: &[usize]) -> Tens
     let mut padded_target = vec![1usize; pad];
     padded_target.extend_from_slice(target_shape);
 
+    // General case: pad target_shape, sum over broadcast dims
+    let pad = grad_ndim.saturating_sub(target_ndim);
+    let mut padded_target = vec![1usize; pad];
+    padded_target.extend_from_slice(target_shape);
+
+    if !grad.device().is_gpu() {
+        // CPU: use fast contiguous data + the (now parallel) iterative sum_dim.
+        // The leading case (hot path for bias) has a direct par reduction above.
+        // General broadcast (rarer) benefits from parallel sum_dim in CpuBackend; ndim is small so the control loop is negligible.
+        // To keep a "direct" flavor for large grads, we materialize once with fast path and let the sums do their par work.
+        let mut res = grad.clone();  // clone is cheap if we later optimize tensor clone; sum_dim will use fast paths internally
+        for d in 0..grad_ndim {
+            if padded_target[d] == 1 && res.shape()[d] > 1 {
+                res = res.sum_dim(d as i32, true);
+            }
+        }
+        return res;
+    }
+
     let mut result = grad.clone();
     for d in 0..grad_ndim {
         if padded_target[d] == 1 && result.shape()[d] > 1 {
