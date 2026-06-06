@@ -965,6 +965,33 @@ fn reduce_grad_for_broadcast(grad: &Tensor<f32>, target_shape: &[usize]) -> Tens
                     .expect("backward: reshape failed");
             }
             // General case: iteratively sum_dim(0)
+            // On CPU, use direct parallel reduction for the common leading-dim bias case (heavy in training elementwise bwd).
+            if !grad.device().is_gpu() {
+                let leading_size: usize = grad_shape[..dims_to_reduce].iter().product();
+                let out_size = target_numel;
+                let mut out = vec![0.0f32; out_size];
+                let g_data: Vec<f32> = grad.to_vec();
+                if grad_numel >= 4096 {
+                    use rayon::prelude::*;
+                    out.par_iter_mut().enumerate().for_each(|(i, o)| {
+                        let mut s = 0.0f32;
+                        for k in 0..leading_size {
+                            s += g_data[k * out_size + i];
+                        }
+                        *o = s;
+                    });
+                } else {
+                    for i in 0..out_size {
+                        let mut s = 0.0f32;
+                        for k in 0..leading_size {
+                            s += g_data[k * out_size + i];
+                        }
+                        out[i] = s;
+                    }
+                }
+                return Tensor::from_vec(out, target_shape)
+                    .expect("reduce_grad_for_broadcast: from_vec for leading sum");
+            }
             let mut result = grad.clone();
             for _ in 0..dims_to_reduce {
                 result = result.sum_dim(0, false);
