@@ -862,8 +862,12 @@ impl<T: Numeric> Tensor<T> {
         if self.is_empty() {
             return Err(Error::EmptyTensor);
         }
-        let data = self.to_vec();
-        let result = CpuBackend::max(&data).expect("max on non-empty tensor");
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let result = CpuBackend::max(data).expect("max on non-empty tensor");
         let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
@@ -881,8 +885,12 @@ impl<T: Numeric> Tensor<T> {
         if self.is_empty() {
             return Err(Error::EmptyTensor);
         }
-        let data = self.to_vec();
-        let result = CpuBackend::min(&data).expect("min on non-empty tensor");
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let result = CpuBackend::min(data).expect("min on non-empty tensor");
         let s = Self::scalar(result);
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
@@ -898,8 +906,12 @@ impl<T: Numeric> Tensor<T> {
         if self.is_empty() {
             return Err(Error::EmptyTensor);
         }
-        let data = self.to_vec();
-        Ok(CpuBackend::argmax(&data).unwrap())
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        Ok(CpuBackend::argmax(data).unwrap())
     }
 
     /// Returns the index of the minimum element.
@@ -907,8 +919,12 @@ impl<T: Numeric> Tensor<T> {
         if self.is_empty() {
             return Err(Error::EmptyTensor);
         }
-        let data = self.to_vec();
-        Ok(CpuBackend::argmin(&data).unwrap())
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        Ok(CpuBackend::argmin(data).unwrap())
     }
 
     /// Concatenates tensors along a dimension.
@@ -1105,9 +1121,13 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe { gpu_into(gpu_ref(self).sqrt_cuda()) };
         }
-        let data = self.to_vec();
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
         let mut result = vec![T::zero(); data.len()];
-        CpuBackend::sqrt(&mut result, &data);
+        CpuBackend::sqrt(&mut result, data);
         Self::from_vec(result, &self.shape).unwrap()
     }
 
@@ -1120,7 +1140,11 @@ impl<T: Float> Tensor<T> {
             let exp_f32: f32 = unsafe { *(&exp as *const T as *const f32) };
             return unsafe { gpu_into(gpu_ref(self).pow_cuda(exp_f32)) };
         }
-        let data = self.to_vec();
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
         let result: Vec<T> = data.iter().map(|&x| x.pow_value(exp)).collect();
         Self::from_vec(result, &self.shape).unwrap()
     }
