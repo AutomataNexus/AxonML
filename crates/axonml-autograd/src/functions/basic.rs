@@ -727,13 +727,23 @@ impl GradientFunction for VarDimBackward {
         }
 
         // Second pass: compute gradients = 2 * (x - mean) / N * grad_output
+        // Parallelized with rayon (independent per flat_idx). Big win for CPU
+        // variance/mean-dim backward (used in RMS/LayerNorm etc. for single-GPU/CPU training).
         let mut grad_input = vec![0.0f32; numel];
         let n = dim_size as f32;
 
-        for flat_idx in 0..numel {
-            let out_idx = map_to_out(flat_idx);
-            grad_input[flat_idx] =
-                2.0 * (input_vec[flat_idx] - means[out_idx]) / n * grad_vec[out_idx];
+        if numel >= 4096 {
+            use rayon::prelude::*;
+            grad_input.par_iter_mut().enumerate().for_each(|(flat_idx, gi)| {
+                let out_idx = map_to_out(flat_idx);
+                *gi = 2.0 * (input_vec[flat_idx] - means[out_idx]) / n * grad_vec[out_idx];
+            });
+        } else {
+            for flat_idx in 0..numel {
+                let out_idx = map_to_out(flat_idx);
+                grad_input[flat_idx] =
+                    2.0 * (input_vec[flat_idx] - means[out_idx]) / n * grad_vec[out_idx];
+            }
         }
 
         let mut grad =
