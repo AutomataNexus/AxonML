@@ -258,44 +258,81 @@ impl GradientFunction for SoftmaxBackward {
         let mut result = vec![0.0f32; s.len()];
 
         if ndim == 1 {
-            // 1D case: simple dot product
+            // 1D case: simple dot product (small, serial ok)
             let dot: f32 = s.iter().zip(g.iter()).map(|(&si, &gi)| si * gi).sum();
             for i in 0..s.len() {
                 result[i] = s[i] * (g[i] - dot);
             }
         } else if ndim == 2 {
             let (rows, cols) = (shape[0], shape[1]);
+            let total = s.len();
             if dim == 0 {
-                // Softmax along rows (each column is independent)
-                for col in 0..cols {
-                    let mut dot = 0.0f32;
-                    for row in 0..rows {
-                        let idx = row * cols + col;
-                        dot += s[idx] * g[idx];
-                    }
-                    for row in 0..rows {
-                        let idx = row * cols + col;
-                        result[idx] = s[idx] * (g[idx] - dot);
+                // Softmax along rows (each column is independent). Parallel over cols when worthwhile.
+                if cols >= 64 || total >= 4096 {
+                    use rayon::prelude::*;
+                    let res_ptr = result.as_mut_ptr() as usize;
+                    (0..cols).into_par_iter().for_each(|col| {
+                        let res_ptr = res_ptr as *mut f32;
+                        let mut dot = 0.0f32;
+                        for row in 0..rows {
+                            let idx = row * cols + col;
+                            dot += s[idx] * g[idx];
+                        }
+                        for row in 0..rows {
+                            let idx = row * cols + col;
+                            unsafe { *res_ptr.add(idx) = s[idx] * (g[idx] - dot); }
+                        }
+                    });
+                } else {
+                    for col in 0..cols {
+                        let mut dot = 0.0f32;
+                        for row in 0..rows {
+                            let idx = row * cols + col;
+                            dot += s[idx] * g[idx];
+                        }
+                        for row in 0..rows {
+                            let idx = row * cols + col;
+                            result[idx] = s[idx] * (g[idx] - dot);
+                        }
                     }
                 }
             } else {
-                // Softmax along columns (each row is independent) - most common case
-                for row in 0..rows {
-                    let start = row * cols;
-                    let mut dot = 0.0f32;
-                    for col in 0..cols {
-                        let idx = start + col;
-                        dot += s[idx] * g[idx];
-                    }
-                    for col in 0..cols {
-                        let idx = start + col;
-                        result[idx] = s[idx] * (g[idx] - dot);
+                // Softmax along columns (each row is independent) - most common (attention, heads, etc).
+                if rows >= 4 || total >= 4096 {
+                    use rayon::prelude::*;
+                    let res_ptr = result.as_mut_ptr() as usize;
+                    (0..rows).into_par_iter().for_each(|row| {
+                        let res_ptr = res_ptr as *mut f32;
+                        let start = row * cols;
+                        let mut dot = 0.0f32;
+                        for col in 0..cols {
+                            let idx = start + col;
+                            dot += s[idx] * g[idx];
+                        }
+                        for col in 0..cols {
+                            let idx = start + col;
+                            unsafe { *res_ptr.add(idx) = s[idx] * (g[idx] - dot); }
+                        }
+                    });
+                } else {
+                    for row in 0..rows {
+                        let start = row * cols;
+                        let mut dot = 0.0f32;
+                        for col in 0..cols {
+                            let idx = start + col;
+                            dot += s[idx] * g[idx];
+                        }
+                        for col in 0..cols {
+                            let idx = start + col;
+                            result[idx] = s[idx] * (g[idx] - dot);
+                        }
                     }
                 }
             }
         } else {
             // General N-D case: iterate over all "outer" positions (all dims except `dim`)
             // and compute softmax backward along each slice of the softmax dimension.
+            // Parallel over the independent outer slices (common for batched multi-head etc.).
             let mut strides = vec![1usize; ndim];
             for i in (0..ndim - 1).rev() {
                 strides[i] = strides[i + 1] * shape[i + 1];
@@ -322,30 +359,63 @@ impl GradientFunction for SoftmaxBackward {
                 outer_dim_strides[i] = outer_dim_strides[i + 1] * outer_dims[i + 1];
             }
 
-            for outer in 0..outer_size {
-                // Decompose `outer` into coordinates for the non-dim dimensions
-                let mut base_idx = 0;
-                let mut temp = outer;
-                for i in 0..outer_dims.len() {
-                    let coord = temp / outer_dim_strides[i];
-                    temp %= outer_dim_strides[i];
-                    base_idx += coord * outer_strides[i];
-                }
-
-                // Compute dot product along this slice
-                let mut dot = 0.0f32;
-                for i in 0..dim_size {
-                    let idx = base_idx + i * dim_stride;
-                    if idx < total {
-                        dot += s[idx] * g[idx];
+            if outer_size > 1 && total >= 4096 {
+                use rayon::prelude::*;
+                let res_ptr = result.as_mut_ptr() as usize;
+                (0..outer_size).into_par_iter().for_each(|outer| {
+                    let res_ptr = res_ptr as *mut f32;
+                    // Decompose `outer` into coordinates for the non-dim dimensions
+                    let mut base_idx = 0;
+                    let mut temp = outer;
+                    for i in 0..outer_dims.len() {
+                        let coord = temp / outer_dim_strides[i];
+                        temp %= outer_dim_strides[i];
+                        base_idx += coord * outer_strides[i];
                     }
-                }
 
-                // Compute gradient for this slice
-                for i in 0..dim_size {
-                    let idx = base_idx + i * dim_stride;
-                    if idx < total {
-                        result[idx] = s[idx] * (g[idx] - dot);
+                    // Compute dot product along this slice
+                    let mut dot = 0.0f32;
+                    for i in 0..dim_size {
+                        let idx = base_idx + i * dim_stride;
+                        if idx < total {
+                            dot += s[idx] * g[idx];
+                        }
+                    }
+
+                    // Compute gradient for this slice
+                    for i in 0..dim_size {
+                        let idx = base_idx + i * dim_stride;
+                        if idx < total {
+                            unsafe { *res_ptr.add(idx) = s[idx] * (g[idx] - dot); }
+                        }
+                    }
+                });
+            } else {
+                for outer in 0..outer_size {
+                    // Decompose `outer` into coordinates for the non-dim dimensions
+                    let mut base_idx = 0;
+                    let mut temp = outer;
+                    for i in 0..outer_dims.len() {
+                        let coord = temp / outer_dim_strides[i];
+                        temp %= outer_dim_strides[i];
+                        base_idx += coord * outer_strides[i];
+                    }
+
+                    // Compute dot product along this slice
+                    let mut dot = 0.0f32;
+                    for i in 0..dim_size {
+                        let idx = base_idx + i * dim_stride;
+                        if idx < total {
+                            dot += s[idx] * g[idx];
+                        }
+                    }
+
+                    // Compute gradient for this slice
+                    for i in 0..dim_size {
+                        let idx = base_idx + i * dim_stride;
+                        if idx < total {
+                            result[idx] = s[idx] * (g[idx] - dot);
+                        }
                     }
                 }
             }
@@ -1009,34 +1079,71 @@ impl GradientFunction for LogSoftmaxBackward {
             }
         } else if ndim == 2 {
             let (rows, cols) = (shape[0], shape[1]);
+            let total = output_vec.len();
             if dim == 1 {
-                for row in 0..rows {
-                    let start = row * cols;
-                    let mut sum_g = 0.0f32;
-                    for col in 0..cols {
-                        sum_g += g[start + col];
-                    }
-                    for col in 0..cols {
-                        let idx = start + col;
-                        let softmax_i = output_vec[idx].exp();
-                        result[idx] = g[idx] - softmax_i * sum_g;
+                // Most common (last dim)
+                if rows >= 4 || total >= 4096 {
+                    use rayon::prelude::*;
+                    let res_ptr = result.as_mut_ptr() as usize;
+                    (0..rows).into_par_iter().for_each(|row| {
+                        let res_ptr = res_ptr as *mut f32;
+                        let start = row * cols;
+                        let mut sum_g = 0.0f32;
+                        for col in 0..cols {
+                            sum_g += g[start + col];
+                        }
+                        for col in 0..cols {
+                            let idx = start + col;
+                            let softmax_i = output_vec[idx].exp();
+                            unsafe { *res_ptr.add(idx) = g[idx] - softmax_i * sum_g; }
+                        }
+                    });
+                } else {
+                    for row in 0..rows {
+                        let start = row * cols;
+                        let mut sum_g = 0.0f32;
+                        for col in 0..cols {
+                            sum_g += g[start + col];
+                        }
+                        for col in 0..cols {
+                            let idx = start + col;
+                            let softmax_i = output_vec[idx].exp();
+                            result[idx] = g[idx] - softmax_i * sum_g;
+                        }
                     }
                 }
             } else {
-                for col in 0..cols {
-                    let mut sum_g = 0.0f32;
-                    for row in 0..rows {
-                        sum_g += g[row * cols + col];
-                    }
-                    for row in 0..rows {
-                        let idx = row * cols + col;
-                        let softmax_i = output_vec[idx].exp();
-                        result[idx] = g[idx] - softmax_i * sum_g;
+                if cols >= 64 || total >= 4096 {
+                    use rayon::prelude::*;
+                    let res_ptr = result.as_mut_ptr() as usize;
+                    (0..cols).into_par_iter().for_each(|col| {
+                        let res_ptr = res_ptr as *mut f32;
+                        let mut sum_g = 0.0f32;
+                        for row in 0..rows {
+                            sum_g += g[row * cols + col];
+                        }
+                        for row in 0..rows {
+                            let idx = row * cols + col;
+                            let softmax_i = output_vec[idx].exp();
+                            unsafe { *res_ptr.add(idx) = g[idx] - softmax_i * sum_g; }
+                        }
+                    });
+                } else {
+                    for col in 0..cols {
+                        let mut sum_g = 0.0f32;
+                        for row in 0..rows {
+                            sum_g += g[row * cols + col];
+                        }
+                        for row in 0..rows {
+                            let idx = row * cols + col;
+                            let softmax_i = output_vec[idx].exp();
+                            result[idx] = g[idx] - softmax_i * sum_g;
+                        }
                     }
                 }
             }
         } else {
-            // General N-D case
+            // General N-D case — parallel over independent outer slices.
             let mut strides = vec![1usize; ndim];
             for i in (0..ndim - 1).rev() {
                 strides[i] = strides[i + 1] * shape[i + 1];
@@ -1047,35 +1154,73 @@ impl GradientFunction for LogSoftmaxBackward {
             let total = output_vec.len();
             let outer_size = total / dim_size;
 
-            for outer in 0..outer_size {
-                let mut base_idx = 0;
-                let mut temp = outer;
-                for d in (0..ndim).rev() {
-                    if d != dim {
-                        let _s = if d > dim {
-                            strides[d]
-                        } else {
-                            strides[d] / dim_size
-                        };
-                        let coord = temp % shape[d];
-                        temp /= shape[d];
-                        base_idx += coord * strides[d];
+            if outer_size > 1 && total >= 4096 {
+                use rayon::prelude::*;
+                let res_ptr = result.as_mut_ptr() as usize;
+                (0..outer_size).into_par_iter().for_each(|outer| {
+                    let res_ptr = res_ptr as *mut f32;
+                    let mut base_idx = 0;
+                    let mut temp = outer;
+                    for d in (0..ndim).rev() {
+                        if d != dim {
+                            let _s = if d > dim {
+                                strides[d]
+                            } else {
+                                strides[d] / dim_size
+                            };
+                            let coord = temp % shape[d];
+                            temp /= shape[d];
+                            base_idx += coord * strides[d];
+                        }
                     }
-                }
 
-                let mut sum_g = 0.0f32;
-                for i in 0..dim_size {
-                    let idx = base_idx + i * dim_stride;
-                    if idx < total {
-                        sum_g += g[idx];
+                    let mut sum_g = 0.0f32;
+                    for i in 0..dim_size {
+                        let idx = base_idx + i * dim_stride;
+                        if idx < total {
+                            sum_g += g[idx];
+                        }
                     }
-                }
 
-                for i in 0..dim_size {
-                    let idx = base_idx + i * dim_stride;
-                    if idx < total {
-                        let softmax_i = output_vec[idx].exp();
-                        result[idx] = g[idx] - softmax_i * sum_g;
+                    for i in 0..dim_size {
+                        let idx = base_idx + i * dim_stride;
+                        if idx < total {
+                            let softmax_i = output_vec[idx].exp();
+                            unsafe { *res_ptr.add(idx) = g[idx] - softmax_i * sum_g; }
+                        }
+                    }
+                });
+            } else {
+                for outer in 0..outer_size {
+                    let mut base_idx = 0;
+                    let mut temp = outer;
+                    for d in (0..ndim).rev() {
+                        if d != dim {
+                            let _s = if d > dim {
+                                strides[d]
+                            } else {
+                                strides[d] / dim_size
+                            };
+                            let coord = temp % shape[d];
+                            temp /= shape[d];
+                            base_idx += coord * strides[d];
+                        }
+                    }
+
+                    let mut sum_g = 0.0f32;
+                    for i in 0..dim_size {
+                        let idx = base_idx + i * dim_stride;
+                        if idx < total {
+                            sum_g += g[idx];
+                        }
+                    }
+
+                    for i in 0..dim_size {
+                        let idx = base_idx + i * dim_stride;
+                        if idx < total {
+                            let softmax_i = output_vec[idx].exp();
+                            result[idx] = g[idx] - softmax_i * sum_g;
+                        }
                     }
                 }
             }

@@ -1999,18 +1999,40 @@ impl<T: Float> Tensor<T> {
         let n = g.len();
         assert_eq!(u.len(), n);
         assert_eq!(go.len(), n);
-        let mut grad_gate: Vec<T> = Vec::with_capacity(n);
-        let mut grad_up: Vec<T> = Vec::with_capacity(n);
-        for i in 0..n {
-            let gi = g[i].to_f32().unwrap_or(0.0);
-            let ui = u[i].to_f32().unwrap_or(0.0);
-            let goi = go[i].to_f32().unwrap_or(0.0);
-            let sig = 1.0f32 / (1.0f32 + (-gi).exp());
-            let silu_g = gi * sig;
-            let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
-            grad_gate.push(num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero));
-            grad_up.push(num_traits::cast(goi * silu_g).unwrap_or_else(T::zero));
+        let mut grad_gate: Vec<T> = vec![T::zero(); n];
+        let mut grad_up: Vec<T> = vec![T::zero(); n];
+
+        if n >= 4096 {
+            use rayon::prelude::*;
+            let gg_ptr = grad_gate.as_mut_ptr() as usize;
+            let gu_ptr = grad_up.as_mut_ptr() as usize;
+            (0..n).into_par_iter().for_each(|i| {
+                let gg_ptr = gg_ptr as *mut T;
+                let gu_ptr = gu_ptr as *mut T;
+                let gi = g[i].to_f32().unwrap_or(0.0);
+                let ui = u[i].to_f32().unwrap_or(0.0);
+                let goi = go[i].to_f32().unwrap_or(0.0);
+                let sig = 1.0f32 / (1.0f32 + (-gi).exp());
+                let silu_g = gi * sig;
+                let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
+                unsafe {
+                    *gg_ptr.add(i) = num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero);
+                    *gu_ptr.add(i) = num_traits::cast(goi * silu_g).unwrap_or_else(T::zero);
+                }
+            });
+        } else {
+            for i in 0..n {
+                let gi = g[i].to_f32().unwrap_or(0.0);
+                let ui = u[i].to_f32().unwrap_or(0.0);
+                let goi = go[i].to_f32().unwrap_or(0.0);
+                let sig = 1.0f32 / (1.0f32 + (-gi).exp());
+                let silu_g = gi * sig;
+                let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
+                grad_gate[i] = num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero);
+                grad_up[i] = num_traits::cast(goi * silu_g).unwrap_or_else(T::zero);
+            }
         }
+
         let gg_t = Self::from_vec(grad_gate, &self.shape).expect("swiglu_bwd: grad_gate");
         let gu_t = Self::from_vec(grad_up, &self.shape).expect("swiglu_bwd: grad_up");
         (gg_t, gu_t)
