@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CPU: parallel argmax/argmin in CpuBackend via par_iter + reduce.
 - Hailo: pre-allocate Vecs in BundleGraph::new (inputs/outputs/nodes, initializers) to reduce CPU reallocs during graph build for large models targeting HEF via NexusFoundry. Parallel CPU math speeds ref for calibration/validation.
 - Generalized the device-native FAF principle (GPU stay-on-device, CPU be fast+parallel, Hailo export/reference optimal) and reduced cross-device thrashing patterns.
-- Benchmarks/measure: CPU runs with autograd/tensor tests + profile_util_signature sampler to verify/quantify parallel gains (e.g. reductions, norms, rope, GradFn).
+- Benchmarks/measure + full testing: CPU runs (autograd/tensor/nn/llm tests exercising parallel reductions/argmax/GradFn/rope/rms/swiglu + profile_util_signature sampler); all relevant crates green (56 core, 112 tensor, 132 autograd, 253 nn, 127 llm, 40 serialize); bundle tests confirm prealloc. Full CPU path coverage (no CUDA feature). 
 - /opt md cleanup: removed/updated obsolete CPU bottleneck descriptions (L82, L138 historical autograd walk, CE roundtrips, GH200 notes, StateDict) now mitigated by FAF/parallel work.
 
 ## [0.6.4] - 2026-05-23
