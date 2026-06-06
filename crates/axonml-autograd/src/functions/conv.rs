@@ -201,33 +201,71 @@ impl GradientFunction for Conv2dBackward {
                     let kj = k_idx % kw;
                     let input_c = input_offset + c * in_h * in_w;
                     let col_base = cr * out_hw;
-                    for oh in 0..out_h {
-                        let ih = (oh * sh + ki) as isize - ph_s;
-                        if ih < 0 || ih >= in_h_s {
-                            continue;
-                        }
-                        let input_row = input_c + ih as usize * in_w;
-                        let col_row_base = col_base + oh * out_w;
-                        for ow in 0..out_w {
-                            let iw = (ow * sw + kj) as isize - pw_s;
-                            if iw >= 0 && iw < in_w_s {
-                                let col_idx = col_row_base + ow;
-                                let inp_idx = input_row + iw as usize;
-                                debug_assert!(
-                                    col_idx < col.len(),
-                                    "im2col col index OOB: {} >= {}",
-                                    col_idx,
-                                    col.len()
-                                );
-                                debug_assert!(
-                                    inp_idx < input_vec.len(),
-                                    "im2col input index OOB: {} >= {}",
-                                    inp_idx,
-                                    input_vec.len()
-                                );
-                                unsafe {
-                                    *col.get_unchecked_mut(col_idx) =
-                                        *input_vec.get_unchecked(inp_idx);
+                    if out_h >= 8 || out_hw >= 4096 {
+                        use rayon::prelude::*;
+                        let col_ptr = col.as_mut_ptr() as usize;
+                        let input_vec_ptr = input_vec.as_ptr() as usize;
+                        (0..out_h).into_par_iter().for_each(|oh| {
+                            let col_ptr = col_ptr as *mut f32;
+                            let input_vec_ptr = input_vec_ptr as *const f32;
+                            let ih = (oh * sh + ki) as isize - ph_s;
+                            if ih < 0 || ih >= in_h_s {
+                                return;
+                            }
+                            let input_row = input_c + ih as usize * in_w;
+                            let col_row_base = col_base + oh * out_w;
+                            for ow in 0..out_w {
+                                let iw = (ow * sw + kj) as isize - pw_s;
+                                if iw >= 0 && iw < in_w_s {
+                                    let col_idx = col_row_base + ow;
+                                    let inp_idx = input_row + iw as usize;
+                                    debug_assert!(
+                                        col_idx < col.len(),
+                                        "im2col col index OOB: {} >= {}",
+                                        col_idx,
+                                        col.len()
+                                    );
+                                    debug_assert!(
+                                        inp_idx < input_vec.len(),
+                                        "im2col input index OOB: {} >= {}",
+                                        inp_idx,
+                                        input_vec.len()
+                                    );
+                                    unsafe {
+                                        *col_ptr.add(col_idx) = *input_vec_ptr.add(inp_idx);
+                                    }
+                                }
+                            }
+                        });
+                    } else {
+                        for oh in 0..out_h {
+                            let ih = (oh * sh + ki) as isize - ph_s;
+                            if ih < 0 || ih >= in_h_s {
+                                continue;
+                            }
+                            let input_row = input_c + ih as usize * in_w;
+                            let col_row_base = col_base + oh * out_w;
+                            for ow in 0..out_w {
+                                let iw = (ow * sw + kj) as isize - pw_s;
+                                if iw >= 0 && iw < in_w_s {
+                                    let col_idx = col_row_base + ow;
+                                    let inp_idx = input_row + iw as usize;
+                                    debug_assert!(
+                                        col_idx < col.len(),
+                                        "im2col col index OOB: {} >= {}",
+                                        col_idx,
+                                        col.len()
+                                    );
+                                    debug_assert!(
+                                        inp_idx < input_vec.len(),
+                                        "im2col input index OOB: {} >= {}",
+                                        inp_idx,
+                                        input_vec.len()
+                                    );
+                                    unsafe {
+                                        *col.get_unchecked_mut(col_idx) =
+                                            *input_vec.get_unchecked(inp_idx);
+                                    }
                                 }
                             }
                         }
