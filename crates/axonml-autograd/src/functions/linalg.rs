@@ -705,7 +705,7 @@ impl GradientFunction for SumDimBackward {
             return vec![Some(expanded.contiguous())];
         }
 
-        // CPU path
+        // CPU path — parallel over the grad positions (outer*inner); each broadcasts the same grad_val along the summed dim (small inner d loop sequential per grad is fine and cache-friendly).
         let dim_size = self.input_shape[self.dim];
         let grad_data = grad_output.to_vec();
 
@@ -715,13 +715,29 @@ impl GradientFunction for SumDimBackward {
         let in_numel: usize = self.input_shape.iter().product();
         let mut result = vec![0.0f32; in_numel];
 
-        for outer in 0..outer_size {
-            for inner in 0..inner_size {
-                let grad_idx = outer * inner_size + inner;
-                let grad_val = grad_data[grad_idx];
+        let grad_positions = outer_size * inner_size;
+        if grad_positions >= 4096 || in_numel >= 4096 {
+            use rayon::prelude::*;
+            let res_ptr = result.as_mut_ptr() as usize;
+            (0..grad_positions).into_par_iter().for_each(|gpos| {
+                let res_ptr = res_ptr as *mut f32;
+                let grad_val = grad_data[gpos];
+                let outer = gpos / inner_size;
+                let inner = gpos % inner_size;
                 for d in 0..dim_size {
                     let in_idx = outer * dim_size * inner_size + d * inner_size + inner;
-                    result[in_idx] = grad_val;
+                    unsafe { *res_ptr.add(in_idx) = grad_val; }
+                }
+            });
+        } else {
+            for outer in 0..outer_size {
+                for inner in 0..inner_size {
+                    let grad_idx = outer * inner_size + inner;
+                    let grad_val = grad_data[grad_idx];
+                    for d in 0..dim_size {
+                        let in_idx = outer * dim_size * inner_size + d * inner_size + inner;
+                        result[in_idx] = grad_val;
+                    }
                 }
             }
         }
