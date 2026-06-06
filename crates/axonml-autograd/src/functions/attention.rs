@@ -109,68 +109,155 @@ impl FusedAttentionBackward {
         let mut grad_k = vec![0.0f32; total_kv];
         let mut grad_v = vec![0.0f32; total_kv];
 
-        for b in 0..batch_size {
-            for h in 0..num_heads {
-                for i in 0..tgt_len {
-                    let eff_src = if self.is_causal {
-                        (i + 1).min(src_len)
-                    } else {
-                        src_len
-                    };
-                    let qi_base = ((b * num_heads + h) * tgt_len + i) * head_dim;
+        // Parallel over (batch, head) pairs — heads are completely independent,
+        // disjoint memory regions for grad_*[h]. Use usize (Send+Sync) cast of raw ptrs
+        // for safe mutation from rayon for_each closure (no overlapping writes across bh).
+        // Good for CPU attention backward in single-GPU or pure-CPU training (distributed bottom tier).
+        {
+            use rayon::prelude::*;
+            let num_bh = batch_size * num_heads;
+            let gq_ptr = grad_q.as_mut_ptr() as usize;
+            let gk_ptr = grad_k.as_mut_ptr() as usize;
+            let gv_ptr = grad_v.as_mut_ptr() as usize;
+            if num_bh > 1 {
+                (0..num_bh).into_par_iter().for_each(|bh| {
+                    let b = bh / num_heads;
+                    let h = bh % num_heads;
+                    let gq_ptr = gq_ptr as *mut f32;
+                    let gk_ptr = gk_ptr as *mut f32;
+                    let gv_ptr = gv_ptr as *mut f32;
+                    for i in 0..tgt_len {
+                        let eff_src = if self.is_causal {
+                            (i + 1).min(src_len)
+                        } else {
+                            src_len
+                        };
+                        let qi_base = ((b * num_heads + h) * tgt_len + i) * head_dim;
 
-                    // Recompute attention scores and softmax
-                    let mut max_score = f32::NEG_INFINITY;
-                    let mut scores = vec![0.0f32; eff_src];
-                    for j in 0..eff_src {
-                        let kj_base = ((b * num_heads + h) * src_len + j) * head_dim;
-                        let mut s = 0.0f32;
-                        for d in 0..head_dim {
-                            s += q_data[qi_base + d] * k_data[kj_base + d];
-                        }
-                        s *= self.scale;
-                        scores[j] = s;
-                        if s > max_score {
-                            max_score = s;
-                        }
-                    }
-
-                    // Softmax
-                    let mut sum_exp = 0.0f32;
-                    for s in &mut scores {
-                        *s = (*s - max_score).exp();
-                        sum_exp += *s;
-                    }
-                    let inv_sum = if sum_exp > 0.0 { 1.0 / sum_exp } else { 0.0 };
-                    for s in &mut scores {
-                        *s *= inv_sum;
-                    }
-
-                    // D_i = sum_d(grad_O[i,d] * O[i,d])
-                    let mut d_i = 0.0f32;
-                    for d in 0..head_dim {
-                        d_i += go_data[qi_base + d] * o_data[qi_base + d];
-                    }
-
-                    // For each key position j
-                    for j in 0..eff_src {
-                        let kj_base = ((b * num_heads + h) * src_len + j) * head_dim;
-                        let p_ij = scores[j];
-
-                        // grad_attn[i,j] = sum_d(grad_O[i,d] * V[j,d])
-                        let mut grad_attn_ij = 0.0f32;
-                        for d in 0..head_dim {
-                            grad_attn_ij += go_data[qi_base + d] * v_data[kj_base + d];
+                        // Recompute attention scores and softmax
+                        let mut max_score = f32::NEG_INFINITY;
+                        let mut scores = vec![0.0f32; eff_src];
+                        for j in 0..eff_src {
+                            let kj_base = ((b * num_heads + h) * src_len + j) * head_dim;
+                            let mut s = 0.0f32;
+                            for d in 0..head_dim {
+                                s += q_data[qi_base + d] * k_data[kj_base + d];
+                            }
+                            s *= self.scale;
+                            scores[j] = s;
+                            if s > max_score {
+                                max_score = s;
+                            }
                         }
 
-                        // grad_score[i,j] = P[i,j] * (grad_attn[i,j] - D_i)
-                        let grad_score_ij = p_ij * (grad_attn_ij - d_i);
-                        let scaled_gs = grad_score_ij * self.scale;
+                        // Softmax
+                        let mut sum_exp = 0.0f32;
+                        for s in &mut scores {
+                            *s = (*s - max_score).exp();
+                            sum_exp += *s;
+                        }
+                        let inv_sum = if sum_exp > 0.0 { 1.0 / sum_exp } else { 0.0 };
+                        for s in &mut scores {
+                            *s *= inv_sum;
+                        }
 
+                        // D_i = sum_d(grad_O[i,d] * O[i,d])
+                        let mut d_i = 0.0f32;
                         for d in 0..head_dim {
-                            grad_v[kj_base + d] += p_ij * go_data[qi_base + d];
-                            grad_q[qi_base + d] += scaled_gs * k_data[kj_base + d];
-                            grad_k[kj_base + d] += scaled_gs * q_data[qi_base + d];
+                            d_i += go_data[qi_base + d] * o_data[qi_base + d];
+                        }
+
+                        // For each key position j
+                        for j in 0..eff_src {
+                            let kj_base = ((b * num_heads + h) * src_len + j) * head_dim;
+                            let p_ij = scores[j];
+
+                            // grad_attn[i,j] = sum_d(grad_O[i,d] * V[j,d])
+                            let mut grad_attn_ij = 0.0f32;
+                            for d in 0..head_dim {
+                                grad_attn_ij += go_data[qi_base + d] * v_data[kj_base + d];
+                            }
+
+                            // grad_score[i,j] = P[i,j] * (grad_attn[i,j] - D_i)
+                            let grad_score_ij = p_ij * (grad_attn_ij - d_i);
+                            let scaled_gs = grad_score_ij * self.scale;
+
+                            for d in 0..head_dim {
+                                unsafe {
+                                    *gv_ptr.add(kj_base + d) += p_ij * go_data[qi_base + d];
+                                    *gq_ptr.add(qi_base + d) += scaled_gs * k_data[kj_base + d];
+                                    *gk_ptr.add(kj_base + d) += scaled_gs * q_data[qi_base + d];
+                                }
+                            }
+                        }
+                    }
+                });
+            } else {
+                // small case, sequential
+                for b in 0..batch_size {
+                    for h in 0..num_heads {
+                        for i in 0..tgt_len {
+                            let eff_src = if self.is_causal {
+                                (i + 1).min(src_len)
+                            } else {
+                                src_len
+                            };
+                            let qi_base = ((b * num_heads + h) * tgt_len + i) * head_dim;
+
+                            // Recompute attention scores and softmax
+                            let mut max_score = f32::NEG_INFINITY;
+                            let mut scores = vec![0.0f32; eff_src];
+                            for j in 0..eff_src {
+                                let kj_base = ((b * num_heads + h) * src_len + j) * head_dim;
+                                let mut s = 0.0f32;
+                                for d in 0..head_dim {
+                                    s += q_data[qi_base + d] * k_data[kj_base + d];
+                                }
+                                s *= self.scale;
+                                scores[j] = s;
+                                if s > max_score {
+                                    max_score = s;
+                                }
+                            }
+
+                            // Softmax
+                            let mut sum_exp = 0.0f32;
+                            for s in &mut scores {
+                                *s = (*s - max_score).exp();
+                                sum_exp += *s;
+                            }
+                            let inv_sum = if sum_exp > 0.0 { 1.0 / sum_exp } else { 0.0 };
+                            for s in &mut scores {
+                                *s *= inv_sum;
+                            }
+
+                            // D_i = sum_d(grad_O[i,d] * O[i,d])
+                            let mut d_i = 0.0f32;
+                            for d in 0..head_dim {
+                                d_i += go_data[qi_base + d] * o_data[qi_base + d];
+                            }
+
+                            // For each key position j
+                            for j in 0..eff_src {
+                                let kj_base = ((b * num_heads + h) * src_len + j) * head_dim;
+                                let p_ij = scores[j];
+
+                                // grad_attn[i,j] = sum_d(grad_O[i,d] * V[j,d])
+                                let mut grad_attn_ij = 0.0f32;
+                                for d in 0..head_dim {
+                                    grad_attn_ij += go_data[qi_base + d] * v_data[kj_base + d];
+                                }
+
+                                // grad_score[i,j] = P[i,j] * (grad_attn[i,j] - D_i)
+                                let grad_score_ij = p_ij * (grad_attn_ij - d_i);
+                                let scaled_gs = grad_score_ij * self.scale;
+
+                                for d in 0..head_dim {
+                                    grad_v[kj_base + d] += p_ij * go_data[qi_base + d];
+                                    grad_q[qi_base + d] += scaled_gs * k_data[kj_base + d];
+                                    grad_k[kj_base + d] += scaled_gs * q_data[qi_base + d];
+                                }
+                            }
                         }
                     }
                 }
