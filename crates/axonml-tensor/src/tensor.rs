@@ -1320,13 +1320,31 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe { gpu_into(gpu_ref(self).gelu_tanh_cuda()) };
         }
-        let x = self.to_vec();
+        // Fastpath + par for large.
+        let xs = self.storage.as_slice();
+        let xf = self.is_contiguous() && self.offset == 0;
+        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
+        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
+        let x: &[T] = xo.as_deref().unwrap_or(xslice);
         const K: f32 = 0.797_884_6;
-        let mut out: Vec<T> = Vec::with_capacity(x.len());
-        for xi in &x {
-            let v = xi.to_f32().unwrap_or(0.0);
-            let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
-            out.push(num_traits::cast(y).unwrap_or_else(T::zero));
+        let n = x.len();
+        let mut out: Vec<T> = vec![T::zero(); n];
+        if n >= 4096 {
+            use rayon::prelude::*;
+            let out_ptr = out.as_mut_ptr() as usize;
+            let x_ptr = x.as_ptr() as usize;
+            (0..n).into_par_iter().for_each(|i| {
+                let out_ptr = out_ptr as *mut T;
+                let v = unsafe { *(x_ptr as *const T).add(i) }.to_f32().unwrap_or(0.0);
+                let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
+                unsafe { *out_ptr.add(i) = num_traits::cast(y).unwrap_or_else(T::zero); }
+            });
+        } else {
+            for i in 0..n {
+                let v = x[i].to_f32().unwrap_or(0.0);
+                let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
+                out[i] = num_traits::cast(y).unwrap_or_else(T::zero);
+            }
         }
         Self::from_vec(out, &self.shape).expect("gelu_tanh: build output")
     }
