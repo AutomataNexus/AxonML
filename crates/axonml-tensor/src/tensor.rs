@@ -973,9 +973,14 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe { gpu_into(gpu_ref(self).relu_cuda()) };
         }
-        let data = self.to_vec();
+        // Fast path for CPU contiguous (common in inference): avoid to_vec copy, feed storage slice directly to parallel CpuBackend.
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
         let mut result = vec![T::zero(); data.len()];
-        CpuBackend::relu(&mut result, &data);
+        CpuBackend::relu(&mut result, data);
         Self::from_vec(result, &self.shape).unwrap()
     }
 
@@ -987,9 +992,13 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe { gpu_into(gpu_ref(self).sigmoid_cuda()) };
         }
-        let data = self.to_vec();
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
         let mut result = vec![T::zero(); data.len()];
-        CpuBackend::sigmoid(&mut result, &data);
+        CpuBackend::sigmoid(&mut result, data);
         Self::from_vec(result, &self.shape).unwrap()
     }
 
@@ -1001,9 +1010,13 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe { gpu_into(gpu_ref(self).tanh_cuda()) };
         }
-        let data = self.to_vec();
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
         let mut result = vec![T::zero(); data.len()];
-        CpuBackend::tanh(&mut result, &data);
+        CpuBackend::tanh(&mut result, data);
         Self::from_vec(result, &self.shape).unwrap()
     }
 
@@ -1015,9 +1028,13 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe { gpu_into(gpu_ref(self).exp_cuda()) };
         }
-        let data = self.to_vec();
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
         let mut result = vec![T::zero(); data.len()];
-        CpuBackend::exp(&mut result, &data);
+        CpuBackend::exp(&mut result, data);
         Self::from_vec(result, &self.shape).unwrap()
     }
 
@@ -1029,9 +1046,13 @@ impl<T: Float> Tensor<T> {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             return unsafe { gpu_into(gpu_ref(self).ln_cuda()) };
         }
-        let data = self.to_vec();
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
         let mut result = vec![T::zero(); data.len()];
-        CpuBackend::ln(&mut result, &data);
+        CpuBackend::ln(&mut result, data);
         Self::from_vec(result, &self.shape).unwrap()
     }
 
@@ -2722,9 +2743,13 @@ impl<T: Numeric> Tensor<T> {
             let self_f32 = unsafe { gpu_ref(self) };
             return unsafe { gpu_into(self_f32.neg_cuda()) };
         }
-        let data = self.to_vec();
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
         let mut result = vec![T::zero(); data.len()];
-        CpuBackend::neg(&mut result, &data);
+        CpuBackend::neg(&mut result, data);
         Self::from_vec(result, &self.shape).unwrap()
     }
 
