@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generalized the device-native FAF principle (GPU stay-on-device, CPU be fast+parallel, Hailo export/reference optimal) and reduced cross-device thrashing patterns.
 - Benchmarks/measure + full testing: CPU runs (autograd/tensor/nn/llm tests exercising parallel reductions/argmax/GradFn/rope/rms/swiglu + profile_util_signature sampler); all relevant crates green (56 core, 112 tensor, 132 autograd, 253 nn, 127 llm, 40 serialize); bundle tests confirm prealloc. Full CPU path coverage (no CUDA feature). 
 - /opt md cleanup: removed/updated obsolete CPU bottleneck descriptions (L82, L138 historical autograd walk, CE roundtrips, GH200 notes, StateDict) now mitigated by FAF/parallel work.
+- perf(cpu): FusedAttentionBackward CPU fallback now parallel over (batch, head) pairs (rayon + raw-ptr writes for disjoint heads). High value for real single-node LLM training / CPU fallback / Hailo ref (distributed explicitly bottom-tier). All attention backward tests green. Fits ongoing FAF for common paths.
 
 ## [0.6.4] - 2026-05-23
 
