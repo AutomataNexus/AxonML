@@ -1408,17 +1408,47 @@ impl<T: Float> Tensor<T> {
             }
             return;
         }
-        let a = attn.to_vec();
-        let f = ffn.to_vec();
-        let x = self.to_vec();
-        let mut out: Vec<T> = Vec::with_capacity(x.len());
-        for i in 0..x.len() {
-            let v = x[i].to_f32().unwrap_or(0.0)
-                + a[i].to_f32().unwrap_or(0.0)
-                + f[i].to_f32().unwrap_or(0.0);
-            out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+        // Fast contiguous + par for CPU Falcon arch.
+        let shape = self.shape.clone();
+        let a = if attn.is_contiguous() && attn.offset == 0 {
+            let s = attn.storage.as_slice();
+            s[..attn.numel()].to_vec()
+        } else {
+            attn.to_vec()
+        };
+        let f = if ffn.is_contiguous() && ffn.offset == 0 {
+            let s = ffn.storage.as_slice();
+            s[..ffn.numel()].to_vec()
+        } else {
+            ffn.to_vec()
+        };
+        let x = if self.is_contiguous() && self.offset == 0 {
+            let s = self.storage.as_slice();
+            s[..self.numel()].to_vec()
+        } else {
+            self.to_vec()
+        };
+        let n = x.len();
+        let mut out: Vec<T> = vec![T::zero(); n];
+        if n >= 4096 {
+            use rayon::prelude::*;
+            out.par_iter_mut().enumerate().for_each(|(i, outi)| {
+                let xv = x[i].to_f32().unwrap_or(0.0);
+                let av = a[i].to_f32().unwrap_or(0.0);
+                let fv = f[i].to_f32().unwrap_or(0.0);
+                let v = xv + av + fv;
+                *outi = num_traits::cast(v).unwrap_or_else(T::zero);
+            });
+        } else {
+            for i in 0..n {
+                let xv = x[i].to_f32().unwrap_or(0.0);
+                let av = a[i].to_f32().unwrap_or(0.0);
+                let fv = f[i].to_f32().unwrap_or(0.0);
+                let v = xv + av + fv;
+                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
+            }
         }
-        *self = Self::from_vec(out, &self.shape).expect("parallel_residual_add_: build output");
+        *self = Self::from_vec(out, &shape).expect("parallel_residual_add_: build output");
     }
 
     /// RMSNorm with a per-element weight scale. GPU-accelerated when enabled;
