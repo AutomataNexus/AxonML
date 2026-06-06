@@ -971,13 +971,36 @@ impl<T: Numeric> Tensor<T> {
             let to: Option<Vec<T>> = if tf { None } else { Some(t.contiguous().to_vec()) };
             let t_data: &[T] = to.as_deref().unwrap_or(tslice);
             let t_dim_size = t.shape[dim];
-            for outer in 0..outer_size {
-                for d in 0..t_dim_size {
-                    let src_base = outer * t_dim_size * inner_size + d * inner_size;
-                    let dst_base =
-                        outer * total_dim_size * inner_size + (dim_offset + d) * inner_size;
-                    result[dst_base..dst_base + inner_size]
-                        .copy_from_slice(&t_data[src_base..src_base + inner_size]);
+            let work = outer_size * t_dim_size;
+            if work >= 4096 {
+                use rayon::prelude::*;
+                let res_ptr = result.as_mut_ptr() as usize;
+                let t_data_ptr = t_data.as_ptr() as usize;
+                (0..outer_size).into_par_iter().for_each(|outer| {
+                    let res_ptr = res_ptr as *mut T;
+                    let t_data_ptr = t_data_ptr as *const T;
+                    for d in 0..t_dim_size {
+                        let src_base = outer * t_dim_size * inner_size + d * inner_size;
+                        let dst_base =
+                            outer * total_dim_size * inner_size + (dim_offset + d) * inner_size;
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                t_data_ptr.add(src_base),
+                                res_ptr.add(dst_base),
+                                inner_size,
+                            );
+                        }
+                    }
+                });
+            } else {
+                for outer in 0..outer_size {
+                    for d in 0..t_dim_size {
+                        let src_base = outer * t_dim_size * inner_size + d * inner_size;
+                        let dst_base =
+                            outer * total_dim_size * inner_size + (dim_offset + d) * inner_size;
+                        result[dst_base..dst_base + inner_size]
+                            .copy_from_slice(&t_data[src_base..src_base + inner_size]);
+                    }
                 }
             }
             dim_offset += t_dim_size;
@@ -1220,29 +1243,72 @@ impl<T: Float> Tensor<T> {
                 ))
             };
         }
-        // CPU fallback.
-        let x = self.to_vec();
-        let g = gamma.to_vec();
-        let b = beta.to_vec();
+        // CPU fallback. Fastpath + parallel for large n.
+        let xs = self.storage.as_slice();
+        let xf = self.is_contiguous() && self.offset == 0;
+        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
+        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
+        let x: &[T] = xo.as_deref().unwrap_or(xslice);
+
+        let gs = gamma.storage.as_slice();
+        let gf = gamma.is_contiguous() && gamma.offset == 0;
+        let gslice: &[T] = if gf { &gs[..gamma.numel()] } else { &[] };
+        let go: Option<Vec<T>> = if gf { None } else { Some(gamma.to_vec()) };
+        let g: &[T] = go.as_deref().unwrap_or(gslice);
+
+        let bs = beta.storage.as_slice();
+        let bf = beta.is_contiguous() && beta.offset == 0;
+        let bslice: &[T] = if bf { &bs[..beta.numel()] } else { &[] };
+        let bo: Option<Vec<T>> = if bf { None } else { Some(beta.to_vec()) };
+        let b: &[T] = bo.as_deref().unwrap_or(bslice);
+
         let n = x.len();
         let n_f = n as f32;
-        let mean: f32 = x.iter().map(|v| v.to_f32().unwrap_or(0.0)).sum::<f32>() / n_f;
-        let var: f32 = x
-            .iter()
-            .map(|v| {
+        // For small n serial ok; for large use parallel sum (though typically small head_dim).
+        let mean: f32 = if n >= 4096 {
+            use rayon::prelude::*;
+            let sum: f32 = x.par_iter().map(|v| v.to_f32().unwrap_or(0.0)).sum();
+            sum / n_f
+        } else {
+            x.iter().map(|v| v.to_f32().unwrap_or(0.0)).sum::<f32>() / n_f
+        };
+        let var: f32 = if n >= 4096 {
+            use rayon::prelude::*;
+            let sum: f32 = x.par_iter().map(|v| {
                 let d = v.to_f32().unwrap_or(0.0) - mean;
                 d * d
-            })
-            .sum::<f32>()
-            / n_f;
+            }).sum();
+            sum / n_f
+        } else {
+            x.iter().map(|v| {
+                let d = v.to_f32().unwrap_or(0.0) - mean;
+                d * d
+            }).sum::<f32>() / n_f
+        };
         let inv = (var + eps).sqrt().recip();
-        let mut out: Vec<T> = Vec::with_capacity(n);
-        for i in 0..n {
-            let xi = x[i].to_f32().unwrap_or(0.0);
-            let gi = g[i].to_f32().unwrap_or(0.0);
-            let bi = b[i].to_f32().unwrap_or(0.0);
-            let v = (xi - mean) * inv * gi + bi;
-            out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+        let mut out: Vec<T> = vec![T::zero(); n];
+        if n >= 4096 {
+            use rayon::prelude::*;
+            let out_ptr = out.as_mut_ptr() as usize;
+            let x_ptr = x.as_ptr() as usize;
+            let g_ptr = g.as_ptr() as usize;
+            let b_ptr = b.as_ptr() as usize;
+            (0..n).into_par_iter().for_each(|i| {
+                let out_ptr = out_ptr as *mut T;
+                let xi = unsafe { *(x_ptr as *const T).add(i) }.to_f32().unwrap_or(0.0);
+                let gi = unsafe { *(g_ptr as *const T).add(i) }.to_f32().unwrap_or(0.0);
+                let bi = unsafe { *(b_ptr as *const T).add(i) }.to_f32().unwrap_or(0.0);
+                let v = (xi - mean) * inv * gi + bi;
+                unsafe { *out_ptr.add(i) = num_traits::cast(v).unwrap_or_else(T::zero); }
+            });
+        } else {
+            for i in 0..n {
+                let xi = x[i].to_f32().unwrap_or(0.0);
+                let gi = g[i].to_f32().unwrap_or(0.0);
+                let bi = b[i].to_f32().unwrap_or(0.0);
+                let v = (xi - mean) * inv * gi + bi;
+                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
+            }
         }
         Self::from_vec(out, &self.shape).expect("layer_norm_tokenwise: build output")
     }
