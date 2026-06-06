@@ -646,8 +646,12 @@ impl<T: Scalar> Tensor<T> {
     /// on contiguous storage.
     #[must_use]
     pub fn map<F: Fn(T) -> T>(&self, f: F) -> Self {
-        let data = self.to_vec(); // contiguous read
-        let result: Vec<T> = data.into_iter().map(f).collect();
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let result: Vec<T> = data.iter().copied().map(f).collect();
         Self::from_vec(result, &self.shape).unwrap()
     }
 
@@ -658,8 +662,18 @@ impl<T: Scalar> Tensor<T> {
     /// use `a.zip_map(&b, |x, y| ...)` which does a single allocation.
     #[must_use]
     pub fn zip_map<F: Fn(T, T) -> T>(&self, other: &Self, f: F) -> Self {
-        let a = self.to_vec();
-        let b = other.to_vec();
+        let sa = self.storage.as_slice();
+        let fa = self.is_contiguous() && self.offset == 0;
+        let sa_slice: &[T] = if fa { &sa[..self.numel()] } else { &[] };
+        let oa: Option<Vec<T>> = if fa { None } else { Some(self.to_vec()) };
+        let a: &[T] = oa.as_deref().unwrap_or(sa_slice);
+
+        let sb = other.storage.as_slice();
+        let fb = other.is_contiguous() && other.offset == 0;
+        let sb_slice: &[T] = if fb { &sb[..other.numel()] } else { &[] };
+        let ob: Option<Vec<T>> = if fb { None } else { Some(other.to_vec()) };
+        let b: &[T] = ob.as_deref().unwrap_or(sb_slice);
+
         debug_assert_eq!(
             a.len(),
             b.len(),
@@ -667,22 +681,37 @@ impl<T: Scalar> Tensor<T> {
             a.len(),
             b.len()
         );
-        let result: Vec<T> = a.into_iter().zip(b).map(|(x, y)| f(x, y)).collect();
+        let result: Vec<T> = a.iter().copied().zip(b.iter().copied()).map(|(x, y)| f(x, y)).collect();
         Self::from_vec(result, &self.shape).unwrap()
     }
 
     /// Apply a ternary function element-wise with two other tensors.
     #[must_use]
     pub fn zip_map3<F: Fn(T, T, T) -> T>(&self, b: &Self, c: &Self, f: F) -> Self {
-        let a_data = self.to_vec();
-        let b_data = b.to_vec();
-        let c_data = c.to_vec();
+        let sa = self.storage.as_slice();
+        let fa = self.is_contiguous() && self.offset == 0;
+        let sa_slice: &[T] = if fa { &sa[..self.numel()] } else { &[] };
+        let oa: Option<Vec<T>> = if fa { None } else { Some(self.to_vec()) };
+        let a_data: &[T] = oa.as_deref().unwrap_or(sa_slice);
+
+        let sb = b.storage.as_slice();
+        let fb = b.is_contiguous() && b.offset == 0;
+        let sb_slice: &[T] = if fb { &sb[..b.numel()] } else { &[] };
+        let ob: Option<Vec<T>> = if fb { None } else { Some(b.to_vec()) };
+        let b_data: &[T] = ob.as_deref().unwrap_or(sb_slice);
+
+        let sc = c.storage.as_slice();
+        let fc = c.is_contiguous() && c.offset == 0;
+        let sc_slice: &[T] = if fc { &sc[..c.numel()] } else { &[] };
+        let oc: Option<Vec<T>> = if fc { None } else { Some(c.to_vec()) };
+        let c_data: &[T] = oc.as_deref().unwrap_or(sc_slice);
+
         debug_assert_eq!(a_data.len(), b_data.len());
         debug_assert_eq!(a_data.len(), c_data.len());
         let result: Vec<T> = a_data
-            .into_iter()
-            .zip(b_data)
-            .zip(c_data)
+            .iter().copied()
+            .zip(b_data.iter().copied())
+            .zip(c_data.iter().copied())
             .map(|((a, b), c)| f(a, b, c))
             .collect();
         Self::from_vec(result, &self.shape).unwrap()
