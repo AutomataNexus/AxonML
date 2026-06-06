@@ -1802,39 +1802,91 @@ impl<T: Float> Tensor<T> {
             };
         }
         // CPU fallback: same math as axonml-llm's RMSNormBackward::apply.
+        // Fast contiguous + parallel over m tokens for training bwd (CPU fallback).
         assert!(
             std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
             "rms_norm_bwd_batched CPU path requires f32",
         );
-        let x = self.to_vec();
-        let w = weight.to_vec();
-        let g = grad_output.to_vec();
+        let xs = self.storage.as_slice();
+        let xf = self.is_contiguous() && self.offset == 0;
+        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
+        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
+        let x: &[T] = xo.as_deref().unwrap_or(xslice);
+
+        let ws = weight.storage.as_slice();
+        let wf = weight.is_contiguous() && weight.offset == 0;
+        let wslice: &[T] = if wf { &ws[..weight.numel()] } else { &[] };
+        let wo: Option<Vec<T>> = if wf { None } else { Some(weight.to_vec()) };
+        let w: &[T] = wo.as_deref().unwrap_or(wslice);
+
+        let gs = grad_output.storage.as_slice();
+        let gf = grad_output.is_contiguous() && grad_output.offset == 0;
+        let gslice: &[T] = if gf { &gs[..grad_output.numel()] } else { &[] };
+        let go: Option<Vec<T>> = if gf { None } else { Some(grad_output.to_vec()) };
+        let g: &[T] = go.as_deref().unwrap_or(gslice);
+
         assert_eq!(x.len(), m * n);
         assert_eq!(w.len(), n);
         assert_eq!(g.len(), m * n);
-        let mut out: Vec<T> = Vec::with_capacity(m * n);
+        let mut out: Vec<T> = vec![T::zero(); m * n];
         let d = n as f32;
-        for t in 0..m {
-            let base = t * n;
-            let mut sum_sq = 0.0f64;
-            let mut dot = 0.0f64;
-            for i in 0..n {
-                let xi = x[base + i].to_f32().unwrap_or(0.0);
-                let wi = w[i].to_f32().unwrap_or(0.0);
-                let gi = g[base + i].to_f32().unwrap_or(0.0);
-                sum_sq += (xi as f64) * (xi as f64);
-                dot += (xi as f64) * (wi as f64) * (gi as f64);
-            }
-            let rms_inv = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-            let rms3_inv = rms_inv * rms_inv * rms_inv;
-            let dot_scaled = (dot as f32) * rms3_inv / d;
-            for i in 0..n {
-                let xi = x[base + i].to_f32().unwrap_or(0.0);
-                let wi = w[i].to_f32().unwrap_or(0.0);
-                let gi = g[base + i].to_f32().unwrap_or(0.0);
-                let term1 = wi * gi * rms_inv;
-                let term2 = xi * dot_scaled;
-                out.push(num_traits::cast(term1 - term2).unwrap_or_else(T::zero));
+        let work = m * n;
+        if work >= 4096 {
+            use rayon::prelude::*;
+            let out_ptr = out.as_mut_ptr() as usize;
+            let x_ptr = x.as_ptr() as usize;
+            let w_ptr = w.as_ptr() as usize;
+            let g_ptr = g.as_ptr() as usize;
+            (0..m).into_par_iter().for_each(|t| {
+                let out_ptr = out_ptr as *mut T;
+                let x_ptr = x_ptr as *const T;
+                let w_ptr = w_ptr as *const T;
+                let g_ptr = g_ptr as *const T;
+                let base = t * n;
+                let mut sum_sq = 0.0f64;
+                let mut dot = 0.0f64;
+                for i in 0..n {
+                    let xi = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0);
+                    let wi = unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
+                    let gi = unsafe { *g_ptr.add(base + i) }.to_f32().unwrap_or(0.0);
+                    sum_sq += (xi as f64) * (xi as f64);
+                    dot += (xi as f64) * (wi as f64) * (gi as f64);
+                }
+                let rms_inv = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+                let rms3_inv = rms_inv * rms_inv * rms_inv;
+                let dot_scaled = (dot as f32) * rms3_inv / d;
+                for i in 0..n {
+                    let xi = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0);
+                    let wi = unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
+                    let gi = unsafe { *g_ptr.add(base + i) }.to_f32().unwrap_or(0.0);
+                    let term1 = wi * gi * rms_inv;
+                    let term2 = xi * dot_scaled;
+                    unsafe { *out_ptr.add(base + i) = num_traits::cast(term1 - term2).unwrap_or_else(T::zero); }
+                }
+            });
+        } else {
+            for t in 0..m {
+                let base = t * n;
+                let mut sum_sq = 0.0f64;
+                let mut dot = 0.0f64;
+                for i in 0..n {
+                    let xi = x[base + i].to_f32().unwrap_or(0.0);
+                    let wi = w[i].to_f32().unwrap_or(0.0);
+                    let gi = g[base + i].to_f32().unwrap_or(0.0);
+                    sum_sq += (xi as f64) * (xi as f64);
+                    dot += (xi as f64) * (wi as f64) * (gi as f64);
+                }
+                let rms_inv = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+                let rms3_inv = rms_inv * rms_inv * rms_inv;
+                let dot_scaled = (dot as f32) * rms3_inv / d;
+                for i in 0..n {
+                    let xi = x[base + i].to_f32().unwrap_or(0.0);
+                    let wi = w[i].to_f32().unwrap_or(0.0);
+                    let gi = g[base + i].to_f32().unwrap_or(0.0);
+                    let term1 = wi * gi * rms_inv;
+                    let term2 = xi * dot_scaled;
+                    out[base + i] = num_traits::cast(term1 - term2).unwrap_or_else(T::zero);
+                }
             }
         }
         Self::from_vec(out, &[m, n]).expect("rms_norm_bwd_batched: build output")
@@ -1929,26 +1981,61 @@ impl<T: Float> Tensor<T> {
                 ))
             };
         }
-        // CPU fallback: m × rms_norm_heads.
-        let x = self.to_vec();
-        let w = weight.to_vec();
+        // CPU fallback: m × rms_norm_heads. Fast + par over (t,h) or m for training bwd.
+        let xs = self.storage.as_slice();
+        let xf = self.is_contiguous() && self.offset == 0;
+        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
+        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
+        let x: &[T] = xo.as_deref().unwrap_or(xslice);
+
+        let ws = weight.storage.as_slice();
+        let wf = weight.is_contiguous() && weight.offset == 0;
+        let wslice: &[T] = if wf { &ws[..weight.numel()] } else { &[] };
+        let wo: Option<Vec<T>> = if wf { None } else { Some(weight.to_vec()) };
+        let w: &[T] = wo.as_deref().unwrap_or(wslice);
+
         let total = m * n_heads * head_dim;
         assert_eq!(x.len(), total);
         assert_eq!(w.len(), head_dim);
-        let mut out: Vec<T> = Vec::with_capacity(total);
-        for t in 0..m {
-            for h in 0..n_heads {
-                let base = t * n_heads * head_dim + h * head_dim;
-                let mut sum_sq = 0.0f64;
-                for i in 0..head_dim {
-                    let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
-                    sum_sq += f * f;
+        let mut out: Vec<T> = vec![T::zero(); total];
+        let work = m * n_heads;
+        if work >= 2 || total >= 4096 {
+            use rayon::prelude::*;
+            let out_ptr = out.as_mut_ptr() as usize;
+            let x_ptr = x.as_ptr() as usize;
+            let w_ptr = w.as_ptr() as usize;
+            (0..m).into_par_iter().for_each(|t| {
+                let out_ptr = out_ptr as *mut T;
+                let x_ptr = x_ptr as *const T;
+                let w_ptr = w_ptr as *const T;
+                for h in 0..n_heads {
+                    let base = t * n_heads * head_dim + h * head_dim;
+                    let mut sum_sq = 0.0f64;
+                    for i in 0..head_dim {
+                        let f: f64 = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0).into();
+                        sum_sq += f * f;
+                    }
+                    let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+                    for i in 0..head_dim {
+                        let v = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0) * scale * unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
+                        unsafe { *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero); }
+                    }
                 }
-                let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
-                for i in 0..head_dim {
-                    let v =
-                        x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
-                    out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+            });
+        } else {
+            for t in 0..m {
+                for h in 0..n_heads {
+                    let base = t * n_heads * head_dim + h * head_dim;
+                    let mut sum_sq = 0.0f64;
+                    for i in 0..head_dim {
+                        let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
+                        sum_sq += f * f;
+                    }
+                    let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+                    for i in 0..head_dim {
+                        let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                        out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
+                    }
                 }
             }
         }
