@@ -599,7 +599,40 @@ impl CpuBackend {
             *val = T::zero();
         }
 
-        // Tiled matrix multiplication for better cache locality
+        let flops = m.saturating_mul(n).saturating_mul(k);
+        if m > 1 && flops >= (1 << 18) {
+            // Parallel over output-row blocks (i0 tiles). Each task owns disjoint
+            // rows of C; inner p/j loops stay serial per tile for cache.
+            let threads = rayon::current_num_threads().max(1);
+            let rows_per = ((m / (threads * 4)).max(1)).min(m);
+            let num_chunks = (m + rows_per - 1) / rows_per;
+            let c_ptr = c.as_mut_ptr() as usize;
+            (0..num_chunks).into_par_iter().for_each(|chunk| {
+                let c_ptr = c_ptr as *mut T;
+                let i0 = chunk * rows_per;
+                let i_end = (i0 + rows_per).min(m);
+                for p0 in (0..k).step_by(BLOCK_SIZE) {
+                    let p_end = (p0 + BLOCK_SIZE).min(k);
+                    for j0 in (0..n).step_by(BLOCK_SIZE) {
+                        let j_end = (j0 + BLOCK_SIZE).min(n);
+                        for i in i0..i_end {
+                            for p in p0..p_end {
+                                let a_val = a[i * k + p];
+                                for j in j0..j_end {
+                                    unsafe {
+                                        let dst = c_ptr.add(i * n + j);
+                                        *dst = *dst + a_val * b[p * n + j];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            return;
+        }
+
+        // Tiled matrix multiplication for better cache locality (serial small case)
         for i0 in (0..m).step_by(BLOCK_SIZE) {
             let i_end = (i0 + BLOCK_SIZE).min(m);
             for p0 in (0..k).step_by(BLOCK_SIZE) {
@@ -708,11 +741,25 @@ impl CpuBackend {
             gemv_row_parallel_f32(c, a, b, n, k);
             return;
         }
+        // For m>1 (prefill inference, training forward/backward matmuls) and
+        // large enough work, parallelize over output rows (m dimension).
+        // Each rayon task owns a disjoint block of C rows and corresponding A
+        // rows; calls into the optimized single-thread sgemm on its tile.
+        let flops = m.saturating_mul(n).saturating_mul(k);
+        if m > 1 && flops >= (1 << 18) {
+            matmul_f32_parallel_m(c, a, b, m, n, k);
+            return;
+        }
         Self::sgemm(c, a, b, m, n, k, 1.0, 0.0);
     }
 
     /// Performs f64 matrix multiplication: C = A @ B using optimized GEMM.
     pub fn matmul_f64(c: &mut [f64], a: &[f64], b: &[f64], m: usize, n: usize, k: usize) {
+        let flops = m.saturating_mul(n).saturating_mul(k);
+        if m > 1 && flops >= (1 << 18) {
+            matmul_f64_parallel_m(c, a, b, m, n, k);
+            return;
+        }
         Self::dgemm(c, a, b, m, n, k, 1.0, 0.0);
     }
 
@@ -746,7 +793,14 @@ impl CpuBackend {
             return;
         }
 
-        // m > 1: sgemm with B reinterpreted as [k, n] via transposed strides.
+        // m > 1 (prefill + training): parallel over output rows when large.
+        let flops = m.saturating_mul(n).saturating_mul(k);
+        if flops >= (1 << 18) {
+            matmul_f32_bt_parallel_m(c, a, b, m, n, k);
+            return;
+        }
+
+        // m > 1 small: sgemm with B reinterpreted as [k, n] via transposed strides.
         // Physical B layout is row-major [n, k]: element B[i, j] is at offset `i*k + j`.
         // We want matmul to see it as a [k, n] matrix: element B'[i, j] at `j*k + i`.
         // Setting rs=1 (stride 1 between rows) and cs=k (stride k between cols)
@@ -883,6 +937,118 @@ fn gemv_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: usize
                     *c_val += a_k * b_val;
                 }
             }
+        });
+}
+
+/// Parallel matmul_f32 over the m (output row) dimension for m>1 cases.
+/// Splits C and A into row-blocks; each rayon worker calls sgemm on its
+/// sub-matrix. Safe because C row blocks are disjoint. Used for prefill
+/// inference and all CPU matmuls in training (fwd + MatMulBackward).
+fn matmul_f32_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize, k: usize) {
+    debug_assert_eq!(a.len(), m * k);
+    debug_assert_eq!(b.len(), k * n);
+    debug_assert_eq!(c.len(), m * n);
+
+    if m == 0 || n == 0 || k == 0 {
+        c.fill(0.0);
+        return;
+    }
+
+    let threads = rayon::current_num_threads().max(1);
+    // Aim for 2–4 tasks per thread for load balance on irregular m; keep chunks
+    // large enough that sgemm call overhead is negligible vs. the FMA work.
+    let rows_per = ((m / (threads * 4)).max(1)).min(m);
+    let row_stride = rows_per * n; // elements per parallel chunk of C
+
+    c.par_chunks_mut(row_stride)
+        .enumerate()
+        .for_each(|(chunk_idx, c_chunk)| {
+            let i0 = chunk_idx * rows_per;
+            let this_m = (c_chunk.len() / n).min(m - i0);
+            if this_m == 0 {
+                return;
+            }
+            let a_sub = &a[i0 * k..(i0 + this_m) * k];
+            // c_chunk may be slightly oversized for the last uneven chunk; sgemm
+            // will only write this_m * n elements.
+            CpuBackend::sgemm(c_chunk, a_sub, b, this_m, n, k, 1.0, 0.0);
+        });
+}
+
+/// Parallel matmul_f32_bt (B row-major [n,k] viewed as [k,n]) over m rows.
+/// Same outer-parallel strategy as matmul_f32_parallel_m but using the
+/// zero-copy stride reinterpret for the natural GGUF/weight layout.
+fn matmul_f32_bt_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize, k: usize) {
+    debug_assert_eq!(a.len(), m * k);
+    debug_assert_eq!(b.len(), n * k);
+    debug_assert_eq!(c.len(), m * n);
+
+    if m == 0 || n == 0 || k == 0 {
+        c.fill(0.0);
+        return;
+    }
+
+    let threads = rayon::current_num_threads().max(1);
+    let rows_per = ((m / (threads * 4)).max(1)).min(m);
+    let row_stride = rows_per * n;
+
+    c.par_chunks_mut(row_stride)
+        .enumerate()
+        .for_each(|(chunk_idx, c_chunk)| {
+            let i0 = chunk_idx * rows_per;
+            let this_m = (c_chunk.len() / n).min(m - i0);
+            if this_m == 0 {
+                return;
+            }
+            let a_sub = &a[i0 * k..(i0 + this_m) * k];
+            // Re-apply the exact stride trick on the sub-matrix (A_sub is still
+            // row-major [this_m, k]; B is the full weight matrix).
+            unsafe {
+                matrixmultiply::sgemm(
+                    this_m,
+                    k,
+                    n,
+                    1.0,
+                    a_sub.as_ptr(),
+                    k as isize,
+                    1,
+                    b.as_ptr(),
+                    1,
+                    k as isize,
+                    0.0,
+                    c_chunk.as_mut_ptr(),
+                    n as isize,
+                    1,
+                );
+            }
+        });
+}
+
+/// Parallel f64 matmul over m (row) dimension. Mirrors the f32 version.
+fn matmul_f64_parallel_m(c: &mut [f64], a: &[f64], b: &[f64], m: usize, n: usize, k: usize) {
+    debug_assert_eq!(a.len(), m * k);
+    debug_assert_eq!(b.len(), k * n);
+    debug_assert_eq!(c.len(), m * n);
+
+    if m == 0 || n == 0 || k == 0 {
+        c.fill(0.0);
+        return;
+    }
+
+    let threads = rayon::current_num_threads().max(1);
+    let rows_per = ((m / (threads * 4)).max(1)).min(m);
+    let row_stride = rows_per * n;
+
+    c.par_chunks_mut(row_stride)
+        .enumerate()
+        .for_each(|(chunk_idx, c_chunk)| {
+            let i0 = chunk_idx * rows_per;
+            let this_m = (c_chunk.len() / n).min(m - i0);
+            if this_m == 0 {
+                return;
+            }
+            let a_sub = &a[i0 * k..(i0 + this_m) * k];
+            CpuBackend::dgemm(c_chunk, a_sub, b, this_m, n, k, 1.0, 0.0);
         });
 }
 

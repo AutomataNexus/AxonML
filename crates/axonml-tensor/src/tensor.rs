@@ -1286,23 +1286,44 @@ impl<T: Float> Tensor<T> {
                 gpu_into(gpu_ref(self).rms_norm_heads_cuda(gpu_ref(weight), n_heads, head_dim, eps))
             };
         }
-        // CPU fallback — per-head rms_norm.
+        // CPU fallback — per-head rms_norm. Parallel over heads (independent).
         let x = self.to_vec();
         let w = weight.to_vec();
         assert_eq!(x.len(), n_heads * head_dim);
         assert_eq!(w.len(), head_dim);
-        let mut out: Vec<T> = Vec::with_capacity(x.len());
-        for h in 0..n_heads {
-            let base = h * head_dim;
-            let mut sum_sq = 0.0f64;
-            for i in 0..head_dim {
-                let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
-                sum_sq += f * f;
-            }
-            let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
-            for i in 0..head_dim {
-                let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
-                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+        let mut out: Vec<T> = vec![T::zero(); x.len()];
+        if n_heads > 1 {
+            use rayon::prelude::*;
+            let out_ptr = out.as_mut_ptr() as usize;
+            (0..n_heads).into_par_iter().for_each(|h| {
+                let out_ptr = out_ptr as *mut T;
+                let base = h * head_dim;
+                let mut sum_sq = 0.0f64;
+                for i in 0..head_dim {
+                    let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
+                    sum_sq += f * f;
+                }
+                let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+                for i in 0..head_dim {
+                    let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                    unsafe {
+                        *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero);
+                    }
+                }
+            });
+        } else {
+            for h in 0..n_heads {
+                let base = h * head_dim;
+                let mut sum_sq = 0.0f64;
+                for i in 0..head_dim {
+                    let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
+                    sum_sq += f * f;
+                }
+                let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+                for i in 0..head_dim {
+                    let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                    out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
+                }
             }
         }
         Self::from_vec(out, &self.shape).expect("rms_norm_heads: build output tensor")
@@ -2913,14 +2934,47 @@ impl<T: Numeric> Tensor<T> {
             }
         }
 
-        // CPU fallback: loop over batches
-        for batch in 0..batch_size {
-            let ai = a_batch_idx[batch];
-            let bi = b_batch_idx[batch];
-            let a_slice = &a_data[ai * a_stride..(ai + 1) * a_stride];
-            let b_slice = &b_data[bi * b_stride..(bi + 1) * b_stride];
-            let c_slice = &mut c_data[batch * c_stride..(batch + 1) * c_stride];
-            CpuBackend::matmul(c_slice, a_slice, b_slice, m, n, k1);
+        // CPU fallback: parallel over batches when there is real work
+        // (common for attention heads, batched prefill, training micro-batches).
+        use rayon::prelude::*;
+        if batch_size > 1 && (batch_size * m * n) >= 4096 {
+            // SAFETY: each batch writes to a disjoint [batch*c_stride .. (batch+1)*c_stride)
+            // region of c_data; a/b slices are read-only and already materialized.
+            // Capture idx vecs via usize-ptr so the closure is Send+Sync (consistent
+            // with other parallel paths in tensor + autograd).
+            let a_idx_ptr = a_batch_idx.as_ptr() as usize;
+            let b_idx_ptr = b_batch_idx.as_ptr() as usize;
+            let c_ptr = c_data.as_mut_ptr() as usize;
+            let a_data_ptr = a_data.as_ptr() as usize;
+            let b_data_ptr = b_data.as_ptr() as usize;
+            (0..batch_size).into_par_iter().for_each(|batch| {
+                let ai = unsafe { *(a_idx_ptr as *const usize).add(batch) };
+                let bi = unsafe { *(b_idx_ptr as *const usize).add(batch) };
+                let a_slice = unsafe {
+                    let base = (a_data_ptr as *const T).add(ai * a_stride);
+                    std::slice::from_raw_parts(base, a_stride)
+                };
+                let b_slice = unsafe {
+                    let base = (b_data_ptr as *const T).add(bi * b_stride);
+                    std::slice::from_raw_parts(base, b_stride)
+                };
+                let c_slice = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        (c_ptr as *mut T).add(batch * c_stride),
+                        c_stride,
+                    )
+                };
+                CpuBackend::matmul(c_slice, a_slice, b_slice, m, n, k1);
+            });
+        } else {
+            for batch in 0..batch_size {
+                let ai = a_batch_idx[batch];
+                let bi = b_batch_idx[batch];
+                let a_slice = &a_data[ai * a_stride..(ai + 1) * a_stride];
+                let b_slice = &b_data[bi * b_stride..(bi + 1) * b_stride];
+                let c_slice = &mut c_data[batch * c_stride..(batch + 1) * c_stride];
+                CpuBackend::matmul(c_slice, a_slice, b_slice, m, n, k1);
+            }
         }
 
         // Build output shape: broadcast batch dims + [m, n]

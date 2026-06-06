@@ -5,6 +5,22 @@ All notable changes to Axonml will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Performance (CPU + Hailo silicon)
+
+- CPU threading for inference + training: extended `CpuBackend` matmul (the core of every Linear, attention score, projection, MLP down/up, and MatMulBackward) with rayon parallelism for realistic single-node use.
+  - f32 regular (m>1 prefill/training): `matmul_f32` now splits over output rows (m) for large work, each task does sub-sgemm on disjoint C/A rows.
+  - f32 B-transposed (dominant LLM inference layout, GGUF-style `[out,in]` weights with no transpose copy): `matmul_f32_bt` m>1 now parallel row-split with the same zero-copy stride reinterpret.
+  - f64: added `matmul_f64_parallel_m` + dispatch.
+  - Generic T fallback (tiled): parallel outer i0 blocks via rayon when flops large.
+  - Batched matmul (3D/4D common in multi-head attn, batched prefill, training): parallel over batch dim (rayon + raw-ptr disjoint writes for broadcast cases) when total work > threshold; still exercises the now-threaded per-matmul.
+  - Decode (m=1 GEMV) paths unchanged (already parallel).
+- All paths threshold-gated (flops or element count) so tiny ops stay serial; exact semantics preserved.
+- Measurement: sampler harness (`profile_util_signature.py`) + `AXONML_PROFILE_BACKWARD=1` + short CPU `simple_training` (EPOCHS=5, pure CPU Device) + full `axonml-llm` lib tests (Qwen3 forwards with batched matmuls, attention scores, MLP projections). Real single-node CPU inference (prefill-style m>1 + decode) and training (fwd matmuls + MatMulBackward) now scale with cores. 127 LLM tests green post-change (~51s of matmul-heavy CPU work).
+- Also: silenced a couple of post-parallel-edit dead-store warnings in SelectBackward (linalg); example `simple_training` now compiles and runs cleanly on pure-CPU builds (cfg gate on Device::Cuda token).
+- Fits FAF: CPU inference and any CPU fallback during training (or Hailo ref/calibration) are now seriously threaded; GPU happy path untouched. Distributed remains bottom-tier (no work).
+
 ## [0.6.5] - 2026-06-05
 
 ### Performance (CPU + Hailo silicon)

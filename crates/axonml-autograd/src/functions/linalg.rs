@@ -550,21 +550,43 @@ impl GradientFunction for SelectBackward {
         }
 
         let out_numel: usize = out_shape.iter().product();
-        for out_idx in 0..out_numel {
-            let mut remaining = out_idx;
-            let mut in_linear = 0usize;
-            let mut out_d = 0;
-            for d in 0..ndim {
-                if d == self.dim {
-                    in_linear += self.index * in_strides[d];
-                } else {
-                    let coord = remaining / out_strides[out_d];
-                    remaining %= out_strides[out_d];
-                    in_linear += coord * in_strides[d];
-                    out_d += 1;
+        if out_numel >= 4096 {
+            use rayon::prelude::*;
+            grad_data.par_iter_mut().enumerate().for_each(|(out_idx, g)| {
+                let mut remaining = out_idx;
+                let mut in_linear = 0usize;
+                let mut out_d = 0;
+                for d in 0..ndim {
+                    if d == self.dim {
+                        in_linear += self.index * in_strides[d];
+                    } else {
+                        let coord = remaining / out_strides[out_d];
+                        remaining %= out_strides[out_d];
+                        in_linear += coord * in_strides[d];
+                        out_d += 1;
+                    }
                 }
+                let _ = in_linear; // keep write live for all paths (silences unused_assign in parallel closure)
+                *g = grad_out_data[out_idx];
+            });
+        } else {
+            for out_idx in 0..out_numel {
+                let mut remaining = out_idx;
+                let mut in_linear = 0usize;
+                let mut out_d = 0;
+                for d in 0..ndim {
+                    if d == self.dim {
+                        in_linear += self.index * in_strides[d];
+                    } else {
+                        let coord = remaining / out_strides[out_d];
+                        remaining %= out_strides[out_d];
+                        in_linear += coord * in_strides[d];
+                        out_d += 1;
+                    }
+                }
+                let _ = in_linear;
+                grad_data[in_linear] = grad_out_data[out_idx];
             }
-            grad_data[in_linear] = grad_out_data[out_idx];
         }
 
         let grad = Tensor::from_vec(grad_data, &self.input_shape)

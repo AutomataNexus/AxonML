@@ -37,12 +37,13 @@ fn main() {
     println!("Features: {}\n", axonml::features());
 
     // Device selection (GPU when cuda feature enabled — see L02 and deficiency #1)
-    let device = if cfg!(feature = "cuda") {
+    #[cfg(feature = "cuda")]
+    let device = {
         println!("CUDA enabled — targeting Device::Cuda(0) for params + data (required for real MatMulBackward on GPU)");
         Device::Cuda(0)
-    } else {
-        Device::Cpu
     };
+    #[cfg(not(feature = "cuda"))]
+    let device = Device::Cpu;
 
     // -------------------------------------------------------------------------
     // Dataset (XOR Problem)
