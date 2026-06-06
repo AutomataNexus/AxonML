@@ -836,7 +836,7 @@ impl GradientFunction for NarrowBackward {
             return vec![Some(grad)];
         }
 
-        // CPU path
+        // CPU path — parallel over output elements (writes are to distinct input positions for a narrow slice).
         let numel: usize = self.input_shape.iter().product();
         let mut grad_data = vec![0.0f32; numel];
         let grad_out_data = grad_output.to_vec();
@@ -848,22 +848,48 @@ impl GradientFunction for NarrowBackward {
 
         let output_shape = grad_output.shape();
         let out_numel: usize = output_shape.iter().product();
-        for out_idx in 0..out_numel {
-            let mut indices = vec![0usize; output_shape.len()];
-            let mut remaining = out_idx;
-            for d in (0..output_shape.len()).rev() {
-                indices[d] = remaining % output_shape[d];
-                remaining /= output_shape[d];
+
+        if out_numel >= 4096 {
+            use rayon::prelude::*;
+            let grad_ptr = grad_data.as_mut_ptr() as usize;
+            (0..out_numel).into_par_iter().for_each(|out_idx| {
+                let grad_ptr = grad_ptr as *mut f32;
+                let mut indices = vec![0usize; output_shape.len()];
+                let mut remaining = out_idx;
+                for d in (0..output_shape.len()).rev() {
+                    indices[d] = remaining % output_shape[d];
+                    remaining /= output_shape[d];
+                }
+
+                indices[self.dim] += self.start;
+
+                let in_idx: usize = indices
+                    .iter()
+                    .zip(strides.iter())
+                    .map(|(&i, &s)| i * s)
+                    .sum();
+                unsafe {
+                    *grad_ptr.add(in_idx) = grad_out_data[out_idx];
+                }
+            });
+        } else {
+            for out_idx in 0..out_numel {
+                let mut indices = vec![0usize; output_shape.len()];
+                let mut remaining = out_idx;
+                for d in (0..output_shape.len()).rev() {
+                    indices[d] = remaining % output_shape[d];
+                    remaining /= output_shape[d];
+                }
+
+                indices[self.dim] += self.start;
+
+                let in_idx: usize = indices
+                    .iter()
+                    .zip(strides.iter())
+                    .map(|(&i, &s)| i * s)
+                    .sum();
+                grad_data[in_idx] = grad_out_data[out_idx];
             }
-
-            indices[self.dim] += self.start;
-
-            let in_idx: usize = indices
-                .iter()
-                .zip(strides.iter())
-                .map(|(&i, &s)| i * s)
-                .sum();
-            grad_data[in_idx] = grad_out_data[out_idx];
         }
 
         let grad = Tensor::from_vec(grad_data, &self.input_shape)
