@@ -1776,10 +1776,10 @@ impl<T: Float> Tensor<T> {
             let out_f32: &mut [f32] = unsafe {
                 std::slice::from_raw_parts_mut(out.as_mut_ptr() as *mut f32, out.len())
             };
-            let tokens = bs * n_heads * seq;
+            let _tokens = bs * n_heads * seq;
             out_f32.par_chunks_mut(head_dim).enumerate().for_each(|(tok, chunk)| {
-                let b = tok / (n_heads * seq);
-                let h = (tok / seq) % n_heads;
+                let _b = tok / (n_heads * seq);
+                let _h = (tok / seq) % n_heads;
                 let t = tok % seq;
                 let pos = pos_start + t;
                 for d in 0..half {
@@ -1892,10 +1892,10 @@ impl<T: Float> Tensor<T> {
             let x_f32: &mut [f32] = unsafe {
                 std::slice::from_raw_parts_mut(x.as_mut_ptr() as *mut f32, x.len())
             };
-            let tokens = bs * n_heads * seq;
+            let _tokens = bs * n_heads * seq;
             x_f32.par_chunks_mut(head_dim).enumerate().for_each(|(tok, chunk)| {
-                let b = tok / (n_heads * seq);
-                let h = (tok / seq) % n_heads;
+                let _b = tok / (n_heads * seq);
+                let _h = (tok / seq) % n_heads;
                 let t = tok % seq;
                 let pos = pos_start + t;
                 for d in 0..half {

@@ -711,15 +711,40 @@ impl GradientFunction for VarDimBackward {
         };
 
         // First pass: compute means along dim
+        // Parallelized with rayon fold+reduce for accumulation (local per-thread vecs, then merge).
+        // Complements the parallel second pass for full CPU parallel VarDimBackward.
         let out_numel: usize = out_shape.iter().product();
-        let mut means = vec![0.0f32; out_numel];
-        let mut counts = vec![0usize; out_numel];
-
-        for flat_idx in 0..numel {
-            let out_idx = map_to_out(flat_idx);
-            means[out_idx] += input_vec[flat_idx];
-            counts[out_idx] += 1;
-        }
+        let (means, counts) = if numel >= 4096 {
+            use rayon::prelude::*;
+            (0..numel).into_par_iter().fold(
+                || (vec![0.0f32; out_numel], vec![0usize; out_numel]),
+                |mut acc, flat_idx| {
+                    let out_idx = map_to_out(flat_idx);
+                    acc.0[out_idx] += input_vec[flat_idx];
+                    acc.1[out_idx] += 1;
+                    acc
+                }
+            ).reduce(
+                || (vec![0.0f32; out_numel], vec![0usize; out_numel]),
+                |mut a, b| {
+                    for i in 0..out_numel {
+                        a.0[i] += b.0[i];
+                        a.1[i] += b.1[i];
+                    }
+                    a
+                }
+            )
+        } else {
+            let mut means = vec![0.0f32; out_numel];
+            let mut counts = vec![0usize; out_numel];
+            for flat_idx in 0..numel {
+                let out_idx = map_to_out(flat_idx);
+                means[out_idx] += input_vec[flat_idx];
+                counts[out_idx] += 1;
+            }
+            (means, counts)
+        };
+        let mut means = means; // to mut for divide
         for i in 0..out_numel {
             if counts[i] > 0 {
                 means[i] /= counts[i] as f32;
