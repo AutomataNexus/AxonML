@@ -358,7 +358,9 @@ impl GradientFunction for GruGatesBackward {
                 // h_new = (1 - z) * n + z * h_prev
                 let dz = dh * (hp - n);
                 let dn = dh * (1.0 - z);
-                unsafe { *gp_ptr.add(idx) = dh * z; }
+                unsafe {
+                    *gp_ptr.add(idx) = dh * z;
+                }
 
                 let d_n_pre = dn * (1.0 - n * n);
                 let d_z_pre = dz * z * (1.0 - z);

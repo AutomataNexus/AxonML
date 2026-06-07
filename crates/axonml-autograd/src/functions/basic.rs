@@ -527,24 +527,27 @@ impl GradientFunction for MeanDimBackward {
 
         if numel >= 4096 {
             use rayon::prelude::*;
-            grad_input.par_iter_mut().enumerate().for_each(|(flat_idx, gi)| {
-                let mut remaining = flat_idx;
-                let mut out_flat = 0usize;
-                let mut out_d = 0;
-                for d in 0..ndim {
-                    let coord = remaining / strides[d];
-                    remaining %= strides[d];
-                    if d == self.dim {
-                        if self.keepdim {
+            grad_input
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(flat_idx, gi)| {
+                    let mut remaining = flat_idx;
+                    let mut out_flat = 0usize;
+                    let mut out_d = 0;
+                    for d in 0..ndim {
+                        let coord = remaining / strides[d];
+                        remaining %= strides[d];
+                        if d == self.dim {
+                            if self.keepdim {
+                                out_d += 1;
+                            }
+                        } else {
+                            out_flat += coord * out_strides[out_d];
                             out_d += 1;
                         }
-                    } else {
-                        out_flat += coord * out_strides[out_d];
-                        out_d += 1;
                     }
-                }
-                *gi = grad_vec[out_flat] * scale;
-            });
+                    *gi = grad_vec[out_flat] * scale;
+                });
         } else {
             for flat_idx in 0..numel {
                 let mut remaining = flat_idx;
@@ -716,24 +719,27 @@ impl GradientFunction for VarDimBackward {
         let out_numel: usize = out_shape.iter().product();
         let (means, counts) = if numel >= 4096 {
             use rayon::prelude::*;
-            (0..numel).into_par_iter().fold(
-                || (vec![0.0f32; out_numel], vec![0usize; out_numel]),
-                |mut acc, flat_idx| {
-                    let out_idx = map_to_out(flat_idx);
-                    acc.0[out_idx] += input_vec[flat_idx];
-                    acc.1[out_idx] += 1;
-                    acc
-                }
-            ).reduce(
-                || (vec![0.0f32; out_numel], vec![0usize; out_numel]),
-                |mut a, b| {
-                    for i in 0..out_numel {
-                        a.0[i] += b.0[i];
-                        a.1[i] += b.1[i];
-                    }
-                    a
-                }
-            )
+            (0..numel)
+                .into_par_iter()
+                .fold(
+                    || (vec![0.0f32; out_numel], vec![0usize; out_numel]),
+                    |mut acc, flat_idx| {
+                        let out_idx = map_to_out(flat_idx);
+                        acc.0[out_idx] += input_vec[flat_idx];
+                        acc.1[out_idx] += 1;
+                        acc
+                    },
+                )
+                .reduce(
+                    || (vec![0.0f32; out_numel], vec![0usize; out_numel]),
+                    |mut a, b| {
+                        for i in 0..out_numel {
+                            a.0[i] += b.0[i];
+                            a.1[i] += b.1[i];
+                        }
+                        a
+                    },
+                )
         } else {
             let mut means = vec![0.0f32; out_numel];
             let mut counts = vec![0usize; out_numel];
@@ -759,10 +765,13 @@ impl GradientFunction for VarDimBackward {
 
         if numel >= 4096 {
             use rayon::prelude::*;
-            grad_input.par_iter_mut().enumerate().for_each(|(flat_idx, gi)| {
-                let out_idx = map_to_out(flat_idx);
-                *gi = 2.0 * (input_vec[flat_idx] - means[out_idx]) / n * grad_vec[out_idx];
-            });
+            grad_input
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(flat_idx, gi)| {
+                    let out_idx = map_to_out(flat_idx);
+                    *gi = 2.0 * (input_vec[flat_idx] - means[out_idx]) / n * grad_vec[out_idx];
+                });
         } else {
             for flat_idx in 0..numel {
                 let out_idx = map_to_out(flat_idx);
@@ -1016,49 +1025,54 @@ fn reduce_grad_for_broadcast(grad: &Tensor<f32>, target_shape: &[usize]) -> Tens
             // Precompute target strides for the kept dims.
             let mut t_strides = vec![1usize; target_ndim];
             if target_ndim > 0 {
-                for i in (0..target_ndim-1).rev() {
-                    t_strides[i] = t_strides[i+1] * target_shape[i+1];
+                for i in (0..target_ndim - 1).rev() {
+                    t_strides[i] = t_strides[i + 1] * target_shape[i + 1];
                 }
             }
-            let merged = (0..grad_numel).into_par_iter().fold(
-                || vec![0.0f32; out_numel],
-                |mut local, g_flat| {
-                    // Decompose g_flat -> coords
-                    let mut coords = vec![0usize; grad_ndim];
-                    let mut rem = g_flat;
-                    for d in (0..grad_ndim).rev() {
-                        coords[d] = rem % grad_shape[d];
-                        rem /= grad_shape[d];
-                    }
-                    // t_flat only from kept dims (padded_target[d]==1 means this is a reduce dim -> do not add its coord*stride)
-                    let mut t_f = 0usize;
-                    let mut t_d = 0;
-                    for d in 0..grad_ndim {
-                        if padded_target[d] != 1 {
-                            t_f += coords[d] * t_strides[t_d];
-                            t_d += 1;
+            let merged = (0..grad_numel)
+                .into_par_iter()
+                .fold(
+                    || vec![0.0f32; out_numel],
+                    |mut local, g_flat| {
+                        // Decompose g_flat -> coords
+                        let mut coords = vec![0usize; grad_ndim];
+                        let mut rem = g_flat;
+                        for d in (0..grad_ndim).rev() {
+                            coords[d] = rem % grad_shape[d];
+                            rem /= grad_shape[d];
                         }
-                    }
-                    local[t_f] += g_data[g_flat];
-                    local
-                }
-            ).reduce(
-                || vec![0.0f32; out_numel],
-                |mut a, b| {
-                    for i in 0..out_numel { a[i] += b[i]; }
-                    a
-                }
-            );
-            return Tensor::from_vec(merged, target_shape).expect("reduce_grad general cpu direct par");
-        } else {
-            let mut res = grad.clone();
-            for d in 0..grad_ndim {
-                if padded_target[d] == 1 && res.shape()[d] > 1 {
-                    res = res.sum_dim(d as i32, true);
-                }
-            }
-            return res;
+                        // t_flat only from kept dims (padded_target[d]==1 means this is a reduce dim -> do not add its coord*stride)
+                        let mut t_f = 0usize;
+                        let mut t_d = 0;
+                        for d in 0..grad_ndim {
+                            if padded_target[d] != 1 {
+                                t_f += coords[d] * t_strides[t_d];
+                                t_d += 1;
+                            }
+                        }
+                        local[t_f] += g_data[g_flat];
+                        local
+                    },
+                )
+                .reduce(
+                    || vec![0.0f32; out_numel],
+                    |mut a, b| {
+                        for i in 0..out_numel {
+                            a[i] += b[i];
+                        }
+                        a
+                    },
+                );
+            return Tensor::from_vec(merged, target_shape)
+                .expect("reduce_grad general cpu direct par");
         }
+        let mut res = grad.clone();
+        for d in 0..grad_ndim {
+            if padded_target[d] == 1 && res.shape()[d] > 1 {
+                res = res.sum_dim(d as i32, true);
+            }
+        }
+        return res;
     }
 
     let mut result = grad.clone();

@@ -605,7 +605,7 @@ impl CpuBackend {
             // rows of C; inner p/j loops stay serial per tile for cache.
             let threads = rayon::current_num_threads().max(1);
             let rows_per = ((m / (threads * 4)).max(1)).min(m);
-            let num_chunks = (m + rows_per - 1) / rows_per;
+            let num_chunks = m.div_ceil(rows_per);
             let c_ptr = c.as_mut_ptr() as usize;
             (0..num_chunks).into_par_iter().for_each(|chunk| {
                 let c_ptr = c_ptr as *mut T;

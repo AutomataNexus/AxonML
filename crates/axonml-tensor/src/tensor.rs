@@ -681,7 +681,12 @@ impl<T: Scalar> Tensor<T> {
             a.len(),
             b.len()
         );
-        let result: Vec<T> = a.iter().copied().zip(b.iter().copied()).map(|(x, y)| f(x, y)).collect();
+        let result: Vec<T> = a
+            .iter()
+            .copied()
+            .zip(b.iter().copied())
+            .map(|(x, y)| f(x, y))
+            .collect();
         Self::from_vec(result, &self.shape).unwrap()
     }
 
@@ -709,7 +714,8 @@ impl<T: Scalar> Tensor<T> {
         debug_assert_eq!(a_data.len(), b_data.len());
         debug_assert_eq!(a_data.len(), c_data.len());
         let result: Vec<T> = a_data
-            .iter().copied()
+            .iter()
+            .copied()
             .zip(b_data.iter().copied())
             .zip(c_data.iter().copied())
             .map(|((a, b), c)| f(a, b, c))
@@ -968,7 +974,11 @@ impl<T: Numeric> Tensor<T> {
             let ts = t.storage.as_slice();
             let tf = t.is_contiguous() && t.offset == 0;
             let tslice: &[T] = if tf { &ts[..t.numel()] } else { &[] };
-            let to: Option<Vec<T>> = if tf { None } else { Some(t.contiguous().to_vec()) };
+            let to: Option<Vec<T>> = if tf {
+                None
+            } else {
+                Some(t.contiguous().to_vec())
+            };
             let t_data: &[T] = to.as_deref().unwrap_or(tslice);
             let t_dim_size = t.shape[dim];
             let work = outer_size * t_dim_size;
@@ -1274,16 +1284,22 @@ impl<T: Float> Tensor<T> {
         };
         let var: f32 = if n >= 4096 {
             use rayon::prelude::*;
-            let sum: f32 = x.par_iter().map(|v| {
-                let d = v.to_f32().unwrap_or(0.0) - mean;
-                d * d
-            }).sum();
+            let sum: f32 = x
+                .par_iter()
+                .map(|v| {
+                    let d = v.to_f32().unwrap_or(0.0) - mean;
+                    d * d
+                })
+                .sum();
             sum / n_f
         } else {
-            x.iter().map(|v| {
-                let d = v.to_f32().unwrap_or(0.0) - mean;
-                d * d
-            }).sum::<f32>() / n_f
+            x.iter()
+                .map(|v| {
+                    let d = v.to_f32().unwrap_or(0.0) - mean;
+                    d * d
+                })
+                .sum::<f32>()
+                / n_f
         };
         let inv = (var + eps).sqrt().recip();
         let mut out: Vec<T> = vec![T::zero(); n];
@@ -1295,11 +1311,19 @@ impl<T: Float> Tensor<T> {
             let b_ptr = b.as_ptr() as usize;
             (0..n).into_par_iter().for_each(|i| {
                 let out_ptr = out_ptr as *mut T;
-                let xi = unsafe { *(x_ptr as *const T).add(i) }.to_f32().unwrap_or(0.0);
-                let gi = unsafe { *(g_ptr as *const T).add(i) }.to_f32().unwrap_or(0.0);
-                let bi = unsafe { *(b_ptr as *const T).add(i) }.to_f32().unwrap_or(0.0);
+                let xi = unsafe { *(x_ptr as *const T).add(i) }
+                    .to_f32()
+                    .unwrap_or(0.0);
+                let gi = unsafe { *(g_ptr as *const T).add(i) }
+                    .to_f32()
+                    .unwrap_or(0.0);
+                let bi = unsafe { *(b_ptr as *const T).add(i) }
+                    .to_f32()
+                    .unwrap_or(0.0);
                 let v = (xi - mean) * inv * gi + bi;
-                unsafe { *out_ptr.add(i) = num_traits::cast(v).unwrap_or_else(T::zero); }
+                unsafe {
+                    *out_ptr.add(i) = num_traits::cast(v).unwrap_or_else(T::zero);
+                }
             });
         } else {
             for i in 0..n {
@@ -1335,9 +1359,13 @@ impl<T: Float> Tensor<T> {
             let x_ptr = x.as_ptr() as usize;
             (0..n).into_par_iter().for_each(|i| {
                 let out_ptr = out_ptr as *mut T;
-                let v = unsafe { *(x_ptr as *const T).add(i) }.to_f32().unwrap_or(0.0);
+                let v = unsafe { *(x_ptr as *const T).add(i) }
+                    .to_f32()
+                    .unwrap_or(0.0);
                 let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
-                unsafe { *out_ptr.add(i) = num_traits::cast(y).unwrap_or_else(T::zero); }
+                unsafe {
+                    *out_ptr.add(i) = num_traits::cast(y).unwrap_or_else(T::zero);
+                }
             });
         } else {
             for i in 0..n {
@@ -1536,7 +1564,8 @@ impl<T: Float> Tensor<T> {
                 }
                 let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
                 for i in 0..head_dim {
-                    let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                    let v =
+                        x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
                     unsafe {
                         *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero);
                     }
@@ -1552,7 +1581,8 @@ impl<T: Float> Tensor<T> {
                 }
                 let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
                 for i in 0..head_dim {
-                    let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                    let v =
+                        x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
                     out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
                 }
             }
@@ -1585,9 +1615,8 @@ impl<T: Float> Tensor<T> {
         let mut x = self.to_vec();
         if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
             // SAFETY: checked + identical repr for f32 slice.
-            let x_f32: &mut [f32] = unsafe {
-                std::slice::from_raw_parts_mut(x.as_mut_ptr() as *mut f32, x.len())
-            };
+            let x_f32: &mut [f32] =
+                unsafe { std::slice::from_raw_parts_mut(x.as_mut_ptr().cast::<f32>(), x.len()) };
             CpuBackend::apply_rope_split_halves_f32(x_f32, n_heads, head_dim, theta, pos);
         } else {
             let half = head_dim / 2;
@@ -1861,7 +1890,10 @@ impl<T: Float> Tensor<T> {
                     let gi = unsafe { *g_ptr.add(base + i) }.to_f32().unwrap_or(0.0);
                     let term1 = wi * gi * rms_inv;
                     let term2 = xi * dot_scaled;
-                    unsafe { *out_ptr.add(base + i) = num_traits::cast(term1 - term2).unwrap_or_else(T::zero); }
+                    unsafe {
+                        *out_ptr.add(base + i) =
+                            num_traits::cast(term1 - term2).unwrap_or_else(T::zero);
+                    }
                 }
             });
         } else {
@@ -1930,13 +1962,20 @@ impl<T: Float> Tensor<T> {
                 let base = t * n;
                 let mut sum_sq = 0.0f64;
                 for i in 0..n {
-                    let f: f64 = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0).into();
+                    let f: f64 = unsafe { *x_ptr.add(base + i) }
+                        .to_f32()
+                        .unwrap_or(0.0)
+                        .into();
                     sum_sq += f * f;
                 }
                 let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
                 for i in 0..n {
-                    let v = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0) * scale * unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
-                    unsafe { *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero); }
+                    let v = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0)
+                        * scale
+                        * unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
+                    unsafe {
+                        *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero);
+                    }
                 }
             });
         } else {
@@ -1949,7 +1988,8 @@ impl<T: Float> Tensor<T> {
                 }
                 let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
                 for i in 0..n {
-                    let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                    let v =
+                        x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
                     out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
                 }
             }
@@ -2012,13 +2052,20 @@ impl<T: Float> Tensor<T> {
                     let base = t * n_heads * head_dim + h * head_dim;
                     let mut sum_sq = 0.0f64;
                     for i in 0..head_dim {
-                        let f: f64 = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0).into();
+                        let f: f64 = unsafe { *x_ptr.add(base + i) }
+                            .to_f32()
+                            .unwrap_or(0.0)
+                            .into();
                         sum_sq += f * f;
                     }
                     let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
                     for i in 0..head_dim {
-                        let v = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0) * scale * unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
-                        unsafe { *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero); }
+                        let v = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0)
+                            * scale
+                            * unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
+                        unsafe {
+                            *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero);
+                        }
                     }
                 }
             });
@@ -2033,7 +2080,9 @@ impl<T: Float> Tensor<T> {
                     }
                     let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
                     for i in 0..head_dim {
-                        let v = x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                        let v = x[base + i].to_f32().unwrap_or(0.0)
+                            * scale
+                            * w[i].to_f32().unwrap_or(0.0);
                         out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
                     }
                 }
@@ -2073,24 +2122,26 @@ impl<T: Float> Tensor<T> {
             use rayon::prelude::*;
             // Sequential for now (complex strided); outer batch parallel possible in caller for large m.
             // Reductions/rms/swiglu have full parallel.
-            let x_f32: &mut [f32] = unsafe {
-                std::slice::from_raw_parts_mut(x.as_mut_ptr() as *mut f32, x.len())
-            };
-            x_f32.par_chunks_mut(row_stride).enumerate().for_each(|(t, chunk)| {
-                let pos = pos_start + t;
-                for h in 0..n_heads {
-                    for d in 0..half {
-                        let base = h * head_dim + d;
-                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                        let angle = pos as f32 * theta.powf(exponent);
-                        let (s, c) = angle.sin_cos();
-                        let a = chunk[base];
-                        let b_val = chunk[base + half];
-                        chunk[base] = c * a - s * b_val;
-                        chunk[base + half] = s * a + c * b_val;
+            let x_f32: &mut [f32] =
+                unsafe { std::slice::from_raw_parts_mut(x.as_mut_ptr().cast::<f32>(), x.len()) };
+            x_f32
+                .par_chunks_mut(row_stride)
+                .enumerate()
+                .for_each(|(t, chunk)| {
+                    let pos = pos_start + t;
+                    for h in 0..n_heads {
+                        for d in 0..half {
+                            let base = h * head_dim + d;
+                            let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                            let angle = pos as f32 * theta.powf(exponent);
+                            let (s, c) = angle.sin_cos();
+                            let a = chunk[base];
+                            let b_val = chunk[base + half];
+                            chunk[base] = c * a - s * b_val;
+                            chunk[base + half] = s * a + c * b_val;
+                        }
                     }
-                }
-            });
+                });
         } else {
             for t in 0..m {
                 let pos = pos_start + t;
@@ -2146,24 +2197,24 @@ impl<T: Float> Tensor<T> {
             use rayon::prelude::*;
             // Parallel over tokens using par_chunks_mut.
             let out_f32: &mut [f32] = unsafe {
-                std::slice::from_raw_parts_mut(out.as_mut_ptr() as *mut f32, out.len())
+                std::slice::from_raw_parts_mut(out.as_mut_ptr().cast::<f32>(), out.len())
             };
-            let _tokens = bs * n_heads * seq;
-            out_f32.par_chunks_mut(head_dim).enumerate().for_each(|(tok, chunk)| {
-                let _b = tok / (n_heads * seq);
-                let _h = (tok / seq) % n_heads;
-                let t = tok % seq;
-                let pos = pos_start + t;
-                for d in 0..half {
-                    let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                    let angle = pos as f32 * theta.powf(exponent);
-                    let (s, c) = angle.sin_cos();
-                    let dy1 = chunk[d];
-                    let dy2 = chunk[d + half];
-                    chunk[d] = c * dy1 + s * dy2;
-                    chunk[d + half] = -s * dy1 + c * dy2;
-                }
-            });
+            out_f32
+                .par_chunks_mut(head_dim)
+                .enumerate()
+                .for_each(|(tok, chunk)| {
+                    let t = tok % seq;
+                    let pos = pos_start + t;
+                    for d in 0..half {
+                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                        let angle = pos as f32 * theta.powf(exponent);
+                        let (s, c) = angle.sin_cos();
+                        let dy1 = chunk[d];
+                        let dy2 = chunk[d + half];
+                        chunk[d] = c * dy1 + s * dy2;
+                        chunk[d + half] = -s * dy1 + c * dy2;
+                    }
+                });
         } else {
             for b in 0..bs {
                 for h in 0..n_heads {
@@ -2176,7 +2227,8 @@ impl<T: Float> Tensor<T> {
                             let (s, c) = angle.sin_cos();
                             let dy1 = g[base + d].to_f32().unwrap_or(0.0);
                             let dy2 = g[base + d + half].to_f32().unwrap_or(0.0);
-                            out[base + d] = num_traits::cast(c * dy1 + s * dy2).unwrap_or_else(T::zero);
+                            out[base + d] =
+                                num_traits::cast(c * dy1 + s * dy2).unwrap_or_else(T::zero);
                             out[base + d + half] =
                                 num_traits::cast(-s * dy1 + c * dy2).unwrap_or_else(T::zero);
                         }
@@ -2261,25 +2313,24 @@ impl<T: Float> Tensor<T> {
         if x.len() >= 4096 && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
             use rayon::prelude::*;
             // Parallel over tokens (b*h*t) using par_chunks_mut on head_dim chunks.
-            let x_f32: &mut [f32] = unsafe {
-                std::slice::from_raw_parts_mut(x.as_mut_ptr() as *mut f32, x.len())
-            };
-            let _tokens = bs * n_heads * seq;
-            x_f32.par_chunks_mut(head_dim).enumerate().for_each(|(tok, chunk)| {
-                let _b = tok / (n_heads * seq);
-                let _h = (tok / seq) % n_heads;
-                let t = tok % seq;
-                let pos = pos_start + t;
-                for d in 0..half {
-                    let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                    let angle = pos as f32 * theta.powf(exponent);
-                    let (s, c) = angle.sin_cos();
-                    let a = chunk[d];
-                    let bv = chunk[d + half];
-                    chunk[d] = c * a - s * bv;
-                    chunk[d + half] = s * a + c * bv;
-                }
-            });
+            let x_f32: &mut [f32] =
+                unsafe { std::slice::from_raw_parts_mut(x.as_mut_ptr().cast::<f32>(), x.len()) };
+            x_f32
+                .par_chunks_mut(head_dim)
+                .enumerate()
+                .for_each(|(tok, chunk)| {
+                    let t = tok % seq;
+                    let pos = pos_start + t;
+                    for d in 0..half {
+                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                        let angle = pos as f32 * theta.powf(exponent);
+                        let (s, c) = angle.sin_cos();
+                        let a = chunk[d];
+                        let bv = chunk[d + half];
+                        chunk[d] = c * a - s * bv;
+                        chunk[d + half] = s * a + c * bv;
+                    }
+                });
         } else {
             let half = head_dim / 2;
             for b in 0..bs {
@@ -2367,7 +2418,8 @@ impl<T: Float> Tensor<T> {
                 let silu_g = gi * sig;
                 let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
                 unsafe {
-                    *gg_ptr.add(i) = num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero);
+                    *gg_ptr.add(i) =
+                        num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero);
                     *gu_ptr.add(i) = num_traits::cast(goi * silu_g).unwrap_or_else(T::zero);
                 }
             });
@@ -2409,13 +2461,15 @@ impl<T: Float> Tensor<T> {
                 .for_each(|(o, (gi, ui))| {
                     let g32 = gi.to_f32().unwrap_or(0.0);
                     let silu = g32 / (1.0 + (-g32).exp());
-                    *o = num_traits::cast(silu * ui.to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero);
+                    *o =
+                        num_traits::cast(silu * ui.to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero);
                 });
         } else {
             for i in 0..g.len() {
                 let gi = g[i].to_f32().unwrap_or(0.0);
                 let silu = gi / (1.0 + (-gi).exp());
-                out[i] = num_traits::cast(silu * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero);
+                out[i] =
+                    num_traits::cast(silu * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero);
             }
         }
         Self::from_vec(out, &self.shape).expect("swiglu: build output tensor")

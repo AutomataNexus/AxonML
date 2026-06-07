@@ -280,7 +280,9 @@ impl GradientFunction for SoftmaxBackward {
                         }
                         for row in 0..rows {
                             let idx = row * cols + col;
-                            unsafe { *res_ptr.add(idx) = s[idx] * (g[idx] - dot); }
+                            unsafe {
+                                *res_ptr.add(idx) = s[idx] * (g[idx] - dot);
+                            }
                         }
                     });
                 } else {
@@ -311,7 +313,9 @@ impl GradientFunction for SoftmaxBackward {
                         }
                         for col in 0..cols {
                             let idx = start + col;
-                            unsafe { *res_ptr.add(idx) = s[idx] * (g[idx] - dot); }
+                            unsafe {
+                                *res_ptr.add(idx) = s[idx] * (g[idx] - dot);
+                            }
                         }
                     });
                 } else {
@@ -386,7 +390,9 @@ impl GradientFunction for SoftmaxBackward {
                     for i in 0..dim_size {
                         let idx = base_idx + i * dim_stride;
                         if idx < total {
-                            unsafe { *res_ptr.add(idx) = s[idx] * (g[idx] - dot); }
+                            unsafe {
+                                *res_ptr.add(idx) = s[idx] * (g[idx] - dot);
+                            }
                         }
                     }
                 });
@@ -1095,7 +1101,9 @@ impl GradientFunction for LogSoftmaxBackward {
                         for col in 0..cols {
                             let idx = start + col;
                             let softmax_i = output_vec[idx].exp();
-                            unsafe { *res_ptr.add(idx) = g[idx] - softmax_i * sum_g; }
+                            unsafe {
+                                *res_ptr.add(idx) = g[idx] - softmax_i * sum_g;
+                            }
                         }
                     });
                 } else {
@@ -1125,7 +1133,9 @@ impl GradientFunction for LogSoftmaxBackward {
                         for row in 0..rows {
                             let idx = row * cols + col;
                             let softmax_i = output_vec[idx].exp();
-                            unsafe { *res_ptr.add(idx) = g[idx] - softmax_i * sum_g; }
+                            unsafe {
+                                *res_ptr.add(idx) = g[idx] - softmax_i * sum_g;
+                            }
                         }
                     });
                 } else {
@@ -1186,7 +1196,9 @@ impl GradientFunction for LogSoftmaxBackward {
                         let idx = base_idx + i * dim_stride;
                         if idx < total {
                             let softmax_i = output_vec[idx].exp();
-                            unsafe { *res_ptr.add(idx) = g[idx] - softmax_i * sum_g; }
+                            unsafe {
+                                *res_ptr.add(idx) = g[idx] - softmax_i * sum_g;
+                            }
                         }
                     }
                 });

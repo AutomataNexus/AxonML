@@ -39,7 +39,9 @@ fn main() {
     // Device selection (GPU when cuda feature enabled — see L02 and deficiency #1)
     #[cfg(feature = "cuda")]
     let device = {
-        println!("CUDA enabled — targeting Device::Cuda(0) for params + data (required for real MatMulBackward on GPU)");
+        println!(
+            "CUDA enabled — targeting Device::Cuda(0) for params + data (required for real MatMulBackward on GPU)"
+        );
         Device::Cuda(0)
     };
     #[cfg(not(feature = "cuda"))]
@@ -101,7 +103,10 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1000);
-    println!("4. Training for {} epochs (override with EPOCHS=...)", epochs);
+    println!(
+        "4. Training for {} epochs (override with EPOCHS=...)",
+        epochs
+    );
 
     for epoch in 0..epochs {
         let mut total_loss = 0.0;
@@ -109,7 +114,11 @@ fn main() {
         for (input, &target) in inputs.iter().zip(targets.iter()) {
             // Create input tensor (on device when GPU to drive GPU matmuls + MatMulBackward)
             let x_t = Tensor::from_vec(input.clone(), &[1, 2]).unwrap();
-            let x_t = if device.is_gpu() { x_t.to_device(device).unwrap() } else { x_t };
+            let x_t = if device.is_gpu() {
+                x_t.to_device(device).unwrap()
+            } else {
+                x_t
+            };
             let x = Variable::new(x_t, true);
 
             // Forward pass
@@ -120,7 +129,11 @@ fn main() {
 
             // Create target tensor
             let y_t = Tensor::from_vec(vec![target], &[1, 1]).unwrap();
-            let y_t = if device.is_gpu() { y_t.to_device(device).unwrap() } else { y_t };
+            let y_t = if device.is_gpu() {
+                y_t.to_device(device).unwrap()
+            } else {
+                y_t
+            };
             let y = Variable::new(y_t, false);
 
             // Compute MSE loss manually: (output - target)^2
@@ -150,7 +163,11 @@ fn main() {
     println!("\n5. Testing trained model...");
     for (input, &expected) in inputs.iter().zip(targets.iter()) {
         let x_t = Tensor::from_vec(input.clone(), &[1, 2]).unwrap();
-        let x_t = if device.is_gpu() { x_t.to_device(device).unwrap() } else { x_t };
+        let x_t = if device.is_gpu() {
+            x_t.to_device(device).unwrap()
+        } else {
+            x_t
+        };
         let x = Variable::new(x_t, false);
 
         let h = linear1.forward(&x);

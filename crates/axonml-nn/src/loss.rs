@@ -259,9 +259,7 @@ impl GradientFunction for CrossEntropyBackward {
                     .to_device(self.softmax_probs.device())
                     .unwrap()
             } else {
-                grad_output
-                    .to_device(self.softmax_probs.device())
-                    .unwrap()
+                grad_output.to_device(self.softmax_probs.device()).unwrap()
             };
 
             let grad = self

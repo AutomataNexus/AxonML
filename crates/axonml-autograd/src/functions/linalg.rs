@@ -114,10 +114,15 @@ impl GradientFunction for MatMulBackward {
 
         let target = if saved_was_gpu || go_dev.is_gpu() || rt_dev.is_gpu() || lt_dev.is_gpu() {
             // Prefer any GPU device present (usually Cuda(0))
-            if go_dev.is_gpu() { go_dev }
-            else if rt_dev.is_gpu() { rt_dev }
-            else if lt_dev.is_gpu() { lt_dev }
-            else { self.saved_lhs.device() }
+            if go_dev.is_gpu() {
+                go_dev
+            } else if rt_dev.is_gpu() {
+                rt_dev
+            } else if lt_dev.is_gpu() {
+                lt_dev
+            } else {
+                self.saved_lhs.device()
+            }
         } else {
             go_dev // pure CPU
         };
@@ -158,8 +163,14 @@ impl GradientFunction for MatMulBackward {
         // FAF guard (debug): if we were supposed to stay on GPU, the outputs should be too.
         #[cfg(debug_assertions)]
         if saved_was_gpu {
-            debug_assert!(grad_lhs.device().is_gpu(), "MatMulBackward grad_lhs left GPU");
-            debug_assert!(grad_rhs.device().is_gpu(), "MatMulBackward grad_rhs left GPU");
+            debug_assert!(
+                grad_lhs.device().is_gpu(),
+                "MatMulBackward grad_lhs left GPU"
+            );
+            debug_assert!(
+                grad_rhs.device().is_gpu(),
+                "MatMulBackward grad_rhs left GPU"
+            );
         }
 
         vec![Some(grad_lhs), Some(grad_rhs)]
@@ -552,23 +563,26 @@ impl GradientFunction for SelectBackward {
         let out_numel: usize = out_shape.iter().product();
         if out_numel >= 4096 {
             use rayon::prelude::*;
-            grad_data.par_iter_mut().enumerate().for_each(|(out_idx, g)| {
-                let mut remaining = out_idx;
-                let mut in_linear = 0usize;
-                let mut out_d = 0;
-                for d in 0..ndim {
-                    if d == self.dim {
-                        in_linear += self.index * in_strides[d];
-                    } else {
-                        let coord = remaining / out_strides[out_d];
-                        remaining %= out_strides[out_d];
-                        in_linear += coord * in_strides[d];
-                        out_d += 1;
+            grad_data
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(out_idx, g)| {
+                    let mut remaining = out_idx;
+                    let mut in_linear = 0usize;
+                    let mut out_d = 0;
+                    for d in 0..ndim {
+                        if d == self.dim {
+                            in_linear += self.index * in_strides[d];
+                        } else {
+                            let coord = remaining / out_strides[out_d];
+                            remaining %= out_strides[out_d];
+                            in_linear += coord * in_strides[d];
+                            out_d += 1;
+                        }
                     }
-                }
-                let _ = in_linear; // keep write live for all paths (silences unused_assign in parallel closure)
-                *g = grad_out_data[out_idx];
-            });
+                    let _ = in_linear; // keep write live for all paths (silences unused_assign in parallel closure)
+                    *g = grad_out_data[out_idx];
+                });
         } else {
             for out_idx in 0..out_numel {
                 let mut remaining = out_idx;
@@ -726,7 +740,9 @@ impl GradientFunction for SumDimBackward {
                 let inner = gpos % inner_size;
                 for d in 0..dim_size {
                     let in_idx = outer * dim_size * inner_size + d * inner_size + inner;
-                    unsafe { *res_ptr.add(in_idx) = grad_val; }
+                    unsafe {
+                        *res_ptr.add(in_idx) = grad_val;
+                    }
                 }
             });
         } else {

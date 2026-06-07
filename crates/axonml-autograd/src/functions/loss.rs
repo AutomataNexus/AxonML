@@ -168,15 +168,11 @@ impl GradientFunction for CrossEntropyLossBackward {
                         .to_device(self.saved_softmax.device())
                         .unwrap()
                 }
-                Reduction::Sum => {
-                    Tensor::from_vec(vec![1.0f32; batch_size], &[batch_size])
-                        .unwrap()
-                        .to_device(self.saved_softmax.device())
-                        .unwrap()
-                }
-                Reduction::None => grad_output
+                Reduction::Sum => Tensor::from_vec(vec![1.0f32; batch_size], &[batch_size])
+                    .unwrap()
                     .to_device(self.saved_softmax.device())
                     .unwrap(),
+                Reduction::None => grad_output.to_device(self.saved_softmax.device()).unwrap(),
             };
 
             // Targets: cast i64 → f32 then move to GPU
@@ -213,7 +209,7 @@ impl GradientFunction for CrossEntropyLossBackward {
                 if grad_output.device().is_gpu() {
                     // For mean reduction the upstream grad is usually a scalar 1/N
                     // We can keep a 1-element GPU tensor; the bwd kernel/ math will handle it.
-                    grad_output.to_vec()[0] / batch_size as f32   // still tiny, acceptable for scalar scale
+                    grad_output.to_vec()[0] / batch_size as f32 // still tiny, acceptable for scalar scale
                 } else {
                     grad_output.to_vec()[0] / batch_size as f32
                 }

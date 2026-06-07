@@ -370,7 +370,9 @@ fn real_nccl_smoke() {
             }
         }
         Err(NcclError::LibraryNotFound) | Err(NcclError::CudaNotFound) => {
-            eprintln!("NCCL/CUDA libs not present — real backend not exercisable here (expected on CI / single-GPU laptops).");
+            eprintln!(
+                "NCCL/CUDA libs not present — real backend not exercisable here (expected on CI / single-GPU laptops)."
+            );
         }
         Err(e) => panic!("Unexpected error generating NCCL unique id: {e:?}"),
     }

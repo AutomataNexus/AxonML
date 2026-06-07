@@ -40,7 +40,10 @@ fn main() {
     println!("Features: {}\n", axonml::features());
 
     let device = Device::Cpu; // force pure CPU for this dedicated gains/FAF bench
-    println!("Device: {:?} (pure CPU; override in source for cuda variant if desired)\n", device);
+    println!(
+        "Device: {:?} (pure CPU; override in source for cuda variant if desired)\n",
+        device
+    );
 
     // Small but threshold-hitting dims for realistic prefill-style + bwd work.
     // Large enough for par paths (>>4K elements, m>1 matmuls); small enough for fast iteration.
@@ -60,7 +63,9 @@ fn main() {
         "Config: batch={}, seq={}, d_model={}, n_heads={}, d_ff={} | steps={}",
         batch, seq, d_model, n_heads, d_ff, steps
     );
-    println!("(override steps with STEPS=... env; run with AXONML_PROFILE_BACKWARD=1 for per-op bwd timings)\n");
+    println!(
+        "(override steps with STEPS=... env; run with AXONML_PROFILE_BACKWARD=1 for per-op bwd timings)\n"
+    );
 
     // Parameters (as plain Tensors for the proxy; we use .matmul + add for projections
     // and rely on autograd graph when wrapping in Variables for the bwd exercise.
@@ -159,6 +164,10 @@ fn main() {
         avg_ms,
         device
     );
-    println!("(Re-run with STEPS=... and AXONML_PROFILE_BACKWARD=1; pair with /proc sampler for thread signature.)");
-    println!("See CHANGELOG + L82 for context on the CPU FAF threading/GradFn wins this exercises.");
+    println!(
+        "(Re-run with STEPS=... and AXONML_PROFILE_BACKWARD=1; pair with /proc sampler for thread signature.)"
+    );
+    println!(
+        "See CHANGELOG + L82 for context on the CPU FAF threading/GradFn wins this exercises."
+    );
 }
