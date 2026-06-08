@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust: 1.75+"></a>
-  <a href="https://crates.io/crates/axonml-tui"><img src="https://img.shields.io/badge/crates.io-0.6.1-green.svg" alt="Crates.io: 0.6.1"></a>
+  <a href="https://crates.io/crates/axonml-tui"><img src="https://img.shields.io/badge/crates.io-0.6.5-green.svg" alt="Crates.io: 0.6.5"></a>
   <a href="https://github.com/automatanexus/axonml"><img src="https://img.shields.io/badge/part%20of-AxonML-teal.svg" alt="Part of AxonML"></a>
 </p>
 
@@ -17,7 +17,7 @@
 
 **axonml-tui** is the terminal user interface for the AxonML machine learning framework, built on Ratatui 0.30 and crossterm 0.28. It provides real-time visualization of neural network architectures, dataset statistics, training progress, loss curves, and a file browser for navigating models and datasets. The crate exposes a single `run(model_path, data_path)` entry point used by the `axonml tui` CLI subcommand.
 
-Last updated: 2026-04-16 — version 0.6.1.
+Last updated: 2026-06-06 — version 0.6.5.
 
 ---
 
@@ -61,7 +61,7 @@ Add `axonml-tui` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-tui = "0.6.1"
+axonml-tui = "0.6.5"
 ```
 
 Or launch it directly via the CLI:

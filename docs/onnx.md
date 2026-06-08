@@ -76,7 +76,7 @@ use axonml_onnx::proto::TensorDataType;
 use axonml_tensor::Tensor;
 
 let mut exporter = OnnxExporter::new("my_model")
-    .with_producer("axonml", "0.6.1")
+    .with_producer("axonml", "0.6.5")
     .with_doc_string("Two-layer MLP exported from AxonML");
 
 // Declare IO
@@ -192,4 +192,4 @@ match import_onnx("model.onnx") {
 
 ---
 
-*Last updated: 2026-04-16 (v0.6.1)*
+*Last updated: 2026-06-06 (v0.6.5)*

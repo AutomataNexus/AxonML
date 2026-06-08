@@ -23,7 +23,7 @@ AxonML (named after axons — the nerve fibers that transmit signals between neu
 
 ### PyTorch Parity: ~92–95%
 
-AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ passing tests** across 24 workspace crates.
+AxonML provides comprehensive PyTorch-equivalent functionality with **2,350+ passing tests** across 24 workspace crates.
 
 ### Key Features
 
@@ -33,12 +33,13 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ pas
 | **Automatic Differentiation** | Dynamic computational graph, reverse-mode autodiff, AMP autocast (F16), gradient checkpointing, graph inspection/DOT export |
 | **Neural Networks** | Linear, Conv1d/2d, BatchNorm1d/2d, LayerNorm, GroupNorm, RMSNorm, MultiHead/Cross/Differential attention, LSTM/GRU/RNN, Transformer encoder/decoder, MoE, GCN/GAT, TernaryLinear, differentiable structured sparsity |
 | **Optimizers** | SGD (+ momentum, Nesterov), Adam, AdamW, RMSprop, LAMB; schedulers (Step, MultiStep, Cosine, OneCycle, Warmup, ReduceLROnPlateau, Exponential); `GradScaler`; training health monitor |
-| **Distributed Training** | DDP, FSDP (ZeRO-2/ZeRO-3 + HybridShard + CPU offload), Pipeline (GPipe / 1F1B), column/row tensor parallel, NCCL backend |
-| **Model Formats** | ONNX import/export (opset 17, 40+ ops), SafeTensors, StateDict |
+| **Distributed Training** | DDP, FSDP (ZeRO-2/ZeRO-3 + HybridShard + CPU offload), Pipeline (GPipe / 1F1B), column/row tensor parallel, optional NCCL backend |
+| **Model Formats** | ONNX import/export (opset 17, 40+ ops), SafeTensors, StateDict, and `.axonml` bundles with an **embedded computation graph** for source-free recompilation (NexusFoundry → HEF) |
 | **Vision Models** | LeNet, ResNet, VGG, ViT, DETR, NanoDet, BlazeFace, RetinaFace, FPN, Nexus, Phantom, NightVision, Aegis Biometric Suite (Mnemosyne, Ariadne, Echo, Argus, Themis), Aegis3D |
-| **LLM Architectures** | BERT, GPT-2, LLaMA, Mistral, Phi, Chimera, Hydra, SSM (Mamba), Trident (1.58-bit) |
-| **Inference Stack** | `nexus-serve` — pure-Rust LLM inference with Anthropic Messages API, SSE streaming, Q4_K/Q6_K CUDA GEMV, fused prefill + flash-decode attention kernels |
-| **GPU Backends** | CUDA (cuBLAS + PTX kernels), Vulkan, Metal, WebGPU — all full implementations |
+| **LLM Architectures** | BERT, GPT-2, LLaMA, Mistral, Phi, Chimera, Hydra, SSM (Mamba), Trident (1.58-bit), **RDT** (Recurrent-Depth Transformer, test-time compute), **RustyMythos** (recurrent-depth + MoE), Qwen3 (trainable) |
+| **Inference Stack** | `nexus-serve` — pure-Rust LLM inference with Anthropic Messages API, SSE streaming, Q4_K/Q5_K/Q6_K/Q8_0 CUDA GEMV, fused prefill + flash-decode attention, `--mlock` / `--no-mmap` / `--n-gpu-layers` / `--n-cpu-moe`, and TurboQuant KV-cache quantization (`--kv-quant q8`/`turbo`) |
+| **Device-native execution** | GPU stays resident on-device; the **CPU backend is rayon-parallel** across matmul (all layouts), the full GradFn backward family, reductions, and the SwiGLU/RMSNorm/RoPE math — single-node CPU inference and training use every core |
+| **GPU Backends** | CUDA (cuBLAS + 15+ PTX kernel modules), Vulkan, Metal, WebGPU |
 
 ## Architecture
 
@@ -144,9 +145,9 @@ which trains a 2-layer MLP on the XOR problem with Adam.
 
 ## Production Deployment
 
-AxonML powers real-time predictive maintenance on HVAC systems across commercial buildings. 12 models (6 LSTM autoencoders for anomaly detection + 6 GRU failure predictors, total 105K–416K params per site) run live inference on Raspberry Pi edge controllers, cross-compiled to `armv7-unknown-linux-musleabihf`, polling sensor data at 1 Hz.
+AxonML powers real-time predictive maintenance on HVAC systems across commercial buildings. Site-specific models (LSTM autoencoders for anomaly detection + GRU failure predictors, ~105K–416K params per site) run live inference on Raspberry Pi edge controllers, cross-compiled to `armv7-unknown-linux-musleabihf`, polling sensor data at 1 Hz. Vision and biometric models are additionally compiled to Hailo-8/10H NPU silicon via the NexusFoundry path using the `.axonml` embedded-graph bundle format.
 
-The `nexus-serve` pure-Rust LLM inference server reaches 9–10 tok/s decode on a quantized 7B model (Q4_K_M) on RTX 3090, via custom CUDA kernels for Q4_K/Q6_K dequant-in-shader GEMV and fused flash-decode attention.
+The `nexus-serve` pure-Rust LLM inference server reaches ~33 tok/s steady-state decode on a quantized 7B model (DeepSeek-R1-Distill-Qwen-7B, Q4_K_M) on an RTX 5070 Ti Laptop, via GPU-resident activations, custom Q4_K/Q5_K/Q6_K/Q8_0 dequant-in-shader GEMV, fused QKV / gate-up-SwiGLU kernels, GPU-native flash-decode attention, and TurboQuant KV-cache quantization.
 
 ## License
 
@@ -154,4 +155,4 @@ AxonML is dual-licensed under [MIT](https://github.com/AutomataNexus/AxonML/blob
 
 ---
 
-*Last updated: 2026-04-16 (v0.6.1)*
+*Last updated: 2026-06-06 (v0.6.5)*

@@ -64,6 +64,8 @@ The `axonml` umbrella crate is a thin re-export layer plus the live browser trai
 | `profile` | `core` + `axonml-profile` | Yes |
 | `cuda` | NVIDIA CUDA backend (cuBLAS + PTX kernels) | No |
 | `cudnn` | `cuda` + cuDNN dispatch | No |
+| `wgpu` | WebGPU / Vulkan via wgpu | No |
+| `nccl` | `distributed` + NCCL backend | No |
 
 **WSL / Windows dev footgun (CUDA):** `/opt/cuda-stubs` (Hailo DFC) can shadow the real WSL driver lib in the ld cache. Any `--features cuda` run that hits a missing symbol (e.g. `cuArray3DCreate_v2`) needs the real path first:
 
@@ -73,9 +75,7 @@ LD_LIBRARY_PATH=/usr/lib/wsl/lib cargo run --release --features cuda ...
 ./scripts/with-wsl-cuda.sh cargo test --features cuda -p axonml-tensor --test integration
 ```
 
-See `scripts/with-wsl-cuda.sh` (idempotent prepend) and `/opt/LESSONS.md` (search cuda-stubs). This is tracked as framework deficiency #10.
-| `wgpu` | WebGPU / Vulkan via wgpu | No |
-| `nccl` | `distributed` + NCCL backend | No |
+See `scripts/with-wsl-cuda.sh` (idempotent prepend).
 
 Example with specific features:
 
@@ -235,4 +235,4 @@ Vulkan, Metal, and WebGPU each have their own feature flag in `axonml-core` (`vu
 
 ---
 
-*Last updated: 2026-04-16 (v0.6.1)*
+*Last updated: 2026-06-06 (v0.6.5)*

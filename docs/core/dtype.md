@@ -161,4 +161,4 @@ Alignment matches size (Pod + Zeroable invariants).
 
 ---
 
-*Last updated: 2026-04-16 (v0.6.1)*
+*Last updated: 2026-06-06 (v0.6.5)*

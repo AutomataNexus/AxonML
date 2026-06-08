@@ -9,7 +9,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust 1.85+">
-  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
+  <img src="https://img.shields.io/badge/version-0.6.5-green.svg" alt="Version 0.6.5">
   <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
@@ -36,6 +36,8 @@
 - **Sparse Tensors** - `SparseCOO` coordinate-format sparse tensor with `from_dense`, `to_dense`, `coalesce`, sparse+sparse add/mul, sparse×dense `spmm`, and `transpose`. `SparseFormat` tags COO/CSR/CSC.
 
 - **Optimized Concatenation** - `cat` uses contiguous memcpy per slice along any axis; `var_dim` computes variance along a dim in a single Welford pass.
+
+- **Multi-threaded CPU backend (0.6.5)** - CPU matmul (regular, B-transposed GGUF `[out,in]`, f64, generic-tiled, and 3D/4D batched), reductions (sum/mean/prod/max/min/argmax/argmin), SwiGLU, RMSNorm (+heads/batched), RoPE, `layer_norm`, `gelu`, residual adds, and the elementwise activation family are rayon-parallel above a work threshold, with contiguous/offset-0 fast-paths that skip the `to_vec` copy before the backend. Single-node CPU inference and training now use every core; tiny ops stay serial with identical semantics. The GPU path is unchanged.
 
 ## Modules
 
@@ -64,7 +66,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-tensor = "0.6.1"
+axonml-tensor = "0.6.5"
 ```
 
 ### Basic Example
@@ -220,4 +222,4 @@ at your option.
 
 ---
 
-_Last updated: 2026-04-16 (v0.6.1)_
+_Last updated: 2026-06-06 (v0.6.5)_

@@ -9,7 +9,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
-  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
+  <img src="https://img.shields.io/badge/version-0.6.5-green.svg" alt="Version 0.6.5">
   <img src="https://img.shields.io/badge/part%20of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
@@ -60,10 +60,10 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-distributed = "0.6.1"
+axonml-distributed = "0.6.5"
 
 # Or with NCCL support:
-axonml-distributed = { version = "0.6.1", features = ["nccl"] }
+axonml-distributed = { version = "0.6.5", features = ["nccl"] }
 ```
 
 ### Basic DDP Training

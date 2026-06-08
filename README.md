@@ -20,7 +20,7 @@ Axonml (named after axons - the nerve fibers that transmit signals between neuro
 
 ## PyTorch Parity: ~92-95% (and beyond)
 
-AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ passing tests**. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
+AxonML provides comprehensive PyTorch-equivalent functionality with **2,350+ passing tests**. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
 
 ## Features
 
@@ -45,10 +45,38 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,182+ pas
 - `profile_train_step` binary + sync-honest phase timing + per-GradFn
   breakdown (`AXONML_PROFILE_BACKWARD=1`) for reproducing the measurements.
 
-See `CHANGELOG.md [Unreleased]` for the full audit trail and next-round
-blockers (CUDA graph capture + memory-pool integration).
+**Device-native CPU parallelism (v0.6.5 + unreleased).** The execution
+model is now device-native end to end: the GPU path stays resident
+on-device, and the **CPU backend is seriously multi-threaded with rayon**
+so single-node CPU inference and training (and Hailo reference/calibration
+forwards) actually use every core instead of pegging one.
 
-### Core (v0.6.3)
+- **CPU matmul threaded** across every layout — `matmul_f32` (m>1
+  prefill/training), `matmul_f32_bt` (the dominant GGUF `[out,in]`
+  inference layout, zero-copy), `f64`, the generic tiled fallback, and
+  3D/4D batched matmul (multi-head attention / batched prefill). Decode
+  GEMV (m=1) was already parallel. All threshold-gated so tiny ops stay
+  serial with identical semantics.
+- **Full GradFn backward family parallelized on CPU** — `MatMulBackward`,
+  `SwigluBackward`, `Softmax`/`LogSoftmaxBackward`, `NarrowBackward`,
+  `SumDimBackward`, `VarDimBackward`/`MeanDimBackward` (RMS/LayerNorm),
+  `CrossEntropyLossBackward`, `FusedAttentionBackward` (over batch×head),
+  `reduce_grad_for_broadcast` (bias/elementwise grads), plus LSTM/GRU/Conv2d
+  fallbacks.
+- **Contiguous fast-paths in the tensor layer** — activations (relu,
+  sigmoid, tanh, exp, ln, neg, gelu), reductions (sum/mean/prod/max/min/
+  argmax/argmin), `zip_map`/`map`, `cat`, `layer_norm`, `rms_norm` (+heads,
+  batched, and their bwds), and residual adds now operate on direct storage
+  slices for contiguous/offset-0 tensors, skipping the `to_vec` copy before
+  the parallel backend.
+- Repeatable single-node CPU LLM-step benchmark at
+  `crates/axonml/examples/cpu_bench_llm_step.rs` (pure-CPU, `STEPS=` env)
+  exercises the exact hot paths for regression tracking.
+
+See `CHANGELOG.md` for the full audit trail. The GPU happy path is
+untouched; distributed training is currently deprioritized.
+
+### Core (v0.6.5)
 
 - **Tensor Operations** (`axonml-tensor`)
   - N-dimensional tensors with arbitrary shapes
@@ -594,18 +622,14 @@ let n = t.narrow(1, 0, 2).unwrap();
 
 ## Production Edge Deployment
 
-AxonML powers real-time predictive maintenance on HVAC systems across commercial buildings. 12 models (6 LSTM autoencoders for anomaly detection + 6 GRU failure predictors) run live inference on Raspberry Pi edge controllers, processing sensor data at 1 Hz.
+AxonML powers real-time predictive maintenance on HVAC systems across commercial buildings. Per-site model pairs — an LSTM autoencoder for anomaly detection plus a GRU failure predictor — run live inference on Raspberry Pi edge controllers, processing sensor data at 1 Hz. Each pair is compact (≈105K–416K params, ~2–3 MB RSS), so a single Pi hosts an entire mechanical room or air-handler bank.
 
-| Building | Unit | Anomaly Detector | Failure Predictor | Params | RSS |
-|----------|------|-------------------|-------------------|--------|-----|
-| FCOG | Mechroom | Erebus (LSTM-AE) | Kairos (GRU-FDD) | 416K | 2.5 MB |
-| Warren | AHU-1 | Aether | Moros | 105K | 2.1 MB |
-| Warren | AHU-2 | Phanes | Hecate | 233K | 2.4 MB |
-| Warren | AHU-4 | Nyctos | Cassandra | 105K | 2.1 MB |
-| Warren | AHU-7 | Poseidon | Triton | 105K | 2.1 MB |
-| Huntington | Mechroom | Plutus | Moira | 415K | 3.2 MB |
+| Unit type | Anomaly Detector | Failure Predictor | Params | RSS |
+|-----------|------------------|-------------------|--------|-----|
+| Mechanical room | LSTM-AE | GRU-FDD | ~416K | ~2.5 MB |
+| Air handler (AHU) | LSTM-AE | GRU-FDD | ~105–233K | ~2.1–2.4 MB |
 
-**Stack:** AxonML training (CPU) → `.axonml` model files → cross-compiled ARM inference daemons (`armv7-unknown-linux-musleabihf`) → PM2-managed services on Raspberry Pi → REST API (`/api/inference/latest`)
+**Stack:** AxonML training (CPU) → `.axonml` model files → cross-compiled ARM inference daemons (`armv7-unknown-linux-musleabihf`) → managed services on Raspberry Pi → local REST API
 
 Each daemon runs pure-tensor inference (no autograd overhead), polls local NexusEdge for sensor data, maintains rolling time-series buffers, and exposes anomaly scores + failure predictions via HTTP.
 
@@ -814,7 +838,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ### Test Suite
 
-The framework includes **2,182 tests** across all crates:
+The framework includes **2,350+ tests** across all crates:
 
 ```bash
 cargo test --workspace
@@ -825,20 +849,20 @@ cargo test --workspace
 | axonml-core | 91 |
 | axonml-tensor | 112 |
 | axonml-autograd | 132 |
-| axonml-nn | 249 |
+| axonml-nn | 253 |
 | axonml-optim | 96 |
 | axonml-data | 63 |
 | axonml-vision | 741 |
 | axonml-audio | 28 |
 | axonml-text | 39 |
 | axonml-distributed | 82 |
-| axonml-serialize | 32 |
+| axonml-serialize | 40 |
 | axonml-onnx | 23 |
 | axonml-quant | 24 |
 | axonml-fusion | 30 |
 | axonml-jit | 31 |
 | axonml-profile | 27 |
-| axonml-llm | 109 |
+| axonml-llm | 127 |
 | axonml-server | 49 |
 | axonml-cli | 112 |
 | axonml-tui | 9 |
@@ -863,4 +887,4 @@ at your option.
 
 **Axonml** - Forging the future of ML in Rust.
 
-_Last updated: 2026-04-25 (v0.6.3)_
+_Last updated: 2026-06-06 (v0.6.5)_

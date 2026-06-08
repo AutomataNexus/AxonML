@@ -10,6 +10,12 @@ provides device abstractions with runtime capability queries, the
 dispatch, reference-counted `Storage<T>` with pooled GPU allocations, and the
 five compute backends (CPU, CUDA, Vulkan, Metal, WebGPU).
 
+As of 0.6.5 the `CpuBackend` is rayon-parallel above a work threshold across
+matmul (all layouts incl. 3D/4D batched), reductions, and the
+SwiGLU/RMSNorm/RoPE math, so single-node CPU inference and training fallbacks
+scale across cores rather than pegging a single thread. The CUDA path keeps
+tensors resident on-device (cuBLAS + 15+ custom PTX kernel modules).
+
 ## Modules
 
 ### `device`
@@ -139,4 +145,4 @@ let storage = Storage::<f32>::zeros(100, device);
 
 ## Last updated
 
-0.6.1 (2026-04-16)
+0.6.5 (2026-06-06)

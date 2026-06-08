@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust"></a>
-  <a href="https://crates.io/crates/axonml-audio"><img src="https://img.shields.io/badge/crates.io-0.6.1-green.svg" alt="Version"></a>
+  <a href="https://crates.io/crates/axonml-audio"><img src="https://img.shields.io/badge/crates.io-0.6.5-green.svg" alt="Version"></a>
   <a href="https://github.com/axonml/axonml"><img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML"></a>
 </p>
 
@@ -41,7 +41,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-audio = "0.6.1"
+axonml-audio = "0.6.5"
 ```
 
 ### Loading Audio Datasets
@@ -174,4 +174,4 @@ at your option.
 
 ---
 
-_Last updated: 2026-04-16 (v0.6.1)_
+_Last updated: 2026-06-06 (v0.6.5)_

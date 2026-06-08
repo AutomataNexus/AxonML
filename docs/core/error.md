@@ -158,4 +158,4 @@ fn two_step(a: &Tensor<f32>, b: &Tensor<f32>) -> Result<Tensor<f32>> {
 
 ---
 
-*Last updated: 2026-04-16 (v0.6.1)*
+*Last updated: 2026-06-06 (v0.6.5)*

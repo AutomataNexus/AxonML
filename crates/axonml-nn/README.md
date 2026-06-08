@@ -9,7 +9,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust 1.85+">
-  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
+  <img src="https://img.shields.io/badge/version-0.6.5-green.svg" alt="Version 0.6.5">
   <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
@@ -31,7 +31,7 @@
 
 - **Mixture of Experts** - `MoELayer`, `MoERouter`, and `Expert` for sparse expert routing.
 
-- **Ternary Weights** - `TernaryLinear` with `PackedTernaryWeights` for 1.58-bit weight quantization.
+- **Ternary Weights** - `TernaryLinear` with `PackedTernaryWeights` for 1.58-bit weight quantization. GPU forward + backward kernels with GPU-resident ternary quantization, plus `saved_input` host-staging during backward to cut peak VRAM at billion-parameter scale (powers Trident b1.58 training).
 
 - **Graph Neural Networks** - `GCNConv` and `GATConv` for graph convolution / attention.
 
@@ -75,7 +75,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-nn = "0.6.1"
+axonml-nn = "0.6.5"
 ```
 
 ### Building a Simple MLP
@@ -314,4 +314,4 @@ at your option.
 
 ---
 
-_Last updated: 2026-04-16 (v0.6.1)_
+_Last updated: 2026-06-06 (v0.6.5)_

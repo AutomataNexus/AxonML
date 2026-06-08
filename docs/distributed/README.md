@@ -14,6 +14,13 @@ microbatch scheduling), tensor-parallel linear layers (`ColumnParallelLinear`,
 dynamic `libcudart` + `libnccl` loading) and `MockBackend` (shared-state
 in-process simulation for deterministic testing).
 
+> **Status (0.6.5):** the primitives, schedules, and the `NcclBackend` FFI are
+> implemented, and the collective ops are validated end-to-end against
+> `MockBackend`. Real multi-GPU NCCL runs are not part of the current test
+> matrix — single-node CPU/GPU is the actively-exercised path, where the CPU
+> backend is now rayon-parallel (see [Training](../training.md)). Treat the
+> multi-GPU path as available-but-unverified-at-scale.
+
 ## Core Concepts
 
 ### World and process groups
@@ -226,4 +233,4 @@ let ddp = DDP::new(model, world.default_group().clone());
 
 ## Last updated
 
-0.6.1 (2026-04-16)
+0.6.5 (2026-06-06)

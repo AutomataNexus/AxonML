@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.85%2B-orange.svg" alt="Rust: 1.85+"></a>
-  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1"/>
+  <img src="https://img.shields.io/badge/version-0.6.5-green.svg" alt="Version 0.6.5"/>
   <a href="https://github.com/AutomataNexus/AxonML"><img src="https://img.shields.io/badge/part%20of-AxonML-teal.svg" alt="Part of AxonML"></a>
 </p>
 
@@ -19,7 +19,7 @@
 
 The **live browser training dashboard** (`TrainingMonitor`) stays in the umbrella crate at `axonml::monitor::TrainingMonitor` since it has no heavy dependencies of its own.
 
-Last updated: 2026-04-16 — version 0.6.1.
+Last updated: 2026-06-06 — version 0.6.5.
 
 ---
 
@@ -87,7 +87,7 @@ let early_stop = EarlyStopping::new(5);  // patience = 5 epochs
 
 ```toml
 [dependencies]
-axonml-train = { version = "0.6.1", features = ["full"] }
+axonml-train = { version = "0.6.5", features = ["full"] }
 ```
 
 ## Dependencies

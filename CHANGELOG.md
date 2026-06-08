@@ -7,47 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Performance (CPU + Hailo silicon)
+### Performance — device-native CPU parallelism
 
-- CPU threading for inference + training: extended `CpuBackend` matmul (the core of every Linear, attention score, projection, MLP down/up, and MatMulBackward) with rayon parallelism for realistic single-node use.
-  - f32 regular (m>1 prefill/training): `matmul_f32` now splits over output rows (m) for large work, each task does sub-sgemm on disjoint C/A rows.
-  - f32 B-transposed (dominant LLM inference layout, GGUF-style `[out,in]` weights with no transpose copy): `matmul_f32_bt` m>1 now parallel row-split with the same zero-copy stride reinterpret.
-  - f64: added `matmul_f64_parallel_m` + dispatch.
-  - Generic T fallback (tiled): parallel outer i0 blocks via rayon when flops large.
-  - Batched matmul (3D/4D common in multi-head attn, batched prefill, training): parallel over batch dim (rayon + raw-ptr disjoint writes for broadcast cases) when total work > threshold; still exercises the now-threaded per-matmul.
-  - Decode (m=1 GEMV) paths unchanged (already parallel).
-- All paths threshold-gated (flops or element count) so tiny ops stay serial; exact semantics preserved.
-- GradFn parallel cleanup (continued): `tensor::swiglu_bwd` (called by every SwigluBackward in LLM MLP training) now parallel elementwise (rayon over flat n, raw-ptr writes) above 4K; previously fully sequential to_vec + push loop. Forward swiglu was already parallelized.
-- GradFn parallel cleanup (continued): `SoftmaxBackward` and `LogSoftmaxBackward` CPU paths (ubiquitous in attention + final heads) now parallel over the independent "outer" groups (rows for common 2D last-dim, or outer_size for ND). 1D/ small stay serial; threshold ~4K elements or group count. Replaces long sequential per-row/col/outer loops + inner reductions. Hits real Qwen/LLM attention softmax bwd + any log_softmax.
-- GradFn parallel cleanup (continued): `NarrowBackward` CPU path now parallel over out_numel (rayon, raw-ptr scatter writes to the larger input grad). Common for slice/narrow ops in models.
-- GradFn parallel cleanup (continued): `SumDimBackward` CPU path (used for sum reductions in training) now parallel over grad positions (outer*inner); each repeats the grad_val along the summed dim. Thresholded. Complements the already-parallel Mean/VarDim.
-- GradFn parallel cleanup (continued): `reduce_grad_for_broadcast` (core helper for Add/Sub/Mul/Div bwd in training, used after every broadcast op like bias) now has explicit CPU parallel reduction for the common leading-dim case (e.g. bias grads). Uses rayon par_iter_mut over output features, direct sum over leading (batch) with fast contiguous data. Avoids multiple serial sum_dim clones/passes. The general (non-leading) case now documents reliance on parallel sum_dim + fast paths (hot path optimized). Big win for elementwise bwd in LLM training steps.
-- GradFn parallel cleanup (continued): LSTMBackward and GruGatesBackward CPU fallbacks now parallel over (batch, hidden) work items with rayon + raw-ptr writes (disjoint per idx). Uses fast to_vec for saved, thresholded. Completes RNN GradFn threading for CPU training (if used; focus remains LLM single-node).
-- GradFn parallel cleanup (continued): Conv2dBackward CPU im2col spatial loops (oh) now parallel (per cr, when spatial large) with rayon + raw ptr. Complements the existing batch par. Win for CPU conv training if used.
-- Tensor CPU inference optimization: hot activation/elementwise fallbacks (relu, sigmoid, tanh, exp, ln, neg and similar) now take direct storage slices for contiguous+offset0 tensors (no to_vec copy + alloc before feeding the already-parallel CpuBackend). zip_map / zip_map3 / map (primary for many GradFn bwd and custom elementwise) also use direct slices for both inputs when contiguous. Reductions (sum/mean/prod/max/min/argmax/argmin) + sqrt + pow similarly fast-pathed. Cat parallel copy loops for large work (raw-ptr disjoint outers). layer_norm_tokenwise fastpath + par mean/var/out loop (n large). gelu_tanh fastpath + par. scaled_add_inplace_ (MoE hot path) fast contiguous + par. parallel_residual_add_ (Falcon) fast contiguous + par. rms_norm_batched (and heads) fast + par over m tokens. rms_norm_bwd_batched and rms_norm_heads_batched (training bwd) fast contiguous + par over m (or m*heads). Same pattern as matmul 2D. Big win for pure-CPU repeated forward passes (inference) and CPU GradFn bwd (fewer copies before rayon CpuBackend work).
-- Measurement (improved harness): direct /proc polling sampler + AXONML_PROFILE_BACKWARD=1 on mixed workload (autograd + training example + full llm lib tests). Fresh run with conv bwd spatial par + prior: 421 samples, peak 52 threads, 68.8s cpu_user (scaling on the paths). Multiple /tmp/cpu_llm_step_sig_*.csv available. Observable gains in utilization now routine in harness runs on CPU paths/fallbacks (52 threads peak, high cpu_user during compute vs. old single-thread peg; e.g. 354 samples/52 threads/68.1s cpu_user in latest 12s proxy window right before bench landed). MatMulBwd, reduce_grad, rms, etc. now using dozens of cores when above threshold.
-- Dedicated repeatable single-node CPU LLM step benchmark: added `crates/axonml/examples/cpu_bench_llm_step.rs` (pure-CPU by default; STEPS= env; exercises the exact hot paths — m>1/batched matmul + full GradFn bwd family (MatMulBackward, Swiglu/Softmax/..., reduce_grad_for_broadcast leading+general, SumDim, elementwise, etc.) + tensor fastpaths (rms/ln style, residuals, cat/gelu if hit)). Intended as the stable artifact for "should I see gains by now?" quantification and future regression tracking. Run with AXONML_PROFILE_BACKWARD=1 + the /proc sampler. See L82 "Resume measurement" for the one-liner harness. Part of the rolling cycle.
-- Full llm lib test (127) green (~50s real Qwen work exercising all the CPU parallel GradFn + tensor fastpaths + matmul threading). Part of every rolling cycle. All crates green (112 tensor, 132 autograd, 127 llm).
-- All crates green post-changes.
-- Also: silenced a couple of post-parallel-edit dead-store warnings in SelectBackward (linalg); example `simple_training` now compiles and runs cleanly on pure-CPU builds (cfg gate on Device::Cuda token).
-- Fits FAF: CPU inference and any CPU fallback during training (or Hailo ref/calibration) are now seriously threaded; GPU happy path untouched. Distributed remains bottom-tier (no work).
+The CPU backend is now multi-threaded with rayon across both the inference
+forward path and the full autograd backward path, so single-node CPU
+training/inference and Hailo reference/calibration forwards use every core.
+All paths are threshold-gated (by FLOPs or element count) so small ops stay
+serial; numerical semantics are unchanged. The GPU path is untouched.
+
+- **Threaded CPU matmul** across every layout: `matmul_f32` (m>1
+  prefill/training, row-split over disjoint C/A rows), `matmul_f32_bt` (the
+  dominant GGUF `[out,in]` inference layout, zero-copy stride reinterpret),
+  `matmul_f64`, the generic tiled fallback (parallel outer blocks), and 3D/4D
+  batched matmul (multi-head attention / batched prefill, parallel over the
+  batch dim). Decode GEMV (m=1) was already parallel.
+- **Parallel GradFn backward family:** `MatMulBackward`, `SwigluBackward`,
+  `SoftmaxBackward`/`LogSoftmaxBackward` (over independent softmax groups),
+  `NarrowBackward`, `SumDimBackward`, `VarDimBackward`/`MeanDimBackward`
+  (RMS/LayerNorm), `CrossEntropyLossBackward`, `FusedAttentionBackward` (over
+  batch×head), `reduce_grad_for_broadcast` (bias/elementwise grads — leading
+  dim parallelized directly), and the LSTM/GRU/Conv2d fallbacks.
+- **Contiguous tensor fast-paths:** activations (relu, sigmoid, tanh, exp,
+  ln, neg, gelu), reductions (sum/mean/prod/max/min/argmax/argmin), sqrt,
+  pow, `zip_map`/`zip_map3`/`map`, `cat`, `layer_norm_tokenwise`,
+  `scaled_add_inplace_` (MoE), `parallel_residual_add_` (Falcon), and
+  `rms_norm_batched`/heads (+ their backward variants) now operate on direct
+  storage slices for contiguous/offset-0 tensors, skipping the `to_vec` copy
+  before the parallel backend.
+- Added `crates/axonml/examples/cpu_bench_llm_step.rs` — a repeatable
+  pure-CPU single-node LLM-step benchmark (`STEPS=` env) that exercises the
+  m>1/batched matmul + full GradFn backward family + tensor fast-paths, for
+  gain quantification and regression tracking.
+
+### Other
+
+- Hailo: pre-allocate the input/output/node/initializer vectors in
+  `BundleGraph::new` to cut reallocations during graph build for large
+  models targeting HEF via NexusFoundry.
+- `simple_training` example now builds and runs on pure-CPU (non-CUDA)
+  builds; cleared dead-store warnings in `SelectBackward`.
 
 ## [0.6.5] - 2026-06-05
 
-### Performance (CPU + Hailo silicon)
+### Performance — CPU parallelism (initial pass)
 
-- CPU: added rayon-parallel reductions (sum, mean, max, min, prod) in `CpuBackend` (above 4K elements threshold) for serious pure-CPU performance in inference and training fallbacks.
-- CPU: parallelized SwiGLU and RMSNorm (including heads/batched variants) CPU fallbacks in the tensor layer — hot paths for every modern LLM FFN and norm layer.
-- CPU: `CpuBackend::apply_rope_split_halves_f32` entry point (for future full parallelization over heads/tokens); tensor CPU rope paths now delegate to it. Improves pure-CPU decode and provides fast/consistent reference forward when training or validating models for Hailo.
-- CPU: batched/bhsd RoPE (and bwds) now parallelized over tokens using par_chunks_mut in CPU fallbacks (outer parallelism for prefill etc.).
-- CPU: routed additional GradFn CPU paths (e.g. CrossEntropyLossBackward, MeanDimBackward) to rayon par_iter_mut instead of sequential for loops.
-- CPU: parallel argmax/argmin in CpuBackend via par_iter + reduce.
-- Hailo: pre-allocate Vecs in BundleGraph::new (inputs/outputs/nodes, initializers) to reduce CPU reallocs during graph build for large models targeting HEF via NexusFoundry. Parallel CPU math speeds ref for calibration/validation.
-- Generalized the device-native FAF principle (GPU stay-on-device, CPU be fast+parallel, Hailo export/reference optimal) and reduced cross-device thrashing patterns.
-- Benchmarks/measure + full testing: CPU runs (autograd/tensor/nn/llm tests exercising parallel reductions/argmax/GradFn/rope/rms/swiglu + profile_util_signature sampler); all relevant crates green (56 core, 112 tensor, 132 autograd, 253 nn, 127 llm, 40 serialize); bundle tests confirm prealloc. Full CPU path coverage (no CUDA feature). 
-- /opt md cleanup: removed/updated obsolete CPU bottleneck descriptions (L82, L138 historical autograd walk, CE roundtrips, GH200 notes, StateDict) now mitigated by FAF/parallel work.
-- perf(cpu): FusedAttentionBackward CPU fallback now parallel over (batch, head) pairs (rayon + raw-ptr writes for disjoint heads). High value for real single-node LLM training / CPU fallback / Hailo ref (distributed explicitly bottom-tier). All attention backward tests green. Fits ongoing FAF for common paths.
-- perf(cpu): VarDimBackward (variance/mean-dim GradFn, core for RMS/LayerNorm in LLM training) first pass (fold/reduce) + second pass (par_iter_mut) now fully parallel with rayon. Combined with attention etc. Single-node (CPU) LLM training step proxy measurement (attention + var_dim backward) with AXONML_PROFILE_BACKWARD harness + sampler to quantify parallel GradFn/CPU wins for actual usage (distributed bottom tier). All tests green. Fits FAF.
+First wave of the device-native CPU parallelization (continued and
+completed under `[Unreleased]`). All paths threshold-gated; semantics
+unchanged.
+
+- Rayon-parallel reductions (sum, mean, max, min, prod, argmax, argmin) in
+  `CpuBackend` above a 4K-element threshold.
+- Parallelized SwiGLU and RMSNorm (incl. heads/batched variants) CPU
+  fallbacks — the hot paths for every modern LLM FFN and norm layer.
+- `CpuBackend::apply_rope_split_halves_f32` entry point; batched/bhsd RoPE
+  and its backward now parallelize over tokens (`par_chunks_mut`).
+- Routed more GradFn CPU paths to `par_iter_mut`: `CrossEntropyLossBackward`,
+  `MeanDimBackward`, `VarDimBackward` (both passes), and
+  `FusedAttentionBackward` (over batch×head).
+- Hailo: pre-allocate the vectors in `BundleGraph::new` to reduce
+  reallocations during graph build for large NexusFoundry/HEF targets.
+- Established the device-native execution principle: GPU stays on-device,
+  CPU is fast + parallel, Hailo export/reference is optimal — reducing
+  cross-device thrashing.
 
 ## [0.6.4] - 2026-05-23
 
@@ -289,23 +310,16 @@ existing minor-version constraints (no `Cargo.toml` changes needed):
 
 GitHub Dependabot API confirms 0 open alerts post-push.
 
-### Personal corpus + tokenizer — `infrastructure`
+### Tokenizer
 
-- `pretokenize_personal.py` → 25.58 M-token `personal-trident.bin`
-  (97.6 MB, trident-coder-bpe pre-tokenized) at
-  `/opt/datasets/personal-trident.bin`. Combines Oracle-LoRA
-  Claude Code traces (24.16 M tokens) + project-context corpus
-  (1.42 M). Tooling lives at `/home/devops/personal-tools/`
-  (NOT checked in — private workflow data).
-- Trident-coder-bpe tokenizer at
-  `/opt/AxonML/tokenizers/trident-coder-bpe/tokenizer.json` (32 k
-  vocab byte-level BPE, 31 736 merges, special tokens at IDs 0-7).
+- Trident-coder-bpe tokenizer (32k-vocab byte-level BPE, 31,736 merges,
+  special tokens at IDs 0–7) for the Trident / RDT code-model line.
 
-## [Oracle → RDT distillation — earlier work, task #61]
+## [RDT distillation — earlier enablement work]
 
-### Oracle → RDT distillation — enablement work (task #61)
+### Recurrent-Depth distillation — enablement
 
-#### Step 1 of 5 — widen gguf_loader arch guard ✅ (2026-04-20)
+#### Step 1 — widen gguf_loader arch guard ✅ (2026-04-20)
 
 - `axonml-llm::gguf_loader::qwen3_config_from_gguf` now accepts both `qwen2`
   and `qwen3` architectures. Arch-specific metadata keys
@@ -324,7 +338,6 @@ GitHub Dependabot API confirms 0 open alerts post-push.
   attempts was this loader guard. Drive-by fixed a pre-existing clippy
   lint in `gguf_export.rs:748` (`for (_k, v) in &map` →
   `for v in map.values()`).
-- See `/opt/LESSONS.md` L91, `/opt/RESOURCES.md` "Oracle distillation assets".
 
 #### Step 2 of 5 — `train_rdt_distill` binary ✅ (2026-04-20)
 

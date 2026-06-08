@@ -97,14 +97,14 @@ AxonML is built as a Rust workspace with **24 specialized crates**.
 | [axonml-vision](https://docs.rs/axonml-vision) | Computer vision, detection, biometrics | `LeNet`, `ResNet`, `ViT`, `DETR`, `NanoDet`, `BlazeFace`, `RetinaFace`, `Nexus`, `Phantom`, `NightVision`, `AegisIdentity`, `Argus*`, `Echo*`, `Mnemosyne*`, `Aegis3D`, `CocoDataset`, `WiderFaceDataset`, `FocalLoss`, `GIoULoss` |
 | [axonml-audio](https://docs.rs/axonml-audio) | Audio processing | `MelSpectrogram`, `MFCC`, `Resample`, `AddNoise`, `SyntheticCommandDataset` |
 | [axonml-text](https://docs.rs/axonml-text) | NLP utilities | `WhitespaceTokenizer`, `CharTokenizer`, `BasicBPETokenizer`, `Vocab`, `TextDataset` |
-| [axonml-llm](https://docs.rs/axonml-llm) | Large language models | `Bert`, `GPT2`, `LLaMA`, `Mistral`, `Phi`, `ChimeraModel`, `HydraModel`, `SSMBlock`, `TridentModel`, `TextGenerator`, `HFLoader` |
+| [axonml-llm](https://docs.rs/axonml-llm) | Large language models | `Bert`, `GPT2`, `LLaMA`, `Mistral`, `Phi`, `ChimeraModel`, `HydraModel`, `SSMBlock`, `TridentModel`, `RDTForCausalLM`, `Qwen3ForCausalLM`, `TextGenerator`, `HFLoader`, GGUF I2_S / `rdt` exporters |
 | [axonml-hvac](https://docs.rs/axonml-hvac) | HVAC fault-detection models | `Panoptes`, `Apollo`, `Aquilo`, `Boreas`, `Colossus`, `Gaia`, `Naiad`, `Vulcan`, `Zephyrus` |
 
 ### Serialization Layer
 
 | Crate | Description | Key Types |
 |:------|:------------|:----------|
-| [axonml-serialize](https://docs.rs/axonml-serialize) | Model serialization | `StateDict`, `TensorData`, SafeTensors, Bincode |
+| [axonml-serialize](https://docs.rs/axonml-serialize) | Model serialization | `StateDict`, `Checkpoint`, `ModelBundle`, `BundleGraph` (embedded computation graph), `TensorData`, SafeTensors, Bincode |
 | [axonml-onnx](https://docs.rs/axonml-onnx) | ONNX import/export (opset 17) | `OnnxModel`, `OnnxExporter`, `import_onnx`, `export_onnx` |
 
 ### Optimization Layer
@@ -230,4 +230,4 @@ Per-crate rustdoc is published to docs.rs:
 
 ---
 
-*Last updated: 2026-04-16 (v0.6.1)*
+*Last updated: 2026-06-06 (v0.6.5)*

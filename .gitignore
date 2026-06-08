@@ -219,3 +219,7 @@ crates/axonml-hvac/src/sentinel*
 crates/axonml-hvac/examples/*sentinel*
 crates/axonml-hvac/examples/*medjed*
 crates/axonml-hvac/examples/repack_*
+
+# internal-only docs (engineering status, not public)
+docs/vision/OPERATIONAL_STATUS.md
+/internal/

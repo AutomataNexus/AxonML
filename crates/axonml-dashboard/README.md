@@ -9,7 +9,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"/></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
   <img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust 1.75+"/>
-  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1"/>
+  <img src="https://img.shields.io/badge/version-0.6.5-green.svg" alt="Version 0.6.5"/>
   <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML"/>
 </p>
 
@@ -19,7 +19,7 @@
 
 **axonml-dashboard** is the reactive web dashboard for the AxonML Machine Learning Framework. It is a client-side-rendered (CSR) Leptos 0.6 application compiled to WebAssembly, served via Trunk, and talking to `axonml-server` over HTTP + WebSocket. It covers authentication (password + TOTP + WebAuthn + recovery codes), training runs and JSON training notebooks, model registry, dataset management (upload, analyze, Kaggle, built-in library), inference endpoints and metrics, a pretrained-model hub, admin (user management, system stats), system overview, and an in-app PTY terminal.
 
-Last updated: 2026-04-16 — version 0.6.1. Crate is `publish = false` (WASM frontend; distributed via GitHub releases, not crates.io).
+Last updated: 2026-06-06 — version 0.6.5. Crate is `publish = false` (WASM frontend; distributed via GitHub releases, not crates.io).
 
 ---
 

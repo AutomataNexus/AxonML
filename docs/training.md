@@ -354,6 +354,41 @@ for (inputs, targets) in batches {
 }
 ```
 
+## Device-Native Execution (CPU parallelism)
+
+AxonML follows a device-native execution model: GPU tensors stay resident
+on-device through the whole forward/backward pass, and the **CPU backend is
+rayon-parallel**. As of 0.6.5 the CPU path threads:
+
+- **matmul** in every layout — `matmul_f32` (m>1 prefill/training),
+  `matmul_f32_bt` (the GGUF `[out,in]` inference layout), `f64`, the generic
+  tiled fallback, and 3D/4D batched matmul;
+- the **full GradFn backward family** — `MatMulBackward`, `SwigluBackward`,
+  `Softmax`/`LogSoftmaxBackward`, `NarrowBackward`, `SumDimBackward`,
+  `VarDimBackward`/`MeanDimBackward`, `CrossEntropyLossBackward`,
+  `FusedAttentionBackward`, `reduce_grad_for_broadcast`, and the LSTM/GRU/Conv2d
+  fallbacks;
+- reductions, SwiGLU, RMSNorm (+heads/batched), RoPE, `layer_norm`, `gelu`, and
+  residual adds, with contiguous/offset-0 fast-paths that skip the copy before
+  the parallel backend.
+
+All paths are threshold-gated, so tiny ops stay serial and numerical semantics
+are unchanged. Single-node CPU training and inference now scale across cores
+instead of pegging one thread.
+
+To measure a single CPU training step:
+
+```bash
+# Repeatable pure-CPU LLM-step proxy (no GPU required)
+STEPS=5 cargo run --release -p axonml --example cpu_bench_llm_step
+
+# Per-GradFn backward timing on any training binary
+AXONML_PROFILE_BACKWARD=1 cargo run --release ...
+```
+
+On a CUDA build, `profile_train_step` (in `llm-training`) buckets a step into
+forward / loss / backward / optimizer and prints the per-GradFn breakdown.
+
 ---
 
-*Last updated: 2026-04-16 (v0.6.1)*
+*Last updated: 2026-06-06 (v0.6.5)*

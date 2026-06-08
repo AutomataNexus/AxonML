@@ -10,6 +10,16 @@ with a `GradAccumulator` and an optional `GradFn` recording the op that
 produced it. Calling `.backward()` walks the graph and accumulates gradients
 into the leaves.
 
+**CPU-parallel backward (0.6.5):** the full GradFn backward family is
+rayon-parallel on CPU above a work threshold — `MatMulBackward`,
+`SwigluBackward`, `Softmax`/`LogSoftmaxBackward`, `NarrowBackward`,
+`SumDimBackward`, `VarDimBackward`/`MeanDimBackward` (RMS/LayerNorm),
+`CrossEntropyLossBackward`, `FusedAttentionBackward` (over batch×head),
+`reduce_grad_for_broadcast` (bias/elementwise grads), and the LSTM/GRU/Conv2d
+fallbacks. Set `AXONML_PROFILE_BACKWARD=1` to print per-GradFn timing. Single-
+node CPU training scales across cores; semantics are unchanged and the GPU
+path is untouched.
+
 ## Core Concepts
 
 ### Computational Graph
@@ -230,4 +240,4 @@ no_grad(|| {
 
 ## Last updated
 
-0.6.1 (2026-04-16)
+0.6.5 (2026-06-06)

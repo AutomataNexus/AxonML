@@ -9,7 +9,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust 1.85+">
-  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
+  <img src="https://img.shields.io/badge/version-0.6.5-green.svg" alt="Version 0.6.5">
   <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
@@ -25,7 +25,7 @@
 
 - **Reference-Counted Storage** - `Storage<T>` wraps either a host `Vec<T>` or a `PooledCudaSlice` behind `Arc<RwLock<...>>`. Supports zero-copy views via offset+len slicing, `to_device()` for CPU<->GPU transfer, deep copy, and RAII `as_slice()` / `as_slice_mut()` guards.
 
-- **Five Compute Backends** - CPU (rayon-parallel, matrixmultiply GEMM/GEMV, always available), CUDA (cuBLAS + 15+ custom PTX kernel modules), Vulkan (ash + gpu-allocator, SPIR-V compute), Metal (Apple Silicon, compute pipelines), WebGPU (wgpu for browser/cross-platform).
+- **Five Compute Backends** - CPU (rayon-parallel, matrixmultiply GEMM/GEMV, always available), CUDA (cuBLAS + 15+ custom PTX kernel modules), Vulkan (ash + gpu-allocator, SPIR-V compute), Metal (Apple Silicon, compute pipelines), WebGPU (wgpu for browser/cross-platform). As of 0.6.5 the CPU backend's matmul (all layouts incl. batched), reductions, and the SwiGLU/RMSNorm/RoPE math are rayon-parallel above a work threshold, so single-node CPU inference and training fallbacks scale across cores.
 
 - **GPU Memory Pool** - `cuda_pool` returns freed CUDA allocations to a size-bucketed free list instead of calling `cudaFree`, amortising allocator cost across training steps.
 
@@ -72,7 +72,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-core = "0.6.1"
+axonml-core = "0.6.5"
 ```
 
 ### Basic Example
@@ -157,4 +157,4 @@ at your option.
 
 ---
 
-_Last updated: 2026-04-16 (v0.6.1)_
+_Last updated: 2026-06-06 (v0.6.5)_

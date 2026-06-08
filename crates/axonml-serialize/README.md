@@ -9,7 +9,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
-  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
+  <img src="https://img.shields.io/badge/version-0.6.5-green.svg" alt="Version 0.6.5">
   <img src="https://img.shields.io/badge/part%20of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
@@ -31,6 +31,7 @@ fallback.
 - **PyTorch Conversion** — `from_pytorch_key`, `to_pytorch_key`, `pytorch_layer_mapping`, `convert_from_pytorch`, `transpose_linear_weights`
 - **ONNX Utilities** — `to_onnx_shape` / `from_onnx_shape` (dynamic batch dim handling), `OnnxOpType` with `parse_op` / `as_str`
 - **High-Level API** — `save_model(&model, path)` / `load_model(&model, path)` (name-matched param load with positional fallback), `save_state_dict` / `load_state_dict`, `save_checkpoint` / `load_checkpoint`
+- **Embedded computation graph (0.6.5)** — `ModelBundle` can carry the model's computation graph (`BundleGraph`: inputs/outputs/nodes/initializers) alongside the weights, so a downstream compiler (e.g. NexusFoundry → HEF) can reconstruct the architecture from the `.axonml` checkpoint without the original source. `BundleGraph::new` pre-allocates its vectors for fast build on large models. Bundle export examples: `hvac_site_models`, `rdt_tiny_bundle`, `mnemosyne_v2_bundle`, `llm_tiny_bundles`.
 
 ## Feature Flags
 
@@ -53,10 +54,10 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-serialize = "0.6.1"
+axonml-serialize = "0.6.5"
 
 # Or with SafeTensors:
-axonml-serialize = { version = "0.6.1", features = ["safetensors"] }
+axonml-serialize = { version = "0.6.5", features = ["safetensors"] }
 ```
 
 ### Saving and Loading Models
@@ -214,7 +215,7 @@ assert_eq!(op.as_str(), "Relu");
 use axonml_serialize::StateDict;
 
 let mut state_dict = StateDict::new();
-state_dict.set_metadata("framework_version", "0.6.1");
+state_dict.set_metadata("framework_version", "0.6.5");
 state_dict.set_metadata("model_architecture", "ResNet50");
 
 if let Some(version) = state_dict.get_metadata("framework_version") {

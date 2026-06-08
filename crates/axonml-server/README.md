@@ -9,7 +9,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"/></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
   <img src="https://img.shields.io/badge/Rust-1.85+-orange.svg" alt="Rust 1.85+"/>
-  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1"/>
+  <img src="https://img.shields.io/badge/version-0.6.5-green.svg" alt="Version 0.6.5"/>
   <img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML"/>
 </p>
 
@@ -19,7 +19,7 @@
 
 **axonml-server** is the REST API + WebSocket backend for the AxonML Machine Learning Framework, built with Axum 0.7 on Tokio. It provides endpoints for user authentication (JWT, TOTP, WebAuthn, recovery codes), training run management with real-time metric streaming, a versioned model registry, dataset management, inference serving with a pooled model cache, a JSON-notebook execution engine, Kaggle/Hub dataset integration, an Ollama-backed LLM assist endpoint, a PTY-based browser terminal, and comprehensive system metrics. It uses Aegis-DB for persistent storage (SQL + KV) and an optional HashiCorp Vault backend for secrets.
 
-Last updated: 2026-04-16 — version 0.6.1.
+Last updated: 2026-06-06 — version 0.6.5.
 
 ---
 

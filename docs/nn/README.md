@@ -9,6 +9,12 @@ layers, activations, loss functions, initializers, and container modules.
 Every layer implements `Module`, with forward pass, parameter aggregation,
 train/eval mode, and device placement.
 
+`TernaryLinear` (1.58-bit) has GPU forward + backward kernels with GPU-resident
+ternary quantization and host-staging of saved activations during backward to
+cut peak VRAM at billion-parameter scale (this is what powers Trident b1.58
+training). On CPU, the layer/GradFn backward paths are rayon-parallel as of
+0.6.5 — see [autograd](../autograd/README.md).
+
 ## Core Concepts
 
 ### The `Module` trait
@@ -208,4 +214,4 @@ flow through the pruning decision.
 
 ## Last updated
 
-0.6.1 (2026-04-16)
+0.6.5 (2026-06-06)

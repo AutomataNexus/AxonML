@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust 1.75+"></a>
-  <a href="https://crates.io/crates/axonml-llm"><img src="https://img.shields.io/badge/crates.io-0.6.1-green.svg" alt="Crate Version"></a>
+  <a href="https://crates.io/crates/axonml-llm"><img src="https://img.shields.io/badge/crates.io-0.6.5-green.svg" alt="Crate Version"></a>
   <a href="https://github.com/AutomataNexus/AxonML"><img src="https://img.shields.io/badge/part_of-AxonML-purple.svg" alt="Part of AxonML"></a>
 </p>
 
@@ -15,7 +15,7 @@
 
 ## Overview
 
-`axonml-llm` provides nine large-language-model architectures for the AxonML framework, all implemented in pure Rust on top of `axonml-tensor` and `axonml-autograd`. Shared infrastructure includes multi-head / causal self-attention with a KV cache, a FlashAttention kernel, RoPE, RMSNorm, a HuggingFace weight loader (safetensors), a state-dict name-mapping helper, a pretrained-weights hub with on-disk caching, a configurable text-generation sampler, and an HF-style tokenizer.
+`axonml-llm` provides ten large-language-model architectures for the AxonML framework, all implemented in pure Rust on top of `axonml-tensor` and `axonml-autograd`. Shared infrastructure includes multi-head / causal self-attention with a KV cache, a FlashAttention kernel, RoPE, RMSNorm, a HuggingFace weight loader (safetensors), a state-dict name-mapping helper, a pretrained-weights hub with on-disk caching, a configurable text-generation sampler, and an HF-style tokenizer.
 
 ---
 
@@ -31,7 +31,10 @@
 | **SSM** | `ssm` | Mamba/S6-style selective state-space model: depthwise Conv1d + selective scan + RMSNorm. `SSMBlock`, `SSMForCausalLM`. |
 | **Hydra** | `hydra` | Hybrid: alternates SSM blocks and windowed (local) attention. `HydraModel`. |
 | **Chimera** | `chimera` | Sparse MoE (top-k routing) + differential attention, with load-balancing auxiliary loss. `ChimeraModel`. |
-| **Trident** | `trident` | 1.58-bit ternary weights (`TernaryLinear`) + RoPE + GQA + ReLU²-gated FFN + SubLN (BitNet b1.58-2B-4T recipe). `TridentModel`. |
+| **Trident** | `trident` | 1.58-bit ternary weights (`TernaryLinear`) + RoPE + GQA + ReLU²-gated FFN + SubLN (BitNet b1.58-2B-4T recipe). `TridentModel`. GGUF I2_S exporter; `trident_laptop`/`300m`/`500m`/`1b`/`3b` configs; per-block gradient checkpointing. |
+| **RDT** | `rdt` | Recurrent-Depth Transformer (Huginn-style test-time compute): a Prelude → recurrent latent block iterated K times → Coda. `RDTForCausalLM`, `rdt` GGUF arch id, distillation path via `train_rdt_distill`. |
+
+The Qwen3 trainable module (`Qwen3ForCausalLM`) and a GGUF loader (qwen2/qwen3) are also provided for distillation and student/teacher workflows.
 
 ### Preset configurations
 
@@ -93,7 +96,7 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-llm = "0.6.1"
+axonml-llm = "0.6.5"
 ```
 
 ### GPT-2 text generation
@@ -310,4 +313,4 @@ at your option.
 
 ---
 
-_Last updated: 2026-04-16 (v0.6.1)_
+_Last updated: 2026-06-06 (v0.6.5)_

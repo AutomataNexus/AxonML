@@ -9,7 +9,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
-  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
+  <img src="https://img.shields.io/badge/version-0.6.5-green.svg" alt="Version 0.6.5">
   <img src="https://img.shields.io/badge/part%20of-AxonML-purple.svg" alt="Part of AxonML">
 </p>
 
@@ -25,7 +25,7 @@ in-crate (no `prost-derive` generated types — the structs live in
 ## Features
 
 - **ONNX Import** — `import_onnx(path)` and `import_onnx_bytes(bytes)` produce a ready-to-run `OnnxModel`
-- **ONNX Export** — `OnnxExporter` builder (`add_input`, `add_output`, `add_node`, `add_initializer`, `to_proto`, `to_bytes`, `export`) + `export_feedforward` helper
+- **ONNX Export** — `OnnxExporter` builder (`add_input`, `add_output`, `add_node`, `add_initializer`, `to_proto`, `to_bytes`, `export`) + `export_feedforward` helper, which now accepts scale-parameterized layer lists for architecture families (e.g. RustyMythos scale presets, HVAC model variants)
 - **Operator Support** — 40+ operators with dispatch via `create_operator(node)` returning `Box<dyn OnnxOperator>`
 - **Initializers** — f32 weight tensors threaded through graph execution via `initializer_map`
 - **State-Dict Bridge** — `OnnxModel::to_state_dict()` emits an `axonml_serialize::StateDict`
@@ -69,7 +69,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml-onnx = "0.6.1"
+axonml-onnx = "0.6.5"
 ```
 
 ### Importing an ONNX Model

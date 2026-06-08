@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.85%2B-orange.svg" alt="Rust: 1.85+"></a>
-  <a href="https://crates.io/crates/axonml"><img src="https://img.shields.io/badge/crates.io-0.6.1-green.svg" alt="Crates.io: 0.6.1"></a>
+  <a href="https://crates.io/crates/axonml"><img src="https://img.shields.io/badge/crates.io-0.6.5-green.svg" alt="Crates.io: 0.6.5"></a>
   <a href="https://github.com/AutomataNexus/AxonML"><img src="https://img.shields.io/badge/part%20of-AxonML-teal.svg" alt="Part of AxonML"></a>
 </p>
 
@@ -26,7 +26,7 @@ The crate is intentionally thin. After the 0.6.1 split, it contains only:
 
 Everything else — layers, optimizers, models, data loaders, training infrastructure, HVAC diagnostics, adversarial training — lives in dedicated sibling crates that can also be used standalone.
 
-Last updated: 2026-04-16 — version 0.6.1.
+Last updated: 2026-06-06 — version 0.6.5.
 
 ---
 
@@ -116,7 +116,7 @@ The `axonml::prelude` re-exports only a small subset of LLM types (`Bert`, `Bert
 
 ```toml
 [dependencies]
-axonml = "0.6.1"                     # default = full feature set
+axonml = "0.6.5"                     # default = full feature set
 ```
 
 Select only what you need:
@@ -124,19 +124,19 @@ Select only what you need:
 ```toml
 [dependencies]
 # Core tensors + autograd
-axonml = { version = "0.6.1", default-features = false, features = ["core"] }
+axonml = { version = "0.6.5", default-features = false, features = ["core"] }
 
 # Neural networks without domain-specific modules
-axonml = { version = "0.6.1", default-features = false, features = ["nn", "data"] }
+axonml = { version = "0.6.5", default-features = false, features = ["nn", "data"] }
 
 # Vision pipeline
-axonml = { version = "0.6.1", default-features = false, features = ["vision"] }
+axonml = { version = "0.6.5", default-features = false, features = ["vision"] }
 
 # NLP + LLM pipeline
-axonml = { version = "0.6.1", default-features = false, features = ["text", "llm"] }
+axonml = { version = "0.6.5", default-features = false, features = ["text", "llm"] }
 
 # With GPU acceleration
-axonml = { version = "0.6.1", features = ["full", "cuda"] }
+axonml = { version = "0.6.5", features = ["full", "cuda"] }
 ```
 
 ---
@@ -333,7 +333,7 @@ fn main() {
 
 ## Version Information
 
-- **Crate version:** 0.6.1
+- **Crate version:** 0.6.5
 - **Rust edition:** 2024
 - **MSRV:** Rust 1.85+
 - **0.6.1 split:** `hvac` (HVAC diagnostic models) and `train` (trainer / hub / benchmark / adversarial) were extracted from this umbrella into standalone crates to keep the umbrella a thin re-export layer. The live browser `TrainingMonitor` stayed here.

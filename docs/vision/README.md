@@ -308,4 +308,4 @@ let normalize = ImageNormalize::imagenet();
 
 ## Last updated
 
-0.6.1 (2026-04-16)
+0.6.5 (2026-06-06)

@@ -18,7 +18,9 @@ description: "Working with tensors in AxonML"
 
 ## Overview
 
-`axonml-tensor::Tensor<T>` is the N-dimensional array type, generic over `Scalar` element types (f16, f32, f64, i8–i64, u8/u32/u64, bool). Supports NumPy-style broadcasting, strided zero-copy views, CPU + CUDA GPU matmul (cuBLAS with a GEMV fast path for `m=1` decode), quantized matmul dispatch (Q4_K / Q6_K dequant-in-shader on GPU), lazy evaluation with algebraic optimization (see `axonml_tensor::lazy`), and sparse COO tensors.
+`axonml-tensor::Tensor<T>` is the N-dimensional array type, generic over `Scalar` element types (f16, f32, f64, i8–i64, u8/u32/u64, bool). Supports NumPy-style broadcasting, strided zero-copy views, CPU + CUDA GPU matmul (cuBLAS with a GEMV fast path for `m=1` decode), quantized matmul dispatch (Q4_K / Q5_K / Q6_K / Q8_0 dequant-in-shader on GPU), lazy evaluation with algebraic optimization (see `axonml_tensor::lazy`), and sparse COO tensors.
+
+**CPU parallelism (0.6.5):** on the CPU backend, matmul (all layouts incl. 3D/4D batched), reductions, SwiGLU, RMSNorm, RoPE, `layer_norm`, `gelu`, and the elementwise/activation family are rayon-parallel above a work threshold, with contiguous/offset-0 fast-paths that avoid copying before the parallel backend. Tiny ops stay serial; results are identical to the single-threaded path.
 
 `axonml-tensor` re-exports `Device`, `DType`, `Error`, `Result` from `axonml-core`.
 
@@ -277,4 +279,4 @@ let roundtrip_error = f.has_f16_rounding_error();
 
 ---
 
-*Last updated: 2026-04-16 (v0.6.1)*
+*Last updated: 2026-06-06 (v0.6.5)*

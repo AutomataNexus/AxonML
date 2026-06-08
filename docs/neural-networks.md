@@ -16,6 +16,13 @@ description: "Building neural networks with AxonML"
 
 ---
 
+> **Performance (0.6.5):** layer forward and backward run device-native — GPU
+> tensors stay on-device, and on CPU the matmul / norm / activation / attention
+> math and the full GradFn backward family are rayon-parallel (see
+> [Training → Device-Native Execution](training.md)). `TernaryLinear` (1.58-bit)
+> additionally has GPU forward + backward kernels with host-staged activations
+> for billion-parameter training.
+
 ## Module Trait
 
 All neural network layers implement the `Module` trait in `axonml_nn::module`:
@@ -327,4 +334,4 @@ Model serialization lives in the `axonml-serialize` crate (StateDict + SafeTenso
 
 ---
 
-*Last updated: 2026-04-16 (v0.6.1)*
+*Last updated: 2026-06-06 (v0.6.5)*

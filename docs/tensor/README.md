@@ -7,8 +7,16 @@
 `axonml-tensor` provides `Tensor<T>`, AxonML's generic strided
 multi-dimensional array. Features: NumPy-style broadcasting, zero-copy
 strided views, CPU and CUDA backends, quantized matmul dispatch (Q4_K /
-Q6_K in-shader dequant), lazy tensors with algebraic optimization, sparse
-COO tensors, and the full factory-function suite.
+Q5_K / Q6_K / Q8_0 in-shader dequant), lazy tensors with algebraic
+optimization, sparse COO tensors, and the full factory-function suite.
+
+**Device-native CPU parallelism (0.6.5):** the CPU backend is rayon-parallel
+above a work threshold across matmul (regular, B-transposed GGUF `[out,in]`,
+f64, generic-tiled, and 3D/4D batched), reductions
+(sum/mean/prod/max/min/argmax/argmin), SwiGLU, RMSNorm (+heads/batched), RoPE,
+`layer_norm`, `gelu`, and residual adds — with contiguous/offset-0 fast-paths
+that skip the `to_vec` copy before the backend. Tiny ops stay serial with
+identical semantics; the GPU path is unchanged.
 
 ## Modules
 
@@ -205,4 +213,4 @@ let chunks = a.chunk(2, 0)?;
 
 ## Last updated
 
-0.6.1 (2026-04-16)
+0.6.5 (2026-06-06)
