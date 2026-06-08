@@ -146,14 +146,13 @@ unchanged.
 
 ## [0.6.3] - 2026-04-25
 
-### Personal-model deployment chain — Trident-Coder Path 1 fully operational
+### Trident 1.58-bit deployment chain — fully operational on commodity hardware
 
-End-to-end pipeline for a from-scratch 1.58-bit ternary personal model on
-the user's own corpus, all on commodity hardware. Six steps now wired:
-personal corpus → `train_trident_code` → `.axonml` checkpoint →
-`export_trident_gguf` → BitNet b1.58 GGUF → `nexus-serve` → token
-round-trip. Verified locally on a 5070 Ti Laptop at the new
-`trident_laptop` (~37 M params) variant.
+End-to-end pipeline for a from-scratch 1.58-bit ternary model, all on a
+single consumer GPU. Six steps now wired: corpus → `train_trident_code`
+→ `.axonml` checkpoint → `export_trident_gguf` → BitNet b1.58 GGUF →
+`nexus-serve` → token round-trip. Verified locally on a 5070 Ti Laptop at
+the new `trident_laptop` (~37 M params) variant.
 
 #### PrismML Q1_0 1-bit kernel (Bonsai-8B family) — `ccb0d30` … `5575874`
 
@@ -274,22 +273,6 @@ round-trip. Verified locally on a 5070 Ti Laptop at the new
 - Wired into both binaries (`train_trident_code --config laptop`
   and `export_trident_gguf --config laptop`) with appropriate
   defaults (50 k steps, 500-step rotating ckpts, bs=2 seq=256).
-
-#### Colab A100 kit for the 1B run — `38551c5`
-
-- New `llm-training/notebooks/trident_personal_colab/`:
-    `go.sh` — six-phase idempotent entry script. Re-runs after
-    Colab VM recycle skip rustup / clone / sm_80 PTX regen
-    / cargo build / dataset copy. Knobs as env vars
-    (`COMMIT`, `TRIDENT_CFG`, `TRIDENT_STEPS`, `TRIDENT_SEQ`,
-    `TRIDENT_BS`, `TRIDENT_LR`, …).
-    `README.md` — Drive staging instructions, Colab one-liner
-    cell, knob table, `train_ctl` ops, post-training export
-    recipe, hyperparam rationale.
-- Mirrors the RDT distill 2026-04-23 go.sh shape; LESSONS
-  L112 (Cargo.toml relative paths), L113 (standalone workspace
-  target/), L114 (sm_80 PTX regen for A100), L115 (FUSE-vs-NVMe)
-  baked in.
 
 ### Security — `c4f1e84`
 
