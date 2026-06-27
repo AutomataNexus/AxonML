@@ -36,7 +36,6 @@ vision      = ["nn", "data", "dep:axonml-vision"]
 text        = ["nn", "data", "dep:axonml-text"]
 audio       = ["nn", "data", "dep:axonml-audio"]
 llm         = ["nn", "dep:axonml-llm"]
-hvac        = ["nn", "dep:axonml-hvac"]
 
 # --- training infrastructure ----------------------------------------------
 train       = ["nn", "dep:axonml-train"]
@@ -69,7 +68,6 @@ full = [
     "distributed",
     "profile",
     "llm",
-    "hvac",
     "train",
     "jit",
     "onnx",
@@ -99,7 +97,6 @@ axonml-onnx        = { workspace = true, optional = true }
 axonml-serialize   = { workspace = true, optional = true }
 axonml-quant       = { workspace = true, optional = true }
 axonml-fusion      = { workspace = true, optional = true }
-axonml-hvac        = { workspace = true, optional = true }
 axonml-train       = { workspace = true, optional = true }
 
 # Controls how docs.rs builds this crate when a new version is published.

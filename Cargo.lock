@@ -339,7 +339,6 @@ dependencies = [
  "axonml-data",
  "axonml-distributed",
  "axonml-fusion",
- "axonml-hvac",
  "axonml-jit",
  "axonml-llm",
  "axonml-nn",
@@ -505,21 +504,6 @@ dependencies = [
  "matrixmultiply",
  "rayon",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "axonml-hvac"
-version = "0.6.5"
-dependencies = [
- "axonml",
- "axonml-autograd",
- "axonml-core",
- "axonml-nn",
- "axonml-optim",
- "axonml-serialize",
- "axonml-tensor",
- "rand 0.8.6",
- "serde_json",
 ]
 
 [[package]]

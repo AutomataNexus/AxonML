@@ -18,10 +18,9 @@
 //! dependency-light, and used by essentially every training script in the
 //! workspace.
 //!
-//! Domain-specific models (e.g. HVAC diagnostics) and training infrastructure
-//! (trainer, hub, benchmark, adversarial) live in dedicated sibling crates:
+//! Training infrastructure (trainer, hub, benchmark, adversarial) lives in a
+//! dedicated sibling crate:
 //!
-//! - `axonml-hvac`  — HVAC fault-detection models (Apollo, Panoptes, etc.)
 //! - `axonml-train` — `TrainingConfig`, `EarlyStopping`, `AdversarialTrainer`,
 //!   `benchmark_model`, unified model hub
 //!
@@ -112,9 +111,6 @@ pub use axonml_quant as quant;
 
 #[cfg(feature = "fusion")]
 pub use axonml_fusion as fusion;
-
-#[cfg(feature = "hvac")]
-pub use axonml_hvac as hvac;
 
 #[cfg(feature = "train")]
 pub use axonml_train as train;
@@ -279,9 +275,6 @@ pub fn features() -> String {
 
     #[cfg(feature = "fusion")]
     features.push("fusion");
-
-    #[cfg(feature = "hvac")]
-    features.push("hvac");
 
     #[cfg(feature = "train")]
     features.push("train");

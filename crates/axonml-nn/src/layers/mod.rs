@@ -4,8 +4,8 @@
 //! LayerNorm, GroupNorm, InstanceNorm2d, RMSNorm), `dropout` (Dropout/
 //! Dropout2d), `rnn` (RNN/LSTM/GRU + cell variants), `attention`
 //! (MultiHead, Cross, fused scaled-dot-product), `diff_attention`
-//! (DifferentialAttention), `embedding`, `ternary` (TernaryLinear for
-//! 1.58-bit weights), `pooling` (MaxPool/AvgPool/AdaptiveAvgPool),
+//! (DifferentialAttention), `embedding`, `pooling`
+//! (MaxPool/AvgPool/AdaptiveAvgPool),
 //! `residual` (ResidualBlock), `moe` (MixtureOfExperts with top-k gating),
 //! `graph` (GCN/GAT), `fft` (FFT/STFT), `sparse` (SparseLinear,
 //! GroupSparsity, LotteryTicket), `transformer` (encoder/decoder stacks,
@@ -44,7 +44,6 @@ pub mod pooling;
 pub mod residual;
 pub mod rnn;
 pub mod sparse;
-pub mod ternary;
 pub mod transformer;
 
 // =============================================================================
@@ -65,7 +64,6 @@ pub use pooling::{AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, MaxPool1d, MaxPool2d}
 pub use residual::ResidualBlock;
 pub use rnn::{GRU, GRUCell, LSTM, LSTMCell, RNN, RNNCell};
 pub use sparse::{GroupSparsity, LotteryTicket, SparseLinear};
-pub use ternary::{PackedTernaryWeights, TernaryLinear};
 pub use transformer::{
     Seq2SeqTransformer, TransformerDecoder, TransformerDecoderLayer, TransformerEncoder,
     TransformerEncoderLayer,

@@ -3,7 +3,7 @@
 //! Provides model profiling via `ModelProfile` and `profile_model()` to estimate
 //! parameter counts, memory footprint (f32 and INT8), and deployment suitability.
 //! `DeployTarget` classifies models as Edge, Server, or Both. `EdgeModelInfo`
-//! catalogs edge-suitable models (BlazeFace, NanoDet, FastDepth, Aegis biometrics)
+//! catalogs edge-suitable models (BlazeFace, NanoDet, FastDepth, StudentTeacher)
 //! and server-grade models (RetinaFace, DETR, DPT, PatchCore, VQA). Deployment
 //! configs for Raspberry Pi, ARM64, and WASM are provided via `EdgeDeployConfig`.
 //!
@@ -145,55 +145,6 @@ pub fn edge_models() -> Vec<EdgeModelInfo> {
             input_size: "224x224",
             task: "Anomaly Detection",
         },
-        EdgeModelInfo {
-            name: "Aegis3D (LOD 0-4)",
-            description: "3D reconstruction with coarse LOD for edge inference",
-            approx_params: "Variable",
-            input_size: "N/A",
-            task: "3D Reconstruction",
-        },
-        EdgeModelInfo {
-            name: "Mnemosyne",
-            description: "Face identity via temporal crystallization (GRU attractor convergence)",
-            approx_params: "~115K",
-            input_size: "64x64",
-            task: "Biometric Identity (Face)",
-        },
-        EdgeModelInfo {
-            name: "Ariadne",
-            description: "Fingerprint identity via Gabor ridge event fields",
-            approx_params: "~65K",
-            input_size: "128x128",
-            task: "Biometric Identity (Fingerprint)",
-        },
-        EdgeModelInfo {
-            name: "Echo",
-            description: "Voice identity via predictive speaker residuals",
-            approx_params: "~68K",
-            input_size: "40xT mel",
-            task: "Biometric Identity (Voice)",
-        },
-        EdgeModelInfo {
-            name: "Argus",
-            description: "Iris identity via polar-native radial phase encoding",
-            approx_params: "~65K",
-            input_size: "32x256 polar",
-            task: "Biometric Identity (Iris)",
-        },
-        EdgeModelInfo {
-            name: "Themis",
-            description: "Multimodal biometric fusion via uncertainty-aware belief propagation",
-            approx_params: "~49K",
-            input_size: "N/A (fusion)",
-            task: "Biometric Fusion",
-        },
-        EdgeModelInfo {
-            name: "AegisIdentity",
-            description: "Unified biometric system (all modalities, <400K params total)",
-            approx_params: "~362K",
-            input_size: "Multi-modal",
-            task: "Biometric Identity (Full)",
-        },
     ]
 }
 
@@ -234,13 +185,6 @@ pub fn server_models() -> Vec<EdgeModelInfo> {
             approx_params: "~15M",
             input_size: "224x224 + text",
             task: "Visual QA",
-        },
-        EdgeModelInfo {
-            name: "Aegis3D (LOD 0-8)",
-            description: "Full-resolution 3D reconstruction with adaptive octree SDF",
-            approx_params: "Variable",
-            input_size: "N/A",
-            task: "3D Reconstruction",
         },
     ]
 }

@@ -14,8 +14,6 @@
 //! - CIFAR + Normalize -> SimpleCNN -> CrossEntropy -> Adam
 //! - CIFAR -> Vision Transformer -> CrossEntropy -> Adam
 //! - MNIST -> MLP -> MSELoss -> Adam (regression-style on one-hot)
-//! - Detection: Phantom training-step pipeline
-//! - Biometric: Mnemosyne identity encoder with MSE on a synthetic embedding
 //! - Gradient-flow validation: assert at least one parameter receives a
 //!   non-zero, finite gradient after backward on LeNet
 //!
@@ -338,106 +336,6 @@ mod tests {
             losses.first().unwrap(),
             losses.last().unwrap()
         );
-    }
-
-    // =========================================================================
-    // Integration: Detection pipeline (Phantom)
-    // =========================================================================
-
-    #[test]
-    fn integration_detection_phantom() {
-        use crate::models::phantom::Phantom;
-
-        let mut model = Phantom::new();
-        model.train();
-        let params = model.parameters();
-        let mut optimizer = Adam::new(params, 1e-3);
-
-        let mut losses = Vec::new();
-        for step in 0..5 {
-            let seed = step as f32 * 0.1;
-            let pixels: Vec<f32> = (0..3 * 64 * 64)
-                .map(|i| (i as f32 * 0.001 + seed).sin() * 0.5 + 0.5)
-                .collect();
-            let frame = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
-            let gt_faces = vec![[8.0, 8.0, 32.0, 32.0]];
-
-            let loss = crate::training::phantom_training_step(
-                &mut model,
-                &frame,
-                &gt_faces,
-                &mut optimizer,
-            );
-            assert!(loss.is_finite(), "Detection loss not finite at step {step}");
-            losses.push(loss);
-        }
-
-        // At least verify all losses are finite (detection training is hard to converge in 5 steps)
-        assert_eq!(losses.len(), 5);
-    }
-
-    // =========================================================================
-    // Integration: Biometric pipeline (Mnemosyne face encoding)
-    // =========================================================================
-
-    #[test]
-    fn integration_biometric_mnemosyne() {
-        use crate::models::biometric::MnemosyneIdentity;
-        use axonml_nn::Module;
-
-        let model = MnemosyneIdentity::new();
-        let mut optimizer = Adam::new(model.parameters(), 0.001);
-        let loss_fn = MSELoss::new();
-
-        // Get the encoding dimension from a probe forward pass
-        let probe = Variable::new(
-            Tensor::from_vec(vec![0.5; 3 * 32 * 32], &[1, 3, 32, 32]).unwrap(),
-            false,
-        );
-        let probe_out = model.forward(&probe);
-        let enc_dim: usize = probe_out.shape().iter().skip(1).product();
-
-        let mut losses = Vec::new();
-        for step in 0..5 {
-            // Simulate a face crop: [1, 3, 32, 32]
-            let seed = step as f32 * 0.05;
-            let pixels: Vec<f32> = (0..3 * 32 * 32)
-                .map(|i| (i as f32 * 0.01 + seed).sin() * 0.5 + 0.5)
-                .collect();
-            let face = Variable::new(Tensor::from_vec(pixels, &[1, 3, 32, 32]).unwrap(), false);
-
-            // Target: arbitrary embedding
-            let target = Variable::new(
-                Tensor::from_vec(vec![0.5; enc_dim], &[1, enc_dim]).unwrap(),
-                false,
-            );
-
-            optimizer.zero_grad();
-            let encoding = model.forward(&face);
-
-            // Reshape if needed to match target
-            let enc_shape = encoding.shape();
-            let enc_flat = if enc_shape.len() > 2 {
-                let features: usize = enc_shape[1..].iter().product();
-                encoding.reshape(&[1, features])
-            } else {
-                encoding.clone()
-            };
-
-            // Use MSE as a proxy loss for embedding training
-            let loss = loss_fn.compute(&enc_flat, &target);
-            let loss_val = loss.data().to_vec()[0];
-            assert!(
-                loss_val.is_finite(),
-                "Mnemosyne loss not finite at step {step}"
-            );
-            losses.push(loss_val);
-
-            loss.backward();
-            optimizer.step();
-        }
-
-        assert!(losses.len() == 5);
     }
 
     // =========================================================================

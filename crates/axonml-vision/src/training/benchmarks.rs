@@ -7,10 +7,7 @@
 //! `bench_forward` returns `(latency_ms, images_per_sec)` for any `Module`,
 //! and `print_bench` emits a one-line summary. Coverage includes LeNet,
 //! SimpleCNN, MLP, ResNet18, VGG16, Vision Transformer, NanoDet, BlazeFace,
-//! Nexus and Phantom (each with its custom forward), Mnemosyne identity,
-//! a LeNet training-step throughput test (forward + backward + Adam step),
-//! a parameter-count + memory profile across the zoo plus Helios variants,
-//! and a Helios-Nano end-to-end detection latency benchmark.
+//! and a LeNet training-step throughput test (forward + backward + Adam step).
 //!
 //! # File
 //! `crates/axonml-vision/src/training/benchmarks.rs`
@@ -226,82 +223,6 @@ mod tests {
     }
 
     // =========================================================================
-    // Nexus (custom forward — not Module trait)
-    // =========================================================================
-
-    #[test]
-    fn benchmark_nexus() {
-        use crate::models::nexus::Nexus;
-
-        let mut model = Nexus::new();
-        model.eval();
-        println!("\n--- Nexus (64x64) ---");
-
-        let input = dummy_input(&[1, 3, 64, 64]);
-
-        // Warmup
-        let _ = model.detect(&input);
-
-        let iters = 3;
-        let start = Instant::now();
-        for _ in 0..iters {
-            let _ = model.detect(&input);
-        }
-        let elapsed = start.elapsed();
-        let lat = elapsed.as_secs_f64() * 1000.0 / iters as f64;
-        let ips = iters as f64 / elapsed.as_secs_f64();
-        print_bench("Nexus-64", 1, lat, ips);
-    }
-
-    // =========================================================================
-    // Phantom (custom forward — not Module trait)
-    // =========================================================================
-
-    #[test]
-    fn benchmark_phantom() {
-        use crate::models::phantom::Phantom;
-
-        let mut model = Phantom::new();
-        model.eval();
-        println!("\n--- Phantom (64x64) ---");
-
-        let input = dummy_input(&[1, 3, 64, 64]);
-
-        // Warmup
-        for _ in 0..2 {
-            let _ = model.detect_frame(&input);
-        }
-
-        let iters = 5;
-        let start = Instant::now();
-        for _ in 0..iters {
-            let _ = model.detect_frame(&input);
-        }
-        let elapsed = start.elapsed();
-        let lat = elapsed.as_secs_f64() * 1000.0 / iters as f64;
-        let ips = iters as f64 / elapsed.as_secs_f64();
-        print_bench("Phantom-64", 1, lat, ips);
-    }
-
-    // =========================================================================
-    // Mnemosyne
-    // =========================================================================
-
-    #[test]
-    fn benchmark_mnemosyne() {
-        use crate::models::biometric::MnemosyneIdentity;
-
-        let model = MnemosyneIdentity::new();
-        println!("\n--- Mnemosyne (face 32x32) ---");
-
-        for &batch in &[1, 8] {
-            let input = dummy_input(&[batch, 3, 32, 32]);
-            let (lat, ips) = bench_forward(&model, &input, 2, 10);
-            print_bench("Mnemosyne", batch, lat, ips);
-        }
-    }
-
-    // =========================================================================
     // Training Throughput (LeNet)
     // =========================================================================
 
@@ -352,92 +273,5 @@ mod tests {
         let ips = (batch_size * iters) as f64 / elapsed.as_secs_f64();
 
         println!("  step_time={step_ms:.1}ms | {ips:.1} img/s (forward+backward+step)");
-    }
-
-    // =========================================================================
-    // Memory Profiling
-    // =========================================================================
-
-    #[test]
-    fn benchmark_param_counts() {
-        use crate::models::biometric::MnemosyneIdentity;
-        use crate::models::blazeface::BlazeFace;
-        use crate::models::lenet::{LeNet, MLP, SimpleCNN};
-        use crate::models::nanodet::NanoDet;
-        use crate::models::resnet::ResNet;
-        use crate::models::transformer::VisionTransformer;
-
-        println!("\n--- Parameter Counts ---");
-
-        let models: Vec<(&str, Vec<axonml_nn::Parameter>)> = vec![
-            ("LeNet", LeNet::new().parameters()),
-            ("SimpleCNN-MNIST", SimpleCNN::for_mnist().parameters()),
-            ("MLP-MNIST", MLP::for_mnist().parameters()),
-            ("ResNet18", ResNet::resnet18(10).parameters()),
-            (
-                "ViT-Small",
-                VisionTransformer::new(32, 8, 3, 10, 64, 2, 4, 128, 0.0).parameters(),
-            ),
-            ("NanoDet-1", NanoDet::new(1).parameters()),
-            ("BlazeFace", BlazeFace::new().parameters()),
-            ("Mnemosyne", MnemosyneIdentity::new().parameters()),
-        ];
-
-        for (name, params) in &models {
-            let total: usize = params
-                .iter()
-                .map(|p| p.variable().data().to_vec().len())
-                .sum();
-            let size_mb = total as f64 * 4.0 / 1_048_576.0;
-            println!("  {name:20} | {total:>10} params | {size_mb:6.2} MB (f32)");
-        }
-
-        // Helios sizes
-        use crate::models::helios::Helios;
-        println!("\n--- Helios Variants ---");
-        for (name, model) in [
-            ("Helios-Nano", Helios::nano(80)),
-            ("Helios-Small", Helios::small(80)),
-        ] {
-            let params = model.parameters();
-            let total: usize = params
-                .iter()
-                .map(|p| p.variable().data().to_vec().len())
-                .sum();
-            let size_mb = total as f64 * 4.0 / 1_048_576.0;
-            println!("  {name:20} | {total:>10} params | {size_mb:6.2} MB (f32)");
-        }
-    }
-
-    // =========================================================================
-    // Helios Inference Benchmark
-    // =========================================================================
-
-    #[test]
-    fn benchmark_helios_nano_inference() {
-        use crate::models::helios::Helios;
-
-        let model = Helios::nano(80);
-        let input = Variable::new(
-            Tensor::from_vec(vec![0.5; 3 * 64 * 64], &[1, 3, 64, 64]).unwrap(),
-            false,
-        );
-
-        println!("\n--- Helios-Nano Inference (64x64) ---");
-        let warmup = 1;
-        let iters = 3;
-
-        for _ in 0..warmup {
-            let _ = model.detect(&input, 0.5, 0.45);
-        }
-
-        let start = std::time::Instant::now();
-        for _ in 0..iters {
-            let _ = model.detect(&input, 0.5, 0.45);
-        }
-        let elapsed = start.elapsed();
-        let latency_ms = elapsed.as_secs_f64() * 1000.0 / iters as f64;
-        let fps = iters as f64 / elapsed.as_secs_f64();
-        println!("  latency={latency_ms:.1}ms | {fps:.1} FPS");
     }
 }

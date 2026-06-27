@@ -4,8 +4,7 @@
 //! Re-exports image transforms (Resize, CenterCrop, ColorJitter, Grayscale,
 //! ImageNormalize, Pad, RandomHorizontalFlip, RandomRotation, RandomVerticalFlip,
 //! ToTensorImage), datasets (MNIST, CIFAR10, CIFAR100, FashionMNIST, and their
-//! synthetic variants), classification models (LeNet, MLP, SimpleCNN), biometric
-//! identity types (AegisIdentity, Mnemosyne, Ariadne, Echo, Argus, Themis), and
+//! synthetic variants), classification models (LeNet, MLP, SimpleCNN), and
 //! pretrained model hub utilities. Provides a `prelude` module for common imports.
 //!
 //! # File
@@ -120,17 +119,6 @@ pub use axonml_data::{Compose, DataLoader, Dataset, Transform};
 // =============================================================================
 
 pub use models::{LeNet, MLP, SimpleCNN};
-
-// -----------------------------------------------------------------------------
-// Biometric Identity (Aegis Identity)
-// -----------------------------------------------------------------------------
-
-pub use models::biometric::{
-    AegisIdentity, AngularMarginLoss, ArgusIris, ArgusLoss, AriadneFingerprint, BiometricConfig,
-    BiometricEvidence, BiometricModality, CenterLoss, ContrastiveLoss, CrystallizationLoss,
-    DiversityRegularization, EchoLoss, EchoSpeaker, EnrollmentResult, IdentificationResult,
-    IdentityBank, LivenessLoss, MnemosyneIdentity, ThemisFusion, ThemisLoss, VerificationResult,
-};
 
 // =============================================================================
 // Re-exports — Hub

@@ -8,10 +8,8 @@
 //! per-epoch loss is strictly less than the first-epoch loss (and finite),
 //! covering: LeNet on MNIST with Adam, MLP on MNIST, LeNet on CIFAR-10,
 //! LeNet on MNIST with SGD+momentum, ResNet18 multi-step smoke,
-//! NanoDet forward-only smoke at 64 / 128, Phantom training-step (used
-//! as the detection convergence proxy), Vision Transformer multi-step
-//! smoke on CIFAR, and a Helios training-step convergence check using
-//! `HeliosLoss` with synthetic GT boxes.
+//! NanoDet forward-only smoke at 64 / 128, and Vision Transformer
+//! multi-step smoke on CIFAR.
 //!
 //! # File
 //! `crates/axonml-vision/src/training/convergence.rs`
@@ -333,40 +331,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn convergence_nanodet_training_step() {
-        use crate::models::phantom::Phantom;
-
-        // Use Phantom as the detection training smoke test since it has
-        // a proper training step function already
-        let mut model = Phantom::new();
-        model.train();
-        let params = model.parameters();
-        let mut optimizer = Adam::new(params, 1e-3);
-
-        let mut losses = Vec::new();
-        for step in 0..3 {
-            let seed = step as f32 * 0.1;
-            let pixels: Vec<f32> = (0..3 * 64 * 64)
-                .map(|i| (i as f32 * 0.001 + seed).sin() * 0.5 + 0.5)
-                .collect();
-            let frame = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
-            let gt_faces = vec![[10.0, 10.0, 30.0, 30.0]];
-
-            let loss = crate::training::phantom_training_step(
-                &mut model,
-                &frame,
-                &gt_faces,
-                &mut optimizer,
-            );
-            losses.push(loss);
-        }
-
-        for (i, &l) in losses.iter().enumerate() {
-            assert!(l.is_finite(), "Phantom loss at step {i} is not finite: {l}");
-        }
-    }
-
     // =========================================================================
     // Phase 1: ViT smoke (loss decreasing)
     // =========================================================================
@@ -460,45 +424,4 @@ mod tests {
         );
     }
 
-    // =========================================================================
-    // Phase 1: Helios training loss convergence
-    // =========================================================================
-
-    #[test]
-    fn convergence_helios_training_step() {
-        use crate::models::helios::{Helios, HeliosLoss};
-
-        let model = Helios::nano(2);
-        let mut optimizer = Adam::new(model.parameters(), 1e-3);
-        let loss_fn = HeliosLoss::new(2, 16);
-
-        // Synthetic GT: one box per image
-        let gt_boxes = vec![vec![[8.0, 8.0, 48.0, 48.0]]];
-        let gt_classes = vec![vec![0usize]];
-
-        let mut losses = Vec::new();
-        for step in 0..5 {
-            let seed = step as f32 * 0.1;
-            let pixels: Vec<f32> = (0..3 * 64 * 64)
-                .map(|i| (i as f32 * 0.001 + seed).sin() * 0.5 + 0.5)
-                .collect();
-            let input = Variable::new(Tensor::from_vec(pixels, &[1, 3, 64, 64]).unwrap(), false);
-
-            optimizer.zero_grad();
-            let train_out = model.forward_train(&input);
-            let (total_loss, _cls, _box, _dfl) =
-                loss_fn.compute(&train_out, &gt_boxes, &gt_classes, 2);
-
-            let val = total_loss.data().to_vec()[0];
-            losses.push(val);
-
-            total_loss.backward();
-            optimizer.step();
-        }
-
-        for (i, &l) in losses.iter().enumerate() {
-            assert!(l.is_finite(), "Helios loss at step {i} is not finite: {l}");
-        }
-        assert!(losses[0] > 0.0, "Initial loss should be positive");
-    }
 }

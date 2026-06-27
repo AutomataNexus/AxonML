@@ -38,7 +38,7 @@ use axonml_tensor::Tensor;
 ///
 /// # Usage
 /// ```ignore
-/// let model = Helios::nano(80);
+/// let model = NanoDet::new(80);
 /// let mut ema = ModelEMA::new(&model.parameters(), 0.9999);
 ///
 /// for epoch in 0..epochs {

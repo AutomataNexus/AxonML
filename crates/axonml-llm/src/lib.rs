@@ -1,13 +1,11 @@
-//! Nine LLM architectures for the AxonML framework.
+//! Eight LLM architectures for the AxonML framework.
 //!
 //! Complete pure-Rust implementations: GPT-2 (decoder-only), LLaMA (split-
 //! halves RoPE + GQA + SwiGLU), Mistral (sliding-window attention), Phi
 //! (partial RoPE + GELU), BERT (bidirectional encoder + classification/MLM),
 //! SSM/Mamba (selective S6 scan + depthwise conv + SSMForCausalLM), Hydra
 //! (hybrid SSM + windowed attention), Chimera (sparse MoE + differential
-//! attention), Trident (1.58-bit ternary TernaryLinear, RoPE + GQA +
-//! ReLU²-gated FFN + SubLN, graph-preserving RepeatKVBackward, configs for
-//! 1B/3B/smoke). Shared building blocks: attention, RMSNorm, RotaryEmbedding,
+//! attention). Shared building blocks: attention, RMSNorm, RotaryEmbedding,
 //! embedding, text generation (top-k/top-p/temperature), HuggingFace weight
 //! loader, and pretrained model hub.
 //!
@@ -51,7 +49,6 @@ pub mod ssm;
 pub mod state_dict;
 pub mod tokenizer;
 pub mod transformer;
-pub mod trident;
 
 pub use attention::{
     CausalSelfAttention, FlashAttention, FlashAttentionConfig, KVCache, LayerKVCache,
@@ -63,7 +60,7 @@ pub use config::{BertConfig, GPT2Config, TransformerConfig};
 pub use embedding::{BertEmbedding, GPT2Embedding, PositionalEmbedding, TokenEmbedding};
 pub use error::{LLMError, LLMResult};
 pub use generation::{GenerationConfig, TextGenerator};
-pub use gguf_export::{export_qwen3_to_gguf, export_rdt_to_gguf, export_trident_to_gguf};
+pub use gguf_export::{export_qwen3_to_gguf, export_rdt_to_gguf};
 pub use gguf_loader::{load_qwen3_from_gguf, read_gguf_metadata_raw_bytes, read_gguf_tokenizer};
 pub use gpt2::{GPT2, GPT2LMHead};
 pub use hf_loader::{HFLoader, load_llama_from_hf, load_mistral_from_hf};
@@ -78,7 +75,6 @@ pub use ssm::{SSMBlock, SSMConfig, SSMForCausalLM};
 pub use state_dict::{LoadResult, LoadStateDict};
 pub use tokenizer::{HFTokenizer, SpecialTokens};
 pub use transformer::{TransformerBlock, TransformerDecoder, TransformerEncoder};
-pub use trident::{TridentConfig, TridentModel};
 
 // =============================================================================
 // Tests

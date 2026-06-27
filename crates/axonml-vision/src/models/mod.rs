@@ -2,12 +2,11 @@
 //!
 //! Module hub for all vision model architectures. Re-exports classification
 //! models (LeNet, MLP, SimpleCNN, ResNet, VGG, VisionTransformer), detection
-//! models (BlazeFace, RetinaFace, DETR, NanoDet, Helios, Nexus, Phantom),
+//! models (BlazeFace, RetinaFace, DETR, NanoDet),
 //! infrastructure (FPN), anomaly detectors (PatchCore, StudentTeacher), depth
-//! estimators (DPT, FastDepth), VQA (VQAModel), 3D reconstruction (Aegis3D),
-//! night vision (NightVision), and biometric identity (AegisIdentity and all
-//! modality-specific sub-models). Includes detection smoke tests that verify
-//! parameter counts and output shapes for all detection-family models.
+//! estimators (DPT, FastDepth), and VQA (VQAModel). Includes detection smoke
+//! tests that verify parameter counts and output shapes for all
+//! detection-family models.
 //!
 //! # File
 //! `crates/axonml-vision/src/models/mod.rs`
@@ -24,19 +23,13 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-pub mod aegis3d;
 pub mod anomaly;
-pub mod biometric;
 pub mod blazeface;
 pub mod depth;
 pub mod detr;
 pub mod fpn;
-pub mod helios;
 pub mod lenet;
 pub mod nanodet;
-pub mod nexus;
-pub mod nightvision;
-pub mod phantom;
 pub mod resnet;
 pub mod retinaface;
 pub mod transformer;
@@ -58,7 +51,6 @@ pub use fpn::FPN;
 // Detection
 pub use blazeface::BlazeFace;
 pub use detr::DETR;
-pub use helios::{CIoULoss, Helios, HeliosLoss, TaskAlignedAssigner};
 pub use nanodet::NanoDet;
 pub use retinaface::RetinaFace;
 
@@ -70,20 +62,6 @@ pub use depth::{DPT, FastDepth};
 
 // Visual Question Answering
 pub use vqa::VQAModel;
-
-// 3D Reconstruction
-pub use aegis3d::Aegis3D;
-
-// Novel Detection Architectures
-pub use nexus::Nexus;
-pub use nightvision::{NightVision, NightVisionConfig, ThermalDomain};
-pub use phantom::Phantom;
-
-// Biometric Identity (Aegis Identity)
-pub use biometric::{
-    AegisIdentity, ArgusIris, AriadneFingerprint, EchoSpeaker, IdentityBank, MnemosyneIdentity,
-    ThemisFusion,
-};
 
 // =============================================================================
 // Smoke Tests — Detection Model Param Counts & Output Shapes
