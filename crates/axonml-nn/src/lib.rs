@@ -116,9 +116,8 @@ pub use layers::{
     ConvTranspose2d, CrossAttention, DifferentialAttention, Dropout, Embedding, Expert, FFT1d,
     GATConv, GCNConv, GRU, GRUCell, GroupNorm, GroupSparsity, InstanceNorm2d, LSTM, LSTMCell,
     LayerNorm, Linear, LotteryTicket, MaxPool1d, MaxPool2d, MoELayer, MoERouter,
-    MultiHeadAttention, RNN, RNNCell, ResidualBlock, STFT,
-    Seq2SeqTransformer, SparseLinear, TransformerDecoder, TransformerDecoderLayer,
-    TransformerEncoder, TransformerEncoderLayer,
+    MultiHeadAttention, RNN, RNNCell, ResidualBlock, STFT, Seq2SeqTransformer, SparseLinear,
+    TransformerDecoder, TransformerDecoderLayer, TransformerEncoder, TransformerEncoderLayer,
 };
 
 // Activation re-exports

@@ -423,5 +423,4 @@ mod tests {
             "SGD loss did not decrease: first={first_epoch_loss:.4}, last={last_epoch_loss:.4}"
         );
     }
-
 }
