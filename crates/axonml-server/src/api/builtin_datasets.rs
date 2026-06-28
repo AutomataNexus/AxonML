@@ -19,21 +19,10 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-// NexusConnectBridge URLs (reserved for future integration)
-#[allow(dead_code)]
-const NEXUS_API_URL: &str = "https://localhost/api/v1/bridge/datasets";
-#[allow(dead_code)]
-const NEXUS_FALLBACK_URL: &str = "http://127.0.0.1:8000/api/v1/bridge/datasets";
 
 // ============================================================================
 // Types
@@ -424,100 +413,4 @@ pub async fn prepare_dataset(
     // The actual download happens client-side when the code is run
 
     Ok(Json(dataset))
-}
-
-// ============================================================================
-// NexusConnectBridge Integration (reserved for future use)
-// ============================================================================
-
-#[allow(dead_code)]
-async fn fetch_from_nexus(source: &Option<String>) -> Result<Vec<BuiltinDataset>, String> {
-    let client = Client::new();
-
-    let url = match source {
-        Some(s) => format!("{}?source={}", NEXUS_API_URL, s),
-        None => NEXUS_API_URL.to_string(),
-    };
-
-    let response = client
-        .get(&url)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !response.status().is_success() {
-        // Try fallback URL
-        let fallback_url = match source {
-            Some(s) => format!("{}?source={}", NEXUS_FALLBACK_URL, s),
-            None => NEXUS_FALLBACK_URL.to_string(),
-        };
-
-        let response = client
-            .get(&fallback_url)
-            .timeout(std::time::Duration::from_secs(30))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        if !response.status().is_success() {
-            return Err("Both primary and fallback APIs failed".to_string());
-        }
-
-        return response.json().await.map_err(|e| e.to_string());
-    }
-
-    response.json().await.map_err(|e| e.to_string())
-}
-
-#[allow(dead_code)]
-async fn fetch_dataset_info_from_nexus(dataset_id: &str) -> Result<BuiltinDataset, String> {
-    let client = Client::new();
-
-    let url = format!("{}/{}", NEXUS_API_URL, dataset_id);
-
-    let response = client
-        .get(&url)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !response.status().is_success() {
-        return Err("API request failed".to_string());
-    }
-
-    response.json().await.map_err(|e| e.to_string())
-}
-
-#[allow(dead_code)]
-async fn search_nexus(
-    query: &str,
-    source: &Option<String>,
-    limit: usize,
-) -> Result<Vec<SearchResult>, String> {
-    let client = Client::new();
-
-    let mut url = format!(
-        "{}/search?q={}&limit={}",
-        NEXUS_API_URL,
-        urlencoding::encode(query),
-        limit
-    );
-    if let Some(s) = source {
-        url.push_str(&format!("&source={}", s));
-    }
-
-    let response = client
-        .get(&url)
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !response.status().is_success() {
-        return Err("Search request failed".to_string());
-    }
-
-    response.json().await.map_err(|e| e.to_string())
 }

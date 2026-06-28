@@ -36,7 +36,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,350+ pas
 | **Distributed Training** | DDP, FSDP (ZeRO-2/ZeRO-3 + HybridShard + CPU offload), Pipeline (GPipe / 1F1B), column/row tensor parallel, optional NCCL backend |
 | **Model Formats** | ONNX import/export (opset 17, 40+ ops), SafeTensors, StateDict, and `.axonml` bundles with an **embedded computation graph** for source-free recompilation (→ Hailo NPU HEF) |
 | **Vision Models** | LeNet, ResNet, VGG, ViT, DETR, NanoDet, BlazeFace, RetinaFace, FPN, DPT/FastDepth (depth), PatchCore/StudentTeacher (anomaly), VQA |
-| **LLM Architectures** | BERT, GPT-2, LLaMA, Mistral, Phi, Chimera, Hydra, SSM (Mamba), **RDT** (Recurrent-Depth Transformer, test-time compute), Qwen3 (trainable) |
+| **LLM Architectures** | BERT, GPT-2, LLaMA, Mistral, Phi, SSM (Mamba), Qwen3 (trainable) |
 | **Inference Stack** | the AxonML inference server — pure-Rust LLM inference with Anthropic Messages API, SSE streaming, Q4_K/Q5_K/Q6_K/Q8_0 CUDA GEMV, fused prefill + flash-decode attention, `--mlock` / `--no-mmap` / `--n-gpu-layers` / `--n-cpu-moe`, and TurboQuant KV-cache quantization (`--kv-quant q8`/`turbo`) |
 | **Device-native execution** | GPU stays resident on-device; the **CPU backend is rayon-parallel** across matmul (all layouts), the full GradFn backward family, reductions, and the SwiGLU/RMSNorm/RoPE math — single-node CPU inference and training use every core |
 | **GPU Backends** | CUDA (cuBLAS + 15+ PTX kernel modules), Vulkan, Metal, WebGPU |

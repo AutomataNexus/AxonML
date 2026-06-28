@@ -71,7 +71,7 @@ anyhow = "1.0"
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }
 
-# HTTP client (for Aegis-DB connection)
+# HTTP client (for database connection)
 reqwest = { workspace = true }
 
 # Multipart file upload

@@ -22,15 +22,26 @@ use std::path::PathBuf;
 use colored::Colorize;
 
 // =============================================================================
-// NexusConnectBridge Configuration
+// Dataset Bridge Configuration
 // =============================================================================
 
-/// NexusConnectBridge API base URL.
-pub const NEXUS_API_URL: &str =
-    "https://localhost/api/v1/bridge/datasets";
+/// Environment variable supplying the optional dataset-bridge base URL.
+///
+/// The dataset bridge is an external HTTP service that proxies dataset
+/// discovery/search across third-party catalogs. It is unconfigured by
+/// default — set this variable to a base URL (e.g.
+/// `https://your-host/api/v1/bridge/datasets`) to enable remote search.
+/// When unset, all dataset operations fall back to the local built-in
+/// registry and search returns a clear "bridge not configured" error.
+pub const DATASET_BRIDGE_URL_ENV: &str = "AXONML_DATASET_BRIDGE_URL";
 
-/// Tailscale fallback URL.
-pub const NEXUS_TAILSCALE_URL: &str = "http://127.0.0.1:8000/api/v1/bridge/datasets";
+/// Read the configured dataset-bridge base URL, if any.
+fn dataset_bridge_url() -> Option<String> {
+    std::env::var(DATASET_BRIDGE_URL_ENV)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
 
 /// Built-in dataset information.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -138,32 +149,32 @@ pub struct SearchResult {
 }
 
 // =============================================================================
-// NexusConnectBridge Client
+// Dataset Bridge Client
 // =============================================================================
 
-/// NexusConnectBridge API client.
-pub struct NexusClient {
-    base_url: String,
+/// Client for the optional remote dataset bridge.
+///
+/// `base_url` is `None` when [`DATASET_BRIDGE_URL_ENV`] is unset; in that
+/// case every method degrades gracefully to the local registry (or returns
+/// a "bridge not configured" error for operations that require it).
+pub struct DatasetBridgeClient {
+    base_url: Option<String>,
 }
 
-impl NexusClient {
-    /// Create a new client.
+impl DatasetBridgeClient {
+    /// Create a new client from the environment configuration.
     pub fn new() -> Self {
         Self {
-            base_url: NEXUS_API_URL.to_string(),
+            base_url: dataset_bridge_url(),
         }
     }
 
-    /// Create client with Tailscale URL.
-    pub fn with_tailscale() -> Self {
-        Self {
-            base_url: NEXUS_TAILSCALE_URL.to_string(),
-        }
-    }
-
-    /// List built-in datasets from API, fallback to local registry.
+    /// List built-in datasets from the bridge, fallback to local registry.
     pub fn list_builtin(&self) -> Result<Vec<BuiltinDataset>, String> {
-        let url = format!("{}/builtin", self.base_url);
+        let Some(base_url) = self.base_url.as_deref() else {
+            return Ok(builtin_datasets());
+        };
+        let url = format!("{}/builtin", base_url);
 
         let client = reqwest::blocking::Client::new();
         match client
@@ -184,16 +195,22 @@ impl NexusClient {
         }
     }
 
-    /// Search datasets across sources via NexusConnectBridge API.
+    /// Search datasets across sources via the dataset bridge.
     pub fn search(
         &self,
         query: &str,
         source: Option<&str>,
         max_results: usize,
     ) -> Result<Vec<SearchResult>, String> {
+        let Some(base_url) = self.base_url.as_deref() else {
+            return Err(format!(
+                "dataset bridge not configured: set {} to enable remote search",
+                DATASET_BRIDGE_URL_ENV
+            ));
+        };
         let mut url = format!(
             "{}/search?query={}&maxResults={}",
-            self.base_url, query, max_results
+            base_url, query, max_results
         );
         if let Some(src) = source {
             url.push_str(&format!("&source={}", src));
@@ -208,7 +225,7 @@ impl NexusClient {
 
         if !response.status().is_success() {
             return Err(format!(
-                "API error: {} - check NexusConnectBridge service",
+                "API error: {} - check the dataset bridge service",
                 response.status()
             ));
         }
@@ -217,22 +234,23 @@ impl NexusClient {
         Ok(results)
     }
 
-    /// Get dataset info from API, fallback to local registry.
+    /// Get dataset info from the bridge, fallback to local registry.
     pub fn get_info(&self, dataset_id: &str) -> Result<BuiltinDataset, String> {
-        let url = format!("{}/builtin/{}", self.base_url, dataset_id);
+        if let Some(base_url) = self.base_url.as_deref() {
+            let url = format!("{}/builtin/{}", base_url, dataset_id);
 
-        let client = reqwest::blocking::Client::new();
-        match client
-            .get(&url)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-        {
-            Ok(response) if response.status().is_success() => {
-                if let Ok(dataset) = response.json::<BuiltinDataset>() {
-                    return Ok(dataset);
+            let client = reqwest::blocking::Client::new();
+            if let Ok(response) = client
+                .get(&url)
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+            {
+                if response.status().is_success() {
+                    if let Ok(dataset) = response.json::<BuiltinDataset>() {
+                        return Ok(dataset);
+                    }
                 }
             }
-            _ => {}
         }
 
         // Fallback to local registry
@@ -243,7 +261,7 @@ impl NexusClient {
     }
 }
 
-impl Default for NexusClient {
+impl Default for DatasetBridgeClient {
     fn default() -> Self {
         Self::new()
     }
@@ -255,7 +273,7 @@ impl Default for NexusClient {
 
 /// Execute dataset list command.
 pub fn execute_list(source: Option<&str>) -> Result<(), String> {
-    let client = NexusClient::new();
+    let client = DatasetBridgeClient::new();
 
     match source {
         Some("builtin") | None => {
@@ -300,7 +318,7 @@ pub fn execute_list(source: Option<&str>) -> Result<(), String> {
 
 /// Execute dataset info command.
 pub fn execute_info(dataset_id: &str) -> Result<(), String> {
-    let client = NexusClient::new();
+    let client = DatasetBridgeClient::new();
     let ds = client.get_info(dataset_id)?;
 
     println!("{}", format!("Dataset: {}", ds.name).bold());
@@ -339,22 +357,14 @@ println!("Label shape: {{:?}}", label.shape());
 
 /// Execute dataset search command.
 pub fn execute_search(query: &str, source: Option<&str>, limit: usize) -> Result<(), String> {
-    let client = NexusClient::new();
+    let client = DatasetBridgeClient::new();
 
     println!("{} Searching for '{}'...", "🔍".cyan(), query);
     if let Some(src) = source {
         println!("Source filter: {}", src);
     }
 
-    // Try primary API, fall back to Tailscale if needed
-    let results = match client.search(query, source, limit) {
-        Ok(r) => r,
-        Err(_) => {
-            // Try Tailscale fallback
-            let tailscale_client = NexusClient::with_tailscale();
-            tailscale_client.search(query, source, limit)?
-        }
-    };
+    let results = client.search(query, source, limit)?;
 
     if results.is_empty() {
         println!("No datasets found for '{}'", query);
@@ -498,8 +508,13 @@ pub fn execute_sources() -> Result<(), String> {
     }
 
     println!("\n{}", "─".repeat(60));
-    println!("API endpoint: {}", NEXUS_API_URL);
-    println!("Tailscale fallback: {}", NEXUS_TAILSCALE_URL);
+    match dataset_bridge_url() {
+        Some(url) => println!("Dataset bridge: {}", url),
+        None => println!(
+            "Dataset bridge: not configured (set {} to enable remote search)",
+            DATASET_BRIDGE_URL_ENV
+        ),
+    }
 
     Ok(())
 }
@@ -538,8 +553,8 @@ mod tests {
     }
 
     #[test]
-    fn test_nexus_client_builtin() {
-        let client = NexusClient::new();
+    fn test_dataset_bridge_builtin() {
+        let client = DatasetBridgeClient::new();
 
         // List built-in datasets (uses local fallback if API unreachable)
         let datasets = client.list_builtin().unwrap();
@@ -547,16 +562,16 @@ mod tests {
     }
 
     #[test]
-    fn test_nexus_client_search() {
-        let client = NexusClient::new();
-        // Search calls real NexusConnectBridge API
-        // Result depends on API availability
+    fn test_dataset_bridge_search() {
+        let client = DatasetBridgeClient::new();
+        // Search hits the dataset bridge when configured; otherwise returns
+        // a "not configured" error. Either way must not panic.
         let _ = client.search("image", None, 10);
     }
 
     #[test]
     fn test_get_info() {
-        let client = NexusClient::new();
+        let client = DatasetBridgeClient::new();
 
         // Get info uses API with local fallback
         let info = client.get_info("mnist").unwrap();

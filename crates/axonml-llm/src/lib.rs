@@ -1,13 +1,12 @@
-//! Eight LLM architectures for the AxonML framework.
+//! LLM architectures for the AxonML framework.
 //!
 //! Complete pure-Rust implementations: GPT-2 (decoder-only), LLaMA (split-
 //! halves RoPE + GQA + SwiGLU), Mistral (sliding-window attention), Phi
 //! (partial RoPE + GELU), BERT (bidirectional encoder + classification/MLM),
-//! SSM/Mamba (selective S6 scan + depthwise conv + SSMForCausalLM), Hydra
-//! (hybrid SSM + windowed attention), Chimera (sparse MoE + differential
-//! attention). Shared building blocks: attention, RMSNorm, RotaryEmbedding,
-//! embedding, text generation (top-k/top-p/temperature), HuggingFace weight
-//! loader, and pretrained model hub.
+//! SSM/Mamba (selective S6 scan + depthwise conv + SSMForCausalLM), Qwen3
+//! (GQA + QK-norm). Shared building blocks: attention, RMSNorm,
+//! RotaryEmbedding, embedding, text generation (top-k/top-p/temperature),
+//! HuggingFace weight loader, and pretrained model hub.
 //!
 //! # File
 //! `crates/axonml-llm/src/lib.rs`
@@ -29,7 +28,6 @@
 
 pub mod attention;
 pub mod bert;
-pub mod chimera;
 pub mod config;
 pub mod embedding;
 pub mod error;
@@ -39,12 +37,10 @@ pub mod gguf_loader;
 pub mod gpt2;
 pub mod hf_loader;
 pub mod hub;
-pub mod hydra;
 pub mod llama;
 pub mod mistral;
 pub mod phi;
 pub mod qwen3;
-pub mod rdt;
 pub mod ssm;
 pub mod state_dict;
 pub mod tokenizer;
@@ -55,22 +51,19 @@ pub use attention::{
     MultiHeadSelfAttention, scaled_dot_product_attention,
 };
 pub use bert::{Bert, BertForMaskedLM, BertForSequenceClassification};
-pub use chimera::{ChimeraConfig, ChimeraModel};
 pub use config::{BertConfig, GPT2Config, TransformerConfig};
 pub use embedding::{BertEmbedding, GPT2Embedding, PositionalEmbedding, TokenEmbedding};
 pub use error::{LLMError, LLMResult};
 pub use generation::{GenerationConfig, TextGenerator};
-pub use gguf_export::{export_qwen3_to_gguf, export_rdt_to_gguf};
+pub use gguf_export::export_qwen3_to_gguf;
 pub use gguf_loader::{load_qwen3_from_gguf, read_gguf_metadata_raw_bytes, read_gguf_tokenizer};
 pub use gpt2::{GPT2, GPT2LMHead};
 pub use hf_loader::{HFLoader, load_llama_from_hf, load_mistral_from_hf};
 pub use hub::{PretrainedLLM, download_weights as download_llm_weights, llm_registry};
-pub use hydra::{HydraConfig, HydraModel};
 pub use llama::{LLaMA, LLaMAConfig, LLaMAForCausalLM};
 pub use mistral::{Mistral, MistralConfig, MistralForCausalLM};
 pub use phi::{Phi, PhiConfig, PhiForCausalLM};
 pub use qwen3::{Qwen3, Qwen3Attention, Qwen3Config, Qwen3DecoderLayer, Qwen3ForCausalLM};
-pub use rdt::{RDT, RDTCoda, RDTConfig, RDTCore, RDTForCausalLM, RDTPrelude};
 pub use ssm::{SSMBlock, SSMConfig, SSMForCausalLM};
 pub use state_dict::{LoadResult, LoadStateDict};
 pub use tokenizer::{HFTokenizer, SpecialTokens};

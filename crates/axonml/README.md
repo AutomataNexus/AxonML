@@ -88,7 +88,7 @@ The umbrella crate re-exports the framework sub-crates under short module names:
 
 ---
 
-## Nine LLM Architectures (`feature = "llm"`)
+## LLM Architectures (`feature = "llm"`)
 
 | Model | Novel Features | Purpose |
 |-------|---------------|---------|
@@ -98,9 +98,6 @@ The umbrella crate re-exports the framework sub-crates under short module names:
 | **Phi** | Partial RoPE, compact design | Small efficient LM |
 | **BERT** | Bidirectional masked LM | Encoder for classification / masked LM |
 | **SSM / Mamba** | Selective S6 scan, depthwise conv | Linear-complexity sequence model |
-| **Hydra** | Hybrid SSM + windowed attention | Best-of-both-worlds architecture |
-| **RDT** | Recurrent-Depth Transformer, test-time compute | Iterate a shared core block K times in latent space |
-| **Chimera** | Sparse MoE (8 experts, top-2) + Differential Attention | Large-capacity conditional compute |
 
 Plus:
 - **BPE / WordPiece / Whitespace / Character tokenizers** (in `axonml-text`)
@@ -301,9 +298,8 @@ cargo run -p axonml --example nlp_audio_test
 For model-specific training scripts, see the per-crate `examples/` directories:
 
 ```bash
-# LLM training (all 9 architectures)
+# LLM training
 cargo run -p axonml-llm --example train_gpt2 --release
-cargo run -p axonml-llm --example train_hydra --release
 
 # Vision training
 cargo run -p axonml-vision --example train_resnet --release

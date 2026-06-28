@@ -127,7 +127,7 @@ pub enum Commands {
     /// Pretrained model hub
     Hub(HubArgs),
 
-    /// Dataset management (NexusConnectBridge)
+    /// Dataset management (built-in registry + optional dataset bridge)
     Dataset(DatasetArgs),
 
     /// Start the AxonML dashboard and API server

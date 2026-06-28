@@ -21,79 +21,15 @@ top-k / top-p / temperature sampling.
 | `phi`        | `Phi`, `PhiForCausalLM` (partial RoPE + GELU)                                                  |
 | `qwen3`      | `Qwen3ForCausalLM` (trainable Qwen3 with QK-norm; teacher/student + distillation)              |
 | `ssm`        | `SSMBlock`, `SSMConfig`, `SSMForCausalLM` (Mamba: selective S6 scan + depthwise conv)          |
-| `hydra`      | `HydraModel`, `HydraConfig` (hybrid SSM + windowed attention)                                  |
-| `chimera`    | `ChimeraModel`, `ChimeraConfig` (sparse MoE + differential attention)                          |
-| `rdt`        | `RDTForCausalLM` (Recurrent-Depth Transformer, Huginn-style test-time compute: Prelude → latent block iterated K times → Coda). `rdt` GGUF arch id; distillation via `train_rdt_distill` |
 
 GGUF support covers both `qwen2` and `qwen3` loaders for distillation /
 teacher-student workflows. Training paths use the device-native CPU
 parallelism (see [training](../training.md)); on GPU, the 1.58-bit ternary
 quantized linear (BitNet b1.58) has fused forward/backward kernels.
 
-The `gpt2`, `bert`, `llama`, `mistral`, `phi`, and `qwen3` modules are faithful
-reimplementations of published architectures (trainable from scratch and
-loadable from HuggingFace `safetensors` / GGUF). The remaining three —
-**Chimera, Hydra, and RDT** — are original AutomataNexus
-architectures, detailed below.
-
-## Novel Architectures
-
-These are designed and implemented in-house, not ports. Each is trainable
-end-to-end on the AxonML autograd engine and several have a dedicated
-whitepaper and Hailo-NPU compile path.
-
-### Chimera — sparse MoE + Differential Attention
-
-A small language model that pairs **massive capacity with noise-cancelling
-precision**. Each `ChimeraBlock` is:
-
-```text
-x = x + DifferentialAttention(RMSNorm(x))
-x = x + MoELayer(RMSNorm(x))            // top-2 of 8 SwiGLU experts
-```
-
-- **Differential Attention** (Microsoft DIFF-Transformer style): computes two
-  softmax attention maps and subtracts them, cancelling attention noise on
-  irrelevant tokens for sharper retrieval.
-- **Sparse MoE MLP**: 8 expert SwiGLU MLPs per layer, top-2 routed — only
-  ~25% of parameters activate per token (Switch/GShard-style).
-- **Load-balancing auxiliary loss** prevents expert collapse.
-
-`ChimeraModel` / `ChimeraConfig`.
-
-### Hydra — hybrid SSM + sparse attention
-
-Alternates **Mamba-style SSM blocks** (`SSMBlock`: selective S6 scan +
-depthwise Conv1d, linear-time in sequence length) with **windowed (local)
-attention** layers. The SSM layers carry long-range state cheaply while the
-windowed-attention layers recover precise local token interactions — a
-sub-quadratic hybrid. `HydraModel` / `HydraConfig`.
-
-### RDT — Recurrent-Depth Transformer (test-time compute)
-
-Huginn-style latent reasoning (Geiping et al. 2025): instead of more layers,
-**iterate a shared core block K times** in latent space, where K is a per-request
-compute knob.
-
-```text
-tokens → Embedding → Prelude (N_p Qwen3 layers) → e
-h_0 = e
-repeat K times (shared Core, N_c layers):
-    h_{t+1} = α·h_t + β·e + Block(h_t + e)
-h_K → Coda (N_d layers) → output_norm → logits
-```
-
-- **K is sampled uniformly from `[k_min, k_max]` per batch at training** so the
-  model generalizes across iteration counts; at inference K trades latency for
-  quality (more for hard prompts, less for easy ones).
-- Reuses `Qwen3DecoderLayer` as the atomic block, inheriting QK-norm,
-  split-halves RoPE, SwiGLU, and the tuned GPU decode kernels.
-- Prelude/Coda weights are **not** shared with the iterated Core.
-- Configs: `rdt_tiny` (~265M), `rdt_small` (~540M), `rdt_mid` (~1.18B).
-- **GGUF arch id `rdt`**; production distillation via `train_rdt_distill`
-  (a 7B teacher → RDT student). Design doc: `docs/RDT_DESIGN.md`.
-
-`RDTForCausalLM` / `RDTConfig`.
+The `gpt2`, `bert`, `llama`, `mistral`, `phi`, `qwen3`, and `ssm` modules are
+faithful reimplementations of published architectures (trainable from scratch
+and loadable from HuggingFace `safetensors` / GGUF).
 
 ## Shared Building Blocks
 
@@ -125,7 +61,7 @@ building blocks used by several models.
 
 `BertConfig`, `GPT2Config`, `TransformerConfig`. Architecture-specific
 configs live alongside their models (`LLaMAConfig`, `MistralConfig`,
-`PhiConfig`, `SSMConfig`, `HydraConfig`, `ChimeraConfig`).
+`PhiConfig`, `SSMConfig`).
 
 ### `generation`
 
@@ -223,20 +159,6 @@ let prompt = vec![15496u32, 11, 314]; // "Hello, I"
 let output = generator.generate(&prompt);
 ```
 
-### RDT (recurrent-depth, test-time compute)
-
-```rust
-use axonml_llm::{RDTConfig, RDTForCausalLM};
-use axonml_tensor::Tensor;
-
-let config = RDTConfig::rdt_small();     // rdt_tiny / rdt_small / rdt_mid
-let model  = RDTForCausalLM::new(&config);
-
-// `k` (recurrent iterations) is the per-request compute knob — pass more for
-// harder prompts. At train time it is sampled from [k_min, k_max].
-let logits = model.forward_ids(&input_ids, /*k=*/8); // input_ids: Tensor<u32>
-```
-
 ### Fine-tuning BERT
 
 ```rust
@@ -283,7 +205,7 @@ for (input_ids, labels) in dataset {
   *0..=t*.
 - **Mistral** — sliding-window causal; token *t* attends to tokens
   *max(0, t-W)..=t*.
-- **Hydra** — hybrid SSM state + windowed attention over short spans.
+- **SSM (Mamba)** — selective state-space scan; linear-time over the sequence.
 
 ## Feature Flags
 

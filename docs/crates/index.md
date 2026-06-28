@@ -30,7 +30,7 @@ AxonML is built as a Rust workspace with **23 specialized crates**.
 +-------------+-------------+-------------+--------------+
 |axonml-vision|axonml-audio |axonml-text  | axonml-llm   |
 |   (CV/CNN)  |(MFCC/Mel)   |(Tokenizers) |(BERT/GPT/    |
-|             |             |             | LLaMA/RDT/   |
+|             |             |             | LLaMA/SSM/   |
 |             |             |             | Phi/Mistral) |
 +-------------+-------------+-------------+--------------+
 |                         Training Layer                              |
@@ -97,7 +97,7 @@ AxonML is built as a Rust workspace with **23 specialized crates**.
 | [axonml-vision](https://docs.rs/axonml-vision) | Computer vision and detection | `LeNet`, `ResNet`, `ViT`, `DETR`, `NanoDet`, `BlazeFace`, `RetinaFace`, `FPN`, `DPT`, `FastDepth`, `PatchCore`, `VQAModel`, `CocoDataset`, `WiderFaceDataset`, `FocalLoss`, `GIoULoss` |
 | [axonml-audio](https://docs.rs/axonml-audio) | Audio processing | `MelSpectrogram`, `MFCC`, `Resample`, `AddNoise`, `SyntheticCommandDataset` |
 | [axonml-text](https://docs.rs/axonml-text) | NLP utilities | `WhitespaceTokenizer`, `CharTokenizer`, `BasicBPETokenizer`, `Vocab`, `TextDataset` |
-| [axonml-llm](https://docs.rs/axonml-llm) | Large language models | `Bert`, `GPT2`, `LLaMA`, `Mistral`, `Phi`, `ChimeraModel`, `HydraModel`, `SSMBlock`, `RDTForCausalLM`, `Qwen3ForCausalLM`, `TextGenerator`, `HFLoader`, GGUF I2_S / `rdt` exporters |
+| [axonml-llm](https://docs.rs/axonml-llm) | Large language models | `Bert`, `GPT2`, `LLaMA`, `Mistral`, `Phi`, `SSMBlock`, `Qwen3ForCausalLM`, `TextGenerator`, `HFLoader`, GGUF I2_S exporter |
 
 ### Serialization Layer
 

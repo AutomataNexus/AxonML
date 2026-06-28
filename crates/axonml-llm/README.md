@@ -15,7 +15,7 @@
 
 ## Overview
 
-`axonml-llm` provides nine large-language-model architectures for the AxonML framework, all implemented in pure Rust on top of `axonml-tensor` and `axonml-autograd`. Shared infrastructure includes multi-head / causal self-attention with a KV cache, a FlashAttention kernel, RoPE, RMSNorm, a HuggingFace weight loader (safetensors), a state-dict name-mapping helper, a pretrained-weights hub with on-disk caching, a configurable text-generation sampler, and an HF-style tokenizer.
+`axonml-llm` provides seven large-language-model architectures for the AxonML framework, all implemented in pure Rust on top of `axonml-tensor` and `axonml-autograd`. Shared infrastructure includes multi-head / causal self-attention with a KV cache, a FlashAttention kernel, RoPE, RMSNorm, a HuggingFace weight loader (safetensors), a state-dict name-mapping helper, a pretrained-weights hub with on-disk caching, a configurable text-generation sampler, and an HF-style tokenizer.
 
 ---
 
@@ -29,9 +29,6 @@
 | **Mistral** | `mistral` | LLaMA + sliding-window attention. `MistralForCausalLM`. |
 | **Phi** | `phi` | Phi-1/2/3-style: partial RoPE, GELU MLP, optional parallel-attn block. `PhiForCausalLM`. |
 | **SSM** | `ssm` | Mamba/S6-style selective state-space model: depthwise Conv1d + selective scan + RMSNorm. `SSMBlock`, `SSMForCausalLM`. |
-| **Hydra** | `hydra` | Hybrid: alternates SSM blocks and windowed (local) attention. `HydraModel`. |
-| **Chimera** | `chimera` | Sparse MoE (top-k routing) + differential attention, with load-balancing auxiliary loss. `ChimeraModel`. |
-| **RDT** | `rdt` | Recurrent-Depth Transformer (Huginn-style test-time compute): a Prelude → recurrent latent block iterated K times → Coda. `RDTForCausalLM`, `rdt` GGUF arch id, distillation path via `train_rdt_distill`. |
 
 The Qwen3 trainable module (`Qwen3ForCausalLM`) and a GGUF loader (qwen2/qwen3) are also provided for distillation and student/teacher workflows.
 
@@ -45,8 +42,6 @@ The Qwen3 trainable module (`Qwen3ForCausalLM`) and a GGUF loader (qwen2/qwen3) 
 | `MistralConfig` | `mistral_7b`, `mistral_7b_instruct`, `mixtral_8x7b`, `tiny` |
 | `PhiConfig` | `phi1`, `phi2`, `phi3_mini`, `tiny` |
 | `SSMConfig` | `from_d_model(d_model, vocab_size)` builder |
-| `HydraConfig` | `base` (~300M), `small`, `tiny` |
-| `ChimeraConfig` | `default_2b` (8 experts, top-2), `small`, `tiny` |
 
 ---
 
@@ -68,7 +63,6 @@ The Qwen3 trainable module (`Qwen3ForCausalLM`) and a GGUF loader (qwen2/qwen3) 
 |--------|-------------|
 | `attention` | Multi-head / causal / flash attention, KV cache |
 | `bert` | BERT encoder + classification and MLM heads |
-| `chimera` | Sparse MoE + differential attention model |
 | `config` | `GPT2Config`, `BertConfig`, `TransformerConfig` |
 | `embedding` | Token, positional, BERT/GPT-2 combined embeddings |
 | `error` | `LLMError` / `LLMResult` |
@@ -76,7 +70,6 @@ The Qwen3 trainable module (`Qwen3ForCausalLM`) and a GGUF loader (qwen2/qwen3) 
 | `gpt2` | GPT-2 + `GPT2LMHead` |
 | `hf_loader` | HuggingFace safetensors loading (LLaMA, Mistral, …) |
 | `hub` | Pretrained-weight registry and downloader |
-| `hydra` | SSM + windowed-attention hybrid |
 | `llama` | LLaMA with RoPE, GQA, SwiGLU, RMSNorm |
 | `mistral` | Mistral (LLaMA + sliding-window attention) |
 | `phi` | Phi with partial RoPE / GELU / optional parallel-attn |
@@ -151,24 +144,6 @@ use axonml_llm::{SSMForCausalLM, SSMConfig};
 
 let cfg = SSMConfig::from_d_model(/*d_model=*/ 512, /*vocab_size=*/ 32000);
 let ssm = SSMForCausalLM::new(&cfg);
-```
-
-### Hydra hybrid SSM + windowed attention
-
-```rust
-use axonml_llm::{HydraModel, HydraConfig};
-
-let hydra = HydraModel::new(&HydraConfig::base()); // 768d, 24 layers, window 256
-```
-
-### Chimera sparse MoE + differential attention
-
-```rust
-use axonml_llm::{ChimeraModel, ChimeraConfig};
-
-let cfg = ChimeraConfig::default_2b(); // 8 experts per layer, top-2 active
-let model = ChimeraModel::new(&cfg);
-// Returns (logits, lb_loss) when used via forward_with_loss for training.
 ```
 
 ### Custom transformer encoder
@@ -258,13 +233,11 @@ let path = download_llm_weights("bert-base-uncased", /*force=*/ false)?;
 | Mistral | `mistral_7b`, `mistral_7b_instruct`, `mixtral_8x7b`, `tiny` |
 | Phi     | `phi1`, `phi2`, `phi3_mini`, `tiny` |
 
-### Hybrid / SSM / MoE
+### SSM
 
 | Config | Presets / builder |
 |--------|--------------------|
 | `SSMConfig`     | `from_d_model(d_model, vocab)` |
-| `HydraConfig`   | `base`, `small`, `tiny` |
-| `ChimeraConfig` | `default_2b`, `small`, `tiny` |
 
 ---
 

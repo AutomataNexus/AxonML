@@ -458,16 +458,14 @@ axon logs -f
   - TimelineProfiler with Chrome trace export
   - BottleneckAnalyzer for automatic issue detection
 
-- **LLM Architectures** (`axonml-llm`) — 9 full architectures
+- **LLM Architectures** (`axonml-llm`) — 7 full architectures
   - **BERT** encoder + `BertForSequenceClassification` / `BertForMaskedLM`
   - **GPT-2** decoder + `GPT2LMHead` for language modeling
   - **LLaMA** (2-7B, 2-13B, 3-8B configs) with GQA + RoPE + RMSNorm
   - **Mistral** (7B, Mixtral 8×7B configs) with sliding-window attention
   - **Phi** (1/2/3-mini configs); full-RoPE workaround for partial-RoPE framework bug documented in `train_phi`
   - **SSM / Mamba** + `SSMForCausalLM` wrapper
-  - **Hydra** *(novel)* — hybrid SSM + windowed-attention interleaved layers
-  - **Chimera** *(novel)* — sparse MoE (top-2 of 4 experts, load-balance loss) + Differential Attention
-  - **RDT** *(novel)* — Recurrent-Depth Transformer (Huginn-style test-time compute): iterate a shared core block K times in latent space, K a per-request compute knob
+  - **Qwen3** (trainable) with QK-norm; teacher/student + distillation
   - Shared infra: `FlashAttention`, `KVCache` / `LayerKVCache`, HuggingFace loader, state-dict mapping, `HFTokenizer`
   - Text generation with top-k, top-p, temperature sampling
 
@@ -793,7 +791,7 @@ Axonml/
 │   ├── axonml-fusion/     # Kernel fusion optimization
 │   ├── axonml-jit/        # JIT compilation (Cranelift)
 │   ├── axonml-profile/    # Profiling tools
-│   ├── axonml-llm/        # 9 LLM architectures (BERT, GPT-2, LLaMA, Mistral, Phi, SSM, Hydra, Chimera, RDT)
+│   ├── axonml-llm/        # 7 LLM architectures (BERT, GPT-2, LLaMA, Mistral, Phi, SSM, Qwen3)
 │   ├── axonml-train/      # Training glue (Trainer, callbacks, benchmarks)
 │   ├── axonml-cli/        # Command line interface
 │   ├── axonml-tui/        # Terminal user interface

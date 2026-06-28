@@ -43,7 +43,7 @@ serial; numerical semantics are unchanged. The GPU path is untouched.
 
 - Hailo: pre-allocate the input/output/node/initializer vectors in
   `BundleGraph::new` to cut reallocations during graph build for large
-  models targeting HEF via NexusFoundry.
+  models targeting HEF via the Hailo NPU compiler.
 - `simple_training` example now builds and runs on pure-CPU (non-CUDA)
   builds; cleared dead-store warnings in `SelectBackward`.
 
@@ -65,7 +65,7 @@ unchanged.
   `MeanDimBackward`, `VarDimBackward` (both passes), and
   `FusedAttentionBackward` (over batch×head).
 - Hailo: pre-allocate the vectors in `BundleGraph::new` to reduce
-  reallocations during graph build for large NexusFoundry/HEF targets.
+  reallocations during graph build for large Hailo/HEF targets.
 - Established the device-native execution principle: GPU stays on-device,
   CPU is fast + parallel, Hailo export/reference is optimal — reducing
   cross-device thrashing.
@@ -78,30 +78,19 @@ unchanged.
 - Deep MLP architecture with progressive temporal compression + multi-head
   output (efficiency, staging, safety).
 
-### RustyMythos — recurrent-depth transformer with MoE
-
-- New `axonml-models/rusty-mythos` crate: Prelude (embedding) →
-  RecurrentBlock (LTI-stable latent injection + MoE transformer layer, N
-  iterations) → Coda (output projection).
-- Configurable scale presets: xs (128d/4iter/4exp), small (256d/8iter/8exp),
-  medium (512d/16iter/16exp), large (1024d/32iter/32exp), xl
-  (2048d/64iter/64exp).
-- Train, ONNX export, and profiler report binaries with CLI scale selection.
-
 ### axonml-serialize — computation graph embedding
 
 - `ModelBundle` now embeds the computation graph alongside weights, enabling
   downstream compilers to reconstruct the model architecture from the
   `.axonml` checkpoint without the original source code.
-- New bundle export examples: `hvac_site_models`, `prometheus_sae_bundle`,
-  `rdt_tiny_bundle`, `mnemosyne_v2_bundle`, `llm_tiny_bundles`.
+- New bundle export examples: `llm_tiny_bundles`, `synthetic_bundle`.
 
 ### axonml-onnx — feedforward export improvements
 
 - `export_feedforward` accepts scale-parameterized layer lists for
-  architecture families (RustyMythos scaling, HVAC model variants).
+  scale-parameterized model families and HVAC model variants.
 
-### nexus-serve
+### Inference server — CLI flags
 
 - **`--mlock`**: lock model weights in RAM via `libc::mlock`, prevents kernel
   paging during long inference sessions.
@@ -116,15 +105,15 @@ unchanged.
   per-head Gram-Schmidt rotation matrices, packed Q4/Q3 storage, and
   rotate-quantize/dequantize-unrotate codec.
 
-### Trident 1.58-bit LLM training
+### 1.58-bit (BitNet b1.58) ternary LLM training
 
-- `trident_300m` and `trident_500m` model configs for A100 training.
-- Per-block gradient checkpointing on `TridentModel` — reduces peak VRAM
+- 300M and 500M ternary model configs for large-GPU training.
+- Per-block gradient checkpointing on the ternary model — reduces peak VRAM
   by trading recomputation for memory.
 - `TernaryLinear` saved_input CPU-staging — frees ~2.3 GB at 1B scale by
   moving saved activations to host during backward.
-- Per-block forward trace gated by `TRIDENT_BLOCK_TRACE=1` env var.
-- `TRIDENT_LOG_EVERY` env override for training step logging frequency.
+- Per-block forward trace gated by a block-trace env var.
+- A log-frequency env override for training step logging.
 
 ### Security and CI
 
@@ -132,7 +121,8 @@ unchanged.
   action SHAs, `permissions` blocks on every job, Node 24 runner upgrade.
 - OpenSSL dependency updated 0.10.78 → 0.10.80 (CVE fix for X509Ref UB +
   AES key-wrap overflow).
-- Sentinel/Sobek FDD system yanked from public repo (moved to private).
+- An internal fault-detection/diagnostics subsystem removed from the public
+  repo (moved to private).
 
 ### Fixes
 
@@ -141,20 +131,20 @@ unchanged.
 - Integration test convergence threshold relaxed (0.01 → 0.15) for CI
   stability across random seeds.
 - HVAC param count test bounds widened to accommodate architecture growth.
-- `axonml-hvac` sentinel module references cleaned up.
+- `axonml-hvac` internal module references cleaned up.
 - Formatting and clippy lint fixes (doc overindent, formatting drift).
 
 ## [0.6.3] - 2026-04-25
 
-### Trident 1.58-bit deployment chain — fully operational on commodity hardware
+### 1.58-bit (BitNet b1.58) deployment chain — fully operational on commodity hardware
 
 End-to-end pipeline for a from-scratch 1.58-bit ternary model, all on a
-single consumer GPU. Six steps now wired: corpus → `train_trident_code`
-→ `.axonml` checkpoint → `export_trident_gguf` → BitNet b1.58 GGUF →
-`nexus-serve` → token round-trip. Verified locally on a 5070 Ti Laptop at
-the new `trident_laptop` (~37 M params) variant.
+single consumer GPU. Six steps now wired: corpus → ternary trainer
+→ `.axonml` checkpoint → GGUF exporter → BitNet b1.58 GGUF →
+inference server → token round-trip. Verified locally on a 5070 Ti Laptop at
+a new ~37 M-param laptop variant.
 
-#### PrismML Q1_0 1-bit kernel (Bonsai-8B family) — `ccb0d30` … `5575874`
+#### Q1_0 1-bit kernel — `ccb0d30` … `5575874`
 
 - New `axonml-quant::q1_0` module: `Q1_0Block { d: f16, qs: [u8; 16] }`,
   rayon-parallel dequant, reference CPU matmul, 6 unit tests
@@ -174,7 +164,7 @@ the new `trident_laptop` (~37 M params) variant.
                               quantized acts. Also shelved (smem
                               occupancy + `__syncthreads` fence regress
                               the v2 baseline on consumer GPUs).
-- `nexus-serve` registers `GgmlType::Q1_0 = 41` + `dequantize_q1_0` +
+- The inference server registers `GgmlType::Q1_0 = 41` + `dequantize_q1_0` +
   GPU dispatch (htod_copy + GEMV/GEMM). Eager-load + lazy-load
   whitelists both updated so a Q1_0 GGUF stays packed in RAM at
   3.5 GB instead of decompressing to f32 (would have been 32 GB).
@@ -189,7 +179,7 @@ the new `trident_laptop` (~37 M params) variant.
 
 #### GPU TernaryLinear (axonml-nn) — `aabaf67` … `22548b4`
 
-- `TridentAttention::repeat_kv` now dispatches through
+- The ternary model's attention `repeat_kv` now dispatches through
   `Tensor::repeat_kv` (the `repeat_kv_f32` PTX in `transformer_ops.ptx`)
   instead of round-tripping CPU on every layer. Autograd preserved
   via existing `RepeatKVBackward`.
@@ -213,20 +203,19 @@ the new `trident_laptop` (~37 M params) variant.
 - `axonml-optim::Adam` CPU step is now rayon-parallel
   (separate AMSGrad + standard branches because the chained `zip`
   count differs).
-- Trident smoke step time, 30 M model, bs=8 seq=64, 24-core CPU:
+- Ternary-model smoke step time, 30 M model, bs=8 seq=64, 24-core CPU:
     pre-session  : 13.5 s/step
     + parallel forward    : 8.2 s/step  (1.6×)
     + parallel backward   : 2.6 s/step  (5.2× cumulative)
     + parallel Adam       : 2.6 s/step  (no measurable Δ)
-- All 12/12 `axonml-nn::ternary` + 11/11 `axonml-llm::trident` tests
+- All 12/12 `axonml-nn::ternary` + 11/11 ternary-model tests
   pass after every step of the chain.
 
-#### Trident → BitNet b1.58 GGUF export pipeline — `f01df7a` … `4636616`
+#### Ternary model → BitNet b1.58 GGUF export pipeline — `f01df7a` … `4636616`
 
-- New `axonml_llm::gguf_export::export_trident_to_gguf(model, output,
-  name, tokenizer_source)` writes a GGUF nexus-serve loads via the
-  existing I2_S dispatch. Walks `TridentModel::parameters()` in the
-  model's emit order (token_embd → per-block (attn_norm, qkvo
+- New ternary-model GGUF exporter writes a GGUF the inference server loads
+  via the existing I2_S dispatch. Walks the ternary model's `parameters()`
+  in the model's emit order (token_embd → per-block (attn_norm, qkvo
   [+sub_norm], mlp_norm, up [+gate]/down [+sub_norm]) →
   output_norm → output) with per-tensor dtype routing:
     norms (RMSNorm)        → F32
@@ -235,11 +224,11 @@ the new `trident_laptop` (~37 M params) variant.
 - I2_S pack: per-tensor absmean scale, 128-elem blocks of 32 bytes
   each in BitNet group-strided 2-bit codes
   (`temp = q << (6-2*g)`, encoding `0→-1, 1→0, 2→+1`), trailing
-  tensor-wide f32 scale that nexus-serve reads from
+  tensor-wide f32 scale that the inference server reads from
   `offset + total_bytes`. Identical layout to
   `microsoft/bitnet-b1.58-2B-4T-gguf`.
 - `tokenizer_source` auto-detects by extension:
-    `.json` → new `read_trident_bpe_tokenizer` parses HF
+    `.json` → a new BPE tokenizer reader parses the HF
     tokenizers schema and emits a clean `tokenizer.ggml.*`
     block (model="gpt2", pre="default", tokens, merges,
     bos/eos/pad).
@@ -248,17 +237,17 @@ the new `trident_laptop` (~37 M params) variant.
   VTYPE_STRING) — fills the gap that previously caused
   "Unknown GGUF value type 21" on tokenizer passthroughs from
   newer reference GGUFs.
-- New `llm-training/src/bin/export_trident_gguf` CLI with
+- New ternary-model GGUF export CLI with
   `--config smoke|laptop|1b|3b`, `--checkpoint`, `--out`,
   `--tokenizer`, `--name`, `--vocab-size` flags.
 - End-to-end verified: laptop checkpoint → 50.85 MB GGUF →
-  nexus-serve loads as `bitnet-b1.58`, hidden=384, layers=8,
+  the inference server loads as `bitnet-b1.58`, hidden=384, layers=8,
   heads=6/2, vocab=32 000, ctx=512, "Tokenizer: GGUF BPE
   (32 000 tokens)", `/v1/completions` returns text.
 
-#### `TridentConfig::trident_laptop` — `96957c3`, resized in `1fd078e`
+#### Laptop ternary-model config — `96957c3`, resized in `1fd078e`
 
-- New laptop-trainable Trident variant that fits 12 GB consumer GPUs
+- New laptop-trainable ternary variant that fits 12 GB consumer GPUs
   end-to-end (autograd + cuBLAS scratch + Adam moments combined).
 - Final shape (after the bs=2 OOM resize):
     d_model         384
@@ -267,11 +256,11 @@ the new `trident_laptop` (~37 M params) variant.
     heads           6 / 2 KV (GQA 3:1, head_dim=64, kv_hidden=128)
     max_seq_len     512
     RoPE θ=500 000, ReLU²-gated FFN, SubLN — same architecture
-    switches as `trident_1b` / `trident_3b`, just smaller.
+    switches as the 1B / 3B configs, just smaller.
   Total params ≈ 37 M. Empirically trains at ~8 s/step on a
   5070 Ti Laptop at bs=2 seq=256 with no OOM.
-- Wired into both binaries (`train_trident_code --config laptop`
-  and `export_trident_gguf --config laptop`) with appropriate
+- Wired into both the ternary-model train and GGUF-export binaries
+  (`--config laptop`) with appropriate
   defaults (50 k steps, 500-step rotating ckpts, bs=2 seq=256).
 
 ### Security — `c4f1e84`
@@ -288,15 +277,15 @@ existing minor-version constraints (no `Cargo.toml` changes needed):
     GHSA-xmgf-hq76-4vx2  PEM password callback OOB read (low)
   rustls-webpki 0.103.12 → 0.103.13  (5 alerts):
     GHSA-82j2-j2ch-gfr8  DoS via panic on malformed CRL BIT STRING (high)
-  rand 0.8.5 → 0.8.6  (4 alerts; nexus-agent has no rand 0.8):
+  rand 0.8.5 → 0.8.6  (4 alerts; the agent crate has no rand 0.8):
     GHSA-cq8v-f236-94qc  Unsound with rand::rng() under custom logger (low)
 
 GitHub Dependabot API confirms 0 open alerts post-push.
 
 ### Tokenizer
 
-- Trident-coder-bpe tokenizer (32k-vocab byte-level BPE, 31,736 merges,
-  special tokens at IDs 0–7) for the Trident / RDT code-model line.
+- A 32k-vocab byte-level BPE code tokenizer (31,736 merges, special tokens
+  at IDs 0–7) for the ternary code-model line.
 
 ## [0.6.2] - 2026-04-17
 
@@ -322,30 +311,28 @@ publishable crate at a coherent point and ships everything listed under
 ## [0.6.1] - 2026-04-16
 
 ### Summary
-Post-0.6.0 productization release focused on (1) the pure-Rust LLM inference stack (`nexus-serve`) reaching a working end-to-end state on a DeepSeek-7B bridge model with custom CUDA kernels, (2) a new `llm-training` crate housing nine LM training binaries, (3) a workspace split that extracted HVAC and training glue out of the `axonml` umbrella, (4) several security fixes (path canonicalization, credential-echo removal, `rand` RUSTSEC bump), and (5) a documentation overhaul where every one of 515 source files received a hand-written doc header + ORCID attribution + section organization.
+Post-0.6.0 productization release focused on (1) the pure-Rust LLM inference server reaching a working end-to-end state on a DeepSeek-7B bridge model with custom CUDA kernels, (2) a new `llm-training` crate housing the LM training binaries, (3) a workspace split that extracted HVAC and training glue out of the `axonml` umbrella, (4) several security fixes (path canonicalization, credential-echo removal, `rand` RUSTSEC bump), and (5) a documentation overhaul where every one of 515 source files received a hand-written doc header + ORCID attribution + section organization.
 
 ### Added
 
 #### New Crate — `llm-training`
-- Dedicated training binaries for every LM architecture in `axonml-llm`: `train_gpt2`, `train_llama`, `train_mistral`, `train_phi`, `train_hydra`, `train_chimera`, `train_ssm`, `train_bert`, `train_trident_code`.
+- Dedicated training binaries for the LM architectures in `axonml-llm`: `train_gpt2`, `train_llama`, `train_mistral`, `train_phi`, `train_ssm`, `train_bert`.
 - `lifecycle.rs` — shared pause/resume/stop/checkpoint control plane over a Unix socket + signal handlers, so weeks-long training runs survive process restart and give the operator a `train_ctl` control binary.
 - `train_phi` documents and applies the full-RoPE workaround for the partial-RoPE framework bug inline.
-- `train_chimera` exercises the sparse-MoE + Differential-Attention path end-to-end.
-- `train_hydra` exercises the hybrid SSM + windowed-attention path.
 
-#### `nexus-serve` — Pure-Rust LLM Inference
+#### Inference server — Pure-Rust LLM Inference
 - DeepSeek-R1-Distill-Qwen-7B bridge model loader (Q4_K_M GGUF, 4.4 GB). `/v1/messages` Anthropic API with SSE streaming reaches 9–10 tok/s decode end-to-end on RTX 3090.
 - `OnceLock<CudaSlice<u8>>` weight upload cache on `Weight::Quantized` — eliminates the per-matmul `htod_copy` re-upload that was the 0.83 tok/s regression.
 - CUDA kernels: Q4_K and Q6_K dequant-in-shader GEMV/GEMM; fused flash-decode attention kernel; fused prefill attention kernel (one launch for all query rows, replaces CPU O(n²) prefill fallback).
-- Altup per-layer embedding addition (Stage 4b) for Gemma-3/Oracle.
-- Gemma-4 config parsing and weight loading (Stage 3). Oracle metadata inspection test.
+- Altup per-layer embedding addition (Stage 4b) for Gemma-3.
+- Gemma-4 config parsing and weight loading (Stage 3). Metadata inspection test.
 - Anthropic Messages API: tool_use / tool_result content blocks, SSE event protocol (`message_start` → `content_block_start` → `content_block_delta` → `content_block_stop` → `message_delta` → `message_stop`), `stop_reason=tool_use` handling, and `<think>…</think>` stripping for R1-family reasoning models before tool-use parsing.
 
-#### `nexus-agent` — 8 Specialized Agents
+#### Agent crate — specialized agents
 - Eight purpose-built agents (code, fieldtech, research, retrain, shield, knowledge, orchestrator, ci_fixer) with 22 tools total (file, git, github, shell, obsidian, tailscale, email, training). All tool calls use the Anthropic Messages API shape — never OpenAI `function_call`.
-- Two backends: `AnthropicBackend` (remote, `max_tokens=512`), `LocalBackend` (nexus-serve local inference).
-- Three eframe-based desktop tickers: `ticker` (CI monitor + ralph auto-fix loop + ci-fixer agent fallback), `tech_ticker` (field-tech monitor), `ferrum_ticker` (Ferrum Mail / NexusRelay 6-probe uptime monitor).
-- `ci-fixer` agent invoked by nexus-ticker's ralph loop when `cargo fmt` + `cargo clippy --fix` can't resolve a CI failure (test assertions, flaky convergence, logic bugs). Qwen3, temp 0.1, 25 iterations.
+- Two backends: `AnthropicBackend` (remote, `max_tokens=512`), `LocalBackend` (local inference server).
+- Three eframe-based desktop tickers: `ticker` (CI monitor + auto-fix loop + ci-fixer agent fallback), `tech_ticker` (field-tech monitor), and a 6-probe mail/relay uptime monitor.
+- `ci-fixer` agent invoked by the ticker's auto-fix loop when `cargo fmt` + `cargo clippy --fix` can't resolve a CI failure (test assertions, flaky convergence, logic bugs). Qwen3, temp 0.1, 25 iterations.
 
 #### Workspace Refactor
 - Split `axonml` umbrella into `axonml-hvac` and `axonml-train` sub-crates to reduce the umbrella's dep fan-out for users who only want training or only want HVAC.
@@ -369,8 +356,8 @@ Post-0.6.0 productization release focused on (1) the pure-Rust LLM inference sta
 ### Fixed
 
 - `Tensor::item()` on GPU tensors now safely copies device → host rather than dereferencing a device pointer.
-- `axonml-server` Aegis-DB port defaults matched the actual DB listen port; `scripts/init-aegis-db.sh` hardened against re-runs and bad env.
-- `train_trident` example caught up with the new `TridentConfig` fields (`num_kv_heads`, `use_rope`, etc.).
+- `axonml-server` database port defaults matched the actual DB listen port; the DB init script hardened against re-runs and bad env.
+- The ternary-model training example caught up with the new ternary config fields (`num_kv_heads`, `use_rope`, etc.).
 - Prefill-attention grid-dim bug — was launching `(total_ctas/32, 1, 1)` instead of `(total_ctas, 1, 1)`, causing silent CUDA kernel drop-through to the CPU path (minutes-long prefill on agent-sized prompts).
 - R1-Distill false-positive `<tool_use>` — parser now strips everything before the final `</think>` before looking for tool calls, so reasoning-trace quotes of tool syntax don't trigger spurious tool execution.
 - CI pipeline stabilized — all `cargo fmt` / `cargo clippy -D warnings` / `cargo test` gates green; historical flakes fixed via the ralph loop + ci-fixer agent.
@@ -511,9 +498,9 @@ Full-crate audit and fix sweep across all 22 crates. 121 files changed, ~5,000 l
 - **WindowedAttnBackward** real gradient computation (was identity pass-through with 7 dead fields)
 - LLaMA `generate()` proper sampling (was greedy-only)
 - Beam search execution loop (config existed but no logic)
-- TridentRMSNorm deduplication (3 copies -> 1 shared)
+- Ternary RMSNorm deduplication (3 copies -> 1 shared)
 - `From<HubError> for LLMError` error composition
-- Attention dropout now applied in Hydra
+- Attention dropout now applied in windowed attention
 
 #### `axonml-text`
 - `TextDataset` stores tokenizer (was hardcoding whitespace split)
@@ -571,14 +558,6 @@ Full-crate audit and fix sweep across all 22 crates. 121 files changed, ~5,000 l
 - Thermal FPN with domain-adaptive feature modulation (learned scale/bias per domain)
 - YOLOX-style decoupled heads (separate cls/reg/obj branches) with anchor-free detection
 - Full model documentation in `crates/axonml-vision/src/models/nightvision/`
-
-#### Biometric GPU Training Pipelines (`axonml-vision`)
-- **Mnemosyne** face verification training — GPU-accelerated with ArcFace loss, checkpoint/resume, LFW dataset support
-- **Argus** iris recognition training — GPU-accelerated with phase consistency loss, CASIA-Iris dataset support
-- **Ariadne** gait recognition training — GPU-accelerated with triplet loss, FVC2000 dataset support
-- Pre-computed polar coordinate cache for Argus iris training (eliminates per-epoch recomputation)
-- `bench_mnemosyne` benchmark example for face verification evaluation
-- Biometric model documentation: 6 READMEs covering Argus, Ariadne, Echo, Mnemosyne, Themis, and suite overview
 
 ### Changed
 - CUDA enabled by default in `axonml-vision` Cargo.toml
@@ -646,35 +625,11 @@ Comprehensive performance audit and optimization across all 22 crates. All 1,988
 
 ### Milestone: Novel Capabilities Beyond PyTorch
 
-AxonML now includes features that don't exist in any other ML framework. Five novel
-subsystems extend the core crates, and a complete biometric identity framework (Aegis Identity)
-demonstrates the framework's unique temporal, event-driven, and uncertainty-aware primitives.
+AxonML now includes features that don't exist in any other ML framework. Four novel
+subsystems extend the core crates with temporal, event-driven, and uncertainty-aware
+primitives.
 
 ### Added
-
-#### Aegis Identity — Unified Biometric Framework (`axonml-vision`)
-- **Mnemosyne** (~115K params) - Face identity via temporal crystallization: GRU hidden state
-  converges to an identity attractor over multiple observations, quality-gated updates,
-  attention-weighted multi-frame aggregation, temporal liveness detection, drift monitoring
-- **Ariadne** (~65K params) - Fingerprint via ridge event fields: learned Gabor wavelet bank
-  extracts 8-orientation ridge responses, ridge density mapping, core/delta singularity
-  detection via Poincare index, partial fingerprint matching
-- **Echo** (~68K params) - Voice via predictive speaker residuals: a generic speech predictor
-  learns to predict the next mel frame; prediction errors ARE the speaker identity (identity =
-  what cannot be predicted), replay detection, VAD, speaking rate estimation
-- **Argus** (~65K params) - Iris via polar-native radial phase encoding: separate radial and
-  angular 1D convolutions on polar-unwrapped iris, multi-resolution encoding at 3 scales,
-  Hamming distance matching with binarized codes, fragile bit masking
-- **Themis** (~49K params) - Multimodal belief propagation fusion: uncertainty-aware dynamic
-  weighting, cross-modal consistency checking, GRU temporal belief accumulation, evidential
-  uncertainty (Dirichlet-based), conflict detection, modality reliability tracking
-- **AegisIdentity** unified API - enroll/verify/identify with any subset of modalities,
-  forensic verification with audit trails, batch operations, identity drift detection,
-  quality assessment, liveness detection, secure verification pipeline, operating curve computation
-- Biometric-specific losses: CrystallizationLoss, ContrastiveLoss, PredictiveCodingLoss,
-  PhaseConsistencyLoss, CenterLoss, AngularMarginLoss, DiversityRegularization, LivenessLoss
-- Iris polar unwrap utilities with rotation estimation via cross-correlation
-- Total: ~362K params, <2MB, each modality independently deployable on Raspberry Pi
 
 #### Graph Inspection API (`axonml-autograd`)
 - `trace_backward(variable)` — DFS walk through grad_fn chain to capture computation graph
@@ -881,9 +836,9 @@ predictors) deployed via cross-compiled ARM binaries, each running at ~2-3 MB RS
 
 ## Version History
 
-- **0.4.2**: NightVision multi-domain IR detector, biometric GPU training pipelines with checkpoint/resume
+- **0.4.2**: NightVision multi-domain IR detector
 - **0.4.1**: Framework-wide performance optimization pass (conv backward 12x faster, fused optimizer loops)
-- **0.4.0**: Novel capabilities beyond PyTorch — Aegis Identity biometric framework, graph inspection, lazy tensors, differentiable sparsity, training health monitor
+- **0.4.0**: Novel capabilities beyond PyTorch — graph inspection, lazy tensors, differentiable sparsity, training health monitor
 - **0.3.0**: Production edge inference — 12 models deployed across 6 controllers
 - **0.1.0**: Initial release with complete ML framework
 

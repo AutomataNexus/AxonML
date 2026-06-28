@@ -16,7 +16,7 @@ Rather than reinvent that, the converter:
 
 The result is a production-grade ONNX file that Hailo DFC, TensorRT, ONNX Runtime, and `onnxruntime-web` all accept without complaint.
 
-This was originally developed for [AutomataNexus/Prometheus](https://github.com/AutomataNexus/Prometheus) (a predictive-maintenance edge stack) and upstreamed into AxonML so any trained model can round-trip through ONNX.
+It lets any trained model round-trip through ONNX.
 
 ## Supported architectures
 
@@ -28,7 +28,7 @@ The `.axonml` bundle's `architecture` tag must be one of:
 | `lstm_autoencoder`  | Encoder LSTM → bottleneck → Decoder LSTM → reconstruction  |
 | `gru_predictor`     | GRU → FC → FC → Sigmoid (multi-horizon prediction)         |
 | `rnn`               | Vanilla stacked RNN → FC → Sigmoid                         |
-| `phantom`           | 3-layer bottleneck MLP with ReLU6                          |
+| `bottleneck-mlp`    | 3-layer bottleneck MLP with ReLU6                          |
 | `conv1d`            | Stacked Conv1d → GAP → FC → Sigmoid                        |
 | `conv2d`            | 3× (Conv2d → ReLU → MaxPool) → FC → Softmax                |
 | `res_net`           | ResNet-18 (stem + 4 BasicBlock stages + GAP + FC)          |

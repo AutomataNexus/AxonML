@@ -12,12 +12,12 @@
 //!
 //! ### Phi tiny
 //! - H=256, INTER=512, 4 layers, 4 heads, HD=64
-//! - Decoder with RoPE (Conv2d spatial mixing proxy — same as RDT)
+//! - Decoder with RoPE (Conv2d spatial mixing proxy)
 //! - Input: [-1, 256, 64, 1]
 //! - Output: [-1, 256, 64, 1]
 //!
 //! Both use Conv2d spatial mixing (k=3) as the attention proxy and SwiGLU
-//! MLP blocks, identical to the RDT-tiny pattern. Each decoder layer:
+//! MLP blocks, the standard tiny-decoder pattern. Each decoder layer:
 //!
 //! ```text
 //! Attention approximation:
@@ -86,7 +86,7 @@ fn init_kaiming(n: usize, fan_in: usize, seed: u64) -> Vec<f32> {
 }
 
 // ============================================================================
-// Layer helpers (same pattern as rdt_tiny_bundle.rs)
+// Layer helpers (shared layer-builder pattern)
 // ============================================================================
 
 /// Add BatchNorm parameters and node.
