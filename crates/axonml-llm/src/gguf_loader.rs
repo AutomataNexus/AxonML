@@ -32,8 +32,8 @@
 //!
 //! # Tech debt
 //! Duplicates ~300 lines of dequant + parser code with
-//! `nexus-serve/src/model/gguf.rs`. The clean future move is a shared
-//! `axonml-gguf` crate that both nexus-serve and axonml-llm depend on.
+//! `axonml-serve/src/model/gguf.rs`. The clean future move is a shared
+//! `axonml-gguf` crate that both axonml-serve and axonml-llm depend on.
 //! Noted; not blocking.
 //!
 //! # File
@@ -327,7 +327,7 @@ fn read_gguf_value(reader: &mut impl Read) -> io::Result<GgufValue> {
 }
 
 // =============================================================================
-// Dequantization (CPU scalar — these match `nexus-serve/src/model/gguf.rs`)
+// Dequantization (CPU scalar — these match `axonml-serve/src/model/gguf.rs`)
 // =============================================================================
 
 fn f16_to_f32(bits: u16) -> f32 {
@@ -598,7 +598,7 @@ fn qwen3_config_from_gguf(gguf: &GgufFile) -> io::Result<Qwen3Config> {
     // Accept qwen2 + qwen3 under the same loader (Qwen3ForCausalLM struct) —
     // the two archs share tensor layout (GQA, RoPE, SwiGLU, RMSNorm, `blk.N.*`
     // names). R1-Distill-Qwen series ships as `qwen2`; a hard qwen3 guard was
-    // the blocker for Oracle teacher-distill loads (LESSONS L91). Prefix-
+    // the blocker for distilled-teacher loads. Prefix-
     // matching covers future variants (qwen3.5 etc).
     let arch_ok = arch == "qwen2"
         || arch.starts_with("qwen2")

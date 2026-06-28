@@ -15,7 +15,7 @@
 
 ## Overview
 
-`axonml-llm` provides ten large-language-model architectures for the AxonML framework, all implemented in pure Rust on top of `axonml-tensor` and `axonml-autograd`. Shared infrastructure includes multi-head / causal self-attention with a KV cache, a FlashAttention kernel, RoPE, RMSNorm, a HuggingFace weight loader (safetensors), a state-dict name-mapping helper, a pretrained-weights hub with on-disk caching, a configurable text-generation sampler, and an HF-style tokenizer.
+`axonml-llm` provides nine large-language-model architectures for the AxonML framework, all implemented in pure Rust on top of `axonml-tensor` and `axonml-autograd`. Shared infrastructure includes multi-head / causal self-attention with a KV cache, a FlashAttention kernel, RoPE, RMSNorm, a HuggingFace weight loader (safetensors), a state-dict name-mapping helper, a pretrained-weights hub with on-disk caching, a configurable text-generation sampler, and an HF-style tokenizer.
 
 ---
 
@@ -31,7 +31,6 @@
 | **SSM** | `ssm` | Mamba/S6-style selective state-space model: depthwise Conv1d + selective scan + RMSNorm. `SSMBlock`, `SSMForCausalLM`. |
 | **Hydra** | `hydra` | Hybrid: alternates SSM blocks and windowed (local) attention. `HydraModel`. |
 | **Chimera** | `chimera` | Sparse MoE (top-k routing) + differential attention, with load-balancing auxiliary loss. `ChimeraModel`. |
-| **Trident** | `trident` | 1.58-bit ternary weights (`TernaryLinear`) + RoPE + GQA + ReLU²-gated FFN + SubLN (BitNet b1.58-2B-4T recipe). `TridentModel`. GGUF I2_S exporter; `trident_laptop`/`300m`/`500m`/`1b`/`3b` configs; per-block gradient checkpointing. |
 | **RDT** | `rdt` | Recurrent-Depth Transformer (Huginn-style test-time compute): a Prelude → recurrent latent block iterated K times → Coda. `RDTForCausalLM`, `rdt` GGUF arch id, distillation path via `train_rdt_distill`. |
 
 The Qwen3 trainable module (`Qwen3ForCausalLM`) and a GGUF loader (qwen2/qwen3) are also provided for distillation and student/teacher workflows.
@@ -48,7 +47,6 @@ The Qwen3 trainable module (`Qwen3ForCausalLM`) and a GGUF loader (qwen2/qwen3) 
 | `SSMConfig` | `from_d_model(d_model, vocab_size)` builder |
 | `HydraConfig` | `base` (~300M), `small`, `tiny` |
 | `ChimeraConfig` | `default_2b` (8 experts, top-2), `small`, `tiny` |
-| `TridentConfig` | `default_150m`, `tiny`, `medium`, plus 1B/3B/smoke constructors exposed for training |
 
 ---
 
@@ -86,7 +84,6 @@ The Qwen3 trainable module (`Qwen3ForCausalLM`) and a GGUF loader (qwen2/qwen3) 
 | `state_dict` | `LoadStateDict` trait, HF ↔ AxonML name mapping |
 | `tokenizer` | HuggingFace-compatible `HFTokenizer` |
 | `transformer` | Encoder / decoder blocks, feed-forward, layer norm |
-| `trident` | 1.58-bit ternary SLM (BitNet b1.58 recipe) |
 
 ---
 
@@ -172,15 +169,6 @@ use axonml_llm::{ChimeraModel, ChimeraConfig};
 let cfg = ChimeraConfig::default_2b(); // 8 experts per layer, top-2 active
 let model = ChimeraModel::new(&cfg);
 // Returns (logits, lb_loss) when used via forward_with_loss for training.
-```
-
-### Trident 1.58-bit ternary LM
-
-```rust
-use axonml_llm::{TridentModel, TridentConfig};
-
-let cfg = TridentConfig::default_150m(); // ternary weights + RoPE + GQA + ReLU² + SubLN
-let model = TridentModel::new(&cfg);
 ```
 
 ### Custom transformer encoder
@@ -270,14 +258,13 @@ let path = download_llm_weights("bert-base-uncased", /*force=*/ false)?;
 | Mistral | `mistral_7b`, `mistral_7b_instruct`, `mixtral_8x7b`, `tiny` |
 | Phi     | `phi1`, `phi2`, `phi3_mini`, `tiny` |
 
-### Hybrid / SSM / MoE / Ternary
+### Hybrid / SSM / MoE
 
 | Config | Presets / builder |
 |--------|--------------------|
 | `SSMConfig`     | `from_d_model(d_model, vocab)` |
 | `HydraConfig`   | `base`, `small`, `tiny` |
 | `ChimeraConfig` | `default_2b`, `small`, `tiny` |
-| `TridentConfig` | `default_150m`, `tiny`, `medium` (plus 1B/3B/smoke constructors) |
 
 ---
 

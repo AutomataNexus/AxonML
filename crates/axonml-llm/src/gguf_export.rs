@@ -1,16 +1,16 @@
 //! Qwen3 → GGUF exporter for trained student models.
 //!
 //! Inverse of `gguf_loader`: takes a trained `Qwen3ForCausalLM`, writes a
-//! GGUF v3 file that `nexus-serve` (and `spec_bench`) can load as a
+//! GGUF v3 file that `axonml-serve` (and `spec_bench`) can load as a
 //! draft. Tensor weights are written as F16 (half the bytes of F32,
-//! supported by the existing `dequantize_f16` path in nexus-serve).
+//! supported by the existing `dequantize_f16` path in axonml-serve).
 //! RMSNorm weights stay F32 because they're tiny and FP16 precision
 //! around 1.0 ± ε can hurt convergence of the normalized scale.
 //!
 //! Optional tokenizer embedding: when `tokenizer_source` is set, the
 //! exporter copies `tokenizer.ggml.*` + `general.file_type` metadata
 //! from a reference GGUF (typically the teacher). Required for
-//! spec_bench and nexus-serve to actually detokenize the student's
+//! spec_bench and axonml-serve to actually detokenize the student's
 //! output. Without it the file still loads structurally but inference
 //! needs a sidecar tokenizer.json.
 //!
@@ -262,7 +262,7 @@ impl<'a> TensorEntry<'a> {
 /// * `model_name` - Friendly name written to `general.name`.
 /// * `tokenizer_source` - Optional path to a Qwen3-family GGUF whose
 ///   `tokenizer.ggml.*` metadata will be copied verbatim. Required for
-///   nexus-serve / spec_bench to detokenize inference output.
+///   axonml-serve / spec_bench to detokenize inference output.
 ///
 /// Body weights (attention Q/K/V/O, MLP gate/up/down, embeddings,
 /// LM head) are stored F16. RMSNorm weights (attn_norm, ffn_norm,
@@ -518,7 +518,7 @@ pub fn export_qwen3_to_gguf(
     if !has_tokenizer {
         eprintln!("[gguf-export] WARNING: no --tokenizer-source; output lacks tokenizer metadata.");
         eprintln!(
-            "[gguf-export] spec_bench / nexus-serve won't be able to detokenize output until a"
+            "[gguf-export] spec_bench / axonml-serve won't be able to detokenize output until a"
         );
         eprintln!(
             "[gguf-export] tokenizer sidecar is provided. Pass a pretrained Qwen3 GGUF path to"
@@ -583,7 +583,7 @@ fn is_norm_name(ggml_name: &str) -> bool {
 /// ```
 ///
 /// The `prelude.blk.` / `core.blk.` / `coda.blk.` prefixes tell the GGUF
-/// reader which stack each layer belongs to; nexus-serve's RDT load path
+/// reader which stack each layer belongs to; axonml-serve's RDT load path
 /// uses this to build the three separate layer stacks.
 fn expected_rdt_ggml_names(cfg: &crate::rdt::RDTConfig) -> Vec<String> {
     let stack_layer_names = |stack: &str, n: usize| -> Vec<String> {

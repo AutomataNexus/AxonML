@@ -31,7 +31,7 @@ fallback.
 - **PyTorch Conversion** — `from_pytorch_key`, `to_pytorch_key`, `pytorch_layer_mapping`, `convert_from_pytorch`, `transpose_linear_weights`
 - **ONNX Utilities** — `to_onnx_shape` / `from_onnx_shape` (dynamic batch dim handling), `OnnxOpType` with `parse_op` / `as_str`
 - **High-Level API** — `save_model(&model, path)` / `load_model(&model, path)` (name-matched param load with positional fallback), `save_state_dict` / `load_state_dict`, `save_checkpoint` / `load_checkpoint`
-- **Embedded computation graph (0.6.5)** — `ModelBundle` can carry the model's computation graph (`BundleGraph`: inputs/outputs/nodes/initializers) alongside the weights, so a downstream compiler (e.g. NexusFoundry → HEF) can reconstruct the architecture from the `.axonml` checkpoint without the original source. `BundleGraph::new` pre-allocates its vectors for fast build on large models. Bundle export examples: `hvac_site_models`, `rdt_tiny_bundle`, `mnemosyne_v2_bundle`, `llm_tiny_bundles`.
+- **Embedded computation graph (0.6.5)** — `ModelBundle` can carry the model's computation graph (`BundleGraph`: inputs/outputs/nodes/initializers) alongside the weights, so a downstream compiler (e.g. a Hailo NPU compiler toolchain → HEF) can reconstruct the architecture from the `.axonml` checkpoint without the original source. `BundleGraph::new` pre-allocates its vectors for fast build on large models. Bundle export examples: `rdt_tiny_bundle`, `llm_tiny_bundles`.
 
 ## Feature Flags
 

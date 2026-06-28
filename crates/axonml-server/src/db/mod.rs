@@ -1,7 +1,7 @@
-//! Database Module — Aegis-DB Client and Multi-Model Data Access
+//! Database Module — Database Client and Multi-Model Data Access
 //!
 //! Top-level database module for the AxonML server, providing a unified async
-//! client for the Aegis-DB backend. Exposes three data-access paradigms through
+//! client for the database backend. Exposes three data-access paradigms through
 //! a single `Database` struct:
 //!
 //! - **SQL queries** via `query()` / `query_with_params()` / `execute()` with
@@ -50,7 +50,7 @@ pub mod users;
 // Imports
 // =============================================================================
 
-use crate::config::AegisConfig;
+use crate::config::BackendConfig;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -85,7 +85,7 @@ pub enum DbError {
 // Core Types — Database Connection
 // =============================================================================
 
-/// Database connection wrapper for Aegis-DB
+/// Database connection wrapper for the database
 #[derive(Clone)]
 pub struct Database {
     client: Client,
@@ -106,7 +106,7 @@ struct QueryRequest {
     params: Option<Vec<Value>>,
 }
 
-/// Query response from Aegis-DB
+/// Query response from the database
 #[derive(Debug, Deserialize)]
 pub struct QueryResponse {
     pub rows: Vec<Value>,
@@ -251,7 +251,7 @@ impl Database {
 
     /// Create a new database connection.
     /// SECURITY: Only allows connections to loopback/private network addresses.
-    pub async fn new(config: &AegisConfig) -> Result<Self, DbError> {
+    pub async fn new(config: &BackendConfig) -> Result<Self, DbError> {
         // SECURITY: Validate the database host to prevent SSRF
         validate_db_host(&config.host, config.port)?;
 
@@ -276,7 +276,7 @@ impl Database {
         Ok(db)
     }
 
-    /// Authenticate with Aegis-DB
+    /// Authenticate with the database
     async fn authenticate(&self) -> Result<(), DbError> {
         if let Some((username, password)) = &self.auth {
             let resp = self

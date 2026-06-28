@@ -24,7 +24,7 @@ The crate is intentionally thin. After the 0.6.1 split, it contains only:
 3. The live browser training monitor ([`TrainingMonitor`](#training-monitor))
 4. `version()` / `features()` introspection helpers
 
-Everything else — layers, optimizers, models, data loaders, training infrastructure, HVAC diagnostics, adversarial training — lives in dedicated sibling crates that can also be used standalone.
+Everything else — layers, optimizers, models, data loaders, training infrastructure, adversarial training — lives in dedicated sibling crates that can also be used standalone.
 
 Last updated: 2026-06-06 — version 0.6.5.
 
@@ -61,11 +61,10 @@ The umbrella crate re-exports the framework sub-crates under short module names:
 
 | Feature | Sub-crate | Namespace | Purpose |
 |---------|-----------|-----------|---------|
-| `vision` | `axonml-vision` | `axonml::vision` | CNNs (LeNet, ResNet, VGG, ViT), MNIST/CIFAR/COCO/WIDER FACE, **Aegis biometric suite** (Mnemosyne, Argus, Echo, Ariadne, Themis) |
+| `vision` | `axonml-vision` | `axonml::vision` | CNNs (LeNet, ResNet, VGG, ViT), detection (BlazeFace, RetinaFace, DETR, NanoDet), depth / anomaly / VQA, MNIST/CIFAR/COCO/WIDER FACE |
 | `text` | `axonml-text` | `axonml::text` | BPE, WordPiece, Whitespace/Char tokenizers, text datasets |
 | `audio` | `axonml-audio` | `axonml::audio` | MelSpectrogram, MFCC, resample, augmentation transforms |
 | `llm` | `axonml-llm` | `axonml::llm` | Nine LLM architectures — see table below |
-| `hvac` | `axonml-hvac` | `axonml::hvac` | HVAC diagnostic models (Apollo, Panoptes, Vulcan, etc.) **— extracted in 0.6.1** |
 
 ### Training, Optimization, Deployment
 
@@ -100,7 +99,7 @@ The umbrella crate re-exports the framework sub-crates under short module names:
 | **BERT** | Bidirectional masked LM | Encoder for classification / masked LM |
 | **SSM / Mamba** | Selective S6 scan, depthwise conv | Linear-complexity sequence model |
 | **Hydra** | Hybrid SSM + windowed attention | Best-of-both-worlds architecture |
-| **Trident** | 1.58-bit ternary weights, 16x compression | Published paper reference implementation |
+| **RDT** | Recurrent-Depth Transformer, test-time compute | Iterate a shared core block K times in latent space |
 | **Chimera** | Sparse MoE (8 experts, top-2) + Differential Attention | Large-capacity conditional compute |
 
 Plus:
@@ -265,11 +264,10 @@ The dashboard shows real-time training loss, optional validation loss, custom me
 | `core` | — | `axonml-core` + `axonml-tensor` + `axonml-autograd` |
 | `nn` | `core` | `axonml-nn` + `axonml-optim` |
 | `data` | `core` | `axonml-data` |
-| `vision` | `nn`, `data` | `axonml-vision` (incl. Aegis biometric suite) |
+| `vision` | `nn`, `data` | `axonml-vision` |
 | `text` | `nn`, `data` | `axonml-text` |
 | `audio` | `nn`, `data` | `axonml-audio` |
 | `llm` | `nn` | `axonml-llm` (all 9 architectures) |
-| `hvac` | `nn` | `axonml-hvac` |
 | `train` | `nn` | `axonml-train` (trainer, hub, benchmark, adversarial) |
 | `distributed` | `nn` | `axonml-distributed` |
 | `profile` | `core` | `axonml-profile` |
@@ -287,7 +285,7 @@ The dashboard shows real-time training loss, optional validation loss, custom me
 
 ## Examples
 
-The crate ships three generic examples; HVAC-specific examples live in `axonml-hvac`.
+The crate ships three generic examples; domain-specific examples live in the per-domain crates.
 
 ```bash
 # Simple training loop
@@ -305,15 +303,10 @@ For model-specific training scripts, see the per-crate `examples/` directories:
 ```bash
 # LLM training (all 9 architectures)
 cargo run -p axonml-llm --example train_gpt2 --release
-cargo run -p axonml-llm --example train_trident --release
 cargo run -p axonml-llm --example train_hydra --release
 
 # Vision training
 cargo run -p axonml-vision --example train_resnet --release
-cargo run -p axonml-vision --example train_mnemosyne --release  # Aegis biometric
-
-# HVAC training
-cargo run -p axonml-hvac --example train_panoptes --release
 ```
 
 ---
@@ -336,7 +329,7 @@ fn main() {
 - **Crate version:** 0.6.5
 - **Rust edition:** 2024
 - **MSRV:** Rust 1.85+
-- **0.6.1 split:** `hvac` (HVAC diagnostic models) and `train` (trainer / hub / benchmark / adversarial) were extracted from this umbrella into standalone crates to keep the umbrella a thin re-export layer. The live browser `TrainingMonitor` stayed here.
+- **0.6.1 split:** `train` (trainer / hub / benchmark / adversarial) was extracted from this umbrella into a standalone crate to keep the umbrella a thin re-export layer. The live browser `TrainingMonitor` stayed here.
 
 ## License
 

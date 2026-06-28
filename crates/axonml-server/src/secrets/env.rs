@@ -52,8 +52,8 @@ impl EnvBackend {
         // Map well-known secret keys to environment variable names
         let env_suffix = match key {
             SecretKey::JWT_SECRET => "JWT_SECRET",
-            SecretKey::DB_USERNAME => "AEGIS_USERNAME",
-            SecretKey::DB_PASSWORD => "AEGIS_PASSWORD",
+            SecretKey::DB_USERNAME => "BACKEND_USERNAME",
+            SecretKey::DB_PASSWORD => "BACKEND_PASSWORD",
             SecretKey::RESEND_API_KEY => "RESEND_API_KEY",
             // For unknown keys, convert to uppercase with underscores
             other => {
@@ -123,11 +123,11 @@ mod tests {
         assert_eq!(backend.env_key(SecretKey::JWT_SECRET), "AXONML_JWT_SECRET");
         assert_eq!(
             backend.env_key(SecretKey::DB_USERNAME),
-            "AXONML_AEGIS_USERNAME"
+            "AXONML_BACKEND_USERNAME"
         );
         assert_eq!(
             backend.env_key(SecretKey::DB_PASSWORD),
-            "AXONML_AEGIS_PASSWORD"
+            "AXONML_BACKEND_PASSWORD"
         );
         assert_eq!(
             backend.env_key(SecretKey::RESEND_API_KEY),

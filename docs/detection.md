@@ -18,17 +18,21 @@ description: "Training object detection and face detection models with AxonML"
 
 ## Overview
 
-AxonML provides end-to-end training infrastructure for anchor-free object detection models. The system includes image loading, dataset parsers (COCO, WIDER FACE), detection-specific losses (Focal, GIoU, Uncertainty), FCOS-style target assignment, complete training loops, and AP/mAP evaluation metrics.
+AxonML provides end-to-end training infrastructure for object and face
+detection. The system includes image loading, dataset parsers (COCO,
+WIDER FACE), detection-specific losses (Focal, GIoU, Uncertainty),
+FCOS-style anchor-free target assignment, and AP/mAP evaluation metrics.
 
-Three built-in detector architectures are trainable out of the box:
+The built-in detector architectures are:
 
-| Model | Task | Architecture | Params | Target Size |
-|:------|:-----|:-------------|:-------|:------------|
-| **Nexus** | General object detection | Dual-pathway + predictive coding + object memory | ~430K | 320x320 |
-| **Phantom** | Face detection | Event-driven + sparse processing + face tracking | ~126K | 128x128 |
-| **NightVision** | Multi-domain IR detection | CSP backbone + Thermal FPN + decoupled heads | ~200K-500K | 320x320 |
+| Model | Task | Architecture | Notes |
+|:------|:-----|:-------------|:------|
+| **BlazeFace** | Face detection | Depthwise-separable conv, dual-scale 128×128, 896 anchors | ~72K params |
+| **RetinaFace** | Face detection | ResNet34 backbone + multi-level FPN, cls/bbox/landmark heads | — |
+| **DETR** | General object detection | Transformer encoder-decoder, set prediction | `small` preset |
+| **NanoDet** | General object detection | ShuffleNet backbone + Ghost-PAN neck, edge-ready | ~364K params |
 
-Nexus and Phantom use FCOS-style anchor-free detection heads. NightVision uses YOLOX-style decoupled heads. All are designed for edge deployment.
+All are designed to be trainable with the shared detection utilities below.
 
 ---
 
@@ -230,7 +234,8 @@ let score = compute_centerness(l, t, r, b);
 
 ### FCOS Target Assignment (Multi-Scale)
 
-Used by **Nexus** for multi-scale detection. Assigns ground truth boxes to spatial locations on feature maps based on center-point containment and size ranges:
+Assigns ground-truth boxes to spatial locations on multiple feature-map
+scales based on center-point containment and size ranges:
 
 ```rust
 use axonml_vision::training::{assign_fcos_targets, fcos_targets_to_tensors};
@@ -270,106 +275,67 @@ let tensor_targets = fcos_targets_to_tensors(&targets);
 | 1 | 16 | [64, 128] pixels |
 | 2 | 32 | [128, infinity] pixels |
 
-### Phantom Target Assignment (Single-Scale)
+### Single-Scale Target Assignment
 
-Used by **Phantom** for single-scale face detection:
+`assign_single_scale_targets` is the generic single-scale variant, useful for
+single-stride face/object heads:
 
 ```rust
-use axonml_vision::training::assign_phantom_targets;
+use axonml_vision::training::assign_single_scale_targets;
 
 let gt_faces: Vec<[f32; 4]> = vec![[10.0, 15.0, 40.0, 50.0]];  // pixel coords
 let feat_h = 32;
 let feat_w = 32;
 let stride = 4.0;
 
-let (cls_target, bbox_target) = assign_phantom_targets(
+let (cls_target, bbox_target) = assign_single_scale_targets(
     &gt_faces, feat_h, feat_w, stride,
 );
-// cls_target: [H, W] — 1.0 at face center cells, 0.0 elsewhere
+// cls_target: [H, W] — 1.0 at object-center cells, 0.0 elsewhere
 // bbox_target: [H, W, 4] — [dx, dy, log_w, log_h] at positive cells
 ```
 
 **Bbox target encoding:**
-- `dx = (face_cx - cell_cx) / stride` — horizontal offset
-- `dy = (face_cy - cell_cy) / stride` — vertical offset
-- `log_w = ln(face_w / stride)` — log-space width
-- `log_h = ln(face_h / stride)` — log-space height
+- `dx = (cx - cell_cx) / stride` — horizontal offset
+- `dy = (cy - cell_cy) / stride` — vertical offset
+- `log_w = ln(w / stride)` — log-space width
+- `log_h = ln(h / stride)` — log-space height
 
 ---
 
-## Training Loops
+## Building a Training Loop
 
-### Nexus Training (General Object Detection)
+The losses and target-assignment utilities compose into a standard
+forward → assign → loss → backward → step loop. For a single-scale head:
 
 ```rust
-use axonml_vision::models::nexus::Nexus;
-use axonml_vision::training::nexus_training_step;
-use axonml_optim::Adam;
+use axonml_vision::training::assign_single_scale_targets;
+use axonml_nn::{BCEWithLogitsLoss, SmoothL1Loss};
+use axonml_autograd::Variable;
+use axonml_optim::{Adam, Optimizer};
 
-let mut model = Nexus::new();  // or Nexus::with_config(config)
 let mut optimizer = Adam::new(model.parameters(), 1e-4);
+let cls_loss_fn = BCEWithLogitsLoss::new();
+let bbox_loss_fn = SmoothL1Loss::new();
 
-// Training loop
-for epoch in 0..num_epochs {
-    for i in 0..dataset.len() {
-        let (image, annotations) = dataset.get(i).unwrap();
-        let frame = Variable::new(image.unsqueeze(0).unwrap(), true);
+for (image, gt_boxes) in dataset.iter() {
+    let frame = Variable::new(image.unsqueeze(0).unwrap(), true);
+    let out = model.forward(&frame);   // your model's detection head output
 
-        // Extract boxes and class IDs
-        let gt_boxes: Vec<[f32; 4]> = annotations.iter()
-            .map(|a| a.bbox)
-            .collect();
-        let gt_classes: Vec<usize> = annotations.iter()
-            .map(|a| a.category_id)
-            .collect();
+    let (cls_t, bbox_t) = assign_single_scale_targets(&gt_boxes, feat_h, feat_w, stride);
+    let cls_loss = cls_loss_fn.compute(&out.cls_logits, &cls_t.into());
+    let bbox_loss = bbox_loss_fn.compute(&out.bbox_pred, &bbox_t.into());
+    let loss = &cls_loss + &bbox_loss;
 
-        let loss = nexus_training_step(
-            &mut model,
-            &frame,
-            &gt_boxes,
-            &gt_classes,
-            &mut optimizer,
-        );
-
-        if i % 100 == 0 {
-            println!("Epoch {} [{}/{}] Loss: {:.4}", epoch, i, dataset.len(), loss);
-        }
-    }
+    optimizer.zero_grad();
+    loss.backward();
+    optimizer.step();
 }
 ```
 
-**Pipeline:** forward → FCOS target assignment (3 scales) → FocalLoss (cls) + SmoothL1Loss (bbox) → backward → optimizer step
-
-### Phantom Training (Face Detection)
-
-```rust
-use axonml_vision::models::phantom::Phantom;
-use axonml_vision::training::phantom_training_step;
-use axonml_optim::Adam;
-
-let mut model = Phantom::new();
-let mut optimizer = Adam::new(model.parameters(), 1e-4);
-
-for epoch in 0..num_epochs {
-    for i in 0..dataset.len() {
-        let (image, face_boxes) = dataset.get(i).unwrap();
-        let frame = Variable::new(image.unsqueeze(0).unwrap(), true);
-
-        let loss = phantom_training_step(
-            &mut model,
-            &frame,
-            &face_boxes,
-            &mut optimizer,
-        );
-
-        if i % 100 == 0 {
-            println!("Epoch {} [{}/{}] Loss: {:.4}", epoch, i, dataset.len(), loss);
-        }
-    }
-}
-```
-
-**Pipeline:** forward → single-scale target assignment → FocalLoss (cls) + SmoothL1Loss (bbox) → backward → optimizer step
+For multi-scale FCOS heads, use `assign_fcos_targets` + `fcos_targets_to_tensors`
+and sum the per-scale losses (typically `FocalLoss` for classification +
+`SmoothL1Loss`/`GIoULoss` for boxes, weighted by centerness).
 
 ---
 
@@ -421,144 +387,29 @@ println!("COCO mAP@[0.5:0.95]: {:.4}", coco_map);
 
 ---
 
-## Model Architectures
-
-### Nexus — Dual-Pathway Object Detector
-
-A neuroscience-inspired object detector with five key innovations:
-
-1. **Dual-pathway processing** — Ventral ("what") and dorsal ("where") streams process features separately before cross-pathway fusion
-2. **Predictive coding** — Surprise-gated processing allocates more compute to unexpected regions
-3. **Persistent object memory** — GRU hidden state per tracked object maintains identity across frames
-4. **Uncertainty quantification** — Every bbox prediction includes mean + log-variance
-5. **Multi-scale detection** — 3 scales with FCOS-style anchor-free heads
+## Detector Models
 
 ```rust
-use axonml_vision::models::nexus::{Nexus, NexusConfig};
+use axonml_vision::models::{BlazeFace, RetinaFace, NanoDet, DETR};
 
-// Default config: 320x320, 20 classes
-let mut model = Nexus::new();
-
-// Custom config
-let config = NexusConfig {
-    input_width: 640,
-    input_height: 640,
-    num_classes: 80,
-    memory_hidden_size: 128,
-    proposal_threshold: 0.3,
-    nms_threshold: 0.5,
-};
-let mut model = Nexus::with_config(config);
-
-// Inference
-let detections = model.detect(&frame_variable);
-for det in &detections {
-    println!("Class {}: [{:.0}, {:.0}, {:.0}, {:.0}] conf={:.2}",
-        det.class_id, det.bbox[0], det.bbox[1], det.bbox[2], det.bbox[3],
-        det.confidence);
-}
-
-// Training forward pass
-let train_output = model.forward_train(&frame_variable);
-// train_output.scales: Vec<NexusScaleOutput>
-//   .cls_logits: [1, 1, H, W]
-//   .bbox_pred: [1, 4, H, W]
-//   .centerness: [1, 1, H, W]
+let blaze   = BlazeFace::new();                   // dual-scale 128x128 face detector
+let retina  = RetinaFace::new();                  // ResNet34 backbone + FPN
+let nanodet = NanoDet::new(/*num_classes=*/ 80);  // mobile-class general detector
+let detr    = DETR::small(10);                     // transformer set-prediction detector
 ```
 
-~430K parameters, <2MB float32, <500KB INT8
+- **BlazeFace** — depthwise-separable conv, dual-scale 128×128 head, 896 anchors (~72K params).
+- **RetinaFace** — ResNet34 backbone with a multi-level FPN head producing class / bbox / 5-point landmark predictions.
+- **NanoDet** — ShuffleNet backbone + Ghost-PAN neck, anchor-free, edge-ready (~364K params).
+- **DETR** — transformer encoder-decoder with set-based prediction; `small` preset.
 
-### Phantom — Event-Driven Face Detector
-
-An ultra-efficient face detector inspired by neuromorphic event cameras:
-
-1. **Pseudo-event generation** — Frame differencing on standard cameras creates event maps
-2. **Sparse processing** — Only event-active regions receive heavy compute
-3. **Predictive tracking** — GRU state per face predicts next location
-4. **Implicit identity** — Tracking ID from temporal continuity
-5. **Confidence accumulation** — Long-tracked faces receive higher confidence
-
-```rust
-use axonml_vision::models::phantom::{Phantom, PhantomConfig};
-
-// Default config: 128x128
-let mut model = Phantom::new();
-
-// Custom config
-let config = PhantomConfig {
-    input_width: 256,
-    input_height: 256,
-    backbone_refresh_interval: 30,
-    tracker_hidden_size: 64,
-    detection_threshold: 0.5,
-};
-let mut model = Phantom::with_config(config);
-
-// Inference (processes temporal sequence)
-let faces = model.detect_frame(&frame_variable);
-for face in &faces {
-    println!("Face: [{:.0}, {:.0}, {:.0}, {:.0}] conf={:.2} track_id={}",
-        face.bbox[0], face.bbox[1], face.bbox[2], face.bbox[3],
-        face.confidence, face.track_id);
-}
-
-// Training forward pass
-let train_output = model.forward_train(&frame_variable);
-// train_output.face_cls: [1, 1, H/4, W/4]
-// train_output.face_bbox: [1, 4, H/4, W/4]
-```
-
-~126K parameters, <500KB float32, <130KB INT8
-
-**Compute efficiency profile:**
-
-| Frame | Compute | Reason |
-|:------|:--------|:-------|
-| 1 | 100% | Cold start, full backbone |
-| 5 | ~30% | Sparse event processing |
-| 30 | ~5% | Predictions accurate, minimal correction |
-| Static | ~0% | Cached backbone, no events |
-
-### NightVision — Multi-Domain Infrared Detector
-
-A YOLOX-inspired detector adapted for thermal imagery across multiple domains:
-
-1. **Thermal-adaptive stem** — handles single-channel (1-ch) or multi-band (3-ch) IR input with thermal normalization
-2. **CSP backbone** — Cross-Stage Partial blocks for efficient multi-scale thermal feature extraction
-3. **Thermal FPN** — Feature Pyramid Network with top-down + lateral connections (P3/P4/P5)
-4. **Decoupled heads** — Separate classification, bbox regression, and objectness branches per scale
-5. **Domain tagging** — Optional domain classification head for multi-domain operation
-
-```rust
-use axonml_vision::models::nightvision::{NightVision, NightVisionConfig, ThermalDomain};
-
-// Preset configurations for each domain
-let model = NightVision::new(NightVisionConfig::wildlife(20));    // 20 animal species
-let model = NightVision::new(NightVisionConfig::human());         // search & rescue
-let model = NightVision::new(NightVisionConfig::interstellar(3, 3)); // 3-band IR, 3 classes
-let model = NightVision::new(NightVisionConfig::multi_domain(50));   // all domains, domain tags
-let model = NightVision::new(NightVisionConfig::edge(10));           // compact for edge
-
-// Detection forward pass — per-scale outputs
-let outputs = model.forward_detection(&ir_image);
-// outputs: Vec<(cls, bbox, obj, Option<domain>)> — one per FPN level
-
-// Flattened forward — concatenated across scales
-let (cls, bbox, obj) = model.forward_flat(&ir_image);
-// cls: [B, total_anchors, num_classes]
-// bbox: [B, total_anchors, 4]
-// obj: [B, total_anchors, 1]
-```
-
-~200K-500K parameters (config-dependent), designed for edge/embedded thermal camera deployments.
-
-**Thermal domains:** Wildlife (warm-blooded animals), Human (body heat / SAR), Interstellar (astronomical thermal sources), Vehicle (engine heat / friction), General (domain-agnostic).
+All share the `FPN` feature-pyramid neck where applicable and integrate with the losses and evaluation utilities above.
 
 ---
 
 ## Autograd Additions
 
-The following `Variable` operations were added to support detection training:
+The following `Variable` operations support detection training:
 
 ```rust
 // Exponential and logarithm (with full gradient tracking)
@@ -597,102 +448,4 @@ let loss = loss_fn.compute(&pred, &target);
 
 ---
 
-## Complete Example: Train Phantom on WIDER FACE
-
-```rust
-use axonml_vision::models::phantom::Phantom;
-use axonml_vision::datasets::WiderFaceDataset;
-use axonml_vision::training::phantom_training_step;
-use axonml_autograd::Variable;
-use axonml_optim::Adam;
-
-fn main() -> Result<(), String> {
-    // Load dataset
-    let dataset = WiderFaceDataset::new(
-        "/data/wider_face", "train", (128, 128),
-    )?;
-    println!("Training on {} images", dataset.len());
-
-    // Create model and optimizer
-    let mut model = Phantom::new();
-    let mut optimizer = Adam::new(model.parameters(), 1e-4);
-
-    // Training loop
-    for epoch in 0..50 {
-        let mut epoch_loss = 0.0;
-        for i in 0..dataset.len() {
-            let (image, face_boxes) = dataset.get(i).unwrap();
-            let frame = Variable::new(
-                image.unsqueeze(0).unwrap(), true,
-            );
-
-            let loss = phantom_training_step(
-                &mut model, &frame, &face_boxes, &mut optimizer,
-            );
-            epoch_loss += loss;
-        }
-
-        println!("Epoch {}: avg_loss = {:.4}",
-            epoch, epoch_loss / dataset.len() as f32);
-    }
-
-    Ok(())
-}
-```
-
-## Complete Example: Train Nexus on COCO
-
-```rust
-use axonml_vision::models::nexus::Nexus;
-use axonml_vision::datasets::CocoDataset;
-use axonml_vision::training::nexus_training_step;
-use axonml_autograd::Variable;
-use axonml_optim::Adam;
-
-fn main() -> Result<(), String> {
-    // Load dataset
-    let dataset = CocoDataset::new(
-        "/data/coco/train2017",
-        "/data/coco/annotations/instances_train2017.json",
-        (320, 320),
-    )?;
-    println!("Training on {} images, {} classes",
-        dataset.len(), dataset.num_classes());
-
-    // Create model and optimizer
-    let mut model = Nexus::new();
-    let mut optimizer = Adam::new(model.parameters(), 1e-4);
-
-    // Training loop
-    for epoch in 0..100 {
-        let mut epoch_loss = 0.0;
-        for i in 0..dataset.len() {
-            let (image, annotations) = dataset.get(i).unwrap();
-            let frame = Variable::new(
-                image.unsqueeze(0).unwrap(), true,
-            );
-
-            let gt_boxes: Vec<[f32; 4]> = annotations.iter()
-                .map(|a| a.bbox).collect();
-            let gt_classes: Vec<usize> = annotations.iter()
-                .map(|a| a.category_id).collect();
-
-            let loss = nexus_training_step(
-                &mut model, &frame, &gt_boxes, &gt_classes,
-                &mut optimizer,
-            );
-            epoch_loss += loss;
-        }
-
-        println!("Epoch {}: avg_loss = {:.4}",
-            epoch, epoch_loss / dataset.len() as f32);
-    }
-
-    Ok(())
-}
-```
-
----
-
 *Last updated: 2026-06-06 (v0.6.5)*
-

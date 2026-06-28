@@ -1035,7 +1035,7 @@ impl CudaBackend {
     /// Fused Q4_K GEMV for QKV projections — one kernel launch produces
     /// Q, K, and V outputs from a shared input activation. Each weight
     /// matrix has the same input dimension but its own output dimension.
-    /// Used by the nexus-serve decode path to collapse the three Q/K/V
+    /// Used by the axonml-serve decode path to collapse the three Q/K/V
     /// kernel launches per layer into a single grid.
     #[allow(clippy::too_many_arguments)]
     pub fn q4k_gemv_fused_qkv_f32(
@@ -4212,7 +4212,7 @@ impl CudaBackend {
 //
 // Decode-step launchers for the kernels in `transformer_ops.cu`. Used by
 // `Tensor::rms_norm` / `apply_rope_split_halves` / `swiglu` / `relu2_gate`
-// to keep activations on GPU through the whole layer in nexus-serve.
+// to keep activations on GPU through the whole layer in axonml-serve.
 // =============================================================================
 
 #[cfg(feature = "cuda")]

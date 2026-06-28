@@ -3621,7 +3621,7 @@ pub const ATTENTION_PTX: &str = include_str!("attention.ptx");
 ///
 /// Compiled from `q4k_matmul.cu`. Exposes `q4k_gemv_f32` which computes
 /// `c[j] = sum_k a[k] * B[j, k]` where B is laid out as Q4_K super-blocks
-/// in physical GGUF layout `[out, in]`. Used for Oracle-class models that
+/// in physical GGUF layout `[out, in]`. Used for large quantized models that
 /// can't fit f32 weights in 12 GB VRAM.
 pub const Q4K_MATMUL_PTX: &str = include_str!("q4k_matmul.ptx");
 
@@ -3662,17 +3662,17 @@ pub const Q8_0_MATMUL_PTX: &str = include_str!("q8_0_matmul.ptx");
 /// caps BitNet-2B decode at ~7 tok/s on WSL.
 pub const I2S_MATMUL_PTX: &str = include_str!("i2s_matmul.ptx");
 
-/// Raw-i8 ternary matmul kernels for `axonml-nn::layers::ternary::TernaryLinear`.
+/// Raw-i8 ternary matmul kernels for a ternary quantized linear layer.
 ///
 /// Compiled from `ternary_matmul.cu`. Distinct from the BitNet I2_S
-/// kernels — TernaryLinear stores ternary weights as a flat `Vec<i8>`
+/// kernels — the ternary linear layer stores ternary weights as a flat `Vec<i8>`
 /// in `{-1, 0, +1}` plus a tensor-wide f32 scale. The kernels here
 /// branch on each i8 byte and add/subtract/skip the activation, then
 /// scale at the end. Forward (gemv/gemm), backward grad_input, and
 /// backward grad_bias all live in this module.
 pub const TERNARY_MATMUL_PTX: &str = include_str!("ternary_matmul.ptx");
 
-/// GPU shadow-weight ternary quantizer for `axonml-nn::layers::ternary`.
+/// GPU shadow-weight ternary quantizer for a ternary linear layer.
 ///
 /// Compiled from `ternary_quantize.cu`. Stage 1 reduces the f32 shadow
 /// weight tensor to a single absolute-sum scalar (host divides by N to
@@ -3722,7 +3722,7 @@ pub const Q6K_MATMUL_PTX: &str = include_str!("q6k_matmul.ptx");
 /// Transformer per-layer ops (rms_norm, RoPE split-halves, SwiGLU, ReLU²).
 ///
 /// Compiled from `transformer_ops.cu`. These kernels collectively let the
-/// nexus-serve decode loop keep activations on GPU through the entire
+/// axonml-serve decode loop keep activations on GPU through the entire
 /// layer instead of round-tripping to CPU after every matmul. Used by
 /// `Tensor::rms_norm`, `Tensor::apply_rope_split_halves`, `Tensor::swiglu`,
 /// and `Tensor::relu2_gate`.
@@ -3965,7 +3965,7 @@ impl CudaKernels {
             &["i2s_gemv_f32", "i2s_gemm_f32"],
         )?;
 
-        // axonml-nn TernaryLinear (raw-i8) — Trident training fast path.
+        // Raw-i8 ternary linear — low-bit ternary training fast path.
         kernels.load_module(
             "ternary_matmul",
             TERNARY_MATMUL_PTX,
@@ -3977,7 +3977,7 @@ impl CudaKernels {
             ],
         )?;
 
-        // GPU absmean quantizer for TernaryLinear shadow weights —
+        // GPU absmean quantizer for ternary linear shadow weights —
         // eliminates the 4 GB GPU→CPU `to_vec` per step at 1B scale.
         kernels.load_module(
             "ternary_quantize",
@@ -4014,7 +4014,7 @@ impl CudaKernels {
         )?;
 
         // Transformer per-layer ops — RMSNorm / RoPE / SwiGLU / ReLU² gate.
-        // Lets nexus-serve keep activations on GPU through the whole layer.
+        // Lets axonml-serve keep activations on GPU through the whole layer.
         kernels.load_module(
             "transformer_ops",
             TRANSFORMER_OPS_PTX,

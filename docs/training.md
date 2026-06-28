@@ -269,7 +269,7 @@ Every training binary in `llm-training` uses a shared `lifecycle.rs` with pause/
 
 ## Object Detection Training
 
-Detection has a dedicated guide — see [Object Detection Training]({% link detection.md %}) for Nexus / Phantom / NightVision.
+Detection has a dedicated guide — see [Object Detection Training]({% link detection.md %}) for the detector models and training utilities.
 
 Quick reference:
 
@@ -286,9 +286,9 @@ let bce = BCEWithLogitsLoss::new();
 // GIoU is a bare compute function
 let gl = GIoULoss::compute(&pred_boxes, &target_boxes);
 
-// Nexus / Phantom training steps:
-use axonml_vision::training::{nexus_training_step, phantom_training_step};
-// Each runs forward → target assignment → loss → backward → optimizer step.
+// Anchor-free target assignment:
+use axonml_vision::training::{assign_fcos_targets, assign_single_scale_targets};
+// Compose forward → target assignment → loss → backward → optimizer step.
 ```
 
 Evaluation:
@@ -299,37 +299,6 @@ use axonml_vision::training::{compute_ap, compute_map, compute_coco_map};
 let ap = compute_ap(&detections, &ground_truths, 0.5);
 let m  = compute_map(&all_dets, &all_gts, num_classes, 0.5);
 let cm = compute_coco_map(&all_dets, &all_gts, num_classes);
-```
-
-## Biometric Model Training
-
-The Aegis Biometric Suite (`axonml-vision::models::biometric`) ships with specialty losses and GPU training pipelines for all modalities:
-
-```rust
-use axonml_vision::models::biometric::losses::{
-    ArgusLoss, EchoLoss, ContrastiveLoss, CenterLoss, AngularMarginLoss,
-    CrystallizationLoss, ThemisLoss, LivenessLoss,
-};
-
-let argus_loss = ArgusLoss::new(num_classes, embed_dim);
-let echo_loss  = EchoLoss::new(margin);
-let themis     = ThemisLoss::new();
-```
-
-Training examples are wired up as example binaries: `train_mnemosyne` (LFW face), `train_argus` (CASIA-Iris), `train_ariadne` (FVC2000 fingerprint), plus `bench_mnemosyne` for verification-pair ROC-AUC / EER / FAR/FRR.
-
-## NightVision Multi-Domain Infrared
-
-NightVision (YOLOX-inspired, thermal) has preset configs for each thermal domain:
-
-```rust
-use axonml_vision::models::nightvision::{NightVision, NightVisionConfig};
-
-let model = NightVision::new(NightVisionConfig::wildlife(20));       // 20 animal species
-let model = NightVision::new(NightVisionConfig::human());            // search & rescue
-let model = NightVision::new(NightVisionConfig::interstellar(3, 3)); // 3-band, 3 classes
-let model = NightVision::new(NightVisionConfig::multi_domain(50));   // all domains + domain tag
-let model = NightVision::new(NightVisionConfig::edge(10));           // compact
 ```
 
 ## GPU Device Placement

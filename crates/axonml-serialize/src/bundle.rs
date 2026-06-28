@@ -5,9 +5,9 @@
 //! generic `StateDict` (a dict of named tensors), a bundle carries three things
 //! the ONNX converter needs to rebuild the architecture:
 //!
-//! 1. `architecture` — an enum tag (`sentinel`, `lstm_autoencoder`, `gru_predictor`,
-//!    `rnn`, `phantom`, `conv1d`, `conv2d`, `res_net`, `vgg`, `bert`, `gpt2`, `vi_t`,
-//!    `nexus`) matching `Architecture` in the AxonML model zoo.
+//! 1. `architecture` — an enum tag (`classifier`, `lstm_autoencoder`, `gru_predictor`,
+//!    `rnn`, `face_detector`, `conv1d`, `conv2d`, `res_net`, `vgg`, `bert`, `gpt2`, `vi_t`,
+//!    `detector`) matching `Architecture` in the AxonML model zoo.
 //! 2. `hyperparameters` — `hidden_dim`, `num_layers`, `sequence_length`, etc.
 //!    These, together with `input_features`, completely determine layer shapes.
 //! 3. `weights` — flat `Vec<f32>` in the exact layer-by-layer order the Python
@@ -38,7 +38,7 @@
 //! April 27, 2026 — added optional `graph` field to `ModelBundle` carrying full
 //! compute-graph topology (nodes, inputs/outputs, initializers as named tensors).
 //! Backwards compatible: legacy bundles without `graph` still load via
-//! `#[serde(default)]`. The graph field is what NexusFoundry's AxonML frontend
+//! `#[serde(default)]`. The graph field is what the Hailo NPU compiler's AxonML frontend
 //! reads to compile to HEF without needing a Python rebuilder.
 //!
 //! # Disclaimer
@@ -125,7 +125,7 @@ pub type BundleResult<T> = Result<T, BundleError>;
 /// the Python converter's `parse_axonml` header JSON (must round-trip verbatim).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleHeader {
-    /// Architecture tag (`sentinel`, `lstm_autoencoder`, `res_net`, `bert`, etc.).
+    /// Architecture tag (`classifier`, `lstm_autoencoder`, `res_net`, `bert`, etc.).
     pub architecture: String,
     /// Number of input features (for MLPs) or input channels (for CNNs).
     pub input_features: usize,
@@ -138,7 +138,7 @@ pub struct BundleHeader {
 }
 
 // =============================================================================
-// Graph payload (optional — for NexusFoundry direct-compile path)
+// Graph payload (optional — for Hailo NPU compiler direct-compile path)
 // =============================================================================
 
 /// A named tensor with explicit shape + dtype. Used for graph initializers
@@ -173,7 +173,7 @@ pub struct GraphIo {
     pub dtype: String,
 }
 
-/// A single compute node. `op` matches a NexusFoundry `IrOp` variant name
+/// A single compute node. `op` matches the Hailo NPU compiler's `IrOp` variant name
 /// (e.g. `"Conv2d"`, `"BatchNorm"`, `"Relu"`, `"MaxPool"`, `"GlobalAvgPool"`,
 /// `"Gemm"`). `attrs` is op-specific JSON; consumers parse based on `op`.
 ///
@@ -184,7 +184,7 @@ pub struct GraphIo {
 pub struct GraphNode {
     /// Unique node name.
     pub name: String,
-    /// Op kind, matching a NexusFoundry `IrOp` variant name verbatim.
+    /// Op kind, matching the Hailo NPU compiler's `IrOp` variant name verbatim.
     pub op: String,
     /// Op-specific attribute bag (kernel_shape / strides / padding / etc).
     #[serde(default)]
@@ -198,7 +198,7 @@ pub struct GraphNode {
 /// Full compute graph topology: I/O declarations + topologically-ordered
 /// compute nodes + named weight tensors.
 ///
-/// This is what NexusFoundry's AxonML frontend consumes to build a populated
+/// This is what the Hailo NPU compiler's AxonML frontend consumes to build a populated
 /// FoundryIR. Without `graph`, the AxonML file is weights-only and the parser
 /// can only return raw tensors (which the rest of the compile pipeline drops
 /// because there are zero compute nodes).
@@ -217,7 +217,7 @@ pub struct BundleGraph {
 impl BundleGraph {
     /// Create an empty graph (no I/O, no nodes, no initializers).
     /// Pre-allocates for typical model sizes to reduce CPU reallocs during
-    /// graph construction for large Hailo-targeted exports (via NexusFoundry).
+    /// graph construction for large Hailo-targeted exports (via the Hailo NPU compiler).
     pub fn new() -> Self {
         Self {
             inputs: Vec::with_capacity(4),
@@ -526,9 +526,9 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn round_trip_sentinel_bundle() {
+    fn round_trip_bundle() {
         let weights: Vec<f32> = (0..256).map(|i| i as f32 * 0.01).collect();
-        let bundle = ModelBundle::new("sentinel", 11, weights.clone())
+        let bundle = ModelBundle::new("classifier", 11, weights.clone())
             .with_hyperparam("hidden_dim", 128)
             .with_hyperparam("num_layers", 2)
             .with_normalization(vec![0.0; 11], vec![1.0; 11])
@@ -538,12 +538,12 @@ mod tests {
         let final_path = save_bundle(&bundle, tmp.path()).unwrap();
 
         let (header, loaded) = load_bundle(&final_path).unwrap();
-        assert_eq!(header.architecture, "sentinel");
+        assert_eq!(header.architecture, "classifier");
         assert_eq!(header.input_features, 11);
         assert_eq!(header.num_parameters, weights.len());
         assert!(!header.quantized);
 
-        assert_eq!(loaded.architecture, "sentinel");
+        assert_eq!(loaded.architecture, "classifier");
         assert_eq!(loaded.weights, weights);
         assert_eq!(
             loaded
@@ -599,7 +599,7 @@ mod tests {
 
     #[test]
     fn save_adds_axonml_extension_when_missing() {
-        let bundle = ModelBundle::new("phantom", 20, vec![1.0, 2.0, 3.0]);
+        let bundle = ModelBundle::new("face_detector", 20, vec![1.0, 2.0, 3.0]);
         let dir = tempfile::tempdir().unwrap();
         let no_ext = dir.path().join("my_model");
         let final_path = save_bundle(&bundle, &no_ext).unwrap();
@@ -610,7 +610,7 @@ mod tests {
     #[test]
     fn round_trip_bundle_with_graph() {
         // Conv2d -> BatchNorm -> Relu -> GlobalAvgPool -> Gemm — the same skeleton
-        // the NexusFoundry e2e_pipeline test uses for its synthetic IR.
+        // the Hailo NPU compiler e2e_pipeline test uses for its synthetic IR.
         let mut graph = BundleGraph::new();
 
         graph.add_input("input", vec![-1, 3, 32, 32]);
@@ -716,7 +716,7 @@ mod tests {
     #[test]
     fn legacy_bundle_without_graph_loads_with_graph_none() {
         // A pre-2026-04-27 bundle (no graph field). Must still load.
-        let bundle = ModelBundle::new("sentinel", 11, vec![1.0, 2.0, 3.0]);
+        let bundle = ModelBundle::new("classifier", 11, vec![1.0, 2.0, 3.0]);
         let tmp = NamedTempFile::new().unwrap();
         save_bundle(&bundle, tmp.path()).unwrap();
 

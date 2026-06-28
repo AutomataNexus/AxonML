@@ -1611,7 +1611,7 @@ impl<T: Float> Tensor<T> {
         }
         // CPU fallback - delegates to CpuBackend (will be parallelized for large cases;
         // currently efficient sequential over heads). Important for pure CPU use and
-        // as reference forward when AxonML models target Hailo via NexusFoundry.
+        // as reference forward when AxonML models target Hailo via the Hailo NPU compiler.
         let mut x = self.to_vec();
         if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
             // SAFETY: checked + identical repr for f32 slice.
@@ -2477,7 +2477,7 @@ impl<T: Float> Tensor<T> {
 
     /// Read-only access to the underlying GPU storage as a `CudaSlice<f32>`.
     /// Panics if the tensor is on CPU. Used by downstream crates (e.g.
-    /// nexus-serve) that need to pass the GPU buffer directly into a kernel
+    /// axonml-serve) that need to pass the GPU buffer directly into a kernel
     /// without going through `.to_vec()` + re-upload.
     ///
     /// Only valid for `Tensor<f32>` — the underlying storage is always f32

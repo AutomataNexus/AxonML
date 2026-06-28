@@ -1,4 +1,4 @@
-//! Target Assignment — FCOS Multi-Scale and Phantom Single-Scale Targets
+//! Target Assignment — FCOS Multi-Scale and Single-Scale Targets
 //!
 //! Generates per-location training targets for anchor-free detectors.
 //! `FcosTarget` holds class id (-1 for background), LTRB box-edge distances,
@@ -8,7 +8,7 @@
 //! configured size range, and computes centerness via
 //! `crate::losses::compute_centerness`. `fcos_targets_to_tensors` flattens
 //! per-scale targets into `(cls [N], bbox [N,4], centerness [N])` tensors.
-//! `assign_phantom_targets` produces a single-scale face-detector target
+//! `assign_single_scale_targets` produces a single-scale face-detector target
 //! grid: `cls [H,W]` is 1 in the cell that contains a face center, and
 //! `bbox [H,W,4]` stores `(dx, dy, log w, log h)` regression deltas.
 //!
@@ -157,10 +157,10 @@ pub fn fcos_targets_to_tensors(
 }
 
 // =============================================================================
-// Phantom Face Target Assignment
+// Single-Scale Face Target Assignment
 // =============================================================================
 
-/// Single-scale target assignment for Phantom face detection.
+/// Single-scale target assignment for face detection.
 ///
 /// - `gt_faces`: Face bounding boxes [x1, y1, x2, y2] in pixel coords.
 /// - `feat_h`, `feat_w`: Feature map spatial dimensions.
@@ -169,7 +169,7 @@ pub fn fcos_targets_to_tensors(
 /// Returns (cls_target [H, W], bbox_target [H, W, 4]):
 /// - cls_target: 1.0 if GT face center falls in cell, else 0.0
 /// - bbox_target: (dx, dy, dw, dh) relative to cell center, log-space for w/h
-pub fn assign_phantom_targets(
+pub fn assign_single_scale_targets(
     gt_faces: &[[f32; 4]],
     feat_h: usize,
     feat_w: usize,
@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn test_phantom_target_assignment() {
         let gt_faces = vec![[20.0, 20.0, 40.0, 40.0]];
-        let (cls, bbox) = assign_phantom_targets(&gt_faces, 16, 16, 4.0);
+        let (cls, bbox) = assign_single_scale_targets(&gt_faces, 16, 16, 4.0);
 
         assert_eq!(cls.shape(), &[16, 16]);
         assert_eq!(bbox.shape(), &[16, 16, 4]);

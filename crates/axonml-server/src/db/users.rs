@@ -1,7 +1,7 @@
 //! User Database Operations — Account Management and MFA
 //!
 //! Provides document-store-backed persistence for user accounts via
-//! `UserRepository`. Users are stored in the `axonml_users` Aegis-DB
+//! `UserRepository`. Users are stored in the `axonml_users` the database
 //! document collection.
 //!
 //! Key types:

@@ -1,7 +1,7 @@
 //! Training Notebooks Database Operations — Notebook and Checkpoint Persistence
 //!
 //! Provides document-store-backed persistence for training notebooks and their
-//! checkpoints via `NotebookRepository`. Uses two Aegis-DB collections:
+//! checkpoints via `NotebookRepository`. Uses two database collections:
 //!
 //! - `axonml_notebooks` — `TrainingNotebook` records containing an ordered list
 //!   of `NotebookCell` items (Code or Markdown), per-cell execution status and

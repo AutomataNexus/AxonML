@@ -31,7 +31,7 @@
 
 - **Mixture of Experts** - `MoELayer`, `MoERouter`, and `Expert` for sparse expert routing.
 
-- **Ternary Weights** - `TernaryLinear` with `PackedTernaryWeights` for 1.58-bit weight quantization. GPU forward + backward kernels with GPU-resident ternary quantization, plus `saved_input` host-staging during backward to cut peak VRAM at billion-parameter scale (powers Trident b1.58 training).
+- **1.58-bit ternary quantized linear (BitNet b1.58)** - ternary weights in {−1, 0, +1} for ~16× weight compression. GPU forward + backward kernels with GPU-resident ternary quantization, plus `saved_input` host-staging during backward to cut peak VRAM at billion-parameter scale.
 
 - **Graph Neural Networks** - `GCNConv` and `GATConv` for graph convolution / attention.
 
@@ -56,7 +56,7 @@
 | `module` | `Module` trait and `ModuleList` container |
 | `parameter` | `Parameter` wrapper for learnable weights with gradient tracking |
 | `sequential` | `Sequential` container for chaining modules |
-| `layers` | All layer types (see `layers/` submodules: `linear`, `conv`, `pooling`, `norm`, `rnn`, `attention`, `diff_attention`, `transformer`, `embedding`, `dropout`, `residual`, `moe`, `ternary`, `sparse`, `graph`, `fft`) |
+| `layers` | All layer types (see `layers/` submodules: `linear`, `conv`, `pooling`, `norm`, `rnn`, `attention`, `diff_attention`, `transformer`, `embedding`, `dropout`, `residual`, `moe`, `sparse`, `graph`, `fft`) |
 | `activation` | Activation function modules |
 | `loss` | Loss function modules and `Reduction` enum |
 | `init` | Weight initialization functions and `InitMode` |
@@ -270,15 +270,6 @@ ticket.snapshot(); // save initial weights
 // ... train for a while ...
 ticket.prune(0.2); // prune bottom 20% by magnitude
 ticket.rewind(&mut sparse); // rewind to initial weights with discovered mask
-```
-
-### Ternary Weights
-
-```rust
-use axonml_nn::layers::ternary::TernaryLinear;
-
-// 1.58-bit ternary linear layer ({-1, 0, +1})
-let layer = TernaryLinear::new(512, 512);
 ```
 
 ### Mixture of Experts

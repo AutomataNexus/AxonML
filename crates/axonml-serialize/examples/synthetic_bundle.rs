@@ -1,12 +1,12 @@
 //! Build a tiny Conv2d → BatchNorm → Relu → GlobalAvgPool → Gemm bundle
-//! and save it to `.axonml` for the NexusFoundry smoke compile.
+//! and save it to `.axonml` for the Hailo NPU compiler smoke compile.
 //!
 //! Usage:
 //!   cargo run --example synthetic_bundle -p axonml-serialize -- <output_path>
 //!
 //! The bundle uses initializer values seeded by index×0.01 for conv weights
 //! and identity-ish parameters for batchnorm — no training, just enough
-//! structure for NexusFoundry to walk the graph and emit a non-trivial HEF.
+//! structure for the Hailo NPU compiler to walk the graph and emit a non-trivial HEF.
 //!
 //! Architecture matches `nexusfoundry-cli/tests/e2e_pipeline::build_synthetic_ir`
 //! so the smoke compile exercises the same op set those tests already cover.

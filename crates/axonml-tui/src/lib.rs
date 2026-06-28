@@ -1,7 +1,7 @@
 //! Terminal user interface for AxonML — interactive ratatui/crossterm dashboard.
 //!
 //! `App` state machine with 6 tab views (`ModelView`, `DataView`, `TrainingView`,
-//! `GraphsView`, `FilesView`, `HelpView`), `AxonmlTheme` NexusForge color
+//! `GraphsView`, `FilesView`, `HelpView`), `AxonmlTheme` color
 //! palette, crossterm `EventHandler` for keyboard/mouse input, and `run()`
 //! entry point that launches the full-screen TUI with optional model/data
 //! path arguments.

@@ -393,7 +393,7 @@ fn parse_epoch_post(body: &str) -> Result<EpochMetrics, &'static str> {
 }
 
 // =============================================================================
-// Dashboard HTML — Prometheus NexusEdge theme (light, warm neutrals, teal accent)
+// Dashboard HTML — Prometheus dashboard theme (light, warm neutrals, teal accent)
 // =============================================================================
 
 const DASHBOARD_HTML: &str = include_str!("monitor_dashboard.html");

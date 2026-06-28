@@ -2,7 +2,7 @@
 //!
 //! Provides document-store-backed persistence for ML dataset records via
 //! `DatasetRepository`. Datasets are stored in the `axonml_datasets`
-//! Aegis-DB document collection.
+//! database document collection.
 //!
 //! Key types:
 //! - `Dataset` — full dataset record with id, owner, file path, size,

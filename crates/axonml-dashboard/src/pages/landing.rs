@@ -112,7 +112,7 @@ pub fn LandingPage() -> impl IntoView {
                     />
                     <FeatureCard
                         icon=view! { <IconDatabase size=IconSize::Lg /> }
-                        title="Aegis-DB Powered"
+                        title="Database Powered"
                         description="Time-series metrics, document storage, and key-value cache all in one database."
                     />
                 </div>
@@ -197,7 +197,7 @@ pub fn LandingPage() -> impl IntoView {
 
                     <div class="footer-bottom">
                         <p class="footer-copyright">
-                            "© 2026 AutomataNexus, LLC. Built with Rust, Leptos, and Aegis-DB."
+                            "© 2026 AutomataNexus, LLC. Built with Rust, Leptos, and a document-store database."
                         </p>
                         <div class="footer-legal">
                             <a href="https://automatanexus.com/privacy">"Privacy"</a>

@@ -2,7 +2,7 @@
 //!
 //! Standalone micro-bench for `axonml_quant::bitnet::matmul_i2s` that replicates
 //! the shape profile of a BitNet b1.58-2B decode step and measures wall time.
-//! Designed to run in isolation from `nexus-serve` so rayon has nothing to
+//! Designed to run in isolation from `axonml-serve` so rayon has nothing to
 //! compete with, letting us distinguish "the kernel is slow" from "the server
 //! context is blocking rayon."
 //!

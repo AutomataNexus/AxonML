@@ -53,7 +53,6 @@ The `axonml` umbrella crate is a thin re-export layer plus the live browser trai
 | `text` | `nn` + `data` + `axonml-text` | Yes |
 | `audio` | `nn` + `data` + `axonml-audio` | Yes |
 | `llm` | `nn` + `axonml-llm` | Yes |
-| `hvac` | `nn` + `axonml-hvac` | Yes |
 | `train` | `nn` + `axonml-train` (`TrainingConfig`, `EarlyStopping`, benchmarking, adversarial) | Yes |
 | `distributed` | `nn` + `axonml-distributed` | Yes |
 | `serialize` | `core` + `axonml-serialize` | Yes |
@@ -229,7 +228,7 @@ Vulkan, Metal, and WebGPU each have their own feature flag in `axonml-core` (`vu
 - [Tensor Operations]({% link tensors.md %}) — tensor API reference
 - [Neural Networks]({% link neural-networks.md %}) — building models
 - [Training]({% link training.md %}) — optimizers, schedulers, AMP, checkpoint
-- [Detection]({% link detection.md %}) — Nexus, Phantom, NightVision detection training
+- [Detection]({% link detection.md %}) — object and face detection training
 - [Distributed]({% link distributed.md %}) — DDP, FSDP, Pipeline parallelism
 - [ONNX]({% link onnx.md %}) — import / export
 

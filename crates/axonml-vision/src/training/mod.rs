@@ -31,7 +31,7 @@ pub mod gpu_bench;
 pub mod integration;
 pub mod metrics;
 pub use assign::{
-    FcosTarget, assign_fcos_targets, assign_phantom_targets, fcos_targets_to_tensors,
+    FcosTarget, assign_fcos_targets, assign_single_scale_targets, fcos_targets_to_tensors,
 };
 pub use augment::{
     DetAugPipeline, DetRandomAffine, DetRandomHFlip, DetSample, HSVJitter, LetterBox, MixUp, Mosaic,

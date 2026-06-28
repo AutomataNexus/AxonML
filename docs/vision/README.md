@@ -5,8 +5,8 @@
 ## Overview
 
 `axonml-vision` is the AxonML counterpart to `torchvision`: image preprocessing
-transforms, vision datasets (real + synthetic), a large collection of
-classification / detection / depth / anomaly / biometric / 3D / VQA model
+transforms, vision datasets (real + synthetic), a collection of
+classification / detection / depth / anomaly / VQA model
 architectures, an image IO module, training utilities for detection, and a
 pretrained-model hub.
 
@@ -97,31 +97,13 @@ Classification:
 Detection / detection-infrastructure:
 
 - `BlazeFace`, `RetinaFace`, `DETR`, `NanoDet`
-- `Helios` + `HeliosLoss`, `CIoULoss`, `TaskAlignedAssigner`
 - `FPN`
-- Novel: `Nexus` (dual-pathway predictive coder), `Phantom` (event-driven
-  edge face detector), `NightVision` (thermal IR multi-domain detector)
 
-Anomaly / depth / VQA / 3D:
+Anomaly / depth / VQA:
 
 - `PatchCore`, `StudentTeacher` (anomaly detection)
 - `DPT`, `FastDepth` (monocular depth)
 - `VQAModel` (visual question answering)
-- `Aegis3D` (3D reconstruction)
-
-Biometric (Aegis Identity suite):
-
-- `AegisIdentity` — fusion entry point
-- `MnemosyneIdentity` — face (temporal GRU attractor)
-- `AriadneFingerprint` — fingerprint (Gabor ridge events)
-- `EchoSpeaker` — voice (predictive-coding residual identity)
-- `ArgusIris` — iris (polar radial/angular conv)
-- `ThemisFusion` — multimodal belief-propagation fusion
-- `IdentityBank`, `BiometricEvidence`, `BiometricConfig`, `BiometricModality`
-- Losses: `AngularMarginLoss`, `ArgusLoss`, `CenterLoss`, `ContrastiveLoss`,
-  `CrystallizationLoss`, `DiversityRegularization`, `EchoLoss`,
-  `LivenessLoss`, `ThemisLoss`
-- Results: `EnrollmentResult`, `IdentificationResult`, `VerificationResult`
 
 ### `losses`
 
@@ -144,8 +126,7 @@ Training infrastructure for detection models:
 
 ```rust
 use axonml_vision::training::{
-    nexus_training_step, phantom_training_step,
-    assign_fcos_targets, assign_phantom_targets,
+    assign_fcos_targets, assign_single_scale_targets,
     compute_ap, compute_map, compute_coco_map,
     DetectionResult, GroundTruth, TrainConfig,
 };
@@ -160,8 +141,8 @@ detection models.
 
 ### `edge`
 
-Edge-deployment helpers (quantization-friendly pipelines, frame differencing
-for Phantom, etc.).
+Edge-deployment helpers (quantization-friendly pipelines, frame differencing,
+etc.).
 
 ### `camera`
 
@@ -218,75 +199,26 @@ let output = model.forward(&Variable::new(input, false));
 let prediction = output.argmax(1)?;
 ```
 
-### Aegis Identity — biometric verification
+### Object detection training (WIDER FACE)
+
+Load a detection dataset and compose your own forward → target-assignment →
+loss → step loop with the shared detection utilities:
 
 ```rust
-use axonml_vision::models::biometric::{AegisIdentity, BiometricEvidence};
-
-let mut aegis = AegisIdentity::full(); // or ::face_only() / ::edge_minimal()
-
-let evidence = BiometricEvidence::new()
-    .with_face(face_tensor)
-    .with_voice(voice_tensor);
-aegis.enroll(1001, &evidence);
-
-let result = aegis.verify(1001, &probe_evidence);
-println!("match: {}, score: {:.3}", result.is_match, result.match_score);
-
-let (result, forensic) = aegis.verify_forensic(1001, &probe);
-let secure = aegis.secure_verify(1001, &evidence);
-```
-
-Five modalities, ~362K total params, <2MB — any subset is deployable
-independently on edge hardware.
-
-### NightVision thermal detection
-
-```rust
-use axonml_vision::models::nightvision::{NightVision, NightVisionConfig, ThermalDomain};
-
-let model = NightVision::new(NightVisionConfig::wildlife(20));
-let outputs = model.forward_detection(&ir_image);
-let (cls, bbox, obj) = model.forward_flat(&ir_image);
-```
-
-Five thermal domains: `Wildlife`, `Human`, `Interstellar`, `Vehicle`,
-`General`. Handles single-channel (1-ch) or multi-band (3-ch) IR input,
-CSP backbone, thermal FPN (P3/P4/P5), decoupled YOLOX-style heads, and an
-optional domain-tag head.
-
-### Object detection training (Phantom + WIDER FACE)
-
-```rust
-use axonml_vision::models::phantom::Phantom;
 use axonml_vision::datasets::WiderFaceDataset;
-use axonml_vision::training::phantom_training_step;
+use axonml_vision::training::assign_single_scale_targets;
 
 let dataset = WiderFaceDataset::new("data/wider_face", "train", (128, 128))?;
-let mut model = Phantom::new();
-let mut opt = Adam::new(model.parameters(), 1e-4);
 
-for _ in 0..50 {
-    for i in 0..dataset.len() {
-        let (image, faces) = dataset.get(i).unwrap();
-        let frame = Variable::new(image.unsqueeze(0).unwrap(), true);
-        let _loss = phantom_training_step(&mut model, &frame, &faces, &mut opt);
-    }
+for i in 0..dataset.len() {
+    let (image, faces) = dataset.get(i).unwrap();
+    let frame = Variable::new(image.unsqueeze(0).unwrap(), true);
+    let (cls_t, bbox_t) = assign_single_scale_targets(&faces, feat_h, feat_w, stride);
+    // forward → loss(cls_t, bbox_t) → backward → optimizer step
 }
 ```
 
-## Biometric Training Examples
-
-Training pipelines (`examples/train_mnemosyne.rs`, `train_argus.rs`,
-`train_ariadne.rs`) for the Aegis suite ship checkpoint/resume + training
-monitor + state-dict serialisation. See
-`/opt/AxonML/crates/axonml-vision/examples/`.
-
-```bash
-cargo run --example train_mnemosyne --release -p axonml-vision -- \
-  --data-dir /opt/datasets/lfw/processed \
-  --epochs 100 --lr 0.001 --batch-size 8
-```
+See the [Object Detection Training Guide](../detection.md) for the full loop.
 
 ## ImageNet Normalization
 

@@ -17,7 +17,7 @@
 
 ## Overview
 
-**axonml-server** is the REST API + WebSocket backend for the AxonML Machine Learning Framework, built with Axum 0.7 on Tokio. It provides endpoints for user authentication (JWT, TOTP, WebAuthn, recovery codes), training run management with real-time metric streaming, a versioned model registry, dataset management, inference serving with a pooled model cache, a JSON-notebook execution engine, Kaggle/Hub dataset integration, an Ollama-backed LLM assist endpoint, a PTY-based browser terminal, and comprehensive system metrics. It uses Aegis-DB for persistent storage (SQL + KV) and an optional HashiCorp Vault backend for secrets.
+**axonml-server** is the REST API + WebSocket backend for the AxonML Machine Learning Framework, built with Axum 0.7 on Tokio. It provides endpoints for user authentication (JWT, TOTP, WebAuthn, recovery codes), training run management with real-time metric streaming, a versioned model registry, dataset management, inference serving with a pooled model cache, a JSON-notebook execution engine, Kaggle/Hub dataset integration, an Ollama-backed LLM assist endpoint, a PTY-based browser terminal, and comprehensive system metrics. It uses a document-store database backend for persistent storage (SQL + KV) and an optional HashiCorp Vault backend for secrets.
 
 Last updated: 2026-06-06 — version 0.6.5.
 
@@ -26,7 +26,7 @@ Last updated: 2026-06-06 — version 0.6.5.
 ## Features
 
 - **Axum 0.7** — Async HTTP + WebSocket server on Tokio, with tower-http layers for CORS, tracing, compression, and static file serving.
-- **Secrets Manager** — Pluggable `SecretsBackend` trait with Vault and environment-variable backends. Resolves JWT secret, Aegis-DB credentials, and Resend API key in priority order (Vault -> env -> config-file fallback). JWT secret is validated to be >=32 characters at startup.
+- **Secrets Manager** — Pluggable `SecretsBackend` trait with Vault and environment-variable backends. Resolves JWT secret, database backend credentials, and Resend API key in priority order (Vault -> env -> config-file fallback). JWT secret is validated to be >=32 characters at startup.
 - **JWT Authentication** — `jsonwebtoken` 10 with access + refresh tokens. JWT secret hot-loaded from Vault or env at boot.
 - **Multi-Factor Authentication** — TOTP (RFC 6238 via `totp-rs`), WebAuthn / FIDO2, and one-time recovery codes.
 - **Argon2id Password Hashing** — `argon2` crate with random per-password salts via `OsRng`.
@@ -34,7 +34,7 @@ Last updated: 2026-06-06 — version 0.6.5.
 - **Secure Default Admin** — On first boot, a 24-character cryptographically random password is generated for `admin@axonml.local` and written to `{tmp}/axonml-admin-password.txt`; there is no static default password.
 - **DevOps Admin** — Optional `DevOps@AutomataNexus.com` user provisioned from the `AXONML_DEVOPS_PASSWORD` environment variable on boot.
 - **Training Management** — Create, list, stop, complete, and delete runs; record metrics and logs; stream metrics live over WebSocket.
-- **Training Executor** — Spawns and tracks training processes with a persistent `TrainingTracker` wired to Aegis-DB.
+- **Training Executor** — Spawns and tracks training processes with a persistent `TrainingTracker` wired to the database backend.
 - **Notebook Engine** — JSON training notebooks with cell add/update/delete/execute, AI-assist (Ollama), checkpoint save/list/best, and model-version export.
 - **Model Registry** — Versioned model storage with multipart upload, download, inspect, convert, quantize, export, and deploy.
 - **Datasets** — CRUD for user-uploaded datasets plus built-in dataset catalog (`builtin-datasets` list/search/sources/info/prepare).
@@ -57,7 +57,7 @@ Last updated: 2026-06-06 — version 0.6.5.
 | `secrets` | `SecretsManager`, `SecretsBackend` trait, `SecretKey` constants, `SecretsError` |
 | `secrets::vault` | HashiCorp Vault backend (`vaultrs`) with background token renewal |
 | `secrets::env` | Environment-variable backend |
-| `db` | Aegis-DB `Database` wrapper (SQL + KV) plus health check |
+| `db` | Database backend `Database` wrapper (SQL + KV) plus health check |
 | `db::schema` | Schema init + default admin / DevOps admin provisioning |
 | `db::users` | User CRUD + auth queries |
 | `db::runs` | Training-run persistence + metrics storage |
@@ -103,7 +103,7 @@ Last updated: 2026-06-06 — version 0.6.5.
 ### Prerequisites
 
 - Rust 1.85+ (workspace edition)
-- Running Aegis-DB instance (default: `localhost:9090`)
+- Running database backend instance (default: `localhost:9090`)
 - Optional: HashiCorp Vault for production secrets
 - Optional: Ollama server for notebook AI assist
 
@@ -179,11 +179,11 @@ host = "0.0.0.0"
 port = 3000
 data_dir = "~/.axonml"
 
-[aegis]
+[database]
 host = "localhost"
-port = 9090          # Must match Aegis-DB's --port (default: 9090)
-username = ""        # Prefer Vault or AEGIS_USER env var
-password = ""        # Prefer Vault or AEGIS_PASS env var
+port = 9090          # Must match the database backend's --port (default: 9090)
+username = ""        # Prefer Vault or BACKEND_USER env var
+password = ""        # Prefer Vault or BACKEND_PASS env var
 
 [auth]
 jwt_secret = ""      # Prefer Vault (jwt_secret) or AXONML_JWT_SECRET env var; MUST be >=32 chars
@@ -364,7 +364,7 @@ Notebooks:
              | HTTP
              v
    +---------------------+           +-------------------+
-   |     Aegis-DB        |           |  HashiCorp Vault  |
+   |  Database backend   |           |  HashiCorp Vault  |
    |  (SQL + KV Store)   |           |   (optional)      |
    +---------------------+           +-------------------+
 ```
@@ -381,10 +381,10 @@ Notebooks:
 | `AXONML_JWT_SECRET` | JWT signing secret (>=32 chars) | (required unless set in Vault) |
 | `AXONML_DEVOPS_PASSWORD` | Password for the DevOps admin seed account | (none — DevOps admin not created) |
 | `AXONML_RESEND_API_KEY` / `RESEND_API_KEY` | Resend email API key | (optional) |
-| `AEGIS_HOST` | Aegis-DB host | `localhost` |
-| `AEGIS_PORT` | Aegis-DB port | `9090` |
-| `AEGIS_USER` | Aegis-DB username | (config / Vault) |
-| `AEGIS_PASS` | Aegis-DB password | (config / Vault) |
+| `BACKEND_HOST` | Database backend host | `localhost` |
+| `BACKEND_PORT` | Database backend port | `9090` |
+| `BACKEND_USER` | Database backend username | (config / Vault) |
+| `BACKEND_PASS` | Database backend password | (config / Vault) |
 | `VAULT_ADDR` | HashiCorp Vault address; if set, Vault backend is enabled | (unset = disabled) |
 | `RUST_LOG` | Log level filter | `axonml_server=info,tower_http=info` |
 
@@ -402,7 +402,7 @@ cargo test -p axonml-server -- --nocapture
 # Run a specific module's tests
 cargo test -p axonml-server auth::
 
-# Integration tests (require a running Aegis-DB)
+# Integration tests (require a running database backend)
 cargo test -p axonml-server --test '*'
 ```
 

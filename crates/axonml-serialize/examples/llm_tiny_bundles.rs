@@ -1,6 +1,6 @@
 //! LLM-tiny bundles — GPT-2 tiny and Phi tiny decoder-only transformers
 //! as BundleGraphs with embedded weights, suitable for ONNX export and Hailo
-//! compilation via DFC / NexusFoundry.
+//! compilation via DFC / the Hailo NPU compiler.
 //!
 //! ## Architectures
 //!

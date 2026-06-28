@@ -1,7 +1,7 @@
 //! Model Registry Database Operations — Models, Versions, and Endpoints
 //!
 //! Provides document-store-backed persistence for the AxonML model registry
-//! via `ModelRepository`. Manages three Aegis-DB collections:
+//! via `ModelRepository`. Manages three database collections:
 //!
 //! - `axonml_models` — top-level `Model` records (id, owner, name, type).
 //! - `axonml_model_versions` — `ModelVersion` records linked to a model,
@@ -12,7 +12,7 @@
 //!   count, and optional JSON config.
 //!
 //! Also writes inference metrics (request counts, p50/p95/p99 latency) to
-//! the Aegis-DB time series store via `record_inference_metrics()` and
+//! the database time series store via `record_inference_metrics()` and
 //! reads them back with `get_inference_metrics()`.
 //!
 //! # File

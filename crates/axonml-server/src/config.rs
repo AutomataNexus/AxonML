@@ -4,7 +4,7 @@
 //! deserialized from `~/.axonml/config.toml` via `toml`:
 //!
 //! - `ServerConfig` — host, port, data directory.
-//! - `AegisConfig` — Aegis-DB connection (host, port, credentials).
+//! - `BackendConfig` — database backend connection (host, port, credentials).
 //! - `AuthConfig` — JWT secret/expiry, session timeout, MFA policy,
 //!   public registration toggle.
 //! - `InferenceConfig` — port range and max endpoint count.
@@ -63,7 +63,7 @@ pub enum ConfigError {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Config {
     pub server: ServerConfig,
-    pub aegis: AegisConfig,
+    pub backend: BackendConfig,
     pub auth: AuthConfig,
     pub inference: InferenceConfig,
     pub dashboard: DashboardConfig,
@@ -82,16 +82,16 @@ pub struct ServerConfig {
     pub data_dir: String,
 }
 
-/// Aegis-DB connection configuration
+/// database backend connection configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AegisConfig {
-    #[serde(default = "default_aegis_host")]
+pub struct BackendConfig {
+    #[serde(default = "default_backend_host")]
     pub host: String,
-    #[serde(default = "default_aegis_port")]
+    #[serde(default = "default_backend_port")]
     pub port: u16,
-    #[serde(default = "default_aegis_user")]
+    #[serde(default = "default_backend_user")]
     pub username: String,
-    #[serde(default = "default_aegis_pass")]
+    #[serde(default = "default_backend_pass")]
     pub password: String,
 }
 
@@ -150,17 +150,17 @@ fn default_port() -> u16 {
 fn default_data_dir() -> String {
     "~/.axonml".to_string()
 }
-fn default_aegis_host() -> String {
+fn default_backend_host() -> String {
     "localhost".to_string()
 }
-fn default_aegis_port() -> u16 {
+fn default_backend_port() -> u16 {
     9090
 }
 // SECURITY: No default database credentials - must be explicitly configured
-fn default_aegis_user() -> String {
+fn default_backend_user() -> String {
     String::new()
 }
-fn default_aegis_pass() -> String {
+fn default_backend_pass() -> String {
     String::new()
 }
 // SECURITY: No default JWT secret - must be explicitly configured
@@ -209,13 +209,13 @@ impl Default for ServerConfig {
     }
 }
 
-impl Default for AegisConfig {
+impl Default for BackendConfig {
     fn default() -> Self {
         Self {
-            host: default_aegis_host(),
-            port: default_aegis_port(),
-            username: default_aegis_user(),
-            password: default_aegis_pass(),
+            host: default_backend_host(),
+            port: default_backend_port(),
+            username: default_backend_user(),
+            password: default_backend_pass(),
         }
     }
 }
@@ -356,9 +356,9 @@ impl Config {
     // Connection Helpers
     // -------------------------------------------------------------------------
 
-    /// Get the Aegis-DB connection URL
-    pub fn aegis_url(&self) -> String {
-        format!("http://{}:{}", self.aegis.host, self.aegis.port)
+    /// Get the database backend connection URL
+    pub fn backend_url(&self) -> String {
+        format!("http://{}:{}", self.backend.host, self.backend.port)
     }
 
     // -------------------------------------------------------------------------
@@ -382,9 +382,9 @@ impl Config {
         }
 
         // SECURITY: Database credentials must be explicitly configured
-        if self.aegis.username.is_empty() || self.aegis.password.is_empty() {
+        if self.backend.username.is_empty() || self.backend.password.is_empty() {
             return Err(ConfigError::MissingConfig(
-                "Database credentials are required. Set aegis.username and aegis.password in config.toml.".to_string()
+                "Database credentials are required. Set backend.username and backend.password in config.toml.".to_string()
             ));
         }
 
@@ -419,7 +419,7 @@ mod tests {
     fn test_default_config() {
         let config = Config::default();
         assert_eq!(config.server.port, 3000);
-        assert_eq!(config.aegis.port, 9090);
+        assert_eq!(config.backend.port, 9090);
     }
 
     #[test]
@@ -429,7 +429,7 @@ mod tests {
 host = "127.0.0.1"
 port = 8000
 
-[aegis]
+[backend]
 host = "db.example.com"
 port = 5432
 
@@ -445,7 +445,7 @@ port = 3000
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.server.port, 8000);
-        assert_eq!(config.aegis.host, "db.example.com");
+        assert_eq!(config.backend.host, "db.example.com");
         assert!(config.auth.require_mfa);
     }
 }

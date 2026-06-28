@@ -133,7 +133,7 @@ match tensor.device() {
 ## Backend Notes
 
 - **CPU** — OpenBLAS when available, native Rust fallback, SIMD where possible.
-- **CUDA** — `axonml-core/src/backends/cuda.rs` (3,706 lines): cuBLAS matmul, custom PTX kernels (Q4_K / Q6_K dequant-in-shader GEMV, fused flash-decode attention, fused prefill attention — used by `nexus-serve`). Requires CUDA toolkit; compute capability 5.2+ (PTX targets).
+- **CUDA** — `axonml-core/src/backends/cuda.rs` (3,706 lines): cuBLAS matmul, custom PTX kernels (Q4_K / Q6_K dequant-in-shader GEMV, fused flash-decode attention, fused prefill attention — used by the AxonML inference server). Requires CUDA toolkit; compute capability 5.2+ (PTX targets).
 - **Vulkan** — `vulkan.rs` (982 lines): compute shaders, cross-platform.
 - **Metal** — `metal.rs` (769 lines): MSL kernels, Apple Silicon.
 - **WebGPU** — `wgpu_backend.rs` (1,710 lines): WGSL kernels via the `wgpu` crate; works in WASM and on native via Vulkan / Metal / D3D12.

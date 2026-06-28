@@ -9,7 +9,7 @@ description: "Rust crate architecture and documentation"
 # Crate Documentation
 {: .no_toc }
 
-AxonML is built as a Rust workspace with **24 specialized crates**.
+AxonML is built as a Rust workspace with **23 specialized crates**.
 {: .fs-6 .fw-300 }
 
 ---
@@ -27,12 +27,12 @@ AxonML is built as a Rust workspace with **24 specialized crates**.
 |               (Umbrella Crate — Feature Flags + Monitor)            |
 +---------------------------------------------------------------------+
 |                           Domain Layer                              |
-+-------------+-------------+-------------+--------------+------------+
-|axonml-vision|axonml-audio |axonml-text  | axonml-llm   |axonml-hvac |
-|   (CV/CNN)  |(MFCC/Mel)   |(Tokenizers) |(BERT/GPT/    |(Panoptes,  |
-|             |             |             | LLaMA/Trident|  Apollo,   |
-|             |             |             | /Phi/Mistral)|  etc.)     |
-+-------------+-------------+-------------+--------------+------------+
++-------------+-------------+-------------+--------------+
+|axonml-vision|axonml-audio |axonml-text  | axonml-llm   |
+|   (CV/CNN)  |(MFCC/Mel)   |(Tokenizers) |(BERT/GPT/    |
+|             |             |             | LLaMA/RDT/   |
+|             |             |             | Phi/Mistral) |
++-------------+-------------+-------------+--------------+
 |                         Training Layer                              |
 +-------------+-------------+-------------+--------------+------------+
 |  axonml-nn  |axonml-optim |axonml-data  |axonml-train  |axonml-dist |
@@ -84,7 +84,7 @@ AxonML is built as a Rust workspace with **24 specialized crates**.
 
 | Crate | Description | Key Types |
 |:------|:------------|:----------|
-| [axonml-nn](https://docs.rs/axonml-nn) | Neural network modules | `Module`, `Linear`, `Conv2d`, `MultiHeadAttention`, `LSTM`, `TernaryLinear`, `SparseLinear`, `MoELayer` |
+| [axonml-nn](https://docs.rs/axonml-nn) | Neural network modules | `Module`, `Linear`, `Conv2d`, `MultiHeadAttention`, `LSTM`, `SparseLinear`, `MoELayer` |
 | [axonml-optim](https://docs.rs/axonml-optim) | Optimizers + LR schedulers + health monitor | `SGD`, `Adam`, `AdamW`, `LAMB`, `RMSprop`, `CosineAnnealingLR`, `OneCycleLR`, `GradScaler`, `TrainingMonitor` |
 | [axonml-data](https://docs.rs/axonml-data) | Data loading and batching | `DataLoader`, `Dataset`, `RandomSampler`, `SequentialSampler`, `Transform` |
 | [axonml-train](https://docs.rs/axonml-train) | High-level training glue | `TrainingConfig`, `EarlyStopping`, `ProgressLogger`, `benchmark_model`, `AdversarialTrainer` |
@@ -94,11 +94,10 @@ AxonML is built as a Rust workspace with **24 specialized crates**.
 
 | Crate | Description | Key Types |
 |:------|:------------|:----------|
-| [axonml-vision](https://docs.rs/axonml-vision) | Computer vision, detection, biometrics | `LeNet`, `ResNet`, `ViT`, `DETR`, `NanoDet`, `BlazeFace`, `RetinaFace`, `Nexus`, `Phantom`, `NightVision`, `AegisIdentity`, `Argus*`, `Echo*`, `Mnemosyne*`, `Aegis3D`, `CocoDataset`, `WiderFaceDataset`, `FocalLoss`, `GIoULoss` |
+| [axonml-vision](https://docs.rs/axonml-vision) | Computer vision and detection | `LeNet`, `ResNet`, `ViT`, `DETR`, `NanoDet`, `BlazeFace`, `RetinaFace`, `FPN`, `DPT`, `FastDepth`, `PatchCore`, `VQAModel`, `CocoDataset`, `WiderFaceDataset`, `FocalLoss`, `GIoULoss` |
 | [axonml-audio](https://docs.rs/axonml-audio) | Audio processing | `MelSpectrogram`, `MFCC`, `Resample`, `AddNoise`, `SyntheticCommandDataset` |
 | [axonml-text](https://docs.rs/axonml-text) | NLP utilities | `WhitespaceTokenizer`, `CharTokenizer`, `BasicBPETokenizer`, `Vocab`, `TextDataset` |
-| [axonml-llm](https://docs.rs/axonml-llm) | Large language models | `Bert`, `GPT2`, `LLaMA`, `Mistral`, `Phi`, `ChimeraModel`, `HydraModel`, `SSMBlock`, `TridentModel`, `RDTForCausalLM`, `Qwen3ForCausalLM`, `TextGenerator`, `HFLoader`, GGUF I2_S / `rdt` exporters |
-| [axonml-hvac](https://docs.rs/axonml-hvac) | HVAC fault-detection models | `Panoptes`, `Apollo`, `Aquilo`, `Boreas`, `Colossus`, `Gaia`, `Naiad`, `Vulcan`, `Zephyrus` |
+| [axonml-llm](https://docs.rs/axonml-llm) | Large language models | `Bert`, `GPT2`, `LLaMA`, `Mistral`, `Phi`, `ChimeraModel`, `HydraModel`, `SSMBlock`, `RDTForCausalLM`, `Qwen3ForCausalLM`, `TextGenerator`, `HFLoader`, GGUF I2_S / `rdt` exporters |
 
 ### Serialization Layer
 
@@ -128,21 +127,21 @@ AxonML is built as a Rust workspace with **24 specialized crates**.
 
 ## Workspace
 
-All 24 crates (from `Cargo.toml`):
+All 23 crates (from `Cargo.toml`):
 
 ```
 axonml-core          axonml-llm
-axonml-tensor        axonml-hvac
-axonml-autograd      axonml-train
-axonml-nn            axonml-distributed
-axonml-optim         axonml-serialize
-axonml-data          axonml-onnx
-axonml-vision        axonml-quant
-axonml-audio         axonml-fusion
-axonml-text          axonml-jit
-axonml-profile       axonml-cli
-axonml-tui           axonml-server
-axonml-dashboard     axonml               (umbrella)
+axonml-tensor        axonml-train
+axonml-autograd      axonml-distributed
+axonml-nn            axonml-serialize
+axonml-optim         axonml-onnx
+axonml-data          axonml-quant
+axonml-vision        axonml-fusion
+axonml-audio         axonml-jit
+axonml-text          axonml-cli
+axonml-profile       axonml-server
+axonml-tui           axonml               (umbrella)
+axonml-dashboard
 ```
 
 ## Dependency Graph (simplified)
@@ -159,7 +158,6 @@ axonml (umbrella)
 ├── axonml-audio          — axonml-data
 ├── axonml-text           — axonml-nn, axonml-data
 ├── axonml-llm            — axonml-nn
-├── axonml-hvac           — axonml-nn
 ├── axonml-train          — axonml-nn (+ axonml-vision, axonml-llm via features)
 ├── axonml-distributed    — axonml-nn
 ├── axonml-serialize      — axonml-nn
@@ -212,7 +210,6 @@ cargo build -p axonml --features "cuda,nccl"
 | `text` | nn + data + text |
 | `audio` | nn + data + audio |
 | `llm` | nn + llm |
-| `hvac` | nn + hvac |
 | `train` | nn + train |
 | `distributed` | nn + distributed |
 | `nccl` | distributed + NCCL backend |

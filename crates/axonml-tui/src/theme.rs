@@ -1,4 +1,4 @@
-//! Theme - NexusForge Color Theme for Axonml TUI
+//! Theme - Color Theme for Axonml TUI
 //!
 //! # File
 //! `crates/axonml-tui/src/theme.rs`
@@ -18,7 +18,7 @@
 use ratatui::style::{Color, Modifier, Style};
 
 // =============================================================================
-// Brand Colors (from NexusForge theme.ts)
+// Brand Colors
 // =============================================================================
 
 /// Primary teal color

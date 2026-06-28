@@ -133,7 +133,7 @@ All commands below are defined in `src/cli.rs` and dispatched in `src/main.rs`.
 | `tui` | Launch the terminal user interface |
 | `kaggle` | Kaggle dataset integration |
 | `hub` | Pretrained model hub |
-| `dataset` | Dataset management (NexusConnectBridge) |
+| `dataset` | Dataset management |
 | `start` | Start dashboard and API server |
 | `stop` | Stop running services |
 | `status` | Check service status |
@@ -291,7 +291,7 @@ axonml kaggle list
 
 Note: `kaggle login` writes credentials to `~/.kaggle/kaggle.json` with Unix mode `0600` and deliberately does not echo the API key (or username) back to stdout to keep it out of shell history / CI logs. Run `axonml kaggle status` after login to confirm.
 
-### Dataset (NexusConnectBridge)
+### Dataset
 
 ```bash
 axonml dataset list --source kaggle

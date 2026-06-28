@@ -23,18 +23,17 @@ top-k / top-p / temperature sampling.
 | `ssm`        | `SSMBlock`, `SSMConfig`, `SSMForCausalLM` (Mamba: selective S6 scan + depthwise conv)          |
 | `hydra`      | `HydraModel`, `HydraConfig` (hybrid SSM + windowed attention)                                  |
 | `chimera`    | `ChimeraModel`, `ChimeraConfig` (sparse MoE + differential attention)                          |
-| `trident`    | `TridentModel`, `TridentConfig` (1.58-bit ternary: RoPE + GQA + ReLU^2 FFN + SubLN). GGUF I2_S export; `trident_laptop`/`300m`/`500m`/`1b`/`3b` configs; per-block gradient checkpointing |
 | `rdt`        | `RDTForCausalLM` (Recurrent-Depth Transformer, Huginn-style test-time compute: Prelude → latent block iterated K times → Coda). `rdt` GGUF arch id; distillation via `train_rdt_distill` |
 
 GGUF support covers both `qwen2` and `qwen3` loaders for distillation /
 teacher-student workflows. Training paths use the device-native CPU
-parallelism (see [training](../training.md)); on GPU, `TernaryLinear` has fused
-forward/backward kernels.
+parallelism (see [training](../training.md)); on GPU, the 1.58-bit ternary
+quantized linear (BitNet b1.58) has fused forward/backward kernels.
 
 The `gpt2`, `bert`, `llama`, `mistral`, `phi`, and `qwen3` modules are faithful
 reimplementations of published architectures (trainable from scratch and
-loadable from HuggingFace `safetensors` / GGUF). The remaining five —
-**Chimera, Hydra, Trident, RDT, and RustyMythos** — are original AutomataNexus
+loadable from HuggingFace `safetensors` / GGUF). The remaining three —
+**Chimera, Hydra, and RDT** — are original AutomataNexus
 architectures, detailed below.
 
 ## Novel Architectures
@@ -70,30 +69,6 @@ attention** layers. The SSM layers carry long-range state cheaply while the
 windowed-attention layers recover precise local token interactions — a
 sub-quadratic hybrid. `HydraModel` / `HydraConfig`.
 
-### Trident — 1.58-bit ternary (BitNet b1.58)
-
-A ternary-weight transformer where every linear projection in the blocks uses
-`TernaryLinear` with weights in {−1, 0, +1}; embeddings and the LM head stay
-fp32.
-
-```text
-Token Embedding (fp32) → [TridentBlock × N] → RMSNorm → LM Head (fp32)
-TridentBlock: RMSNorm → ternary QKV → MHA → ternary o_proj → residual
-              RMSNorm → ternary gate/up → ReLU²-gated FFN → ternary down → residual (+ SubLN)
-```
-
-- **16× weight compression** (≈1.58 bits/weight vs 32) — inference matmul
-  reduces to add/subtract, no FP multiply on weights.
-- Full-precision activations throughout for accuracy.
-- Trained with a **Straight-Through Estimator (STE)** on fp32 shadow weights;
-  GPU forward + backward ternary kernels with host-staged activations to fit
-  billion-parameter runs.
-- Configs: `trident_laptop` (~110M, 12 GB-deployable), `trident_300m`,
-  `trident_500m`, `trident_1b`, `trident_3b`; per-block gradient checkpointing.
-- **GGUF I2_S export** → runs in `nexus-serve` (BitNet b1.58 recipe).
-
-`TridentModel` / `TridentConfig`.
-
 ### RDT — Recurrent-Depth Transformer (test-time compute)
 
 Huginn-style latent reasoning (Geiping et al. 2025): instead of more layers,
@@ -116,32 +91,9 @@ h_K → Coda (N_d layers) → output_norm → logits
 - Prelude/Coda weights are **not** shared with the iterated Core.
 - Configs: `rdt_tiny` (~265M), `rdt_small` (~540M), `rdt_mid` (~1.18B).
 - **GGUF arch id `rdt`**; production distillation via `train_rdt_distill`
-  (Oracle-7B teacher → RDT student). Design doc: `docs/RDT_DESIGN.md`.
+  (a 7B teacher → RDT student). Design doc: `docs/RDT_DESIGN.md`.
 
 `RDTForCausalLM` / `RDTConfig`.
-
-### RustyMythos — recurrent-depth + MoE + LTI-stable latent reasoning
-
-A byte-level (vocab 256) recurrent-depth model that adds **mixture-of-experts**
-and an **LTI-stable latent state** to the recurrent-depth idea, and is compiled
-to Hailo NPU silicon.
-
-```text
-Prelude:        token Embedding(256, d) + positional Embedding(L, d) + dropout
-RecurrentBlock: T iterations of { causal MHA, gate σ(W_g[h; s]), MoE(top-k), LTI state }
-                state update is linear-time-invariant: h = α·state + (1−α)·update
-Coda:           LayerNorm + Linear(d → vocab)
-```
-
-- The **σ-gate** mixes the new hidden state with the carried latent `s`; the
-  **LTI decay α** keeps the recurrent state bounded/stable across many
-  iterations.
-- Scale presets `xs`/`small`/`medium`/`large`/`xl` (d/iters/experts scale
-  together) plus a `t1…t16` recurrence-depth sweep that varies only T.
-- Lives in `axonml-models/rusty-mythos` with train / ONNX-export / profiler
-  binaries; the recurrent block is **unrolled** for the NPU and compiled to
-  Hailo-8 / Hailo-10H HEFs via NexusFoundry (HEFs + profiler reports shipped in
-  the crate). See the crate's `RustyMythos-Whitepaper.html`.
 
 ## Shared Building Blocks
 
@@ -162,7 +114,7 @@ Coda:           LayerNorm + Linear(d → vocab)
 - `GPT2Embedding` — GPT-2 embedding stack
 
 Rotary embeddings and RMSNorm live inside the individual model modules
-where they are used (LLaMA, Mistral, Trident).
+where they are used (LLaMA, Mistral).
 
 ### `transformer`
 
@@ -173,7 +125,7 @@ building blocks used by several models.
 
 `BertConfig`, `GPT2Config`, `TransformerConfig`. Architecture-specific
 configs live alongside their models (`LLaMAConfig`, `MistralConfig`,
-`PhiConfig`, `SSMConfig`, `HydraConfig`, `ChimeraConfig`, `TridentConfig`).
+`PhiConfig`, `SSMConfig`, `HydraConfig`, `ChimeraConfig`).
 
 ### `generation`
 
@@ -271,15 +223,6 @@ let prompt = vec![15496u32, 11, 314]; // "Hello, I"
 let output = generator.generate(&prompt);
 ```
 
-### Trident (1.58-bit ternary)
-
-```rust
-use axonml_llm::{TridentConfig, TridentModel};
-let config = TridentConfig::trident_laptop(); // or ::trident_1b(), ::trident_3b()
-let model  = TridentModel::new(&config);
-// Export to GGUF I2_S for nexus-serve via axonml_llm::gguf_export.
-```
-
 ### RDT (recurrent-depth, test-time compute)
 
 ```rust
@@ -293,22 +236,6 @@ let model  = RDTForCausalLM::new(&config);
 // harder prompts. At train time it is sampled from [k_min, k_max].
 let logits = model.forward_ids(&input_ids, /*k=*/8); // input_ids: Tensor<u32>
 ```
-
-### RustyMythos (recurrent-depth + MoE, byte-level)
-
-```rust
-// crate: axonml-models/rusty-mythos
-use rusty_mythos::model::{RustyMythos, RustyMythosConfig};
-
-let config = RustyMythosConfig::from_scale("medium"); // xs/small/medium/large/xl, or t1..t16
-let model  = RustyMythos::new(&config);
-// Train: `cargo run -p rusty-mythos --bin train_rusty_mythos -- medium`
-// Export ONNX → NexusFoundry → Hailo HEF via the `export` binary.
-```
-
-Each Trident block uses `TernaryLinear` from `axonml-nn` with trained
-shadow weights + Straight-Through-Estimator, giving ~16x memory compression
-for transformer weights while keeping activations in fp32 for accuracy.
 
 ### Fine-tuning BERT
 
@@ -352,7 +279,7 @@ for (input_ids, labels) in dataset {
 ## Attention Patterns
 
 - **BERT** — bidirectional; every token attends to every other.
-- **GPT-2 / LLaMA / Phi / Trident** — causal; token *t* attends to tokens
+- **GPT-2 / LLaMA / Phi** — causal; token *t* attends to tokens
   *0..=t*.
 - **Mistral** — sliding-window causal; token *t* attends to tokens
   *max(0, t-W)..=t*.

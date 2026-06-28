@@ -19,9 +19,9 @@ description: "Building neural networks with AxonML"
 > **Performance (0.6.5):** layer forward and backward run device-native — GPU
 > tensors stay on-device, and on CPU the matmul / norm / activation / attention
 > math and the full GradFn backward family are rayon-parallel (see
-> [Training → Device-Native Execution](training.md)). `TernaryLinear` (1.58-bit)
-> additionally has GPU forward + backward kernels with host-staged activations
-> for billion-parameter training.
+> [Training → Device-Native Execution](training.md)). The 1.58-bit ternary
+> quantized linear (BitNet b1.58) additionally has GPU forward + backward
+> kernels with host-staged activations for billion-parameter training.
 
 ## Module Trait
 
@@ -139,7 +139,7 @@ let gn_opts = GroupNorm::with_options(32, 256, /*eps=*/1e-5, /*affine=*/true);
 let in_norm = InstanceNorm2d::new(64);
 ```
 
-`RMSNorm` is also available (used by LLaMA / Mistral / Trident).
+`RMSNorm` is also available (used by LLaMA / Mistral).
 
 ## Activation Layers
 
@@ -230,7 +230,7 @@ let dec_layer = TransformerDecoderLayer::new(512, 8);
 The `axonml_nn::layers` module also provides:
 
 - `Embedding` — lookup table
-- `TernaryLinear`, `PackedTernaryWeights` — 1.58-bit quantized Linear (Trident / BitNet)
+- 1.58-bit ternary quantized Linear (BitNet b1.58)
 - `SparseLinear`, `GroupSparsity`, `LotteryTicket` — differentiable structured sparsity (novel to AxonML)
 - `MoELayer`, `MoERouter`, `Expert` — mixture-of-experts
 - `GCNConv`, `GATConv` — graph neural networks
@@ -326,7 +326,7 @@ let s1b = SmoothL1Loss::with_beta(0.1);
 let nll = NLLLoss::new();
 ```
 
-Specialty losses live in `axonml-vision::losses` (`FocalLoss`, `GIoULoss`, `UncertaintyLoss`, etc.) and `axonml-vision::models::biometric::losses` (`ArgusLoss`, `EchoLoss`, `ThemisLoss`, `CrystallizationLoss`, etc.). See [Object Detection Training]({% link detection.md %}) and [Training]({% link training.md %}).
+Specialty detection losses live in `axonml-vision::losses` (`FocalLoss`, `GIoULoss`, `UncertaintyLoss`, etc.). See [Object Detection Training]({% link detection.md %}) and [Training]({% link training.md %}).
 
 ## Saving and Loading
 

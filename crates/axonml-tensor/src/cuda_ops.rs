@@ -3993,7 +3993,7 @@ impl Tensor<f32> {
     // Transformer Per-Layer Ops (GPU)
     //
     // Decode-step kernels added in axonml-core/cuda_kernels/transformer_ops.cu.
-    // These let nexus-serve keep activations on the device through the whole
+    // These let axonml-serve keep activations on the device through the whole
     // layer instead of round-tripping CPU↔GPU after every matmul.
     // =========================================================================
 

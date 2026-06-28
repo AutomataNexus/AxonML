@@ -9,11 +9,11 @@ layers, activations, loss functions, initializers, and container modules.
 Every layer implements `Module`, with forward pass, parameter aggregation,
 train/eval mode, and device placement.
 
-`TernaryLinear` (1.58-bit) has GPU forward + backward kernels with GPU-resident
-ternary quantization and host-staging of saved activations during backward to
-cut peak VRAM at billion-parameter scale (this is what powers Trident b1.58
-training). On CPU, the layer/GradFn backward paths are rayon-parallel as of
-0.6.5 — see [autograd](../autograd/README.md).
+The 1.58-bit ternary quantized linear (BitNet b1.58) has GPU forward + backward
+kernels with GPU-resident ternary quantization and host-staging of saved
+activations during backward to cut peak VRAM at billion-parameter scale. On
+CPU, the layer/GradFn backward paths are rayon-parallel as of 0.6.5 — see
+[autograd](../autograd/README.md).
 
 ## Core Concepts
 
@@ -62,7 +62,7 @@ sequentially and aggregates parameters + mode switches.
 | Embedding       | `Embedding`                                                                             |
 | Residual        | `ResidualBlock`                                                                         |
 | MoE             | `MoELayer`, `MoERouter`, `Expert`                                                       |
-| Quantized       | `TernaryLinear`, `PackedTernaryWeights` (BitNet b1.58)                                  |
+| Quantized       | 1.58-bit ternary quantized linear (BitNet b1.58)                                        |
 | Graph           | `GCNConv`, `GATConv`                                                                    |
 | Spectral        | `FFT1d`, `STFT`                                                                         |
 | Sparse          | `SparseLinear`, `GroupSparsity`, `LotteryTicket` (differentiable structured sparsity)   |

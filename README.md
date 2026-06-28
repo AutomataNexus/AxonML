@@ -128,25 +128,14 @@ untouched; distributed training is currently deprioritized.
   - Image transforms (Resize, Crop, Flip, Normalize)
   - MNIST/CIFAR loaders (real data + synthetic), COCO + WIDER FACE
   - LeNet, SimpleCNN, ResNet-18/34, VGG-11/13/16/19, Vision Transformer
-  - **Aegis Identity** *(novel)* — Unified biometric framework (~362K params, <2MB) with 5 novel architectures:
-    - **Mnemosyne** - Face identity via temporal crystallization (GRU attractor convergence, liveness detection)
-    - **Ariadne** - Fingerprint via ridge event fields (Gabor wavelet banks, singularity detection)
-    - **Echo** - Voice via predictive speaker residuals (identity = what can't be predicted)
-    - **Argus** - Iris via polar-native radial phase encoding (rotation-invariant matching)
-    - **Themis** - Multimodal belief propagation fusion (uncertainty-aware, not score averaging)
-    - Forensic verification, batch ops, drift detection, quality gating, operating curves
-    - Each modality deployable independently on Raspberry Pi
+  - **Object Detection** — `BlazeFace` and `RetinaFace` (face detection), `DETR` (transformer-based), `NanoDet` (mobile-class), plus the shared `FPN` feature-pyramid neck
+  - **Dense prediction / anomaly / VQA** — `DPT` + `FastDepth` (monocular depth), `PatchCore` + `StudentTeacher` (anomaly detection), `VQAModel` (visual question answering)
   - **Object Detection Training Infrastructure** *(novel)*
     - Image I/O: `load_image`, `load_image_resized`, `rgb_bytes_to_tensor` (CHW, [0,1] normalized)
     - Dataset loaders: `CocoDataset` (COCO JSON, category remapping), `WiderFaceDataset` (WIDER FACE annotations)
     - Detection losses: `FocalLoss`, `GIoULoss`, `UncertaintyLoss`, `compute_centerness`
-    - FCOS target assignment (multi-scale) and Phantom target assignment (single-scale)
-    - Training loops: `nexus_training_step()`, `phantom_training_step()` (full forward→loss→backward→step)
+    - Anchor-free target assignment: `assign_fcos_targets` (multi-scale FCOS) and `assign_single_scale_targets` (single-scale)
     - Evaluation: `compute_ap`, `compute_map`, `compute_coco_map` (AP/mAP at IoU thresholds)
-  - **Nexus** *(novel)* — Dual-pathway object detector (~430K params) with predictive coding, persistent GRU object memory, uncertainty quantification, and 3-scale anchor-free heads
-  - **Phantom** *(novel)* — Event-driven face detector (~126K params) with sparse processing, GRU face tracking, and confidence accumulation. Compute drops to ~5% in steady state
-  - **NightVision** *(novel)* — Multi-domain thermal IR detector (~2.6M params) with CSP backbone, Thermal FPN with domain-adaptive feature modulation, and YOLOX decoupled heads. Supports 5 domains: Wildlife, Human, Interstellar, Vehicle, and General
-  - **Biometric GPU Training Pipelines** — Full GPU-accelerated training for Mnemosyne (face), Argus (iris), and Ariadne (fingerprint) with checkpoint/resume support, trained on LFW, CASIA-Iris, and FVC2000 datasets
 
 - **Audio Processing** (`axonml-audio`)
   - MelSpectrogram, MFCC transforms
@@ -182,7 +171,7 @@ untouched; distributed training is currently deprioritized.
   - INT8 (Q8_0), INT4 (Q4_0, Q4_1, Q4_K), INT5 (Q5_0, Q5_1), INT6 (Q6_K) formats
   - Half-precision (F16) support
   - Block-based quantization with calibration
-  - **BitNet I2_S 1.58-bit ternary** *(novel)* — `matmul_i2s_i8` with AVX-VNNI fused dequant, int8 activation quantizer, 128-weight blocks; powers the Trident sub-2-bit LLM stack
+  - **BitNet I2_S 1.58-bit ternary** — `matmul_i2s_i8` with AVX-VNNI fused dequant, int8 activation quantizer, 128-weight blocks; ~16x compression for sub-2-bit LLM weights
   - ~8x model size reduction with Q4, ~16x with I2_S
 
 - **Kernel Fusion** (`axonml-fusion`)
@@ -311,7 +300,7 @@ axonml kaggle search "image classification"  # Search datasets
 axonml kaggle download owner/dataset         # Download dataset
 axonml kaggle list                           # List downloaded datasets
 
-# Dataset Management (NexusConnectBridge)
+# Dataset Management
 axonml dataset list                          # List available datasets
 axonml dataset list --source kaggle          # List from specific source
 axonml dataset info mnist                    # Show dataset details
@@ -450,7 +439,7 @@ axon logs -f
   - CLI: `axonml kaggle login/status/search/download/list`
 
 - **Dataset Management** (`axonml-cli`)
-  - NexusConnectBridge API integration
+  - Dataset bridge API integration
   - Built-in datasets (MNIST, CIFAR, Iris, Wine, etc.)
   - Multiple data sources (Kaggle, UCI, data.gov)
   - CLI: `axonml dataset list/info/search/download/sources`
@@ -478,7 +467,7 @@ axon logs -f
   - **SSM / Mamba** + `SSMForCausalLM` wrapper
   - **Hydra** *(novel)* — hybrid SSM + windowed-attention interleaved layers
   - **Chimera** *(novel)* — sparse MoE (top-2 of 4 experts, load-balance loss) + Differential Attention
-  - **Trident** *(novel)* — 1.58-bit ternary transformer with GQA + BitNet STE; training + inference fully wired
+  - **RDT** *(novel)* — Recurrent-Depth Transformer (Huginn-style test-time compute): iterate a shared core block K times in latent space, K a per-request compute knob
   - Shared infra: `FlashAttention`, `KVCache` / `LayerKVCache`, HuggingFace loader, state-dict mapping, `HFTokenizer`
   - Text generation with top-k, top-p, temperature sampling
 
@@ -631,7 +620,7 @@ AxonML powers real-time predictive maintenance on HVAC systems across commercial
 
 **Stack:** AxonML training (CPU) → `.axonml` model files → cross-compiled ARM inference daemons (`armv7-unknown-linux-musleabihf`) → managed services on Raspberry Pi → local REST API
 
-Each daemon runs pure-tensor inference (no autograd overhead), polls local NexusEdge for sensor data, maintains rolling time-series buffers, and exposes anomaly scores + failure predictions via HTTP.
+Each daemon runs pure-tensor inference (no autograd overhead), polls the local edge controller for sensor data, maintains rolling time-series buffers, and exposes anomaly scores + failure predictions via HTTP.
 
 ## Architecture
 
@@ -639,7 +628,7 @@ Each daemon runs pure-tensor inference (no autograd overhead), polls local Nexus
 +------------------------------------------------------------------+
 |                        axonml (main crate)                       |
 +------------------------------------------------------------------+
-|  axonml-hvac   |  axonml-train  |  axonml-vision  |  axonml-audio |
+|  axonml-train  |  axonml-vision  |  axonml-audio  |
 +----------------+----------------+-----------------+----------------+
 |  axonml-text   | axonml-distributed |  axonml-llm  |  axonml-jit  |
 +----------------+--------------------+--------------+---------------+
@@ -676,14 +665,14 @@ Each daemon runs pure-tensor inference (no autograd overhead), polls local Nexus
 |  Axum REST API: Auth, Training Runs, Model Registry, Metrics       |
 +--------------------------------------------------------------------+
 
-+----------------+----------------+----------------+----------------+
-|  llm-training  | biometric-     |  nexus-serve   |  nexus-agent   |
-|                | training       |                |                |
-|  9 LM train    | Aegis biometric| Pure-Rust LLM  | 8 agents × 22  |
-|  binaries      | GPU pipelines  | inference svr  | tools (Anthrop.|
-|  + lifecycle   | (argus/ariadne | (GGUF + CUDA + | Messages API)  |
-|  (pause/resume)| /mnemosyne)    | Anthropic SSE) |                |
-+----------------+----------------+----------------+----------------+
++----------------+--------------------------------------------------+
+|  llm-training  |             AxonML inference server               |
+|                |                                                  |
+|  LM training   |  Pure-Rust LLM inference server                  |
+|  binaries      |  (GGUF + CUDA Q4_K/Q6_K + Anthropic SSE)         |
+|  + lifecycle   |                                                  |
+|  (pause/resume)|                                                  |
++----------------+--------------------------------------------------+
 ```
 
 ## Building from Source
@@ -693,7 +682,7 @@ Each daemon runs pure-tensor inference (no autograd overhead), polls local Nexus
 - Rust 1.85 or later
 - Cargo
 - Node.js (for PM2 process management)
-- Aegis-DB (document store database)
+- A document-store database backend
 
 ### Build
 
@@ -750,7 +739,7 @@ pm2 stop axonml-server                     # Stop server
 
 ### Database Initialization
 
-AxonML uses Aegis-DB as its document store.
+AxonML uses a document-store database backend.
 
 ```bash
 # Initialize database (run once or to reinitialize)
@@ -769,7 +758,7 @@ AxonML uses Aegis-DB as its document store.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RUST_LOG` | `info` | Log level (trace, debug, info, warn, error) |
-| `AEGIS_URL` | `http://127.0.0.1:7001` | Aegis-DB connection URL |
+| `BACKEND_URL` | `http://127.0.0.1:7001` | Database backend connection URL |
 | `RESEND_API_KEY` | - | Email service API key |
 | `AXONML_JWT_SECRET` | - | JWT signing secret (**required**, must be ≥32 chars; server refuses to boot otherwise) |
 | `AXONML_DEVOPS_PASSWORD` | - | If set, seeds the DevOps@automatanexus.com admin on first boot |
@@ -791,10 +780,10 @@ Axonml/
 │   ├── axonml-core/       # Device, storage, dtypes, GPU backends (CPU/CUDA/Vulkan/Metal/WebGPU)
 │   ├── axonml-tensor/     # Tensor ops (+ lazy tensor, sparse COO, CUDA ops)
 │   ├── axonml-autograd/   # Automatic differentiation (+ AMP, checkpointing, graph inspection)
-│   ├── axonml-nn/         # Neural network modules (+ TernaryLinear, MoE, sparse, graph, FFT)
+│   ├── axonml-nn/         # Neural network modules (+ ternary BitNet b1.58, MoE, sparse, graph, FFT)
 │   ├── axonml-optim/      # Optimizers & schedulers (+ LAMB, GradScaler, health monitor)
 │   ├── axonml-data/       # Data loading
-│   ├── axonml-vision/     # Computer vision (ResNet/VGG/ViT/Aegis biometric/Helios/Nexus/Phantom/NightVision/Aegis3D)
+│   ├── axonml-vision/     # Computer vision (ResNet/VGG/ViT/BlazeFace/RetinaFace/DETR/NanoDet/depth/anomaly/VQA)
 │   ├── axonml-audio/      # Audio processing (MelSpectrogram, MFCC, pitch/time stretch)
 │   ├── axonml-text/       # NLP utilities (BPE / WordPiece / Unigram tokenizers)
 │   ├── axonml-distributed/# Distributed training (DDP, FSDP, tensor + pipeline parallel, NCCL)
@@ -804,19 +793,15 @@ Axonml/
 │   ├── axonml-fusion/     # Kernel fusion optimization
 │   ├── axonml-jit/        # JIT compilation (Cranelift)
 │   ├── axonml-profile/    # Profiling tools
-│   ├── axonml-llm/        # 9 LLM architectures (BERT, GPT-2, LLaMA, Mistral, Phi, SSM, Hydra, Chimera, Trident)
-│   ├── axonml-hvac/       # HVAC predictive models (Panoptes)
+│   ├── axonml-llm/        # 9 LLM architectures (BERT, GPT-2, LLaMA, Mistral, Phi, SSM, Hydra, Chimera, RDT)
 │   ├── axonml-train/      # Training glue (Trainer, callbacks, benchmarks)
 │   ├── axonml-cli/        # Command line interface
 │   ├── axonml-tui/        # Terminal user interface
 │   ├── axonml-dashboard/  # Leptos/WASM web dashboard
 │   ├── axonml-server/     # Axum API server
 │   └── axonml/            # Main umbrella crate
-├── llm-training/          # 9 LM training binaries + train_ctl + TrainingLifecycle (pause/resume/stop)
-├── biometric-training/    # Aegis biometric GPU training (argus, ariadne, mnemosyne)
-├── nexus-serve/           # Pure-Rust LLM inference server (GGUF, CUDA Q4_K/Q6_K, Anthropic SSE)
-├── nexus-agent/           # 8 AI agents × 22 tools (Anthropic Messages API) + 3 desktop tickers
-├── papers/trident-blog/   # Trident 1.58-bit LLM companion code (train, generate, compare, bench)
+├── llm-training/          # LM training binaries + train_ctl + TrainingLifecycle (pause/resume/stop)
+├── axonml-serve/          # Pure-Rust LLM inference server (GGUF, CUDA Q4_K/Q6_K, Anthropic SSE)
 ├── docs/                  # Per-module documentation (Jekyll-rendered)
 └── crates/axonml/examples/# Working examples
     ├── simple_training.rs # XOR with MLP
@@ -828,7 +813,7 @@ Axonml/
 
 - [Architecture Guide](Axonml_Architecture.md)
 - [API Documentation](docs/) - Per-module documentation
-- [Object Detection Training](docs/detection.md) - Detection training guide (Nexus, Phantom, COCO, WIDER FACE)
+- [Object Detection Training](docs/detection.md) - Detection training guide (RetinaFace, BlazeFace, COCO, WIDER FACE)
 - [Examples](examples/) - Working code examples
 - [Changelog](CHANGELOG.md) - Version history
 

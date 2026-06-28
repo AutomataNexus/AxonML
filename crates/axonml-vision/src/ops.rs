@@ -9,7 +9,7 @@
 //! `Upsample` / `interpolate_var()` (differentiable variants with `InterpolateBackward`).
 //! `roi_align()` extracts fixed-size features from RoI regions via bilinear sampling.
 //! Detection output types: `Detection`, `FaceDetection`, `AnomalyResult`,
-//! `NexusDetection`, `PhantomFaceDetection`, `DepthMap`. Also provides
+//! `TrackedDetection`, `TrackedFaceDetection`, `DepthMap`. Also provides
 //! `positional_encoding_2d()` for DETR-style spatial positional embeddings.
 //!
 //! # File
@@ -681,9 +681,9 @@ pub struct AnomalyResult {
     pub heatmap: Option<Tensor<f32>>,
 }
 
-/// A Nexus detection with uncertainty quantification.
+/// A detection with uncertainty quantification and tracking.
 #[derive(Debug, Clone)]
-pub struct NexusDetection {
+pub struct TrackedDetection {
     /// Bounding box mean in `(x1, y1, x2, y2)` format.
     pub bbox_mean: [f32; 4],
     /// Bounding box log-variance (aleatoric uncertainty) for each coordinate.
@@ -698,9 +698,9 @@ pub struct NexusDetection {
     pub frames_tracked: u32,
 }
 
-/// A Phantom temporal face detection with tracking.
+/// A temporal face detection with tracking.
 #[derive(Debug, Clone)]
-pub struct PhantomFaceDetection {
+pub struct TrackedFaceDetection {
     /// Bounding box in `(x1, y1, x2, y2)` format.
     pub bbox: [f32; 4],
     /// Accumulated confidence score (builds over time).

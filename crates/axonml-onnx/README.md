@@ -25,7 +25,7 @@ in-crate (no `prost-derive` generated types — the structs live in
 ## Features
 
 - **ONNX Import** — `import_onnx(path)` and `import_onnx_bytes(bytes)` produce a ready-to-run `OnnxModel`
-- **ONNX Export** — `OnnxExporter` builder (`add_input`, `add_output`, `add_node`, `add_initializer`, `to_proto`, `to_bytes`, `export`) + `export_feedforward` helper, which now accepts scale-parameterized layer lists for architecture families (e.g. RustyMythos scale presets, HVAC model variants)
+- **ONNX Export** — `OnnxExporter` builder (`add_input`, `add_output`, `add_node`, `add_initializer`, `to_proto`, `to_bytes`, `export`) + `export_feedforward` helper, which now accepts scale-parameterized layer lists for architecture families (e.g. scale-preset model variants)
 - **Operator Support** — 40+ operators with dispatch via `create_operator(node)` returning `Box<dyn OnnxOperator>`
 - **Initializers** — f32 weight tensors threaded through graph execution via `initializer_map`
 - **State-Dict Bridge** — `OnnxModel::to_state_dict()` emits an `axonml_serialize::StateDict`

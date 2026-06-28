@@ -599,7 +599,7 @@ impl SSMForCausalLM {
     /// Forward pass with shifted cross-entropy loss for next-token prediction.
     ///
     /// Returns `(logits, loss)`. Shifts logits/labels internally so `logits[:, :-1]`
-    /// predicts `labels[:, 1:]`, matching the GPT-2 / Hydra / Chimera / Trident
+    /// predicts `labels[:, 1:]`, matching the standard causal-LM
     /// `forward_with_loss` pattern. Out-of-range label indices are clamped to 0.
     pub fn forward_with_loss(
         &self,
@@ -674,9 +674,8 @@ impl SSMForCausalLM {
 impl Module for SSMForCausalLM {
     /// `Module::forward` treats `input` as an already-embedded hidden-state
     /// tensor `[B, S, d_model]` and runs the block stack + final norm + LM head,
-    /// matching the convention used by [`LLaMAForCausalLM`](crate::llama::LLaMAForCausalLM)
-    /// and [`HydraModel`](crate::hydra::HydraModel). For token-ID input use
-    /// [`SSMForCausalLM::forward_ids`].
+    /// matching the convention used by [`LLaMAForCausalLM`](crate::llama::LLaMAForCausalLM).
+    /// For token-ID input use [`SSMForCausalLM::forward_ids`].
     fn forward(&self, input: &Variable) -> Variable {
         let mut hidden = input.clone();
         for block in &self.blocks {
@@ -749,7 +748,7 @@ mod tests {
 
     #[test]
     fn test_ssm_for_causal_lm_forward_and_loss() {
-        // Mirrors the test_trident_forward_with_loss pattern: a tiny [2, 3]
+        // Mirrors the forward_with_loss test pattern: a tiny [2, 3]
         // input, check the logits shape matches [batch, seq, vocab] and the
         // loss is a positive scalar.
         let config = SSMConfig::from_d_model(32, 1000);

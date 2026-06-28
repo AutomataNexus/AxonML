@@ -1,6 +1,6 @@
 //! Database Schema Initialization — Collection Bootstrap and Seed Users
 //!
-//! Defines the canonical collection name constants for all Aegis-DB document
+//! Defines the canonical collection name constants for all database document
 //! collections used by the AxonML server and provides `Schema::init()` to
 //! create them on startup. Collections are created idempotently (409 Conflict
 //! is silently ignored by `Database::create_collection`).

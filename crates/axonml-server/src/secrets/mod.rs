@@ -62,10 +62,10 @@ impl SecretKey {
     /// JWT signing secret (min 32 characters)
     pub const JWT_SECRET: &'static str = "jwt_secret";
 
-    /// Database username for Aegis-DB
+    /// Database username for the database
     pub const DB_USERNAME: &'static str = "db_username";
 
-    /// Database password for Aegis-DB
+    /// Database password for the database
     pub const DB_PASSWORD: &'static str = "db_password";
 
     /// Resend email API key

@@ -3,7 +3,7 @@
 //! Binary entry point for the AxonML HTTP/WebSocket server. Parses CLI flags
 //! via `clap`, initializes the tracing subscriber, loads `Config` (with optional
 //! file override), wires a `SecretsManager` with Vault and environment
-//! backends, connects to Aegis-DB, initializes the schema, provisions the
+//! backends, connects to the database, initializes the schema, provisions the
 //! default admin (random password written to a temp file) and an optional
 //! DevOps admin from `AXONML_DEVOPS_PASSWORD`, constructs `JwtAuth`,
 //! `EmailService`, `InferenceServer`, `ModelPool`, `InferenceMetrics`,
@@ -178,12 +178,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_username = secrets_manager
         .get_secret(secrets::SecretKey::DB_USERNAME)
         .await
-        .unwrap_or_else(|_| config.aegis.username.clone());
+        .unwrap_or_else(|_| config.backend.username.clone());
 
     let db_password = secrets_manager
         .get_secret(secrets::SecretKey::DB_PASSWORD)
         .await
-        .unwrap_or_else(|_| config.aegis.password.clone());
+        .unwrap_or_else(|_| config.backend.password.clone());
 
     let email_api_key = secrets_manager
         .get_secret_optional(secrets::SecretKey::RESEND_API_KEY)
@@ -205,24 +205,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Database Connection and Schema Initialization
     // -------------------------------------------------------------------------
 
-    // Connect to Aegis-DB with secrets-loaded credentials
-    info!("Connecting to Aegis-DB at {}", config.aegis_url());
-    let mut aegis_config = config.aegis.clone();
-    aegis_config.username = db_username;
-    aegis_config.password = db_password;
+    // Connect to the database with secrets-loaded credentials
+    info!("Connecting to the database at {}", config.backend_url());
+    let mut backend_config = config.backend.clone();
+    backend_config.username = db_username;
+    backend_config.password = db_password;
 
-    let db = match Database::new(&aegis_config).await {
+    let db = match Database::new(&backend_config).await {
         Ok(db) => {
-            info!("Connected to Aegis-DB");
+            info!("Connected to the database");
             db
         }
         Err(e) => {
-            error!("Failed to connect to Aegis-DB: {}", e);
+            error!("Failed to connect to the database: {}", e);
             error!(
-                "Make sure Aegis-DB is running on {}:{}",
-                config.aegis.host, config.aegis.port
+                "Make sure the database is running on {}:{}",
+                config.backend.host, config.backend.port
             );
-            error!("Start it with: aegis start");
+            error!("Ensure your database backend is started.");
             return Err(e.into());
         }
     };

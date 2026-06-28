@@ -1,8 +1,8 @@
 //! Training Runs Database Operations — Run Lifecycle and Metrics Persistence
 //!
 //! Provides document-store-backed persistence for training runs via
-//! `RunRepository`. Runs are stored in the `axonml_runs` Aegis-DB document
-//! collection, with metric time series written to the Aegis-DB time series
+//! `RunRepository`. Runs are stored in the `axonml_runs` database document
+//! collection, with metric time series written to the database time series
 //! store.
 //!
 //! Key types:
