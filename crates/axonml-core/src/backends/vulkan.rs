@@ -57,23 +57,26 @@ struct VulkanGlobalState {
 }
 
 #[cfg(feature = "vulkan")]
-unsafe impl Send for VulkanGlobalState {}
-#[cfg(feature = "vulkan")]
-unsafe impl Sync for VulkanGlobalState {}
-
-#[cfg(feature = "vulkan")]
 static VULKAN_STATE: OnceLock<Option<VulkanGlobalState>> = OnceLock::new();
 
 #[cfg(feature = "vulkan")]
 fn get_vulkan_state() -> Option<&'static VulkanGlobalState> {
-    VULKAN_STATE
-        .get_or_init(|| unsafe { init_vulkan().ok() })
-        .as_ref()
+    VULKAN_STATE.get_or_init(|| init_vulkan().ok()).as_ref()
 }
 
+/// Load the Vulkan loader, create an instance and record every physical
+/// device's properties.
+///
+/// Takes no input, so there is no precondition a caller could violate: every
+/// requirement the Vulkan API has is established inside, at the call that
+/// needs it. That is why this is a safe function with internal unsafe blocks
+/// rather than an unsafe fn.
 #[cfg(feature = "vulkan")]
-unsafe fn init_vulkan() -> Result<VulkanGlobalState, vk::Result> {
-    let entry = Entry::load().map_err(|_| vk::Result::ERROR_INITIALIZATION_FAILED)?;
+fn init_vulkan() -> Result<VulkanGlobalState, vk::Result> {
+    // SAFETY: loading the system Vulkan loader runs its initialisers, which is
+    // why ash marks this unsafe. There is no memory-safety obligation on our
+    // side; we are trusting the installed loader, as any Vulkan program must.
+    let entry = unsafe { Entry::load() }.map_err(|_| vk::Result::ERROR_INITIALIZATION_FAILED)?;
 
     let app_info = vk::ApplicationInfo::default()
         .application_name(c"Axonml")
@@ -84,23 +87,30 @@ unsafe fn init_vulkan() -> Result<VulkanGlobalState, vk::Result> {
 
     let create_info = vk::InstanceCreateInfo::default().application_info(&app_info);
 
-    let instance = entry.create_instance(&create_info, None)?;
+    // SAFETY: create_info is a fully initialised InstanceCreateInfo, and the
+    // app_info it points to is a local that outlives this call. No allocator
+    // callbacks are passed.
+    let instance = unsafe { entry.create_instance(&create_info, None) }?;
 
-    let physical_devices = instance.enumerate_physical_devices()?;
+    // SAFETY: instance was just created above and is valid for its lifetime.
+    let physical_devices = unsafe { instance.enumerate_physical_devices() }?;
 
     let device_properties: Vec<_> = physical_devices
         .iter()
-        .map(|&pd| instance.get_physical_device_properties(pd))
+        // SAFETY: each pd came from this instance's enumerate_physical_devices.
+        .map(|&pd| unsafe { instance.get_physical_device_properties(pd) })
         .collect();
 
     let device_memory_properties: Vec<_> = physical_devices
         .iter()
-        .map(|&pd| instance.get_physical_device_memory_properties(pd))
+        // SAFETY: each pd came from this instance's enumerate_physical_devices.
+        .map(|&pd| unsafe { instance.get_physical_device_memory_properties(pd) })
         .collect();
 
     let device_features: Vec<_> = physical_devices
         .iter()
-        .map(|&pd| instance.get_physical_device_features(pd))
+        // SAFETY: each pd came from this instance's enumerate_physical_devices.
+        .map(|&pd| unsafe { instance.get_physical_device_features(pd) })
         .collect();
 
     // entry is only needed for instance creation, not stored

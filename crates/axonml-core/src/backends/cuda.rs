@@ -104,13 +104,6 @@ pub struct CudaBackend {
     device_index: usize,
 }
 
-// Implement Send and Sync for CudaBackend
-// Safe because CudaContext/CudaStream and CudaBlas are internally synchronized
-#[cfg(feature = "cuda")]
-unsafe impl Send for CudaBackend {}
-#[cfg(feature = "cuda")]
-unsafe impl Sync for CudaBackend {}
-
 #[cfg(feature = "cuda")]
 impl std::fmt::Debug for CudaBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -5524,6 +5517,11 @@ pub struct PinnedBuffer {
     len: usize,
 }
 
+// SAFETY: PinnedBuffer uniquely owns one cuMemAllocHost allocation and frees it
+// on drop, so it has the ownership shape of Vec<f32>. as_slice_mut and
+// as_mut_ptr both take &mut self, so a shared &PinnedBuffer can only read the
+// allocation. Moving it moves the ownership (Send); sharing it permits only
+// concurrent reads (Sync).
 #[cfg(feature = "cuda")]
 unsafe impl Send for PinnedBuffer {}
 #[cfg(feature = "cuda")]

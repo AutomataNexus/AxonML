@@ -76,7 +76,12 @@ enum CompiledKind {
     },
 }
 
-// Safety: The native code pointer is never dereferenced without proper synchronization
+// SAFETY: code_ptr points into a Cranelift JITModule that compile_native
+// deliberately leaks with mem::forget after finalize_definitions, so the code
+// it addresses is immutable and lives for the rest of the process. A pointer to
+// 'static immutable memory can be moved between threads (Send) and called from
+// any number of them at once (Sync); there is nothing to synchronise. The
+// Interpreted variant holds no pointer at all.
 unsafe impl Send for CompiledKind {}
 unsafe impl Sync for CompiledKind {}
 

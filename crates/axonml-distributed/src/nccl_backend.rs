@@ -250,11 +250,6 @@ struct NcclLib {
     cuda_memcpy: FnCudaMemcpy,
 }
 
-// Safety: NcclLib holds function pointers loaded from shared libraries.
-// The NCCL and CUDA APIs are thread-safe for distinct communicators/streams.
-unsafe impl Send for NcclLib {}
-unsafe impl Sync for NcclLib {}
-
 impl NcclLib {
     /// Load NCCL and CUDA runtime libraries dynamically.
     fn load() -> Result<Self, NcclError> {
@@ -390,7 +385,7 @@ impl NcclLib {
     /// Returns the NCCL version code.
     fn version(&self) -> Result<i32, NcclError> {
         let mut version: c_int = 0;
-        let result = unsafe { (self.get_version)(&mut version) };
+        let result = unsafe { (self.get_version)(&raw mut version) };
         check_nccl(result, self)?;
         Ok(version)
     }
@@ -506,7 +501,7 @@ impl GpuBuffer {
     fn alloc(lib: &Arc<NcclLib>, count: usize) -> Result<Self, NcclError> {
         let size_bytes = count * std::mem::size_of::<f32>();
         let mut ptr: *mut c_void = ptr::null_mut();
-        let code = unsafe { (lib.cuda_malloc)(&mut ptr, size_bytes) };
+        let code = unsafe { (lib.cuda_malloc)(&raw mut ptr, size_bytes) };
         check_cuda(code, "cudaMalloc")?;
         Ok(Self {
             ptr,
@@ -516,7 +511,7 @@ impl GpuBuffer {
     }
 
     /// Copy host data to this GPU buffer.
-    fn copy_from_host(&self, data: &[f32]) -> Result<(), NcclError> {
+    fn copy_from_host(&mut self, data: &[f32]) -> Result<(), NcclError> {
         let size = (data.len() * std::mem::size_of::<f32>()).min(self.size_bytes);
         let code = unsafe {
             (self.lib.cuda_memcpy)(
@@ -554,8 +549,10 @@ impl Drop for GpuBuffer {
     }
 }
 
-// Safety: GPU buffers are accessed through NCCL collectives which are
-// synchronized via CUDA streams.
+// SAFETY: GpuBuffer uniquely owns one cudaMalloc allocation and frees it on
+// drop, so moving it to another thread moves that ownership (Send). Every
+// method that writes the allocation takes &mut self, so a shared &GpuBuffer
+// can only read it, and concurrent reads of device memory are sound (Sync).
 unsafe impl Send for GpuBuffer {}
 unsafe impl Sync for GpuBuffer {}
 
@@ -589,11 +586,20 @@ pub struct NcclBackend {
     rank: usize,
     world_size: usize,
     device: i32,
+    /// Held for the duration of every operation that touches `comm` or
+    /// `stream`. NCCL permits one in-flight operation per communicator, and
+    /// this struct owns exactly one stream, so `&self` from several threads
+    /// must serialise here or it is a data race inside NCCL.
+    op_lock: std::sync::Mutex<()>,
 }
 
-// Safety: NCCL communicators are thread-safe when used with distinct streams
-// or properly synchronized. NcclBackend holds a unique communicator and stream
-// per rank, and NCCL collectives internally handle synchronization.
+// SAFETY: comm and stream are raw handles owned by this struct and released on
+// drop, so moving the struct moves that ownership (Send). They are only ever
+// used while op_lock is held, so any number of threads holding &NcclBackend
+// reduce to one operation at a time on the communicator, which is the contract
+// NCCL requires (Sync). Without the lock this impl would be unsound: every
+// collective takes &self and NCCL does not permit concurrent operations on one
+// communicator.
 unsafe impl Send for NcclBackend {}
 unsafe impl Sync for NcclBackend {}
 
@@ -605,7 +611,7 @@ impl NcclBackend {
     pub fn generate_unique_id() -> Result<NcclUniqueId, NcclError> {
         let lib = NcclLib::load()?;
         let mut id = NcclUniqueId::default();
-        let result = unsafe { (lib.get_unique_id)(&mut id) };
+        let result = unsafe { (lib.get_unique_id)(&raw mut id) };
         check_nccl(result, &lib)?;
         Ok(id)
     }
@@ -634,13 +640,13 @@ impl NcclBackend {
 
         // Create CUDA stream
         let mut stream: CudaStream = ptr::null_mut();
-        let code = unsafe { (lib.cuda_stream_create)(&mut stream) };
+        let code = unsafe { (lib.cuda_stream_create)(&raw mut stream) };
         check_cuda(code, "cudaStreamCreate")?;
 
         // Initialize NCCL communicator
         let mut comm: NcclComm = ptr::null_mut();
         let result = unsafe {
-            (lib.comm_init_rank)(&mut comm, world_size as c_int, unique_id, rank as c_int)
+            (lib.comm_init_rank)(&raw mut comm, world_size as c_int, unique_id, rank as c_int)
         };
         check_nccl(result, &lib)?;
 
@@ -651,6 +657,7 @@ impl NcclBackend {
             rank,
             world_size,
             device,
+            op_lock: std::sync::Mutex::new(()),
         })
     }
 
@@ -684,13 +691,13 @@ impl NcclBackend {
             check_cuda(code, "cudaSetDevice")?;
 
             // Create stream on this device
-            let code = unsafe { (lib.cuda_stream_create)(&mut streams[rank]) };
+            let code = unsafe { (lib.cuda_stream_create)(&raw mut streams[rank]) };
             check_cuda(code, "cudaStreamCreate")?;
 
             // Init communicator (grouped)
             let result = unsafe {
                 (lib.comm_init_rank)(
-                    &mut comms[rank],
+                    &raw mut comms[rank],
                     world_size as c_int,
                     unique_id,
                     rank as c_int,
@@ -710,6 +717,7 @@ impl NcclBackend {
                 rank,
                 world_size,
                 device,
+                op_lock: std::sync::Mutex::new(()),
             });
         }
 
@@ -734,6 +742,7 @@ impl NcclBackend {
     ///
     /// Blocks until all previously enqueued NCCL operations complete.
     pub fn synchronize(&self) -> Result<(), NcclError> {
+        let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let code = unsafe { (self.lib.cuda_stream_synchronize)(self.stream) };
         check_cuda(code, "cudaStreamSynchronize")
     }
@@ -754,7 +763,7 @@ impl NcclBackend {
         let code = unsafe { (self.lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice")?;
 
-        let send_buf = GpuBuffer::alloc(&self.lib, send_data.len())?;
+        let mut send_buf = GpuBuffer::alloc(&self.lib, send_data.len())?;
         let recv_buf = GpuBuffer::alloc(&self.lib, recv_data.len())?;
 
         send_buf.copy_from_host(send_data)?;
@@ -778,7 +787,7 @@ impl NcclBackend {
         let code = unsafe { (self.lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice")?;
 
-        let buf = GpuBuffer::alloc(&self.lib, data.len())?;
+        let mut buf = GpuBuffer::alloc(&self.lib, data.len())?;
         buf.copy_from_host(data)?;
 
         op(buf.ptr)?;
@@ -829,6 +838,7 @@ impl Backend for NcclBackend {
     }
 
     fn all_reduce(&self, data: &mut [f32], op: ReduceOp) {
+        let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let nccl_op = to_nccl_op(op);
         let count = data.len();
         let comm = self.comm;
@@ -853,6 +863,7 @@ impl Backend for NcclBackend {
     }
 
     fn broadcast(&self, data: &mut [f32], src: usize) {
+        let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let count = data.len();
         let comm = self.comm;
         let stream = self.stream;
@@ -876,6 +887,7 @@ impl Backend for NcclBackend {
     }
 
     fn all_gather(&self, send_data: &[f32], recv_data: &mut [f32]) {
+        let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let send_count = send_data.len();
         let comm = self.comm;
         let stream = self.stream;
@@ -898,6 +910,7 @@ impl Backend for NcclBackend {
     }
 
     fn reduce_scatter(&self, send_data: &[f32], recv_data: &mut [f32], op: ReduceOp) {
+        let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let nccl_op = to_nccl_op(op);
         let recv_count = recv_data.len();
         let comm = self.comm;
@@ -931,7 +944,7 @@ impl Backend for NcclBackend {
         let code = unsafe { (lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice").expect("CUDA set device failed");
 
-        let send_buf =
+        let mut send_buf =
             GpuBuffer::alloc(&self.lib, send_count).expect("GPU alloc failed for gather send");
         send_buf
             .copy_from_host(send_data)
@@ -999,7 +1012,7 @@ impl Backend for NcclBackend {
         check_cuda(code, "cudaSetDevice").expect("CUDA set device failed");
 
         // Send buffer only needed on src rank
-        let send_buf = GpuBuffer::alloc(&self.lib, send_data.len())
+        let mut send_buf = GpuBuffer::alloc(&self.lib, send_data.len())
             .expect("GPU alloc failed for scatter send");
         if self.rank == src {
             send_buf
@@ -1056,6 +1069,7 @@ impl Backend for NcclBackend {
     }
 
     fn reduce(&self, send_data: &[f32], recv_data: &mut [f32], dst: usize, op: ReduceOp) {
+        let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let nccl_op = to_nccl_op(op);
         let count = send_data.len();
         let comm = self.comm;
@@ -1081,6 +1095,7 @@ impl Backend for NcclBackend {
     }
 
     fn barrier(&self) {
+        let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         // NCCL has no explicit barrier. Implement via zero-byte all-reduce.
         let comm = self.comm;
         let stream = self.stream;
@@ -1110,6 +1125,7 @@ impl Backend for NcclBackend {
     }
 
     fn send(&self, data: &[f32], dst: usize, _tag: usize) {
+        let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let count = data.len();
         let comm = self.comm;
         let stream = self.stream;
@@ -1118,7 +1134,7 @@ impl Backend for NcclBackend {
         let code = unsafe { (self.lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice").expect("CUDA set device failed");
 
-        let send_buf = GpuBuffer::alloc(&self.lib, count).expect("GPU alloc failed for send");
+        let mut send_buf = GpuBuffer::alloc(&self.lib, count).expect("GPU alloc failed for send");
         send_buf
             .copy_from_host(data)
             .expect("H2D copy failed for send");
@@ -1141,6 +1157,7 @@ impl Backend for NcclBackend {
     }
 
     fn recv(&self, data: &mut [f32], src: usize, _tag: usize) {
+        let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let count = data.len();
         let comm = self.comm;
         let stream = self.stream;
