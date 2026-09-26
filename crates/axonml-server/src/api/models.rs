@@ -155,20 +155,25 @@ fn validate_path_id(id: &str) -> Result<(), AuthError> {
     Ok(())
 }
 
-/// Resolve `<models_dir>/<id>/v<version>` and prove it is inside the models
-/// root before a caller acts on it.
+/// Resolve `<models_dir>/<stored_id>/v<version>` and prove it is inside the
+/// models root before a caller acts on it.
 ///
-/// Validation of `id` alone is not enough for a destructive operation: a
-/// symlink placed inside `models_dir` can still point outside it, and that is
-/// only visible after the path is resolved on the filesystem. Callers that
-/// delete or read must go through here.
+/// `stored_id` must be the identifier as the database returned it, not the one
+/// the request carried. The two are equal for any request that gets this far,
+/// but taking the persisted value means the directory is named after a record
+/// that exists rather than after request text.
+///
+/// Validation alone is not enough for a destructive operation either: a symlink
+/// placed inside `models_dir` can point outside it, and that is only visible
+/// once the path is resolved on the filesystem. Callers that delete or read go
+/// through here.
 fn resolve_version_dir(
     models_root: &std::path::Path,
-    id: &str,
+    stored_id: &str,
     version: u32,
 ) -> Result<Option<PathBuf>, AuthError> {
-    validate_path_id(id)?;
-    let candidate = models_root.join(id).join(format!("v{version}"));
+    validate_path_id(stored_id)?;
+    let candidate = models_root.join(stored_id).join(format!("v{version}"));
     if !candidate.exists() {
         return Ok(None);
     }
@@ -605,7 +610,8 @@ pub async fn delete_version(
         .ok_or(AuthError::Internal("Version not found".to_string()))?;
 
     // Delete version directory
-    if let Some(version_dir) = resolve_version_dir(&state.config.models_dir(), &id, version)? {
+    if let Some(version_dir) = resolve_version_dir(&state.config.models_dir(), &model.id, version)?
+    {
         std::fs::remove_dir_all(&version_dir).ok();
     }
 
@@ -653,7 +659,7 @@ pub async fn download_version(
     let models_root = state.config.models_dir();
     let mut file_path: Option<PathBuf> = None;
 
-    if let Some(canon_dir) = resolve_version_dir(&models_root, &id, version)? {
+    if let Some(canon_dir) = resolve_version_dir(&models_root, &model.id, version)? {
         let canon_root =
             std::fs::canonicalize(&models_root).map_err(|e| AuthError::Internal(e.to_string()))?;
         for entry in std::fs::read_dir(&canon_dir)
