@@ -63,22 +63,33 @@ pub struct CompiledFunction {
     kind: CompiledKind,
 }
 
-#[derive(Clone)]
+/// The compiled entry point: `(input ptr, output ptr)`, matching the two-I64
+/// Cranelift signature `compile_native` declares.
+///
+/// `unsafe` because the callee dereferences both pointers; the caller must
+/// pass buffers sized for the graph's inputs and outputs.
+type NativeEntry = unsafe extern "C" fn(*const f32, *mut f32);
+
+#[derive(Clone, Copy)]
 enum CompiledKind {
     /// Interpreted execution (fallback).
     Interpreted,
     /// Native code via Cranelift JIT (enabled via `JitCompiler::enable_native(true)`).
-    Native {
-        /// Pointer to compiled code.
-        code_ptr: *const u8,
-        /// Code size.
-        code_size: usize,
-    },
+    ///
+    /// Holds a real function pointer rather than a `*const u8`, so the type is
+    /// `Send + Sync` by the language's own rules -- function pointers are --
+    /// and needs no manual impl. The pointer stays valid for the whole process
+    /// because `compile_native` leaks the `JITModule` that owns the code.
+    Native(NativeEntry),
 }
 
-// Safety: The native code pointer is never dereferenced without proper synchronization
-unsafe impl Send for CompiledKind {}
-unsafe impl Sync for CompiledKind {}
+// CompiledKind is Send + Sync because a function pointer is, not because
+// anyone asserted it. This fails to compile the day a field is added that
+// takes that back, which is the point of stating it here.
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<CompiledKind>();
+};
 
 impl CompiledFunction {
     /// Creates a placeholder compiled function (for testing).
@@ -102,28 +113,23 @@ impl CompiledFunction {
     pub fn run(&self, inputs: &[(&str, &[f32])]) -> JitResult<Vec<f32>> {
         match &self.kind {
             CompiledKind::Interpreted => self.run_interpreted(inputs),
-            CompiledKind::Native {
-                code_ptr,
-                code_size,
-            } => {
-                // Native execution via function pointer call
-                // Safety: code_ptr points to valid compiled code from Cranelift
-                unsafe {
-                    let func: extern "C" fn(*const f32, *mut f32) = std::mem::transmute(code_ptr);
-                    let flat_inputs: Vec<f32> =
-                        inputs.iter().flat_map(|(_, d)| d.iter().copied()).collect();
-                    // Allocate exact output size from graph shapes
-                    let output_size: usize = self
-                        .graph
-                        .outputs()
-                        .values()
-                        .map(|id| self.graph.node(*id).shape.numel())
-                        .sum();
-                    let mut output = vec![0.0f32; output_size];
-                    func(flat_inputs.as_ptr(), output.as_mut_ptr());
-                    let _ = code_size; // Used for memory management
-                    Ok(output)
-                }
+            CompiledKind::Native(entry) => {
+                let flat_inputs: Vec<f32> =
+                    inputs.iter().flat_map(|(_, d)| d.iter().copied()).collect();
+                let output_size: usize = self
+                    .graph
+                    .outputs()
+                    .values()
+                    .map(|id| self.graph.node(*id).shape.numel())
+                    .sum();
+                let mut output = vec![0.0f32; output_size];
+                // SAFETY: the compiled code reads `input` and writes `output`
+                // through these pointers. `flat_inputs` holds every input the
+                // graph declares, in graph order, and `output` is sized from
+                // the graph's own output shapes, which is exactly what the
+                // codegen indexed against. Both live until the call returns.
+                unsafe { entry(flat_inputs.as_ptr(), output.as_mut_ptr()) };
+                Ok(output)
             }
         }
     }
@@ -751,17 +757,22 @@ impl JitCompiler {
             .map_err(|e| JitError::CompilationFailed(format!("Failed to finalize: {:?}", e)))?;
 
         let code_ptr = module.get_finalized_function(func_id);
-        let code_size = 0; // JITModule manages memory
 
-        // Leak the module to keep the code alive
+        // Leak the module so the code stays mapped and immutable for the rest
+        // of the process. Nothing ever unmaps it, which is what lets the entry
+        // pointer below be an ordinary 'static function pointer.
         std::mem::forget(module);
+
+        // SAFETY: code_ptr is the finalized address of func_id, whose signature
+        // was declared above as two I64 parameters and no return -- the C ABI
+        // shape of NativeEntry. The module is leaked, so the address never
+        // dangles. This is the single place a raw address becomes a function
+        // pointer; every call site is then an ordinary typed call.
+        let entry: NativeEntry = unsafe { std::mem::transmute(code_ptr) };
 
         Ok(CompiledFunction {
             graph: Arc::new(graph.clone()),
-            kind: CompiledKind::Native {
-                code_ptr,
-                code_size,
-            },
+            kind: CompiledKind::Native(entry),
         })
     }
 

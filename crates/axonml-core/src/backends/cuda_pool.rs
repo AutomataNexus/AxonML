@@ -615,16 +615,15 @@ mod tests {
         pool_free(slice);
 
         let slice2 = pool_alloc(64).expect("re-alloc failed");
-        // Copy to host and verify zeros
-        let host_data = super::super::cuda::get_cuda_backend()
+        // A failed copy must fail the test, not skip the assertion: the
+        // previous `if let Ok` made this pass vacuously.
+        let data = super::super::cuda::get_cuda_backend()
             .unwrap()
-            .stream()
-            .memcpy_dtoh(&slice2);
-
-        if let Ok(data) = host_data {
-            for &val in &data {
-                assert_eq!(val, 0.0, "Pool-reused memory should be zeroed");
-            }
+            .dtoh_copy(&slice2)
+            .expect("dtoh copy");
+        assert_eq!(data.len(), 64);
+        for &val in &data {
+            assert_eq!(val, 0.0, "Pool-reused memory should be zeroed");
         }
         pool_free(slice2);
     }

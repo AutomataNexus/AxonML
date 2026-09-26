@@ -32,7 +32,8 @@ use cudarc::cublas::{CudaBlas, Gemm, GemmConfig, sys::cublasOperation_t};
 use cudarc::cudnn::Cudnn;
 #[cfg(feature = "cuda")]
 use cudarc::driver::{
-    CudaContext, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PushKernelArg, ValidAsZeroBits,
+    CudaContext, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PinnedHostSlice, PushKernelArg,
+    ValidAsZeroBits,
 };
 
 use super::Backend;
@@ -103,13 +104,6 @@ pub struct CudaBackend {
 pub struct CudaBackend {
     device_index: usize,
 }
-
-// Implement Send and Sync for CudaBackend
-// Safe because CudaContext/CudaStream and CudaBlas are internally synchronized
-#[cfg(feature = "cuda")]
-unsafe impl Send for CudaBackend {}
-#[cfg(feature = "cuda")]
-unsafe impl Sync for CudaBackend {}
 
 #[cfg(feature = "cuda")]
 impl std::fmt::Debug for CudaBackend {
@@ -5503,10 +5497,16 @@ impl CudaBackend {
 
 /// A page-locked (pinned) host memory buffer for fast CPU-to-GPU transfers.
 ///
-/// Pinned memory is allocated via `cuMemAllocHost` and is not subject to
-/// OS paging, enabling the GPU to DMA directly from the host buffer. This
-/// typically provides 2-3x faster host-to-device transfer compared to
-/// pageable (regular) memory.
+/// Pinned memory is allocated via `cuMemHostAlloc` and is not subject to OS
+/// paging, so the GPU can DMA directly from it. This wraps cudarc's
+/// [`PinnedHostSlice`], which owns the allocation and carries the CUDA event
+/// that every host-side access waits on, so a read can never observe a copy
+/// still in flight. That event is what makes an asynchronous pinned transfer
+/// sound; a hand-rolled raw pointer has no way to express it.
+///
+/// There is no `unsafe impl Send`/`Sync` here and none is needed: the wrapped
+/// type carries both, on the strength of owning its allocation and gating
+/// mutation behind `&mut self`.
 ///
 /// # Usage
 /// ```ignore
@@ -5514,154 +5514,111 @@ impl CudaBackend {
 ///
 /// let data = vec![1.0f32; 1024];
 /// let pinned = PinnedBuffer::from_slice(&data).expect("pin failed");
-/// // Use pinned.as_slice() as the source for htod transfers
+/// let on_gpu = pinned.to_gpu().expect("copy failed");
 /// ```
 #[cfg(feature = "cuda")]
 pub struct PinnedBuffer {
-    /// Raw pointer to the pinned host allocation (from cuMemAllocHost).
-    ptr: *mut f32,
-    /// Number of f32 elements in the buffer.
-    len: usize,
+    inner: Option<PinnedHostSlice<f32>>,
 }
 
+// PinnedBuffer is Send + Sync because PinnedHostSlice is, not because anyone
+// asserted it. This fails to compile the day a raw pointer comes back.
 #[cfg(feature = "cuda")]
-unsafe impl Send for PinnedBuffer {}
-#[cfg(feature = "cuda")]
-unsafe impl Sync for PinnedBuffer {}
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<PinnedBuffer>();
+};
 
 #[cfg(feature = "cuda")]
 impl PinnedBuffer {
     /// Allocates a pinned host buffer and copies `data` into it.
     ///
-    /// The returned buffer can be used as a source for fast CPU-to-GPU
-    /// transfers. The memory is page-locked so the GPU can DMA from it
-    /// without going through the OS page cache.
-    ///
     /// # Errors
-    /// Returns `CudaError` if pinned memory allocation fails (e.g., out of
-    /// lockable memory, CUDA not initialized).
+    /// If no CUDA device is available or the pinned allocation fails.
     pub fn from_slice(data: &[f32]) -> Result<Self, CudaError> {
-        use std::ptr;
-
-        if data.is_empty() {
-            return Ok(Self {
-                ptr: ptr::null_mut(),
-                len: 0,
-            });
+        let mut buf = Self::alloc(data.len())?;
+        if let Some(inner) = buf.inner.as_mut() {
+            inner
+                .as_mut_slice()
+                .map_err(CudaError::from)?
+                .copy_from_slice(data);
         }
-
-        let byte_size = data.len() * std::mem::size_of::<f32>();
-        let mut host_ptr: *mut std::ffi::c_void = ptr::null_mut();
-
-        // Ensure CUDA is initialized before calling driver API
-        let _ = get_cuda_backend().ok_or(CudaError::DeviceNotFound)?;
-
-        unsafe {
-            let result = cudarc::driver::sys::cuMemAllocHost_v2(&mut host_ptr, byte_size);
-            if result != cudarc::driver::sys::CUresult::CUDA_SUCCESS {
-                return Err(CudaError::AllocationFailed);
-            }
-
-            // Copy data into pinned buffer
-            ptr::copy_nonoverlapping(data.as_ptr(), host_ptr as *mut f32, data.len());
-        }
-
-        Ok(Self {
-            ptr: host_ptr as *mut f32,
-            len: data.len(),
-        })
+        Ok(buf)
     }
 
-    /// Allocates an uninitialized pinned host buffer of the given length.
+    /// Allocates an uninitialised pinned host buffer of `len` elements.
     ///
-    /// # Safety
-    /// The contents are uninitialized. Caller must write to the buffer
-    /// before reading from it.
+    /// The contents are zero-filled before this returns, so no caller can
+    /// read uninitialised memory through `as_slice`.
     ///
     /// # Errors
-    /// Returns `CudaError` if pinned memory allocation fails.
+    /// If no CUDA device is available or the pinned allocation fails.
     pub fn alloc(len: usize) -> Result<Self, CudaError> {
-        use std::ptr;
-
         if len == 0 {
-            return Ok(Self {
-                ptr: ptr::null_mut(),
-                len: 0,
-            });
+            return Ok(Self { inner: None });
         }
-
-        let byte_size = len * std::mem::size_of::<f32>();
-        let mut host_ptr: *mut std::ffi::c_void = ptr::null_mut();
-
-        let _ = get_cuda_backend().ok_or(CudaError::DeviceNotFound)?;
-
-        unsafe {
-            let result = cudarc::driver::sys::cuMemAllocHost_v2(&mut host_ptr, byte_size);
-            if result != cudarc::driver::sys::CUresult::CUDA_SUCCESS {
-                return Err(CudaError::AllocationFailed);
-            }
-        }
-
-        Ok(Self {
-            ptr: host_ptr as *mut f32,
-            len,
-        })
+        let backend = get_cuda_backend().ok_or(CudaError::DeviceNotFound)?;
+        // SAFETY: cudarc marks alloc_pinned unsafe because the memory is unset
+        // on return. It is filled with zeros on the next line, before the
+        // buffer can escape, so nothing ever reads it uninitialised.
+        let mut inner = unsafe { backend.context().alloc_pinned::<f32>(len) }
+            .map_err(|_| CudaError::AllocationFailed)?;
+        inner.as_mut_slice().map_err(CudaError::from)?.fill(0.0);
+        Ok(Self { inner: Some(inner) })
     }
 
-    /// Returns a slice view of the pinned buffer.
-    pub fn as_slice(&self) -> &[f32] {
-        if self.ptr.is_null() || self.len == 0 {
-            return &[];
-        }
-        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
-    }
-
-    /// Returns a mutable slice view of the pinned buffer.
-    pub fn as_slice_mut(&mut self) -> &mut [f32] {
-        if self.ptr.is_null() || self.len == 0 {
-            return &mut [];
-        }
-        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
-    }
-
-    /// Returns the number of elements in the buffer.
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Returns true if the buffer is empty.
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// Returns the raw host pointer.
-    pub fn as_ptr(&self) -> *const f32 {
-        self.ptr
-    }
-
-    /// Returns a mutable raw host pointer.
-    pub fn as_mut_ptr(&mut self) -> *mut f32 {
-        self.ptr
-    }
-
-    /// Transfers the pinned buffer contents to a GPU `CudaSlice`.
+    /// The buffer contents. Waits for any in-flight transfer first.
     ///
-    /// This is the fast path: since the source memory is pinned, the GPU
-    /// can DMA directly without staging through pageable memory.
+    /// # Panics
+    /// If the CUDA event wait fails, which means the driver is in an
+    /// unrecoverable state.
+    #[must_use]
+    pub fn as_slice(&self) -> &[f32] {
+        match &self.inner {
+            Some(inner) => inner.as_slice().expect("pinned buffer event wait"),
+            None => &[],
+        }
+    }
+
+    /// Mutable buffer contents. Waits for any in-flight transfer first.
+    ///
+    /// # Panics
+    /// If the CUDA event wait fails, which means the driver is in an
+    /// unrecoverable state.
+    pub fn as_slice_mut(&mut self) -> &mut [f32] {
+        match self.inner.as_mut() {
+            Some(inner) => inner.as_mut_slice().expect("pinned buffer event wait"),
+            None => &mut [],
+        }
+    }
+
+    /// Number of f32 elements.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.inner.as_ref().map_or(0, PinnedHostSlice::len)
+    }
+
+    /// Whether the buffer holds no elements.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Copies the buffer to the GPU.
+    ///
+    /// The copy is asynchronous on the backend stream. cudarc records an event
+    /// on this buffer, so a later `as_slice` waits for the transfer rather
+    /// than reading memory the DMA engine may still be using -- which is the
+    /// behaviour a hand-rolled raw pointer cannot provide, and the reason the
+    /// previous implementation had to synchronize the whole stream instead.
+    ///
+    /// # Errors
+    /// If no CUDA device is available or the copy fails.
     pub fn to_gpu(&self) -> Result<CudaSlice<f32>, CudaError> {
         let backend = get_cuda_backend().ok_or(CudaError::DeviceNotFound)?;
-        backend.htod_copy(self.as_slice())
-    }
-}
-
-#[cfg(feature = "cuda")]
-impl Drop for PinnedBuffer {
-    fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe {
-                let _ = cudarc::driver::sys::cuMemFreeHost(self.ptr as *mut std::ffi::c_void);
-            }
-            self.ptr = std::ptr::null_mut();
+        match &self.inner {
+            Some(inner) => backend.stream().clone_htod(inner).map_err(CudaError::from),
+            None => backend.htod_copy(&[]),
         }
     }
 }
@@ -6046,5 +6003,54 @@ mod tests {
             "3x3 conv corner: expected 12.0, got {}",
             out2[0]
         );
+    }
+}
+
+// ── pinned host memory ──
+
+#[cfg(all(test, feature = "cuda"))]
+mod pinned_buffer_tests {
+    use super::PinnedBuffer;
+
+    /// The behaviour that justifies pinned memory at all: a transfer is
+    /// asynchronous, and a host read after it must see the data, not a copy
+    /// still in flight. cudarc's event on the slice is what makes that true.
+    #[test]
+    fn round_trip_through_the_gpu_is_exact() {
+        if !super::is_available() {
+            return;
+        }
+        let data: Vec<f32> = (0..4096).map(|i| i as f32 * 0.5).collect();
+        let pinned = PinnedBuffer::from_slice(&data).expect("pin");
+        assert_eq!(pinned.len(), data.len());
+        assert_eq!(pinned.as_slice(), &data[..]);
+
+        let on_gpu = pinned.to_gpu().expect("htod");
+        let backend = super::get_cuda_backend().expect("backend");
+        let back = backend.dtoh_copy(&on_gpu).expect("dtoh");
+        assert_eq!(back, data);
+    }
+
+    #[test]
+    fn alloc_is_zeroed_and_writable() {
+        if !super::is_available() {
+            return;
+        }
+        let mut buf = PinnedBuffer::alloc(257).expect("alloc");
+        assert!(buf.as_slice().iter().all(|&x| x == 0.0));
+        buf.as_slice_mut()[256] = 7.0;
+        assert_eq!(buf.as_slice()[256], 7.0);
+    }
+
+    #[test]
+    fn an_empty_buffer_is_harmless() {
+        if !super::is_available() {
+            return;
+        }
+        let buf = PinnedBuffer::alloc(0).expect("alloc");
+        assert!(buf.is_empty());
+        assert!(buf.as_slice().is_empty());
+        let empty = PinnedBuffer::from_slice(&[]).expect("pin");
+        assert_eq!(empty.to_gpu().expect("htod").len(), 0);
     }
 }

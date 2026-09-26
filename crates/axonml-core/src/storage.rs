@@ -410,6 +410,11 @@ impl Storage<f32> {
                 let cpu_storage = self.to_device_f32(Device::Cpu)?;
                 cpu_storage.to_device_f32(device)
             }
+            // This is the CUDA transfer path and it has no route onto a Vulkan
+            // device. Only reachable when both backends are compiled in, which
+            // nothing had done before CI started checking that combination.
+            #[cfg(feature = "vulkan")]
+            (_, Device::Vulkan(_)) => Err(Error::DeviceNotAvailable { device }),
         }
     }
 }
