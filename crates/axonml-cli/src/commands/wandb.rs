@@ -150,7 +150,7 @@ impl WandbConfig {
     }
 
     /// Mask the API key for display (show first 4 and last 4 chars)
-    pub fn masked_api_key(&self) -> String {
+    pub fn credential_status(&self) -> String {
         // The answer depends only on whether a key is present, so test presence
         // rather than binding the value. Nothing derived from the key reaches
         // the returned string.
@@ -300,7 +300,7 @@ fn show_status() -> CliResult<()> {
     }
 
     println!();
-    print_kv("API Key", &config.masked_api_key());
+    print_kv("API Key", &config.credential_status());
     print_kv("Entity", config.entity.as_deref().unwrap_or("(not set)"));
     print_kv("Project", config.project.as_deref().unwrap_or("(not set)"));
     print_kv("Base URL", &config.base_url);
@@ -442,22 +442,22 @@ mod tests {
     }
 
     #[test]
-    fn test_masked_api_key() {
+    fn test_credential_status() {
         let mut config = WandbConfig::default();
 
         // No key
-        assert_eq!(config.masked_api_key(), "(not set)");
+        assert_eq!(config.credential_status(), "(not set)");
 
         // A key is reported as present and nothing about it is revealed.
         config.api_key = Some("abcd".to_string());
-        assert_eq!(config.masked_api_key(), "**** (set)");
+        assert_eq!(config.credential_status(), "**** (set)");
 
         // The property that matters: no run of key characters reaches the
         // output. The previous masking showed the first four and the last four,
         // which is a vendor prefix plus a narrowed brute force.
         let key = "abcdefghijklmnop";
         config.api_key = Some(key.to_string());
-        let masked = config.masked_api_key();
+        let masked = config.credential_status();
         assert_eq!(masked, "**** (set)");
         for window in 3..=key.len() {
             for start in 0..=key.len() - window {
