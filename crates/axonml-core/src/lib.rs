@@ -26,6 +26,7 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#![deny(unsafe_op_in_unsafe_fn)]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
 #![warn(clippy::all)]
