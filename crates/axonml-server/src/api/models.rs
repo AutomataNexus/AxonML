@@ -173,14 +173,39 @@ fn resolve_version_dir(
     version: u32,
 ) -> Result<Option<PathBuf>, AuthError> {
     validate_path_id(stored_id)?;
-    let candidate = models_root.join(stored_id).join(format!("v{version}"));
-    if !candidate.exists() {
+
+    // Nothing from the request is joined into a path. The directory is found by
+    // listing the trusted root and matching an entry name, so every PathBuf here
+    // originates from the operating system's listing of a directory we own.
+    // Traversal is not prevented by a check, it is unrepresentable.
+    let entry_named = |dir: &std::path::Path, want: &str| -> Result<Option<PathBuf>, AuthError> {
+        let listing = match std::fs::read_dir(dir) {
+            Ok(listing) => listing,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(AuthError::Internal(e.to_string())),
+        };
+        for entry in listing.flatten() {
+            if entry.file_name().to_str() == Some(want) {
+                return Ok(Some(entry.path()));
+            }
+        }
+        Ok(None)
+    };
+
+    let Some(model_dir) = entry_named(models_root, stored_id)? else {
         return Ok(None);
-    }
+    };
+    let version_name = format!("v{version}");
+    let Some(version_dir) = entry_named(&model_dir, &version_name)? else {
+        return Ok(None);
+    };
+
+    // Defence in depth: a symlink among those entries can still point outside
+    // the root, which is only visible once the path is resolved.
     let canon_root =
         std::fs::canonicalize(models_root).map_err(|e| AuthError::Internal(e.to_string()))?;
     let canon_dir =
-        std::fs::canonicalize(&candidate).map_err(|e| AuthError::Internal(e.to_string()))?;
+        std::fs::canonicalize(&version_dir).map_err(|e| AuthError::Internal(e.to_string()))?;
     if !canon_dir.starts_with(&canon_root) {
         return Err(AuthError::InvalidInput(
             "version directory escapes the models root".to_string(),
