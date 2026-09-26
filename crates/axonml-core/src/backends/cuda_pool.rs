@@ -90,7 +90,7 @@ impl CudaMemoryPool {
     fn bucket_size(requested: usize) -> usize {
         if requested <= 256 {
             // Round up to next multiple of 64
-            ((requested + 63) / 64) * 64
+            requested.div_ceil(64) * 64
         } else {
             // Round up to next power of 2
             requested.next_power_of_two()
@@ -149,7 +149,7 @@ impl CudaMemoryPool {
         let backend = super::cuda::get_cuda_backend();
         for (_bucket, blocks) in inner.free_lists.drain() {
             for block in blocks {
-                if let Some(ref be) = backend {
+                if let Some(be) = backend {
                     unsafe {
                         let slice: CudaSlice<f32> =
                             be.stream().upgrade_device_ptr(block.ptr, block.capacity);

@@ -321,7 +321,10 @@ pub fn cpu_gemm(a: &[f32], b: &[f32], m: usize, n: usize, k: usize) -> Vec<f32> 
 #[cfg(feature = "cuda")]
 /// CUDA backend integration tests — validates GPU kernel correctness.
 pub mod cuda_tests {
-    use super::*;
+    use super::{
+        GpuTestConfig, GpuTestReport, GpuTestResult, assert_close, cpu_add, cpu_gemm, cpu_mul,
+        cpu_relu, cpu_scale, cpu_sigmoid, cpu_tanh, random_vec,
+    };
     use crate::backends::Backend;
     use crate::backends::cuda::{CudaBackend, is_available};
 

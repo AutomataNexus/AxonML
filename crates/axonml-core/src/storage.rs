@@ -517,7 +517,7 @@ pub struct CudaSliceReadGuard<'a> {
 }
 
 #[cfg(feature = "cuda")]
-impl<'a> CudaSliceReadGuard<'a> {
+impl CudaSliceReadGuard<'_> {
     /// Returns a reference to the CudaSlice.
     ///
     /// # Panics
@@ -537,7 +537,7 @@ pub struct CudaSliceWriteGuard<'a> {
 }
 
 #[cfg(feature = "cuda")]
-impl<'a> CudaSliceWriteGuard<'a> {
+impl CudaSliceWriteGuard<'_> {
     /// Returns a mutable reference to the CudaSlice.
     ///
     /// # Panics

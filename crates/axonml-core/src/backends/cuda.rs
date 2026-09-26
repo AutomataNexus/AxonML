@@ -148,7 +148,7 @@ impl CudaBackend {
                 CUmemPool_attribute, cuDeviceGetDefaultMemPool, cuMemPoolSetAttribute,
             };
             let mut pool: cudarc::driver::sys::CUmemoryPool = std::ptr::null_mut();
-            if cuDeviceGetDefaultMemPool(&mut pool, dev_idx)
+            if cuDeviceGetDefaultMemPool(&raw mut pool, dev_idx)
                 == cudarc::driver::sys::CUresult::CUDA_SUCCESS
                 && !pool.is_null()
             {
@@ -156,7 +156,7 @@ impl CudaBackend {
                 let _ = cuMemPoolSetAttribute(
                     pool,
                     CUmemPool_attribute::CU_MEMPOOL_ATTR_RELEASE_THRESHOLD,
-                    &threshold as *const u64 as *mut std::ffi::c_void,
+                    &raw const threshold as *mut std::ffi::c_void,
                 );
             }
         }
@@ -369,8 +369,8 @@ impl Backend for CudaBackend {
         match self.stream.alloc_zeros::<u8>(size) {
             Ok(slice) => {
                 // Get the raw device pointer via leak
-                let ptr = slice.leak() as *mut u8;
-                ptr
+
+                slice.leak() as *mut u8
             }
             Err(_) => std::ptr::null_mut(),
         }
@@ -681,12 +681,12 @@ impl CudaBackend {
                 m as i32,
                 n as i32,
                 k as i32,
-                &alpha as *const f32,
+                &raw const alpha,
                 a_ptr as *const f32,
                 lda as i32,
                 b_ptr as *const f32,
                 ldb as i32,
-                &beta as *const f32,
+                &raw const beta,
                 c_ptr as *mut f32,
                 ldc as i32,
             )
@@ -797,14 +797,14 @@ impl CudaBackend {
                 m as i32,
                 n as i32,
                 k as i32,
-                &alpha as *const f32,
+                &raw const alpha,
                 a_ptr,
                 lda as i32,
                 stride_a,
                 b_ptr,
                 ldb as i32,
                 stride_b,
-                &beta as *const f32,
+                &raw const beta,
                 c_ptr,
                 ldc as i32,
                 stride_c,
@@ -950,7 +950,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid_x = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid_x = (out_dim as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid_x, m_dim as u32, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1005,7 +1005,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (out_dim as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1059,7 +1059,7 @@ impl CudaBackend {
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
         let total_out = (q_out + k_out + v_out) as u32;
-        let grid = (total_out + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = total_out.div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1125,10 +1125,8 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        const STAGE_MAX_FLOATS: u32 = 8192;
-        let _stage_cap = STAGE_MAX_FLOATS; // kept for parity; unused here
         let total_out = (q_out + k_out + v_out) as u32;
-        let grid = (total_out + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = total_out.div_ceil(ROWS_PER_CTA);
         let reduction_bytes = 8u32 * std::mem::size_of::<f32>() as u32;
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
@@ -1185,7 +1183,7 @@ impl CudaBackend {
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
         let total_out = (inter * 2) as u32;
-        let grid = (total_out + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = total_out.div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1230,7 +1228,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (out_dim as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1276,7 +1274,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 4;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((inter as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (inter as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1350,7 +1348,7 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("q6k_gemm_matched_f32".to_string()))?;
         const WARPS_PER_CTA: u32 = 4;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid_x = ((out_dim as u32) + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let grid_x = (out_dim as u32).div_ceil(WARPS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid_x, m_dim as u32, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1398,7 +1396,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (out_dim as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1451,7 +1449,7 @@ impl CudaBackend {
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
         let total_out = (q_out + k_out + v_out) as u32;
-        let grid = (total_out + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = total_out.div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1536,7 +1534,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid_x = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid_x = (out_dim as u32).div_ceil(ROWS_PER_CTA);
         let grid_y = m_dim as u32;
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid_x, grid_y, 1),
@@ -1578,7 +1576,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (out_dim as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1648,7 +1646,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (out_dim as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1729,7 +1727,7 @@ impl CudaBackend {
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
         let total_out = (q_out + k_out + v_out) as u32;
-        let grid = (total_out + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = total_out.div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1776,7 +1774,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (out_dim as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1849,7 +1847,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((n as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (n as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1890,7 +1888,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((n as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (n as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1931,7 +1929,7 @@ impl CudaBackend {
         let n_chunks = (k / 32) as u32;
         const THREADS_PER_CTA: u32 = 128;
         let warps_per_cta: u32 = THREADS_PER_CTA / 32;
-        let grid = (n_chunks + warps_per_cta - 1) / warps_per_cta;
+        let grid = n_chunks.div_ceil(warps_per_cta);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -1972,7 +1970,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((n as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (n as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -2015,7 +2013,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((n as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (n as u32).div_ceil(ROWS_PER_CTA);
         // smem layout: k bytes int8 acts + (k/32)*2 bytes fp16 scales
         //            + rows_per_cta * 2 * 4 bytes partials
         let smem_bytes = (k as u32) + ((k as u32) / 32) * 2 + ROWS_PER_CTA * 2 * 4;
@@ -2094,7 +2092,7 @@ impl CudaBackend {
 
         const THREADS_PER_CTA: u32 = 256;
         let n_u32 = n as u32;
-        let grid = (n_u32 + THREADS_PER_CTA - 1) / THREADS_PER_CTA;
+        let grid = n_u32.div_ceil(THREADS_PER_CTA);
 
         // Stage 1 — sum |w| into a single device scalar.
         let mut sum_buf: CudaSlice<f32> =
@@ -2153,7 +2151,7 @@ impl CudaBackend {
         const ROWS_PER_CTA: u32 = 4;
         const WARPS_PER_CTA: u32 = ROWS_PER_CTA * 2;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((n as u32) + ROWS_PER_CTA - 1) / ROWS_PER_CTA;
+        let grid = (n as u32).div_ceil(ROWS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -2315,7 +2313,7 @@ impl CudaBackend {
 
         const WARPS_PER_CTA: u32 = 4;
         const THREADS_PER_CTA: u32 = WARPS_PER_CTA * 32;
-        let grid = ((out_dim as u32) + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+        let grid = (out_dim as u32).div_ceil(WARPS_PER_CTA);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (THREADS_PER_CTA, 1, 1),
@@ -3948,7 +3946,7 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("fused_attention_fwd_f32".to_string()))?;
         let total_rows = batch_size * num_heads * tgt_len;
         let cfg = cuda_kernels::launch_config(total_rows);
-        let is_causal_u32: u32 = if is_causal { 1 } else { 0 };
+        let is_causal_u32: u32 = u32::from(is_causal);
         unsafe {
             self.stream
                 .launch_builder(func)
@@ -4229,7 +4227,7 @@ impl CudaBackend {
             .get("rms_norm_f32")
             .ok_or_else(|| CudaError::KernelNotFound("rms_norm_f32".to_string()))?;
         let block: u32 = 256;
-        let n_warps = (block + 31) / 32;
+        let n_warps = block.div_ceil(32);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (1, 1, 1),
             block_dim: (block, 1, 1),
@@ -4249,8 +4247,8 @@ impl CudaBackend {
         }
     }
 
-    /// Single-token LayerNorm. `out[i] = (x[i] - mean) / sqrt(var + eps)
-    /// * gamma[i] + beta[i]` over a single vector of length `n`. Used by
+    /// Single-token LayerNorm over a single vector of length `n`:
+    /// `out[i] = (x[i] - mean) / sqrt(var + eps) * gamma[i] + beta[i]`. Used by
     /// legacy Falcon's decode path. Distinct from `layer_norm_f32` above
     /// (which takes a `num_rows` and operates on a batched `[rows, n]`
     /// input for training).
@@ -4271,7 +4269,7 @@ impl CudaBackend {
             .get("layer_norm_tokenwise_f32")
             .ok_or_else(|| CudaError::KernelNotFound("layer_norm_tokenwise_f32".to_string()))?;
         let block: u32 = 256;
-        let n_warps = (block + 31) / 32;
+        let n_warps = block.div_ceil(32);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (1, 1, 1),
             block_dim: (block, 1, 1),
@@ -4435,7 +4433,7 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("rope_split_halves_f32".to_string()))?;
         let half = (head_dim / 2) as u32;
         let block: u32 = half.min(128); // small enough to fit; pairs are independent
-        let grid_y = (half + block - 1) / block;
+        let grid_y = half.div_ceil(block);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (n_heads as u32, grid_y, 1),
             block_dim: (block, 1, 1),
@@ -4470,7 +4468,7 @@ impl CudaBackend {
             .get("swiglu_f32")
             .ok_or_else(|| CudaError::KernelNotFound("swiglu_f32".to_string()))?;
         let block: u32 = 256;
-        let grid: u32 = ((n as u32) + block - 1) / block;
+        let grid: u32 = (n as u32).div_ceil(block);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (block, 1, 1),
@@ -4507,7 +4505,7 @@ impl CudaBackend {
             .get("swiglu_bwd_f32")
             .ok_or_else(|| CudaError::KernelNotFound("swiglu_bwd_f32".to_string()))?;
         let block: u32 = 256;
-        let grid: u32 = ((n as u32) + block - 1) / block;
+        let grid: u32 = (n as u32).div_ceil(block);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (block, 1, 1),
@@ -4541,7 +4539,7 @@ impl CudaBackend {
             .get("relu2_gate_f32")
             .ok_or_else(|| CudaError::KernelNotFound("relu2_gate_f32".to_string()))?;
         let block: u32 = 256;
-        let grid: u32 = ((n as u32) + block - 1) / block;
+        let grid: u32 = (n as u32).div_ceil(block);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (block, 1, 1),
@@ -4576,7 +4574,7 @@ impl CudaBackend {
             .get("rms_norm_batched_f32")
             .ok_or_else(|| CudaError::KernelNotFound("rms_norm_batched_f32".to_string()))?;
         let block: u32 = 256;
-        let n_warps = (block + 31) / 32;
+        let n_warps = block.div_ceil(32);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (m as u32, 1, 1),
             block_dim: (block, 1, 1),
@@ -4615,7 +4613,7 @@ impl CudaBackend {
             .get("softmax_causal_scaled_f32")
             .ok_or_else(|| CudaError::KernelNotFound("softmax_causal_scaled_f32".to_string()))?;
         let block: u32 = 256;
-        let n_warps = (block + 31) / 32;
+        let n_warps = block.div_ceil(32);
         // Reuses one shmem buffer across two reductions; n_warps * 4 bytes is enough.
         let shmem = n_warps * 4;
         let cfg = cudarc::driver::LaunchConfig {
@@ -4655,7 +4653,7 @@ impl CudaBackend {
                 CudaError::KernelNotFound("softmax_causal_scaled_bwd_f32".to_string())
             })?;
         let block: u32 = 256;
-        let n_warps = (block + 31) / 32;
+        let n_warps = block.div_ceil(32);
         let shmem = n_warps * 4;
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (num_rows as u32, 1, 1),
@@ -4738,7 +4736,7 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("repeat_kv_f32".to_string()))?;
         let total = bs * kv_heads * n_rep * seq * head_dim;
         let block: u32 = 256;
-        let grid: u32 = ((total as u32) + block - 1) / block;
+        let grid: u32 = (total as u32).div_ceil(block);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (block, 1, 1),
@@ -4823,7 +4821,7 @@ impl CudaBackend {
             .get("add_rmsnorm_batched_f32")
             .ok_or_else(|| CudaError::KernelNotFound("add_rmsnorm_batched_f32".to_string()))?;
         let block: u32 = 256;
-        let n_warps = (block + 31) / 32;
+        let n_warps = block.div_ceil(32);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (m as u32, 1, 1),
             block_dim: (block, 1, 1),
@@ -4864,7 +4862,7 @@ impl CudaBackend {
             .get("rms_norm_bwd_batched_f32")
             .ok_or_else(|| CudaError::KernelNotFound("rms_norm_bwd_batched_f32".to_string()))?;
         let block: u32 = 256;
-        let n_warps = (block + 31) / 32;
+        let n_warps = block.div_ceil(32);
         // Two reductions per row (sum_sq + dot), so 2 × n_warps × 4 bytes of shmem.
         let shmem = 2 * n_warps * 4;
         let cfg = cudarc::driver::LaunchConfig {
@@ -4949,7 +4947,7 @@ impl CudaBackend {
             })?;
         let half = (head_dim / 2) as u32;
         let block: u32 = half.min(128);
-        let grid_y = (half + block - 1) / block;
+        let grid_y = half.div_ceil(block);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (n_heads as u32, grid_y, m as u32),
             block_dim: (block, 1, 1),
@@ -4985,7 +4983,7 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("add_bias_batched_f32".to_string()))?;
         let total = (m * n) as u32;
         let block: u32 = 256;
-        let grid: u32 = (total + block - 1) / block;
+        let grid: u32 = total.div_ceil(block);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (grid, 1, 1),
             block_dim: (block, 1, 1),
@@ -5042,7 +5040,7 @@ impl CudaBackend {
             .ok_or_else(|| CudaError::KernelNotFound("fused_attention_bwd_f32".to_string()))?;
         let total_rows = batch_size * num_heads * tgt_len;
         let cfg = cuda_kernels::launch_config(total_rows);
-        let is_causal_u32: u32 = if is_causal { 1 } else { 0 };
+        let is_causal_u32: u32 = u32::from(is_causal);
         unsafe {
             self.stream
                 .launch_builder(func)
