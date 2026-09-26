@@ -226,9 +226,8 @@ pub fn execute_login(username: &str, key: &str) -> Result<(), String> {
 /// Execute kaggle status command.
 pub fn execute_status() -> Result<(), String> {
     if is_configured() {
-        if let Some(creds) = load_credentials() {
+        if load_credentials().is_some() {
             println!("{} Kaggle is configured", "✓".green());
-            println!("  Username: {}", creds.username);
             println!("  Config: {:?}", kaggle_credentials_path());
         }
     } else {

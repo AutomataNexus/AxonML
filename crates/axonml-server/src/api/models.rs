@@ -140,12 +140,48 @@ fn validate_path_id(id: &str) -> Result<(), AuthError> {
     if id.is_empty() {
         return Err(AuthError::InvalidInput("ID cannot be empty".to_string()));
     }
-    if id.contains("..") || id.contains('/') || id.contains('\\') || id.contains('\0') {
+    // An allowlist, not a denylist: a rejected-character list has to anticipate
+    // every escape (".", "..", encodings, unicode separators) while this admits
+    // only what a model id is allowed to be.
+    if id.len() > 128
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return Err(AuthError::InvalidInput(
-            "ID contains invalid characters".to_string(),
+            "ID may contain only ASCII letters, digits, '-' and '_'".to_string(),
         ));
     }
     Ok(())
+}
+
+/// Resolve `<models_dir>/<id>/v<version>` and prove it is inside the models
+/// root before a caller acts on it.
+///
+/// Validation of `id` alone is not enough for a destructive operation: a
+/// symlink placed inside `models_dir` can still point outside it, and that is
+/// only visible after the path is resolved on the filesystem. Callers that
+/// delete or read must go through here.
+fn resolve_version_dir(
+    models_root: &std::path::Path,
+    id: &str,
+    version: u32,
+) -> Result<Option<PathBuf>, AuthError> {
+    validate_path_id(id)?;
+    let candidate = models_root.join(id).join(format!("v{version}"));
+    if !candidate.exists() {
+        return Ok(None);
+    }
+    let canon_root =
+        std::fs::canonicalize(models_root).map_err(|e| AuthError::Internal(e.to_string()))?;
+    let canon_dir =
+        std::fs::canonicalize(&candidate).map_err(|e| AuthError::Internal(e.to_string()))?;
+    if !canon_dir.starts_with(&canon_root) {
+        return Err(AuthError::InvalidInput(
+            "version directory escapes the models root".to_string(),
+        ));
+    }
+    Ok(Some(canon_dir))
 }
 
 // ============================================================================
@@ -569,12 +605,9 @@ pub async fn delete_version(
         .ok_or(AuthError::Internal("Version not found".to_string()))?;
 
     // Delete version directory
-    let version_dir = state
-        .config
-        .models_dir()
-        .join(&id)
-        .join(format!("v{}", version));
-    std::fs::remove_dir_all(&version_dir).ok();
+    if let Some(version_dir) = resolve_version_dir(&state.config.models_dir(), &id, version)? {
+        std::fs::remove_dir_all(&version_dir).ok();
+    }
 
     repo.delete_version(&ver.id)
         .await
@@ -618,19 +651,11 @@ pub async fn download_version(
     // be under `models_dir` so a symlink inside `models_dir/<id>/` cannot
     // escape the root at filesystem-resolution time either.
     let models_root = state.config.models_dir();
-    let version_dir = models_root.join(&id).join(format!("v{}", version));
     let mut file_path: Option<PathBuf> = None;
 
-    if version_dir.exists() {
+    if let Some(canon_dir) = resolve_version_dir(&models_root, &id, version)? {
         let canon_root =
             std::fs::canonicalize(&models_root).map_err(|e| AuthError::Internal(e.to_string()))?;
-        let canon_dir =
-            std::fs::canonicalize(&version_dir).map_err(|e| AuthError::Internal(e.to_string()))?;
-        if !canon_dir.starts_with(&canon_root) {
-            return Err(AuthError::InvalidInput(
-                "version_dir escapes models root".to_string(),
-            ));
-        }
         for entry in std::fs::read_dir(&canon_dir)
             .map_err(|e| AuthError::Internal(e.to_string()))?
             .flatten()

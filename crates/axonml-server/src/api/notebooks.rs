@@ -351,9 +351,13 @@ pub async fn create_notebook(
         )));
     }
 
-    // SECURITY: cell count is bounded by MAX_CELLS check above
-    let mut cells = Vec::with_capacity(req.cells.len().min(MAX_CELLS));
-    cells.extend(req.cells.into_iter().take(MAX_CELLS).map(request_to_cell));
+    // SECURITY: take(MAX_CELLS) bounds the allocation at the point it happens.
+    let cells: Vec<_> = req
+        .cells
+        .into_iter()
+        .take(MAX_CELLS)
+        .map(request_to_cell)
+        .collect();
 
     let notebook = repo
         .create(NewNotebook {
@@ -422,12 +426,12 @@ pub async fn update_notebook(
         }
     }
 
-    // SECURITY: cell count is bounded by MAX_CELLS check above
+    // SECURITY: take(MAX_CELLS) bounds the allocation at the point it happens.
     let cells = req.cells.map(|c| {
-        let len = c.len();
-        let mut result = Vec::with_capacity(len.min(MAX_CELLS));
-        result.extend(c.into_iter().take(MAX_CELLS).map(request_to_cell));
-        result
+        c.into_iter()
+            .take(MAX_CELLS)
+            .map(request_to_cell)
+            .collect::<Vec<_>>()
     });
 
     let notebook = repo
