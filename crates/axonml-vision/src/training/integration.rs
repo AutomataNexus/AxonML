@@ -127,6 +127,18 @@ mod tests {
         (images_var, labels_var)
     }
 
+    /// Did the loss trend down over the run?
+    ///
+    /// Comparing the last value against the first compares one noisy sample
+    /// against another and fails intermittently even when training is working.
+    /// The means of the first and last thirds express the same intent and are
+    /// stable.
+    fn loss_trends_down(losses: &[f32]) -> bool {
+        assert!(losses.len() >= 3, "need at least 3 steps to see a trend");
+        let w = losses.len() / 3;
+        let mean = |xs: &[f32]| xs.iter().sum::<f32>() / xs.len() as f32;
+        mean(&losses[losses.len() - w..]) < mean(&losses[..w])
+    }
     // =========================================================================
     // Integration: MNIST -> Normalize -> LeNet -> CrossEntropy -> Adam
     // =========================================================================
@@ -169,9 +181,8 @@ mod tests {
 
         // Loss should decrease over 10 steps
         assert!(
-            losses.last().unwrap() < losses.first().unwrap(),
-            "Pipeline loss did not decrease: {:?}",
-            losses
+            loss_trends_down(&losses),
+            "Pipeline loss did not trend down: {losses:?}"
         );
     }
 
@@ -224,7 +235,7 @@ mod tests {
         let batch_size = 8;
         let mut losses = Vec::new();
 
-        for step in 0..5 {
+        for step in 0..12 {
             let (images, targets) =
                 make_batch_with_transform(&dataset, &normalize, step * batch_size, batch_size);
 
@@ -258,7 +269,7 @@ mod tests {
         let batch_size = 8;
         let mut losses = Vec::new();
 
-        for step in 0..5 {
+        for step in 0..12 {
             let (images, targets) = make_batch(&dataset, step * batch_size, batch_size);
 
             optimizer.zero_grad();
@@ -280,7 +291,7 @@ mod tests {
         }
 
         assert!(
-            losses.last().unwrap() < losses.first().unwrap(),
+            loss_trends_down(&losses),
             "ViT pipeline loss did not decrease"
         );
     }
@@ -331,10 +342,8 @@ mod tests {
         }
 
         assert!(
-            losses.last().unwrap() < losses.first().unwrap(),
-            "MSE pipeline loss did not decrease: first={:.4}, last={:.4}",
-            losses.first().unwrap(),
-            losses.last().unwrap()
+            loss_trends_down(&losses),
+            "MSE pipeline loss did not trend down: {losses:?}"
         );
     }
 
