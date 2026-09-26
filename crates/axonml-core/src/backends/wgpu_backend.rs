@@ -53,9 +53,10 @@ fn get_instance() -> &'static Instance {
     WGPU_INSTANCE.get_or_init(|| {
         Instance::new(InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            dx12_shader_compiler: wgpu::Dx12Compiler::default(),
             flags: wgpu::InstanceFlags::default(),
-            gles_minor_version: wgpu::Gles3MinorVersion::default(),
+            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            backend_options: wgpu::BackendOptions::default(),
+            display: None,
         })
     })
 }
@@ -64,13 +65,7 @@ fn get_instance() -> &'static Instance {
 fn get_adapters() -> &'static Vec<Adapter> {
     WGPU_ADAPTERS.get_or_init(|| {
         let instance = get_instance();
-        pollster::block_on(async {
-            let mut adapters = Vec::new();
-            for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
-                adapters.push(adapter);
-            }
-            adapters
-        })
+        pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()))
     })
 }
 
@@ -161,15 +156,13 @@ impl WgpuBackend {
         // Request device with compute capabilities
         let (device, queue) = pollster::block_on(async {
             adapter
-                .request_device(
-                    &DeviceDescriptor {
-                        label: Some("Axonml wgpu Device"),
-                        required_features: Features::empty(),
-                        required_limits: Limits::default(),
-                        memory_hints: wgpu::MemoryHints::default(),
-                    },
-                    None,
-                )
+                .request_device(&DeviceDescriptor {
+                    label: Some("Axonml wgpu Device"),
+                    required_features: Features::empty(),
+                    required_limits: Limits::default(),
+                    memory_hints: wgpu::MemoryHints::default(),
+                    ..Default::default()
+                })
                 .await
                 .ok()
         })?;
@@ -282,7 +275,13 @@ impl WgpuBackend {
             tx.send(result).unwrap();
         });
 
-        self.device.poll(wgpu::Maintain::Wait);
+        if self
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .is_err()
+        {
+            return None;
+        }
 
         if rx.recv().unwrap().is_ok() {
             let data = buffer_slice.get_mapped_range().to_vec();
@@ -421,7 +420,7 @@ impl Backend for WgpuBackend {
     }
 
     fn synchronize(&self) {
-        self.device.poll(wgpu::Maintain::Wait);
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
     }
 }
 
@@ -596,7 +595,7 @@ impl WgpuBackend {
 
         drop(tracker);
 
-        let workgroups = ((count + 255) / 256) as u32;
+        let workgroups = count.div_ceil(256) as u32;
         let mut encoder = self
             .device
             .create_command_encoder(&CommandEncoderDescriptor {
@@ -683,7 +682,7 @@ impl WgpuBackend {
 
         drop(tracker);
 
-        let workgroups = ((count + 255) / 256) as u32;
+        let workgroups = count.div_ceil(256) as u32;
         let mut encoder = self
             .device
             .create_command_encoder(&CommandEncoderDescriptor { label: Some(name) });
@@ -774,8 +773,8 @@ impl WgpuBackend {
         drop(tracker);
 
         // Dispatch with 16x16 workgroups
-        let workgroups_x = ((m + 15) / 16) as u32;
-        let workgroups_y = ((n + 15) / 16) as u32;
+        let workgroups_x = m.div_ceil(16) as u32;
+        let workgroups_y = n.div_ceil(16) as u32;
 
         let mut encoder = self
             .device
@@ -851,7 +850,7 @@ impl WgpuBackend {
 
         drop(tracker);
 
-        let workgroups = ((count + 255) / 256) as u32;
+        let workgroups = count.div_ceil(256) as u32;
         let mut encoder = self
             .device
             .create_command_encoder(&CommandEncoderDescriptor { label: Some(name) });
@@ -913,7 +912,7 @@ impl WgpuBackend {
 
         drop(tracker);
 
-        let workgroups = ((count + 255) / 256) as u32;
+        let workgroups = count.div_ceil(256) as u32;
         let mut encoder = self
             .device
             .create_command_encoder(&CommandEncoderDescriptor {
@@ -939,7 +938,7 @@ impl WgpuBackend {
 // =============================================================================
 
 /// WGSL shader for element-wise addition.
-pub const SHADER_ADD: &str = r#"
+pub const SHADER_ADD: &str = r"
 @group(0) @binding(0) var<storage, read> a: array<f32>;
 @group(0) @binding(1) var<storage, read> b: array<f32>;
 @group(0) @binding(2) var<storage, read_write> result: array<f32>;
@@ -951,10 +950,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         result[index] = a[index] + b[index];
     }
 }
-"#;
+";
 
 /// WGSL shader for element-wise subtraction.
-pub const SHADER_SUB: &str = r#"
+pub const SHADER_SUB: &str = r"
 @group(0) @binding(0) var<storage, read> a: array<f32>;
 @group(0) @binding(1) var<storage, read> b: array<f32>;
 @group(0) @binding(2) var<storage, read_write> result: array<f32>;
@@ -966,10 +965,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         result[index] = a[index] - b[index];
     }
 }
-"#;
+";
 
 /// WGSL shader for element-wise multiplication.
-pub const SHADER_MUL: &str = r#"
+pub const SHADER_MUL: &str = r"
 @group(0) @binding(0) var<storage, read> a: array<f32>;
 @group(0) @binding(1) var<storage, read> b: array<f32>;
 @group(0) @binding(2) var<storage, read_write> result: array<f32>;
@@ -981,10 +980,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         result[index] = a[index] * b[index];
     }
 }
-"#;
+";
 
 /// WGSL shader for element-wise division.
-pub const SHADER_DIV: &str = r#"
+pub const SHADER_DIV: &str = r"
 @group(0) @binding(0) var<storage, read> a: array<f32>;
 @group(0) @binding(1) var<storage, read> b: array<f32>;
 @group(0) @binding(2) var<storage, read_write> result: array<f32>;
@@ -996,10 +995,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         result[index] = a[index] / b[index];
     }
 }
-"#;
+";
 
 /// WGSL shader for matrix multiplication.
-pub const SHADER_MATMUL: &str = r#"
+pub const SHADER_MATMUL: &str = r"
 struct Dimensions {
     M: u32,
     N: u32,
@@ -1027,10 +1026,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     result[row * dims.N + col] = sum;
 }
-"#;
+";
 
 /// WGSL shader for ReLU activation.
-pub const SHADER_RELU: &str = r#"
+pub const SHADER_RELU: &str = r"
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 
@@ -1041,10 +1040,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         output[index] = max(0.0, input[index]);
     }
 }
-"#;
+";
 
 /// WGSL shader for sigmoid activation.
-pub const SHADER_SIGMOID: &str = r#"
+pub const SHADER_SIGMOID: &str = r"
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 
@@ -1055,10 +1054,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         output[index] = 1.0 / (1.0 + exp(-input[index]));
     }
 }
-"#;
+";
 
 /// WGSL shader for tanh activation.
-pub const SHADER_TANH: &str = r#"
+pub const SHADER_TANH: &str = r"
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 
@@ -1069,10 +1068,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         output[index] = tanh(input[index]);
     }
 }
-"#;
+";
 
 /// WGSL shader for sum reduction.
-pub const SHADER_SUM: &str = r#"
+pub const SHADER_SUM: &str = r"
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 
@@ -1108,10 +1107,10 @@ fn main(
         output[group_id.x] = shared_data[0];
     }
 }
-"#;
+";
 
 /// WGSL shader for GELU activation (approximate).
-pub const SHADER_GELU: &str = r#"
+pub const SHADER_GELU: &str = r"
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 
@@ -1126,10 +1125,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         output[index] = 0.5 * x * (1.0 + tanh(inner));
     }
 }
-"#;
+";
 
 /// WGSL shader for SiLU (Swish) activation.
-pub const SHADER_SILU: &str = r#"
+pub const SHADER_SILU: &str = r"
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 
@@ -1141,10 +1140,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         output[index] = x / (1.0 + exp(-x));
     }
 }
-"#;
+";
 
 /// WGSL shader for LeakyReLU activation.
-pub const SHADER_LEAKY_RELU: &str = r#"
+pub const SHADER_LEAKY_RELU: &str = r"
 struct Params {
     negative_slope: f32,
 }
@@ -1161,10 +1160,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         output[index] = select(params.negative_slope * x, x, x > 0.0);
     }
 }
-"#;
+";
 
 /// WGSL shader for exponential.
-pub const SHADER_EXP: &str = r#"
+pub const SHADER_EXP: &str = r"
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 
@@ -1175,10 +1174,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         output[index] = exp(input[index]);
     }
 }
-"#;
+";
 
 /// WGSL shader for natural logarithm.
-pub const SHADER_LOG: &str = r#"
+pub const SHADER_LOG: &str = r"
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 
@@ -1189,10 +1188,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         output[index] = log(input[index]);
     }
 }
-"#;
+";
 
 /// WGSL shader for square root.
-pub const SHADER_SQRT: &str = r#"
+pub const SHADER_SQRT: &str = r"
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 
@@ -1203,10 +1202,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         output[index] = sqrt(input[index]);
     }
 }
-"#;
+";
 
 /// WGSL shader for softmax (row-wise).
-pub const SHADER_SOFTMAX: &str = r#"
+pub const SHADER_SOFTMAX: &str = r"
 struct Dims {
     rows: u32,
     cols: u32,
@@ -1251,10 +1250,10 @@ fn main(
 
     output[idx] = exp(x - max_val) / sum_val;
 }
-"#;
+";
 
 /// WGSL shader for layer normalization.
-pub const SHADER_LAYER_NORM: &str = r#"
+pub const SHADER_LAYER_NORM: &str = r"
 struct Params {
     size: u32,
     eps: f32,
@@ -1297,10 +1296,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let normalized = (input[idx] - mean) / sqrt(variance + params.eps);
     output[idx] = normalized * gamma[elem_idx] + beta[elem_idx];
 }
-"#;
+";
 
 /// WGSL shader for 2D convolution.
-pub const SHADER_CONV2D: &str = r#"
+pub const SHADER_CONV2D: &str = r"
 struct ConvParams {
     batch_size: u32,
     in_channels: u32,
@@ -1363,10 +1362,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 + out_row * params.out_width + out_col;
     output[out_idx] = sum;
 }
-"#;
+";
 
 /// WGSL shader for batch normalization.
-pub const SHADER_BATCH_NORM: &str = r#"
+pub const SHADER_BATCH_NORM: &str = r"
 struct BnParams {
     channels: u32,
     spatial_size: u32,
@@ -1402,10 +1401,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let normalized = (input[idx] - mean) / sqrt(variance + params.eps);
     output[idx] = g * normalized + b;
 }
-"#;
+";
 
 /// WGSL shader for max pooling 2D.
-pub const SHADER_MAX_POOL2D: &str = r#"
+pub const SHADER_MAX_POOL2D: &str = r"
 struct PoolParams {
     batch_size: u32,
     channels: u32,
@@ -1460,10 +1459,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 + out_row * params.out_width + out_col;
     output[out_idx] = max_val;
 }
-"#;
+";
 
 /// WGSL shader for embedding lookup.
-pub const SHADER_EMBEDDING: &str = r#"
+pub const SHADER_EMBEDDING: &str = r"
 struct EmbedParams {
     vocab_size: u32,
     embed_dim: u32,
@@ -1492,10 +1491,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     output[out_offset] = weight[weight_offset];
 }
-"#;
+";
 
 /// WGSL shader for attention scores (Q @ K^T / sqrt(d_k)).
-pub const SHADER_ATTENTION_SCORES: &str = r#"
+pub const SHADER_ATTENTION_SCORES: &str = r"
 struct AttentionParams {
     batch_size: u32,
     num_heads: u32,
@@ -1539,7 +1538,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 + q_pos * params.seq_len + k_pos;
     scores[out_idx] = dot_product * params.scale;
 }
-"#;
+";
 
 // =============================================================================
 // Tests

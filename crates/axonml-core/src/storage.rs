@@ -415,6 +415,8 @@ impl Storage<f32> {
             // nothing had done before CI started checking that combination.
             #[cfg(feature = "vulkan")]
             (_, Device::Vulkan(_)) => Err(Error::DeviceNotAvailable { device }),
+            #[cfg(feature = "wgpu")]
+            (_, Device::Wgpu(_)) => Err(Error::DeviceNotAvailable { device }),
         }
     }
 }
