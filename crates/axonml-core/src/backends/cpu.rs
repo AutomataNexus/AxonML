@@ -88,7 +88,7 @@ impl Backend for CpuBackend {
         }
     }
 
-    fn deallocate(&self, ptr: *mut u8, size: usize) {
+    unsafe fn deallocate(&self, ptr: *mut u8, size: usize) {
         if ptr.is_null() || size == 0 {
             return;
         }
@@ -100,21 +100,21 @@ impl Backend for CpuBackend {
         }
     }
 
-    fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
+    unsafe fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
         // For CPU, this is just a memory copy
         unsafe {
             std::ptr::copy_nonoverlapping(src, dst, size);
         }
     }
 
-    fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
+    unsafe fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
         // For CPU, this is just a memory copy
         unsafe {
             std::ptr::copy_nonoverlapping(src, dst, size);
         }
     }
 
-    fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
+    unsafe fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
         // For CPU, this is just a memory copy
         unsafe {
             std::ptr::copy_nonoverlapping(src, dst, size);

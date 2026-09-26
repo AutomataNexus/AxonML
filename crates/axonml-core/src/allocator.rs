@@ -157,7 +157,8 @@ mod tests {
 
         unsafe {
             alloc.zero(ptr, 100);
-            alloc.deallocate(ptr, 100);
+            // SAFETY: ptr came from this allocator's allocate(100) above.
+            unsafe { alloc.deallocate(ptr, 100) };
         }
     }
 

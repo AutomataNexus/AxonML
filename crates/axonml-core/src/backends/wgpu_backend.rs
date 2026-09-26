@@ -430,18 +430,18 @@ impl Backend for WgpuBackend {
         buffer_id as *mut u8
     }
 
-    fn deallocate(&self, ptr: *mut u8, _size: usize) {
+    unsafe fn deallocate(&self, ptr: *mut u8, _size: usize) {
         let buffer_id = ptr as u64;
         self.destroy_buffer(buffer_id);
     }
 
-    fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
+    unsafe fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
         let buffer_id = dst as u64;
         let data = unsafe { std::slice::from_raw_parts(src, size) };
         self.write_buffer(buffer_id, 0, data);
     }
 
-    fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
+    unsafe fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
         let buffer_id = src as u64;
         if let Some(data) = self.read_buffer(buffer_id) {
             let copy_size = std::cmp::min(size, data.len());
@@ -451,7 +451,7 @@ impl Backend for WgpuBackend {
         }
     }
 
-    fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
+    unsafe fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
         let src_id = src as u64;
         let dst_id = dst as u64;
 
@@ -507,13 +507,13 @@ impl Backend for WgpuBackend {
         std::ptr::null_mut()
     }
 
-    fn deallocate(&self, _ptr: *mut u8, _size: usize) {}
+    unsafe fn deallocate(&self, _ptr: *mut u8, _size: usize) {}
 
-    fn copy_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
+    unsafe fn copy_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
 
-    fn copy_to_host(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
+    unsafe fn copy_to_host(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
 
-    fn copy_device_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
+    unsafe fn copy_device_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
 
     fn synchronize(&self) {}
 }
