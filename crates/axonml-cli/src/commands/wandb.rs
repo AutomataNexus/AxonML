@@ -151,9 +151,13 @@ impl WandbConfig {
 
     /// Mask the API key for display (show first 4 and last 4 chars)
     pub fn masked_api_key(&self) -> String {
-        match &self.api_key {
-            Some(_) => "**** (set)".to_string(),
-            None => "(not set)".to_string(),
+        // The answer depends only on whether a key is present, so test presence
+        // rather than binding the value. Nothing derived from the key reaches
+        // the returned string.
+        if self.api_key.is_some() {
+            "**** (set)".to_string()
+        } else {
+            "(not set)".to_string()
         }
     }
 }
