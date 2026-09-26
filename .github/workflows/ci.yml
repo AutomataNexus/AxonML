@@ -37,7 +37,7 @@ jobs:
       - name: Verify kernel launches against PTX signatures
         run: python3 tools/check_launches.py
       - name: Check feature-gated backends
-        run: cargo check --workspace --features axonml-core/vulkan,axonml-distributed/nccl,axonml-core/cuda
+        run: cargo check --workspace --features axonml-core/vulkan,axonml-core/wgpu,axonml-distributed/nccl,axonml-core/cuda
 
   test:
     runs-on: ubuntu-latest
@@ -100,7 +100,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings -D clippy::undocumented_unsafe_blocks
       - name: Clippy feature-gated backends
-        run: cargo clippy --workspace --features axonml-core/cuda,axonml-core/vulkan,axonml-distributed/nccl -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo clippy --workspace --features axonml-core/cuda,axonml-core/vulkan,axonml-core/wgpu,axonml-distributed/nccl -- -D warnings -D clippy::undocumented_unsafe_blocks
 
   docs:
     runs-on: ubuntu-latest
