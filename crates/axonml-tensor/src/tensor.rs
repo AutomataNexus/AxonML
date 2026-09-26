@@ -984,24 +984,19 @@ impl<T: Numeric> Tensor<T> {
             let work = outer_size * t_dim_size;
             if work >= 4096 {
                 use rayon::prelude::*;
-                let res_ptr = result.as_mut_ptr() as usize;
-                let t_data_ptr = t_data.as_ptr() as usize;
-                (0..outer_size).into_par_iter().for_each(|outer| {
-                    let res_ptr = res_ptr as *mut T;
-                    let t_data_ptr = t_data_ptr as *const T;
-                    for d in 0..t_dim_size {
-                        let src_base = outer * t_dim_size * inner_size + d * inner_size;
-                        let dst_base =
-                            outer * total_dim_size * inner_size + (dim_offset + d) * inner_size;
-                        unsafe {
-                            std::ptr::copy_nonoverlapping(
-                                t_data_ptr.add(src_base),
-                                res_ptr.add(dst_base),
-                                inner_size,
-                            );
-                        }
-                    }
-                });
+                // Each `outer` slab of the result is total_dim_size * inner_size
+                // wide and this tensor's block sits at dim_offset within it.
+                // par_chunks_mut over slabs gives every thread its own slab, so
+                // the disjointness the raw copy relied on is now checked.
+                let src_slab = t_dim_size * inner_size;
+                let dst_slab = total_dim_size * inner_size;
+                let start = dim_offset * inner_size;
+                result
+                    .par_chunks_mut(dst_slab)
+                    .zip(t_data.par_chunks(src_slab))
+                    .for_each(|(dst, src)| {
+                        dst[start..start + src_slab].copy_from_slice(src);
+                    });
             } else {
                 for outer in 0..outer_size {
                     for d in 0..t_dim_size {
@@ -1245,13 +1240,11 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).layer_norm_tokenwise_cuda(
-                    gpu_ref(gamma),
-                    gpu_ref(beta),
-                    eps,
-                ))
-            };
+            return gpu_into(gpu_ref(self).layer_norm_tokenwise_cuda(
+                gpu_ref(gamma),
+                gpu_ref(beta),
+                eps,
+            ));
         }
         // CPU fallback. Fastpath + parallel for large n.
         let xs = self.storage.as_slice();
@@ -1305,26 +1298,20 @@ impl<T: Float> Tensor<T> {
         let mut out: Vec<T> = vec![T::zero(); n];
         if n >= 4096 {
             use rayon::prelude::*;
-            let out_ptr = out.as_mut_ptr() as usize;
-            let x_ptr = x.as_ptr() as usize;
-            let g_ptr = g.as_ptr() as usize;
-            let b_ptr = b.as_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
-                let out_ptr = out_ptr as *mut T;
-                let xi = unsafe { *(x_ptr as *const T).add(i) }
-                    .to_f32()
-                    .unwrap_or(0.0);
-                let gi = unsafe { *(g_ptr as *const T).add(i) }
-                    .to_f32()
-                    .unwrap_or(0.0);
-                let bi = unsafe { *(b_ptr as *const T).add(i) }
-                    .to_f32()
-                    .unwrap_or(0.0);
-                let v = (xi - mean) * inv * gi + bi;
-                unsafe {
-                    *out_ptr.add(i) = num_traits::cast(v).unwrap_or_else(T::zero);
-                }
-            });
+            // par_iter_mut hands each thread a disjoint &mut T, so the borrow
+            // checker proves what the raw-pointer version only assumed: no two
+            // threads write the same element.
+            out.par_iter_mut()
+                .zip(x.par_iter())
+                .zip(g.par_iter())
+                .zip(b.par_iter())
+                .for_each(|(((o, xi), gi), bi)| {
+                    let xi = xi.to_f32().unwrap_or(0.0);
+                    let gi = gi.to_f32().unwrap_or(0.0);
+                    let bi = bi.to_f32().unwrap_or(0.0);
+                    let v = (xi - mean) * inv * gi + bi;
+                    *o = num_traits::cast(v).unwrap_or_else(T::zero);
+                });
         } else {
             for i in 0..n {
                 let xi = x[i].to_f32().unwrap_or(0.0);
@@ -1355,17 +1342,10 @@ impl<T: Float> Tensor<T> {
         let mut out: Vec<T> = vec![T::zero(); n];
         if n >= 4096 {
             use rayon::prelude::*;
-            let out_ptr = out.as_mut_ptr() as usize;
-            let x_ptr = x.as_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
-                let out_ptr = out_ptr as *mut T;
-                let v = unsafe { *(x_ptr as *const T).add(i) }
-                    .to_f32()
-                    .unwrap_or(0.0);
+            out.par_iter_mut().zip(x.par_iter()).for_each(|(o, xi)| {
+                let v = xi.to_f32().unwrap_or(0.0);
                 let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
-                unsafe {
-                    *out_ptr.add(i) = num_traits::cast(y).unwrap_or_else(T::zero);
-                }
+                *o = num_traits::cast(y).unwrap_or_else(T::zero);
             });
         } else {
             for i in 0..n {
@@ -1384,9 +1364,7 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            unsafe {
-                gpu_ref_mut(self).scaled_add_inplace_cuda_(gpu_ref(other), scalar);
-            }
+            gpu_ref_mut(self).scaled_add_inplace_cuda_(gpu_ref(other), scalar);
             return;
         }
         // Fast contiguous + par for CPU MoE hot path.
@@ -1431,9 +1409,7 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            unsafe {
-                gpu_ref_mut(self).parallel_residual_add_cuda_(gpu_ref(attn), gpu_ref(ffn));
-            }
+            gpu_ref_mut(self).parallel_residual_add_cuda_(gpu_ref(attn), gpu_ref(ffn));
             return;
         }
         // Fast contiguous + par for CPU Falcon arch.
@@ -1541,9 +1517,12 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).rms_norm_heads_cuda(gpu_ref(weight), n_heads, head_dim, eps))
-            };
+            return gpu_into(gpu_ref(self).rms_norm_heads_cuda(
+                gpu_ref(weight),
+                n_heads,
+                head_dim,
+                eps,
+            ));
         }
         // CPU fallback — per-head rms_norm. Parallel over heads (independent).
         let x = self.to_vec();
@@ -1553,24 +1532,20 @@ impl<T: Float> Tensor<T> {
         let mut out: Vec<T> = vec![T::zero(); x.len()];
         if n_heads > 1 {
             use rayon::prelude::*;
-            let out_ptr = out.as_mut_ptr() as usize;
-            (0..n_heads).into_par_iter().for_each(|h| {
-                let out_ptr = out_ptr as *mut T;
-                let base = h * head_dim;
-                let mut sum_sq = 0.0f64;
-                for i in 0..head_dim {
-                    let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
-                    sum_sq += f * f;
-                }
-                let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
-                for i in 0..head_dim {
-                    let v =
-                        x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
-                    unsafe {
-                        *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero);
+            out.par_chunks_mut(head_dim)
+                .zip(x.par_chunks(head_dim))
+                .for_each(|(o_row, x_row)| {
+                    let mut sum_sq = 0.0f64;
+                    for xi in x_row {
+                        let f: f64 = xi.to_f32().unwrap_or(0.0).into();
+                        sum_sq += f * f;
                     }
-                }
-            });
+                    let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+                    for ((o, xi), wi) in o_row.iter_mut().zip(x_row).zip(&w) {
+                        let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
+                        *o = num_traits::cast(v).unwrap_or_else(T::zero);
+                    }
+                });
         } else {
             for h in 0..n_heads {
                 let base = h * head_dim;
@@ -1605,9 +1580,7 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).rope_split_halves_cuda(n_heads, head_dim, theta, pos))
-            };
+            return gpu_into(gpu_ref(self).rope_split_halves_cuda(n_heads, head_dim, theta, pos));
         }
         // CPU fallback - delegates to CpuBackend (will be parallelized for large cases;
         // currently efficient sequential over heads). Important for pure CPU use and
@@ -1655,9 +1628,8 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            let (out, sum) = unsafe {
-                gpu_ref(self).add_rmsnorm_batched_cuda(gpu_ref(b), gpu_ref(weight), m, n, eps)
-            };
+            let (out, sum) =
+                gpu_ref(self).add_rmsnorm_batched_cuda(gpu_ref(b), gpu_ref(weight), m, n, eps);
             return (gpu_into(out), gpu_into(sum));
         }
         assert!(
@@ -1706,9 +1678,7 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).softmax_causal_scaled_cuda(tq, tk, offset, scale))
-            };
+            return gpu_into(gpu_ref(self).softmax_causal_scaled_cuda(tq, tk, offset, scale));
         }
         // CPU fallback: same math, row by row.
         assert!(
@@ -1766,13 +1736,11 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).softmax_causal_scaled_bwd_cuda(
-                    gpu_ref(grad_output),
-                    tk,
-                    scale,
-                ))
-            };
+            return gpu_into(gpu_ref(self).softmax_causal_scaled_bwd_cuda(
+                gpu_ref(grad_output),
+                tk,
+                scale,
+            ));
         }
         assert!(
             std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
@@ -1820,15 +1788,13 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).rms_norm_bwd_batched_cuda(
-                    gpu_ref(weight),
-                    gpu_ref(grad_output),
-                    m,
-                    n,
-                    eps,
-                ))
-            };
+            return gpu_into(gpu_ref(self).rms_norm_bwd_batched_cuda(
+                gpu_ref(weight),
+                gpu_ref(grad_output),
+                m,
+                n,
+                eps,
+            ));
         }
         // CPU fallback: same math as axonml-llm's RMSNormBackward::apply.
         // Fast contiguous + parallel over m tokens for training bwd (CPU fallback).
@@ -1862,40 +1828,31 @@ impl<T: Float> Tensor<T> {
         let work = m * n;
         if work >= 4096 {
             use rayon::prelude::*;
-            let out_ptr = out.as_mut_ptr() as usize;
-            let x_ptr = x.as_ptr() as usize;
-            let w_ptr = w.as_ptr() as usize;
-            let g_ptr = g.as_ptr() as usize;
-            (0..m).into_par_iter().for_each(|t| {
-                let out_ptr = out_ptr as *mut T;
-                let x_ptr = x_ptr as *const T;
-                let w_ptr = w_ptr as *const T;
-                let g_ptr = g_ptr as *const T;
-                let base = t * n;
-                let mut sum_sq = 0.0f64;
-                let mut dot = 0.0f64;
-                for i in 0..n {
-                    let xi = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0);
-                    let wi = unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
-                    let gi = unsafe { *g_ptr.add(base + i) }.to_f32().unwrap_or(0.0);
-                    sum_sq += (xi as f64) * (xi as f64);
-                    dot += (xi as f64) * (wi as f64) * (gi as f64);
-                }
-                let rms_inv = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-                let rms3_inv = rms_inv * rms_inv * rms_inv;
-                let dot_scaled = (dot as f32) * rms3_inv / d;
-                for i in 0..n {
-                    let xi = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0);
-                    let wi = unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
-                    let gi = unsafe { *g_ptr.add(base + i) }.to_f32().unwrap_or(0.0);
-                    let term1 = wi * gi * rms_inv;
-                    let term2 = xi * dot_scaled;
-                    unsafe {
-                        *out_ptr.add(base + i) =
-                            num_traits::cast(term1 - term2).unwrap_or_else(T::zero);
+            out.par_chunks_mut(n)
+                .zip(x.par_chunks(n))
+                .zip(g.par_chunks(n))
+                .for_each(|((o_row, x_row), g_row)| {
+                    let mut sum_sq = 0.0f64;
+                    let mut dot = 0.0f64;
+                    for ((xi, wi), gi) in x_row.iter().zip(w).zip(g_row) {
+                        let xi = xi.to_f32().unwrap_or(0.0);
+                        let wi = wi.to_f32().unwrap_or(0.0);
+                        let gi = gi.to_f32().unwrap_or(0.0);
+                        sum_sq += (xi as f64) * (xi as f64);
+                        dot += (xi as f64) * (wi as f64) * (gi as f64);
                     }
-                }
-            });
+                    let rms_inv = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+                    let rms3_inv = rms_inv * rms_inv * rms_inv;
+                    let dot_scaled = (dot as f32) * rms3_inv / d;
+                    for (((o, xi), wi), gi) in o_row.iter_mut().zip(x_row).zip(w).zip(g_row) {
+                        let xi = xi.to_f32().unwrap_or(0.0);
+                        let wi = wi.to_f32().unwrap_or(0.0);
+                        let gi = gi.to_f32().unwrap_or(0.0);
+                        let term1 = wi * gi * rms_inv;
+                        let term2 = xi * dot_scaled;
+                        *o = num_traits::cast(term1 - term2).unwrap_or_else(T::zero);
+                    }
+                });
         } else {
             for t in 0..m {
                 let base = t * n;
@@ -1930,9 +1887,7 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).rms_norm_batched_cuda(gpu_ref(weight), m, n, eps))
-            };
+            return gpu_into(gpu_ref(self).rms_norm_batched_cuda(gpu_ref(weight), m, n, eps));
         }
         // CPU fallback: independent rms_norm over each of m rows. Fast + par over t.
         let xs = self.storage.as_slice();
@@ -1952,32 +1907,20 @@ impl<T: Float> Tensor<T> {
         let mut out: Vec<T> = vec![T::zero(); m * n];
         if m >= 2 || (m * n) >= 4096 {
             use rayon::prelude::*;
-            let out_ptr = out.as_mut_ptr() as usize;
-            let x_ptr = x.as_ptr() as usize;
-            let w_ptr = w.as_ptr() as usize;
-            (0..m).into_par_iter().for_each(|t| {
-                let out_ptr = out_ptr as *mut T;
-                let x_ptr = x_ptr as *const T;
-                let w_ptr = w_ptr as *const T;
-                let base = t * n;
-                let mut sum_sq = 0.0f64;
-                for i in 0..n {
-                    let f: f64 = unsafe { *x_ptr.add(base + i) }
-                        .to_f32()
-                        .unwrap_or(0.0)
-                        .into();
-                    sum_sq += f * f;
-                }
-                let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-                for i in 0..n {
-                    let v = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0)
-                        * scale
-                        * unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
-                    unsafe {
-                        *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero);
+            out.par_chunks_mut(n)
+                .zip(x.par_chunks(n))
+                .for_each(|(o_row, x_row)| {
+                    let mut sum_sq = 0.0f64;
+                    for xi in x_row {
+                        let f: f64 = xi.to_f32().unwrap_or(0.0).into();
+                        sum_sq += f * f;
                     }
-                }
-            });
+                    let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+                    for ((o, xi), wi) in o_row.iter_mut().zip(x_row).zip(w) {
+                        let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
+                        *o = num_traits::cast(v).unwrap_or_else(T::zero);
+                    }
+                });
         } else {
             for t in 0..m {
                 let base = t * n;
@@ -2011,15 +1954,13 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).rms_norm_heads_batched_cuda(
-                    gpu_ref(weight),
-                    m,
-                    n_heads,
-                    head_dim,
-                    eps,
-                ))
-            };
+            return gpu_into(gpu_ref(self).rms_norm_heads_batched_cuda(
+                gpu_ref(weight),
+                m,
+                n_heads,
+                head_dim,
+                eps,
+            ));
         }
         // CPU fallback: m × rms_norm_heads. Fast + par over (t,h) or m for training bwd.
         let xs = self.storage.as_slice();
@@ -2041,34 +1982,22 @@ impl<T: Float> Tensor<T> {
         let work = m * n_heads;
         if work >= 2 || total >= 4096 {
             use rayon::prelude::*;
-            let out_ptr = out.as_mut_ptr() as usize;
-            let x_ptr = x.as_ptr() as usize;
-            let w_ptr = w.as_ptr() as usize;
-            (0..m).into_par_iter().for_each(|t| {
-                let out_ptr = out_ptr as *mut T;
-                let x_ptr = x_ptr as *const T;
-                let w_ptr = w_ptr as *const T;
-                for h in 0..n_heads {
-                    let base = t * n_heads * head_dim + h * head_dim;
+            // One chunk per head across every token: the same disjoint rows the
+            // raw-pointer loop assumed, now proven by par_chunks_mut.
+            out.par_chunks_mut(head_dim)
+                .zip(x.par_chunks(head_dim))
+                .for_each(|(o_row, x_row)| {
                     let mut sum_sq = 0.0f64;
-                    for i in 0..head_dim {
-                        let f: f64 = unsafe { *x_ptr.add(base + i) }
-                            .to_f32()
-                            .unwrap_or(0.0)
-                            .into();
+                    for xi in x_row {
+                        let f: f64 = xi.to_f32().unwrap_or(0.0).into();
                         sum_sq += f * f;
                     }
                     let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
-                    for i in 0..head_dim {
-                        let v = unsafe { *x_ptr.add(base + i) }.to_f32().unwrap_or(0.0)
-                            * scale
-                            * unsafe { *w_ptr.add(i) }.to_f32().unwrap_or(0.0);
-                        unsafe {
-                            *out_ptr.add(base + i) = num_traits::cast(v).unwrap_or_else(T::zero);
-                        }
+                    for ((o, xi), wi) in o_row.iter_mut().zip(x_row).zip(w) {
+                        let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
+                        *o = num_traits::cast(v).unwrap_or_else(T::zero);
                     }
-                }
-            });
+                });
         } else {
             for t in 0..m {
                 for h in 0..n_heads {
@@ -2105,13 +2034,10 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(
-                    gpu_ref(self).apply_rope_split_halves_batched_cuda(
-                        m, n_heads, head_dim, theta, pos_start,
-                    ),
-                )
-            };
+            return gpu_into(
+                gpu_ref(self)
+                    .apply_rope_split_halves_batched_cuda(m, n_heads, head_dim, theta, pos_start),
+            );
         }
         // CPU fallback - parallel over m tokens using rayon (flat per-row work).
         // Serious optimization for CPU prefill and Hailo ref paths.
@@ -2177,13 +2103,10 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(
-                    gpu_ref(self).rope_split_halves_bhsd_bwd_cuda(
-                        bs, n_heads, seq, head_dim, theta, pos_start,
-                    ),
-                )
-            };
+            return gpu_into(
+                gpu_ref(self)
+                    .rope_split_halves_bhsd_bwd_cuda(bs, n_heads, seq, head_dim, theta, pos_start),
+            );
         }
         assert!(
             std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
@@ -2257,9 +2180,7 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).repeat_kv_cuda(bs, kv_heads, n_rep, seq, head_dim))
-            };
+            return gpu_into(gpu_ref(self).repeat_kv_cuda(bs, kv_heads, n_rep, seq, head_dim));
         }
         // CPU fallback.
         assert!(
@@ -2300,11 +2221,11 @@ impl<T: Float> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return unsafe {
-                gpu_into(gpu_ref(self).apply_rope_split_halves_bhsd_cuda(
+            return gpu_into(
+                gpu_ref(self).apply_rope_split_halves_bhsd_cuda(
                     bs, n_heads, seq, head_dim, theta, pos_start,
-                ))
-            };
+                ),
+            );
         }
         // CPU fallback - parallel over bs*heads*seq using rayon.
         // Win for CPU and Hailo ref.
@@ -2405,23 +2326,22 @@ impl<T: Float> Tensor<T> {
 
         if n >= 4096 {
             use rayon::prelude::*;
-            let gg_ptr = grad_gate.as_mut_ptr() as usize;
-            let gu_ptr = grad_up.as_mut_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
-                let gg_ptr = gg_ptr as *mut T;
-                let gu_ptr = gu_ptr as *mut T;
-                let gi = g[i].to_f32().unwrap_or(0.0);
-                let ui = u[i].to_f32().unwrap_or(0.0);
-                let goi = go[i].to_f32().unwrap_or(0.0);
-                let sig = 1.0f32 / (1.0f32 + (-gi).exp());
-                let silu_g = gi * sig;
-                let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
-                unsafe {
-                    *gg_ptr.add(i) =
-                        num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero);
-                    *gu_ptr.add(i) = num_traits::cast(goi * silu_g).unwrap_or_else(T::zero);
-                }
-            });
+            grad_gate
+                .par_iter_mut()
+                .zip(grad_up.par_iter_mut())
+                .zip(g.par_iter())
+                .zip(u.par_iter())
+                .zip(go.par_iter())
+                .for_each(|((((gg, gu), gi), ui), goi)| {
+                    let gi = gi.to_f32().unwrap_or(0.0);
+                    let ui = ui.to_f32().unwrap_or(0.0);
+                    let goi = goi.to_f32().unwrap_or(0.0);
+                    let sig = 1.0f32 / (1.0f32 + (-gi).exp());
+                    let silu_g = gi * sig;
+                    let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
+                    *gg = num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero);
+                    *gu = num_traits::cast(goi * silu_g).unwrap_or_else(T::zero);
+                });
         } else {
             for i in 0..n {
                 let gi = g[i].to_f32().unwrap_or(0.0);
@@ -2711,13 +2631,11 @@ impl<T: Float> Tensor<T> {
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
             let self_f32 = gpu_ref(self);
-            return unsafe {
-                gpu_into(
-                    self_f32
-                        .broadcast_to_cuda(shape)
-                        .expect("CUDA broadcast_to failed"),
-                )
-            };
+            return gpu_into(
+                self_f32
+                    .broadcast_to_cuda(shape)
+                    .expect("CUDA broadcast_to failed"),
+            );
         }
 
         let result_shape = broadcast_shape(&self.shape, shape).unwrap_or_else(|_| shape.into());
@@ -2824,7 +2742,7 @@ impl<T: Numeric> Tensor<T> {
             if self_gpu || other_gpu {
                 assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
                 if self_gpu && other_gpu {
-                    let (s, o) = unsafe { (gpu_ref(self), gpu_ref(other)) };
+                    let (s, o) = (gpu_ref(self), gpu_ref(other));
                     if self.shape == other.shape {
                         return Ok(gpu_into(s.add_cuda(o)?));
                     } else {
@@ -2893,7 +2811,7 @@ impl<T: Numeric> Tensor<T> {
             if self_gpu || other_gpu {
                 assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
                 if self_gpu && other_gpu {
-                    let (s, o) = unsafe { (gpu_ref(self), gpu_ref(other)) };
+                    let (s, o) = (gpu_ref(self), gpu_ref(other));
                     if self.shape == other.shape {
                         return Ok(gpu_into(s.sub_cuda(o)?));
                     } else {
@@ -2960,7 +2878,7 @@ impl<T: Numeric> Tensor<T> {
             if self_gpu || other_gpu {
                 assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
                 if self_gpu && other_gpu {
-                    let (s, o) = unsafe { (gpu_ref(self), gpu_ref(other)) };
+                    let (s, o) = (gpu_ref(self), gpu_ref(other));
                     if self.shape == other.shape {
                         return Ok(gpu_into(s.mul_cuda(o)?));
                     } else {
@@ -3027,7 +2945,7 @@ impl<T: Numeric> Tensor<T> {
             if self_gpu || other_gpu {
                 assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
                 if self_gpu && other_gpu {
-                    let (s, o) = unsafe { (gpu_ref(self), gpu_ref(other)) };
+                    let (s, o) = (gpu_ref(self), gpu_ref(other));
                     if self.shape == other.shape {
                         return Ok(gpu_into(s.div_cuda(o)?));
                     } else {
@@ -3146,7 +3064,7 @@ impl<T: Numeric> Tensor<T> {
         #[cfg(feature = "cuda")]
         if self.device().is_gpu() {
             assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            let (s, o) = unsafe { (gpu_ref(self), gpu_ref(other)) };
+            let (s, o) = (gpu_ref(self), gpu_ref(other));
             return Ok(gpu_into(s.matmul_cuda(o)?));
         }
         if self.ndim() < 2 || other.ndim() < 2 {
@@ -3372,30 +3290,20 @@ impl<T: Numeric> Tensor<T> {
             // region of c_data; a/b slices are read-only and already materialized.
             // Capture idx vecs via usize-ptr so the closure is Send+Sync (consistent
             // with other parallel paths in tensor + autograd).
-            let a_idx_ptr = a_batch_idx.as_ptr() as usize;
-            let b_idx_ptr = b_batch_idx.as_ptr() as usize;
-            let c_ptr = c_data.as_mut_ptr() as usize;
-            let a_data_ptr = a_data.as_ptr() as usize;
-            let b_data_ptr = b_data.as_ptr() as usize;
-            (0..batch_size).into_par_iter().for_each(|batch| {
-                let ai = unsafe { *(a_idx_ptr as *const usize).add(batch) };
-                let bi = unsafe { *(b_idx_ptr as *const usize).add(batch) };
-                let a_slice = unsafe {
-                    let base = (a_data_ptr as *const T).add(ai * a_stride);
-                    std::slice::from_raw_parts(base, a_stride)
-                };
-                let b_slice = unsafe {
-                    let base = (b_data_ptr as *const T).add(bi * b_stride);
-                    std::slice::from_raw_parts(base, b_stride)
-                };
-                let c_slice = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        (c_ptr as *mut T).add(batch * c_stride),
-                        c_stride,
-                    )
-                };
-                CpuBackend::matmul(c_slice, a_slice, b_slice, m, n, k1);
-            });
+            // The index tables broadcast: several batches may read the same
+            // operand slab, which is a shared borrow and needs no unsafe. Only
+            // C is written, one disjoint slab per batch, which par_chunks_mut
+            // hands out and the borrow checker verifies.
+            c_data
+                .par_chunks_mut(c_stride)
+                .enumerate()
+                .for_each(|(batch, c_slice)| {
+                    let ai = a_batch_idx[batch];
+                    let bi = b_batch_idx[batch];
+                    let a_slice = &a_data[ai * a_stride..(ai + 1) * a_stride];
+                    let b_slice = &b_data[bi * b_stride..(bi + 1) * b_stride];
+                    CpuBackend::matmul(c_slice, a_slice, b_slice, m, n, k1);
+                });
         } else {
             for batch in 0..batch_size {
                 let ai = a_batch_idx[batch];
@@ -3700,5 +3608,50 @@ mod tests {
             "expected helpful error, got: {}",
             msg
         );
+    }
+}
+
+// ── parallel CPU paths ──
+
+#[cfg(test)]
+mod parallel_cpu_path_tests {
+    use super::Tensor;
+
+    /// The parallel branch of a CPU kernel used to write through raw pointers
+    /// cast to usize to get past rayon's Send check. It is now a
+    /// par_iter_mut, which the borrow checker can verify. The two branches
+    /// compute the same arithmetic, so they must agree exactly, and the
+    /// parallel one must not be slower than the sequential one on a size
+    /// that takes the parallel path.
+    #[test]
+    fn layer_norm_tokenwise_parallel_matches_sequential_exactly() {
+        let small = 1024usize;
+        let large = 1 << 16;
+        for n in [small, large] {
+            let x: Vec<f32> = (0..n)
+                .map(|i| ((i * 7919) % 1000) as f32 * 0.01 - 5.0)
+                .collect();
+            let g: Vec<f32> = (0..n).map(|i| 1.0 + (i % 13) as f32 * 0.05).collect();
+            let b: Vec<f32> = (0..n).map(|i| (i % 5) as f32 * 0.1).collect();
+            let xt = Tensor::from_vec(x.clone(), &[n]).unwrap();
+            let gt = Tensor::from_vec(g.clone(), &[n]).unwrap();
+            let bt = Tensor::from_vec(b.clone(), &[n]).unwrap();
+            let out = xt.layer_norm_tokenwise(&gt, &bt, 1e-5).to_vec();
+
+            // Reference: the sequential arithmetic, written out here so the test
+            // does not depend on which branch the implementation picked.
+            let n_f = n as f32;
+            let mean: f32 = x.iter().sum::<f32>() / n_f;
+            let var: f32 = x.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / n_f;
+            let inv = (var + 1e-5).sqrt().recip();
+            for i in 0..n {
+                let want = (x[i] - mean) * inv * g[i] + b[i];
+                assert!(
+                    (out[i] - want).abs() <= 1e-4 * want.abs().max(1.0),
+                    "n={n} i={i}: got {} want {want}",
+                    out[i]
+                );
+            }
+        }
     }
 }
