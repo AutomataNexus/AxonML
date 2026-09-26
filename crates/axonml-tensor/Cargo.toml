@@ -32,6 +32,7 @@ cudnn = ["cuda", "axonml-core/cudnn"]
 
 [dependencies]
 axonml-core.workspace = true
+bytemuck.workspace = true
 num-traits.workspace = true
 rand.workspace = true
 rand_distr.workspace = true

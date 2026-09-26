@@ -353,60 +353,6 @@ impl Backend for MetalBackend {
         }
     }
 
-    fn allocate(&self, size: usize) -> *mut u8 {
-        let buffer_id = self.create_buffer(size as u64);
-        buffer_id as *mut u8
-    }
-
-    fn deallocate(&self, ptr: *mut u8, _size: usize) {
-        let buffer_id = ptr as u64;
-        self.destroy_buffer(buffer_id);
-    }
-
-    fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        let buffer_id = dst as u64;
-        let data = unsafe { std::slice::from_raw_parts(src, size) };
-        self.write_buffer(buffer_id, 0, data);
-    }
-
-    fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
-        let buffer_id = src as u64;
-        if let Some(data) = self.read_buffer(buffer_id) {
-            let copy_size = std::cmp::min(size, data.len());
-            unsafe {
-                std::ptr::copy_nonoverlapping(data.as_ptr(), dst, copy_size);
-            }
-        }
-    }
-
-    fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        let src_id = src as u64;
-        let dst_id = dst as u64;
-
-        autoreleasepool(|| {
-            let tracker = self.buffer_tracker.lock().unwrap();
-            let src_info = match tracker.get(src_id) {
-                Some(info) => info,
-                None => return,
-            };
-            let dst_info = match tracker.get(dst_id) {
-                Some(info) => info,
-                None => return,
-            };
-
-            let command_buffer = self.command_queue.new_command_buffer();
-            let blit_encoder = command_buffer.new_blit_command_encoder();
-
-            blit_encoder.copy_from_buffer(&src_info.buffer, 0, &dst_info.buffer, 0, size as u64);
-
-            blit_encoder.end_encoding();
-            drop(tracker);
-
-            command_buffer.commit();
-            command_buffer.wait_until_completed();
-        });
-    }
-
     fn synchronize(&self) {
         autoreleasepool(|| {
             let command_buffer = self.command_queue.new_command_buffer();
@@ -437,18 +383,6 @@ impl Backend for MetalBackend {
             compute_capability: None,
         }
     }
-
-    fn allocate(&self, _size: usize) -> *mut u8 {
-        std::ptr::null_mut()
-    }
-
-    fn deallocate(&self, _ptr: *mut u8, _size: usize) {}
-
-    fn copy_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
-
-    fn copy_to_host(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
-
-    fn copy_device_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
 
     fn synchronize(&self) {}
 }

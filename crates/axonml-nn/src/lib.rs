@@ -29,7 +29,7 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-#![deny(unsafe_op_in_unsafe_fn)]
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
@@ -52,7 +52,6 @@
 #![allow(clippy::uninlined_format_args)]
 #![allow(clippy::ptr_arg)]
 #![allow(clippy::return_self_not_must_use)]
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
 #![allow(clippy::items_after_statements)]
 #![allow(clippy::unreadable_literal)]
 #![allow(clippy::if_same_then_else)]

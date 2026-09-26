@@ -420,62 +420,6 @@ impl Backend for WgpuBackend {
         }
     }
 
-    fn allocate(&self, size: usize) -> *mut u8 {
-        // Create buffer with storage and copy usage
-        let buffer_id = self.create_buffer(
-            size as u64,
-            BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-        );
-        // Return the buffer ID as a pointer (we track internally)
-        buffer_id as *mut u8
-    }
-
-    fn deallocate(&self, ptr: *mut u8, _size: usize) {
-        let buffer_id = ptr as u64;
-        self.destroy_buffer(buffer_id);
-    }
-
-    fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        let buffer_id = dst as u64;
-        let data = unsafe { std::slice::from_raw_parts(src, size) };
-        self.write_buffer(buffer_id, 0, data);
-    }
-
-    fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
-        let buffer_id = src as u64;
-        if let Some(data) = self.read_buffer(buffer_id) {
-            let copy_size = std::cmp::min(size, data.len());
-            unsafe {
-                std::ptr::copy_nonoverlapping(data.as_ptr(), dst, copy_size);
-            }
-        }
-    }
-
-    fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        let src_id = src as u64;
-        let dst_id = dst as u64;
-
-        let tracker = self.buffer_tracker.lock().unwrap();
-        let src_info = match tracker.get(src_id) {
-            Some(info) => info,
-            None => return,
-        };
-        let dst_info = match tracker.get(dst_id) {
-            Some(info) => info,
-            None => return,
-        };
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some("Copy D2D Encoder"),
-            });
-        encoder.copy_buffer_to_buffer(&src_info.buffer, 0, &dst_info.buffer, 0, size as u64);
-
-        drop(tracker);
-        self.queue.submit(Some(encoder.finish()));
-    }
-
     fn synchronize(&self) {
         self.device.poll(wgpu::Maintain::Wait);
     }
@@ -502,18 +446,6 @@ impl Backend for WgpuBackend {
             compute_capability: None,
         }
     }
-
-    fn allocate(&self, _size: usize) -> *mut u8 {
-        std::ptr::null_mut()
-    }
-
-    fn deallocate(&self, _ptr: *mut u8, _size: usize) {}
-
-    fn copy_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
-
-    fn copy_to_host(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
-
-    fn copy_device_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
 
     fn synchronize(&self) {}
 }

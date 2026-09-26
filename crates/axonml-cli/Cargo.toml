@@ -94,7 +94,7 @@ dirs = { workspace = true }
 
 # Unix process management (for dashboard commands)
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+nix = { version = "0.29", features = ["signal"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"

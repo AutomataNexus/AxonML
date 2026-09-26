@@ -264,6 +264,9 @@ impl NcclLib {
 
         let lib = nccl_paths
             .iter()
+            // SAFETY: dlopen of a candidate NCCL/CUDA runtime path. libloading marks this
+            // unsafe because a library's initialisers run on load; there is no memory
+            // obligation on our side, and a missing library is an Err, not UB.
             .find_map(|path| unsafe { Library::new(path).ok() })
             .ok_or(NcclError::LibraryNotFound)?;
 
@@ -278,9 +281,18 @@ impl NcclLib {
 
         let cuda_lib = cuda_paths
             .iter()
+            // SAFETY: dlopen of a candidate NCCL/CUDA runtime path. libloading marks this
+            // unsafe because a library's initialisers run on load; there is no memory
+            // obligation on our side, and a missing library is an Err, not UB.
             .find_map(|path| unsafe { Library::new(path).ok() })
             .ok_or(NcclError::CudaNotFound)?;
 
+        // SAFETY: Each symbol is resolved by its exported C name and cast to the fn
+        // pointer type declared beside it; those types transcribe nccl.h and
+        // cuda_runtime_api.h. A wrong transcription would be a wrong ABI on every
+        // call below, so this is the one place the ABI is asserted, and every
+        // later call site relies on it. The pointers are copied out by value,
+        // and `_lib` keeps the mapping alive as long as any of them can be called.
         unsafe {
             // Load all NCCL function pointers (extract raw pointers before moving lib)
             let fn_get_version = *lib
@@ -385,6 +397,8 @@ impl NcclLib {
     /// Returns the NCCL version code.
     fn version(&self) -> Result<i32, NcclError> {
         let mut version: c_int = 0;
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Three out-parameters the library writes; read only on success.
         let result = unsafe { (self.get_version)(&raw mut version) };
         check_nccl(result, self)?;
         Ok(version)
@@ -392,10 +406,16 @@ impl NcclLib {
 
     /// Returns a human-readable string for an NCCL error code.
     fn error_string(&self, result: NcclResult) -> String {
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // ncclGetErrorString returns a pointer to a static NUL-terminated string
+        // owned by the library, checked non-null before CStr reads it.
         let ptr = unsafe { (self.get_error_string)(result) };
         if ptr.is_null() {
             return format!("Unknown NCCL error: {:?}", result);
         }
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // ncclGetErrorString returns a pointer to a static NUL-terminated string
+        // owned by the library, checked non-null before CStr reads it.
         unsafe { std::ffi::CStr::from_ptr(ptr) }
             .to_string_lossy()
             .into_owned()
@@ -501,6 +521,10 @@ impl GpuBuffer {
     fn alloc(lib: &Arc<NcclLib>, count: usize) -> Result<Self, NcclError> {
         let size_bytes = count * std::mem::size_of::<f32>();
         let mut ptr: *mut c_void = ptr::null_mut();
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // `ptr` is an out-parameter written by cudaMalloc; `size_bytes` is
+        // count * size_of::<f32>(), and the allocation is owned by the returned
+        // GpuBuffer, which frees it exactly once in drop.
         let code = unsafe { (lib.cuda_malloc)(&raw mut ptr, size_bytes) };
         check_cuda(code, "cudaMalloc")?;
         Ok(Self {
@@ -513,6 +537,10 @@ impl GpuBuffer {
     /// Copy host data to this GPU buffer.
     fn copy_from_host(&mut self, data: &[f32]) -> Result<(), NcclError> {
         let size = (data.len() * std::mem::size_of::<f32>()).min(self.size_bytes);
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // `size` is clamped to `self.size_bytes` so the device side is in bounds,
+        // and the host slice is a live &[f32]/&mut [f32] of at least that many
+        // bytes for the duration of the synchronous copy.
         let code = unsafe {
             (self.lib.cuda_memcpy)(
                 self.ptr,
@@ -527,6 +555,10 @@ impl GpuBuffer {
     /// Copy from GPU buffer back to host slice.
     fn copy_to_host(&self, data: &mut [f32]) -> Result<(), NcclError> {
         let size = (data.len() * std::mem::size_of::<f32>()).min(self.size_bytes);
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // `size` is clamped to `self.size_bytes` so the device side is in bounds,
+        // and the host slice is a live &[f32]/&mut [f32] of at least that many
+        // bytes for the duration of the synchronous copy.
         let code = unsafe {
             (self.lib.cuda_memcpy)(
                 data.as_mut_ptr() as *mut c_void,
@@ -542,6 +574,9 @@ impl GpuBuffer {
 impl Drop for GpuBuffer {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // `ptr` came from cudaMalloc in `alloc`, is non-null by the guard above,
+            // and is freed exactly once because this is Drop.
             unsafe {
                 (self.lib.cuda_free)(self.ptr);
             }
@@ -550,10 +585,11 @@ impl Drop for GpuBuffer {
 }
 
 // SAFETY: GpuBuffer uniquely owns one cudaMalloc allocation and frees it on
-// drop, so moving it to another thread moves that ownership (Send). Every
-// method that writes the allocation takes &mut self, so a shared &GpuBuffer
-// can only read it, and concurrent reads of device memory are sound (Sync).
+// drop, so moving it to another thread moves that ownership.
 unsafe impl Send for GpuBuffer {}
+// SAFETY: every method that writes the allocation takes &mut self, so a
+// shared &GpuBuffer can only read it, and concurrent reads of device memory
+// are sound.
 unsafe impl Sync for GpuBuffer {}
 
 // =============================================================================
@@ -594,13 +630,13 @@ pub struct NcclBackend {
 }
 
 // SAFETY: comm and stream are raw handles owned by this struct and released on
-// drop, so moving the struct moves that ownership (Send). They are only ever
-// used while op_lock is held, so any number of threads holding &NcclBackend
-// reduce to one operation at a time on the communicator, which is the contract
-// NCCL requires (Sync). Without the lock this impl would be unsound: every
-// collective takes &self and NCCL does not permit concurrent operations on one
-// communicator.
+// drop, so moving the struct moves that ownership.
 unsafe impl Send for NcclBackend {}
+// SAFETY: comm and stream are only ever used while op_lock is held, so any
+// number of threads holding &NcclBackend reduce to one operation at a time on
+// the communicator, which is the contract NCCL requires. Without the lock this
+// impl would be unsound: every collective takes &self and NCCL does not permit
+// concurrent operations on one communicator.
 unsafe impl Sync for NcclBackend {}
 
 impl NcclBackend {
@@ -611,6 +647,8 @@ impl NcclBackend {
     pub fn generate_unique_id() -> Result<NcclUniqueId, NcclError> {
         let lib = NcclLib::load()?;
         let mut id = NcclUniqueId::default();
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // `id` is a stack NcclUniqueId the library fills in place.
         let result = unsafe { (lib.get_unique_id)(&raw mut id) };
         check_nccl(result, &lib)?;
         Ok(id)
@@ -635,16 +673,25 @@ impl NcclBackend {
         let lib = Arc::new(NcclLib::load()?);
 
         // Set CUDA device for this rank
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // cudaSetDevice takes an ordinal by value and touches no memory of ours.
         let code = unsafe { (lib.cuda_set_device)(device) };
         check_cuda(code, "cudaSetDevice")?;
 
         // Create CUDA stream
         let mut stream: CudaStream = ptr::null_mut();
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // `stream` is an out-parameter the runtime fills; it is read only after
+        // the call reports success.
         let code = unsafe { (lib.cuda_stream_create)(&raw mut stream) };
         check_cuda(code, "cudaStreamCreate")?;
 
         // Initialize NCCL communicator
         let mut comm: NcclComm = ptr::null_mut();
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // `comm` is an out-parameter; `unique_id` was produced by ncclGetUniqueId
+        // or received from rank 0; rank and world_size are plain ints. On success
+        // the communicator is owned by this struct and destroyed once in drop.
         let result = unsafe {
             (lib.comm_init_rank)(&raw mut comm, world_size as c_int, unique_id, rank as c_int)
         };
@@ -679,6 +726,11 @@ impl NcclBackend {
 
         // Use NCCL group semantics to init all communicators from one thread
         let lib = Arc::new(NcclLib::load()?);
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Device buffers are GpuBuffers this fn allocated, sized from the host
+        // slices, and NCCL's size contract between them is asserted at the top of
+        // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+        // no other thread issues a collective on them concurrently.
         let result = unsafe { (lib.group_start)() };
         check_nccl(result, &lib)?;
 
@@ -687,14 +739,23 @@ impl NcclBackend {
 
         for (rank, &device) in devices.iter().enumerate() {
             // Set device
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // cudaSetDevice takes an ordinal by value and touches no memory of ours.
             let code = unsafe { (lib.cuda_set_device)(device) };
             check_cuda(code, "cudaSetDevice")?;
 
             // Create stream on this device
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // `stream` is an out-parameter the runtime fills; it is read only after
+            // the call reports success.
             let code = unsafe { (lib.cuda_stream_create)(&raw mut streams[rank]) };
             check_cuda(code, "cudaStreamCreate")?;
 
             // Init communicator (grouped)
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // `comm` is an out-parameter; `unique_id` was produced by ncclGetUniqueId
+            // or received from rank 0; rank and world_size are plain ints. On success
+            // the communicator is owned by this struct and destroyed once in drop.
             let result = unsafe {
                 (lib.comm_init_rank)(
                     &raw mut comms[rank],
@@ -706,6 +767,11 @@ impl NcclBackend {
             check_nccl(result, &lib)?;
         }
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Device buffers are GpuBuffers this fn allocated, sized from the host
+        // slices, and NCCL's size contract between them is asserted at the top of
+        // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+        // no other thread issues a collective on them concurrently.
         let result = unsafe { (lib.group_end)() };
         check_nccl(result, &lib)?;
 
@@ -743,6 +809,8 @@ impl NcclBackend {
     /// Blocks until all previously enqueued NCCL operations complete.
     pub fn synchronize(&self) -> Result<(), NcclError> {
         let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Blocks until this struct's own stream has drained. No pointers are passed.
         let code = unsafe { (self.lib.cuda_stream_synchronize)(self.stream) };
         check_cuda(code, "cudaStreamSynchronize")
     }
@@ -760,6 +828,8 @@ impl NcclBackend {
         F: FnOnce(*const c_void, *mut c_void) -> Result<(), NcclError>,
     {
         // Set device for this rank
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // cudaSetDevice takes an ordinal by value and touches no memory of ours.
         let code = unsafe { (self.lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice")?;
 
@@ -771,6 +841,8 @@ impl NcclBackend {
         op(send_buf.ptr as *const c_void, recv_buf.ptr)?;
 
         // Synchronize before reading results back
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Blocks until this struct's own stream has drained. No pointers are passed.
         let code = unsafe { (self.lib.cuda_stream_synchronize)(self.stream) };
         check_cuda(code, "cudaStreamSynchronize")?;
 
@@ -784,6 +856,8 @@ impl NcclBackend {
     where
         F: FnOnce(*mut c_void) -> Result<(), NcclError>,
     {
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // cudaSetDevice takes an ordinal by value and touches no memory of ours.
         let code = unsafe { (self.lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice")?;
 
@@ -792,6 +866,8 @@ impl NcclBackend {
 
         op(buf.ptr)?;
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Blocks until this struct's own stream has drained. No pointers are passed.
         let code = unsafe { (self.lib.cuda_stream_synchronize)(self.stream) };
         check_cuda(code, "cudaStreamSynchronize")?;
 
@@ -805,6 +881,9 @@ impl Drop for NcclBackend {
     fn drop(&mut self) {
         // Finalize and destroy communicator
         if !self.comm.is_null() {
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // `comm` was initialised by this struct and is destroyed exactly once,
+            // in drop, after which nothing references it.
             unsafe {
                 let _ = (self.lib.comm_finalize)(self.comm);
                 let _ = (self.lib.comm_destroy)(self.comm);
@@ -812,6 +891,9 @@ impl Drop for NcclBackend {
         }
         // Destroy stream
         if !self.stream.is_null() {
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // The stream was created by this struct and is destroyed exactly once, here
+            // in drop, after which nothing references it.
             unsafe {
                 let _ = (self.lib.cuda_stream_destroy)(self.stream);
             }
@@ -846,6 +928,11 @@ impl Backend for NcclBackend {
         let lib = &self.lib;
 
         self.with_gpu_buffer_inplace(data, |buf| {
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // Device buffers are GpuBuffers this fn allocated, sized from the host
+            // slices, and NCCL's size contract between them is asserted at the top of
+            // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+            // no other thread issues a collective on them concurrently.
             let result = unsafe {
                 (lib.all_reduce)(
                     buf as *const c_void,
@@ -870,6 +957,11 @@ impl Backend for NcclBackend {
         let lib = &self.lib;
 
         self.with_gpu_buffer_inplace(data, |buf| {
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // Device buffers are GpuBuffers this fn allocated, sized from the host
+            // slices, and NCCL's size contract between them is asserted at the top of
+            // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+            // no other thread issues a collective on them concurrently.
             let result = unsafe {
                 (lib.broadcast)(
                     buf as *const c_void,
@@ -887,6 +979,16 @@ impl Backend for NcclBackend {
     }
 
     fn all_gather(&self, send_data: &[f32], recv_data: &mut [f32]) {
+        // NCCL's contract: the receive buffer holds world_size copies of the
+        // send buffer, back to back. A shorter one is an out-of-bounds device
+        // write inside NCCL, which no later check could catch.
+        assert!(
+            recv_data.len() >= send_data.len().saturating_mul(self.world_size),
+            "all_gather: recv_data holds {} elements but world_size {} x send_data {} are needed",
+            recv_data.len(),
+            self.world_size,
+            send_data.len()
+        );
         let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let send_count = send_data.len();
         let comm = self.comm;
@@ -894,6 +996,11 @@ impl Backend for NcclBackend {
         let lib = &self.lib;
 
         self.with_gpu_buffers(send_data, recv_data, |send_buf, recv_buf| {
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // Device buffers are GpuBuffers this fn allocated, sized from the host
+            // slices, and NCCL's size contract between them is asserted at the top of
+            // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+            // no other thread issues a collective on them concurrently.
             let result = unsafe {
                 (lib.all_gather)(
                     send_buf,
@@ -910,6 +1017,15 @@ impl Backend for NcclBackend {
     }
 
     fn reduce_scatter(&self, send_data: &[f32], recv_data: &mut [f32], op: ReduceOp) {
+        // NCCL's contract: the send buffer holds world_size chunks of the
+        // receive buffer's size; this rank keeps chunk `rank`.
+        assert!(
+            send_data.len() >= recv_data.len().saturating_mul(self.world_size),
+            "reduce_scatter: send_data holds {} elements but world_size {} x recv_data {} are needed",
+            send_data.len(),
+            self.world_size,
+            recv_data.len()
+        );
         let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let nccl_op = to_nccl_op(op);
         let recv_count = recv_data.len();
@@ -918,6 +1034,11 @@ impl Backend for NcclBackend {
         let lib = &self.lib;
 
         self.with_gpu_buffers(send_data, recv_data, |send_buf, recv_buf| {
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // Device buffers are GpuBuffers this fn allocated, sized from the host
+            // slices, and NCCL's size contract between them is asserted at the top of
+            // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+            // no other thread issues a collective on them concurrently.
             let result = unsafe {
                 (lib.reduce_scatter)(
                     send_buf,
@@ -935,12 +1056,26 @@ impl Backend for NcclBackend {
     }
 
     fn gather(&self, send_data: &[f32], recv_data: &mut [f32], dst: usize) {
+        // The loop below writes recv_buf at offset r * send_count for every
+        // rank r, so on the destination the receive buffer must hold
+        // world_size chunks.
+        if self.rank == dst {
+            assert!(
+                recv_data.len() >= send_data.len().saturating_mul(self.world_size),
+                "gather: recv_data holds {} elements but world_size {} x send_data {} are needed",
+                recv_data.len(),
+                self.world_size,
+                send_data.len()
+            );
+        }
         // NCCL does not have a native gather. Implement via grouped send/recv.
         let send_count = send_data.len();
         let comm = self.comm;
         let stream = self.stream;
         let lib = &self.lib;
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // cudaSetDevice takes an ordinal by value and touches no memory of ours.
         let code = unsafe { (lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice").expect("CUDA set device failed");
 
@@ -954,6 +1089,11 @@ impl Backend for NcclBackend {
         let recv_buf =
             GpuBuffer::alloc(&self.lib, recv_data.len()).expect("GPU alloc failed for gather recv");
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Device buffers are GpuBuffers this fn allocated, sized from the host
+        // slices, and NCCL's size contract between them is asserted at the top of
+        // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+        // no other thread issues a collective on them concurrently.
         unsafe {
             let result = (lib.group_start)();
             check_nccl(result, lib).expect("NCCL group_start failed");
@@ -991,6 +1131,8 @@ impl Backend for NcclBackend {
         }
 
         // Sync and copy back
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Blocks until this struct's own stream has drained. No pointers are passed.
         let code = unsafe { (lib.cuda_stream_synchronize)(self.stream) };
         check_cuda(code, "cudaStreamSynchronize").expect("CUDA sync failed");
 
@@ -1008,6 +1150,8 @@ impl Backend for NcclBackend {
         let stream = self.stream;
         let lib = &self.lib;
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // cudaSetDevice takes an ordinal by value and touches no memory of ours.
         let code = unsafe { (lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice").expect("CUDA set device failed");
 
@@ -1023,6 +1167,11 @@ impl Backend for NcclBackend {
         let recv_buf =
             GpuBuffer::alloc(&self.lib, recv_count).expect("GPU alloc failed for scatter recv");
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Device buffers are GpuBuffers this fn allocated, sized from the host
+        // slices, and NCCL's size contract between them is asserted at the top of
+        // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+        // no other thread issues a collective on them concurrently.
         unsafe {
             let result = (lib.group_start)();
             check_nccl(result, lib).expect("NCCL group_start failed");
@@ -1060,6 +1209,8 @@ impl Backend for NcclBackend {
         }
 
         // Sync and copy back
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Blocks until this struct's own stream has drained. No pointers are passed.
         let code = unsafe { (lib.cuda_stream_synchronize)(self.stream) };
         check_cuda(code, "cudaStreamSynchronize").expect("CUDA sync failed");
 
@@ -1069,6 +1220,14 @@ impl Backend for NcclBackend {
     }
 
     fn reduce(&self, send_data: &[f32], recv_data: &mut [f32], dst: usize, op: ReduceOp) {
+        if self.rank == dst {
+            assert!(
+                recv_data.len() >= send_data.len(),
+                "reduce: recv_data holds {} elements but {} are reduced into it",
+                recv_data.len(),
+                send_data.len()
+            );
+        }
         let _op = self.op_lock.lock().unwrap_or_else(|e| e.into_inner());
         let nccl_op = to_nccl_op(op);
         let count = send_data.len();
@@ -1077,6 +1236,11 @@ impl Backend for NcclBackend {
         let lib = &self.lib;
 
         self.with_gpu_buffers(send_data, recv_data, |send_buf, recv_buf| {
+            // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+            // Device buffers are GpuBuffers this fn allocated, sized from the host
+            // slices, and NCCL's size contract between them is asserted at the top of
+            // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+            // no other thread issues a collective on them concurrently.
             let result = unsafe {
                 (lib.reduce)(
                     send_buf,
@@ -1101,12 +1265,19 @@ impl Backend for NcclBackend {
         let stream = self.stream;
         let lib = &self.lib;
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // cudaSetDevice takes an ordinal by value and touches no memory of ours.
         let code = unsafe { (self.lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice").expect("CUDA set device failed");
 
         // Allocate a tiny 1-element buffer for the all-reduce barrier
         let buf = GpuBuffer::alloc(&self.lib, 1).expect("GPU alloc failed for barrier");
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Device buffers are GpuBuffers this fn allocated, sized from the host
+        // slices, and NCCL's size contract between them is asserted at the top of
+        // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+        // no other thread issues a collective on them concurrently.
         let result = unsafe {
             (lib.all_reduce)(
                 buf.ptr as *const c_void,
@@ -1120,6 +1291,8 @@ impl Backend for NcclBackend {
         };
         check_nccl(result, lib).expect("NCCL barrier (all_reduce) failed");
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Blocks until this struct's own stream has drained. No pointers are passed.
         let code = unsafe { (lib.cuda_stream_synchronize)(stream) };
         check_cuda(code, "cudaStreamSynchronize").expect("CUDA sync for barrier failed");
     }
@@ -1131,6 +1304,8 @@ impl Backend for NcclBackend {
         let stream = self.stream;
         let lib = &self.lib;
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // cudaSetDevice takes an ordinal by value and touches no memory of ours.
         let code = unsafe { (self.lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice").expect("CUDA set device failed");
 
@@ -1140,6 +1315,11 @@ impl Backend for NcclBackend {
             .expect("H2D copy failed for send");
 
         // NCCL send/recv must be paired in a group when called from the same thread
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Device buffers are GpuBuffers this fn allocated, sized from the host
+        // slices, and NCCL's size contract between them is asserted at the top of
+        // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+        // no other thread issues a collective on them concurrently.
         let result = unsafe {
             (lib.send)(
                 send_buf.ptr as *const c_void,
@@ -1152,6 +1332,8 @@ impl Backend for NcclBackend {
         };
         check_nccl(result, lib).expect("NCCL send failed");
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Blocks until this struct's own stream has drained. No pointers are passed.
         let code = unsafe { (lib.cuda_stream_synchronize)(stream) };
         check_cuda(code, "cudaStreamSynchronize").expect("CUDA sync for send failed");
     }
@@ -1163,11 +1345,18 @@ impl Backend for NcclBackend {
         let stream = self.stream;
         let lib = &self.lib;
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // cudaSetDevice takes an ordinal by value and touches no memory of ours.
         let code = unsafe { (self.lib.cuda_set_device)(self.device) };
         check_cuda(code, "cudaSetDevice").expect("CUDA set device failed");
 
         let recv_buf = GpuBuffer::alloc(&self.lib, count).expect("GPU alloc failed for recv");
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Device buffers are GpuBuffers this fn allocated, sized from the host
+        // slices, and NCCL's size contract between them is asserted at the top of
+        // this fn. `comm` and `stream` are this struct's own, used under op_lock so
+        // no other thread issues a collective on them concurrently.
         let result = unsafe {
             (lib.recv)(
                 recv_buf.ptr,
@@ -1180,6 +1369,8 @@ impl Backend for NcclBackend {
         };
         check_nccl(result, lib).expect("NCCL recv failed");
 
+        // SAFETY: Symbol resolved at load with this exact signature (see `NcclLib::load`).
+        // Blocks until this struct's own stream has drained. No pointers are passed.
         let code = unsafe { (lib.cuda_stream_synchronize)(stream) };
         check_cuda(code, "cudaStreamSynchronize").expect("CUDA sync for recv failed");
 

@@ -270,21 +270,22 @@ impl GradientFunction for SoftmaxBackward {
                 // Softmax along rows (each column is independent). Parallel over cols when worthwhile.
                 if cols >= 64 || total >= 4096 {
                     use rayon::prelude::*;
-                    let res_ptr = result.as_mut_ptr() as usize;
-                    (0..cols).into_par_iter().for_each(|col| {
-                        let res_ptr = res_ptr as *mut f32;
-                        let mut dot = 0.0f32;
-                        for row in 0..rows {
+                    // Column writes are strided, so the parallel part is the
+                    // per-column reduction; the writes then need no unsafe.
+                    let dots: Vec<f32> = (0..cols)
+                        .into_par_iter()
+                        .map(|col| {
+                            (0..rows)
+                                .map(|row| s[row * cols + col] * g[row * cols + col])
+                                .sum()
+                        })
+                        .collect();
+                    for row in 0..rows {
+                        for col in 0..cols {
                             let idx = row * cols + col;
-                            dot += s[idx] * g[idx];
+                            result[idx] = s[idx] * (g[idx] - dots[col]);
                         }
-                        for row in 0..rows {
-                            let idx = row * cols + col;
-                            unsafe {
-                                *res_ptr.add(idx) = s[idx] * (g[idx] - dot);
-                            }
-                        }
-                    });
+                    }
                 } else {
                     for col in 0..cols {
                         let mut dot = 0.0f32;
@@ -302,22 +303,16 @@ impl GradientFunction for SoftmaxBackward {
                 // Softmax along columns (each row is independent) - most common (attention, heads, etc).
                 if rows >= 4 || total >= 4096 {
                     use rayon::prelude::*;
-                    let res_ptr = result.as_mut_ptr() as usize;
-                    (0..rows).into_par_iter().for_each(|row| {
-                        let res_ptr = res_ptr as *mut f32;
-                        let start = row * cols;
-                        let mut dot = 0.0f32;
-                        for col in 0..cols {
-                            let idx = start + col;
-                            dot += s[idx] * g[idx];
-                        }
-                        for col in 0..cols {
-                            let idx = start + col;
-                            unsafe {
-                                *res_ptr.add(idx) = s[idx] * (g[idx] - dot);
+                    result
+                        .par_chunks_mut(cols)
+                        .zip(s.par_chunks(cols))
+                        .zip(g.par_chunks(cols))
+                        .for_each(|((r_row, s_row), g_row)| {
+                            let dot: f32 = s_row.iter().zip(g_row).map(|(a, b)| a * b).sum();
+                            for ((r, si), gi) in r_row.iter_mut().zip(s_row).zip(g_row) {
+                                *r = si * (gi - dot);
                             }
-                        }
-                    });
+                        });
                 } else {
                     for row in 0..rows {
                         let start = row * cols;
@@ -365,10 +360,7 @@ impl GradientFunction for SoftmaxBackward {
 
             if outer_size > 1 && total >= 4096 {
                 use rayon::prelude::*;
-                let res_ptr = result.as_mut_ptr() as usize;
-                (0..outer_size).into_par_iter().for_each(|outer| {
-                    let res_ptr = res_ptr as *mut f32;
-                    // Decompose `outer` into coordinates for the non-dim dimensions
+                let base_of = |outer: usize| {
                     let mut base_idx = 0;
                     let mut temp = outer;
                     for i in 0..outer_dims.len() {
@@ -376,26 +368,30 @@ impl GradientFunction for SoftmaxBackward {
                         temp %= outer_dim_strides[i];
                         base_idx += coord * outer_strides[i];
                     }
-
-                    // Compute dot product along this slice
-                    let mut dot = 0.0f32;
+                    base_idx
+                };
+                // Slices are strided, so the parallel part is the per-slice
+                // reduction; the writes then need no unsafe.
+                let dots: Vec<f32> = (0..outer_size)
+                    .into_par_iter()
+                    .map(|outer| {
+                        let base_idx = base_of(outer);
+                        (0..dim_size)
+                            .map(|i| base_idx + i * dim_stride)
+                            .filter(|&idx| idx < total)
+                            .map(|idx| s[idx] * g[idx])
+                            .sum()
+                    })
+                    .collect();
+                for (outer, &dot) in dots.iter().enumerate() {
+                    let base_idx = base_of(outer);
                     for i in 0..dim_size {
                         let idx = base_idx + i * dim_stride;
                         if idx < total {
-                            dot += s[idx] * g[idx];
+                            result[idx] = s[idx] * (g[idx] - dot);
                         }
                     }
-
-                    // Compute gradient for this slice
-                    for i in 0..dim_size {
-                        let idx = base_idx + i * dim_stride;
-                        if idx < total {
-                            unsafe {
-                                *res_ptr.add(idx) = s[idx] * (g[idx] - dot);
-                            }
-                        }
-                    }
-                });
+                }
             } else {
                 for outer in 0..outer_size {
                     // Decompose `outer` into coordinates for the non-dim dimensions
@@ -1090,22 +1086,16 @@ impl GradientFunction for LogSoftmaxBackward {
                 // Most common (last dim)
                 if rows >= 4 || total >= 4096 {
                     use rayon::prelude::*;
-                    let res_ptr = result.as_mut_ptr() as usize;
-                    (0..rows).into_par_iter().for_each(|row| {
-                        let res_ptr = res_ptr as *mut f32;
-                        let start = row * cols;
-                        let mut sum_g = 0.0f32;
-                        for col in 0..cols {
-                            sum_g += g[start + col];
-                        }
-                        for col in 0..cols {
-                            let idx = start + col;
-                            let softmax_i = output_vec[idx].exp();
-                            unsafe {
-                                *res_ptr.add(idx) = g[idx] - softmax_i * sum_g;
+                    result
+                        .par_chunks_mut(cols)
+                        .zip(output_vec.par_chunks(cols))
+                        .zip(g.par_chunks(cols))
+                        .for_each(|((r_row, o_row), g_row)| {
+                            let sum_g: f32 = g_row.iter().sum();
+                            for ((r, oi), gi) in r_row.iter_mut().zip(o_row).zip(g_row) {
+                                *r = gi - oi.exp() * sum_g;
                             }
-                        }
-                    });
+                        });
                 } else {
                     for row in 0..rows {
                         let start = row * cols;
@@ -1123,21 +1113,18 @@ impl GradientFunction for LogSoftmaxBackward {
             } else {
                 if cols >= 64 || total >= 4096 {
                     use rayon::prelude::*;
-                    let res_ptr = result.as_mut_ptr() as usize;
-                    (0..cols).into_par_iter().for_each(|col| {
-                        let res_ptr = res_ptr as *mut f32;
-                        let mut sum_g = 0.0f32;
-                        for row in 0..rows {
-                            sum_g += g[row * cols + col];
-                        }
-                        for row in 0..rows {
+                    // Column writes are strided, so the parallel part is the
+                    // per-column reduction; the writes then need no unsafe.
+                    let sums: Vec<f32> = (0..cols)
+                        .into_par_iter()
+                        .map(|col| (0..rows).map(|row| g[row * cols + col]).sum())
+                        .collect();
+                    for row in 0..rows {
+                        for col in 0..cols {
                             let idx = row * cols + col;
-                            let softmax_i = output_vec[idx].exp();
-                            unsafe {
-                                *res_ptr.add(idx) = g[idx] - softmax_i * sum_g;
-                            }
+                            result[idx] = g[idx] - output_vec[idx].exp() * sums[col];
                         }
-                    });
+                    }
                 } else {
                     for col in 0..cols {
                         let mut sum_g = 0.0f32;
@@ -1166,42 +1153,40 @@ impl GradientFunction for LogSoftmaxBackward {
 
             if outer_size > 1 && total >= 4096 {
                 use rayon::prelude::*;
-                let res_ptr = result.as_mut_ptr() as usize;
-                (0..outer_size).into_par_iter().for_each(|outer| {
-                    let res_ptr = res_ptr as *mut f32;
+                let base_of = |outer: usize| {
                     let mut base_idx = 0;
                     let mut temp = outer;
                     for d in (0..ndim).rev() {
                         if d != dim {
-                            let _s = if d > dim {
-                                strides[d]
-                            } else {
-                                strides[d] / dim_size
-                            };
                             let coord = temp % shape[d];
                             temp /= shape[d];
                             base_idx += coord * strides[d];
                         }
                     }
-
-                    let mut sum_g = 0.0f32;
+                    base_idx
+                };
+                // Slices are strided, so the parallel part is the per-slice
+                // reduction; the writes then need no unsafe.
+                let sums: Vec<f32> = (0..outer_size)
+                    .into_par_iter()
+                    .map(|outer| {
+                        let base_idx = base_of(outer);
+                        (0..dim_size)
+                            .map(|i| base_idx + i * dim_stride)
+                            .filter(|&idx| idx < total)
+                            .map(|idx| g[idx])
+                            .sum()
+                    })
+                    .collect();
+                for (outer, &sum_g) in sums.iter().enumerate() {
+                    let base_idx = base_of(outer);
                     for i in 0..dim_size {
                         let idx = base_idx + i * dim_stride;
                         if idx < total {
-                            sum_g += g[idx];
+                            result[idx] = g[idx] - output_vec[idx].exp() * sum_g;
                         }
                     }
-
-                    for i in 0..dim_size {
-                        let idx = base_idx + i * dim_stride;
-                        if idx < total {
-                            let softmax_i = output_vec[idx].exp();
-                            unsafe {
-                                *res_ptr.add(idx) = g[idx] - softmax_i * sum_g;
-                            }
-                        }
-                    }
-                });
+                }
             } else {
                 for outer in 0..outer_size {
                     let mut base_idx = 0;

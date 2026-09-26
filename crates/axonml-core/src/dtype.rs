@@ -241,12 +241,11 @@ impl_scalar!(u8, DType::U8);
 impl_scalar!(u32, DType::U32);
 impl_scalar!(u64, DType::U64);
 
-// f16 needs special handling because bytemuck doesn't impl Pod for half::f16 by default
-unsafe impl Zeroable for F16Wrapper {}
-unsafe impl Pod for F16Wrapper {}
-
 /// Wrapper type for f16 to implement Pod.
-#[derive(Debug, Clone, Copy, Default)]
+///
+/// `half` is built with its `bytemuck` feature, so `f16: Pod`, and the
+/// derives prove the wrapper is a `repr(transparent)` newtype over it.
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct F16Wrapper(pub f16);
 
@@ -255,13 +254,11 @@ impl Scalar for F16Wrapper {
 }
 
 // Bool wrapper for Pod compatibility
-/// Wrapper type for bool to implement Pod.
-#[derive(Debug, Clone, Copy, Default)]
+/// Wrapper type for bool to implement Pod (a `u8`, so every bit pattern
+/// is valid — which is exactly why it is not `bool`).
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct BoolWrapper(pub u8);
-
-unsafe impl Zeroable for BoolWrapper {}
-unsafe impl Pod for BoolWrapper {}
 
 impl Scalar for BoolWrapper {
     const DTYPE: DType = DType::Bool;

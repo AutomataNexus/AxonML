@@ -30,6 +30,12 @@ jobs:
       # compiles them and they rot silently: a lint added in #5 broke the
       # Vulkan backend and nothing here noticed. check does not link, so this
       # needs no CUDA, Vulkan or NCCL installed on the runner.
+      # Every CUDA kernel launch is unsafe because cudarc cannot see whether the
+      # argument list matches the kernel. The PTX is in the repository and
+      # declares every parameter's width, so this proves count and
+      # pointer-vs-scalar for all 121 launches. Pure text, no GPU needed.
+      - name: Verify kernel launches against PTX signatures
+        run: python3 tools/check_launches.py
       - name: Check feature-gated backends
         run: cargo check --workspace --features axonml-core/vulkan,axonml-distributed/nccl,axonml-core/cuda
 
@@ -92,9 +98,9 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace -- -D warnings -D clippy::undocumented_unsafe_blocks
       - name: Clippy feature-gated backends
-        run: cargo clippy --workspace --features axonml-core/vulkan,axonml-distributed/nccl -- -D warnings
+        run: cargo clippy --workspace --features axonml-core/cuda,axonml-core/vulkan,axonml-distributed/nccl -- -D warnings -D clippy::undocumented_unsafe_blocks
 
   docs:
     runs-on: ubuntu-latest

@@ -13,9 +13,8 @@
 //! - `dequantize_i2s_block` and rayon-parallel `dequantize_i2s` for
 //!   recovering f32 weights from packed bytes.
 //! - `matmul_i2s` — fused add-only ternary matmul (f32 activations).
-//! - `matmul_i2s_i8` — int8-activation fused path with runtime AVX-VNNI
-//!   dispatch, scalar fallback `matmul_i2s_i8_scalar`, and an in-progress
-//!   `matmul_i2s_i8_avxvnni` unsafe target-feature stub.
+//! - `matmul_i2s_i8` — int8-activation fused path over the scalar kernel
+//!   `matmul_i2s_i8_scalar` (a SIMD variant is documented, not yet wired).
 //! - `quantize_row_to_int8` per-row absmax int8 quantization for
 //!   activations entering the int8 fast path.
 //! - `bytes_for_elements` size helper and a test module covering
@@ -398,10 +397,9 @@ pub fn quantize_row_to_int8(input: &[f32], output: &mut [i8]) -> f32 {
 /// where `code[j, k] ∈ {0, 1, 2}` is the raw 2-bit code and `act_sum[i] = sum_k(act_i8[i, k])`.
 ///
 /// # Dispatch
-/// At runtime we check for AVX-VNNI via `is_x86_feature_detected!("avxvnni")`
-/// and take the SIMD path when available; otherwise fall back to a scalar
-/// reference that matches the SIMD path bit-for-bit (lets tests run on any
-/// host).
+/// Runs the scalar kernel on every host. A future AVX-VNNI variant is
+/// expected to match it bit-for-bit and be dispatched behind
+/// `is_x86_feature_detected!("avxvnni")`.
 pub fn matmul_i2s_i8(
     acts_int8: &[i8],
     act_scales: &[f32],
@@ -427,28 +425,6 @@ pub fn matmul_i2s_i8(
         "weight_bytes shape mismatch",
     );
 
-    // Runtime dispatch — AVX-VNNI variant fills in on a follow-up commit;
-    // scalar path below is the correctness baseline.
-    #[cfg(target_arch = "x86_64")]
-    {
-        if std::is_x86_feature_detected!("avxvnni") && std::is_x86_feature_detected!("avx2") {
-            // SAFETY: feature-detected above.
-            unsafe {
-                matmul_i2s_i8_avxvnni(
-                    acts_int8,
-                    act_scales,
-                    m,
-                    k,
-                    weight_bytes,
-                    n,
-                    weight_scale,
-                    output,
-                );
-            }
-            return;
-        }
-    }
-
     matmul_i2s_i8_scalar(
         acts_int8,
         act_scales,
@@ -461,9 +437,9 @@ pub fn matmul_i2s_i8(
     );
 }
 
-/// Scalar reference for [`matmul_i2s_i8`]. Used as a correctness baseline
-/// for the AVX-VNNI fast path and as a fallback on non-x86_64 or
-/// pre-AVX-VNNI CPUs.
+/// Scalar kernel for [`matmul_i2s_i8`]. A SIMD (AVX-VNNI) variant would be
+/// a `#[target_feature]` fn dispatched behind `is_x86_feature_detected!`;
+/// none is wired in yet, so this is the only path.
 fn matmul_i2s_i8_scalar(
     acts_int8: &[i8],
     act_scales: &[f32],
@@ -515,69 +491,6 @@ fn matmul_i2s_i8_scalar(
                 *out_slot = (trit_dot as f32) * combined_scale;
             });
     }
-}
-
-/// AVX-VNNI fast path — **unimplemented**. Drop-in replacement for
-/// [`matmul_i2s_i8_scalar`] once filled in.
-///
-/// # Planned inner loop (per block of 128 weights × 128 activations):
-///
-/// ```ignore
-/// // Load 32 weight bytes (128 trits packed) and 128 int8 activations.
-/// let bytes_v = _mm256_loadu_si256(block_ptr as *const __m256i);
-/// let acts_g0 = _mm256_loadu_si256(act_ptr.add(k_base)         as *const __m256i); // pos k_base..+32
-/// let acts_g1 = _mm256_loadu_si256(act_ptr.add(k_base + 32)    as *const __m256i);
-/// let acts_g2 = _mm256_loadu_si256(act_ptr.add(k_base + 64)    as *const __m256i);
-/// let acts_g3 = _mm256_loadu_si256(act_ptr.add(k_base + 96)    as *const __m256i);
-///
-/// // Extract 2-bit codes for each of 4 groups.
-/// let mask = _mm256_set1_epi8(0x03);
-/// let codes_g0 = _mm256_and_si256(_mm256_srli_epi16(bytes_v, 6), mask); // bits 6-7
-/// let codes_g1 = _mm256_and_si256(_mm256_srli_epi16(bytes_v, 4), mask); // bits 4-5
-/// let codes_g2 = _mm256_and_si256(_mm256_srli_epi16(bytes_v, 2), mask); // bits 2-3
-/// let codes_g3 = _mm256_and_si256(bytes_v, mask);                      // bits 0-1
-///
-/// // 32 × (u8 × i8) → 8 × i32, accumulated.
-/// acc = _mm256_dpbusd_epi32(acc, codes_g0, acts_g0);
-/// acc = _mm256_dpbusd_epi32(acc, codes_g1, acts_g1);
-/// acc = _mm256_dpbusd_epi32(acc, codes_g2, acts_g2);
-/// acc = _mm256_dpbusd_epi32(acc, codes_g3, acts_g3);
-/// ```
-///
-/// Four VNNI ops per 128-weight block. The outer loop iterates
-/// `blocks_per_row` blocks per output column, then horizontally sums the
-/// int32 lanes to a scalar, applies the `- act_sum` correction, and scales
-/// by `combined_scale` to f32.
-///
-/// Rayon fan-out over output columns `n` (same as the scalar path). On
-/// Arrow Lake (AVX-VNNI but no AVX-512), expect ~8-12× speedup over
-/// scalar on the kernel alone; end-to-end wins compound because activation
-/// bandwidth drops 4× and weight bandwidth stays 2-bit.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2,avxvnni")]
-unsafe fn matmul_i2s_i8_avxvnni(
-    acts_int8: &[i8],
-    act_scales: &[f32],
-    m: usize,
-    k: usize,
-    weight_bytes: &[u8],
-    n: usize,
-    weight_scale: f32,
-    output: &mut [f32],
-) {
-    // TODO: fill in. For now delegate to the scalar path so the public
-    // API works on every machine — this is the scaffolding for the
-    // follow-up perf commit.
-    matmul_i2s_i8_scalar(
-        acts_int8,
-        act_scales,
-        m,
-        k,
-        weight_bytes,
-        n,
-        weight_scale,
-        output,
-    );
 }
 
 // =============================================================================

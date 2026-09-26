@@ -1065,10 +1065,15 @@ impl Tensor<f32> {
         let a_guard = a_data.storage.as_cuda_slice();
 
         // Stream-allocated scratch — bypasses the f32-typed pool, freed
-        // at end of this function via Drop.
-        let mut a_q: cudarc::driver::CudaSlice<u8> =
-            unsafe { cuda.stream().alloc::<u8>(k) }.expect("stream alloc u8 (int8 acts) failed");
-        let mut a_d: cudarc::driver::CudaSlice<u16> = unsafe { cuda.stream().alloc::<u16>(k / 32) }
+        // at end of this function via Drop. Zero-initialised so the buffer
+        // is never observed uninitialised (the memset is k bytes).
+        let mut a_q: cudarc::driver::CudaSlice<u8> = cuda
+            .stream()
+            .alloc_zeros::<u8>(k)
+            .expect("stream alloc u8 (int8 acts) failed");
+        let mut a_d: cudarc::driver::CudaSlice<u16> = cuda
+            .stream()
+            .alloc_zeros::<u16>(k / 32)
             .expect("stream alloc u16 (fp16-as-bits) failed");
 
         cuda.q1_0_quantize_acts_q8(a_guard.slice(), &mut a_q, &mut a_d, k)
@@ -1174,7 +1179,9 @@ impl Tensor<f32> {
         let data = self.contiguous_gpu();
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let guard = data.storage.as_cuda_slice();
-        let mut out_i8: cudarc::driver::CudaSlice<u8> = unsafe { cuda.stream().alloc::<u8>(n) }
+        let mut out_i8: cudarc::driver::CudaSlice<u8> = cuda
+            .stream()
+            .alloc_zeros::<u8>(n)
             .map_err(|e| axonml_core::error::Error::InvalidOperation {
                 message: format!("stream alloc u8 (ternary quant) failed: {e}"),
             })?;
@@ -1295,8 +1302,7 @@ impl Tensor<f32> {
         let a_guard = a_data.storage.as_cuda_slice();
 
         // Upload ternary as u8 (reinterpret on kernel side as signed char).
-        let w_bytes: &[u8] =
-            unsafe { std::slice::from_raw_parts(w_i8.as_ptr() as *const u8, w_i8.len()) };
+        let w_bytes: &[u8] = bytemuck::cast_slice(w_i8);
         let w_gpu = cuda
             .htod_copy(w_bytes)
             .expect("htod_copy ternary weights failed");
@@ -1345,8 +1351,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let g_guard = g_data.storage.as_cuda_slice();
 
-        let w_bytes: &[u8] =
-            unsafe { std::slice::from_raw_parts(w_i8.as_ptr() as *const u8, w_i8.len()) };
+        let w_bytes: &[u8] = bytemuck::cast_slice(w_i8);
         let w_gpu = cuda
             .htod_copy(w_bytes)
             .expect("htod_copy ternary weights failed");

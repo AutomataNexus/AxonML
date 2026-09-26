@@ -30,8 +30,6 @@ use crate::device::DeviceCapabilities;
 #[cfg(feature = "vulkan")]
 use std::collections::HashMap;
 #[cfg(feature = "vulkan")]
-use std::ffi::CStr;
-#[cfg(feature = "vulkan")]
 use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(feature = "vulkan")]
@@ -222,6 +220,10 @@ impl VulkanBackend {
 
         let physical_device = state.physical_devices[device_index];
 
+        // SAFETY: `physical_device` was enumerated from `state.instance`,
+        // which lives for the whole process, and every handle created here
+        // is created from that instance/device and owned by the returned
+        // backend until its `Drop` destroys them in reverse order.
         unsafe {
             // Find compute queue family
             let queue_families = state
@@ -356,6 +358,9 @@ impl VulkanBackend {
     /// Creates a GPU buffer with the specified size.
     #[cfg(feature = "vulkan")]
     pub fn create_buffer(&self, size: u64, usage: vk::BufferUsageFlags) -> Option<u64> {
+        // SAFETY: the buffer is created and bound on `self.device`, with
+        // memory sized from that buffer's own requirements, and both are
+        // recorded in the tracker so `destroy_buffer`/`Drop` release them.
         unsafe {
             let buffer_info = vk::BufferCreateInfo::default()
                 .size(size)
@@ -406,7 +411,21 @@ impl VulkanBackend {
     pub fn write_buffer(&self, buffer_id: u64, offset: u64, data: &[u8]) {
         let tracker = self.buffer_tracker.lock().unwrap();
         if let Some(info) = tracker.get(buffer_id) {
+            let end = offset.checked_add(data.len() as u64);
+            assert!(
+                end.is_some_and(|e| e <= info.size),
+                "write_buffer: {} bytes at offset {} exceed buffer {} of size {}",
+                data.len(),
+                offset,
+                buffer_id,
+                info.size
+            );
             if let Some(mapped) = info.allocation.mapped_ptr() {
+                // SAFETY: `mapped` is the host mapping of an allocation at
+                // least `info.size` bytes long (sized from the buffer's
+                // requirements in `create_buffer`), the assert above keeps
+                // `offset..offset+len` inside it, and the tracker lock is
+                // held so nothing frees the allocation during the copy.
                 unsafe {
                     let dst = mapped.as_ptr().cast::<u8>().add(offset as usize);
                     std::ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len());
@@ -423,6 +442,9 @@ impl VulkanBackend {
 
         let mapped = info.allocation.mapped_ptr()?;
         let mut data = vec![0u8; info.size as usize];
+        // SAFETY: the mapping covers at least `info.size` bytes (see
+        // `create_buffer`), `data` is exactly that long, and the tracker
+        // lock is held for the duration of the copy.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 mapped.as_ptr() as *const u8,
@@ -438,6 +460,9 @@ impl VulkanBackend {
     pub fn destroy_buffer(&self, buffer_id: u64) {
         let mut tracker = self.buffer_tracker.lock().unwrap();
         if let Some(info) = tracker.remove(buffer_id) {
+            // SAFETY: removing the entry means no other handle to this
+            // buffer exists; it was created on `self.device` and is destroyed
+            // exactly once, here, before its memory is returned.
             unsafe {
                 self.device.destroy_buffer(info.buffer, None);
             }
@@ -452,6 +477,10 @@ impl VulkanBackend {
     where
         F: FnOnce(vk::CommandBuffer),
     {
+        // SAFETY: the command buffer comes from `self.command_pool`, is
+        // recorded once, submitted to `self.queue`, waited to idle and then
+        // freed — all on `self.device`, all within this call, so nothing
+        // it references outlives the submission.
         unsafe {
             let alloc_info = vk::CommandBufferAllocateInfo::default()
                 .command_pool(self.command_pool)
@@ -493,6 +522,12 @@ impl VulkanBackend {
             None => return,
         };
 
+        assert!(
+            size <= src_info.size && size <= dst_info.size,
+            "copy_buffer: {size} bytes exceed src {} / dst {}",
+            src_info.size,
+            dst_info.size
+        );
         let src_buffer = src_info.buffer;
         let dst_buffer = dst_info.buffer;
         drop(tracker);
@@ -503,6 +538,9 @@ impl VulkanBackend {
                 dst_offset: 0,
                 size,
             };
+            // SAFETY: both buffers were looked up in the tracker, so they
+            // are live buffers of this device, and `cmd` is the recording
+            // command buffer `execute_commands` hands us.
             unsafe {
                 self.device
                     .cmd_copy_buffer(cmd, src_buffer, dst_buffer, &[copy_region]);
@@ -513,6 +551,10 @@ impl VulkanBackend {
     /// Creates a compute pipeline from SPIR-V bytecode.
     #[cfg(feature = "vulkan")]
     pub fn create_compute_pipeline(&self, name: &str, spirv: &[u32]) -> Option<vk::Pipeline> {
+        // SAFETY: the shader module and pipeline are created on
+        // `self.device` against `self.pipeline_layout`; the module is
+        // destroyed once the pipeline exists and the pipeline is recorded so
+        // `Drop` destroys it.
         unsafe {
             let shader_info = vk::ShaderModuleCreateInfo::default().code(spirv);
 
@@ -552,6 +594,10 @@ impl VulkanBackend {
         buffers: &[u64],
         group_count: (u32, u32, u32),
     ) {
+        // SAFETY: the descriptor set is allocated from `self.descriptor_pool`
+        // with `self.descriptor_set_layout`, the buffers bound into it are
+        // live tracker entries, and the dispatch is recorded and completed
+        // inside `execute_commands` before this returns.
         unsafe {
             // Allocate descriptor set
             let layouts = [self.descriptor_set_layout];
@@ -616,6 +662,10 @@ impl VulkanBackend {
 #[cfg(feature = "vulkan")]
 impl Drop for VulkanBackend {
     fn drop(&mut self) {
+        // SAFETY: `&mut self` means no operation is in flight from Rust,
+        // `device_wait_idle` drains the GPU, and every handle destroyed here
+        // was created by `new`/`create_*` on this device and is destroyed
+        // exactly once, children before the device itself.
         unsafe {
             self.device.device_wait_idle().ok();
 
@@ -667,32 +717,19 @@ impl Backend for VulkanBackend {
     fn capabilities(&self) -> DeviceCapabilities {
         let state = get_vulkan_state().unwrap();
 
-        // Use stored physical_device to query properties directly
-        let props = unsafe {
-            state
-                .instance
-                .get_physical_device_properties(self.physical_device)
-        };
-        let mem_props = unsafe {
-            state
-                .instance
-                .get_physical_device_memory_properties(self.physical_device)
-        };
-        let features = unsafe {
-            state
-                .instance
-                .get_physical_device_features(self.physical_device)
-        };
+        // The probes were taken once at init for every physical device.
+        let props = &state.device_properties[self.device_index];
+        let mem_props = &state.device_memory_properties[self.device_index];
+        let features = &state.device_features[self.device_index];
 
         let total_memory: usize = (0..mem_props.memory_heap_count as usize)
             .map(|i| mem_props.memory_heaps[i].size as usize)
             .sum();
 
-        let device_name = unsafe {
-            CStr::from_ptr(props.device_name.as_ptr())
-                .to_string_lossy()
-                .to_string()
-        };
+        let device_name = props
+            .device_name_as_c_str()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
 
         DeviceCapabilities {
             name: device_name,
@@ -705,46 +742,9 @@ impl Backend for VulkanBackend {
         }
     }
 
-    fn allocate(&self, size: usize) -> *mut u8 {
-        match self.create_buffer(
-            size as u64,
-            vk::BufferUsageFlags::STORAGE_BUFFER
-                | vk::BufferUsageFlags::TRANSFER_SRC
-                | vk::BufferUsageFlags::TRANSFER_DST,
-        ) {
-            Some(buffer_id) => buffer_id as *mut u8,
-            None => std::ptr::null_mut(),
-        }
-    }
-
-    fn deallocate(&self, ptr: *mut u8, _size: usize) {
-        let buffer_id = ptr as u64;
-        self.destroy_buffer(buffer_id);
-    }
-
-    fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        let buffer_id = dst as u64;
-        let data = unsafe { std::slice::from_raw_parts(src, size) };
-        self.write_buffer(buffer_id, 0, data);
-    }
-
-    fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
-        let buffer_id = src as u64;
-        if let Some(data) = self.read_buffer(buffer_id) {
-            let copy_size = std::cmp::min(size, data.len());
-            unsafe {
-                std::ptr::copy_nonoverlapping(data.as_ptr(), dst, copy_size);
-            }
-        }
-    }
-
-    fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        let src_id = src as u64;
-        let dst_id = dst as u64;
-        self.copy_buffer(src_id, dst_id, size as u64);
-    }
-
     fn synchronize(&self) {
+        // SAFETY: `self.device` is a live logical device owned by this
+        // backend; waiting for idle has no other precondition.
         unsafe {
             self.device.device_wait_idle().ok();
         }
@@ -772,18 +772,6 @@ impl Backend for VulkanBackend {
             compute_capability: None,
         }
     }
-
-    fn allocate(&self, _size: usize) -> *mut u8 {
-        std::ptr::null_mut()
-    }
-
-    fn deallocate(&self, _ptr: *mut u8, _size: usize) {}
-
-    fn copy_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
-
-    fn copy_to_host(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
-
-    fn copy_device_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
 
     fn synchronize(&self) {}
 }
@@ -857,11 +845,10 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
         .map(|i| mem_props.memory_heaps[i].size as usize)
         .sum();
 
-    let device_name = unsafe {
-        CStr::from_ptr(props.device_name.as_ptr())
-            .to_string_lossy()
-            .to_string()
-    };
+    let device_name = props
+        .device_name_as_c_str()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
 
     DeviceCapabilities {
         name: device_name,

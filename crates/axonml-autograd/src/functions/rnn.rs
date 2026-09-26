@@ -138,42 +138,52 @@ impl GradientFunction for LstmGatesBackward {
         let total_work = batch_size * hs;
         if total_work >= 4096 {
             use rayon::prelude::*;
-            let gg_ptr = grad_gates_data.as_mut_ptr() as usize;
-            let gc_ptr = grad_c_prev_data.as_mut_ptr() as usize;
-            (0..total_work).into_par_iter().for_each(|idx| {
-                let gg_ptr = gg_ptr as *mut f32;
-                let gc_ptr = gc_ptr as *mut f32;
-                let b = idx / hs;
-                let h = idx % hs;
-                let base = b * 4 * hs;
+            // One batch row per outer chunk; inside it the four gate slices are
+            // disjoint `split_at_mut` views, so every write is a plain `&mut`.
+            grad_gates_data
+                .par_chunks_mut(4 * hs)
+                .zip(grad_c_prev_data.par_chunks_mut(hs))
+                .enumerate()
+                .for_each(|(b, (gg, gc))| {
+                    let base = b * 4 * hs;
+                    let (g_i, rest) = gg.split_at_mut(hs);
+                    let (g_f, rest) = rest.split_at_mut(hs);
+                    let (g_g, g_o) = rest.split_at_mut(hs);
+                    g_i.par_iter_mut()
+                        .zip(g_f.par_iter_mut())
+                        .zip(g_g.par_iter_mut())
+                        .zip(g_o.par_iter_mut())
+                        .zip(gc.par_iter_mut())
+                        .enumerate()
+                        .for_each(|(h, ((((gi_h, gf_h), gg_h), go_h), gc_h))| {
+                            let idx = b * hs + h;
 
-                // Load pre-activation gates
-                let i_pre = gates_data[base + h];
-                let f_pre = gates_data[base + hs + h];
-                let g_pre = gates_data[base + 2 * hs + h];
-                let o_pre = gates_data[base + 3 * hs + h];
+                            // Load pre-activation gates
+                            let i_pre = gates_data[base + h];
+                            let f_pre = gates_data[base + hs + h];
+                            let g_pre = gates_data[base + 2 * hs + h];
+                            let o_pre = gates_data[base + 3 * hs + h];
 
-                // Recompute activations
-                let i_act = 1.0 / (1.0 + (-i_pre).exp());
-                let f_act = 1.0 / (1.0 + (-f_pre).exp());
-                let g_act = g_pre.tanh();
-                let o_act = 1.0 / (1.0 + (-o_pre).exp());
+                            // Recompute activations
+                            let i_act = 1.0 / (1.0 + (-i_pre).exp());
+                            let f_act = 1.0 / (1.0 + (-f_pre).exp());
+                            let g_act = g_pre.tanh();
+                            let o_act = 1.0 / (1.0 + (-o_pre).exp());
 
-                let c = c_new_data[idx];
-                let tanh_c = c.tanh();
-                let dh = grad_h_data[idx];
-                // dc = grad_c_next + grad_h * o * (1 - tanh(c)^2)
-                let dc = grad_c_next_data[idx] + dh * o_act * (1.0 - tanh_c * tanh_c);
+                            let c = c_new_data[idx];
+                            let tanh_c = c.tanh();
+                            let dh = grad_h_data[idx];
+                            // dc = grad_c_next + grad_h * o * (1 - tanh(c)^2)
+                            let dc = grad_c_next_data[idx] + dh * o_act * (1.0 - tanh_c * tanh_c);
 
-                // Gate gradients
-                unsafe {
-                    *gg_ptr.add(base + h) = dc * g_act * i_act * (1.0 - i_act);
-                    *gg_ptr.add(base + hs + h) = dc * c_prev_data[idx] * f_act * (1.0 - f_act);
-                    *gg_ptr.add(base + 2 * hs + h) = dc * i_act * (1.0 - g_act * g_act);
-                    *gg_ptr.add(base + 3 * hs + h) = dh * tanh_c * o_act * (1.0 - o_act);
-                    *gc_ptr.add(idx) = dc * f_act;
-                }
-            });
+                            // Gate gradients
+                            *gi_h = dc * g_act * i_act * (1.0 - i_act);
+                            *gf_h = dc * c_prev_data[idx] * f_act * (1.0 - f_act);
+                            *gg_h = dc * i_act * (1.0 - g_act * g_act);
+                            *go_h = dh * tanh_c * o_act * (1.0 - o_act);
+                            *gc_h = dc * f_act;
+                        });
+                });
         } else {
             for b in 0..batch_size {
                 for h in 0..hs {
@@ -328,59 +338,73 @@ impl GradientFunction for GruGatesBackward {
         let total_work = batch_size * hs;
         if total_work >= 4096 {
             use rayon::prelude::*;
-            let gi_ptr = grad_ih_data.as_mut_ptr() as usize;
-            let gh_ptr = grad_hh_data.as_mut_ptr() as usize;
-            let gp_ptr = grad_h_prev_data.as_mut_ptr() as usize;
-            (0..total_work).into_par_iter().for_each(|idx| {
-                let gi_ptr = gi_ptr as *mut f32;
-                let gh_ptr = gh_ptr as *mut f32;
-                let gp_ptr = gp_ptr as *mut f32;
-                let b = idx / hs;
-                let h = idx % hs;
-                let base = b * 3 * hs;
+            // One batch row per outer chunk; inside it the three gate slices of
+            // each output are disjoint `split_at_mut` views, so every write is
+            // a plain `&mut`.
+            grad_ih_data
+                .par_chunks_mut(3 * hs)
+                .zip(grad_hh_data.par_chunks_mut(3 * hs))
+                .zip(grad_h_prev_data.par_chunks_mut(hs))
+                .enumerate()
+                .for_each(|(b, ((gi, gh), gp))| {
+                    let base = b * 3 * hs;
+                    let (gi_r, rest) = gi.split_at_mut(hs);
+                    let (gi_z, gi_n) = rest.split_at_mut(hs);
+                    let (gh_r, rest) = gh.split_at_mut(hs);
+                    let (gh_z, gh_n) = rest.split_at_mut(hs);
+                    gi_r.par_iter_mut()
+                        .zip(gi_z.par_iter_mut())
+                        .zip(gi_n.par_iter_mut())
+                        .zip(gh_r.par_iter_mut())
+                        .zip(gh_z.par_iter_mut())
+                        .zip(gh_n.par_iter_mut())
+                        .zip(gp.par_iter_mut())
+                        .enumerate()
+                        .for_each(
+                            |(
+                                h,
+                                ((((((gi_r_h, gi_z_h), gi_n_h), gh_r_h), gh_z_h), gh_n_h), gp_h),
+                            )| {
+                                let idx = b * hs + h;
 
-                let r_ih = ih_data[base + h];
-                let z_ih = ih_data[base + hs + h];
-                let n_ih = ih_data[base + 2 * hs + h];
+                                let r_ih = ih_data[base + h];
+                                let z_ih = ih_data[base + hs + h];
+                                let n_ih = ih_data[base + 2 * hs + h];
 
-                let r_hh = hh_data[base + h];
-                let z_hh = hh_data[base + hs + h];
-                let n_hh_val = hh_data[base + 2 * hs + h];
+                                let r_hh = hh_data[base + h];
+                                let z_hh = hh_data[base + hs + h];
+                                let n_hh_val = hh_data[base + 2 * hs + h];
 
-                // Recompute activations
-                let r = 1.0 / (1.0 + (-(r_ih + r_hh)).exp());
-                let z = 1.0 / (1.0 + (-(z_ih + z_hh)).exp());
-                let n = (n_ih + r * n_hh_val).tanh();
+                                // Recompute activations
+                                let r = 1.0 / (1.0 + (-(r_ih + r_hh)).exp());
+                                let z = 1.0 / (1.0 + (-(z_ih + z_hh)).exp());
+                                let n = (n_ih + r * n_hh_val).tanh();
 
-                let hp = h_prev_data[idx];
-                let dh = grad_data[idx];
+                                let hp = h_prev_data[idx];
+                                let dh = grad_data[idx];
 
-                // h_new = (1 - z) * n + z * h_prev
-                let dz = dh * (hp - n);
-                let dn = dh * (1.0 - z);
-                unsafe {
-                    *gp_ptr.add(idx) = dh * z;
-                }
+                                // h_new = (1 - z) * n + z * h_prev
+                                let dz = dh * (hp - n);
+                                let dn = dh * (1.0 - z);
+                                *gp_h = dh * z;
 
-                let d_n_pre = dn * (1.0 - n * n);
-                let d_z_pre = dz * z * (1.0 - z);
-                let dr = d_n_pre * n_hh_val;
-                let d_r_pre = dr * r * (1.0 - r);
+                                let d_n_pre = dn * (1.0 - n * n);
+                                let d_z_pre = dz * z * (1.0 - z);
+                                let dr = d_n_pre * n_hh_val;
+                                let d_r_pre = dr * r * (1.0 - r);
 
-                // ih gate gradients
-                unsafe {
-                    *gi_ptr.add(base + h) = d_r_pre;
-                    *gi_ptr.add(base + hs + h) = d_z_pre;
-                    *gi_ptr.add(base + 2 * hs + h) = d_n_pre;
-                }
+                                // ih gate gradients
+                                *gi_r_h = d_r_pre;
+                                *gi_z_h = d_z_pre;
+                                *gi_n_h = d_n_pre;
 
-                // hh gate gradients
-                unsafe {
-                    *gh_ptr.add(base + h) = d_r_pre;
-                    *gh_ptr.add(base + hs + h) = d_z_pre;
-                    *gh_ptr.add(base + 2 * hs + h) = d_n_pre * r;
-                }
-            });
+                                // hh gate gradients
+                                *gh_r_h = d_r_pre;
+                                *gh_z_h = d_z_pre;
+                                *gh_n_h = d_n_pre * r;
+                            },
+                        );
+                });
         } else {
             for b in 0..batch_size {
                 for h in 0..hs {

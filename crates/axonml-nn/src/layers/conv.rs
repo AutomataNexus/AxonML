@@ -476,24 +476,11 @@ fn im2col(
             let input_row = input_c + h_in as usize * width;
             let col_row_base = col_base + oh * out_w;
 
-            for ow in 0..out_w {
+            let col_row_slice = &mut col[col_row_base..col_row_base + out_w];
+            for (ow, slot) in col_row_slice.iter_mut().enumerate() {
                 let w_in = (ow * stride_w + kw_off) as isize - pad_w_s;
                 if w_in >= 0 && w_in < w_signed {
-                    let col_idx = col_row_base + ow;
-                    let inp_idx = input_row + w_in as usize;
-                    debug_assert!(
-                        col_idx < col.len(),
-                        "im2col fwd col OOB: {col_idx} >= {}",
-                        col.len()
-                    );
-                    debug_assert!(
-                        inp_idx < input.len(),
-                        "im2col fwd input OOB: {inp_idx} >= {}",
-                        input.len()
-                    );
-                    unsafe {
-                        *col.get_unchecked_mut(col_idx) = *input.get_unchecked(inp_idx);
-                    }
+                    *slot = input[input_row + w_in as usize];
                 }
             }
         }

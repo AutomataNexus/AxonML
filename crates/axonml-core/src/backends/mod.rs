@@ -89,21 +89,6 @@ pub trait Backend: Send + Sync {
     /// Returns the device capabilities.
     fn capabilities(&self) -> DeviceCapabilities;
 
-    /// Allocates memory on this backend.
-    fn allocate(&self, size: usize) -> *mut u8;
-
-    /// Deallocates memory on this backend.
-    fn deallocate(&self, ptr: *mut u8, size: usize);
-
-    /// Copies data from host to device.
-    fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize);
-
-    /// Copies data from device to host.
-    fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize);
-
-    /// Copies data within the device.
-    fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize);
-
     /// Synchronizes the device (waits for all operations to complete).
     fn synchronize(&self);
 }
@@ -367,36 +352,6 @@ mod tests {
         let cpu = CpuBackend::new();
         assert!(cpu.is_available());
         assert_eq!(cpu.name(), "cpu");
-    }
-
-    #[test]
-    fn test_cpu_backend_allocate_deallocate() {
-        let cpu = CpuBackend::new();
-        let ptr = cpu.allocate(256);
-        assert!(!ptr.is_null());
-        cpu.deallocate(ptr, 256);
-    }
-
-    #[test]
-    fn test_cpu_backend_zero_alloc() {
-        let cpu = CpuBackend::new();
-        let ptr = cpu.allocate(0);
-        assert!(ptr.is_null());
-    }
-
-    #[test]
-    fn test_cpu_backend_copy_round_trip() {
-        let cpu = CpuBackend::new();
-        let src: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
-        let dst_ptr = cpu.allocate(16); // 4 f32s
-
-        cpu.copy_to_device(dst_ptr, src.as_ptr().cast::<u8>(), 16);
-
-        let mut result = [0.0f32; 4];
-        cpu.copy_to_host(result.as_mut_ptr().cast::<u8>(), dst_ptr.cast_const(), 16);
-
-        assert_eq!(result, [1.0, 2.0, 3.0, 4.0]);
-        cpu.deallocate(dst_ptr, 16);
     }
 
     #[test]

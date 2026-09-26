@@ -401,7 +401,7 @@ dependencies = [
  "dirs",
  "half",
  "indicatif",
- "libc",
+ "nix 0.29.0",
  "num_cpus",
  "pollster",
  "predicates",
@@ -691,6 +691,7 @@ version = "0.6.5"
 dependencies = [
  "approx",
  "axonml-core",
+ "bytemuck",
  "cudarc",
  "half",
  "num-traits",

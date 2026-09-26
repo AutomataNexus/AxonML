@@ -43,7 +43,7 @@ pub const BLOCK_SIZE: u32 = 256;
 
 /// Embedded PTX for element-wise operations
 #[cfg(feature = "cuda")]
-pub const ELEMENTWISE_PTX: &str = r#"
+pub const ELEMENTWISE_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -439,7 +439,7 @@ $L__pow_exit:
 $L__pows_exit:
     ret;
 }
-"#;
+";
 
 /// Embedded PTX for broadcast element-wise operations.
 ///
@@ -451,7 +451,7 @@ $L__pows_exit:
 /// This handles the most common patterns: bias addition, residual scaling, etc.
 /// The `_rev` variants broadcast `a` instead of `b`.
 #[cfg(feature = "cuda")]
-pub const BROADCAST_PTX: &str = r#"
+pub const BROADCAST_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -829,11 +829,11 @@ $L__bmr_exit:
 $L__bdr_exit:
     ret;
 }
-"#;
+";
 
 /// Embedded PTX for activation functions
 #[cfg(feature = "cuda")]
-pub const ACTIVATIONS_PTX: &str = r#"
+pub const ACTIVATIONS_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -1315,7 +1315,7 @@ $L__silu_bwd_exit:
     ret;
 }
 
-"#;
+";
 
 /// Embedded PTX for reduction operations (softmax, etc.)
 ///
@@ -1325,7 +1325,7 @@ $L__silu_bwd_exit:
 /// Algorithm: max → subtract max → exp → sum → divide.
 /// Handles row_size > blockDim.x via sequential loops + shared reduction.
 #[cfg(feature = "cuda")]
-pub const REDUCTION_PTX: &str = r#"
+pub const REDUCTION_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -1708,7 +1708,7 @@ $L__bcopy_exit:
 $L__gather_exit:
     ret;
 }
-"#;
+";
 
 /// Embedded PTX for reduction along a dimension (sum_dim).
 ///
@@ -1717,7 +1717,7 @@ $L__gather_exit:
 /// Each thread computes one output element: out[outer * inner + inner_idx] = sum over dim.
 /// Grid: ceil(outer_size * inner_size / 256), Block: 256.
 #[cfg(feature = "cuda")]
-pub const SUM_DIM_PTX: &str = r#"
+pub const SUM_DIM_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -1843,7 +1843,7 @@ $L__sum_dim_done:
 $L__sum_dim_exit:
     ret;
 }
-"#;
+";
 
 /// Embedded PTX for LayerNorm kernel.
 ///
@@ -1853,7 +1853,7 @@ $L__sum_dim_exit:
 ///
 /// Grid: (num_rows, 1, 1), Block: (256, 1, 1), Shared: 256*4 bytes
 #[cfg(feature = "cuda")]
-pub const LAYERNORM_PTX: &str = r#"
+pub const LAYERNORM_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -2488,13 +2488,13 @@ $L__lnbwb_row_done:
 $L__lnbwb_exit:
     ret;
 }
-"#;
+";
 
 /// CrossEntropy forward+backward kernels.
 /// Forward: fused softmax + NLL loss (one block per batch row).
 /// Backward: softmax_probs - one_hot(target), scaled by grad_output.
 #[cfg(feature = "cuda")]
-pub const CROSS_ENTROPY_PTX: &str = r#"
+pub const CROSS_ENTROPY_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -2776,14 +2776,14 @@ $L__ce_exit:
 $L__cebwd_exit:
     ret;
 }
-"#;
+";
 
 /// PTX for embedding scatter-add backward (GPU-native gradient accumulation)
 /// Each thread handles one element: given (token_index, dim_offset),
 /// atomically adds grad_output[token_index * emb_dim + dim_offset] to
 /// weight_grad[indices[token_index] * emb_dim + dim_offset].
 #[cfg(feature = "cuda")]
-pub const EMBEDDING_SCATTER_PTX: &str = r#"
+pub const EMBEDDING_SCATTER_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -2847,13 +2847,13 @@ pub const EMBEDDING_SCATTER_PTX: &str = r#"
 $L__scatter_exit:
     ret;
 }
-"#;
+";
 
 /// PTX for fused Adam optimizer step (GPU-native parameter update)
 /// Each thread handles one element: updates param, exp_avg, exp_avg_sq in-place.
 /// Eliminates the GPU->CPU->GPU copy that standard Adam does per step.
 #[cfg(feature = "cuda")]
-pub const ADAM_PTX: &str = r#"
+pub const ADAM_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -3082,12 +3082,12 @@ $L__norm_exit:
 $L__scale_exit:
     ret;
 }
-"#;
+";
 
 /// PTX for strided gather (making non-contiguous tensors contiguous on GPU)
 /// Replaces the CPU index computation in contiguous_gpu()
 #[cfg(feature = "cuda")]
-pub const STRIDED_COPY_PTX: &str = r#"
+pub const STRIDED_COPY_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -3192,12 +3192,12 @@ $L__sg_done:
 $L__sg_exit:
     ret;
 }
-"#;
+";
 
 /// Embedded PTX for im2col (conv2d unfolding) and bias_add_channels
 #[cfg(feature = "cuda")]
 /// PTX for attention mask expansion kernels
-pub const MASK_PTX: &str = r#"
+pub const MASK_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -3331,10 +3331,10 @@ $L__mask_causal_exit:
 $L__mask_padding_exit:
     ret;
 }
-"#;
+";
 
 /// PTX assembly for Conv2d CUDA kernels (im2col, bias_add, col2im).
-pub const CONV_PTX: &str = r#"
+pub const CONV_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
@@ -3606,7 +3606,7 @@ $L__bias_exit:
 $L__col2im_exit:
     ret;
 }
-"#;
+";
 
 /// LSTM/GRU/BatchNorm fused kernels (compiled from lstm.cu)
 pub const LSTM_PTX: &str = include_str!("lstm.ptx");
@@ -4097,7 +4097,7 @@ impl CudaKernels {
 /// Compute optimal launch configuration for a given number of elements
 #[cfg(feature = "cuda")]
 pub fn launch_config(n: usize) -> LaunchConfig {
-    let num_blocks = ((n as u32) + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    let num_blocks = (n as u32).div_ceil(BLOCK_SIZE);
     LaunchConfig {
         grid_dim: (num_blocks, 1, 1),
         block_dim: (BLOCK_SIZE, 1, 1),

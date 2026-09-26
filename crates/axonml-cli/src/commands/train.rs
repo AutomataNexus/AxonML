@@ -79,12 +79,8 @@ pub fn execute(args: TrainArgs) -> CliResult<()> {
     if let Some(seed) = args.seed.or(config.seed) {
         print_info(&format!("Random seed: {seed}"));
         // Store the seed globally so downstream components can use it.
-        // Also set the AXONML_SEED env var so child processes inherit it.
         GLOBAL_SEED.store(seed, std::sync::atomic::Ordering::Relaxed);
         SEED_SET.store(true, std::sync::atomic::Ordering::Relaxed);
-        // SAFETY: set_var is called once during single-threaded CLI initialization,
-        // before any worker threads are spawned.
-        unsafe { std::env::set_var("AXONML_SEED", seed.to_string()) };
     }
 
     // Parse device

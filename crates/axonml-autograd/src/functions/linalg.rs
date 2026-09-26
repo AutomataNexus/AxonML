@@ -732,19 +732,16 @@ impl GradientFunction for SumDimBackward {
         let grad_positions = outer_size * inner_size;
         if grad_positions >= 4096 || in_numel >= 4096 {
             use rayon::prelude::*;
-            let res_ptr = result.as_mut_ptr() as usize;
-            (0..grad_positions).into_par_iter().for_each(|gpos| {
-                let res_ptr = res_ptr as *mut f32;
-                let grad_val = grad_data[gpos];
-                let outer = gpos / inner_size;
-                let inner = gpos % inner_size;
-                for d in 0..dim_size {
-                    let in_idx = outer * dim_size * inner_size + d * inner_size + inner;
-                    unsafe {
-                        *res_ptr.add(in_idx) = grad_val;
-                    }
-                }
-            });
+            // Each (outer, d) row of the result is a copy of the outer's grad
+            // row, so parallelise over those rows and write through `&mut`.
+            result
+                .par_chunks_mut(dim_size * inner_size)
+                .zip(grad_data.par_chunks(inner_size))
+                .for_each(|(res_outer, g_outer)| {
+                    res_outer
+                        .par_chunks_mut(inner_size)
+                        .for_each(|row| row.copy_from_slice(g_outer));
+                });
         } else {
             for outer in 0..outer_size {
                 for inner in 0..inner_size {
