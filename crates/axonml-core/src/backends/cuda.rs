@@ -914,7 +914,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "Q4_K GEMM requires in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "Q4_K GEMM requires in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q4k_gemm_f32")
@@ -948,7 +948,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "Q4_K GEMM requires in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "Q4_K GEMM requires in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q4k_gemm_matched_f32")
@@ -997,7 +997,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "Q4_K GEMV requires in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "Q4_K GEMV requires in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q4k_gemv_f32")
@@ -1052,7 +1052,7 @@ impl CudaBackend {
         v_out: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(
+        assert!(
             in_dim % 256 == 0,
             "fused QKV GEMV requires in_dim % 256 == 0"
         );
@@ -1119,7 +1119,7 @@ impl CudaBackend {
         v_out: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(
+        assert!(
             in_dim % 256 == 0,
             "fused QKV+bias GEMV requires in_dim % 256 == 0"
         );
@@ -1178,7 +1178,7 @@ impl CudaBackend {
         inter: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(
+        assert!(
             in_dim % 256 == 0,
             "fused gate/up GEMV requires in_dim % 256 == 0"
         );
@@ -1227,7 +1227,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "q4k_gemv_residual: in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "q4k_gemv_residual: in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q4k_gemv_residual_f32")
@@ -1270,7 +1270,7 @@ impl CudaBackend {
         inter: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "fused gate/up+swiglu: in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "fused gate/up+swiglu: in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q4k_gemv_fused_gate_up_swiglu_f32")
@@ -1315,7 +1315,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "Q6_K GEMM requires in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "Q6_K GEMM requires in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q6k_gemm_f32")
@@ -1349,7 +1349,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "Q6_K GEMM requires in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "Q6_K GEMM requires in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q6k_gemm_matched_f32")
@@ -1389,7 +1389,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "Q5_K GEMV requires in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "Q5_K GEMV requires in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q5k_gemv_f32")
@@ -1444,7 +1444,7 @@ impl CudaBackend {
         v_out: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(
+        assert!(
             in_dim % 256 == 0,
             "fused QKV Q5_K GEMV requires in_dim % 256 == 0"
         );
@@ -1497,7 +1497,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "Q5_K GEMM requires in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "Q5_K GEMM requires in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q5k_gemm_f32")
@@ -1533,7 +1533,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "Q5_K GEMM requires in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "Q5_K GEMM requires in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q5k_gemm_matched_f32")
@@ -1575,7 +1575,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 32 == 0, "Q5_0 GEMV requires in_dim % 32 == 0");
+        assert!(in_dim % 32 == 0, "Q5_0 GEMV requires in_dim % 32 == 0");
         let func = self
             .kernels
             .get("q5_0_gemv_f32")
@@ -1614,7 +1614,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 32 == 0, "Q5_0 GEMM requires in_dim % 32 == 0");
+        assert!(in_dim % 32 == 0, "Q5_0 GEMM requires in_dim % 32 == 0");
         let func = self
             .kernels
             .get("q5_0_gemm_f32")
@@ -1645,7 +1645,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 32 == 0, "Q5_1 GEMV requires in_dim % 32 == 0");
+        assert!(in_dim % 32 == 0, "Q5_1 GEMV requires in_dim % 32 == 0");
         let func = self
             .kernels
             .get("q5_1_gemv_f32")
@@ -1684,7 +1684,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 32 == 0, "Q5_1 GEMM requires in_dim % 32 == 0");
+        assert!(in_dim % 32 == 0, "Q5_1 GEMM requires in_dim % 32 == 0");
         let func = self
             .kernels
             .get("q5_1_gemm_f32")
@@ -1722,7 +1722,7 @@ impl CudaBackend {
         v_out: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(
+        assert!(
             in_dim % 32 == 0,
             "fused QKV Q5_1 GEMV requires in_dim % 32 == 0"
         );
@@ -1774,7 +1774,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 32 == 0, "Q8_0 GEMV requires in_dim % 32 == 0");
+        assert!(in_dim % 32 == 0, "Q8_0 GEMV requires in_dim % 32 == 0");
         let func = self
             .kernels
             .get("q8_0_gemv_f32")
@@ -1812,7 +1812,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 32 == 0, "Q8_0 GEMM requires in_dim % 32 == 0");
+        assert!(in_dim % 32 == 0, "Q8_0 GEMM requires in_dim % 32 == 0");
         let func = self
             .kernels
             .get("q8_0_gemm_f32")
@@ -1847,7 +1847,7 @@ impl CudaBackend {
         n: usize,
         k: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(k % 128 == 0, "I2_S GEMV requires k % 128 == 0");
+        assert!(k % 128 == 0, "I2_S GEMV requires k % 128 == 0");
         let func = self
             .kernels
             .get("i2s_gemv_f32")
@@ -1888,7 +1888,7 @@ impl CudaBackend {
         n: usize,
         k: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(k % 128 == 0, "Q1_0 GEMV requires k % 128 == 0");
+        assert!(k % 128 == 0, "Q1_0 GEMV requires k % 128 == 0");
         let func = self
             .kernels
             .get("q1_0_gemv_f32")
@@ -1929,7 +1929,7 @@ impl CudaBackend {
         a_d: &mut CudaSlice<u16>,
         k: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(k % 32 == 0, "q8 act-quant requires k % 32 == 0");
+        assert!(k % 32 == 0, "q8 act-quant requires k % 32 == 0");
         let func = self
             .kernels
             .get("q1_0_quantize_acts_q8")
@@ -1970,7 +1970,7 @@ impl CudaBackend {
         n: usize,
         k: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(k % 128 == 0, "Q1_0 DP4A GEMV requires k % 128 == 0");
+        assert!(k % 128 == 0, "Q1_0 DP4A GEMV requires k % 128 == 0");
         let func = self
             .kernels
             .get("q1_0_gemv_dp4a_f32")
@@ -2013,7 +2013,7 @@ impl CudaBackend {
         n: usize,
         k: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(k % 128 == 0, "Q1_0 fused DP4A GEMV requires k % 128 == 0");
+        assert!(k % 128 == 0, "Q1_0 fused DP4A GEMV requires k % 128 == 0");
         let func = self
             .kernels
             .get("q1_0_gemv_fused_dp4a_f32")
@@ -2055,7 +2055,7 @@ impl CudaBackend {
         n: usize,
         k: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(k % 128 == 0, "Q1_0 GEMM requires k % 128 == 0");
+        assert!(k % 128 == 0, "Q1_0 GEMM requires k % 128 == 0");
         let func = self
             .kernels
             .get("q1_0_gemm_f32")
@@ -2281,7 +2281,7 @@ impl CudaBackend {
         n: usize,
         k: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(k % 128 == 0, "I2_S GEMM requires k % 128 == 0");
+        assert!(k % 128 == 0, "I2_S GEMM requires k % 128 == 0");
         let func = self
             .kernels
             .get("i2s_gemm_f32")
@@ -2313,7 +2313,7 @@ impl CudaBackend {
         out_dim: usize,
         in_dim: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(in_dim % 256 == 0, "Q6_K GEMV requires in_dim % 256 == 0");
+        assert!(in_dim % 256 == 0, "Q6_K GEMV requires in_dim % 256 == 0");
         let func = self
             .kernels
             .get("q6k_gemv_f32")
@@ -4054,11 +4054,11 @@ impl CudaBackend {
         swa_window: usize,
         scale: f32,
     ) -> Result<(), CudaError> {
-        debug_assert!(
+        assert!(
             head_dim <= 512,
             "fused_attn_decode_f32: head_dim {head_dim} exceeds kernel MAX_DIMS budget"
         );
-        debug_assert!(
+        assert!(
             n_kv_heads > 0 && n_heads % n_kv_heads == 0,
             "fused_attn_decode_f32: n_heads ({n_heads}) must be a multiple of n_kv_heads ({n_kv_heads})"
         );
@@ -4114,7 +4114,7 @@ impl CudaBackend {
         head_dim: usize,
         pos: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(
+        assert!(
             head_dim <= 512,
             "quantize_kv_row_q8_f32: head_dim {head_dim} exceeds DIMS_MAX budget"
         );
@@ -4166,11 +4166,11 @@ impl CudaBackend {
         swa_window: usize,
         scale: f32,
     ) -> Result<(), CudaError> {
-        debug_assert!(
+        assert!(
             head_dim <= 512,
             "fused_attn_decode_q8_f32: head_dim {head_dim} exceeds MAX_DIMS budget"
         );
-        debug_assert!(
+        assert!(
             n_kv_heads > 0 && n_heads % n_kv_heads == 0,
             "fused_attn_decode_q8_f32: n_heads ({n_heads}) must be a multiple of n_kv_heads ({n_kv_heads})"
         );
@@ -4431,7 +4431,7 @@ impl CudaBackend {
         theta: f32,
         pos: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(
+        assert!(
             head_dim % 2 == 0,
             "head_dim must be even for split-halves RoPE"
         );
@@ -4943,7 +4943,7 @@ impl CudaBackend {
         theta: f32,
         pos_start: usize,
     ) -> Result<(), CudaError> {
-        debug_assert!(
+        assert!(
             head_dim % 2 == 0,
             "head_dim must be even for split-halves RoPE"
         );

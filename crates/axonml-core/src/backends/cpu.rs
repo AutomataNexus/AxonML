@@ -562,9 +562,15 @@ impl CpuBackend {
     /// Uses optimized GEMM from matrixmultiply crate for f32/f64,
     /// falls back to cache-efficient tiled implementation for other types.
     pub fn matmul<T: Numeric>(c: &mut [T], a: &[T], b: &[T], m: usize, n: usize, k: usize) {
-        debug_assert_eq!(a.len(), m * k);
-        debug_assert_eq!(b.len(), k * n);
-        debug_assert_eq!(c.len(), m * n);
+        assert!(
+            a.len() >= m.saturating_mul(k)
+                && b.len() >= k.saturating_mul(n)
+                && c.len() >= m.saturating_mul(n),
+            "GEMM dimensions exceed the slices given: m={m} n={n} k={k} with a={} b={} c={}",
+            a.len(),
+            b.len(),
+            c.len()
+        );
 
         // Use optimized BLAS routines for f32 and f64
         use std::any::TypeId;
@@ -667,9 +673,15 @@ impl CpuBackend {
         alpha: f32,
         beta: f32,
     ) {
-        debug_assert_eq!(a.len(), m * k);
-        debug_assert_eq!(b.len(), k * n);
-        debug_assert_eq!(c.len(), m * n);
+        assert!(
+            a.len() >= m.saturating_mul(k)
+                && b.len() >= k.saturating_mul(n)
+                && c.len() >= m.saturating_mul(n),
+            "GEMM dimensions exceed the slices given: m={m} n={n} k={k} with a={} b={} c={}",
+            a.len(),
+            b.len(),
+            c.len()
+        );
 
         unsafe {
             matrixmultiply::sgemm(
@@ -704,9 +716,15 @@ impl CpuBackend {
         alpha: f64,
         beta: f64,
     ) {
-        debug_assert_eq!(a.len(), m * k);
-        debug_assert_eq!(b.len(), k * n);
-        debug_assert_eq!(c.len(), m * n);
+        assert!(
+            a.len() >= m.saturating_mul(k)
+                && b.len() >= k.saturating_mul(n)
+                && c.len() >= m.saturating_mul(n),
+            "GEMM dimensions exceed the slices given: m={m} n={n} k={k} with a={} b={} c={}",
+            a.len(),
+            b.len(),
+            c.len()
+        );
 
         unsafe {
             matrixmultiply::dgemm(
@@ -784,9 +802,15 @@ impl CpuBackend {
     /// # Panics
     /// Does not panic. Debug-asserts shape consistency.
     pub fn matmul_f32_bt(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize, k: usize) {
-        debug_assert_eq!(a.len(), m * k);
-        debug_assert_eq!(b.len(), n * k);
-        debug_assert_eq!(c.len(), m * n);
+        assert!(
+            a.len() >= m.saturating_mul(k)
+                && b.len() >= n.saturating_mul(k)
+                && c.len() >= m.saturating_mul(n),
+            "GEMM dimensions exceed the slices given: m={m} n={n} k={k} with a={} b={} c={}",
+            a.len(),
+            b.len(),
+            c.len()
+        );
 
         if m == 1 {
             gemv_bt_row_parallel_f32(c, a, b, n, k);
@@ -945,9 +969,15 @@ fn gemv_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: usize
 /// sub-matrix. Safe because C row blocks are disjoint. Used for prefill
 /// inference and all CPU matmuls in training (fwd + MatMulBackward).
 fn matmul_f32_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize, k: usize) {
-    debug_assert_eq!(a.len(), m * k);
-    debug_assert_eq!(b.len(), k * n);
-    debug_assert_eq!(c.len(), m * n);
+    assert!(
+        a.len() >= m.saturating_mul(k)
+            && b.len() >= k.saturating_mul(n)
+            && c.len() >= m.saturating_mul(n),
+        "GEMM dimensions exceed the slices given: m={m} n={n} k={k} with a={} b={} c={}",
+        a.len(),
+        b.len(),
+        c.len()
+    );
 
     if m == 0 || n == 0 || k == 0 {
         c.fill(0.0);
@@ -979,9 +1009,15 @@ fn matmul_f32_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize
 /// Same outer-parallel strategy as matmul_f32_parallel_m but using the
 /// zero-copy stride reinterpret for the natural GGUF/weight layout.
 fn matmul_f32_bt_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize, k: usize) {
-    debug_assert_eq!(a.len(), m * k);
-    debug_assert_eq!(b.len(), n * k);
-    debug_assert_eq!(c.len(), m * n);
+    assert!(
+        a.len() >= m.saturating_mul(k)
+            && b.len() >= n.saturating_mul(k)
+            && c.len() >= m.saturating_mul(n),
+        "GEMM dimensions exceed the slices given: m={m} n={n} k={k} with a={} b={} c={}",
+        a.len(),
+        b.len(),
+        c.len()
+    );
 
     if m == 0 || n == 0 || k == 0 {
         c.fill(0.0);
@@ -1026,9 +1062,15 @@ fn matmul_f32_bt_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: us
 
 /// Parallel f64 matmul over m (row) dimension. Mirrors the f32 version.
 fn matmul_f64_parallel_m(c: &mut [f64], a: &[f64], b: &[f64], m: usize, n: usize, k: usize) {
-    debug_assert_eq!(a.len(), m * k);
-    debug_assert_eq!(b.len(), k * n);
-    debug_assert_eq!(c.len(), m * n);
+    assert!(
+        a.len() >= m.saturating_mul(k)
+            && b.len() >= k.saturating_mul(n)
+            && c.len() >= m.saturating_mul(n),
+        "GEMM dimensions exceed the slices given: m={m} n={n} k={k} with a={} b={} c={}",
+        a.len(),
+        b.len(),
+        c.len()
+    );
 
     if m == 0 || n == 0 || k == 0 {
         c.fill(0.0);
@@ -1334,5 +1376,69 @@ mod tests {
         let mut a = [0.0_f32; 5];
         CpuBackend::fill(&mut a, 42.0);
         assert_eq!(a, [42.0; 5]);
+    }
+}
+
+// ── soundness of the GEMM entry points ──
+
+#[cfg(test)]
+mod gemm_bounds_tests {
+    use super::CpuBackend;
+
+    /// The reported unsoundness: these are safe public functions whose length
+    /// checks were `debug_assert_eq!`, so a release build passed unvalidated
+    /// `m`, `n`, `k` into raw-pointer BLAS and read and wrote out of bounds.
+    /// Run under `--release` as well, where the debug asserts are gone.
+    fn panics(f: impl FnOnce() + std::panic::UnwindSafe) -> bool {
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let caught = std::panic::catch_unwind(f).is_err();
+        std::panic::set_hook(hook);
+        caught
+    }
+
+    #[test]
+    fn sgemm_refuses_dimensions_larger_than_its_slices() {
+        assert!(panics(|| {
+            let (a, b) = ([1.0f32; 1], [1.0f32; 1]);
+            let mut c = [0.0f32; 1];
+            CpuBackend::sgemm(&mut c, &a, &b, 8, 8, 8, 1.0, 0.0);
+        }));
+    }
+
+    #[test]
+    fn dgemm_refuses_dimensions_larger_than_its_slices() {
+        assert!(panics(|| {
+            let (a, b) = ([1.0f64; 1], [1.0f64; 1]);
+            let mut c = [0.0f64; 1];
+            CpuBackend::dgemm(&mut c, &a, &b, 8, 8, 8, 1.0, 0.0);
+        }));
+    }
+
+    #[test]
+    fn matmul_refuses_dimensions_larger_than_its_slices() {
+        assert!(panics(|| {
+            let (a, b) = ([1.0f32; 1], [1.0f32; 1]);
+            let mut c = [0.0f32; 1];
+            CpuBackend::matmul(&mut c, &a, &b, 8, 8, 8);
+        }));
+    }
+
+    #[test]
+    fn matmul_f32_bt_refuses_dimensions_larger_than_its_slices() {
+        assert!(panics(|| {
+            let (a, b) = ([1.0f32; 1], [1.0f32; 1]);
+            let mut c = [0.0f32; 1];
+            CpuBackend::matmul_f32_bt(&mut c, &a, &b, 8, 8, 8);
+        }));
+    }
+
+    #[test]
+    fn an_over_allocated_buffer_is_still_accepted() {
+        let a = vec![1.0f32; 4 * 3 + 7];
+        let b = vec![1.0f32; 3 * 2 + 7];
+        let mut c = vec![0.0f32; 4 * 2 + 7];
+        CpuBackend::sgemm(&mut c, &a, &b, 4, 2, 3, 1.0, 0.0);
+        assert_eq!(c[0], 3.0);
     }
 }
