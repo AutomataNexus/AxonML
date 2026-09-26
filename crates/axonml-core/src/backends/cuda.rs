@@ -384,81 +384,6 @@ impl Backend for CudaBackend {
         }
     }
 
-    fn allocate(&self, size: usize) -> *mut u8 {
-        match self.stream.alloc_zeros::<u8>(size) {
-            Ok(slice) => {
-                // Get the raw device pointer via leak
-
-                slice.leak() as *mut u8
-            }
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    unsafe fn deallocate(&self, ptr: *mut u8, size: usize) {
-        if !ptr.is_null() {
-            // SAFETY: the trait contract requires ptr to have come from this
-            // backend's allocate with this size and to be unused afterwards.
-            // allocate is a leaked CudaSlice<u8> of exactly `size`, so
-            // rebuilding that slice and dropping it is the matching free.
-            unsafe {
-                let slice: CudaSlice<u8> = self
-                    .stream
-                    .upgrade_device_ptr(ptr as cudarc::driver::sys::CUdeviceptr, size);
-                drop(slice);
-            }
-        }
-    }
-
-    unsafe fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        if dst.is_null() || src.is_null() || size == 0 {
-            return;
-        }
-        // SAFETY: the trait contract requires src readable for `size` bytes and
-        // dst a device allocation of at least `size`; both are non-null and
-        // size is non-zero by the guard above. The copy is synchronous, so src
-        // is not read after this returns.
-        unsafe {
-            let src_slice = std::slice::from_raw_parts(src, size);
-            let _ = cudarc::driver::result::memcpy_htod_sync(
-                dst as cudarc::driver::sys::CUdeviceptr,
-                src_slice,
-            );
-        }
-    }
-
-    unsafe fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
-        if dst.is_null() || src.is_null() || size == 0 {
-            return;
-        }
-        // SAFETY: the trait contract requires dst writable for `size` bytes and
-        // src a device allocation of at least `size`; both are non-null and
-        // size is non-zero by the guard above. The copy is synchronous, so dst
-        // is fully written before this returns.
-        unsafe {
-            let dst_slice = std::slice::from_raw_parts_mut(dst, size);
-            let _ = cudarc::driver::result::memcpy_dtoh_sync(
-                dst_slice,
-                src as cudarc::driver::sys::CUdeviceptr,
-            );
-        }
-    }
-
-    unsafe fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        if dst.is_null() || src.is_null() || size == 0 {
-            return;
-        }
-        // SAFETY: the trait contract requires both to be device allocations of
-        // at least `size` bytes that do not overlap. No host memory is touched.
-        unsafe {
-            let _ = cudarc::driver::result::memcpy_dtod_sync(
-                dst as cudarc::driver::sys::CUdeviceptr,
-                src as cudarc::driver::sys::CUdeviceptr,
-                size,
-            );
-        }
-    }
-
     fn synchronize(&self) {
         let _ = self.stream.synchronize();
     }
@@ -503,18 +428,6 @@ impl Backend for CudaBackend {
             compute_capability: None,
         }
     }
-
-    fn allocate(&self, _size: usize) -> *mut u8 {
-        std::ptr::null_mut()
-    }
-
-    unsafe fn deallocate(&self, _ptr: *mut u8, _size: usize) {}
-
-    unsafe fn copy_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
-
-    unsafe fn copy_to_host(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
-
-    unsafe fn copy_device_to_device(&self, _dst: *mut u8, _src: *const u8, _size: usize) {}
 
     fn synchronize(&self) {}
 }

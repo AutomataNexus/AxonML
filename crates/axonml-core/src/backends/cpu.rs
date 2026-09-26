@@ -75,52 +75,6 @@ impl Backend for CpuBackend {
         }
     }
 
-    fn allocate(&self, size: usize) -> *mut u8 {
-        if size == 0 {
-            return std::ptr::null_mut();
-        }
-        // Round size up to alignment to satisfy Layout's invariant:
-        // size must be a multiple of align when using from_size_align_unchecked.
-        let aligned_size = (size + 63) & !63; // Round up to next multiple of 64
-        unsafe {
-            let layout = std::alloc::Layout::from_size_align_unchecked(aligned_size, 64);
-            std::alloc::alloc(layout)
-        }
-    }
-
-    unsafe fn deallocate(&self, ptr: *mut u8, size: usize) {
-        if ptr.is_null() || size == 0 {
-            return;
-        }
-        // Must use the same aligned size as allocate() for a matching Layout.
-        let aligned_size = (size + 63) & !63;
-        unsafe {
-            let layout = std::alloc::Layout::from_size_align_unchecked(aligned_size, 64);
-            std::alloc::dealloc(ptr, layout);
-        }
-    }
-
-    unsafe fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        // For CPU, this is just a memory copy
-        unsafe {
-            std::ptr::copy_nonoverlapping(src, dst, size);
-        }
-    }
-
-    unsafe fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize) {
-        // For CPU, this is just a memory copy
-        unsafe {
-            std::ptr::copy_nonoverlapping(src, dst, size);
-        }
-    }
-
-    unsafe fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize) {
-        // For CPU, this is just a memory copy
-        unsafe {
-            std::ptr::copy_nonoverlapping(src, dst, size);
-        }
-    }
-
     fn synchronize(&self) {
         // No-op for CPU - operations are synchronous
     }
@@ -574,25 +528,29 @@ impl CpuBackend {
 
         // Use optimized BLAS routines for f32 and f64
         use std::any::TypeId;
+        // `Scalar: Pod`, so these are checked bytemuck casts, and the TypeId
+        // guard means they only ever see the matching element type.
         if TypeId::of::<T>() == TypeId::of::<f32>() {
-            // SAFETY: We verified T is f32, so the casts are safe
-            unsafe {
-                let a_f32: &[f32] = &*(std::ptr::from_ref::<[T]>(a) as *const [f32]);
-                let b_f32: &[f32] = &*(std::ptr::from_ref::<[T]>(b) as *const [f32]);
-                let c_f32: &mut [f32] = &mut *(std::ptr::from_mut::<[T]>(c) as *mut [f32]);
-                Self::matmul_f32(c_f32, a_f32, b_f32, m, n, k);
-            }
+            Self::matmul_f32(
+                bytemuck::cast_slice_mut(c),
+                bytemuck::cast_slice(a),
+                bytemuck::cast_slice(b),
+                m,
+                n,
+                k,
+            );
             return;
         }
 
         if TypeId::of::<T>() == TypeId::of::<f64>() {
-            // SAFETY: We verified T is f64, so the casts are safe
-            unsafe {
-                let a_f64: &[f64] = &*(std::ptr::from_ref::<[T]>(a) as *const [f64]);
-                let b_f64: &[f64] = &*(std::ptr::from_ref::<[T]>(b) as *const [f64]);
-                let c_f64: &mut [f64] = &mut *(std::ptr::from_mut::<[T]>(c) as *mut [f64]);
-                Self::matmul_f64(c_f64, a_f64, b_f64, m, n, k);
-            }
+            Self::matmul_f64(
+                bytemuck::cast_slice_mut(c),
+                bytemuck::cast_slice(a),
+                bytemuck::cast_slice(b),
+                m,
+                n,
+                k,
+            );
             return;
         }
 
@@ -611,30 +569,28 @@ impl CpuBackend {
             // rows of C; inner p/j loops stay serial per tile for cache.
             let threads = rayon::current_num_threads().max(1);
             let rows_per = ((m / (threads * 4)).max(1)).min(m);
-            let num_chunks = m.div_ceil(rows_per);
-            let c_ptr = c.as_mut_ptr() as usize;
-            (0..num_chunks).into_par_iter().for_each(|chunk| {
-                let c_ptr = c_ptr as *mut T;
-                let i0 = chunk * rows_per;
-                let i_end = (i0 + rows_per).min(m);
-                for p0 in (0..k).step_by(BLOCK_SIZE) {
-                    let p_end = (p0 + BLOCK_SIZE).min(k);
-                    for j0 in (0..n).step_by(BLOCK_SIZE) {
-                        let j_end = (j0 + BLOCK_SIZE).min(n);
-                        for i in i0..i_end {
-                            for p in p0..p_end {
-                                let a_val = a[i * k + p];
-                                for j in j0..j_end {
-                                    unsafe {
-                                        let dst = c_ptr.add(i * n + j);
-                                        *dst = *dst + a_val * b[p * n + j];
+            c[..m * n]
+                .par_chunks_mut(rows_per * n)
+                .enumerate()
+                .for_each(|(chunk, c_band)| {
+                    let i0 = chunk * rows_per;
+                    let band_rows = c_band.len() / n;
+                    for p0 in (0..k).step_by(BLOCK_SIZE) {
+                        let p_end = (p0 + BLOCK_SIZE).min(k);
+                        for j0 in (0..n).step_by(BLOCK_SIZE) {
+                            let j_end = (j0 + BLOCK_SIZE).min(n);
+                            for (r, c_row) in c_band.chunks_mut(n).enumerate().take(band_rows) {
+                                let i = i0 + r;
+                                for p in p0..p_end {
+                                    let a_val = a[i * k + p];
+                                    for j in j0..j_end {
+                                        c_row[j] = c_row[j] + a_val * b[p * n + j];
                                     }
                                 }
                             }
                         }
                     }
-                }
-            });
+                });
             return;
         }
 
@@ -683,6 +639,9 @@ impl CpuBackend {
             c.len()
         );
 
+        // SAFETY: the assert above guarantees a/b/c hold at least m×k, k×n and
+        // m×n elements, which with the row-major unit strides below is exactly
+        // the extent sgemm reads and writes.
         unsafe {
             matrixmultiply::sgemm(
                 m,
@@ -726,6 +685,9 @@ impl CpuBackend {
             c.len()
         );
 
+        // SAFETY: the assert above guarantees a/b/c hold at least m×k, k×n and
+        // m×n elements, which with the row-major unit strides below is exactly
+        // the extent dgemm reads and writes.
         unsafe {
             matrixmultiply::dgemm(
                 m,
@@ -829,6 +791,9 @@ impl CpuBackend {
         // We want matmul to see it as a [k, n] matrix: element B'[i, j] at `j*k + i`.
         // Setting rs=1 (stride 1 between rows) and cs=k (stride k between cols)
         // on the same pointer reinterprets the layout correctly.
+        // SAFETY: the assert at the top guarantees a ≥ m×k, b ≥ n×k and
+        // c ≥ m×n elements; the transposed strides (1, k) index b within
+        // those n×k elements, so every access sgemm makes is in bounds.
         unsafe {
             matrixmultiply::sgemm(
                 m,
@@ -1039,6 +1004,9 @@ fn matmul_f32_bt_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: us
             let a_sub = &a[i0 * k..(i0 + this_m) * k];
             // Re-apply the exact stride trick on the sub-matrix (A_sub is still
             // row-major [this_m, k]; B is the full weight matrix).
+            // SAFETY: `a_sub` is exactly this_m×k, `c_chunk` holds this_m×n
+            // (this_m is derived from its length), and the top-of-fn assert
+            // gives b ≥ n×k for the transposed (1, k) strides.
             unsafe {
                 matrixmultiply::sgemm(
                     this_m,
@@ -1351,6 +1319,24 @@ mod tests {
 
         CpuBackend::matmul(&mut c, &a, &b, 2, 2, 2);
         assert_eq!(c, [19.0, 22.0, 43.0, 50.0]);
+    }
+
+    // Non-f32/f64 element types take the tiled path, which goes parallel
+    // above 2^18 flops; 70×70×70 is past that, with ragged 64-tiles.
+    #[test]
+    fn test_matmul_tiled_parallel_matches_naive() {
+        let (m, n, k) = (70, 70, 70);
+        let a: Vec<i32> = (0..m * k).map(|i| (i % 7) as i32 - 3).collect();
+        let b: Vec<i32> = (0..k * n).map(|i| (i % 5) as i32 - 2).collect();
+        let mut c = vec![0i32; m * n + 3];
+        CpuBackend::matmul(&mut c, &a, &b, m, n, k);
+        for i in 0..m {
+            for j in 0..n {
+                let want: i32 = (0..k).map(|p| a[i * k + p] * b[p * n + j]).sum();
+                assert_eq!(c[i * n + j], want, "c[{i},{j}]");
+            }
+        }
+        assert_eq!(&c[m * n..], &[0, 0, 0], "over-allocated tail untouched");
     }
 
     #[test]

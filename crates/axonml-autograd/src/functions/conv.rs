@@ -54,6 +54,21 @@ fn gemm_acc(
     } else {
         (n as isize, 1isize)
     };
+    assert!(
+        a.len() >= m.saturating_mul(k)
+            && b.len() >= k.saturating_mul(n)
+            && c.len() >= m.saturating_mul(n),
+        "gemm_acc: operand lengths a={} b={} c={} too small for m={} k={} n={}",
+        a.len(),
+        b.len(),
+        c.len(),
+        m,
+        k,
+        n
+    );
+    // SAFETY: the assert above guarantees every operand holds at least the
+    // m×k / k×n / m×n elements sgemm will touch, and the strides are the
+    // canonical row/column-major pairs for those exact shapes.
     unsafe {
         matrixmultiply::sgemm(
             m,
@@ -201,71 +216,35 @@ impl GradientFunction for Conv2dBackward {
                     let kj = k_idx % kw;
                     let input_c = input_offset + c * in_h * in_w;
                     let col_base = cr * out_hw;
+                    let col_rows_view = &mut col[col_base..col_base + out_hw];
                     if out_h >= 8 || out_hw >= 4096 {
                         use rayon::prelude::*;
-                        let col_ptr = col.as_mut_ptr() as usize;
-                        let input_vec_ptr = input_vec.as_ptr() as usize;
-                        (0..out_h).into_par_iter().for_each(|oh| {
-                            let col_ptr = col_ptr as *mut f32;
-                            let input_vec_ptr = input_vec_ptr as *const f32;
-                            let ih = (oh * sh + ki) as isize - ph_s;
-                            if ih < 0 || ih >= in_h_s {
-                                return;
-                            }
-                            let input_row = input_c + ih as usize * in_w;
-                            let col_row_base = col_base + oh * out_w;
-                            for ow in 0..out_w {
-                                let iw = (ow * sw + kj) as isize - pw_s;
-                                if iw >= 0 && iw < in_w_s {
-                                    let col_idx = col_row_base + ow;
-                                    let inp_idx = input_row + iw as usize;
-                                    debug_assert!(
-                                        col_idx < col.len(),
-                                        "im2col col index OOB: {} >= {}",
-                                        col_idx,
-                                        col.len()
-                                    );
-                                    debug_assert!(
-                                        inp_idx < input_vec.len(),
-                                        "im2col input index OOB: {} >= {}",
-                                        inp_idx,
-                                        input_vec.len()
-                                    );
-                                    unsafe {
-                                        *col_ptr.add(col_idx) = *input_vec_ptr.add(inp_idx);
+                        col_rows_view.par_chunks_mut(out_w).enumerate().for_each(
+                            |(oh, col_row)| {
+                                let ih = (oh * sh + ki) as isize - ph_s;
+                                if ih < 0 || ih >= in_h_s {
+                                    return;
+                                }
+                                let input_row = input_c + ih as usize * in_w;
+                                for (ow, slot) in col_row.iter_mut().enumerate() {
+                                    let iw = (ow * sw + kj) as isize - pw_s;
+                                    if iw >= 0 && iw < in_w_s {
+                                        *slot = input_vec[input_row + iw as usize];
                                     }
                                 }
-                            }
-                        });
+                            },
+                        );
                     } else {
-                        for oh in 0..out_h {
+                        for (oh, col_row) in col_rows_view.chunks_mut(out_w).enumerate() {
                             let ih = (oh * sh + ki) as isize - ph_s;
                             if ih < 0 || ih >= in_h_s {
                                 continue;
                             }
                             let input_row = input_c + ih as usize * in_w;
-                            let col_row_base = col_base + oh * out_w;
-                            for ow in 0..out_w {
+                            for (ow, slot) in col_row.iter_mut().enumerate() {
                                 let iw = (ow * sw + kj) as isize - pw_s;
                                 if iw >= 0 && iw < in_w_s {
-                                    let col_idx = col_row_base + ow;
-                                    let inp_idx = input_row + iw as usize;
-                                    debug_assert!(
-                                        col_idx < col.len(),
-                                        "im2col col index OOB: {} >= {}",
-                                        col_idx,
-                                        col.len()
-                                    );
-                                    debug_assert!(
-                                        inp_idx < input_vec.len(),
-                                        "im2col input index OOB: {} >= {}",
-                                        inp_idx,
-                                        input_vec.len()
-                                    );
-                                    unsafe {
-                                        *col.get_unchecked_mut(col_idx) =
-                                            *input_vec.get_unchecked(inp_idx);
-                                    }
+                                    *slot = input_vec[input_row + iw as usize];
                                 }
                             }
                         }
@@ -320,24 +299,7 @@ impl GradientFunction for Conv2dBackward {
                         for ow in 0..out_w {
                             let iw = (ow * sw + kj) as isize - pw_s;
                             if iw >= 0 && iw < in_w_s {
-                                let gi_idx = gi_row + iw as usize;
-                                let gc_idx = col_row_base + ow;
-                                debug_assert!(
-                                    gi_idx < gi_batch.len(),
-                                    "col2im gi index OOB: {} >= {}",
-                                    gi_idx,
-                                    gi_batch.len()
-                                );
-                                debug_assert!(
-                                    gc_idx < grad_col.len(),
-                                    "col2im grad_col index OOB: {} >= {}",
-                                    gc_idx,
-                                    grad_col.len()
-                                );
-                                unsafe {
-                                    *gi_batch.get_unchecked_mut(gi_idx) +=
-                                        *grad_col.get_unchecked(gc_idx);
-                                }
+                                gi_batch[gi_row + iw as usize] += grad_col[col_row_base + ow];
                             }
                         }
                     }

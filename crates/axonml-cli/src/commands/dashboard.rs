@@ -85,9 +85,8 @@ fn remove_pid(service: &str) -> CliResult<()> {
 /// Check if a process is running
 #[cfg(unix)]
 fn is_process_running(pid: u32) -> bool {
-    // Use kill -0 to check if process exists
-    let result = unsafe { libc::kill(pid as i32, 0) };
-    result == 0
+    // Signal 0 probes for existence without delivering anything
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
 }
 
 #[cfg(not(unix))]
@@ -103,9 +102,13 @@ fn is_process_running(pid: u32) -> bool {
 /// Stop a process by PID
 #[cfg(unix)]
 fn stop_process(pid: u32, force: bool) -> bool {
-    let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
-    let result = unsafe { libc::kill(pid as i32, signal) };
-    result == 0
+    use nix::sys::signal::{Signal, kill};
+    let signal = if force {
+        Signal::SIGKILL
+    } else {
+        Signal::SIGTERM
+    };
+    kill(nix::unistd::Pid::from_raw(pid as i32), signal).is_ok()
 }
 
 #[cfg(not(unix))]

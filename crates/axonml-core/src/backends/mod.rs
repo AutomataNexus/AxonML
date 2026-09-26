@@ -89,39 +89,6 @@ pub trait Backend: Send + Sync {
     /// Returns the device capabilities.
     fn capabilities(&self) -> DeviceCapabilities;
 
-    /// Allocates memory on this backend.
-    fn allocate(&self, size: usize) -> *mut u8;
-
-    /// Deallocates memory on this backend.
-    ///
-    /// # Safety
-    /// `ptr` must have come from `allocate` on this same backend with this
-    /// same `size`, and must not be used again afterwards. Nothing here can
-    /// check that: a stale or foreign pointer is a double free or a free of
-    /// memory this backend never owned.
-    unsafe fn deallocate(&self, ptr: *mut u8, size: usize);
-
-    /// Copies data from host to device.
-    ///
-    /// # Safety
-    /// `src` must be readable for `size` bytes on the host, and `dst` must
-    /// point to at least `size` bytes obtained from this backend's `allocate`.
-    unsafe fn copy_to_device(&self, dst: *mut u8, src: *const u8, size: usize);
-
-    /// Copies data from device to host.
-    ///
-    /// # Safety
-    /// `src` must point to at least `size` bytes obtained from this backend's
-    /// `allocate`, and `dst` must be writable for `size` bytes on the host.
-    unsafe fn copy_to_host(&self, dst: *mut u8, src: *const u8, size: usize);
-
-    /// Copies data within the device.
-    ///
-    /// # Safety
-    /// Both pointers must address at least `size` bytes obtained from this
-    /// backend's `allocate`, and the ranges must not overlap.
-    unsafe fn copy_device_to_device(&self, dst: *mut u8, src: *const u8, size: usize);
-
     /// Synchronizes the device (waits for all operations to complete).
     fn synchronize(&self);
 }
@@ -385,49 +352,6 @@ mod tests {
         let cpu = CpuBackend::new();
         assert!(cpu.is_available());
         assert_eq!(cpu.name(), "cpu");
-    }
-
-    #[test]
-    fn test_cpu_backend_allocate_deallocate() {
-        let cpu = CpuBackend::new();
-        let ptr = cpu.allocate(256);
-        assert!(!ptr.is_null());
-        // SAFETY: test-owned buffers, sized and allocated just above.
-        unsafe {
-            cpu.deallocate(ptr, 256);
-        }
-    }
-
-    #[test]
-    fn test_cpu_backend_zero_alloc() {
-        let cpu = CpuBackend::new();
-        let ptr = cpu.allocate(0);
-        assert!(ptr.is_null());
-    }
-
-    #[test]
-    fn test_cpu_backend_copy_round_trip() {
-        let cpu = CpuBackend::new();
-        let src: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
-        let dst_ptr = cpu.allocate(16); // 4 f32s
-
-        // SAFETY: test-owned buffers, sized and allocated just above.
-
-        unsafe {
-            cpu.copy_to_device(dst_ptr, src.as_ptr().cast::<u8>(), 16);
-        }
-
-        let mut result = [0.0f32; 4];
-        // SAFETY: test-owned buffers, sized and allocated just above.
-        unsafe {
-            cpu.copy_to_host(result.as_mut_ptr().cast::<u8>(), dst_ptr.cast_const(), 16);
-        }
-
-        assert_eq!(result, [1.0, 2.0, 3.0, 4.0]);
-        // SAFETY: test-owned buffers, sized and allocated just above.
-        unsafe {
-            cpu.deallocate(dst_ptr, 16);
-        }
     }
 
     #[test]

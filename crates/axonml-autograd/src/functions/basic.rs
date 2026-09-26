@@ -860,27 +860,38 @@ impl GradientFunction for NarrowBackward {
 
         if out_numel >= 4096 {
             use rayon::prelude::*;
-            let grad_ptr = grad_data.as_mut_ptr() as usize;
-            (0..out_numel).into_par_iter().for_each(|out_idx| {
-                let grad_ptr = grad_ptr as *mut f32;
-                let mut indices = vec![0usize; output_shape.len()];
-                let mut remaining = out_idx;
-                for d in (0..output_shape.len()).rev() {
-                    indices[d] = remaining % output_shape[d];
-                    remaining /= output_shape[d];
-                }
-
-                indices[self.dim] += self.start;
-
-                let in_idx: usize = indices
-                    .iter()
-                    .zip(strides.iter())
-                    .map(|(&i, &s)| i * s)
-                    .sum();
-                unsafe {
-                    *grad_ptr.add(in_idx) = grad_out_data[out_idx];
-                }
-            });
+            // Parallel over INPUT rows (last-dim runs): a row is either wholly
+            // outside the narrowed window or maps to one contiguous output row,
+            // so each chunk is written through its own `&mut` and nothing
+            // needs a raw pointer.
+            let last = self.input_shape.len() - 1;
+            let in_row = self.input_shape[last];
+            let out_row = output_shape[last];
+            let row_off = if self.dim == last { self.start } else { 0 };
+            grad_data
+                .par_chunks_mut(in_row)
+                .enumerate()
+                .for_each(|(row, dst)| {
+                    let mut remaining = row;
+                    let mut out_row_idx = 0usize;
+                    let mut mul = 1usize;
+                    for d in (0..last).rev() {
+                        let idx = remaining % self.input_shape[d];
+                        remaining /= self.input_shape[d];
+                        let o = if d == self.dim {
+                            if idx < self.start || idx >= self.start + output_shape[d] {
+                                return;
+                            }
+                            idx - self.start
+                        } else {
+                            idx
+                        };
+                        out_row_idx += o * mul;
+                        mul *= output_shape[d];
+                    }
+                    let src = &grad_out_data[out_row_idx * out_row..(out_row_idx + 1) * out_row];
+                    dst[row_off..row_off + out_row].copy_from_slice(src);
+                });
         } else {
             for out_idx in 0..out_numel {
                 let mut indices = vec![0usize; output_shape.len()];

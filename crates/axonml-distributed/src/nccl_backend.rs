@@ -585,10 +585,11 @@ impl Drop for GpuBuffer {
 }
 
 // SAFETY: GpuBuffer uniquely owns one cudaMalloc allocation and frees it on
-// drop, so moving it to another thread moves that ownership (Send). Every
-// method that writes the allocation takes &mut self, so a shared &GpuBuffer
-// can only read it, and concurrent reads of device memory are sound (Sync).
+// drop, so moving it to another thread moves that ownership.
 unsafe impl Send for GpuBuffer {}
+// SAFETY: every method that writes the allocation takes &mut self, so a
+// shared &GpuBuffer can only read it, and concurrent reads of device memory
+// are sound.
 unsafe impl Sync for GpuBuffer {}
 
 // =============================================================================
@@ -629,13 +630,13 @@ pub struct NcclBackend {
 }
 
 // SAFETY: comm and stream are raw handles owned by this struct and released on
-// drop, so moving the struct moves that ownership (Send). They are only ever
-// used while op_lock is held, so any number of threads holding &NcclBackend
-// reduce to one operation at a time on the communicator, which is the contract
-// NCCL requires (Sync). Without the lock this impl would be unsound: every
-// collective takes &self and NCCL does not permit concurrent operations on one
-// communicator.
+// drop, so moving the struct moves that ownership.
 unsafe impl Send for NcclBackend {}
+// SAFETY: comm and stream are only ever used while op_lock is held, so any
+// number of threads holding &NcclBackend reduce to one operation at a time on
+// the communicator, which is the contract NCCL requires. Without the lock this
+// impl would be unsound: every collective takes &self and NCCL does not permit
+// concurrent operations on one communicator.
 unsafe impl Sync for NcclBackend {}
 
 impl NcclBackend {
