@@ -342,7 +342,8 @@ async fn batch_handler(
         ));
     }
 
-    let mut results = Vec::with_capacity(request.data.len());
+    // SECURITY: capacity comes from the server's cap, not the request length.
+    let mut results = Vec::with_capacity(effective_max);
     for input in request.data {
         let pred_request = PredictRequest { data: input };
         match predict_handler(State(state.clone()), Json(pred_request)).await {

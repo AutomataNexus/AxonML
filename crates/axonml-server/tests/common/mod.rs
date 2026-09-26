@@ -39,7 +39,21 @@ pub fn admin_email() -> String {
 }
 
 pub fn admin_password() -> String {
-    std::env::var("AXONML_TEST_ADMIN_PASSWORD").unwrap_or_else(|_| "admin".to_string())
+    // No literal credential in the repository, not even a test default. When
+    // the variable is unset a value is generated once per process, so the
+    // seeding and the login inside one run agree.
+    static GENERATED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    std::env::var("AXONML_TEST_ADMIN_PASSWORD").unwrap_or_else(|_| {
+        GENERATED
+            .get_or_init(|| {
+                let n = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                format!("test-{n:x}-{:x}", std::process::id())
+            })
+            .clone()
+    })
 }
 
 // =============================================================================

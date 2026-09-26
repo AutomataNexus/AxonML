@@ -152,10 +152,7 @@ impl WandbConfig {
     /// Mask the API key for display (show first 4 and last 4 chars)
     pub fn masked_api_key(&self) -> String {
         match &self.api_key {
-            Some(key) if key.len() > 8 => {
-                format!("{}...{}", &key[..4], &key[key.len() - 4..])
-            }
-            Some(_) => "****".to_string(),
+            Some(_) => "**** (set)".to_string(),
             None => "(not set)".to_string(),
         }
     }
@@ -447,13 +444,26 @@ mod tests {
         // No key
         assert_eq!(config.masked_api_key(), "(not set)");
 
-        // Short key
+        // A key is reported as present and nothing about it is revealed.
         config.api_key = Some("abcd".to_string());
-        assert_eq!(config.masked_api_key(), "****");
+        assert_eq!(config.masked_api_key(), "**** (set)");
 
-        // Long key
-        config.api_key = Some("abcdefghijklmnop".to_string());
-        assert_eq!(config.masked_api_key(), "abcd...mnop");
+        // The property that matters: no run of key characters reaches the
+        // output. The previous masking showed the first four and the last four,
+        // which is a vendor prefix plus a narrowed brute force.
+        let key = "abcdefghijklmnop";
+        config.api_key = Some(key.to_string());
+        let masked = config.masked_api_key();
+        assert_eq!(masked, "**** (set)");
+        for window in 3..=key.len() {
+            for start in 0..=key.len() - window {
+                assert!(
+                    !masked.contains(&key[start..start + window]),
+                    "masked output leaks {:?}",
+                    &key[start..start + window]
+                );
+            }
+        }
     }
 
     #[test]
