@@ -91,6 +91,20 @@
 // Modules
 // =============================================================================
 
+extern crate alloc;
+
+/// `alloc` types that the std prelude provides for free; imported by modules
+/// only when building without `std`.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+pub(crate) mod alloc_prelude {
+    pub use alloc::borrow::ToOwned;
+    pub use alloc::boxed::Box;
+    pub use alloc::string::{String, ToString};
+    pub use alloc::vec::Vec;
+    pub use alloc::{format, vec};
+}
+
 pub mod creation;
 #[cfg(feature = "cuda")]
 pub mod cuda_ops;
@@ -119,6 +133,8 @@ pub use tensor::Tensor;
 pub mod prelude {
     pub use crate::shape::{Shape, Strides};
     pub use crate::tensor::Tensor;
-    pub use crate::{arange, full, linspace, ones, rand, randn, zeros};
+    pub use crate::{arange, full, linspace, ones, zeros};
+    #[cfg(feature = "std")]
+    pub use crate::{rand, randn};
     pub use axonml_core::{DType, Device, Error, Result};
 }

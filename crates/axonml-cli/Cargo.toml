@@ -77,7 +77,7 @@ thiserror = { workspace = true }
 anyhow = "1.0"
 
 # Random (for simulation)
-rand = { workspace = true }
+rand = { workspace = true, features = ["std", "std_rng"] }
 
 # System info (for bench/gpu commands)
 num_cpus = "1.16"

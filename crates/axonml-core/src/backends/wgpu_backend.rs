@@ -410,8 +410,8 @@ impl Backend for WgpuBackend {
                 "{} ({:?})",
                 self.adapter_info.name, self.adapter_info.backend
             ),
-            total_memory: 0, // wgpu doesn't expose this directly
-            available_memory: 0,
+            total_memory: None, // wgpu doesn't expose this directly
+            available_memory: None,
             supports_f16: self.device.features().contains(Features::SHADER_F16),
             supports_f64: false, // WebGPU doesn't support f64 in shaders
             max_threads_per_block: limits.max_compute_invocations_per_workgroup as usize,
@@ -437,8 +437,8 @@ impl Backend for WgpuBackend {
     fn capabilities(&self) -> DeviceCapabilities {
         DeviceCapabilities {
             name: "WebGPU (not available)".to_string(),
-            total_memory: 0,
-            available_memory: 0,
+            total_memory: None,
+            available_memory: None,
             supports_f16: false,
             supports_f64: false,
             max_threads_per_block: 0,
@@ -487,8 +487,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
     if index >= adapters.len() {
         return DeviceCapabilities {
             name: "Unknown".to_string(),
-            total_memory: 0,
-            available_memory: 0,
+            total_memory: None,
+            available_memory: None,
             supports_f16: false,
             supports_f64: false,
             max_threads_per_block: 0,
@@ -502,8 +502,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
 
     DeviceCapabilities {
         name: format!("{} ({:?})", info.name, info.backend),
-        total_memory: 0, // wgpu doesn't expose this
-        available_memory: 0,
+        total_memory: None, // wgpu doesn't expose this
+        available_memory: None,
         supports_f16: adapter.features().contains(Features::SHADER_F16),
         supports_f64: false, // WebGPU doesn't support f64
         max_threads_per_block: limits.max_compute_invocations_per_workgroup as usize,
@@ -515,8 +515,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
 pub fn get_capabilities(index: usize) -> DeviceCapabilities {
     DeviceCapabilities {
         name: format!("WebGPU Device {} (not available)", index),
-        total_memory: 0,
-        available_memory: 0,
+        total_memory: None,
+        available_memory: None,
         supports_f16: false,
         supports_f64: false,
         max_threads_per_block: 0,

@@ -26,23 +26,36 @@ categories = ["science", "mathematics"]
 
 [features]
 default = ["std"]
-std = []
-cuda = ["dep:cudarc"]
+# Everything that needs an OS lives behind `std` (on by default). Without it the
+# crate builds for bare-metal / no_std targets: storage locks fall back to
+# `spin`, the CPU backend runs serially (see `par`), host-memory probing is off.
+std = [
+    "dep:parking_lot",
+    "dep:rayon",
+    "dep:sysinfo",
+    "thiserror/std",
+    "num-traits/std",
+    "half/std",
+    "matrixmultiply/std",
+    "matrixmultiply/threading",
+]
+cuda = ["std", "dep:cudarc"]
 cudnn = ["cuda"]
-vulkan = ["dep:ash", "dep:gpu-allocator"]
-metal = ["dep:metal", "dep:objc"]
-wgpu = ["dep:wgpu", "dep:pollster"]
+vulkan = ["std", "dep:ash", "dep:gpu-allocator"]
+metal = ["std", "dep:metal", "dep:objc"]
+wgpu = ["std", "dep:wgpu", "dep:pollster"]
 
 [dependencies]
 thiserror.workspace = true
 num-traits.workspace = true
 bytemuck.workspace = true
 half.workspace = true
-parking_lot.workspace = true
+parking_lot = { workspace = true, optional = true }
+spin.workspace = true
 smallvec.workspace = true
-sysinfo.workspace = true
+sysinfo = { workspace = true, optional = true }
 matrixmultiply.workspace = true
-rayon.workspace = true
+rayon = { workspace = true, optional = true }
 
 # GPU backends (optional)
 cudarc = { workspace = true, optional = true }

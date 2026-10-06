@@ -411,7 +411,7 @@ dependencies = [
  "serde_json",
  "sysinfo 0.32.1",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "toml",
  "uuid",
@@ -437,8 +437,9 @@ dependencies = [
  "pollster",
  "rayon",
  "smallvec",
+ "spin",
  "sysinfo 0.32.1",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "wgpu",
 ]
 
@@ -503,7 +504,7 @@ dependencies = [
  "axonml-tensor",
  "matrixmultiply",
  "rayon",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -542,7 +543,7 @@ dependencies = [
  "safetensors",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -574,7 +575,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -598,7 +599,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -613,7 +614,7 @@ dependencies = [
  "bytemuck",
  "half",
  "rayon",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

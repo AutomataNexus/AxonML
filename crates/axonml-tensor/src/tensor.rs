@@ -28,6 +28,16 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+// f32/f64 transcendental methods (exp, sqrt, powf, sin_cos, tanh) come from
+// libm via num_traits::Float when there is no std to provide them inherently.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use num_traits::Float as _;
+
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 use core::fmt;
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
@@ -89,40 +99,40 @@ use crate::shape::{
 // than a reinterpretation of memory.
 
 fn gpu_ref<T: Scalar>(t: &Tensor<T>) -> &Tensor<f32> {
-    (t as &dyn std::any::Any)
+    (t as &dyn core::any::Any)
         .downcast_ref::<Tensor<f32>>()
         .unwrap_or_else(|| panic!("only Tensor<f32> is supported here, got {:?}", T::DTYPE))
 }
 
 #[cfg(feature = "cuda")]
 fn gpu_ref_mut<T: Scalar>(t: &mut Tensor<T>) -> &mut Tensor<f32> {
-    (t as &mut dyn std::any::Any)
+    (t as &mut dyn core::any::Any)
         .downcast_mut::<Tensor<f32>>()
         .unwrap_or_else(|| panic!("only Tensor<f32> is supported here, got {:?}", T::DTYPE))
 }
 
 fn gpu_into<T: Scalar>(t: Tensor<f32>) -> Tensor<T> {
-    *(Box::new(t) as Box<dyn std::any::Any>)
+    *(Box::new(t) as Box<dyn core::any::Any>)
         .downcast::<Tensor<T>>()
         .unwrap_or_else(|_| panic!("only Tensor<f32> can be produced here, got {:?}", T::DTYPE))
 }
 
 fn vec_as_f32_mut<T: Scalar>(v: &mut Vec<T>) -> &mut Vec<f32> {
-    (v as &mut dyn std::any::Any)
+    (v as &mut dyn core::any::Any)
         .downcast_mut::<Vec<f32>>()
         .unwrap_or_else(|| panic!("only Vec<f32> is supported here, got {:?}", T::DTYPE))
 }
 
 #[cfg(feature = "cuda")]
 fn vec_from_f32<T: Scalar>(v: Vec<f32>) -> Vec<T> {
-    *(Box::new(v) as Box<dyn std::any::Any>)
+    *(Box::new(v) as Box<dyn core::any::Any>)
         .downcast::<Vec<T>>()
         .unwrap_or_else(|_| panic!("only Vec<f32> can be produced here, got {:?}", T::DTYPE))
 }
 
 #[cfg(feature = "cuda")]
 fn scalar_as_f32<T: Scalar>(v: T) -> f32 {
-    *(&v as &dyn std::any::Any)
+    *(&v as &dyn core::any::Any)
         .downcast_ref::<f32>()
         .unwrap_or_else(|| panic!("only f32 scalars are supported here, got {:?}", T::DTYPE))
 }
@@ -140,7 +150,7 @@ fn slice_as_f32<T: Scalar>(s: &[T]) -> &[f32] {
 }
 
 fn is_f32<T: 'static>() -> bool {
-    std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>()
+    core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>()
 }
 
 // =============================================================================
@@ -257,7 +267,28 @@ impl<T: Scalar> Tensor<T> {
         crate::creation::full(shape, value)
     }
 
+    /// Creates a tensor with random values from standard normal distribution,
+    /// drawn from `rng`. Works without `std`.
+    pub fn randn_with_rng<R: rand::Rng + ?Sized>(rng: &mut R, shape: &[usize]) -> Self
+    where
+        T: Float,
+        rand_distr::StandardNormal: rand::distributions::Distribution<T>,
+    {
+        crate::creation::randn_with_rng(rng, shape)
+    }
+
+    /// Creates a tensor with random values from uniform distribution [0, 1),
+    /// drawn from `rng`. Works without `std`.
+    pub fn rand_with_rng<R: rand::Rng + ?Sized>(rng: &mut R, shape: &[usize]) -> Self
+    where
+        T: Float,
+        rand::distributions::Standard: rand::distributions::Distribution<T>,
+    {
+        crate::creation::rand_with_rng(rng, shape)
+    }
+
     /// Creates a tensor with random values from standard normal distribution.
+    #[cfg(feature = "std")]
     #[must_use]
     pub fn randn(shape: &[usize]) -> Self
     where
@@ -268,6 +299,7 @@ impl<T: Scalar> Tensor<T> {
     }
 
     /// Creates a tensor with random values from uniform distribution [0, 1).
+    #[cfg(feature = "std")]
     #[must_use]
     pub fn rand(shape: &[usize]) -> Self
     where
@@ -753,7 +785,7 @@ impl<T: Scalar> Tensor<T> {
                     "Tensor<{}>.to_device(GPU) is not supported (GPU tensors are f32-only). \
                      Keep token IDs / integer tensors on CPU; Embedding::lookup and the autograd \
                      cross-entropy path handle the CPU-index → GPU-weight crossing internally.",
-                    std::any::type_name::<T>()
+                    core::any::type_name::<T>()
                 )));
             }
             let self_f32 = gpu_ref(self);
@@ -993,7 +1025,7 @@ impl<T: Numeric> Tensor<T> {
             let t_dim_size = t.shape[dim];
             let work = outer_size * t_dim_size;
             if work >= 4096 {
-                use rayon::prelude::*;
+                use axonml_core::par::prelude::*;
                 // Each `outer` slab of the result is total_dim_size * inner_size
                 // wide and this tensor's block sits at dim_offset within it.
                 // par_chunks_mut over slabs gives every thread its own slab, so
@@ -1275,14 +1307,14 @@ impl<T: Float> Tensor<T> {
         let n_f = n as f32;
         // For small n serial ok; for large use parallel sum (though typically small head_dim).
         let mean: f32 = if n >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             let sum: f32 = x.par_iter().map(|v| v.to_f32().unwrap_or(0.0)).sum();
             sum / n_f
         } else {
             x.iter().map(|v| v.to_f32().unwrap_or(0.0)).sum::<f32>() / n_f
         };
         let var: f32 = if n >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             let sum: f32 = x
                 .par_iter()
                 .map(|v| {
@@ -1303,7 +1335,7 @@ impl<T: Float> Tensor<T> {
         let inv = (var + eps).sqrt().recip();
         let mut out: Vec<T> = vec![T::zero(); n];
         if n >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             // par_iter_mut hands each thread a disjoint &mut T, so the borrow
             // checker proves what the raw-pointer version only assumed: no two
             // threads write the same element.
@@ -1347,7 +1379,7 @@ impl<T: Float> Tensor<T> {
         let n = x.len();
         let mut out: Vec<T> = vec![T::zero(); n];
         if n >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             out.par_iter_mut().zip(x.par_iter()).for_each(|(o, xi)| {
                 let v = xi.to_f32().unwrap_or(0.0);
                 let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
@@ -1392,7 +1424,7 @@ impl<T: Float> Tensor<T> {
         let n = x.len();
         let mut out: Vec<T> = vec![T::zero(); n];
         if n >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             out.par_iter_mut().enumerate().for_each(|(i, outi)| {
                 let xv = x[i].to_f32().unwrap_or(0.0);
                 let ov = o[i].to_f32().unwrap_or(0.0);
@@ -1441,7 +1473,7 @@ impl<T: Float> Tensor<T> {
         let n = x.len();
         let mut out: Vec<T> = vec![T::zero(); n];
         if n >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             out.par_iter_mut().enumerate().for_each(|(i, outi)| {
                 let xv = x[i].to_f32().unwrap_or(0.0);
                 let av = a[i].to_f32().unwrap_or(0.0);
@@ -1478,7 +1510,7 @@ impl<T: Float> Tensor<T> {
 
         // Parallel sum of squares (f64 for numerical stability on large hidden dims)
         let sum_sq = if n >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             x.par_iter()
                 .map(|v| {
                     let f: f64 = v.to_f32().unwrap_or(0.0).into();
@@ -1498,7 +1530,7 @@ impl<T: Float> Tensor<T> {
 
         let mut out: Vec<T> = vec![T::zero(); n];
         if n >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             out.par_iter_mut()
                 .zip(x.par_iter().zip(w.par_iter()))
                 .for_each(|(o, (xi, wi))| {
@@ -1537,7 +1569,7 @@ impl<T: Float> Tensor<T> {
         assert_eq!(w.len(), head_dim);
         let mut out: Vec<T> = vec![T::zero(); x.len()];
         if n_heads > 1 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             out.par_chunks_mut(head_dim)
                 .zip(x.par_chunks(head_dim))
                 .for_each(|(o_row, x_row)| {
@@ -1642,7 +1674,7 @@ impl<T: Float> Tensor<T> {
             return (gpu_into(out), gpu_into(sum));
         }
         assert!(
-            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
             "add_rmsnorm_batched CPU path requires f32",
         );
         let av = self.to_vec();
@@ -1691,7 +1723,7 @@ impl<T: Float> Tensor<T> {
         }
         // CPU fallback: same math, row by row.
         assert!(
-            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
             "softmax_causal_scaled CPU path requires f32",
         );
         let total = self.numel();
@@ -1752,7 +1784,7 @@ impl<T: Float> Tensor<T> {
             ));
         }
         assert!(
-            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
             "softmax_causal_scaled_bwd CPU path requires f32",
         );
         let total = self.numel();
@@ -1808,7 +1840,7 @@ impl<T: Float> Tensor<T> {
         // CPU fallback: same math as axonml-llm's RMSNormBackward::apply.
         // Fast contiguous + parallel over m tokens for training bwd (CPU fallback).
         assert!(
-            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
             "rms_norm_bwd_batched CPU path requires f32",
         );
         let xs = self.storage.as_slice();
@@ -1836,7 +1868,7 @@ impl<T: Float> Tensor<T> {
         let d = n as f32;
         let work = m * n;
         if work >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             out.par_chunks_mut(n)
                 .zip(x.par_chunks(n))
                 .zip(g.par_chunks(n))
@@ -1915,7 +1947,7 @@ impl<T: Float> Tensor<T> {
         assert_eq!(w.len(), n, "rms_norm_batched: weight len mismatch");
         let mut out: Vec<T> = vec![T::zero(); m * n];
         if m >= 2 || (m * n) >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             out.par_chunks_mut(n)
                 .zip(x.par_chunks(n))
                 .for_each(|(o_row, x_row)| {
@@ -1990,7 +2022,7 @@ impl<T: Float> Tensor<T> {
         let mut out: Vec<T> = vec![T::zero(); total];
         let work = m * n_heads;
         if work >= 2 || total >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             // One chunk per head across every token: the same disjoint rows the
             // raw-pointer loop assumed, now proven by par_chunks_mut.
             out.par_chunks_mut(head_dim)
@@ -2053,8 +2085,8 @@ impl<T: Float> Tensor<T> {
         let mut x = self.to_vec();
         let half = head_dim / 2;
         let row_stride = n_heads * head_dim;
-        if x.len() >= 4096 && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
-            use rayon::prelude::*;
+        if x.len() >= 4096 && core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>() {
+            use axonml_core::par::prelude::*;
             // Sequential for now (complex strided); outer batch parallel possible in caller for large m.
             // Reductions/rms/swiglu have full parallel.
             vec_as_f32_mut(&mut x)
@@ -2116,15 +2148,15 @@ impl<T: Float> Tensor<T> {
             );
         }
         assert!(
-            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
             "rope_split_halves_bhsd_bwd CPU path requires f32",
         );
         let g = self.to_vec();
         // CPU fallback - parallel via rayon over bs/heads/seq.
         let mut out: Vec<T> = g.clone();
         let half = head_dim / 2;
-        if out.len() >= 4096 && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
-            use rayon::prelude::*;
+        if out.len() >= 4096 && core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>() {
+            use axonml_core::par::prelude::*;
             // Parallel over tokens using par_chunks_mut.
             vec_as_f32_mut(&mut out)
                 .par_chunks_mut(head_dim)
@@ -2188,7 +2220,7 @@ impl<T: Float> Tensor<T> {
         }
         // CPU fallback.
         assert!(
-            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
             "repeat_kv CPU path requires f32",
         );
         let src = self.to_vec();
@@ -2235,8 +2267,8 @@ impl<T: Float> Tensor<T> {
         // Win for CPU and Hailo ref.
         let mut x = self.to_vec();
         let half = head_dim / 2;
-        if x.len() >= 4096 && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
-            use rayon::prelude::*;
+        if x.len() >= 4096 && core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>() {
+            use axonml_core::par::prelude::*;
             // Parallel over tokens (b*h*t) using par_chunks_mut on head_dim chunks.
             vec_as_f32_mut(&mut x)
                 .par_chunks_mut(head_dim)
@@ -2314,7 +2346,7 @@ impl<T: Float> Tensor<T> {
             return (gpu_into(gg), gpu_into(gu));
         }
         assert!(
-            std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>(),
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
             "swiglu_bwd CPU path requires f32",
         );
         let g = self.to_vec();
@@ -2327,7 +2359,7 @@ impl<T: Float> Tensor<T> {
         let mut grad_up: Vec<T> = vec![T::zero(); n];
 
         if n >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             grad_gate
                 .par_iter_mut()
                 .zip(grad_up.par_iter_mut())
@@ -2376,7 +2408,7 @@ impl<T: Float> Tensor<T> {
         let mut out: Vec<T> = vec![T::zero(); g.len()];
 
         if g.len() >= 4096 {
-            use rayon::prelude::*;
+            use axonml_core::par::prelude::*;
             out.par_iter_mut()
                 .zip(g.par_iter().zip(u.par_iter()))
                 .for_each(|(o, (gi, ui))| {
@@ -2658,7 +2690,7 @@ impl<T: Float> Tensor<T> {
 
     /// Slices the tensor using ranges for each dimension.
     #[must_use]
-    pub fn slice(&self, ranges: &[std::ops::Range<usize>]) -> Self {
+    pub fn slice(&self, ranges: &[core::ops::Range<usize>]) -> Self {
         let mut new_shape = Vec::with_capacity(self.ndim());
         for (i, range) in ranges.iter().enumerate() {
             if i < self.ndim() {
@@ -2697,7 +2729,7 @@ impl<T: Float> Tensor<T> {
     fn slice_recursive(
         data: &[T],
         shape: &[usize],
-        ranges: &[std::ops::Range<usize>],
+        ranges: &[core::ops::Range<usize>],
         dim: usize,
         offset: usize,
         result: &mut [T],
@@ -3140,7 +3172,7 @@ impl<T: Numeric> Tensor<T> {
             #[cfg(feature = "cuda")]
             {
                 let flops = m * n * k1;
-                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>()
+                if core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>()
                     && flops >= 4_000_000
                 {
                     let a_f32 = slice_as_f32(a);
@@ -3249,7 +3281,8 @@ impl<T: Numeric> Tensor<T> {
         #[cfg(feature = "cuda")]
         {
             let flops = m * n * k1;
-            if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() && flops >= 4_000_000 {
+            if core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>() && flops >= 4_000_000
+            {
                 let a_f32 = slice_as_f32(a_data.as_slice());
                 let b_f32 = slice_as_f32(b_data.as_slice());
                 let mut gpu_ok = true;
@@ -3279,7 +3312,7 @@ impl<T: Numeric> Tensor<T> {
 
         // CPU fallback: parallel over batches when there is real work
         // (common for attention heads, batched prefill, training micro-batches).
-        use rayon::prelude::*;
+        use axonml_core::par::prelude::*;
         if batch_size > 1 && (batch_size * m * n) >= 4096 {
             // SAFETY: each batch writes to a disjoint [batch*c_stride .. (batch+1)*c_stride)
             // region of c_data; a/b slices are read-only and already materialized.

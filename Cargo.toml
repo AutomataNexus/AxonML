@@ -74,17 +74,18 @@ axonml-tui = { path = "crates/axonml-tui", version = "0.6.1" }
 axonml-train = { path = "crates/axonml-train", version = "0.6.1" }
 
 # External dependencies
-thiserror = "1.0"
-num-traits = "0.2"
-rand = "0.8"
-rand_distr = "0.4"
+thiserror = { version = "2.0", default-features = false }
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+rand = { version = "0.8", default-features = false }
+rand_distr = { version = "0.4", default-features = false }
 rayon = "1.10"
 parking_lot = "0.12"
-smallvec = "1.13"
+spin = { version = "0.9", default-features = false, features = ["rwlock"] }
+smallvec = { version = "1.13", default-features = false }
 bytemuck = { version = "1.14", features = ["derive"] }
-half = { version = "2.4", features = ["bytemuck", "num-traits"] }
+half = { version = "2.4", default-features = false, features = ["bytemuck", "num-traits"] }
 sysinfo = "0.32"
-matrixmultiply = { version = "0.3", features = ["threading"] }
+matrixmultiply = { version = "0.3", default-features = false }
 rustc-hash = "2.1"
 
 # GPU backends

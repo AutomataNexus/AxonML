@@ -25,6 +25,10 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 #[cfg(feature = "cuda")]
 use axonml_core::Device;
 #[cfg(feature = "cuda")]

@@ -38,6 +38,13 @@ jobs:
         run: python3 tools/check_launches.py
       - name: Check feature-gated backends
         run: cargo check --workspace --features axonml-core/vulkan,axonml-core/wgpu,axonml-distributed/nccl,axonml-core/cuda
+      # axonml-core and axonml-tensor build without std (#12, #13). A host
+      # target always has std available, so only a bare-metal target proves no
+      # std-only crate (parking_lot, rayon, sysinfo, ...) slipped back in.
+      - name: Check no_std (bare metal)
+        run: |
+          rustup target add thumbv7em-none-eabihf
+          cargo check -p axonml-core -p axonml-tensor --no-default-features --target thumbv7em-none-eabihf
 
   test:
     runs-on: ubuntu-latest

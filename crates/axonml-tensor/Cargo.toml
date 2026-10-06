@@ -26,19 +26,29 @@ categories = ["science", "mathematics"]
 
 [features]
 default = ["std"]
-std = ["axonml-core/std"]
-cuda = ["axonml-core/cuda", "dep:cudarc"]
+# `std` (default): parallel CPU kernels (rayon), thread-local RNG conveniences
+# (`rand`, `randn`, ...). Without it the crate builds for bare-metal / no_std
+# targets; random constructors take a caller RNG (`*_with_rng`).
+std = [
+    "axonml-core/std",
+    "dep:rayon",
+    "rand/std",
+    "rand/std_rng",
+    "rand_distr/std",
+    "num-traits/std",
+]
+cuda = ["std", "axonml-core/cuda", "dep:cudarc"]
 cudnn = ["cuda", "axonml-core/cudnn"]
 
 [dependencies]
-axonml-core.workspace = true
+axonml-core = { path = "../axonml-core", version = "0.6.1", default-features = false }
 bytemuck.workspace = true
 num-traits.workspace = true
 rand.workspace = true
 rand_distr.workspace = true
 smallvec.workspace = true
 half.workspace = true
-rayon.workspace = true
+rayon = { workspace = true, optional = true }
 cudarc = { workspace = true, optional = true }
 
 [dev-dependencies]

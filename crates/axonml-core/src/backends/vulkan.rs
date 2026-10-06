@@ -733,9 +733,9 @@ impl Backend for VulkanBackend {
 
         DeviceCapabilities {
             name: device_name,
-            total_memory,
-            available_memory: 0, // Vulkan doesn't provide this directly
-            supports_f16: true,  // Most modern GPUs support f16
+            total_memory: Some(total_memory),
+            available_memory: None, // Vulkan doesn't provide this directly
+            supports_f16: true,     // Most modern GPUs support f16
             supports_f64: features.shader_float64 != 0,
             max_threads_per_block: props.limits.max_compute_work_group_invocations as usize,
             compute_capability: None,
@@ -764,8 +764,8 @@ impl Backend for VulkanBackend {
     fn capabilities(&self) -> DeviceCapabilities {
         DeviceCapabilities {
             name: "Vulkan (not available)".to_string(),
-            total_memory: 0,
-            available_memory: 0,
+            total_memory: None,
+            available_memory: None,
             supports_f16: false,
             supports_f64: false,
             max_threads_per_block: 0,
@@ -815,8 +815,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
         None => {
             return DeviceCapabilities {
                 name: "Unknown".to_string(),
-                total_memory: 0,
-                available_memory: 0,
+                total_memory: None,
+                available_memory: None,
                 supports_f16: false,
                 supports_f64: false,
                 max_threads_per_block: 0,
@@ -828,8 +828,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
     if index >= state.physical_devices.len() {
         return DeviceCapabilities {
             name: "Unknown".to_string(),
-            total_memory: 0,
-            available_memory: 0,
+            total_memory: None,
+            available_memory: None,
             supports_f16: false,
             supports_f64: false,
             max_threads_per_block: 0,
@@ -852,8 +852,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
 
     DeviceCapabilities {
         name: device_name,
-        total_memory,
-        available_memory: 0,
+        total_memory: Some(total_memory),
+        available_memory: None,
         supports_f16: true,
         supports_f64: features.shader_float64 != 0,
         max_threads_per_block: props.limits.max_compute_work_group_invocations as usize,
@@ -865,8 +865,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
 pub fn get_capabilities(index: usize) -> DeviceCapabilities {
     DeviceCapabilities {
         name: format!("Vulkan Device {} (not available)", index),
-        total_memory: 0,
-        available_memory: 0,
+        total_memory: None,
+        available_memory: None,
         supports_f16: false,
         supports_f64: false,
         max_threads_per_block: 0,

@@ -21,7 +21,12 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 use core::fmt;
+#[cfg(feature = "std")]
 use sysinfo::System;
 
 // =============================================================================
@@ -152,10 +157,11 @@ impl fmt::Display for Device {
 pub struct DeviceCapabilities {
     /// Name of the device.
     pub name: String,
-    /// Total memory in bytes.
-    pub total_memory: usize,
-    /// Available memory in bytes.
-    pub available_memory: usize,
+    /// Total memory in bytes, or `None` when the backend cannot report it
+    /// (some GPU APIs, or any host without `std` / an OS to ask).
+    pub total_memory: Option<usize>,
+    /// Currently available memory in bytes, or `None` when not reported.
+    pub available_memory: Option<usize>,
     /// Whether the device supports f16.
     pub supports_f16: bool,
     /// Whether the device supports f64.
@@ -196,21 +202,40 @@ impl Device {
 // Helper Functions
 // =============================================================================
 
-/// Returns the total system memory in bytes.
-fn get_system_memory() -> usize {
-    let sys = System::new_all();
-    sys.total_memory() as usize
+/// Total host memory in bytes. Needs an OS to ask: `None` without `std`.
+fn get_system_memory() -> Option<usize> {
+    #[cfg(feature = "std")]
+    {
+        Some(System::new_all().total_memory() as usize)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        None
+    }
 }
 
-/// Returns the available system memory in bytes.
-fn get_available_memory() -> usize {
-    let sys = System::new_all();
-    sys.available_memory() as usize
+/// Available host memory in bytes. Needs an OS to ask: `None` without `std`.
+fn get_available_memory() -> Option<usize> {
+    #[cfg(feature = "std")]
+    {
+        Some(System::new_all().available_memory() as usize)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        None
+    }
 }
 
 /// Returns the number of CPU cores.
 fn num_cpus() -> usize {
-    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+    #[cfg(feature = "std")]
+    {
+        std::thread::available_parallelism().map_or(1, core::num::NonZeroUsize::get)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        1
+    }
 }
 
 impl DeviceCapabilities {

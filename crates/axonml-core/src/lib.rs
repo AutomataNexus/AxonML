@@ -88,6 +88,20 @@
 #![allow(clippy::manual_assert)]
 #![allow(clippy::unnecessary_debug_formatting)]
 
+extern crate alloc;
+
+/// `alloc` types that the std prelude provides for free; imported by modules
+/// only when building without `std`.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+pub(crate) mod alloc_prelude {
+    pub use alloc::borrow::ToOwned;
+    pub use alloc::boxed::Box;
+    pub use alloc::string::{String, ToString};
+    pub use alloc::vec::Vec;
+    pub use alloc::{format, vec};
+}
+
 // =============================================================================
 // Modules
 // =============================================================================
@@ -97,7 +111,9 @@ pub mod backends;
 pub mod device;
 pub mod dtype;
 pub mod error;
+pub mod par;
 pub mod storage;
+pub mod sync;
 
 // =============================================================================
 // Re-exports
