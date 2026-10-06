@@ -23,6 +23,10 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 use axonml_core::dtype::{Numeric, Scalar};
 use axonml_core::error::{Error, Result};
 

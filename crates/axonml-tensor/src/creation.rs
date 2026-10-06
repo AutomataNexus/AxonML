@@ -21,6 +21,10 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 use rand::Rng;
 use rand::distributions::{Distribution, Standard};
 use rand_distr::{Normal, StandardNormal, Uniform};
@@ -121,90 +125,155 @@ pub fn diag<T: Numeric>(diag: &[T]) -> Tensor<T> {
 // Random Initialization
 // =============================================================================
 
-/// Creates a tensor with uniformly distributed random values in [0, 1).
+/// Creates a tensor with uniformly distributed random values in [0, 1),
+/// drawn from `rng`. Works without `std`: bring any `rand::Rng`.
+pub fn rand_with_rng<T: Float, R: Rng + ?Sized>(rng: &mut R, shape: &[usize]) -> Tensor<T>
+where
+    Standard: Distribution<T>,
+{
+    let numel: usize = shape.iter().product();
+    let data: Vec<T> = (0..numel).map(|_| rng.r#gen()).collect();
+    Tensor::from_vec(data, shape).expect("tensor creation failed")
+}
+
+/// Creates a tensor with uniformly distributed random values in [0, 1),
+/// using the thread-local RNG.
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
+#[cfg(feature = "std")]
 #[must_use]
 pub fn rand<T: Float>(shape: &[usize]) -> Tensor<T>
 where
     Standard: Distribution<T>,
 {
+    rand_with_rng(&mut rand::thread_rng(), shape)
+}
+
+/// Creates a tensor with normally distributed random values (mean=0, std=1),
+/// drawn from `rng`. Works without `std`.
+pub fn randn_with_rng<T: Float, R: Rng + ?Sized>(rng: &mut R, shape: &[usize]) -> Tensor<T>
+where
+    StandardNormal: Distribution<T>,
+{
     let numel: usize = shape.iter().product();
-    let mut rng = rand::thread_rng();
-    let data: Vec<T> = (0..numel).map(|_| rng.r#gen()).collect();
+    let data: Vec<T> = (0..numel).map(|_| StandardNormal.sample(rng)).collect();
     Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
-/// Creates a tensor with normally distributed random values (mean=0, std=1).
+/// Creates a tensor with normally distributed random values (mean=0, std=1),
+/// using the thread-local RNG.
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
+#[cfg(feature = "std")]
 #[must_use]
 pub fn randn<T: Float>(shape: &[usize]) -> Tensor<T>
 where
     StandardNormal: Distribution<T>,
 {
+    randn_with_rng(&mut rand::thread_rng(), shape)
+}
+
+/// Creates a tensor with uniformly distributed random values in [low, high),
+/// drawn from `rng`. Works without `std`.
+pub fn uniform_with_rng<T: Float, R: Rng + ?Sized>(
+    rng: &mut R,
+    shape: &[usize],
+    low: T,
+    high: T,
+) -> Tensor<T>
+where
+    T: rand::distributions::uniform::SampleUniform,
+{
     let numel: usize = shape.iter().product();
-    let mut rng = rand::thread_rng();
-    let normal = StandardNormal;
-    let data: Vec<T> = (0..numel).map(|_| normal.sample(&mut rng)).collect();
+    let dist = Uniform::new(low, high);
+    let data: Vec<T> = (0..numel).map(|_| dist.sample(rng)).collect();
     Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
-/// Creates a tensor with uniformly distributed random values in [low, high).
+/// Creates a tensor with uniformly distributed random values in [low, high),
+/// using the thread-local RNG.
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
 /// * `low` - Lower bound (inclusive)
 /// * `high` - Upper bound (exclusive)
+#[cfg(feature = "std")]
 pub fn uniform<T: Float>(shape: &[usize], low: T, high: T) -> Tensor<T>
 where
     T: rand::distributions::uniform::SampleUniform,
 {
-    let numel: usize = shape.iter().product();
-    let mut rng = rand::thread_rng();
-    let dist = Uniform::new(low, high);
-    let data: Vec<T> = (0..numel).map(|_| dist.sample(&mut rng)).collect();
-    Tensor::from_vec(data, shape).expect("tensor creation failed")
+    uniform_with_rng(&mut rand::thread_rng(), shape, low, high)
 }
 
-/// Creates a tensor with normally distributed random values.
-///
-/// # Arguments
-/// * `shape` - Shape of the tensor
-/// * `mean` - Mean of the distribution
-/// * `std` - Standard deviation of the distribution
-pub fn normal<T: Float>(shape: &[usize], mean: T, std: T) -> Tensor<T>
+/// Creates a tensor with normally distributed random values, drawn from `rng`.
+/// Works without `std`.
+pub fn normal_with_rng<T: Float, R: Rng + ?Sized>(
+    rng: &mut R,
+    shape: &[usize],
+    mean: T,
+    std: T,
+) -> Tensor<T>
 where
     T: rand::distributions::uniform::SampleUniform,
     StandardNormal: Distribution<T>,
 {
     let numel: usize = shape.iter().product();
-    let mut rng = rand::thread_rng();
     let dist = Normal::new(mean, std).unwrap();
-    let data: Vec<T> = (0..numel).map(|_| dist.sample(&mut rng)).collect();
+    let data: Vec<T> = (0..numel).map(|_| dist.sample(rng)).collect();
     Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
-/// Creates a tensor with random integers in [low, high).
+/// Creates a tensor with normally distributed random values, using the
+/// thread-local RNG.
+///
+/// # Arguments
+/// * `shape` - Shape of the tensor
+/// * `mean` - Mean of the distribution
+/// * `std` - Standard deviation of the distribution
+#[cfg(feature = "std")]
+pub fn normal<T: Float>(shape: &[usize], mean: T, std: T) -> Tensor<T>
+where
+    T: rand::distributions::uniform::SampleUniform,
+    StandardNormal: Distribution<T>,
+{
+    normal_with_rng(&mut rand::thread_rng(), shape, mean, std)
+}
+
+/// Creates a tensor with random integers in [low, high), drawn from `rng`.
+/// Works without `std`.
+pub fn randint_with_rng<T: Numeric, R: Rng + ?Sized>(
+    rng: &mut R,
+    shape: &[usize],
+    low: i64,
+    high: i64,
+) -> Tensor<T>
+where
+    T: num_traits::NumCast,
+{
+    let numel: usize = shape.iter().product();
+    let dist = Uniform::new(low, high);
+    let data: Vec<T> = (0..numel)
+        .map(|_| T::from(dist.sample(rng)).unwrap())
+        .collect();
+    Tensor::from_vec(data, shape).expect("tensor creation failed")
+}
+
+/// Creates a tensor with random integers in [low, high), using the
+/// thread-local RNG.
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
 /// * `low` - Lower bound (inclusive)
 /// * `high` - Upper bound (exclusive)
+#[cfg(feature = "std")]
 #[must_use]
 pub fn randint<T: Numeric>(shape: &[usize], low: i64, high: i64) -> Tensor<T>
 where
     T: num_traits::NumCast,
 {
-    let numel: usize = shape.iter().product();
-    let mut rng = rand::thread_rng();
-    let dist = Uniform::new(low, high);
-    let data: Vec<T> = (0..numel)
-        .map(|_| T::from(dist.sample(&mut rng)).unwrap())
-        .collect();
-    Tensor::from_vec(data, shape).expect("tensor creation failed")
+    randint_with_rng(&mut rand::thread_rng(), shape, low, high)
 }
 
 // =============================================================================

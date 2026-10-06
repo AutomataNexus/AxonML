@@ -23,6 +23,10 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 use crate::tensor::Tensor;
 
 // =============================================================================
@@ -733,13 +737,13 @@ mod tests {
     fn test_exp_correctness() {
         let a = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![0.0, 1.0], &[2]).unwrap());
         let result = a.exp().materialize();
-        approx_eq(&result.to_vec(), &[1.0, std::f32::consts::E], 1e-5);
+        approx_eq(&result.to_vec(), &[1.0, core::f32::consts::E], 1e-5);
     }
 
     #[test]
     fn test_log_correctness() {
         let a = LazyTensor::from_tensor(
-            Tensor::<f32>::from_vec(vec![1.0, std::f32::consts::E], &[2]).unwrap(),
+            Tensor::<f32>::from_vec(vec![1.0, core::f32::consts::E], &[2]).unwrap(),
         );
         let result = a.log().materialize();
         approx_eq(&result.to_vec(), &[0.0, 1.0], 1e-5);

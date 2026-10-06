@@ -26,6 +26,10 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 #[cfg(feature = "cuda")]
 use cudarc::cublas::{CudaBlas, Gemm, GemmConfig, sys::cublasOperation_t};
 #[cfg(feature = "cudnn")]
@@ -371,12 +375,12 @@ impl Backend for CudaBackend {
         let name = format!("CUDA Device {}", self.device_index);
 
         // Get memory info via CUDA driver API
-        let (free, total) = cudarc::driver::result::mem_get_info().unwrap_or((0, 0));
+        let mem = cudarc::driver::result::mem_get_info().ok();
 
         DeviceCapabilities {
             name,
-            total_memory: total,
-            available_memory: free,
+            total_memory: mem.map(|(_, total)| total),
+            available_memory: mem.map(|(free, _)| free),
             supports_f16: true,
             supports_f64: true,
             max_threads_per_block: 1024,
@@ -420,8 +424,8 @@ impl Backend for CudaBackend {
     fn capabilities(&self) -> DeviceCapabilities {
         DeviceCapabilities {
             name: format!("CUDA Device {} (unavailable)", self.device_index),
-            total_memory: 0,
-            available_memory: 0,
+            total_memory: None,
+            available_memory: None,
             supports_f16: false,
             supports_f64: false,
             max_threads_per_block: 0,
@@ -457,8 +461,8 @@ pub enum CudaError {
     KernelNotFound(String),
 }
 
-impl std::fmt::Display for CudaError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for CudaError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CudaError::DeviceNotFound => write!(f, "CUDA device not found"),
             CudaError::AllocationFailed => write!(f, "CUDA memory allocation failed"),
@@ -472,7 +476,7 @@ impl std::fmt::Display for CudaError {
     }
 }
 
-impl std::error::Error for CudaError {}
+impl core::error::Error for CudaError {}
 
 #[cfg(feature = "cuda")]
 impl From<cudarc::driver::DriverError> for CudaError {
@@ -532,8 +536,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
     #[allow(unreachable_code)]
     DeviceCapabilities {
         name: format!("CUDA Device {}", index),
-        total_memory: 0,
-        available_memory: 0,
+        total_memory: None,
+        available_memory: None,
         supports_f16: true,
         supports_f64: true,
         max_threads_per_block: 1024,

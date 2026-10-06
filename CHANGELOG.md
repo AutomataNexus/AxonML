@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### `no_std` support for `axonml-core` and `axonml-tensor` (#12, #13)
+
+Both crates declared `#![cfg_attr(not(feature = "std"), no_std)]` but always
+pulled `std` in through `parking_lot`, `rayon`, `sysinfo` and `thiserror` 1.x,
+and used `std` APIs directly, so a `--no-default-features` build failed on any
+bare-metal target. They now build for `no_std` + `alloc` (checked in CI on
+`thumbv7em-none-eabihf`); the default `std` build is unchanged.
+
+- `std` (default) now owns everything that needs an OS: `parking_lot`,
+  `rayon`, `sysinfo`, rand's thread RNG, `matrixmultiply` threading. GPU
+  backend features imply `std`.
+- Storage locks come from `axonml_core::sync`: `parking_lot` with `std`,
+  `spin` (no_std) without, same guard API.
+- Data-parallel loops go through `axonml_core::par::prelude`: rayon with
+  `std`, a serial stand-in with the same call shapes without. A test checks
+  the stand-in against rayon on every shape the kernels use.
+- `thiserror` 2.x (works without `std`); float math uses `libm` via
+  `num-traits` when there is no `std`.
+- **Breaking:** `DeviceCapabilities::{total_memory, available_memory}` and
+  `Allocator::{total_memory, free_memory}` are now `Option<usize>`: `Some`
+  when measured, `None` when the backend or platform cannot report it (some
+  GPU APIs previously reported these as `0`).
+- New RNG-taking constructors that work without `std`: `rand_with_rng`,
+  `randn_with_rng`, `uniform_with_rng`, `normal_with_rng`, `randint_with_rng`
+  (and `Tensor::rand_with_rng` / `Tensor::randn_with_rng`). The thread-RNG
+  versions (`rand`, `randn`, ...) are unchanged and require `std`.
+
 ### Performance — device-native CPU parallelism
 
 The CPU backend is now multi-threaded with rayon across both the inference

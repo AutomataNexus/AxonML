@@ -23,6 +23,10 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 // Operations are implemented directly on Tensor in tensor.rs
 // This module provides additional standalone functions
 
@@ -297,8 +301,8 @@ pub struct TopKResult<T: Scalar> {
     pub indices: Tensor<i64>,
 }
 
-impl<T: Scalar> std::fmt::Debug for TopKResult<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: Scalar> core::fmt::Debug for TopKResult<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("TopKResult")
             .field("values_shape", &self.values.shape())
             .field("indices_shape", &self.indices.shape())
@@ -359,9 +363,9 @@ pub fn topk<T: Numeric>(
     if shape.len() == 1 {
         let mut indexed: Vec<(usize, T)> = data.into_iter().enumerate().collect();
         if largest {
-            indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
         } else {
-            indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(core::cmp::Ordering::Equal));
         }
 
         if !sorted {
@@ -394,9 +398,9 @@ pub fn topk<T: Numeric>(
                 .collect();
 
             if largest {
-                slice.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                slice.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
             } else {
-                slice.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                slice.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(core::cmp::Ordering::Equal));
             }
 
             if !sorted {
@@ -428,8 +432,8 @@ pub struct SortResult<T: Scalar> {
     pub indices: Tensor<i64>,
 }
 
-impl<T: Scalar> std::fmt::Debug for SortResult<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: Scalar> core::fmt::Debug for SortResult<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("SortResult")
             .field("values_shape", &self.values.shape())
             .field("indices_shape", &self.indices.shape())
@@ -621,8 +625,8 @@ pub struct UniqueResult<T: Scalar> {
     pub counts: Option<Tensor<i64>>,
 }
 
-impl<T: Scalar> std::fmt::Debug for UniqueResult<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: Scalar> core::fmt::Debug for UniqueResult<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("UniqueResult")
             .field("values_shape", &self.values.shape())
             .field("has_inverse", &self.inverse_indices.is_some())
@@ -665,7 +669,7 @@ pub fn unique<T: Numeric>(
     let (unique_vals, final_inverse, final_counts) = if sorted {
         // Sort unique values and update inverse indices
         let mut indexed: Vec<(usize, T)> = seen.into_iter().enumerate().collect();
-        indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(core::cmp::Ordering::Equal));
 
         // Create mapping from old index to new index
         let mut old_to_new = vec![0i64; indexed.len()];

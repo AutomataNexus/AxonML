@@ -27,13 +27,13 @@
 //! liable for any damages arising from the use of this software.
 
 #[cfg(feature = "cuda")]
+use alloc::sync::Arc;
+#[cfg(feature = "cuda")]
 use cudarc::driver::{CudaContext, CudaFunction, CudaModule, LaunchConfig};
 #[cfg(feature = "cuda")]
 use cudarc::nvrtc::Ptx;
 #[cfg(feature = "cuda")]
 use std::collections::HashMap;
-#[cfg(feature = "cuda")]
-use std::sync::Arc;
 
 #[cfg(feature = "cuda")]
 use super::cuda::CudaError;

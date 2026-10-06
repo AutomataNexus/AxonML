@@ -344,10 +344,10 @@ impl Backend for MetalBackend {
     fn capabilities(&self) -> DeviceCapabilities {
         DeviceCapabilities {
             name: self.device.name().to_string(),
-            total_memory: self.device.recommended_max_working_set_size() as usize,
-            available_memory: 0, // Metal doesn't provide this directly
-            supports_f16: true,  // All Metal 2+ GPUs support f16
-            supports_f64: false, // Metal doesn't support f64 in shaders
+            total_memory: Some(self.device.recommended_max_working_set_size() as usize),
+            available_memory: None, // Metal doesn't provide this directly
+            supports_f16: true,     // All Metal 2+ GPUs support f16
+            supports_f64: false,    // Metal doesn't support f64 in shaders
             max_threads_per_block: self.device.max_threads_per_threadgroup().width as usize,
             compute_capability: None,
         }
@@ -375,8 +375,8 @@ impl Backend for MetalBackend {
     fn capabilities(&self) -> DeviceCapabilities {
         DeviceCapabilities {
             name: "Metal (not available)".to_string(),
-            total_memory: 0,
-            available_memory: 0,
+            total_memory: None,
+            available_memory: None,
             supports_f16: false,
             supports_f64: false,
             max_threads_per_block: 0,
@@ -425,8 +425,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
     if index >= devices.len() {
         return DeviceCapabilities {
             name: "Unknown".to_string(),
-            total_memory: 0,
-            available_memory: 0,
+            total_memory: None,
+            available_memory: None,
             supports_f16: false,
             supports_f64: false,
             max_threads_per_block: 0,
@@ -437,8 +437,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
     let device = &devices[index];
     DeviceCapabilities {
         name: device.name().to_string(),
-        total_memory: device.recommended_max_working_set_size() as usize,
-        available_memory: 0,
+        total_memory: Some(device.recommended_max_working_set_size() as usize),
+        available_memory: None,
         supports_f16: true,
         supports_f64: false,
         max_threads_per_block: device.max_threads_per_threadgroup().width as usize,
@@ -450,8 +450,8 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
 pub fn get_capabilities(index: usize) -> DeviceCapabilities {
     DeviceCapabilities {
         name: format!("Metal Device {} (not available)", index),
-        total_memory: 0,
-        available_memory: 0,
+        total_memory: None,
+        available_memory: None,
         supports_f16: false,
         supports_f64: false,
         max_threads_per_block: 0,

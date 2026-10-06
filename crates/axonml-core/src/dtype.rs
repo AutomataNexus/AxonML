@@ -25,6 +25,10 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 use bytemuck::{Pod, Zeroable};
 use half::f16;
 use num_traits::{Float as NumFloat, Num, NumCast, One, Zero};

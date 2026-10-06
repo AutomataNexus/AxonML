@@ -170,10 +170,16 @@ impl GpuTestReport {
 
         if let Some(caps) = &self.capabilities {
             println!("Device: {}", caps.name);
+            let gb = |m: Option<usize>| {
+                m.map_or_else(
+                    || "unknown".to_string(),
+                    |b| format!("{:.1} GB", b as f64 / 1e9),
+                )
+            };
             println!(
-                "Memory: {:.1} GB total, {:.1} GB available",
-                caps.total_memory as f64 / 1e9,
-                caps.available_memory as f64 / 1e9
+                "Memory: {} total, {} available",
+                gb(caps.total_memory),
+                gb(caps.available_memory)
             );
             if let Some(cc) = &caps.compute_capability {
                 println!("Compute Capability: {}.{}", cc.0, cc.1);
@@ -734,7 +740,13 @@ pub fn print_gpu_info() {
             for i in 0..crate::backends::cuda::device_count() {
                 let caps = crate::backends::cuda::get_capabilities(i);
                 println!("  [{}] {}", i, caps.name);
-                println!("      Memory: {:.1} GB", caps.total_memory as f64 / 1e9);
+                println!(
+                    "      Memory: {}",
+                    caps.total_memory.map_or_else(
+                        || "unknown".to_string(),
+                        |b| format!("{:.1} GB", b as f64 / 1e9)
+                    )
+                );
                 if let Some(cc) = caps.compute_capability {
                     println!("      Compute: {}.{}", cc.0, cc.1);
                 }

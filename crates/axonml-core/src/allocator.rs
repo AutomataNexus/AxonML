@@ -1,7 +1,8 @@
 //! Memory allocation traits and the default CPU allocator.
 //!
 //! `DefaultAllocator` names the host device and reports `total_memory()` /
-//! `free_memory()` via sysinfo. Host buffers are ordinary `Vec`s; there is
+//! `free_memory()` via sysinfo (`None` without `std`, where there is no OS to
+//! ask). Host buffers are ordinary `Vec`s; there is
 //! no raw-pointer allocation API.
 //! The `Allocator` trait is the extension point for custom allocators
 //! (arena-based, pool-based, or device-specific).
@@ -21,7 +22,12 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 use crate::device::Device;
+#[cfg(feature = "std")]
 use sysinfo::System;
 
 // =============================================================================
@@ -47,16 +53,28 @@ impl DefaultAllocator {
 
     /// Returns the total memory available on the device.
     #[must_use]
-    pub fn total_memory(&self) -> usize {
-        let sys = System::new_all();
-        sys.total_memory() as usize
+    pub fn total_memory(&self) -> Option<usize> {
+        #[cfg(feature = "std")]
+        {
+            Some(System::new_all().total_memory() as usize)
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            None
+        }
     }
 
     /// Returns the currently free memory on the device.
     #[must_use]
-    pub fn free_memory(&self) -> usize {
-        let sys = System::new_all();
-        sys.available_memory() as usize
+    pub fn free_memory(&self) -> Option<usize> {
+        #[cfg(feature = "std")]
+        {
+            Some(System::new_all().available_memory() as usize)
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            None
+        }
     }
 }
 
@@ -72,11 +90,11 @@ pub trait Allocator {
     /// Returns the device this allocator is for.
     fn device(&self) -> Device;
 
-    /// Returns the total memory available.
-    fn total_memory(&self) -> usize;
+    /// Returns the total memory, or `None` when it cannot be determined.
+    fn total_memory(&self) -> Option<usize>;
 
-    /// Returns the free memory available.
-    fn free_memory(&self) -> usize;
+    /// Returns the free memory, or `None` when it cannot be determined.
+    fn free_memory(&self) -> Option<usize>;
 }
 
 impl Allocator for DefaultAllocator {
@@ -84,11 +102,11 @@ impl Allocator for DefaultAllocator {
         Device::Cpu
     }
 
-    fn total_memory(&self) -> usize {
+    fn total_memory(&self) -> Option<usize> {
         self.total_memory()
     }
 
-    fn free_memory(&self) -> usize {
+    fn free_memory(&self) -> Option<usize> {
         self.free_memory()
     }
 }
@@ -105,6 +123,6 @@ mod tests {
     fn test_default_allocator() {
         let alloc = DefaultAllocator::new();
         assert_eq!(alloc.device(), Device::Cpu);
-        assert!(alloc.total_memory() > 0);
+        assert!(alloc.total_memory().is_some_and(|m| m > 0));
     }
 }

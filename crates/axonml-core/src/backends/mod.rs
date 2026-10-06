@@ -24,6 +24,10 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 use crate::device::DeviceCapabilities;
 
 // =============================================================================
@@ -51,7 +55,8 @@ pub mod metal;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_backend;
 
-// GPU testing infrastructure
+// GPU testing infrastructure (prints reports; needs std)
+#[cfg(feature = "std")]
 pub mod gpu_tests;
 
 // =============================================================================
@@ -294,7 +299,7 @@ mod tests {
 
     #[test]
     fn test_gpu_memory_creation() {
-        let mem = GpuMemory::new(std::ptr::null_mut(), 1024, 0, BackendType::Cpu);
+        let mem = GpuMemory::new(core::ptr::null_mut(), 1024, 0, BackendType::Cpu);
         assert_eq!(mem.size(), 1024);
         assert_eq!(mem.device_index(), 0);
         assert_eq!(mem.backend_type(), BackendType::Cpu);
@@ -360,6 +365,6 @@ mod tests {
         let caps = cpu.capabilities();
         assert!(caps.supports_f16);
         assert!(caps.supports_f64);
-        assert!(caps.total_memory > 0);
+        assert!(caps.total_memory.is_some_and(|m| m > 0));
     }
 }

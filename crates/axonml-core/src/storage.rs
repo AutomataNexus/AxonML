@@ -23,10 +23,14 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-use core::ops::{Deref, DerefMut};
-use std::sync::Arc;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
 
-use parking_lot::RwLock;
+use alloc::sync::Arc;
+use core::ops::{Deref, DerefMut};
+
+use crate::sync::RwLock;
 
 use crate::device::Device;
 use crate::dtype::Scalar;
@@ -48,8 +52,8 @@ pub struct PooledCudaSlice {
 }
 
 #[cfg(feature = "cuda")]
-impl std::fmt::Debug for PooledCudaSlice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for PooledCudaSlice {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("PooledCudaSlice")
             .field("pool_managed", &self.pool_managed)
             .field("len", &self.slice.as_ref().map(|s| s.len()))
@@ -347,12 +351,12 @@ impl Storage<f32> {
                     // structured error.
                     eprintln!(
                         "[storage] htod_copy failed for {} bytes on {:?}: {:?}",
-                        self.len * std::mem::size_of::<f32>(),
+                        self.len * core::mem::size_of::<f32>(),
                         device,
                         e
                     );
                     Error::AllocationFailed {
-                        size: self.len * std::mem::size_of::<f32>(),
+                        size: self.len * core::mem::size_of::<f32>(),
                         device,
                     }
                 })?;
@@ -515,7 +519,7 @@ impl Storage<f32> {
 /// Read guard that provides access to the CudaSlice.
 #[cfg(feature = "cuda")]
 pub struct CudaSliceReadGuard<'a> {
-    guard: parking_lot::RwLockReadGuard<'a, StorageInner<f32>>,
+    guard: crate::sync::RwLockReadGuard<'a, StorageInner<f32>>,
 }
 
 #[cfg(feature = "cuda")]
@@ -535,7 +539,7 @@ impl CudaSliceReadGuard<'_> {
 /// Write guard that provides mutable access to the CudaSlice.
 #[cfg(feature = "cuda")]
 pub struct CudaSliceWriteGuard<'a> {
-    guard: parking_lot::RwLockWriteGuard<'a, StorageInner<f32>>,
+    guard: crate::sync::RwLockWriteGuard<'a, StorageInner<f32>>,
 }
 
 #[cfg(feature = "cuda")]
@@ -568,7 +572,7 @@ impl<T: Scalar> Clone for Storage<T> {
 
 /// Read guard for storage data.
 pub struct StorageReadGuard<'a, T: Scalar> {
-    guard: parking_lot::RwLockReadGuard<'a, StorageInner<T>>,
+    guard: crate::sync::RwLockReadGuard<'a, StorageInner<T>>,
     offset: usize,
     len: usize,
 }
@@ -589,7 +593,7 @@ impl<T: Scalar> Deref for StorageReadGuard<'_, T> {
 
 /// Write guard for storage data.
 pub struct StorageWriteGuard<'a, T: Scalar> {
-    guard: parking_lot::RwLockWriteGuard<'a, StorageInner<T>>,
+    guard: crate::sync::RwLockWriteGuard<'a, StorageInner<T>>,
     offset: usize,
     len: usize,
 }

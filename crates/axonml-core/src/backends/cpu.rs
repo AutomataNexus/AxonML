@@ -25,10 +25,20 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::alloc_prelude::*;
+
 use super::Backend;
 use crate::device::DeviceCapabilities;
 use crate::dtype::{Float, Numeric, Scalar};
-use rayon::prelude::*;
+use crate::par::prelude::*;
+// f32 transcendental methods (powf, sin_cos, exp, ...) come from libm via
+// num_traits::Float when there is no std to provide them inherently.
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use num_traits::Float as _;
+#[cfg(feature = "std")]
 use sysinfo::System;
 
 /// Threshold for using parallel processing (in elements)
@@ -84,21 +94,40 @@ impl Backend for CpuBackend {
 // Helper Functions
 // =============================================================================
 
-/// Returns the total system memory in bytes.
-fn get_system_memory() -> usize {
-    let sys = System::new_all();
-    sys.total_memory() as usize
+/// Total host memory in bytes. Needs an OS to ask: `None` without `std`.
+fn get_system_memory() -> Option<usize> {
+    #[cfg(feature = "std")]
+    {
+        Some(System::new_all().total_memory() as usize)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        None
+    }
 }
 
-/// Returns the available system memory in bytes.
-fn get_available_memory() -> usize {
-    let sys = System::new_all();
-    sys.available_memory() as usize
+/// Available host memory in bytes. Needs an OS to ask: `None` without `std`.
+fn get_available_memory() -> Option<usize> {
+    #[cfg(feature = "std")]
+    {
+        Some(System::new_all().available_memory() as usize)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        None
+    }
 }
 
 /// Returns the number of CPU cores.
 fn num_cpus() -> usize {
-    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+    #[cfg(feature = "std")]
+    {
+        std::thread::available_parallelism().map_or(1, core::num::NonZeroUsize::get)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        1
+    }
 }
 
 // =============================================================================
@@ -527,7 +556,7 @@ impl CpuBackend {
         );
 
         // Use optimized BLAS routines for f32 and f64
-        use std::any::TypeId;
+        use core::any::TypeId;
         // `Scalar: Pod`, so these are checked bytemuck casts, and the TypeId
         // guard means they only ever see the matching element type.
         if TypeId::of::<T>() == TypeId::of::<f32>() {
@@ -567,7 +596,7 @@ impl CpuBackend {
         if m > 1 && flops >= (1 << 18) {
             // Parallel over output-row blocks (i0 tiles). Each task owns disjoint
             // rows of C; inner p/j loops stay serial per tile for cache.
-            let threads = rayon::current_num_threads().max(1);
+            let threads = crate::par::current_num_threads().max(1);
             let rows_per = ((m / (threads * 4)).max(1)).min(m);
             c[..m * n]
                 .par_chunks_mut(rows_per * n)
@@ -756,7 +785,7 @@ impl CpuBackend {
     ///
     /// - **m=1 (decode)**: dispatches to [`gemv_bt_row_parallel_f32`] which
     ///   parallelizes over rows of `B` — each rayon worker dots its row with
-    ///   `A` and writes one element of `C`. Linear with `rayon::current_num_threads()`.
+    ///   `A` and writes one element of `C`. Linear with `crate::par::current_num_threads()`.
     /// - **m>1 (prefill)**: calls `matrixmultiply::sgemm` with `B`'s row-major
     ///   stride `(k, 1)` but reads as if it were `[k, n]` column-major via
     ///   `(rs=1, cs=k)` — the classic "transpose by stride" trick. Zero copy.
@@ -875,7 +904,7 @@ fn gemv_bt_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: us
     // Chunk size heuristic: aim for ~64 output rows per task (each row is a
     // k-length dot product). This balances rayon overhead against per-task
     // cache residency.
-    let threads = rayon::current_num_threads().max(1);
+    let threads = crate::par::current_num_threads().max(1);
     let chunk = (n / (threads * 4)).max(16).min(n);
 
     c.par_chunks_mut(chunk)
@@ -905,7 +934,7 @@ fn gemv_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: usize
     // orders-of-magnitude more slabs than threads. Each slab does k*slab FMAs;
     // for k=2560, slab=256 gives ~650K FMAs per slab — good cache residency
     // (~1 MB of B's rows streamed per slab at this width).
-    let target_slab = 256usize.max(n / (rayon::current_num_threads() * 4).max(1));
+    let target_slab = 256usize.max(n / (crate::par::current_num_threads() * 4).max(1));
     let slab = target_slab.min(n).max(1);
 
     c.par_chunks_mut(slab)
@@ -949,7 +978,7 @@ fn matmul_f32_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize
         return;
     }
 
-    let threads = rayon::current_num_threads().max(1);
+    let threads = crate::par::current_num_threads().max(1);
     // Aim for 2–4 tasks per thread for load balance on irregular m; keep chunks
     // large enough that sgemm call overhead is negligible vs. the FMA work.
     let rows_per = ((m / (threads * 4)).max(1)).min(m);
@@ -989,7 +1018,7 @@ fn matmul_f32_bt_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: us
         return;
     }
 
-    let threads = rayon::current_num_threads().max(1);
+    let threads = crate::par::current_num_threads().max(1);
     let rows_per = ((m / (threads * 4)).max(1)).min(m);
     let row_stride = rows_per * n;
 
@@ -1045,7 +1074,7 @@ fn matmul_f64_parallel_m(c: &mut [f64], a: &[f64], b: &[f64], m: usize, n: usize
         return;
     }
 
-    let threads = rayon::current_num_threads().max(1);
+    let threads = crate::par::current_num_threads().max(1);
     let rows_per = ((m / (threads * 4)).max(1)).min(m);
     let row_stride = rows_per * n;
 
