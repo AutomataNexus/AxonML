@@ -225,7 +225,11 @@ mod tests {
         let a = data();
         let (s, p) = (with_serial::run(&a), with_rayon::run(&a));
         assert!((s.0 - p.0).abs() < 1e-3, "sum {} vs {}", s.0, p.0);
-        assert_eq!(s.1.to_bits(), p.1.to_bits(), "fold/reduce max (an element, so exact)");
+        assert_eq!(
+            s.1.to_bits(),
+            p.1.to_bits(),
+            "fold/reduce max (an element, so exact)"
+        );
         assert_eq!(s.2, p.2, "argmax");
         assert_eq!(s.3, p.3, "zip for_each");
         assert_eq!(s.4, p.4, "par_chunks_mut enumerate");
