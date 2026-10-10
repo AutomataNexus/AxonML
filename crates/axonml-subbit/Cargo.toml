@@ -1,0 +1,35 @@
+# =============================================================================
+# axonml-subbit — sub-bit vector-quantized (VQ) GPU primitives
+# =============================================================================
+#
+# Fused VQ matmul kernels, grouped MoE experts, device-side router top-k,
+# resident index assignment, offload tiles and the combine/cat device ops.
+# Depends on axonml-tensor / axonml-core through their PUBLIC APIs only and
+# loads its OWN CUDA modules, so the core crates carry none of the kernels.
+#
+# @author AutomataNexus Development Team
+# =============================================================================
+
+[package]
+name = "axonml-subbit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "README.md"
+description = "Sub-bit vector-quantized (VQ) GPU primitives for AxonML: fused VQ matmul, grouped MoE experts, device router top-k, resident index assignment, NVFP4 paths"
+keywords = ["machine-learning", "quantization", "cuda", "gpu", "tensor"]
+categories = ["science", "algorithms"]
+
+[features]
+default = []
+cuda = ["axonml-tensor/cuda", "axonml-core/cuda", "dep:cudarc"]
+
+[dependencies]
+axonml-core.workspace = true
+axonml-tensor.workspace = true
+cudarc = { workspace = true, optional = true }

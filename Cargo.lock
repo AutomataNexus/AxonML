@@ -689,6 +689,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axonml-subbit"
+version = "0.7.0"
+dependencies = [
+ "axonml-core",
+ "axonml-tensor",
+ "cudarc",
+]
+
+[[package]]
 name = "axonml-tensor"
 version = "0.7.0"
 dependencies = [

@@ -94,6 +94,24 @@ downstream training fold, folded back into the open framework.
   stay F32), which a GPU-resident decoder can serve; the default F16 output is
   byte-identical to before.
 
+### Added — `axonml-subbit`: sub-bit vector-quantized GPU primitives (new crate)
+
+- Fused VQ matmul kernels that run a projection straight off packed codebook
+  indices (dim-2/4/8 codes, f16 or f32 codebooks) with row- and column-blocked
+  GEMV variants for decode; grouped MoE experts (`VqGroupedExperts`) with
+  device-side router top-k (`RouterSel`) and combine; resident per-tile
+  index/scale assignment (`ResidentAssign`); offload tiles for training a block
+  wider than VRAM; batched multi-sequence decode kernels for Mamba2 + MoE hybrids
+  with per-slot recurrent state; an NVFP4 (Blackwell, sm_120a) training path.
+  Switches: `AXONML_TF32`, `AXONML_FP4`, `AXONML_FP4_BWD`, `AXONML_VQ_WARP_ROWS`.
+- Reaches the core crates only through their public APIs (extension traits
+  `SubbitTensorExt`, `SubbitBackendExt`, `SubbitEmbeddingExt`) and loads its
+  own PTX modules; empty without the `cuda` feature.
+- Measured with these kernels on a 12 GB laptop GPU: a 30B-A3B Mamba2-MoE
+  hybrid packs to 3.85 GiB at ~1 bpw (119.9 GiB in fp32) and serves 16
+  concurrent streams at 170+ tok/s; a d=16384 block wider than VRAM trains
+  through the offload path in under 10 GB.
+
 ### Added — CLI, TUI, vision
 
 - `axonml train` gains multi-modal fusion / ensemble training (`--data-b`,

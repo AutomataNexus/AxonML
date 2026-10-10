@@ -15,6 +15,7 @@ resolver = "2"
 members = [
     "crates/axonml-core",
     "crates/axonml-tensor",
+    "crates/axonml-subbit",
     "crates/axonml-autograd",
     "crates/axonml-nn",
     "crates/axonml-optim",

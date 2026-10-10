@@ -1,6 +1,6 @@
 name: Publish to crates.io
 
-# Publishes all 23 publishable workspace crates to crates.io in strict
+# Publishes all 24 publishable workspace crates to crates.io in strict
 # topological dependency order, sleeping 10 minutes between each so every
 # upload is fully propagated through crates.io's sparse index before the
 # next crate references it. 23 crates × ~10 min = ~3.8h total wall time,
@@ -91,7 +91,7 @@ jobs:
   # Order (computed from [dependencies] sections, dev-deps excluded):
   #   Tier 0: axonml-core
   #   Tier 1: axonml-tensor
-  #   Tier 2: axonml-autograd, axonml-data, axonml-fusion, axonml-jit,
+  #   Tier 2: axonml-subbit, axonml-autograd, axonml-data, axonml-fusion, axonml-jit,
   #           axonml-profile
   #   Tier 3: axonml-nn (autograd,core,tensor), axonml-audio (core,data,tensor)
   #   Tier 4: axonml-optim (autograd,core,nn,tensor), axonml-serialize
@@ -198,6 +198,7 @@ jobs:
           CRATES=(
             axonml-core
             axonml-tensor
+            axonml-subbit
             axonml-autograd
             axonml-data
             axonml-fusion

@@ -57,6 +57,7 @@ use num_traits::NumCast;
 
 #[cfg(feature = "cuda")]
 mod cuda_accel {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
     use axonml_core::backends::cuda::get_cuda_backend;
 
@@ -1041,9 +1042,8 @@ impl<T: Numeric> Tensor<T> {
                     let (s, o) = (gpu_ref(self), gpu_ref(other));
                     if self.shape == other.shape {
                         return Ok(gpu_into(s.add_cuda(o)?));
-                    } else {
-                        return Ok(gpu_into(s.broadcast_add_cuda(o)?));
                     }
+                    return Ok(gpu_into(s.broadcast_add_cuda(o)?));
                 }
                 // Mixed device — move to GPU, then operate
                 let target_device = if self_gpu {
@@ -1110,9 +1110,8 @@ impl<T: Numeric> Tensor<T> {
                     let (s, o) = (gpu_ref(self), gpu_ref(other));
                     if self.shape == other.shape {
                         return Ok(gpu_into(s.sub_cuda(o)?));
-                    } else {
-                        return Ok(gpu_into(s.broadcast_sub_cuda(o)?));
                     }
+                    return Ok(gpu_into(s.broadcast_sub_cuda(o)?));
                 }
                 let target = if self_gpu {
                     self.device()
@@ -1177,9 +1176,8 @@ impl<T: Numeric> Tensor<T> {
                     let (s, o) = (gpu_ref(self), gpu_ref(other));
                     if self.shape == other.shape {
                         return Ok(gpu_into(s.mul_cuda(o)?));
-                    } else {
-                        return Ok(gpu_into(s.broadcast_mul_cuda(o)?));
                     }
+                    return Ok(gpu_into(s.broadcast_mul_cuda(o)?));
                 }
                 let target = if self_gpu {
                     self.device()
@@ -1244,9 +1242,8 @@ impl<T: Numeric> Tensor<T> {
                     let (s, o) = (gpu_ref(self), gpu_ref(other));
                     if self.shape == other.shape {
                         return Ok(gpu_into(s.div_cuda(o)?));
-                    } else {
-                        return Ok(gpu_into(s.broadcast_div_cuda(o)?));
                     }
+                    return Ok(gpu_into(s.broadcast_div_cuda(o)?));
                 }
                 let target = if self_gpu {
                     self.device()

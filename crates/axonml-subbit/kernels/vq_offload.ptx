@@ -1,0 +1,122 @@
+.version 7.0
+.target sm_50
+.address_size 64
+
+// vq_normalize_f32: out[i] = w[i] * (1.0 / row_scale[(i/dim)/vec_per_row])
+.visible .entry vq_normalize_f32(
+    .param .u64 w,
+    .param .u64 row_scale,
+    .param .u64 out,
+    .param .u32 n_vec,
+    .param .u32 dim,
+    .param .u32 vec_per_row
+) {
+    .reg .pred %p<2>;
+    .reg .f32 %f<4>;
+    .reg .b32 %r<10>;
+    .reg .b64 %rd<10>;
+
+    ld.param.u64 %rd1, [w];
+    ld.param.u64 %rd2, [row_scale];
+    ld.param.u64 %rd3, [out];
+    ld.param.u32 %r1, [n_vec];
+    ld.param.u32 %r2, [dim];
+    ld.param.u32 %r3, [vec_per_row];
+
+    mov.u32 %r4, %ctaid.x;
+    mov.u32 %r5, %ntid.x;
+    mov.u32 %r6, %tid.x;
+    mad.lo.s32 %r4, %r4, %r5, %r6;
+
+    mul.lo.s32 %r7, %r1, %r2;
+    setp.ge.u32 %p1, %r4, %r7;
+    @%p1 bra $L__norm_exit;
+
+    div.u32 %r8, %r4, %r2;
+    div.u32 %r9, %r8, %r3;
+
+    cvt.u64.u32 %rd4, %r9;
+    shl.b64 %rd4, %rd4, 2;
+    add.s64 %rd5, %rd2, %rd4;
+    ld.global.f32 %f1, [%rd5];
+    mov.f32 %f2, 0f3F800000;
+    div.rn.f32 %f2, %f2, %f1;
+
+    cvt.u64.u32 %rd6, %r4;
+    shl.b64 %rd6, %rd6, 2;
+    add.s64 %rd7, %rd1, %rd6;
+    ld.global.f32 %f3, [%rd7];
+    mul.f32 %f3, %f3, %f2;
+    add.s64 %rd8, %rd3, %rd6;
+    st.global.f32 [%rd8], %f3;
+
+$L__norm_exit:
+    ret;
+}
+
+// vq_gather_denorm_f32: recon[i] = codebook[assign[i/dim]*dim + i%dim]
+//                                  / (1.0 / row_scale[(i/dim)/vec_per_row])
+.visible .entry vq_gather_denorm_f32(
+    .param .u64 codebook,
+    .param .u64 assign,
+    .param .u64 row_scale,
+    .param .u64 recon,
+    .param .u32 n_vec,
+    .param .u32 dim,
+    .param .u32 vec_per_row
+) {
+    .reg .pred %p<2>;
+    .reg .f32 %f<4>;
+    .reg .b32 %r<14>;
+    .reg .b64 %rd<14>;
+
+    ld.param.u64 %rd1, [codebook];
+    ld.param.u64 %rd2, [assign];
+    ld.param.u64 %rd3, [row_scale];
+    ld.param.u64 %rd4, [recon];
+    ld.param.u32 %r1, [n_vec];
+    ld.param.u32 %r2, [dim];
+    ld.param.u32 %r3, [vec_per_row];
+
+    mov.u32 %r4, %ctaid.x;
+    mov.u32 %r5, %ntid.x;
+    mov.u32 %r6, %tid.x;
+    mad.lo.s32 %r4, %r4, %r5, %r6;
+
+    mul.lo.s32 %r7, %r1, %r2;
+    setp.ge.u32 %p1, %r4, %r7;
+    @%p1 bra $L__gd_exit;
+
+    div.u32 %r8, %r4, %r2;
+    rem.u32 %r9, %r4, %r2;
+    div.u32 %r10, %r8, %r3;
+
+    cvt.u64.u32 %rd5, %r8;
+    shl.b64 %rd5, %rd5, 2;
+    add.s64 %rd6, %rd2, %rd5;
+    ld.global.u32 %r11, [%rd6];
+
+    mul.lo.s32 %r12, %r11, %r2;
+    add.s32 %r12, %r12, %r9;
+    cvt.u64.u32 %rd7, %r12;
+    shl.b64 %rd7, %rd7, 2;
+    add.s64 %rd8, %rd1, %rd7;
+    ld.global.f32 %f1, [%rd8];
+
+    cvt.u64.u32 %rd9, %r10;
+    shl.b64 %rd9, %rd9, 2;
+    add.s64 %rd10, %rd3, %rd9;
+    ld.global.f32 %f2, [%rd10];
+    mov.f32 %f3, 0f3F800000;
+    div.rn.f32 %f3, %f3, %f2;
+
+    div.approx.f32 %f1, %f1, %f3;
+
+    cvt.u64.u32 %rd11, %r4;
+    shl.b64 %rd11, %rd11, 2;
+    add.s64 %rd12, %rd4, %rd11;
+    st.global.f32 [%rd12], %f1;
+
+$L__gd_exit:
+    ret;
+}

@@ -1171,8 +1171,11 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let a_guard = a_data.storage.as_cuda_slice();
 
+        // SAFETY: `alloc` hands back uninitialised device memory; every element of `a_q`
+        // is written by `q1_0_quantize_acts_q8` below before anything reads it.
         let mut a_q: cudarc::driver::CudaSlice<u8> =
             unsafe { cuda.stream().alloc::<u8>(k) }.expect("stream alloc u8 (int8 acts) failed");
+        // SAFETY: same contract as `a_q`: fully written by the quantize kernel before use.
         let mut a_d: cudarc::driver::CudaSlice<u16> = unsafe { cuda.stream().alloc::<u16>(k / 32) }
             .expect("stream alloc u16 (fp16-as-bits) failed");
 
@@ -1279,6 +1282,8 @@ impl Tensor<f32> {
         let data = self.contiguous_gpu();
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let guard = data.storage.as_cuda_slice();
+        // SAFETY: uninitialised device memory that the ternary quantize kernel below fills
+        // completely (`n` elements) before it is read.
         let mut out_i8: cudarc::driver::CudaSlice<u8> = unsafe { cuda.stream().alloc::<u8>(n) }
             .map_err(|e| axonml_core::error::Error::InvalidOperation {
                 message: format!("stream alloc u8 (ternary quant) failed: {e}"),
@@ -1399,8 +1404,10 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let a_guard = a_data.storage.as_cuda_slice();
 
+        // SAFETY: `w_i8` is a live `&[i8]`; `i8` and `u8` have identical size and alignment,
+        // so the same pointer and length view exactly its bytes, and the borrow keeps it alive.
         let w_bytes: &[u8] =
-            unsafe { std::slice::from_raw_parts(w_i8.as_ptr() as *const u8, w_i8.len()) };
+            unsafe { std::slice::from_raw_parts(w_i8.as_ptr().cast::<u8>(), w_i8.len()) };
         let w_gpu = cuda
             .htod_copy(w_bytes)
             .expect("htod_copy ternary weights failed");
@@ -1449,8 +1456,10 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         let g_guard = g_data.storage.as_cuda_slice();
 
+        // SAFETY: `w_i8` is a live `&[i8]`; `i8` and `u8` have identical size and alignment,
+        // so the same pointer and length view exactly its bytes, and the borrow keeps it alive.
         let w_bytes: &[u8] =
-            unsafe { std::slice::from_raw_parts(w_i8.as_ptr() as *const u8, w_i8.len()) };
+            unsafe { std::slice::from_raw_parts(w_i8.as_ptr().cast::<u8>(), w_i8.len()) };
         let w_gpu = cuda
             .htod_copy(w_bytes)
             .expect("htod_copy ternary weights failed");
@@ -1795,7 +1804,7 @@ impl Tensor<f32> {
                 s
             };
             let total: usize = out_shape.iter().product();
-            return Ok(Self::from_vec(vec![0.0f32; total], &out_shape)?);
+            return Self::from_vec(vec![0.0f32; total], &out_shape);
         }
 
         if a.shape.len() == 2 && b.shape.len() == 2 {
@@ -1865,7 +1874,7 @@ impl Tensor<f32> {
             out_shape.push(m);
             out_shape.push(n);
             let total: usize = out_shape.iter().product();
-            return Ok(Self::from_vec(vec![0.0f32; total.max(1)], &out_shape)?);
+            return Self::from_vec(vec![0.0f32; total.max(1)], &out_shape);
         }
 
         let total = batch_size * m * n;
@@ -2078,7 +2087,7 @@ impl Tensor<f32> {
         let cuda = get_cuda_backend().expect("CUDA backend not available");
         STAGE.with(|cell| {
             let mut opt = cell.borrow_mut();
-            if opt.as_ref().map_or(true, |p| p.len() < n) {
+            if opt.as_ref().is_none_or(|p| p.len() < n) {
                 *opt = Some(
                     axonml_core::backends::cuda::PinnedBuffer::alloc(n).expect("pinned alloc"),
                 );
@@ -2165,20 +2174,23 @@ impl Tensor<f32> {
         unsafe {
             let g = graph.0.cu_graph();
             let mut n: usize = 0;
-            if sys::cuGraphGetNodes(g, std::ptr::null_mut(), &mut n) != sys::CUresult::CUDA_SUCCESS
+            if sys::cuGraphGetNodes(g, std::ptr::null_mut(), &raw mut n)
+                != sys::CUresult::CUDA_SUCCESS
             {
                 return (0, 0, 0, 0, 0, 0, 0, 0);
             }
             let mut nodes: Vec<sys::CUgraphNode> = vec![std::ptr::null_mut(); n];
             let mut n2 = n;
-            if sys::cuGraphGetNodes(g, nodes.as_mut_ptr(), &mut n2) != sys::CUresult::CUDA_SUCCESS {
+            if sys::cuGraphGetNodes(g, nodes.as_mut_ptr(), &raw mut n2)
+                != sys::CUresult::CUDA_SUCCESS
+            {
                 return (n, 0, 0, 0, 0, 0, 0, 0);
             }
             let (mut kern, mut cpy, mut set, mut host, mut al, mut fr, mut oth) =
                 (0, 0, 0, 0, 0, 0, 0);
             for &node in &nodes {
                 let mut ty = sys::CUgraphNodeType::CU_GRAPH_NODE_TYPE_KERNEL;
-                if sys::cuGraphNodeGetType(node, &mut ty) != sys::CUresult::CUDA_SUCCESS {
+                if sys::cuGraphNodeGetType(node, &raw mut ty) != sys::CUresult::CUDA_SUCCESS {
                     oth += 1;
                     continue;
                 }
@@ -2204,26 +2216,30 @@ impl Tensor<f32> {
         unsafe {
             let g = graph.0.cu_graph();
             let mut n: usize = 0;
-            if sys::cuGraphGetNodes(g, std::ptr::null_mut(), &mut n) != sys::CUresult::CUDA_SUCCESS
+            if sys::cuGraphGetNodes(g, std::ptr::null_mut(), &raw mut n)
+                != sys::CUresult::CUDA_SUCCESS
             {
                 return (0, 0, 0, 0);
             }
             let mut nodes: Vec<sys::CUgraphNode> = vec![std::ptr::null_mut(); n];
             let mut n2 = n;
-            if sys::cuGraphGetNodes(g, nodes.as_mut_ptr(), &mut n2) != sys::CUresult::CUDA_SUCCESS {
+            if sys::cuGraphGetNodes(g, nodes.as_mut_ptr(), &raw mut n2)
+                != sys::CUresult::CUDA_SUCCESS
+            {
                 return (0, 0, 0, 0);
             }
             let (mut htod, mut dtod, mut dtoh, mut other) = (0, 0, 0, 0);
             for &node in &nodes {
                 let mut ty = sys::CUgraphNodeType::CU_GRAPH_NODE_TYPE_KERNEL;
-                if sys::cuGraphNodeGetType(node, &mut ty) != sys::CUresult::CUDA_SUCCESS {
+                if sys::cuGraphNodeGetType(node, &raw mut ty) != sys::CUresult::CUDA_SUCCESS {
                     continue;
                 }
                 if ty != sys::CUgraphNodeType::CU_GRAPH_NODE_TYPE_MEMCPY {
                     continue;
                 }
                 let mut p: sys::CUDA_MEMCPY3D_st = std::mem::MaybeUninit::zeroed().assume_init();
-                if sys::cuGraphMemcpyNodeGetParams(node, &mut p) != sys::CUresult::CUDA_SUCCESS {
+                if sys::cuGraphMemcpyNodeGetParams(node, &raw mut p) != sys::CUresult::CUDA_SUCCESS
+                {
                     other += 1;
                     continue;
                 }
@@ -5967,7 +5983,7 @@ impl MtPlan {
             let base = {
                 let g = t.storage.as_cuda_slice();
                 let (p, _guard) = g.slice().device_ptr(stream);
-                p as u64
+                p
             };
             ptrs.push(base + (t.offset * 4) as u64);
             let n = t.numel();
@@ -5980,10 +5996,7 @@ impl MtPlan {
             }
             held.push(t);
         }
-        let device = tensors
-            .first()
-            .map(|t| t.device())
-            .unwrap_or(Device::Cuda(0));
+        let device = tensors.first().map_or(Device::Cuda(0), |t| t.device());
         MtPlan {
             ptrs: cuda.upload_u64(&ptrs).expect("mt ptrs"),
             lens: cuda.upload_u32(&lens).expect("mt lens"),
