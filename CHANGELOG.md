@@ -5,7 +5,143 @@ All notable changes to Axonml will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-10-09
+
+The GPU training engine, JIT, graph export, and LLM fine-tuning work from the
+downstream training fold, folded back into the open framework.
+
+### Fixed — GPU training correctness
+
+- **Non-deterministic GPU `conv2d` forward.** The output copy was issued on the
+  null stream and raced the compute-stream GEMM, so the same call returned a
+  different result each time once the pool was dirty. Both stale-read sites are
+  now stream-ordered after the GEMM; GPU-vs-GPU and GPU-vs-CPU are 0.0.
+- **`Adam`/`AdamW` GPU path applied STRIDED gradients as if contiguous.** A
+  `Linear` transposes its weight before the matmul, so its weight gradient
+  arrives as a transposed view; the GPU update read it as contiguous and
+  scrambled every dense-layer update, silently. The update now honours strides.
+- **CUDA `pow` computed `|x|^n`.** Sign-correct forward and backward kernels.
+- **`conv2d` `grad_bias` intermittently wrong** under a dirtied pool — fixed
+  with the batched backward.
+- **`softmax` honoured its `dim` argument in name only** on the CPU path.
+- **`RMSNorm` scale never trained.** `RMSNormBackward` returned only
+  `grad_input`. The scale is now opt-in trainable with a fused GPU weight
+  gradient (`rms_inv_rows` + column partials; no host round-trip).
+- **`clip_grad_norm` was documented but did not exist.** Implemented.
+- **LLaMA GQA `repeat_kv` host path was wrong and slow.** Replaced by a
+  one-hot expansion matmul on device; the causal mask is built on device.
+- **`accumulate_grad` allocated a fresh tensor on every accumulation.** Now an
+  in-place add.
+- **A fused `inv_rms` buffer bypassed the pool** (a raw `cuMemFree` per step,
+  66 driver alloc/free pairs per step near a full heap). Returned through
+  `pool_free`.
+
+### Added — GPU coverage and launch reduction
+
+- GPU backward for grouped/depthwise `conv2d`, `MaxPool1d`, `AdaptiveAvgPool2d`,
+  `GroupNorm`, `InstanceNorm2d`, `ConvTranspose2d`, and nearest `interpolate`
+  (forward + backward) — each was a CPU-only host round-trip.
+- Whole-batch batched `conv2d` forward/backward (one im2col + one strided-batched
+  GEMM instead of a loop over the batch), grouped/depthwise forward batched over
+  batch × groups, and direct depthwise kernels (`depthwise.cu`).
+- `narrow_backward`, `cat` forward, and `MaxPool2d` backward issue one strided-copy
+  launch instead of one memcpy per outer block; shape/stride scratch uploads are
+  cached (762 → 18 host-to-device copies per training step).
+- `batchnorm_bwd_reduce` is a block-per-channel warp reduction instead of
+  per-element atomics; `PowBackward` special-cases exponents 1, 2 and 3.
+- Multi-tensor kernels (`mt_sumsq` / `mt_abssum` / `mt_ternarize` / `mt_scale`,
+  one launch per step) behind the `MtPlan` API; `MatMulBackward` skips gradients
+  that have no consumer.
+- `AXONML_TF32` runs every cuBLAS GEMM on TF32 tensor cores (opt-in).
+- CUDA pool: per-block completion fences, `AXONML_POOL_SAFE` (default on),
+  `with_pool_uncapped`, a mempool release threshold at 80% of device memory with
+  a `mempool_usage()` diagnostic, and no `cuEventQuery` while a stream is
+  capturing.
+- CUDA-graph capture/replay wrappers on the cudarc graph type (`ReplayGraph`)
+  with node and memcpy diagnostics.
+- Fused `softmax_causal_scaled` in LLaMA attention: one saved `[B,H,Tq,Tk]`
+  tensor instead of four.
+- Opt-in deterministic seeding for init, tensor creation and dropout (`rng`).
+
+### Added — JIT
+
+- **Automatic forward capture.** `JitFn::trace_forward` records a model's real
+  `forward` through a thread-local recorder in `axonml-autograd`
+  (`trace_capture`), so there is no tracer DSL to re-declare. Non-elementwise
+  ops record nothing and become natural fusion boundaries.
+- The `elementwise_fusion` graph pass is implemented (it was a no-op stub), and
+  fused chains — including two-input chains — compile through runtime NVRTC and
+  dispatch on-device via the new GPU execution bridge.
+
+### Added — graph export and serialization
+
+- `.axonml` bundles carry the model's exact compute graph: a DAG-primary forward
+  tracer (`graph_trace`) captures true wiring including skip connections, and
+  every layer implements `describe()` / `named_children`. Example:
+  `graph_export_demo`.
+- `Adam::export_state` / `import_state` for lossless pause and resume.
+
+### Added — LLM fine-tuning
+
+- LoRA: `Linear::{attach_lora, detach_lora, freeze_base, merge_lora}`; LLaMA and
+  Qwen3 `attach_lora` / `freeze_lora_base` / `lora_named_parameters` /
+  `merge_lora`; `attach_lora_from` for upper-layer-only adapters. Adapters are
+  placed on the base weight's device.
+- Qwen3: shared LM head (`tie_lm_head`), per-layer activation checkpointing
+  (`AXONML_CKPT_LAYERS`), and `layer_input_hiddens` for teacher traces.
+- LLaMA activation checkpointing (`AXONML_CKPT_LAYERS=1`).
+- GGUF export: `AXONML_GGUF_QUANT=q8_0` stores 2-D body weights as Q8_0 (norms
+  stay F32), which a GPU-resident decoder can serve; the default F16 output is
+  byte-identical to before.
+
+### Added — CLI, TUI, vision
+
+- `axonml train` gains multi-modal fusion / ensemble training (`--data-b`,
+  `--branches`, `--strategy concat|gated|moe|late-ensemble`), sequence
+  classifiers, image-folder datasets and explicit device selection.
+- `axonml tui --log <metrics.jsonl>` opens the training view on a live log.
+- Vision: GPU nearest interpolate, additional losses and ops.
+
+### Changed
+
+- Soundness: every CUDA launcher asserts its host-side preconditions;
+  `gemm_f32_at`, the strided-batched GEMM, the 2-D device copies and
+  `dtoh_into_n` are bounds-checked; the `u64` event/graph handle API is replaced
+  by cudarc `CudaEvent`s; `axonml-tensor`'s `forbid(unsafe_code)` is scoped to
+  non-CUDA builds so its `cuda` feature compiles again;
+  `tools/check_launches.py` verifies 153 launches including inline-assembled
+  NVRTC entries.
+- `tools/model_converter` is ONNX-only. The optional vendor NPU SDK branch
+  (compiled NPU binary output) is gone; ONNX export and validation are unchanged.
+- Internal crate dependency pins moved to 0.7.0.
+
+### Removed
+
+- `JitFn::capture` (the tracer-DSL path), superseded by `trace_forward`.
+- The vendor NPU SDK code path of `tools/model_converter`.
+
+### Fixed — autograd correctness (2026-07-18)
+
+- **GPU Conv2d backward computed wrong gradients.** `conv2d_backward_cuda` staged
+  each batch's `grad_output`/`input` into pool-allocated scratch buffers via a
+  null-stream `memcpy_dtod` and then consumed them from the compute stream. Once
+  the CUDA pool was dirtied (i.e. any real training run) the GEMM read the scratch
+  as **zeros**, collapsing `grad_input` (and `grad_weight`) to ~0 — silently
+  breaking backprop through every `groups==1` conv on GPU, including the pointwise
+  1×1 convs in depthwise-separable nets (the "caps depthwise-separable models"
+  symptom). Additionally the grad_input GEMM read the weight transposed. Fixed by
+  reading `grad_output`/`input` **directly at their batch offset** (`gemm_f32_at` +
+  a stream-ordered per-batch input view) — no scratch buffers, no hazard — and the
+  correct grad_input GEMM (`transB=true, ldb=col_h`). New GPU↔CPU parity regression
+  test covers all three gradients under a dirtied pool.
+- **`GroupedConv2dBackward` returned CPU-device gradients on a GPU model.**
+  Depthwise/grouped convs (`groups>1`) fall to the CPU im2col path, which built its
+  gradient tensors on the CPU regardless of the model's device → device mismatch.
+  Now moved back to the grad's device.
+- **BCE detached the gradient w.r.t. predictions.** `Variable::binary_cross_entropy`
+  built its log terms as `Variable::from_tensor(x.data().ln())` — a detached leaf —
+  so `d(loss)/d(input)` was identically **zero** (the loss connected only to the
+  target). Fixed to use the graph-tracked `.log()`.
 
 ### `no_std` support for `axonml-core` and `axonml-tensor` (#12, #13)
 
@@ -38,7 +174,7 @@ bare-metal target. They now build for `no_std` + `alloc` (checked in CI on
 
 The CPU backend is now multi-threaded with rayon across both the inference
 forward path and the full autograd backward path, so single-node CPU
-training/inference and Hailo reference/calibration forwards use every core.
+training/inference and NPU reference/calibration forwards use every core.
 All paths are threshold-gated (by FLOPs or element count) so small ops stay
 serial; numerical semantics are unchanged. The GPU path is untouched.
 
@@ -68,9 +204,9 @@ serial; numerical semantics are unchanged. The GPU path is untouched.
 
 ### Other
 
-- Hailo: pre-allocate the input/output/node/initializer vectors in
+- Graph export: pre-allocate the input/output/node/initializer vectors in
   `BundleGraph::new` to cut reallocations during graph build for large
-  models targeting HEF via the Hailo NPU compiler.
+  models targeting downstream NPU compilers.
 - `simple_training` example now builds and runs on pure-CPU (non-CUDA)
   builds; cleared dead-store warnings in `SelectBackward`.
 
@@ -91,10 +227,10 @@ unchanged.
 - Routed more GradFn CPU paths to `par_iter_mut`: `CrossEntropyLossBackward`,
   `MeanDimBackward`, `VarDimBackward` (both passes), and
   `FusedAttentionBackward` (over batch×head).
-- Hailo: pre-allocate the vectors in `BundleGraph::new` to reduce
-  reallocations during graph build for large Hailo/HEF targets.
+- Graph export: pre-allocate the vectors in `BundleGraph::new` to reduce
+  reallocations during graph build for large NPU targets.
 - Established the device-native execution principle: GPU stays on-device,
-  CPU is fast + parallel, Hailo export/reference is optimal — reducing
+  CPU is fast + parallel, NPU export/reference is optimal — reducing
   cross-device thrashing.
 
 ## [0.6.4] - 2026-05-23

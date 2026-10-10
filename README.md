@@ -48,7 +48,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,350+ pas
 **Device-native CPU parallelism (v0.6.5 + unreleased).** The execution
 model is now device-native end to end: the GPU path stays resident
 on-device, and the **CPU backend is seriously multi-threaded with rayon**
-so single-node CPU inference and training (and Hailo reference/calibration
+so single-node CPU inference and training (and NPU reference/calibration
 forwards) actually use every core instead of pegging one.
 
 - **CPU matmul threaded** across every layout — `matmul_f32` (m>1

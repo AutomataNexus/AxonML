@@ -41,7 +41,7 @@ cuda = ["std", "axonml-core/cuda", "dep:cudarc"]
 cudnn = ["cuda", "axonml-core/cudnn"]
 
 [dependencies]
-axonml-core = { path = "../axonml-core", version = "0.6.1", default-features = false }
+axonml-core = { path = "../axonml-core", version = "0.7.0", default-features = false }
 bytemuck.workspace = true
 num-traits.workspace = true
 rand.workspace = true

@@ -66,7 +66,7 @@ The `axonml` umbrella crate is a thin re-export layer plus the live browser trai
 | `wgpu` | WebGPU / Vulkan via wgpu | No |
 | `nccl` | `distributed` + NCCL backend | No |
 
-**WSL / Windows dev footgun (CUDA):** `/opt/cuda-stubs` (Hailo DFC) can shadow the real WSL driver lib in the ld cache. Any `--features cuda` run that hits a missing symbol (e.g. `cuArray3DCreate_v2`) needs the real path first:
+**WSL / Windows dev footgun (CUDA):** `/opt/cuda-stubs` (vendor NPU SDK) can shadow the real WSL driver lib in the ld cache. Any `--features cuda` run that hits a missing symbol (e.g. `cuArray3DCreate_v2`) needs the real path first:
 
 ```bash
 LD_LIBRARY_PATH=/usr/lib/wsl/lib cargo run --release --features cuda ...

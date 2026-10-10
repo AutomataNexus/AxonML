@@ -1,6 +1,6 @@
 # AxonML Model Converter
 
-Converts AxonML `.axonml` bundles to **ONNX** (and optionally **HEF** for Hailo-8/8L edge accelerators).
+Converts AxonML `.axonml` bundles to **ONNX**.
 
 ## Why a Python tool?
 
@@ -14,7 +14,7 @@ Rather than reinvent that, the converter:
 4. Runs `torch.onnx.export()` with `opset_version=17` and `do_constant_folding=True`.
 5. Validates the resulting ONNX via `onnx.checker` and an ONNX Runtime parity check (PyTorch output vs ORT output, max-diff reported).
 
-The result is a production-grade ONNX file that Hailo DFC, TensorRT, ONNX Runtime, and `onnxruntime-web` all accept without complaint.
+The result is a production-grade ONNX file that TensorRT, ONNX Runtime, and `onnxruntime-web` all accept without complaint.
 
 It lets any trained model round-trip through ONNX.
 
@@ -75,22 +75,6 @@ Validate-only (parses the bundle, doesn't convert):
 python convert.py my_model.axonml --validate-only
 ```
 
-## HEF (Hailo) output
-
-HEF compilation additionally requires the Hailo DFC SDK:
-
-1. Register at <https://hailo.ai/developer-zone/>.
-2. Install `hailo_sdk_client` into a **separate** venv (Hailo's SDK has tight dep pins).
-3. Point the CLI at it:
-   ```bash
-   export HAILO_DFC_VENV=/opt/hailo-dfc-env
-   ```
-4. Run `axonml export my_model.axonml --format hef --output my_model.hef`.
-
-If HEF compilation fails (usually due to DFC version mismatch), the converter falls back to writing the HAR (Hailo Archive) instead, which can be compiled later with `hailo compiler my_model.har`.
-
-The converter handles Hailo's RNN constraints automatically: for LSTM/GRU/RNN models it strips post-RNN Linear layers, wraps the RNN in a standalone module, and adds an input projection if `input_dim != hidden_dim`.
-
 ## Environment variables
 
 | Variable                   | Purpose                                                          |
@@ -98,7 +82,6 @@ The converter handles Hailo's RNN constraints automatically: for LSTM/GRU/RNN mo
 | `AXONML_CONVERTER_PYTHON`  | Path to the Python interpreter with torch+onnx installed.        |
 | `AXONML_CONVERTER_SCRIPT`  | Override path to `convert.py` (default: this file).              |
 | `CONVERTER_VENV`           | Alternative: a venv root — `<root>/bin/python` is used.          |
-| `HAILO_DFC_VENV`           | Venv with `hailo_sdk_client` installed (HEF only).              |
 
 ## Testing
 

@@ -34,7 +34,7 @@ AxonML provides comprehensive PyTorch-equivalent functionality with **2,350+ pas
 | **Neural Networks** | Linear, Conv1d/2d, BatchNorm1d/2d, LayerNorm, GroupNorm, RMSNorm, MultiHead/Cross/Differential attention, LSTM/GRU/RNN, Transformer encoder/decoder, MoE, GCN/GAT, 1.58-bit ternary quantized linear (BitNet b1.58), differentiable structured sparsity |
 | **Optimizers** | SGD (+ momentum, Nesterov), Adam, AdamW, RMSprop, LAMB; schedulers (Step, MultiStep, Cosine, OneCycle, Warmup, ReduceLROnPlateau, Exponential); `GradScaler`; training health monitor |
 | **Distributed Training** | DDP, FSDP (ZeRO-2/ZeRO-3 + HybridShard + CPU offload), Pipeline (GPipe / 1F1B), column/row tensor parallel, optional NCCL backend |
-| **Model Formats** | ONNX import/export (opset 17, 40+ ops), SafeTensors, StateDict, and `.axonml` bundles with an **embedded computation graph** for source-free recompilation (→ Hailo NPU HEF) |
+| **Model Formats** | ONNX import/export (opset 17, 40+ ops), SafeTensors, StateDict, and `.axonml` bundles with an **embedded computation graph** for source-free recompilation by downstream compilers |
 | **Vision Models** | LeNet, ResNet, VGG, ViT, DETR, NanoDet, BlazeFace, RetinaFace, FPN, DPT/FastDepth (depth), PatchCore/StudentTeacher (anomaly), VQA |
 | **LLM Architectures** | BERT, GPT-2, LLaMA, Mistral, Phi, SSM (Mamba), Qwen3 (trainable) |
 | **Inference Stack** | the AxonML inference server — pure-Rust LLM inference with Anthropic Messages API, SSE streaming, Q4_K/Q5_K/Q6_K/Q8_0 CUDA GEMV, fused prefill + flash-decode attention, `--mlock` / `--no-mmap` / `--n-gpu-layers` / `--n-cpu-moe`, and TurboQuant KV-cache quantization (`--kv-quant q8`/`turbo`) |
@@ -145,7 +145,7 @@ which trains a 2-layer MLP on the XOR problem with Adam.
 
 ## Production Deployment
 
-AxonML powers real-time predictive maintenance on HVAC systems across commercial buildings. Site-specific models (LSTM autoencoders for anomaly detection + GRU failure predictors, ~105K–416K params per site) run live inference on Raspberry Pi edge controllers, cross-compiled to `armv7-unknown-linux-musleabihf`, polling sensor data at 1 Hz. Vision models are additionally compiled to Hailo-8/10H NPU silicon via the Hailo NPU compiler toolchain using the `.axonml` embedded-graph bundle format.
+AxonML powers real-time predictive maintenance on HVAC systems across commercial buildings. Site-specific models (LSTM autoencoders for anomaly detection + GRU failure predictors, ~105K–416K params per site) run live inference on Raspberry Pi edge controllers, cross-compiled to `armv7-unknown-linux-musleabihf`, polling sensor data at 1 Hz. Vision models are additionally compiled to edge NPU silicon by downstream compilers using the `.axonml` embedded-graph bundle format.
 
 The AxonML pure-Rust LLM inference server reaches ~33 tok/s steady-state decode on a quantized 7B model (DeepSeek-R1-Distill-Qwen-7B, Q4_K_M) on an RTX 5070 Ti Laptop, via GPU-resident activations, custom Q4_K/Q5_K/Q6_K/Q8_0 dequant-in-shader GEMV, fused QKV / gate-up-SwiGLU kernels, GPU-native flash-decode attention, and TurboQuant KV-cache quantization.
 

@@ -45,7 +45,11 @@ for f in kdir.glob("*.cu"):
         for prm in params:
             is_ptr = "*" in prm
             is_const = prm.startswith("const ") or " const " in prm.split("*")[0]
-            flags.append("write" if (is_ptr and not is_const) else ("read" if is_ptr else "scalar"))
+            # `float* const* ptrs`: the argument is a read-only TABLE of device
+            # pointers; the kernel writes through the table to buffers that are
+            # not launch arguments. Ordering for those is the single stream's.
+            is_table = re.search(r"\*\s*const\s*\*", prm) is not None
+            flags.append("table" if is_table else "write" if (is_ptr and not is_const) else ("read" if is_ptr else "scalar"))
         mutable_params[m.group(1)] = flags
 
 # Index guards. A kernel launched through launch_config(len) is given exactly
@@ -85,21 +89,40 @@ def rust_param_mutability(fn_body, argname):
         return "write" if m.group(1) else "read"
     return "unknown"
 
-# var -> kernel name, per `let VAR = self.kernels.get("NAME")`
-gets = [(m.start(), m.group(1), m.group(2))
-        for m in re.finditer(r"let\s+(\w+)\s*=\s*self\s*\.kernels\s*\.get\(\"(\w+)\"\)", src)]
+# Every kernel literal fetched in the enclosing fn must be compatible with the
+# launch: a fn that picks one of several (`match name { "a" => get("a"), .. }`)
+# is checked against each. A fn that compiles its own kernel with nvrtc must
+# assemble the entry text itself (`__global__ void NAME(` literal in the fn) —
+# that literal is then the signature.
+def kernels_in(fn_body):
+    names = re.findall(r"self\s*\.kernels\s*\.get\(\"(\w+)\"\)", fn_body)
+    return list(dict.fromkeys(names))
 
-def kernel_for(var, pos):
-    best = None
-    for p, v, name in gets:
-        if v == var and p < pos:
-            best = name
-    return best
+def inline_entry(fn_body):
+    m = re.search(r"__global__\s+void\s+(\w+)\s*\((.*?)\)\s*\{\{", fn_body, re.S)
+    if not m:
+        return None
+    raw = re.sub(r"\\\s*\n\s*", " ", m.group(2))
+    params = [x.strip() for x in raw.split(",") if x.strip()]
+    flags = []
+    for prm in params:
+        is_ptr = "*" in prm
+        is_const = prm.startswith("const ") or " const " in prm.split("*")[0]
+        flags.append("write" if (is_ptr and not is_const) else ("read" if is_ptr else "scalar"))
+    guarded_inline = re.search(r"if\s*\(\s*\w+\s*(<|>=)\s*\w+\s*\)", fn_body) is not None
+    return m.group(1), flags, guarded_inline
 
 problems, checked = [], 0
 for m in re.finditer(r"launch_builder\((&?\*?)(\w+)\)", src):
     var = m.group(2)
-    name = kernel_for(var, m.start())
+    fn_start = src.rfind("pub fn ", 0, m.start())
+    fn_body_all = src[fn_start:m.start()]
+    # `let VAR = self.kernels.get("NAME")` binds the launch to one kernel; a
+    # VAR bound any other way (a `match` over names) is checked against every
+    # literal the fn fetches.
+    bound = re.findall(r"let\s+" + re.escape(var) + r"\s*=\s*self\s*\.kernels\s*\.get\(\"(\w+)\"\)", fn_body_all)
+    candidates = [bound[-1]] if bound else kernels_in(fn_body_all)
+    jit = inline_entry(fn_body_all) if not candidates else None
     end = src.find(".launch(", m.end())
     chain = src[m.end():end]
     # Each .arg(EXPR) up to the .launch(; EXPR may itself contain balanced
@@ -120,37 +143,46 @@ for m in re.finditer(r"launch_builder\((&?\*?)(\w+)\)", src):
             k += 1
         args.append(chain[j + len(".arg("):k - 1])
         i = k
-    if name is None:
-        problems.append(f"{var}: launch_builder with no preceding kernels.get"); continue
-    if name not in sigs:
-        problems.append(f"{name}: no .entry found in any PTX"); continue
-    want = sigs[name]
-    if len(args) != len(want):
-        problems.append(f"{name}: rust passes {len(args)} args, ptx declares {len(want)}"); continue
-    # Enclosing fn signature, for parameter mutability.
-    fn_start = src.rfind("pub fn ", 0, m.start())
-    fn_body = src[fn_start:m.start()]
-    if name in mutable_params:
-        flags = mutable_params[name]
-        if len(flags) == len(args):
-            for i, (a, fl) in enumerate(zip(args, flags)):
-                if fl == "write":
-                    got = rust_param_mutability(fn_body, a)
-                    if got == "read":
-                        problems.append(
-                            f"{name}: param {i} is written by the kernel but Rust passes `{a.strip()}` "
-                            f"as & -- cudarc records a READ event, so a later launch will not wait for this write")
-    if "launch_config(" in fn_body and name not in guarded:
-        problems.append(
-            f"{name}: launched via launch_config(len) but no index guard found in its "
-            f".cu or PTX -- the trailing threads of the last block will index past `len`")
-    for i, (a, w) in enumerate(zip(args, want)):
-        a = a.strip()
-        is_scalar = a.startswith("&(") or a.startswith("&mut (") or re.match(r"&\w+_(u32|f32|i32|u8)\b", a) or re.match(r"&(\w+)$", a) and not any(k in a for k in ("buf", "slice", "ptr", "w", "out", "data"))
-        if w == "u64" and (a.startswith("&(") or re.search(r"as (u32|f32|i32)\)", a)):
-            problems.append(f"{name}: param {i} is a pointer (.u64) but rust passes scalar `{a}`")
-        if w in ("u32", "f32", "s32", "u16", "u8", "b8") and not (a.startswith("&") ):
-            problems.append(f"{name}: param {i} is scalar (.{w}) but rust passes `{a}`")
+    if not candidates and jit is None:
+        problems.append(f"{var}: launch_builder with no kernels.get literal and no inline __global__ entry in its fn"); continue
+    fn_body = fn_body_all
+    if jit is not None:
+        jname, jflags, jguard = jit
+        if len(args) != len(jflags):
+            problems.append(f"{jname} (nvrtc, inline): rust passes {len(args)} args, entry declares {len(jflags)}"); continue
+        if not jguard:
+            problems.append(f"{jname} (nvrtc, inline): entry text has no index guard"); continue
+        for i_, (a, fl) in enumerate(zip(args, jflags)):
+            if fl == "write" and rust_param_mutability(fn_body, a) == "read":
+                problems.append(f"{jname} (nvrtc, inline): param {i_} is written by the kernel but Rust passes `{a.strip()}` as &")
+        checked += 1
+        continue
+    for name in candidates:
+        if name not in sigs:
+            problems.append(f"{name}: no .entry found in any PTX"); continue
+        want = sigs[name]
+        if len(args) != len(want):
+            problems.append(f"{name}: rust passes {len(args)} args, ptx declares {len(want)}"); continue
+        if name in mutable_params:
+            flags = mutable_params[name]
+            if len(flags) == len(args):
+                for i, (a, fl) in enumerate(zip(args, flags)):
+                    if fl == "write":
+                        got = rust_param_mutability(fn_body, a)
+                        if got == "read":
+                            problems.append(
+                                f"{name}: param {i} is written by the kernel but Rust passes `{a.strip()}` "
+                                f"as & -- cudarc records a READ event, so a later launch will not wait for this write")
+        if "launch_config(" in fn_body and name not in guarded:
+            problems.append(
+                f"{name}: launched via launch_config(len) but no index guard found in its "
+                f".cu or PTX -- the trailing threads of the last block will index past `len`")
+        for i, (a, w) in enumerate(zip(args, want)):
+            a = a.strip()
+            if w == "u64" and (a.startswith("&(") or re.search(r"as (u32|f32|i32)\)", a)):
+                problems.append(f"{name}: param {i} is a pointer (.u64) but rust passes scalar `{a}`")
+            if w in ("u32", "f32", "s32", "u16", "u8", "b8") and not (a.startswith("&") ):
+                problems.append(f"{name}: param {i} is scalar (.{w}) but rust passes `{a}`")
     checked += 1
 
 # The backend disables cudarc's per-slice event tracking, which is sound only

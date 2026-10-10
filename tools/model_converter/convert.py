@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AxonML Model Converter — .axonml to ONNX (and HEF for Hailo edge inference).
+AxonML Model Converter — .axonml to ONNX.
 
 Parses the `.axonml` binary format produced by AxonML training, reconstructs
 the model in PyTorch layer-for-layer, loads the flat weight vector into the
@@ -8,16 +8,12 @@ PyTorch state dict, and exports to standard ONNX protobuf format via the
 battle-tested `torch.onnx.export()` path. Validation happens via `onnx.checker`
 and an ONNX Runtime parity check (PyTorch vs ORT max-diff).
 
-Optional HEF compilation for Hailo-8/8L edge accelerators is gated behind
-the Hailo DFC SDK — if not installed, ONNX export still works end-to-end.
-
 Architectures supported (must match AxonML's `Architecture` enum):
     sentinel, lstm_autoencoder, gru_predictor, rnn, phantom, conv1d,
     conv2d, res_net, vgg, bert, gpt2, vi_t, nexus.
 
 Usage:
     python convert.py model.axonml --format onnx --output model.onnx
-    python convert.py model.axonml --format hef  --output model.hef
     python convert.py model.axonml --validate-only
 
 Originally developed for the Prometheus predictive-maintenance stack
@@ -126,45 +122,27 @@ class LstmAutoencoderPT(nn.Module):
             hidden_dim, hidden_dim, num_layers, batch_first=True
         )
         self.decoder_output = nn.Linear(hidden_dim, input_features)
-        # Expand bottleneck to full sequence (avoids Tile/Expand for Hailo)
+        # Expand bottleneck to full sequence (avoids Tile/Expand ops)
         self.decoder_expand = nn.Linear(hidden_dim, seq_len * hidden_dim)
 
-        # Register fixed-shape zero states as buffers (ONNX initializers for Hailo)
+        # Register fixed-shape zero states as buffers (ONNX initializers)
         self.register_buffer('enc_h0', torch.zeros(num_layers, 1, hidden_dim))
         self.register_buffer('enc_c0', torch.zeros(num_layers, 1, hidden_dim))
         self.register_buffer('dec_c0', torch.zeros(num_layers, 1, hidden_dim))
 
     def forward(self, x):
-        # x: [batch, seq_len, features] — batch=1 for Hailo static export
+        # x: [batch, seq_len, features] — batch=1 for static export
         _, (h_n, _) = self.encoder_lstm(x, (self.enc_h0, self.enc_c0))
         bottleneck = self.encoder_linear(h_n[-1])
         expanded = self.decoder_linear(bottleneck)
         # Project bottleneck to full decoder input shape via linear layer
-        # This avoids Tile/Expand/Repeat ops that Hailo DFC cannot parse
+        # This avoids Tile/Expand/Repeat ops that some importers cannot parse
         decoder_input = self.decoder_expand(expanded)  # [batch, seq_len * hidden]
         decoder_input = decoder_input.view(-1, self.seq_len, self.hidden_dim)
         decoder_out, _ = self.decoder_lstm(decoder_input, (self.dec_c0, self.dec_c0))
         output = self.decoder_output(decoder_out)
         return output
 
-
-class LstmEncoderOnlyPT(nn.Module):
-    """LSTM Encoder-only for Hailo HEF: encoder LSTM -> bottleneck -> score.
-
-    For edge inference, only the encoder runs on Hailo. Reconstruction error
-    is computed host-side from the bottleneck output.
-    """
-    def __init__(self, input_features: int, hidden_dim: int, num_layers: int, bottleneck_dim: int):
-        super().__init__()
-        self.encoder_lstm = nn.LSTM(input_features, hidden_dim, num_layers, batch_first=True)
-        self.encoder_linear = nn.Linear(hidden_dim, bottleneck_dim)
-        self.register_buffer('h0', torch.zeros(num_layers, 1, hidden_dim))
-        self.register_buffer('c0', torch.zeros(num_layers, 1, hidden_dim))
-
-    def forward(self, x):
-        _, (h_n, _) = self.encoder_lstm(x, (self.h0, self.c0))
-        bottleneck = self.encoder_linear(h_n[-1])
-        return bottleneck
 
 
 class GruPredictorPT(nn.Module):
@@ -1273,7 +1251,7 @@ def export_to_onnx(model: nn.Module, dummy_input: torch.Tensor, output_path: str
         if isinstance(m, (nn.LSTM, nn.GRU, nn.RNN)):
             m.flatten_parameters()
 
-    # For Hailo HEF: use fully static shapes (no dynamic axes)
+    # Fully static shapes (no dynamic axes) when requested
     dynamic = None if static_shapes else {
         "input": {0: "batch_size"},
         "output": {0: "batch_size"},
@@ -1301,98 +1279,18 @@ def export_to_onnx(model: nn.Module, dummy_input: torch.Tensor, output_path: str
 
 
 # =============================================================================
-# HEF conversion (requires Hailo DFC SDK)
-# =============================================================================
-
-
-def export_to_hef(onnx_path: str, output_path: str, model_name: str = "prometheus_model",
-                  input_shape: list = None):
-    """Convert an ONNX model to Hailo HEF format.
-
-    Uses Hailo DFC SDK to translate, optimize (quantize), and compile.
-    LSTM/GRU/RNN models are supported — Hailo-8/8L handles recurrent layers.
-    """
-    try:
-        from hailo_sdk_client import ClientRunner
-    except ImportError:
-        raise RuntimeError(
-            "Hailo DFC SDK not installed. To convert to HEF:\n"
-            "  1. Register at https://hailo.ai/developer-zone/\n"
-            "  2. pip install hailo_sdk_client\n"
-            "  3. Run this converter again with --format hef\n"
-            "\n"
-            "Alternatively, use the ONNX file with the Hailo Model Zoo:\n"
-            f"  hailo parser onnx {onnx_path}\n"
-            f"  hailo compiler --har model.har"
-        )
-
-    import numpy as np
-
-    runner = ClientRunner(hw_arch="hailo8")
-
-    # Determine input shape from ONNX model
-    if input_shape is None:
-        import onnx
-        model = onnx.load(onnx_path)
-        inp = model.graph.input[0]
-        dims = [d.dim_value for d in inp.type.tensor_type.shape.dim]
-        input_shape = dims if all(d > 0 for d in dims) else [1, 10, 11]
-
-    print(f"Parsing ONNX for Hailo (input shape: {input_shape})")
-
-    # Translate ONNX → Hailo Network (HN)
-    hn, npz = runner.translate_onnx_model(
-        onnx_path,
-        model_name,
-        net_input_shapes={"input": input_shape},
-    )
-
-    # Generate calibration data matching Hailo's inferred network input shape
-    n_calib = 256
-    input_name = f"{model_name}/input_layer1"
-    # Hailo may add extra dimensions — get actual shape from the translated network
-    try:
-        hn_dict = runner.get_hn_dict() if hasattr(runner, 'get_hn_dict') else None
-    except:
-        hn_dict = None
-    # Hailo always expects at least 3D input — pad 2D inputs with extra dim
-    calib_shape = list(input_shape)
-    if len(calib_shape) == 2:
-        calib_shape = [calib_shape[0], 1, calib_shape[1]]  # [batch, 1, features]
-    calib_data = {input_name: np.random.randn(n_calib, *calib_shape).astype(np.float32)}
-    print(f"Optimizing with {n_calib} calibration samples (shape per sample: {calib_shape})...")
-    runner.optimize(calib_data)
-
-    print("Compiling HEF...")
-    try:
-        hef = runner.compile()
-        with open(output_path, "wb") as f:
-            f.write(hef)
-        print(f"HEF written: {output_path} ({len(hef)} bytes)")
-        return output_path
-    except Exception as compile_err:
-        # Save HAR (Hailo Archive) — can be compiled with different DFC version
-        har_path = output_path.replace(".hef", ".har")
-        runner.save_har(har_path)
-        print(f"HEF compilation failed, saved HAR: {har_path}")
-        print(f"  HAR can be compiled with: hailo compiler {har_path}")
-        # Return HAR path instead of raising
-        return har_path
-
-
-# =============================================================================
 # Main CLI
 # =============================================================================
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Convert .axonml models to ONNX or HEF format"
+        description="Convert .axonml models to ONNX"
     )
     parser.add_argument("input", help="Path to .axonml model file")
     parser.add_argument(
         "--format", "-f",
-        choices=["onnx", "hef", "both"],
+        choices=["onnx"],
         default="onnx",
         help="Output format (default: onnx)"
     )
@@ -1469,104 +1367,6 @@ def main():
                 print(f"  Outputs match within tolerance.")
         except Exception as e:
             print(f"  ONNX Runtime validation skipped: {e}")
-
-    if fmt in ("hef", "both"):
-        onnx_intermediate = args.output or str(input_path.with_suffix(".onnx"))
-        if fmt == "hef":
-            # For HEF: Hailo DFC can't handle Linear layers after RNN outputs.
-            # Strip all post-RNN layers — output raw RNN hidden states.
-            # Classification/projection runs on host CPU.
-            arch = model_data.get("architecture", "").lower().replace(" ", "_")
-            rnn_archs = ("lstm_autoencoder", "lstmautoencoder", "gru_predictor", "grupredictor",
-                         "rnn", "lstm", "gru", "bilstm")
-            if arch in rnn_archs:
-                hp = model_data.get("hyperparameters", {})
-                hd = hp.get("hidden_dim", 64)
-                nl = hp.get("num_layers", 2)
-                sl = hp.get("sequence_length", 10)
-                inf = model_data.get("input_features", 11)
-
-                # Find the RNN module in the model and wrap it standalone
-                rnn_module = None
-                rnn_type = None
-                for name, m in model.named_modules():
-                    if isinstance(m, nn.LSTM):
-                        rnn_module = m
-                        rnn_type = "lstm"
-                        break
-                    elif isinstance(m, nn.GRU):
-                        rnn_module = m
-                        rnn_type = "gru"
-                        break
-                    elif isinstance(m, nn.RNN):
-                        rnn_module = m
-                        rnn_type = "rnn"
-                        break
-
-                if rnn_module is not None:
-                    print(f"HEF: stripping post-{rnn_type.upper()} Linear layers for Hailo compatibility")
-
-                    class RnnOnlyWrapper(nn.Module):
-                        def __init__(self, rnn, rnn_type, num_layers, hidden_dim, input_features):
-                            super().__init__()
-                            # Hailo DFC requires input_dim == hidden_dim for RNN layers
-                            self.needs_proj = (input_features != hidden_dim)
-                            if self.needs_proj:
-                                self.input_proj = nn.Linear(input_features, hidden_dim)
-                            self.rnn = rnn
-                            self.rnn_type = rnn_type
-                            self.register_buffer('h0', torch.zeros(num_layers, 1, hidden_dim))
-                            if rnn_type == "lstm":
-                                self.register_buffer('c0', torch.zeros(num_layers, 1, hidden_dim))
-                        def forward(self, x):
-                            if self.needs_proj:
-                                x = self.input_proj(x)
-                            if self.rnn_type == "lstm":
-                                out, _ = self.rnn(x, (self.h0, self.c0))
-                            else:
-                                out, _ = self.rnn(x, self.h0)
-                            return out
-
-                    wrapper = RnnOnlyWrapper(rnn_module, rnn_type, nl, hd, inf)
-                    # If projecting, rebuild RNN with matching input_dim
-                    if inf != hd:
-                        print(f"  Adding input projection: {inf} -> {hd} (Hailo requires input_dim == hidden_dim)")
-                        if rnn_type == "lstm":
-                            wrapper.rnn = nn.LSTM(hd, hd, nl, batch_first=True)
-                        elif rnn_type == "gru":
-                            wrapper.rnn = nn.GRU(hd, hd, nl, batch_first=True)
-                        else:
-                            wrapper.rnn = nn.RNN(hd, hd, nl, batch_first=True)
-                    model = wrapper
-                    dummy_input = torch.randn(1, sl, inf)
-                    print(f"  RNN-only model: input=[1,{sl},{inf}] -> output=[1,{sl},{hd}]")
-
-            # Use unique temp path to avoid Hailo state caching issues
-            import uuid as _uuid
-            onnx_intermediate = str(input_path.parent / f"_hef_tmp_{_uuid.uuid4().hex[:8]}.onnx")
-            # Clean any old temp ONNX files
-            for old in input_path.parent.glob("_hef_tmp_*.onnx"):
-                old.unlink(missing_ok=True)
-            print(f"Exporting intermediate ONNX (static shapes for Hailo): {onnx_intermediate}")
-            export_to_onnx(model, dummy_input, onnx_intermediate, args.name, static_shapes=True)
-
-        hef_path = str(input_path.with_suffix(".hef")) if fmt == "both" else (args.output or str(input_path.with_suffix(".hef")))
-        # Get input shape from dummy for Hailo
-        hef_input_shape = list(dummy_input.shape)
-        print(f"Converting to HEF: {hef_path} (input shape: {hef_input_shape})")
-        try:
-            export_to_hef(onnx_intermediate, hef_path, args.name, input_shape=hef_input_shape)
-            hef_size = Path(hef_path).stat().st_size
-            print(f"  HEF export OK ({hef_size:,} bytes)")
-        except RuntimeError as e:
-            print(f"\nHEF conversion failed:\n{e}", file=sys.stderr)
-        finally:
-            # Clean up temp ONNX and Hailo temp dirs
-            Path(onnx_intermediate).unlink(missing_ok=True)
-            import shutil
-            for d in Path("/tmp").glob("hailo*"):
-                shutil.rmtree(d, ignore_errors=True)
-            return 1
 
     print("\nDone.")
     return 0

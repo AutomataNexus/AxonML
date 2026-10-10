@@ -7,7 +7,7 @@
 #   ./scripts/with-wsl-cuda.sh cargo test --features cuda --test bar
 #   LD_LIBRARY_PATH=/usr/lib/wsl/lib cargo ...   (manual equivalent)
 #
-# Why: /opt/cuda-stubs (for Hailo DFC / TF) contains a stub libcuda.so.1 that wins
+# Why: /opt/cuda-stubs (for vendor NPU SDKs / TF) contains a stub libcuda.so.1 that wins
 # in the cache on some WSL setups. Real driver lives in /usr/lib/wsl/lib (installed
 # by the Windows NVIDIA driver). Without this, you get runtime link errors only on
 # the first CUDA call that hits a missing symbol (e.g. cuArray3DCreate_v2 from
