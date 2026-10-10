@@ -110,6 +110,7 @@ mod tests {
 
     #[test]
     fn convergence_lenet_mnist() {
+        axonml_nn::init::set_seed(0xA11CE);
         let dataset = SyntheticMNIST::new(200);
         let model = LeNet::new();
         let mut optimizer = Adam::new(model.parameters(), 0.001);
@@ -169,6 +170,7 @@ mod tests {
 
     #[test]
     fn convergence_mlp_mnist() {
+        axonml_nn::init::set_seed(0xB0B);
         let dataset = SyntheticMNIST::new(200);
         let model = MLP::for_mnist();
         let mut optimizer = Adam::new(model.parameters(), 0.001);
@@ -217,6 +219,7 @@ mod tests {
 
     #[test]
     fn convergence_lenet_cifar() {
+        axonml_nn::init::set_seed(0xC1FA4);
         let dataset = SyntheticCIFAR::cifar10(200);
         let model = LeNet::for_cifar10();
         let mut optimizer = Adam::new(model.parameters(), 0.001);
@@ -265,6 +268,7 @@ mod tests {
 
     #[test]
     fn convergence_resnet18_cifar_smoke() {
+        axonml_nn::init::set_seed(0xDE5);
         use crate::models::resnet::ResNet;
 
         let dataset = SyntheticCIFAR::cifar10(64);
@@ -308,6 +312,7 @@ mod tests {
 
     #[test]
     fn convergence_nanodet_forward_smoke() {
+        axonml_nn::init::set_seed(0x120DE7);
         use crate::models::nanodet::NanoDet;
 
         let model = NanoDet::new(1);
@@ -337,6 +342,7 @@ mod tests {
 
     #[test]
     fn convergence_vit_cifar_smoke() {
+        axonml_nn::init::set_seed(0x71C1FA);
         use crate::models::transformer::VisionTransformer;
 
         let dataset = SyntheticCIFAR::cifar10(64);
@@ -382,6 +388,7 @@ mod tests {
 
     #[test]
     fn convergence_lenet_sgd() {
+        axonml_nn::init::set_seed(0xC0FFEE);
         let dataset = SyntheticMNIST::new(200);
         let model = LeNet::new();
         let mut optimizer = SGD::with_momentum(model.parameters(), 0.05, 0.9);

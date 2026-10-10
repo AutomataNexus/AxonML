@@ -80,7 +80,6 @@ impl Conv1d {
         padding: usize,
         bias: bool,
     ) -> Self {
-        // Initialize weights
         let fan_in = in_channels * kernel_size;
         let weight_data = kaiming_uniform(out_channels, fan_in);
         let weight_reshaped = weight_data
@@ -121,11 +120,8 @@ impl Module for Conv1d {
         let input_data = input.data();
         let weight_data = self.weight.data();
 
-        // GPU-resident fast path: reshape [B,C,L] → [B,C,L,1], use Conv2d CUDA pipeline,
-        // then reshape output [B,Cout,Lout,1] → [B,Cout,Lout].
         #[cfg(feature = "cuda")]
         if input_data.device().is_gpu() {
-            // Auto-migrate weights to GPU if needed
             let input_dev = input_data.device();
             if !weight_data.device().is_gpu() {
                 self.weight.to_device(input_dev);
@@ -135,7 +131,6 @@ impl Module for Conv1d {
             }
             let weight_data = self.weight.data();
 
-            // Reshape input [B, Cin, L] → [B, Cin, L, 1]
             let input_4d = input_data
                 .reshape(&[
                     batch_size as isize,
@@ -145,7 +140,6 @@ impl Module for Conv1d {
                 ])
                 .unwrap();
 
-            // Reshape weight [Cout, Cin, K] → [Cout, Cin, K, 1]
             let weight_4d = weight_data
                 .reshape(&[
                     self.out_channels as isize,
@@ -164,7 +158,6 @@ impl Module for Conv1d {
             );
 
             if let Some(output_4d) = gpu_output {
-                // Reshape output [B, Cout, Lout, 1] → [B, Cout, Lout]
                 let output_tensor = output_4d
                     .reshape(&[
                         batch_size as isize,
@@ -198,7 +191,6 @@ impl Module for Conv1d {
                     return Variable::new(output_tensor, false);
                 }
             }
-            // Fall through to CPU path if GPU conv failed
         }
 
         let input_vec = input_data.to_vec();
@@ -457,9 +449,6 @@ fn im2col(
     let pad_h_s = pad_h as isize;
     let pad_w_s = pad_w as isize;
 
-    // Fused single-pass: iterate linearly over output col matrix
-    // col_row = c * kH * kW + kh_off * kW + kw_off
-    // col_col = oh * out_w + ow
     for col_row in 0..col_h {
         let c = col_row / kk;
         let k_idx = col_row % kk;
@@ -490,6 +479,205 @@ fn im2col(
 }
 
 /// Conv2d forward using im2col + matmul. Supports groups.
+pub fn conv2d_functional(
+    input: &Variable,
+    weight: &Variable,
+    bias: Option<&Variable>,
+    stride: (usize, usize),
+    padding: (usize, usize),
+    groups: usize,
+) -> Variable {
+    let input_shape = input.shape();
+    let batch_size = input_shape[0];
+    let in_height = input_shape[2];
+    let in_width = input_shape[3];
+
+    let wshape = weight.shape();
+    let out_channels = wshape[0];
+    let in_channels = wshape[1] * groups;
+    let (kh, kw) = (wshape[2], wshape[3]);
+    let (sh, sw) = stride;
+    let (ph, pw) = padding;
+
+    let out_height = (in_height + 2 * ph - kh) / sh + 1;
+    let out_width = (in_width + 2 * pw - kw) / sw + 1;
+
+    let input_data = input.data();
+    let weight_data = weight.data();
+
+    #[cfg(feature = "cuda")]
+    if input_data.device().is_gpu() {
+        let input_dev = input_data.device();
+        let w_gpu = if weight_data.device().is_gpu() {
+            weight_data.clone()
+        } else {
+            weight_data
+                .to_device(input_dev)
+                .unwrap_or_else(|_| weight_data.clone())
+        };
+        let bias_gpu = bias.map(|b| {
+            let bd = b.data();
+            if bd.device().is_gpu() {
+                bd
+            } else {
+                bd.to_device(input_dev).unwrap_or(bd)
+            }
+        });
+        let gpu_output = if groups == 1 {
+            input_data.conv2d_cuda(&w_gpu, bias_gpu.as_ref(), stride, padding)
+        } else {
+            input_data.conv2d_grouped_cuda(&w_gpu, bias_gpu.as_ref(), stride, padding, groups)
+        };
+        if let Some(output_tensor) = gpu_output {
+            let requires_grad =
+                (input.requires_grad() || weight.requires_grad()) && is_grad_enabled();
+            if requires_grad {
+                let bias_grad_fn = bias.map(|b| b.grad_fn().cloned());
+                if groups == 1 {
+                    let grad_fn = GradFn::new(Conv2dBackward::new(
+                        input.grad_fn().cloned(),
+                        weight.grad_fn().cloned(),
+                        bias_grad_fn,
+                        input_data,
+                        w_gpu,
+                        input_shape,
+                        in_channels,
+                        out_channels,
+                        (kh, kw),
+                        stride,
+                        padding,
+                        bias.is_some(),
+                    ));
+                    return Variable::from_operation(output_tensor, grad_fn, true);
+                }
+                let grad_fn = GradFn::new(GroupedConv2dBackward::new(
+                    input.grad_fn().cloned(),
+                    weight.grad_fn().cloned(),
+                    bias_grad_fn,
+                    input_data,
+                    w_gpu,
+                    input_shape,
+                    in_channels,
+                    out_channels,
+                    (kh, kw),
+                    stride,
+                    padding,
+                    groups,
+                    bias.is_some(),
+                ));
+                return Variable::from_operation(output_tensor, grad_fn, true);
+            }
+            return Variable::new(output_tensor, false);
+        }
+    }
+
+    let input_vec = input_data.to_vec();
+    let weight_vec = weight_data.to_vec();
+    let bias_vec = bias.map(|b| b.data().to_vec());
+
+    let conv_flops = out_channels * in_channels * kh * kw * out_height * out_width;
+    let output_data = if groups == 1 && conv_flops >= 500_000 {
+        let gpu_result = axonml_core::backends::cuda::cuda_conv2d_forward(
+            &input_vec,
+            &weight_vec,
+            bias_vec.as_deref(),
+            batch_size,
+            in_channels,
+            in_height,
+            in_width,
+            out_channels,
+            kh,
+            kw,
+            sh,
+            sw,
+            ph,
+            pw,
+        );
+        gpu_result.unwrap_or_else(|| {
+            conv2d_im2col(
+                &input_vec,
+                &weight_vec,
+                bias_vec.as_deref(),
+                batch_size,
+                in_channels,
+                in_height,
+                in_width,
+                out_channels,
+                kh,
+                kw,
+                sh,
+                sw,
+                ph,
+                pw,
+                groups,
+            )
+        })
+    } else {
+        conv2d_im2col(
+            &input_vec,
+            &weight_vec,
+            bias_vec.as_deref(),
+            batch_size,
+            in_channels,
+            in_height,
+            in_width,
+            out_channels,
+            kh,
+            kw,
+            sh,
+            sw,
+            ph,
+            pw,
+            groups,
+        )
+    };
+
+    let output_tensor = Tensor::from_vec(
+        output_data,
+        &[batch_size, out_channels, out_height, out_width],
+    )
+    .unwrap();
+    let requires_grad = (input.requires_grad() || weight.requires_grad()) && is_grad_enabled();
+    if requires_grad && groups == 1 {
+        let bias_grad_fn = bias.map(|b| b.grad_fn().cloned());
+        let grad_fn = GradFn::new(Conv2dBackward::new(
+            input.grad_fn().cloned(),
+            weight.grad_fn().cloned(),
+            bias_grad_fn,
+            input_data,
+            weight_data,
+            input_shape,
+            in_channels,
+            out_channels,
+            (kh, kw),
+            stride,
+            padding,
+            bias.is_some(),
+        ));
+        Variable::from_operation(output_tensor, grad_fn, true)
+    } else if requires_grad {
+        let bias_grad_fn = bias.map(|b| b.grad_fn().cloned());
+        let grad_fn = GradFn::new(GroupedConv2dBackward::new(
+            input.grad_fn().cloned(),
+            weight.grad_fn().cloned(),
+            bias_grad_fn,
+            input_data,
+            weight_data,
+            input_shape,
+            in_channels,
+            out_channels,
+            (kh, kw),
+            stride,
+            padding,
+            groups,
+            bias.is_some(),
+        ));
+        Variable::from_operation(output_tensor, grad_fn, true)
+    } else {
+        Variable::new(output_tensor, false)
+    }
+}
+
 fn conv2d_im2col(
     input: &[f32],
     weight: &[f32],
@@ -516,7 +704,6 @@ fn conv2d_im2col(
     let spatial = out_h * out_w;
     let in_spatial = in_height * in_width;
 
-    // Parallel: each batch element produces its own output slice
     let out_per_batch = out_channels * spatial;
     let per_batch: Vec<Vec<f32>> = (0..batch_size)
         .into_par_iter()
@@ -527,11 +714,9 @@ fn conv2d_im2col(
                 let ic_start = g * in_channels_per_group;
                 let oc_start = g * out_channels_per_group;
 
-                // Extract input for this batch+group
                 let in_offset = b * in_channels * in_spatial + ic_start * in_spatial;
                 let input_slice = &input[in_offset..in_offset + in_channels_per_group * in_spatial];
 
-                // im2col
                 let col = im2col(
                     input_slice,
                     in_channels_per_group,
@@ -547,12 +732,10 @@ fn conv2d_im2col(
                     out_w,
                 );
 
-                // Weight for this group
                 let w_offset = oc_start * in_channels_per_group * kh * kw;
                 let w_size = out_channels_per_group * col_h;
                 let weight_slice = &weight[w_offset..w_offset + w_size];
 
-                // GEMM via Tensor::matmul
                 let w_tensor =
                     Tensor::from_vec(weight_slice.to_vec(), &[out_channels_per_group, col_h])
                         .unwrap();
@@ -561,7 +744,6 @@ fn conv2d_im2col(
                 let result = w_tensor.matmul(&col_tensor).expect("matmul failed");
                 let result_vec = result.to_vec();
 
-                // Copy to output with bias
                 let out_offset = oc_start * spatial;
                 for oc_local in 0..out_channels_per_group {
                     let oc = oc_start + oc_local;
@@ -583,7 +765,6 @@ fn conv2d_im2col(
         })
         .collect();
 
-    // Flatten per-batch results into single output
     let mut output = Vec::with_capacity(batch_size * out_per_batch);
     for batch_out in per_batch {
         output.extend_from_slice(&batch_out);
@@ -608,11 +789,8 @@ impl Module for Conv2d {
         let input_data = input.data();
         let weight_data = self.weight.data();
 
-        // GPU-resident fast path: when input is already on GPU, do everything on GPU
-        // without any CPU↔GPU copies.
         #[cfg(feature = "cuda")]
         if input_data.device().is_gpu() {
-            // Auto-migrate weights to GPU if needed (one-time cost, cached via Arc)
             let input_dev = input_data.device();
             if !weight_data.device().is_gpu() {
                 self.weight.to_device(input_dev);
@@ -622,7 +800,6 @@ impl Module for Conv2d {
             }
             let weight_data = self.weight.data();
 
-            // Try cuDNN first (fastest path), fall back to im2col+GEMM
             #[cfg(feature = "cudnn")]
             let cudnn_output = {
                 let bias_tensor = self.bias.as_ref().map(|b| b.data());
@@ -640,7 +817,6 @@ impl Module for Conv2d {
             let gpu_output = if cudnn_output.is_some() {
                 cudnn_output
             } else if self.groups == 1 {
-                // Standard convolution: single im2col + GEMM
                 let bias_tensor = self.bias.as_ref().map(|b| b.data());
                 input_data.conv2d_cuda(
                     &weight_data,
@@ -649,7 +825,6 @@ impl Module for Conv2d {
                     self.padding,
                 )
             } else {
-                // Grouped convolution: run per-group im2col + GEMM on GPU
                 input_data.conv2d_grouped_cuda(
                     &weight_data,
                     self.bias.as_ref().map(|b| b.data()).as_ref(),
@@ -703,13 +878,11 @@ impl Module for Conv2d {
                     return Variable::new(output_tensor, false);
                 }
             }
-            // Fall through to CPU path if GPU conv failed
         }
 
         let input_vec = input_data.to_vec();
         let weight_vec = weight_data.to_vec();
 
-        // Try GPU im2col+GEMM for groups=1 when data is on CPU but GPU is available
         let conv_flops = self.out_channels * self.in_channels * kh * kw * out_height * out_width;
         let output_data = if self.groups == 1 && conv_flops >= 500_000 {
             let bias_vec = self.bias.as_ref().map(|b| b.data().to_vec());
@@ -781,7 +954,6 @@ impl Module for Conv2d {
             (input.requires_grad() || self.weight.requires_grad()) && is_grad_enabled();
 
         if requires_grad && self.groups == 1 {
-            // Full backward pass for standard convolution
             let weight_var = self.weight.variable();
             let bias_grad_fn = self.bias.as_ref().map(|b| b.variable().grad_fn().cloned());
 
@@ -801,7 +973,6 @@ impl Module for Conv2d {
             ));
             Variable::from_operation(output_tensor, grad_fn, true)
         } else if requires_grad {
-            // Grouped convolution backward (depthwise separable, etc.)
             let weight_var = self.weight.variable();
             let bias_grad_fn = self.bias.as_ref().map(|b| b.variable().grad_fn().cloned());
 
@@ -841,6 +1012,34 @@ impl Module for Conv2d {
             params.insert("bias".to_string(), bias.clone());
         }
         params
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        let (kh, kw) = self.kernel_size;
+        let (sh, sw) = self.stride;
+        let (ph, pw) = self.padding;
+        let depthwise = self.groups > 1 && self.groups == self.out_channels;
+        let mut node = crate::NodeSpec::new(if depthwise {
+            "DepthwiseConv2d"
+        } else {
+            "Conv2d"
+        })
+        .attr(
+            "kernel_shape",
+            crate::AttrVal::Ints(vec![kh as i64, kw as i64]),
+        )
+        .attr("strides", crate::AttrVal::Ints(vec![sh as i64, sw as i64]))
+        .attr(
+            "pads",
+            crate::AttrVal::Ints(vec![ph as i64, pw as i64, ph as i64, pw as i64]),
+        )
+        .attr("dilations", crate::AttrVal::Ints(vec![1, 1]))
+        .attr("group", crate::AttrVal::Int(self.groups as i64))
+        .param("weight");
+        if self.bias.is_some() {
+            node = node.param("bias");
+        }
+        vec![node]
     }
 
     fn name(&self) -> &'static str {
@@ -951,7 +1150,6 @@ impl Module for ConvTranspose2d {
 
         let mut output_data = vec![0.0f32; batch_size * self.out_channels * out_h * out_w];
 
-        // Transposed convolution: scatter input values through the kernel
         for b in 0..batch_size {
             for ic in 0..self.in_channels {
                 for ih in 0..in_h {
@@ -977,7 +1175,6 @@ impl Module for ConvTranspose2d {
                                             + oc * out_h * out_w
                                             + oh * out_w
                                             + ow;
-                                        // weight: (in_channels, out_channels, kh, kw)
                                         let w_idx = ic * self.out_channels * kh * kw
                                             + oc * kh * kw
                                             + ki * kw
@@ -992,7 +1189,6 @@ impl Module for ConvTranspose2d {
             }
         }
 
-        // Add bias
         if let Some(ref bias) = self.bias {
             let bias_vec = bias.data().to_vec();
             for b in 0..batch_size {
@@ -1104,7 +1300,6 @@ mod tests {
         let loss = output.sum();
         loss.backward();
 
-        // Input should have gradient (not None)
         assert!(
             input.grad().is_some(),
             "Conv1d: input gradient should flow through backward pass"
@@ -1150,7 +1345,6 @@ mod tests {
         let grad = input.grad().unwrap();
         assert_eq!(grad.shape(), &[1, 1, 5, 5]);
 
-        // Weight should also have gradient
         let w_grad = conv.weight.grad();
         assert!(
             w_grad.is_some(),
@@ -1162,12 +1356,11 @@ mod tests {
     fn test_conv2d_parameters() {
         let conv = Conv2d::new(3, 64, 3);
         let params = conv.parameters();
-        assert_eq!(params.len(), 2); // weight + bias
+        assert_eq!(params.len(), 2);
     }
 
     #[test]
     fn test_conv2d_grouped() {
-        // Depthwise: groups = in_channels = out_channels
         let conv = Conv2d::depthwise(4, 3);
         assert_eq!(conv.groups, 4);
         assert_eq!(conv.in_channels, 4);
@@ -1189,7 +1382,6 @@ mod tests {
             false,
         );
         let output = conv_t.forward(&input);
-        // H_out = (2-1)*2 - 2*1 + 3 + 1 = 4
         assert_eq!(output.shape(), vec![1, 1, 4, 4]);
     }
 
@@ -1219,7 +1411,6 @@ mod tests {
         let conv = Conv1d::with_options(1, 4, 3, 2, 1, true);
         let input = Variable::new(Tensor::from_vec(vec![1.0; 16], &[1, 1, 16]).unwrap(), true);
         let output = conv.forward(&input);
-        // L_out = (16 + 2*1 - 3) / 2 + 1 = 8
         assert_eq!(output.shape(), vec![1, 4, 8]);
 
         output.sum().backward();
@@ -1230,13 +1421,12 @@ mod tests {
 
     #[test]
     fn test_conv1d_multi_channel() {
-        let conv = Conv1d::new(3, 8, 5); // 3 input channels, 8 output, kernel 5
+        let conv = Conv1d::new(3, 8, 5);
         let input = Variable::new(
             Tensor::from_vec(vec![0.5; 2 * 3 * 20], &[2, 3, 20]).unwrap(),
             false,
         );
         let output = conv.forward(&input);
-        // L_out = (20 - 5) / 1 + 1 = 16 (no padding)
         assert_eq!(output.shape(), vec![2, 8, 16]);
     }
 
@@ -1260,7 +1450,6 @@ mod tests {
         assert_eq!(grad.shape(), &[1, 4, 8, 8]);
         assert!(grad.to_vec().iter().any(|g| g.abs() > 0.0));
 
-        // Parameters should also get gradients
         for p in conv.parameters() {
             let g = p.grad().expect("Conv params should have gradients");
             assert!(g.to_vec().iter().any(|v| v.abs() > 0.0));
@@ -1269,7 +1458,6 @@ mod tests {
 
     #[test]
     fn test_conv2d_groups_two() {
-        // 2 groups: 4 input channels split into 2 groups of 2
         let conv = Conv2d::with_groups(4, 8, (3, 3), (1, 1), (1, 1), true, 2);
         let input = Variable::new(
             Tensor::from_vec(vec![1.0; 4 * 6 * 6], &[1, 4, 6, 6]).unwrap(),
@@ -1281,9 +1469,8 @@ mod tests {
 
     #[test]
     fn test_conv2d_depthwise_separable_pattern() {
-        // Depthwise separable: depthwise conv + pointwise conv (standard MobileNet pattern)
-        let dw = Conv2d::depthwise(16, 3); // 16 channels, 3x3 kernel
-        let pw = Conv2d::with_options(16, 32, (1, 1), (1, 1), (0, 0), true); // pointwise
+        let dw = Conv2d::depthwise(16, 3);
+        let pw = Conv2d::with_options(16, 32, (1, 1), (1, 1), (0, 0), true);
 
         let input = Variable::new(
             Tensor::from_vec(vec![1.0; 16 * 8 * 8], &[1, 16, 8, 8]).unwrap(),
@@ -1295,7 +1482,6 @@ mod tests {
         let pw_out = pw.forward(&dw_out);
         assert_eq!(pw_out.shape(), vec![1, 32, 8, 8]);
 
-        // Full gradient flow through both
         pw_out.sum().backward();
         let grad = input
             .grad()
@@ -1309,14 +1495,12 @@ mod tests {
 
     #[test]
     fn test_conv_transpose2d_upsamples() {
-        // ConvTranspose2d with stride=2 should roughly double spatial dims
         let conv_t = ConvTranspose2d::with_options(1, 1, (4, 4), (2, 2), (1, 1), (0, 0), true);
         let input = Variable::new(
             Tensor::from_vec(vec![1.0; 4 * 4], &[1, 1, 4, 4]).unwrap(),
             false,
         );
         let output = conv_t.forward(&input);
-        // H_out = (4-1)*2 - 2*1 + 4 + 0 = 8
         assert_eq!(output.shape(), vec![1, 1, 8, 8]);
     }
 
@@ -1335,7 +1519,6 @@ mod tests {
         assert!(grad.to_vec().iter().all(|g| g.is_finite()));
         assert!(grad.to_vec().iter().any(|g| g.abs() > 0.0));
 
-        // Weight params should also have gradients
         for p in conv_t.parameters() {
             assert!(p.grad().is_some(), "ConvTranspose2d params need gradients");
         }
@@ -1349,7 +1532,7 @@ mod tests {
             false,
         );
         let output = conv_t.forward(&input);
-        assert_eq!(output.shape()[0], 2); // batch
-        assert_eq!(output.shape()[1], 16); // out_channels
+        assert_eq!(output.shape()[0], 2);
+        assert_eq!(output.shape()[1], 16);
     }
 }

@@ -66,11 +66,9 @@ pub struct GCNConv {
 impl GCNConv {
     /// Creates a new GCN convolution layer with bias.
     pub fn new(in_features: usize, out_features: usize) -> Self {
-        // Xavier initialization
         let scale = (2.0 / (in_features + out_features) as f32).sqrt();
         let weight_data: Vec<f32> = (0..in_features * out_features)
             .map(|i| {
-                // Simple deterministic-ish init for reproducibility
                 let x = ((i as f32 * 0.618_034) % 1.0) * 2.0 - 1.0;
                 x * scale
             })
@@ -143,41 +141,29 @@ impl GCNConv {
         let batch = shape[0];
         let adj_shape = adj.shape();
 
-        // GCN: output = adj @ x @ weight + bias
-        // Use Variable operations to preserve gradient flow
-        //
-        // Process per-sample: for each batch element, compute adj @ x_b @ weight
-        // This preserves gradient flow through x and weight via matmul backward.
         let weight = self.weight.variable();
 
         let mut per_sample: Vec<Variable> = Vec::with_capacity(batch);
         for b in 0..batch {
-            // x_b: (nodes, in_features)
             let x_b = x.select(0, b);
 
-            // adj_b: (nodes, nodes)
             let adj_b = if adj_shape.len() == 3 {
                 adj.select(0, b)
             } else {
                 adj.clone()
             };
 
-            // message_b = adj_b @ x_b → (nodes, in_features)
             let msg_b = adj_b.matmul(&x_b);
 
-            // out_b = msg_b @ weight → (nodes, out_features)
             let mut out_b = msg_b.matmul(&weight);
 
-            // Add bias
             if let Some(bias) = &self.bias {
                 out_b = out_b.add_var(&bias.variable());
             }
 
-            // Unsqueeze to (1, nodes, out_features) for stacking
             per_sample.push(out_b.unsqueeze(0));
         }
 
-        // Stack along batch dimension
         let refs: Vec<&Variable> = per_sample.iter().collect();
         Variable::cat(&refs, 0)
     }
@@ -197,7 +183,6 @@ impl Module for GCNConv {
     /// Forward with identity adjacency (self-loops only).
     /// For proper graph convolution, use `forward_graph(x, adj)`.
     fn forward(&self, input: &Variable) -> Variable {
-        // Use identity adjacency: each node only aggregates from itself
         let n = input.shape()[0];
         let mut eye_data = vec![0.0f32; n * n];
         for i in 0..n {
@@ -230,6 +215,10 @@ impl Module for GCNConv {
 
     fn name(&self) -> &'static str {
         "GCNConv"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("GCNConv")]
     }
 }
 
@@ -287,7 +276,6 @@ impl GATConv {
             true,
         );
 
-        // Attention vectors: one per head for source and destination
         let attn_scale = (1.0 / out_features as f32).sqrt();
         let attn_src_data: Vec<f32> = (0..total_out)
             .map(|i| {
@@ -384,7 +372,6 @@ impl GATConv {
                 }
             }
 
-            // Step 2: Compute attention per head
             let adj_off = if adj.shape().len() == 3 {
                 b * nodes * nodes
             } else {
@@ -394,12 +381,9 @@ impl GATConv {
             for head in 0..self.num_heads {
                 let head_off = head * self.out_features;
 
-                // Compute attention scores for each edge
-                // e_ij = LeakyReLU(attn_src · h_i + attn_dst · h_j)
                 let mut attn_scores = vec![f32::NEG_INFINITY; nodes * nodes];
 
                 for i in 0..nodes {
-                    // src score for node i
                     let mut src_score = 0.0;
                     for f in 0..self.out_features {
                         src_score += h[i * total_out + head_off + f]
@@ -416,14 +400,12 @@ impl GATConv {
                             }
 
                             let e = src_score + dst_score;
-                            // LeakyReLU
                             let e = if e > 0.0 { e } else { e * self.negative_slope };
                             attn_scores[i * nodes + j] = e;
                         }
                     }
                 }
 
-                // Softmax per row (per destination node)
                 for i in 0..nodes {
                     let row_start = i * nodes;
                     let row_end = row_start + nodes;
@@ -431,7 +413,7 @@ impl GATConv {
 
                     let max_val = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                     if max_val == f32::NEG_INFINITY {
-                        continue; // No neighbors
+                        continue;
                     }
 
                     let mut sum_exp = 0.0f32;
@@ -443,7 +425,6 @@ impl GATConv {
                         }
                     }
 
-                    // Weighted sum of neighbor features
                     let out_off = (b * nodes + i) * total_out + head_off;
                     for j in 0..nodes {
                         if exps[j] > 0.0 {
@@ -457,7 +438,6 @@ impl GATConv {
             }
         }
 
-        // Add bias
         if let Some(bias) = &self.bias {
             let bias_data = bias.data().to_vec();
             for b in 0..batch {
@@ -484,7 +464,6 @@ impl GATConv {
 
 impl Module for GATConv {
     fn forward(&self, input: &Variable) -> Variable {
-        // Use identity adjacency: each node only attends to itself
         let n = input.shape()[0];
         let mut eye_data = vec![0.0f32; n * n];
         for i in 0..n {
@@ -519,6 +498,10 @@ impl Module for GATConv {
 
     fn name(&self) -> &'static str {
         "GATConv"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("GATConv")]
     }
 }
 
@@ -567,7 +550,6 @@ mod tests {
         let output = gcn.forward_graph(&x, &adj);
         assert_eq!(output.shape(), vec![1, 3, 8]);
 
-        // All nodes have same input, so all should produce same output
         let data = output.data().to_vec();
         for i in 0..3 {
             for f in 0..8 {
@@ -583,17 +565,17 @@ mod tests {
     fn test_gcn_conv_parameters() {
         let gcn = GCNConv::new(16, 32);
         let params = gcn.parameters();
-        assert_eq!(params.len(), 2); // weight + bias
+        assert_eq!(params.len(), 2);
 
         let total_params: usize = params.iter().map(|p| p.numel()).sum();
-        assert_eq!(total_params, 16 * 32 + 32); // weight + bias
+        assert_eq!(total_params, 16 * 32 + 32);
     }
 
     #[test]
     fn test_gcn_conv_no_bias() {
         let gcn = GCNConv::without_bias(16, 32);
         let params = gcn.parameters();
-        assert_eq!(params.len(), 1); // weight only
+        assert_eq!(params.len(), 1);
     }
 
     #[test]
@@ -606,7 +588,7 @@ mod tests {
 
     #[test]
     fn test_gat_conv_shape() {
-        let gat = GATConv::new(72, 32, 4); // 4 heads
+        let gat = GATConv::new(72, 32, 4);
         let x = Variable::new(
             Tensor::from_vec(vec![1.0; 2 * 7 * 72], &[2, 7, 72]).expect("tensor creation failed"),
             false,
@@ -616,7 +598,7 @@ mod tests {
             false,
         );
         let output = gat.forward_graph(&x, &adj);
-        assert_eq!(output.shape(), vec![2, 7, 128]); // 32 * 4 = 128
+        assert_eq!(output.shape(), vec![2, 7, 128]);
     }
 
     #[test]
@@ -638,7 +620,7 @@ mod tests {
     fn test_gat_conv_parameters() {
         let gat = GATConv::new(16, 8, 4);
         let params = gat.parameters();
-        assert_eq!(params.len(), 4); // w, attn_src, attn_dst, bias
+        assert_eq!(params.len(), 4);
 
         let named = gat.named_parameters();
         assert!(named.contains_key("w"));
@@ -655,7 +637,6 @@ mod tests {
 
     #[test]
     fn test_gcn_zero_adjacency() {
-        // Zero adjacency should produce only bias in output
         let gcn = GCNConv::new(4, 4);
         let x = Variable::new(
             Tensor::from_vec(vec![99.0; 3 * 4], &[1, 3, 4]).expect("tensor creation failed"),
@@ -667,7 +648,6 @@ mod tests {
         );
         let output = gcn.forward_graph(&x, &adj);
 
-        // With zero adjacency, output should be just bias (all zeros initially)
         let data = output.data().to_vec();
         for val in &data {
             assert!(

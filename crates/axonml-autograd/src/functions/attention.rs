@@ -109,10 +109,6 @@ impl FusedAttentionBackward {
         let mut grad_k = vec![0.0f32; total_kv];
         let mut grad_v = vec![0.0f32; total_kv];
 
-        // Parallel over (batch, head) pairs — heads are completely independent,
-        // so each one owns a disjoint `par_chunks_mut` slice of grad_q/k/v and
-        // every accumulation is a plain `&mut` write into that slice.
-        // Good for CPU attention backward in single-GPU or pure-CPU training (distributed bottom tier).
         {
             use rayon::prelude::*;
             let num_bh = batch_size * num_heads;
@@ -194,7 +190,6 @@ impl FusedAttentionBackward {
                         }
                     });
             } else {
-                // small case, sequential
                 for b in 0..batch_size {
                     for h in 0..num_heads {
                         for i in 0..tgt_len {
@@ -205,7 +200,6 @@ impl FusedAttentionBackward {
                             };
                             let qi_base = ((b * num_heads + h) * tgt_len + i) * head_dim;
 
-                            // Recompute attention scores and softmax
                             let mut max_score = f32::NEG_INFINITY;
                             let mut scores = vec![0.0f32; eff_src];
                             for j in 0..eff_src {
@@ -221,7 +215,6 @@ impl FusedAttentionBackward {
                                 }
                             }
 
-                            // Softmax
                             let mut sum_exp = 0.0f32;
                             for s in &mut scores {
                                 *s = (*s - max_score).exp();
@@ -232,24 +225,20 @@ impl FusedAttentionBackward {
                                 *s *= inv_sum;
                             }
 
-                            // D_i = sum_d(grad_O[i,d] * O[i,d])
                             let mut d_i = 0.0f32;
                             for d in 0..head_dim {
                                 d_i += go_data[qi_base + d] * o_data[qi_base + d];
                             }
 
-                            // For each key position j
                             for j in 0..eff_src {
                                 let kj_base = ((b * num_heads + h) * src_len + j) * head_dim;
                                 let p_ij = scores[j];
 
-                                // grad_attn[i,j] = sum_d(grad_O[i,d] * V[j,d])
                                 let mut grad_attn_ij = 0.0f32;
                                 for d in 0..head_dim {
                                     grad_attn_ij += go_data[qi_base + d] * v_data[kj_base + d];
                                 }
 
-                                // grad_score[i,j] = P[i,j] * (grad_attn[i,j] - D_i)
                                 let grad_score_ij = p_ij * (grad_attn_ij - d_i);
                                 let scaled_gs = grad_score_ij * self.scale;
 
@@ -275,10 +264,8 @@ impl FusedAttentionBackward {
 
 impl GradientFunction for FusedAttentionBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // Try GPU backward kernel
         #[cfg(feature = "cuda")]
         if self.saved_q.device().is_gpu() {
-            // Ensure grad_output is on GPU
             let go_gpu = if grad_output.device().is_gpu() {
                 grad_output.clone()
             } else {
@@ -295,10 +282,8 @@ impl GradientFunction for FusedAttentionBackward {
             ) {
                 return vec![Some(gq), Some(gk), Some(gv)];
             }
-            // Fall through to CPU on failure
         }
 
-        // CPU fallback
         self.backward_cpu(grad_output)
     }
 
@@ -390,7 +375,6 @@ mod tests {
             }
         }
 
-        // At least V gradient should be nonzero
         let v_nonzero = grads[2]
             .as_ref()
             .unwrap()
@@ -420,9 +404,7 @@ mod tests {
         let output =
             Tensor::from_vec(vec![0.1f32; n], &shape).expect("backward: tensor creation failed");
 
-        let backward = FusedAttentionBackward::new(
-            None, None, None, q, k, v, output, scale, true, // causal=true
-        );
+        let backward = FusedAttentionBackward::new(None, None, None, q, k, v, output, scale, true);
 
         let grad =
             Tensor::from_vec(vec![1.0f32; n], &shape).expect("backward: tensor creation failed");

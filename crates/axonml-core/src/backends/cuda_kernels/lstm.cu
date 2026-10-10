@@ -328,3 +328,77 @@ extern "C" __global__ void batchnorm_norm_f32(
 
     y[idx] = gamma[c] * (x_val - m) * inv_std + beta[c];
 }
+
+// BatchNorm2d backward pass 1: per-channel gradient reductions.
+// sum_grad[c] = sum(grad); sum_grad_xhat[c] = sum(grad * x_hat),
+// x_hat = (x - mean) * rsqrt(var + eps). Buffers must be zeroed by the caller.
+// One BLOCK per channel c: the block strides over all N*spatial elements of that channel and
+// warp-reduces, so the channel accumulators take ONE atomic per warp instead of one per element.
+// The old kernel issued N*C*spatial atomics onto just C counters (e.g. ~2M atomics onto 64
+// counters at b8/C64/64x64), which serialized hard on the atomic units.
+extern "C" __global__ void batchnorm_bwd_reduce_f32(
+    const float* __restrict__ grad,        // [N, C, spatial]
+    const float* __restrict__ x,           // [N, C, spatial]
+    const float* __restrict__ mean,        // [C]
+    const float* __restrict__ var,         // [C]
+    float* __restrict__ sum_grad,          // [C]
+    float* __restrict__ sum_grad_xhat,     // [C]
+    float eps,
+    unsigned int N,
+    unsigned int C,
+    unsigned int spatial
+) {
+    const unsigned int c = blockIdx.x;
+    if (c >= C) return;
+    const float inv_std = rsqrtf(var[c] + eps);
+    const float mc = mean[c];
+    const unsigned int per_ch = N * spatial;
+
+    float sg = 0.0f, sgx = 0.0f;
+    for (unsigned int i = threadIdx.x; i < per_ch; i += blockDim.x) {
+        const unsigned int nn = i / spatial;
+        const unsigned int sp = i - nn * spatial;
+        const size_t idx = ((size_t)nn * C + c) * spatial + sp;
+        const float g = grad[idx];
+        sg  += g;
+        sgx += g * (x[idx] - mc) * inv_std;
+    }
+    for (unsigned int o = 16; o > 0; o >>= 1) {
+        sg  += __shfl_down_sync(0xffffffff, sg,  o);
+        sgx += __shfl_down_sync(0xffffffff, sgx, o);
+    }
+    if ((threadIdx.x & 31) == 0) {
+        atomicAdd(&sum_grad[c], sg);
+        atomicAdd(&sum_grad_xhat[c], sgx);
+    }
+}
+
+// BatchNorm2d backward pass 2: grad_input elementwise.
+// grad_input = gamma*inv_std/Nf * (Nf*grad - sum_grad - x_hat*sum_grad_xhat),
+// Nf = N*spatial. grad_weight = sum_grad_xhat, grad_bias = sum_grad (from pass 1).
+extern "C" __global__ void batchnorm_bwd_input_f32(
+    const float* __restrict__ grad,         // [N, C, spatial]
+    const float* __restrict__ x,            // [N, C, spatial]
+    const float* __restrict__ mean,         // [C]
+    const float* __restrict__ var,          // [C]
+    const float* __restrict__ gamma,        // [C]
+    const float* __restrict__ sum_grad,     // [C]
+    const float* __restrict__ sum_grad_xhat,// [C]
+    float* __restrict__ grad_input,         // [N, C, spatial]
+    float eps,
+    unsigned int N,
+    unsigned int C,
+    unsigned int spatial,
+    unsigned int total                      // N * C * spatial
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= total) return;
+
+    unsigned int c = (idx / spatial) % C;
+    float inv_std = rsqrtf(var[c] + eps);
+    float nf = (float)(N * spatial);
+    float x_hat = (x[idx] - mean[c]) * inv_std;
+    float scale = gamma[c] * inv_std / nf;
+    float g = grad[idx];
+    grad_input[idx] = scale * (nf * g - sum_grad[c] - x_hat * sum_grad_xhat[c]);
+}

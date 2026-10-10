@@ -43,7 +43,6 @@ fn main() {
     let o = mk(0.4);
     let go = mk(0.01);
 
-    // Warm-up
     for _ in 0..5 {
         let _ = q
             .fused_attention_bwd_cuda(&k, &v, &o, &go, scale, true)
@@ -58,7 +57,6 @@ fn main() {
                 .unwrap();
             std::hint::black_box(gq);
         }
-        // Stream drain
         let (drain, _, _) = q
             .fused_attention_bwd_cuda(&k, &v, &o, &go, scale, true)
             .unwrap();
@@ -73,7 +71,7 @@ fn main() {
         );
     }
 
-    let per_layer_us = 0.0; // filled below
+    let per_layer_us = 0.0;
     println!("\nNote: ~30 layers per training step — multiply µs/call by 30.");
     let _ = per_layer_us;
 }

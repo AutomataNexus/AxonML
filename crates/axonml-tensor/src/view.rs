@@ -285,8 +285,6 @@ impl<T: Numeric> Tensor<T> {
             });
         }
 
-        // For simplicity, this is a basic implementation
-        // A full implementation would match PyTorch's semantics exactly
         let output_shape = indices.shape();
         let mut output_data = vec![T::zero(); numel(output_shape)];
 
@@ -301,7 +299,6 @@ impl<T: Numeric> Tensor<T> {
                     size: self.shape[dim],
                 });
             }
-            // Simplified: assumes 1D case
             output_data[out_idx] = self_data[index];
         }
 
@@ -380,7 +377,6 @@ pub fn cat<T: Scalar>(tensors: &[Tensor<T>], dim: usize) -> Result<Tensor<T>> {
         });
     }
 
-    // Validate shapes match except for concat dimension
     for t in tensors.iter().skip(1) {
         if t.ndim() != ndim {
             return Err(Error::invalid_operation(
@@ -394,22 +390,27 @@ pub fn cat<T: Scalar>(tensors: &[Tensor<T>], dim: usize) -> Result<Tensor<T>> {
         }
     }
 
-    // Compute output shape
     let mut output_shape = Shape::from_slice(first.shape());
     output_shape[dim] = tensors.iter().map(|t| t.shape()[dim]).sum();
 
-    // Allocate output
     let total_numel = numel(&output_shape);
     let mut output_data = vec![T::zeroed(); total_numel];
 
-    // Copy data - simplified for contiguous case
-    let mut offset = 0;
+    let outer: usize = first.shape()[..dim].iter().product();
+    let inner: usize = first.shape()[dim + 1..].iter().product();
+    let out_dim: usize = output_shape[dim];
+    let mut dim_off = 0usize;
     for t in tensors {
         let data = t.to_vec();
-        for val in data {
-            output_data[offset] = val;
-            offset += 1;
+        let ds = t.shape()[dim];
+        for o in 0..outer {
+            let src = &data[o * ds * inner..(o + 1) * ds * inner];
+            let dst_start = (o * out_dim + dim_off) * inner;
+            for (j, val) in src.iter().enumerate() {
+                output_data[dst_start + j] = *val;
+            }
         }
+        dim_off += ds;
     }
 
     Tensor::from_vec(output_data, &output_shape)
@@ -425,7 +426,6 @@ pub fn stack<T: Scalar>(tensors: &[Tensor<T>], dim: usize) -> Result<Tensor<T>> 
         return Err(Error::invalid_operation("Cannot stack empty list"));
     }
 
-    // Unsqueeze each tensor and then concatenate
     let unsqueezed: Result<Vec<Tensor<T>>> =
         tensors.iter().map(|t| t.unsqueeze(dim as i64)).collect();
 
@@ -486,6 +486,23 @@ mod tests {
         let c = cat(&[a, b], 0).unwrap();
         assert_eq!(c.shape(), &[4]);
         assert_eq!(c.to_vec(), vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_cat_inner_axis() {
+        let a =
+            Tensor::<f32>::from_vec((0..12).map(|x| x as f32).collect(), &[1, 3, 2, 2]).unwrap();
+        let b =
+            Tensor::<f32>::from_vec((100..106).map(|x| x as f32).collect(), &[1, 3, 1, 2]).unwrap();
+        let c = cat(&[a, b], 2).unwrap();
+        assert_eq!(c.shape(), &[1, 3, 3, 2]);
+        assert_eq!(
+            c.to_vec(),
+            vec![
+                0.0, 1.0, 2.0, 3.0, 100.0, 101.0, 4.0, 5.0, 6.0, 7.0, 102.0, 103.0, 8.0, 9.0, 10.0,
+                11.0, 104.0, 105.0,
+            ]
+        );
     }
 
     #[test]

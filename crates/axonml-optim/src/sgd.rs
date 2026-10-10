@@ -157,30 +157,20 @@ impl Optimizer for SGD {
 
             let param_data = param.data();
 
-            // ============================================================
-            // Tensor-op path: works on both CPU and GPU without to_vec()
-            // All ops (add, mul, mul_scalar, sub) dispatch to CUDA when
-            // the tensors are GPU-resident.
-            // ============================================================
-
-            // Apply weight decay: d = grad + weight_decay * param
             let d = if self.weight_decay == 0.0 {
                 grad.clone()
             } else {
                 grad.add(&param_data.mul_scalar(self.weight_decay)).unwrap()
             };
 
-            // Apply momentum
             let update_dir = if self.momentum == 0.0 {
                 d
             } else {
                 let buf = &mut self.momentum_buffers[i];
 
                 if buf.is_none() {
-                    // First iteration: momentum buffer = d
                     *buf = Some(d.clone());
                 } else {
-                    // buf = momentum * buf + (1 - dampening) * d
                     let old = buf.as_ref().unwrap();
                     let new_buf = old
                         .mul_scalar(self.momentum)
@@ -192,14 +182,12 @@ impl Optimizer for SGD {
                 let buf_ref = buf.as_ref().unwrap();
 
                 if self.nesterov {
-                    // effective = d + momentum * buf
                     d.add(&buf_ref.mul_scalar(self.momentum)).unwrap()
                 } else {
                     buf_ref.clone()
                 }
             };
 
-            // param = param - lr * update_dir
             let new_param = param_data.sub(&update_dir.mul_scalar(self.lr)).unwrap();
             param.update_data(new_param);
         }
@@ -266,7 +254,6 @@ mod tests {
         );
         let param = Parameter::from_variable(var);
 
-        // Manually set gradient
         param
             .variable()
             .set_grad(Tensor::from_vec(vec![0.1, 0.2, 0.3], &[3]).expect("tensor creation failed"));
@@ -275,7 +262,6 @@ mod tests {
         optimizer.step();
 
         let new_data = param.data().to_vec();
-        // param = param - lr * grad = [1, 2, 3] - 0.1 * [0.1, 0.2, 0.3]
         assert!((new_data[0] - 0.99).abs() < 1e-5);
         assert!((new_data[1] - 1.98).abs() < 1e-5);
         assert!((new_data[2] - 2.97).abs() < 1e-5);
@@ -289,19 +275,16 @@ mod tests {
         );
         let param = Parameter::from_variable(var);
 
-        // Set gradient
         param
             .variable()
             .set_grad(Tensor::from_vec(vec![0.1, 0.2, 0.3], &[3]).expect("tensor creation failed"));
 
         let mut optimizer = SGD::new(vec![param.clone()], 0.1);
 
-        // Verify gradient exists
         assert!(param.grad().is_some());
 
         optimizer.zero_grad();
 
-        // Gradient should be zeroed
         let grad = param.grad();
         if let Some(g) = grad {
             assert!(g.to_vec().iter().all(|&x| x == 0.0));

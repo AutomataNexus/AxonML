@@ -149,6 +149,23 @@ impl GradientFunction for MatMulBackward {
                 .expect("backward: device transfer failed")
         };
 
+        // ── a side with no grad_fn (frozen weight, constant input) gets no gradient: for a frozen
+        //    152k-vocab lm_head that is a 545 MB tensor and a 52 GFLOP GEMM per call, thrown away ──
+        let need_lhs = self.next_fns[0].is_some();
+        let need_rhs = self.next_fns[1].is_some();
+        if !need_lhs && !need_rhs {
+            return vec![None, None];
+        }
+        if !need_rhs {
+            let grad_lhs_raw = go.matmul(&rt).expect("backward: matmul failed");
+            let grad_lhs = reduce_matmul_grad(&grad_lhs_raw, &self.saved_lhs);
+            return vec![Some(grad_lhs), None];
+        }
+        if !need_lhs {
+            let grad_rhs_raw = lt.matmul(&go).expect("backward: matmul failed");
+            let grad_rhs = reduce_matmul_grad(&grad_rhs_raw, &self.saved_rhs);
+            return vec![None, Some(grad_rhs)];
+        }
         // grad_lhs = grad_output @ rhs^T
         let grad_lhs_raw = go.matmul(&rt).expect("backward: matmul failed");
         // grad_rhs = lhs^T @ grad_output
@@ -566,22 +583,27 @@ impl GradientFunction for SelectBackward {
             grad_data
                 .par_iter_mut()
                 .enumerate()
-                .for_each(|(out_idx, g)| {
-                    let mut remaining = out_idx;
-                    let mut in_linear = 0usize;
+                .for_each(|(in_idx, g)| {
+                    let mut remaining = in_idx;
+                    let mut out_idx = 0usize;
                     let mut out_d = 0;
+                    let mut on_slice = true;
                     for d in 0..ndim {
+                        let coord = remaining / in_strides[d];
+                        remaining %= in_strides[d];
                         if d == self.dim {
-                            in_linear += self.index * in_strides[d];
+                            if coord != self.index {
+                                on_slice = false;
+                                break;
+                            }
                         } else {
-                            let coord = remaining / out_strides[out_d];
-                            remaining %= out_strides[out_d];
-                            in_linear += coord * in_strides[d];
+                            out_idx += coord * out_strides[out_d];
                             out_d += 1;
                         }
                     }
-                    let _ = in_linear; // keep write live for all paths (silences unused_assign in parallel closure)
-                    *g = grad_out_data[out_idx];
+                    if on_slice {
+                        *g = grad_out_data[out_idx];
+                    }
                 });
         } else {
             for out_idx in 0..out_numel {
@@ -781,12 +803,31 @@ impl GradientFunction for SumDimBackward {
 mod tests {
     use super::*;
 
+    /// A consumer that wants a gradient; `MatMulBackward` only computes the
+    /// operands that have one.
+    #[derive(Debug)]
+    struct Leaf;
+    impl GradientFunction for Leaf {
+        fn apply(&self, _g: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+            Vec::new()
+        }
+        fn name(&self) -> &'static str {
+            "Leaf"
+        }
+        fn next_functions(&self) -> &[Option<GradFn>] {
+            &[]
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
     #[test]
     fn test_matmul_backward() {
         // A: 2x3, B: 3x4, C: 2x4
         let a = Tensor::from_vec(vec![1.0; 6], &[2, 3]).expect("backward: tensor creation failed");
         let b = Tensor::from_vec(vec![1.0; 12], &[3, 4]).expect("backward: tensor creation failed");
-        let grad_fn = MatMulBackward::new(None, None, a, b);
+        let grad_fn = MatMulBackward::new(Some(GradFn::new(Leaf)), Some(GradFn::new(Leaf)), a, b);
 
         let grad_output =
             Tensor::from_vec(vec![1.0; 8], &[2, 4]).expect("backward: tensor creation failed");
@@ -796,6 +837,20 @@ mod tests {
         assert_eq!(grads[0].as_ref().unwrap().shape(), &[2, 3]);
         // grad_rhs should be 3x4
         assert_eq!(grads[1].as_ref().unwrap().shape(), &[3, 4]);
+    }
+
+    #[test]
+    fn test_matmul_backward_skips_operands_without_a_consumer() {
+        let a = Tensor::from_vec(vec![1.0; 6], &[2, 3]).unwrap();
+        let b = Tensor::from_vec(vec![1.0; 12], &[3, 4]).unwrap();
+        let grad_output = Tensor::from_vec(vec![1.0; 8], &[2, 4]).unwrap();
+
+        let both = MatMulBackward::new(None, None, a.clone(), b.clone()).apply(&grad_output);
+        assert!(both[0].is_none() && both[1].is_none());
+
+        let lhs_only = MatMulBackward::new(Some(GradFn::new(Leaf)), None, a, b).apply(&grad_output);
+        assert_eq!(lhs_only[0].as_ref().unwrap().shape(), &[2, 3]);
+        assert!(lhs_only[1].is_none());
     }
 
     #[test]

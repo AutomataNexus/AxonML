@@ -83,6 +83,15 @@ pub struct Dropout {
     training: AtomicBool,
 }
 
+impl Clone for Dropout {
+    fn clone(&self) -> Self {
+        Self {
+            p: self.p,
+            training: AtomicBool::new(self.training.load(Ordering::Relaxed)),
+        }
+    }
+}
+
 impl std::fmt::Debug for Dropout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Dropout")
@@ -126,17 +135,14 @@ impl Module for Dropout {
         let input_data = input.data();
         let shape = input_data.shape().to_vec();
         let numel = input_data.numel();
-        // Use deterministic RNG during checkpoint recomputation
         let mut rng = if let Some(seed) = checkpoint_rng_seed() {
             StdRng::seed_from_u64(seed)
         } else {
-            StdRng::from_rng(rand::thread_rng()).unwrap()
+            axonml_tensor::rng::with_rng(|r| StdRng::from_rng(&mut *r).unwrap())
         };
 
-        // Scale factor for inverted dropout
         let scale = 1.0 / (1.0 - self.p);
 
-        // Build mask on CPU: 0.0 for dropped, scale for kept
         let mask: Vec<f32> = (0..numel)
             .map(|_| {
                 if rng.r#gen::<f32>() < self.p {
@@ -147,7 +153,6 @@ impl Module for Dropout {
             })
             .collect();
 
-        // Create mask tensor and move to input device
         let mut mask_tensor = Tensor::from_vec(mask, &shape).expect("tensor creation failed");
         if input_data.device().is_gpu() {
             mask_tensor = mask_tensor.to_device(input_data.device()).unwrap();
@@ -177,6 +182,10 @@ impl Module for Dropout {
 
     fn name(&self) -> &'static str {
         "Dropout"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Identity")]
     }
 }
 
@@ -236,11 +245,10 @@ impl Module for Dropout2d {
         let input_vec = input_data.to_vec();
         let total = input_vec.len();
         let mut mask = vec![0.0f32; total];
-        // Use deterministic RNG during checkpoint recomputation
         let mut rng = if let Some(seed) = checkpoint_rng_seed() {
             StdRng::seed_from_u64(seed)
         } else {
-            StdRng::from_rng(rand::thread_rng()).unwrap()
+            axonml_tensor::rng::with_rng(|r| StdRng::from_rng(&mut *r).unwrap())
         };
         let scale = 1.0 / (1.0 - self.p);
 
@@ -321,7 +329,6 @@ impl Module for AlphaDropout {
             return input.clone();
         }
 
-        // SELU parameters
         const ALPHA: f32 = 1.673_263_2;
         const SCALE: f32 = 1.050_701;
 
@@ -334,20 +341,17 @@ impl Module for AlphaDropout {
         let input_data = input.data();
         let shape = input_data.shape().to_vec();
         let numel = input_data.numel();
-        // Use deterministic RNG during checkpoint recomputation
         let mut rng = if let Some(seed) = checkpoint_rng_seed() {
             StdRng::seed_from_u64(seed)
         } else {
-            StdRng::from_rng(rand::thread_rng()).unwrap()
+            axonml_tensor::rng::with_rng(|r| StdRng::from_rng(&mut *r).unwrap())
         };
 
-        // Build mask on CPU: 'a' where kept, 0.0 where dropped
         let dropped_val = a * alpha_p + b;
         let mask_raw: Vec<f32> = (0..numel)
             .map(|_| if rng.r#gen::<f32>() < self.p { 0.0 } else { a })
             .collect();
 
-        // Build bias tensor: dropped_val where dropped, b where kept
         let bias_raw: Vec<f32> = mask_raw
             .iter()
             .map(|&m| if m == 0.0 { dropped_val } else { b })
@@ -360,7 +364,6 @@ impl Module for AlphaDropout {
             bias_tensor = bias_tensor.to_device(input_data.device()).unwrap();
         }
 
-        // output = mask * input + bias  (all Tensor ops, GPU-dispatched)
         let output = input_data
             .mul(&mask_tensor)
             .unwrap()
@@ -409,11 +412,9 @@ mod tests {
         );
         let output = dropout.forward(&input);
 
-        // Some values should be zero, some should be scaled
         let output_vec = output.data().to_vec();
         let num_zeros = output_vec.iter().filter(|&&x| x == 0.0).count();
 
-        // With p=0.5, roughly half should be zero (with some variance)
         assert!(num_zeros > 300 && num_zeros < 700);
     }
 
@@ -428,7 +429,6 @@ mod tests {
         );
         let output = dropout.forward(&input);
 
-        // In eval mode, output should equal input
         assert_eq!(output.data().to_vec(), vec![1.0, 2.0, 3.0]);
     }
 

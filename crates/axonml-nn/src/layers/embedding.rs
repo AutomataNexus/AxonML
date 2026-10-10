@@ -49,7 +49,6 @@ struct EmbeddingBackward {
 
 impl GradientFunction for EmbeddingBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // GPU path: use CUDA scatter-add kernel
         #[cfg(feature = "cuda")]
         if grad_output.device().is_gpu() {
             let indices_u32: Vec<u32> = self.indices.iter().map(|&i| i as u32).collect();
@@ -61,11 +60,9 @@ impl GradientFunction for EmbeddingBackward {
             return vec![Some(grad_tensor)];
         }
 
-        // CPU fallback
         let grad_data = grad_output.to_vec();
         let mut weight_grad = vec![0.0f32; self.num_embeddings * self.embedding_dim];
 
-        // Scatter-add: accumulate gradients for each index
         for (i, &idx) in self.indices.iter().enumerate() {
             if idx < self.num_embeddings {
                 let src_offset = i * self.embedding_dim;
@@ -129,10 +126,8 @@ impl Embedding {
         embedding_dim: usize,
         padding_idx: Option<usize>,
     ) -> Self {
-        // Initialize weights from N(0, 1)
         let mut weight_data = normal(&[num_embeddings, embedding_dim], 0.0, 1.0);
 
-        // Set padding index to zeros if specified
         if let Some(pad_idx) = padding_idx {
             let mut data = weight_data.to_vec();
             for i in 0..embedding_dim {
@@ -183,18 +178,14 @@ impl Embedding {
     /// Here we use f32 and cast to usize.
     pub fn lookup(&self, indices: &Variable) -> Variable {
         let indices_data = indices.data();
-        // Copy indices to CPU (small: batch_size * seq_len values)
         let indices_vec = indices_data.to_vec();
         let indices_shape = indices_data.shape().to_vec();
 
-        // Output shape: indices_shape + [embedding_dim]
         let mut output_shape = indices_shape.clone();
         output_shape.push(self.embedding_dim);
         let output_size: usize = output_shape.iter().product();
 
-        // Compute gather indices and validate on CPU (indices are small)
         let mut safe_indices = Vec::with_capacity(indices_vec.len());
-        // Build flat gather index: for each token index, we need embedding_dim consecutive elements
         let mut gather_idx = Vec::with_capacity(output_size);
 
         for &idx_f in &indices_vec {
@@ -211,7 +202,6 @@ impl Embedding {
                 idx
             };
             safe_indices.push(safe_idx);
-            // Each token maps to embedding_dim elements starting at safe_idx * embedding_dim
             let base = safe_idx * self.embedding_dim;
             for d in 0..self.embedding_dim {
                 gather_idx.push((base + d) as u32);
@@ -222,7 +212,6 @@ impl Embedding {
         #[cfg(feature = "cuda")]
         let weight_device = weight_data.device();
 
-        // GPU path: use gather kernel to avoid copying entire weight matrix
         #[cfg(feature = "cuda")]
         let output_tensor = if weight_device.is_gpu() {
             weight_data.embedding_gather_cuda(&gather_idx, &output_shape)
@@ -272,6 +261,10 @@ impl Module for Embedding {
 
     fn name(&self) -> &'static str {
         "Embedding"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Embedding").param("weight")]
     }
 }
 
@@ -333,7 +326,6 @@ mod tests {
     #[test]
     fn test_embedding_with_padding() {
         let emb = Embedding::with_options(10, 4, Some(0));
-        // Padding index 0 should be all zeros
         let indices = Variable::new(
             Tensor::from_vec(vec![0.0], &[1]).expect("tensor creation failed"),
             false,

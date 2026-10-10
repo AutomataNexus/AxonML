@@ -33,8 +33,6 @@ use super::Backend;
 use crate::device::DeviceCapabilities;
 use crate::dtype::{Float, Numeric, Scalar};
 use crate::par::prelude::*;
-// f32 transcendental methods (powf, sin_cos, exp, ...) come from libm via
-// num_traits::Float when there is no std to provide them inherently.
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use num_traits::Float as _;
@@ -70,7 +68,7 @@ impl Backend for CpuBackend {
     }
 
     fn is_available(&self) -> bool {
-        true // CPU is always available
+        true
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
@@ -85,16 +83,14 @@ impl Backend for CpuBackend {
         }
     }
 
-    fn synchronize(&self) {
-        // No-op for CPU - operations are synchronous
-    }
+    fn synchronize(&self) {}
 }
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
-/// Total host memory in bytes. Needs an OS to ask: `None` without `std`.
+/// Returns the total system memory in bytes.
 fn get_system_memory() -> Option<usize> {
     #[cfg(feature = "std")]
     {
@@ -106,7 +102,7 @@ fn get_system_memory() -> Option<usize> {
     }
 }
 
-/// Available host memory in bytes. Needs an OS to ask: `None` without `std`.
+/// Returns the available system memory in bytes.
 fn get_available_memory() -> Option<usize> {
     #[cfg(feature = "std")]
     {
@@ -555,7 +551,6 @@ impl CpuBackend {
             c.len()
         );
 
-        // Use optimized BLAS routines for f32 and f64
         use core::any::TypeId;
         // `Scalar: Pod`, so these are checked bytemuck casts, and the TypeId
         // guard means they only ever see the matching element type.
@@ -583,19 +578,14 @@ impl CpuBackend {
             return;
         }
 
-        // Fallback: Use cache-efficient tiled matrix multiplication
-        // Block size chosen for typical L1 cache (32KB)
         const BLOCK_SIZE: usize = 64;
 
-        // Initialize C to zero
         for val in c.iter_mut() {
             *val = T::zero();
         }
 
         let flops = m.saturating_mul(n).saturating_mul(k);
         if m > 1 && flops >= (1 << 18) {
-            // Parallel over output-row blocks (i0 tiles). Each task owns disjoint
-            // rows of C; inner p/j loops stay serial per tile for cache.
             let threads = crate::par::current_num_threads().max(1);
             let rows_per = ((m / (threads * 4)).max(1)).min(m);
             c[..m * n]
@@ -623,7 +613,6 @@ impl CpuBackend {
             return;
         }
 
-        // Tiled matrix multiplication for better cache locality (serial small case)
         for i0 in (0..m).step_by(BLOCK_SIZE) {
             let i_end = (i0 + BLOCK_SIZE).min(m);
             for p0 in (0..k).step_by(BLOCK_SIZE) {
@@ -631,7 +620,6 @@ impl CpuBackend {
                 for j0 in (0..n).step_by(BLOCK_SIZE) {
                     let j_end = (j0 + BLOCK_SIZE).min(n);
 
-                    // Compute block C[i0:i_end, j0:j_end] += A[i0:i_end, p0:p_end] @ B[p0:p_end, j0:j_end]
                     for i in i0..i_end {
                         for p in p0..p_end {
                             let a_val = a[i * k + p];
@@ -679,14 +667,14 @@ impl CpuBackend {
                 alpha,
                 a.as_ptr(),
                 k as isize,
-                1, // A: row-major (m x k)
+                1,
                 b.as_ptr(),
                 n as isize,
-                1, // B: row-major (k x n)
+                1,
                 beta,
                 c.as_mut_ptr(),
                 n as isize,
-                1, // C: row-major (m x n)
+                1,
             );
         }
     }
@@ -725,14 +713,14 @@ impl CpuBackend {
                 alpha,
                 a.as_ptr(),
                 k as isize,
-                1, // A: row-major (m x k)
+                1,
                 b.as_ptr(),
                 n as isize,
-                1, // B: row-major (k x n)
+                1,
                 beta,
                 c.as_mut_ptr(),
                 n as isize,
-                1, // C: row-major (m x n)
+                1,
             );
         }
     }
@@ -750,10 +738,6 @@ impl CpuBackend {
             gemv_row_parallel_f32(c, a, b, n, k);
             return;
         }
-        // For m>1 (prefill inference, training forward/backward matmuls) and
-        // large enough work, parallelize over output rows (m dimension).
-        // Each rayon task owns a disjoint block of C rows and corresponding A
-        // rows; calls into the optimized single-thread sgemm on its tile.
         let flops = m.saturating_mul(n).saturating_mul(k);
         if m > 1 && flops >= (1 << 18) {
             matmul_f32_parallel_m(c, a, b, m, n, k);
@@ -808,18 +792,12 @@ impl CpuBackend {
             return;
         }
 
-        // m > 1 (prefill + training): parallel over output rows when large.
         let flops = m.saturating_mul(n).saturating_mul(k);
         if flops >= (1 << 18) {
             matmul_f32_bt_parallel_m(c, a, b, m, n, k);
             return;
         }
 
-        // m > 1 small: sgemm with B reinterpreted as [k, n] via transposed strides.
-        // Physical B layout is row-major [n, k]: element B[i, j] is at offset `i*k + j`.
-        // We want matmul to see it as a [k, n] matrix: element B'[i, j] at `j*k + i`.
-        // Setting rs=1 (stride 1 between rows) and cs=k (stride k between cols)
-        // on the same pointer reinterprets the layout correctly.
         // SAFETY: the assert at the top guarantees a ≥ m×k, b ≥ n×k and
         // c ≥ m×n elements; the transposed strides (1, k) index b within
         // those n×k elements, so every access sgemm makes is in bounds.
@@ -830,15 +808,15 @@ impl CpuBackend {
                 n,
                 1.0,
                 a.as_ptr(),
-                k as isize, // A row stride
-                1,          // A col stride — row-major [m, k]
+                k as isize,
+                1,
                 b.as_ptr(),
-                1,          // B row stride — transposed view
-                k as isize, // B col stride — transposed view
+                1,
+                k as isize,
                 0.0,
                 c.as_mut_ptr(),
                 n as isize,
-                1, // C row-major [m, n]
+                1,
             );
         }
     }
@@ -901,9 +879,6 @@ fn gemv_bt_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: us
     debug_assert_eq!(b.len(), n * k);
     debug_assert_eq!(c.len(), n);
 
-    // Chunk size heuristic: aim for ~64 output rows per task (each row is a
-    // k-length dot product). This balances rayon overhead against per-task
-    // cache residency.
     let threads = crate::par::current_num_threads().max(1);
     let chunk = (n / (threads * 4)).max(16).min(n);
 
@@ -914,8 +889,6 @@ fn gemv_bt_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: us
             for (local_i, c_slot) in c_chunk.iter_mut().enumerate() {
                 let row = row_base + local_i;
                 let b_row = &b[row * k..row * k + k];
-                // Dot product. The compiler auto-vectorizes this tight loop
-                // into FMAs when AVX2/AVX-512 is available.
                 let mut acc = 0.0f32;
                 for (&ai, &bi) in a.iter().zip(b_row.iter()) {
                     acc += ai * bi;
@@ -930,10 +903,6 @@ fn gemv_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: usize
     debug_assert_eq!(b.len(), k * n);
     debug_assert_eq!(c.len(), n);
 
-    // Slab size: aim for ~256 output cols per worker, bounded so we don't spawn
-    // orders-of-magnitude more slabs than threads. Each slab does k*slab FMAs;
-    // for k=2560, slab=256 gives ~650K FMAs per slab — good cache residency
-    // (~1 MB of B's rows streamed per slab at this width).
     let target_slab = 256usize.max(n / (crate::par::current_num_threads() * 4).max(1));
     let slab = target_slab.min(n).max(1);
 
@@ -942,11 +911,7 @@ fn gemv_row_parallel_f32(c: &mut [f32], a: &[f32], b: &[f32], n: usize, k: usize
         .for_each(|(slab_idx, c_slab)| {
             let col_start = slab_idx * slab;
             let this_n = c_slab.len();
-            // Zero this slab (we accumulate into it).
             c_slab.fill(0.0);
-            // Stream through rows of B. For each row k_i, multiply by a[k_i] and
-            // accumulate into c_slab. The inner loop over `this_n` is trivially
-            // auto-vectorizable (FMA in rustc-generated AVX2/AVX-512 code).
             for k_i in 0..k {
                 let a_k = a[k_i];
                 let row_start = k_i * n + col_start;
@@ -979,10 +944,8 @@ fn matmul_f32_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize
     }
 
     let threads = crate::par::current_num_threads().max(1);
-    // Aim for 2–4 tasks per thread for load balance on irregular m; keep chunks
-    // large enough that sgemm call overhead is negligible vs. the FMA work.
     let rows_per = ((m / (threads * 4)).max(1)).min(m);
-    let row_stride = rows_per * n; // elements per parallel chunk of C
+    let row_stride = rows_per * n;
 
     c.par_chunks_mut(row_stride)
         .enumerate()
@@ -993,8 +956,6 @@ fn matmul_f32_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize
                 return;
             }
             let a_sub = &a[i0 * k..(i0 + this_m) * k];
-            // c_chunk may be slightly oversized for the last uneven chunk; sgemm
-            // will only write this_m * n elements.
             CpuBackend::sgemm(c_chunk, a_sub, b, this_m, n, k, 1.0, 0.0);
         });
 }
@@ -1031,8 +992,6 @@ fn matmul_f32_bt_parallel_m(c: &mut [f32], a: &[f32], b: &[f32], m: usize, n: us
                 return;
             }
             let a_sub = &a[i0 * k..(i0 + this_m) * k];
-            // Re-apply the exact stride trick on the sub-matrix (A_sub is still
-            // row-major [this_m, k]; B is the full weight matrix).
             // SAFETY: `a_sub` is exactly this_m×k, `c_chunk` holds this_m×n
             // (this_m is derived from its length), and the top-of-fn assert
             // gives b ≥ n×k for the transposed (1, k) strides.
@@ -1152,13 +1111,13 @@ impl CpuBackend {
 }
 
 // =============================================================================
-// Positional Encoding Operations (for CPU / Hailo reference paths)
+// Positional Encoding Operations (for CPU / NPU reference paths)
 // =============================================================================
 
 impl CpuBackend {
     /// Apply split-halves RoPE (Llama/Qwen style) on f32 data in place.
     /// Parallelized with rayon over heads for large tensors.
-    /// Used by pure-CPU inference and as reference for Hailo-targeted models
+    /// Used by pure-CPU inference and as reference for NPU-targeted models
     /// (fast CPU forward during training/export/calibration is critical).
     pub fn apply_rope_split_halves_f32(
         data: &mut [f32],
@@ -1168,8 +1127,6 @@ impl CpuBackend {
         pos: usize,
     ) {
         let half = head_dim / 2;
-        // n_heads is typically small (8-128); sequential over heads is fine and simple.
-        // For batched per-token rope the outer loop in caller provides parallelism opportunity.
         for h in 0..n_heads {
             for d in 0..half {
                 let base = h * head_dim + d;
@@ -1183,8 +1140,6 @@ impl CpuBackend {
             }
         }
     }
-
-    // Additional batched / bhsd / backward variants can be added similarly for full coverage.
 
     /// Batched split-halves RoPE for [m, n_heads * head_dim].
     /// Parallel over m tokens (outer) * heads (inner).
@@ -1339,9 +1294,6 @@ mod tests {
 
     #[test]
     fn test_matmul() {
-        // A = [[1, 2], [3, 4]] (2x2)
-        // B = [[5, 6], [7, 8]] (2x2)
-        // C = [[19, 22], [43, 50]]
         let a = [1.0_f32, 2.0, 3.0, 4.0];
         let b = [5.0_f32, 6.0, 7.0, 8.0];
         let mut c = [0.0_f32; 4];
@@ -1370,8 +1322,6 @@ mod tests {
 
     #[test]
     fn test_transpose() {
-        // A = [[1, 2, 3], [4, 5, 6]] (2x3)
-        // B = [[1, 4], [2, 5], [3, 6]] (3x2)
         let a = [1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         let mut b = [0.0_f32; 6];
 

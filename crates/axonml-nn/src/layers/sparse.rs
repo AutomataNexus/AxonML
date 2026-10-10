@@ -123,11 +123,9 @@ impl SparseLinear {
 
     /// Internal constructor.
     fn build(in_features: usize, out_features: usize, structured: bool, bias: bool) -> Self {
-        // Kaiming uniform initialization for weights
         let weight_data = kaiming_uniform(out_features, in_features);
         let weight = Parameter::named("weight", weight_data, true);
 
-        // Bias initialization
         let bias_param = if bias {
             let bias_data = zeros(&[out_features]);
             Some(Parameter::named("bias", bias_data, true))
@@ -135,7 +133,6 @@ impl SparseLinear {
             None
         };
 
-        // Threshold initialization — small value so most weights start active
         let threshold_data = if structured {
             constant(&[out_features], DEFAULT_THRESHOLD)
         } else {
@@ -179,7 +176,6 @@ impl SparseLinear {
         let t_vec = threshold_data.to_vec();
 
         let mask_vec: Vec<f32> = if self.structured {
-            // One threshold per output neuron — broadcast across in_features
             w_vec
                 .iter()
                 .enumerate()
@@ -190,7 +186,6 @@ impl SparseLinear {
                 })
                 .collect()
         } else {
-            // One threshold per weight
             w_vec
                 .iter()
                 .zip(t_vec.iter())
@@ -248,7 +243,6 @@ impl SparseLinear {
             .expect("tensor creation failed");
         self.weight.update_data(new_weight);
 
-        // Reset thresholds to zero so forward pass doesn't re-prune
         let zero_threshold = if self.structured {
             zeros(&[self.out_features])
         } else {
@@ -305,7 +299,6 @@ impl SparseLinear {
         let w_vec = weight_data.to_vec();
         let t_vec = threshold_data.to_vec();
 
-        // Compute sigmoid((|w| - threshold) * temperature) element-wise
         let mask_vec: Vec<f32> = if self.structured {
             w_vec
                 .iter()
@@ -331,10 +324,6 @@ impl SparseLinear {
         let mask_tensor = Tensor::from_vec(mask_vec, &[self.out_features, self.in_features])
             .expect("tensor creation failed");
 
-        // Create as a variable that participates in the graph
-        // The mask depends on both weight and threshold, but since we compute
-        // it from the raw tensor values, we wrap it as a new variable.
-        // The gradient signal flows through the weight multiplication below.
         Variable::new(mask_tensor, false)
     }
 }
@@ -345,31 +334,25 @@ impl Module for SparseLinear {
         let batch_dims: Vec<usize> = input_shape[..input_shape.len() - 1].to_vec();
         let total_batch: usize = batch_dims.iter().product();
 
-        // Reshape to 2D if needed
         let input_2d = if input_shape.len() > 2 {
             input.reshape(&[total_batch, self.in_features])
         } else {
             input.clone()
         };
 
-        // Get weight variable and compute soft mask
         let weight_var = self.weight.variable();
         let mask = self.compute_soft_mask(&weight_var);
 
-        // effective_weight = weight * mask
         let effective_weight = weight_var.mul_var(&mask);
 
-        // y = x @ effective_weight^T
         let weight_t = effective_weight.transpose(0, 1);
         let mut output = input_2d.matmul(&weight_t);
 
-        // Add bias if present
         if let Some(ref bias) = self.bias {
             let bias_var = bias.variable();
             output = output.add_var(&bias_var);
         }
 
-        // Reshape back to original batch dimensions
         if batch_dims.len() > 1 || (batch_dims.len() == 1 && input_shape.len() > 2) {
             let mut output_shape: Vec<usize> = batch_dims;
             output_shape.push(self.out_features);
@@ -399,6 +382,15 @@ impl Module for SparseLinear {
 
     fn name(&self) -> &'static str {
         "SparseLinear"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![
+            crate::NodeSpec::new("Gemm")
+                .attr("trans_b", crate::AttrVal::Bool(true))
+                .param("weight")
+                .param("bias"),
+        ]
     }
 }
 
@@ -478,10 +470,8 @@ impl GroupSparsity {
         let w_vec = weight_data.to_vec();
         let total = w_vec.len();
 
-        // Number of complete groups
         let num_groups = total.div_ceil(self.group_size);
 
-        // Compute L2 norm per group, then sum (L1 of group norms)
         let mut group_norm_sum = 0.0f32;
         for g in 0..num_groups {
             let start = g * self.group_size;
@@ -496,10 +486,6 @@ impl GroupSparsity {
         let penalty_tensor =
             Tensor::from_vec(vec![penalty_val], &[1]).expect("tensor creation failed");
 
-        // Create as a variable. The penalty is computed from raw tensor values
-        // for simplicity. For full autograd integration, one would implement a
-        // custom backward function, but the penalty is typically used alongside
-        // weight decay in the optimizer.
         Variable::new(penalty_tensor, false)
     }
 }
@@ -709,8 +695,6 @@ mod tests {
 
     #[test]
     fn test_sparse_linear_density_initial() {
-        // With default threshold of 0.01, most Kaiming-initialized weights
-        // should be above threshold (density close to 1.0).
         let layer = SparseLinear::new(100, 50);
         let density = layer.density();
         assert!(
@@ -746,7 +730,6 @@ mod tests {
         let mut layer = SparseLinear::new(100, 50);
         let density_low_thresh = layer.density();
 
-        // Set high threshold — should prune more weights
         layer.reset_threshold(10.0);
         let density_high_thresh = layer.density();
 
@@ -761,7 +744,6 @@ mod tests {
     #[test]
     fn test_sparse_linear_low_threshold_dense() {
         let mut layer = SparseLinear::new(100, 50);
-        // Set threshold to zero — all weights should be active
         layer.reset_threshold(0.0);
         let density = layer.density();
         assert!(
@@ -790,18 +772,15 @@ mod tests {
     #[test]
     fn test_sparse_linear_hard_prune() {
         let mut layer = SparseLinear::new(10, 5);
-        // Set a threshold that will prune some weights
         layer.reset_threshold(0.5);
 
         let pre_prune_density = layer.density();
         layer.hard_prune();
 
-        // After hard prune, the zeroed weights should stay zero
         let weight_data = layer.weight.data();
         let w_vec = weight_data.to_vec();
         let zeros_count = w_vec.iter().filter(|&&v| v == 0.0).count();
 
-        // The number of zeros should correspond to the pruned fraction
         let expected_zeros = ((1.0 - pre_prune_density) * (10 * 5) as f32).round() as usize;
         assert_eq!(
             zeros_count, expected_zeros,
@@ -815,7 +794,6 @@ mod tests {
         layer.reset_threshold(0.5);
         layer.hard_prune();
 
-        // After hard prune, thresholds should be zero
         let t_vec = layer.threshold.data().to_vec();
         assert!(
             t_vec.iter().all(|&v| v == 0.0),
@@ -853,7 +831,6 @@ mod tests {
     fn test_sparse_linear_parameters_include_threshold() {
         let layer = SparseLinear::new(10, 5);
         let params = layer.parameters();
-        // weight + threshold + bias = 3
         assert_eq!(params.len(), 3);
 
         let named = layer.named_parameters();
@@ -866,7 +843,6 @@ mod tests {
     fn test_sparse_linear_parameters_no_bias() {
         let layer = SparseLinear::with_bias(10, 5, false);
         let params = layer.parameters();
-        // weight + threshold = 2
         assert_eq!(params.len(), 2);
     }
 
@@ -896,14 +872,12 @@ mod tests {
     #[test]
     fn test_sparse_linear_unstructured_threshold_shape() {
         let layer = SparseLinear::unstructured(10, 5);
-        // Unstructured: threshold has same shape as weight
         assert_eq!(layer.threshold.shape(), vec![5, 10]);
     }
 
     #[test]
     fn test_sparse_linear_structured_threshold_shape() {
         let layer = SparseLinear::new(10, 5);
-        // Structured: threshold has shape (out_features,)
         assert_eq!(layer.threshold.shape(), vec![5]);
     }
 
@@ -982,7 +956,6 @@ mod tests {
             penalty_large
         );
 
-        // Should scale linearly with lambda
         let ratio = penalty_large / penalty_small;
         assert!(
             (ratio - 10.0).abs() < 1e-4,
@@ -1025,18 +998,14 @@ mod tests {
 
         let ticket = LotteryTicket::snapshot(&params);
 
-        // Modify the weight
         let new_data = Tensor::from_vec(vec![99.0; 50], &[5, 10]).expect("tensor creation failed");
         params[0].update_data(new_data);
 
-        // Verify it changed
         let modified_weight = params[0].data().to_vec();
         assert_ne!(modified_weight, initial_weight);
 
-        // Rewind
         ticket.rewind(&params);
 
-        // Verify it's back to initial
         let rewound_weight = params[0].data().to_vec();
         assert_eq!(rewound_weight, initial_weight);
     }
@@ -1049,7 +1018,6 @@ mod tests {
 
         let ticket = LotteryTicket::snapshot(&params);
 
-        // Modify weight data (same shape)
         let new_data = Tensor::from_vec(vec![0.0; 50], &[5, 10]).expect("tensor creation failed");
         params[0].update_data(new_data);
 
@@ -1068,12 +1036,10 @@ mod tests {
 
         let ticket = LotteryTicket::snapshot(&params);
 
-        // Modify the parameter
         let new_data = Tensor::from_vec(vec![10.0, 20.0, 30.0, 40.0], &[2, 2])
             .expect("tensor creation failed");
         params[0].update_data(new_data);
 
-        // Mask: keep first two, prune last two
         let mask =
             Tensor::from_vec(vec![1.0, 1.0, 0.0, 0.0], &[2, 2]).expect("tensor creation failed");
         ticket.rewind_with_mask(&params, &[mask]);
@@ -1101,10 +1067,8 @@ mod tests {
 
     #[test]
     fn test_integration_sparse_linear_with_group_sparsity() {
-        // Create a SparseLinear layer
         let layer = SparseLinear::new(8, 4);
 
-        // Forward pass
         let input = Variable::new(
             Tensor::from_vec(vec![1.0; 16], &[2, 8]).expect("tensor creation failed"),
             false,
@@ -1112,8 +1076,7 @@ mod tests {
         let output = layer.forward(&input);
         assert_eq!(output.shape(), vec![2, 4]);
 
-        // Compute group sparsity penalty on the weights
-        let reg = GroupSparsity::new(0.001, 8); // group_size = in_features
+        let reg = GroupSparsity::new(0.001, 8);
         let weight_var = layer.weight.variable();
         let penalty = reg.penalty(&weight_var);
         let penalty_val = penalty.data().to_vec()[0];
@@ -1125,32 +1088,25 @@ mod tests {
 
     #[test]
     fn test_integration_lottery_ticket_with_pruning() {
-        // 1. Create layer and snapshot
         let mut layer = SparseLinear::new(8, 4);
         let ticket = LotteryTicket::snapshot(&layer.parameters());
 
-        // 2. Simulate training (modify weights)
         let new_weight = Tensor::from_vec(vec![0.5; 32], &[4, 8]).expect("tensor creation failed");
         layer.weight.update_data(new_weight);
 
-        // 3. Set threshold to prune some weights
         layer.reset_threshold(0.3);
 
-        // 4. Get the effective weight mask
         let mask = layer.hard_mask();
 
-        // 5. Rewind to initial weights with mask
         let weight_param = vec![layer.weight.clone()];
         ticket.rewind_with_mask(&weight_param, &[mask]);
 
-        // Verify shape is preserved
         assert_eq!(layer.weight.shape(), vec![4, 8]);
     }
 
     #[test]
     fn test_num_parameters_sparse_linear() {
         let layer = SparseLinear::new(10, 5);
-        // weight: 50 + threshold: 5 + bias: 5 = 60
         assert_eq!(layer.num_parameters(), 60);
     }
 }

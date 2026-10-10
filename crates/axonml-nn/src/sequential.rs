@@ -133,6 +133,34 @@ impl Module for Sequential {
         params
     }
 
+    fn named_buffers(&self) -> HashMap<String, axonml_tensor::Tensor<f32>> {
+        let mut buffers = HashMap::new();
+        for (module_name, module) in &self.modules {
+            for (buf_name, buf) in module.named_buffers() {
+                buffers.insert(format!("{module_name}.{buf_name}"), buf);
+            }
+        }
+        buffers
+    }
+
+    fn set_buffer(&self, name: &str, value: axonml_tensor::Tensor<f32>) -> bool {
+        match name.split_once('.') {
+            Some((mod_name, rest)) => self
+                .modules
+                .iter()
+                .find(|(n, _)| n == mod_name)
+                .is_some_and(|(_, m)| m.set_buffer(rest, value)),
+            None => false,
+        }
+    }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        self.modules
+            .iter()
+            .map(|(n, m)| (n.clone(), m.as_ref()))
+            .collect()
+    }
+
     fn set_training(&mut self, training: bool) {
         self.training = training;
         for (_, module) in &mut self.modules {
@@ -158,7 +186,6 @@ mod tests {
     use super::*;
     use axonml_tensor::Tensor;
 
-    // Test identity module
     struct TestIdentity;
 
     impl Module for TestIdentity {
@@ -167,7 +194,6 @@ mod tests {
         }
     }
 
-    // Test doubling module
     struct TestDouble;
 
     impl Module for TestDouble {
@@ -189,7 +215,6 @@ mod tests {
         let input = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2]).unwrap(), false);
         let output = seq.forward(&input);
 
-        // Double twice: 1*2*2=4, 2*2*2=8
         assert_eq!(output.data().to_vec(), vec![4.0, 8.0]);
     }
 

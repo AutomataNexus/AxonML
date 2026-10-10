@@ -13,7 +13,7 @@
 //     cudarc's `DeviceRepr` doesn't admit i8; reinterpret on entry).
 //
 // Eliminates the per-step 4 GB GPU→CPU `to_vec()` that would otherwise
-// fire inside `TernaryLinear::quantize_weights` for the 1B Trident run.
+// fire inside `TernaryLinear::quantize_weights` for a 1B ternary run.
 //
 // Compile: nvcc -ptx -arch=sm_89 --use_fast_math ternary_quantize.cu \
 //                  -o ternary_quantize.ptx

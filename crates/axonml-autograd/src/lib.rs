@@ -32,7 +32,6 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
-// ML/tensor-specific allowances
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_precision_loss)]
@@ -101,6 +100,7 @@ pub mod grad_fn;
 pub mod graph;
 pub mod inspect;
 pub mod no_grad;
+pub mod trace_capture;
 pub mod variable;
 
 // =============================================================================
@@ -111,7 +111,9 @@ pub use amp::{
     AutocastGuard, AutocastPolicy, autocast, autocast_dtype, disable_autocast, is_autocast_enabled,
 };
 pub use backward::backward;
-pub use checkpoint::{checkpoint, checkpoint_rng_seed, checkpoint_sequential};
+pub use checkpoint::{
+    checkpoint, checkpoint_rng_seed, checkpoint_sequential, checkpoint_with_params,
+};
 pub use functions::{
     FusedAttentionBackward, GruGatesBackward, IdentityBackward, LstmGatesBackward,
 };
@@ -119,6 +121,7 @@ pub use grad_fn::{GradFn, GradientFunction};
 pub use graph::{ComputationGraph, GraphNode};
 pub use inspect::{GraphSnapshot, SnapshotNode, depth, node_count, to_dot, trace_backward};
 pub use no_grad::{NoGradGuard, no_grad};
+pub use trace_capture::{RecordedOp, Recording, TraceKind, capture, is_recording};
 pub use variable::Variable;
 
 // =============================================================================

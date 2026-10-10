@@ -111,7 +111,6 @@ fn init_vulkan() -> Result<VulkanGlobalState, vk::Result> {
         .map(|&pd| unsafe { instance.get_physical_device_features(pd) })
         .collect();
 
-    // entry is only needed for instance creation, not stored
     let _ = entry;
 
     Ok(VulkanGlobalState {
@@ -225,7 +224,6 @@ impl VulkanBackend {
         // is created from that instance/device and owned by the returned
         // backend until its `Drop` destroys them in reverse order.
         unsafe {
-            // Find compute queue family
             let queue_families = state
                 .instance
                 .get_physical_device_queue_family_properties(physical_device);
@@ -235,7 +233,6 @@ impl VulkanBackend {
                 .find(|(_, props)| props.queue_flags.contains(vk::QueueFlags::COMPUTE))
                 .map(|(idx, _)| idx as u32)?;
 
-            // Create logical device
             let queue_priorities = [1.0f32];
             let queue_create_info = vk::DeviceQueueCreateInfo::default()
                 .queue_family_index(queue_family_index)
@@ -250,14 +247,12 @@ impl VulkanBackend {
                 .ok()?;
             let queue = device.get_device_queue(queue_family_index, 0);
 
-            // Create command pool
             let pool_create_info = vk::CommandPoolCreateInfo::default()
                 .queue_family_index(queue_family_index)
                 .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
 
             let command_pool = device.create_command_pool(&pool_create_info, None).ok()?;
 
-            // Create allocator
             let allocator = Allocator::new(&AllocatorCreateDesc {
                 instance: state.instance.clone(),
                 device: device.clone(),
@@ -268,7 +263,6 @@ impl VulkanBackend {
             })
             .ok()?;
 
-            // Create descriptor set layout for compute shaders
             let bindings = [
                 vk::DescriptorSetLayoutBinding::default()
                     .binding(0)
@@ -294,7 +288,6 @@ impl VulkanBackend {
                 .create_descriptor_set_layout(&layout_create_info, None)
                 .ok()?;
 
-            // Create pipeline layout
             let pipeline_layout_info = vk::PipelineLayoutCreateInfo::default()
                 .set_layouts(std::slice::from_ref(&descriptor_set_layout));
 
@@ -302,7 +295,6 @@ impl VulkanBackend {
                 .create_pipeline_layout(&pipeline_layout_info, None)
                 .ok()?;
 
-            // Create descriptor pool
             let pool_sizes = [vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::STORAGE_BUFFER,
                 descriptor_count: 1000,
@@ -599,7 +591,6 @@ impl VulkanBackend {
         // live tracker entries, and the dispatch is recorded and completed
         // inside `execute_commands` before this returns.
         unsafe {
-            // Allocate descriptor set
             let layouts = [self.descriptor_set_layout];
             let alloc_info = vk::DescriptorSetAllocateInfo::default()
                 .descriptor_pool(self.descriptor_pool)
@@ -612,7 +603,6 @@ impl VulkanBackend {
 
             let descriptor_set = descriptor_sets[0];
 
-            // Update descriptor sets with buffer bindings
             let tracker = self.buffer_tracker.lock().unwrap();
             let mut buffer_infos = Vec::new();
             let mut writes = Vec::new();
@@ -640,7 +630,6 @@ impl VulkanBackend {
             self.device.update_descriptor_sets(&writes, &[]);
             drop(tracker);
 
-            // Execute compute
             self.execute_commands(|cmd| {
                 self.device
                     .cmd_bind_pipeline(cmd, vk::PipelineBindPoint::COMPUTE, pipeline);
@@ -669,7 +658,6 @@ impl Drop for VulkanBackend {
         unsafe {
             self.device.device_wait_idle().ok();
 
-            // Clean up buffers
             let mut tracker = self.buffer_tracker.lock().unwrap();
             let buffer_ids: Vec<u64> = tracker.buffers.keys().copied().collect();
             for id in buffer_ids {
@@ -681,7 +669,6 @@ impl Drop for VulkanBackend {
             }
             drop(tracker);
 
-            // Clean up pipelines
             let pipelines = self.compute_pipelines.lock().unwrap();
             for (_, pipeline) in pipelines.iter() {
                 self.device.destroy_pipeline(*pipeline, None);
@@ -711,7 +698,7 @@ impl Backend for VulkanBackend {
     }
 
     fn is_available(&self) -> bool {
-        true // If we created successfully, we're available
+        true
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
@@ -734,8 +721,8 @@ impl Backend for VulkanBackend {
         DeviceCapabilities {
             name: device_name,
             total_memory: Some(total_memory),
-            available_memory: None, // Vulkan doesn't provide this directly
-            supports_f16: true,     // Most modern GPUs support f16
+            available_memory: None,
+            supports_f16: true,
             supports_f64: features.shader_float64 != 0,
             max_threads_per_block: props.limits.max_compute_work_group_invocations as usize,
             compute_capability: None,
@@ -877,16 +864,11 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
 /// Waits for a Vulkan queue to become idle.
 /// The handle parameter is not used directly; synchronization is handled per-backend.
 #[cfg(feature = "vulkan")]
-pub fn queue_wait_idle(_handle: usize) {
-    // Queue synchronization is handled internally by the VulkanBackend
-    // This function exists for API compatibility with the GpuStream abstraction
-}
+pub fn queue_wait_idle(_handle: usize) {}
 
 /// Waits for a Vulkan queue to become idle (no-op when Vulkan is not available).
 #[cfg(not(feature = "vulkan"))]
-pub fn queue_wait_idle(_handle: usize) {
-    // No-op when Vulkan is not available
-}
+pub fn queue_wait_idle(_handle: usize) {}
 
 // =============================================================================
 // SPIR-V Shader Templates (Pre-compiled bytecode would go here)
@@ -956,7 +938,6 @@ mod tests {
             None => return,
         };
 
-        // Create a buffer with data
         let data: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
         let bytes: &[u8] = bytemuck::cast_slice(&data);
         let buffer_id = match backend.create_buffer_init(bytes) {
@@ -964,7 +945,6 @@ mod tests {
             None => return,
         };
 
-        // Read it back
         if let Some(read_data) = backend.read_buffer(buffer_id) {
             let floats: &[f32] = bytemuck::cast_slice(&read_data);
             assert_eq!(floats.len(), 4);

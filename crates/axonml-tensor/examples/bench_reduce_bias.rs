@@ -25,7 +25,6 @@ fn main() {
         .to_device(device.clone())
         .unwrap();
 
-    // Approach A: ones + matmul (current reduce_grad_for_broadcast path)
     let approach_a = |g: &Tensor<f32>| -> Tensor<f32> {
         let ones_data = vec![1.0f32; m];
         let ones = Tensor::from_vec(ones_data, &[1, m])
@@ -35,7 +34,6 @@ fn main() {
         ones.matmul(g).unwrap().reshape(&[n as isize]).unwrap()
     };
 
-    // Approach B: sum_dim(0, false) (pure GPU reduction)
     let approach_b = |g: &Tensor<f32>| -> Tensor<f32> { g.sum_dim(0, false) };
 
     for _ in 0..5 {
@@ -77,7 +75,6 @@ fn main() {
         );
     }
 
-    // Correctness
     let a = approach_a(&grad).to_vec();
     let b = approach_b(&grad).to_vec();
     let max_abs = a

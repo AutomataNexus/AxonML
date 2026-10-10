@@ -180,8 +180,6 @@ impl GradScaler {
         for g in grads.iter_mut() {
             if g.is_infinite() || g.is_nan() {
                 self.found_inf = true;
-                // Don't return early - still need to unscale other grads
-                // But mark that we found inf
             }
             *g *= inv_scale;
         }
@@ -248,19 +246,14 @@ impl GradScaler {
         }
 
         if self.found_inf {
-            // Reduce scale on overflow
             self.scale *= self.backoff_factor;
             self.growth_tracker = 0;
-            // Clamp to avoid too small scale
             self.scale = self.scale.max(1.0);
         } else {
-            // Track successful steps
             self.growth_tracker += 1;
             if self.growth_tracker >= self.growth_interval {
-                // Increase scale
                 self.scale *= self.growth_factor;
                 self.growth_tracker = 0;
-                // Clamp to avoid overflow
                 self.scale = self.scale.min(f32::MAX / 2.0);
             }
         }
@@ -372,7 +365,6 @@ mod tests {
     fn test_update_growth() {
         let mut scaler = GradScaler::with_options(100.0, 2.0, 0.5, 3);
 
-        // Simulate 3 successful steps
         for _ in 0..3 {
             scaler.found_inf = false;
             scaler.update();
@@ -393,7 +385,6 @@ mod tests {
         let mut grads = vec![1.0, 2.0, 3.0];
         let valid = scaler.unscale_grads(&mut grads);
         assert!(valid);
-        // Grads should be unchanged
         assert!((grads[0] - 1.0).abs() < 1e-6);
     }
 

@@ -68,7 +68,6 @@ impl Drop for PooledCudaSlice {
             if self.pool_managed {
                 crate::backends::cuda_pool::pool_free(slice);
             }
-            // else: normal CudaSlice drop calls cudaFree
         }
     }
 }
@@ -99,6 +98,11 @@ impl PooledCudaSlice {
 enum StorageData<T: Scalar> {
     /// CPU data stored as a Vec.
     Cpu(Vec<T>),
+    /// Page-locked (pinned) CPU host data (f32 only). Lets device→host copies
+    /// DMA straight into it at full PCIe bandwidth with no intermediate pageable
+    /// copy — the zero-copy grad path for the weight-offload optimizer.
+    #[cfg(feature = "cuda")]
+    CpuPinned(crate::backends::cuda::PinnedBuffer),
     /// GPU data stored as a PooledCudaSlice (f32 only on GPU).
     /// Returns to memory pool on drop instead of calling cudaFree.
     #[cfg(feature = "cuda")]
@@ -185,10 +189,38 @@ impl<T: Scalar> Storage<T> {
         self.inner.read().device
     }
 
-    /// Returns true if data is on CPU.
+    /// Returns true if data is on CPU (pageable or pinned).
     #[must_use]
     pub fn is_cpu(&self) -> bool {
-        matches!(self.inner.read().data, StorageData::Cpu(_))
+        let inner = self.inner.read();
+        match &inner.data {
+            StorageData::Cpu(_) => true,
+            #[cfg(feature = "cuda")]
+            StorageData::CpuPinned(_) => true,
+            #[cfg(feature = "cuda")]
+            StorageData::Cuda(_) => false,
+        }
+    }
+
+    /// Creates CPU storage backed by page-locked (pinned) host memory of `len`
+    /// f32 elements, uninitialized. Device→host copies DMA straight into it. `T`
+    /// must be `f32`.
+    #[cfg(feature = "cuda")]
+    #[must_use]
+    pub fn pinned_uninit(len: usize) -> Self {
+        assert!(
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
+            "pinned storage is f32-only"
+        );
+        let pin = crate::backends::cuda::PinnedBuffer::alloc(len).expect("pinned alloc");
+        Self {
+            inner: Arc::new(RwLock::new(StorageInner {
+                data: StorageData::CpuPinned(pin),
+                device: Device::Cpu,
+            })),
+            offset: 0,
+            len,
+        }
     }
 
     /// Returns true if data is on GPU.
@@ -251,6 +283,21 @@ impl<T: Scalar> Storage<T> {
         }
     }
 
+    /// Runs `f` on the pinned host buffer behind this storage with the
+    /// storage's element offset, for stream-ordered copies that must target
+    /// page-locked memory by type. Panics if the storage is not pinned.
+    #[cfg(feature = "cuda")]
+    pub fn with_pinned_mut<R>(
+        &self,
+        f: impl FnOnce(&mut crate::backends::cuda::PinnedBuffer, usize) -> R,
+    ) -> R {
+        let mut guard = self.inner.write();
+        match &mut guard.data {
+            StorageData::CpuPinned(pin) => f(pin, self.offset),
+            _ => panic!("with_pinned_mut: storage is not pinned host memory"),
+        }
+    }
+
     /// Copies data from another storage into this one.
     pub fn copy_from(&self, other: &Self) -> Result<()> {
         if self.len != other.len {
@@ -276,6 +323,11 @@ impl<T: Scalar> Storage<T> {
                 Self::from_vec(data, inner.device)
             }
             #[cfg(feature = "cuda")]
+            StorageData::CpuPinned(pin) => {
+                let data = pinned_view::<T>(pin, self.offset, self.len).to_vec();
+                Self::from_vec(data, inner.device)
+            }
+            #[cfg(feature = "cuda")]
             StorageData::Cuda(_) => {
                 panic!("deep_copy() on GPU storage requires Storage<f32>. Use deep_copy_f32().");
             }
@@ -294,6 +346,8 @@ impl<T: Scalar> Storage<T> {
         match &inner.data {
             StorageData::Cpu(cpu_data) => cpu_data[self.offset..self.offset + self.len].to_vec(),
             #[cfg(feature = "cuda")]
+            StorageData::CpuPinned(pin) => pinned_view::<T>(pin, self.offset, self.len).to_vec(),
+            #[cfg(feature = "cuda")]
             StorageData::Cuda(_) => {
                 panic!(
                     "Cannot call to_vec() on GPU storage for generic T. Use to_vec_f32() on Storage<f32>."
@@ -311,7 +365,6 @@ impl<T: Scalar> Storage<T> {
             return Ok(self.clone());
         }
 
-        // Generic path: only CPU→CPU is supported
         if device.is_cpu() && self.device().is_cpu() {
             return Ok(self.deep_copy());
         }
@@ -335,20 +388,15 @@ impl Storage<f32> {
         let inner = self.inner.read();
 
         match (&inner.data, device) {
-            // CPU → CPU: just deep copy
             (StorageData::Cpu(_), Device::Cpu) => {
                 drop(inner);
                 Ok(self.deep_copy())
             }
-            // CPU → GPU: htod_copy
             (StorageData::Cpu(cpu_data), Device::Cuda(_idx)) => {
                 let backend = crate::backends::cuda::get_cuda_backend()
                     .ok_or(Error::DeviceNotAvailable { device })?;
                 let slice = &cpu_data[self.offset..self.offset + self.len];
                 let cuda_slice = backend.htod_copy(slice).map_err(|e| {
-                    // Surface the underlying cudarc error stderr-side so an
-                    // OOM doesn't get silently re-wrapped. Then return the
-                    // structured error.
                     eprintln!(
                         "[storage] htod_copy failed for {} bytes on {:?}: {:?}",
                         self.len * core::mem::size_of::<f32>(),
@@ -370,7 +418,30 @@ impl Storage<f32> {
                     len,
                 })
             }
-            // GPU → CPU: dtoh_copy
+            (StorageData::CpuPinned(_), Device::Cpu) => {
+                drop(inner);
+                Ok(self.deep_copy())
+            }
+            (StorageData::CpuPinned(pin), Device::Cuda(_idx)) => {
+                let backend = crate::backends::cuda::get_cuda_backend()
+                    .ok_or(Error::DeviceNotAvailable { device })?;
+                let slice = &pin.as_slice()[self.offset..self.offset + self.len];
+                let cuda_slice = backend
+                    .htod_copy(slice)
+                    .map_err(|_| Error::AllocationFailed {
+                        size: self.len * std::mem::size_of::<f32>(),
+                        device,
+                    })?;
+                let len = self.len;
+                Ok(Self {
+                    inner: Arc::new(RwLock::new(StorageInner {
+                        data: StorageData::Cuda(PooledCudaSlice::new(cuda_slice, false)),
+                        device,
+                    })),
+                    offset: 0,
+                    len,
+                })
+            }
             (StorageData::Cuda(pooled), Device::Cpu) => {
                 let backend =
                     crate::backends::cuda::get_cuda_backend().ok_or(Error::DeviceNotAvailable {
@@ -385,8 +456,6 @@ impl Storage<f32> {
                 } else if end <= full_vec.len() {
                     full_vec[self.offset..end].to_vec()
                 } else {
-                    // CudaSlice is smaller than Storage.len — this indicates a bug
-                    // but handle gracefully: copy what we have, zero-pad the rest
                     eprintln!(
                         "[storage] WARNING: CudaSlice len={} < Storage offset+len={} (offset={}, len={})",
                         full_vec.len(),
@@ -408,7 +477,6 @@ impl Storage<f32> {
                 };
                 Ok(Self::from_vec(sliced, Device::Cpu))
             }
-            // GPU → GPU: D2H then H2D (simple path)
             (StorageData::Cuda(_), Device::Cuda(_)) => {
                 drop(inner);
                 let cpu_storage = self.to_device_f32(Device::Cpu)?;
@@ -436,6 +504,9 @@ impl Storage<f32> {
         let inner = self.inner.read();
         match &inner.data {
             StorageData::Cpu(cpu_data) => cpu_data[self.offset..self.offset + self.len].to_vec(),
+            StorageData::CpuPinned(pin) => {
+                pin.as_slice()[self.offset..self.offset + self.len].to_vec()
+            }
             StorageData::Cuda(pooled) => {
                 if let Some(backend) = crate::backends::cuda::get_cuda_backend() {
                     if let Ok(full_vec) = backend.dtoh_copy(pooled.slice()) {
@@ -531,7 +602,9 @@ impl CudaSliceReadGuard<'_> {
     pub fn slice(&self) -> &CudaSlice<f32> {
         match &self.guard.data {
             StorageData::Cuda(pooled) => pooled.slice(),
-            StorageData::Cpu(_) => panic!("Storage is on CPU, not GPU"),
+            StorageData::Cpu(_) | StorageData::CpuPinned(_) => {
+                panic!("Storage is on CPU, not GPU")
+            }
         }
     }
 }
@@ -551,7 +624,9 @@ impl CudaSliceWriteGuard<'_> {
     pub fn slice_mut(&mut self) -> &mut CudaSlice<f32> {
         match &mut self.guard.data {
             StorageData::Cuda(pooled) => pooled.slice_mut(),
-            StorageData::Cpu(_) => panic!("Storage is on CPU, not GPU"),
+            StorageData::Cpu(_) | StorageData::CpuPinned(_) => {
+                panic!("Storage is on CPU, not GPU")
+            }
         }
     }
 }
@@ -584,11 +659,37 @@ impl<T: Scalar> Deref for StorageReadGuard<'_, T> {
         match &self.guard.data {
             StorageData::Cpu(data) => &data[self.offset..self.offset + self.len],
             #[cfg(feature = "cuda")]
+            StorageData::CpuPinned(pin) => pinned_view::<T>(pin, self.offset, self.len),
+            #[cfg(feature = "cuda")]
             StorageData::Cuda(_) => panic!(
                 "Cannot access GPU storage as CPU slice. Use to_vec() for device-safe access."
             ),
         }
     }
+}
+
+// ── pinned host views ──
+
+/// `offset`/`len` are in `T` units over the f32-backed pinned buffer; the
+/// cast is a checked bytemuck reinterpretation (`Scalar: Pod`).
+#[cfg(feature = "cuda")]
+fn pinned_view<T: Scalar>(
+    pin: &crate::backends::cuda::PinnedBuffer,
+    offset: usize,
+    len: usize,
+) -> &[T] {
+    let all: &[T] = bytemuck::cast_slice(pin.as_slice());
+    &all[offset..offset + len]
+}
+
+#[cfg(feature = "cuda")]
+fn pinned_view_mut<T: Scalar>(
+    pin: &mut crate::backends::cuda::PinnedBuffer,
+    offset: usize,
+    len: usize,
+) -> &mut [T] {
+    let all: &mut [T] = bytemuck::cast_slice_mut(pin.as_slice_mut());
+    &mut all[offset..offset + len]
 }
 
 /// Write guard for storage data.
@@ -605,6 +706,8 @@ impl<T: Scalar> Deref for StorageWriteGuard<'_, T> {
         match &self.guard.data {
             StorageData::Cpu(data) => &data[self.offset..self.offset + self.len],
             #[cfg(feature = "cuda")]
+            StorageData::CpuPinned(pin) => pinned_view::<T>(pin, self.offset, self.len),
+            #[cfg(feature = "cuda")]
             StorageData::Cuda(_) => panic!("Cannot access GPU storage as CPU slice."),
         }
     }
@@ -612,8 +715,11 @@ impl<T: Scalar> Deref for StorageWriteGuard<'_, T> {
 
 impl<T: Scalar> DerefMut for StorageWriteGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        let (offset, len) = (self.offset, self.len);
         match &mut self.guard.data {
-            StorageData::Cpu(data) => &mut data[self.offset..self.offset + self.len],
+            StorageData::Cpu(data) => &mut data[offset..offset + len],
+            #[cfg(feature = "cuda")]
+            StorageData::CpuPinned(pin) => pinned_view_mut::<T>(pin, offset, len),
             #[cfg(feature = "cuda")]
             StorageData::Cuda(_) => panic!("Cannot access GPU storage as mutable CPU slice."),
         }
@@ -677,10 +783,8 @@ mod tests {
         assert!(storage1.is_unique());
         assert!(storage2.is_unique());
 
-        // Modify storage2
         storage2.as_slice_mut()[0] = 99.0;
 
-        // storage1 should be unchanged
         assert_eq!(storage1.as_slice()[0], 1.0);
     }
 

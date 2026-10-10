@@ -52,43 +52,34 @@ fn is_profile_enabled() -> bool {
 /// * `output` - The output variable (typically the loss)
 /// * `grad_output` - The gradient of the loss with respect to output (typically 1.0)
 pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
-    // Get the gradient function for the output
     let grad_fn = if let Some(gf) = output.grad_fn() {
         gf.clone()
     } else {
-        // Leaf variable - accumulate gradient directly
         if output.is_leaf() && output.requires_grad() {
             output.accumulate_grad(grad_output);
         }
         return;
     };
 
-    // Build the topological order of nodes
     let mut topo_order: Vec<GradFn> = Vec::new();
     let mut visited: HashSet<GradFnId> = HashSet::new();
     build_topo_order(&grad_fn, &mut topo_order, &mut visited);
 
-    // Initialize gradient map with the output gradient
-    // Use stable IDs based on Arc pointer, not struct address
     let mut grad_map: HashMap<GradFnId, Tensor<f32>> = HashMap::new();
     let output_id = grad_fn.id();
     grad_map.insert(output_id, grad_output.clone());
 
-    // Process nodes in reverse topological order
-    // Profile: track time per backward op type
     let profile_enabled = is_profile_enabled();
     let mut op_times: HashMap<&str, (u128, usize)> = HashMap::new();
 
     for node in topo_order.iter().rev() {
         let node_id = node.id();
 
-        // Get the accumulated gradient for this node
         let grad = match grad_map.get(&node_id) {
             Some(g) => g.clone(),
-            None => continue, // No gradient to propagate
+            None => continue,
         };
 
-        // Apply the gradient function to get input gradients.
         let t0 = std::time::Instant::now();
         let input_grads = node.apply(&grad);
         if profile_enabled {
@@ -98,18 +89,13 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
             entry.1 += 1;
         }
 
-        // Device of the incoming gradient — output grads should match
         let target_device = grad.device();
 
-        // Propagate gradients to input nodes
         let next_fns = node.next_functions();
         for (i, maybe_next) in next_fns.iter().enumerate() {
             if let Some(next_fn) = maybe_next {
                 if let Some(mut input_grad) = input_grads.get(i).and_then(std::clone::Clone::clone)
                 {
-                    // Auto-migrate gradient to match the propagation device.
-                    // This handles backward functions that compute on CPU even
-                    // when the forward was on GPU (e.g., Conv1d/Conv2d backward).
                     if input_grad.device() != target_device {
                         input_grad = input_grad
                             .to_device(target_device)
@@ -117,16 +103,13 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
                     }
                     let next_id = next_fn.id();
 
-                    // Accumulate gradient (device-safe)
                     grad_map
                         .entry(next_id)
                         .and_modify(|existing| {
-                            // Ensure both tensors are on the same device before add
                             let ig = if existing.device() == input_grad.device() {
                                 input_grad.clone()
                             } else {
                                 input_grad.to_device(existing.device()).unwrap_or_else(|_| {
-                                    // If migration fails, move existing to match input_grad
                                     let moved = existing.to_device(input_grad.device())
                                         .expect("backward: cannot reconcile devices for gradient accumulation");
                                     *existing = moved;
@@ -141,7 +124,6 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
         }
     }
 
-    // Print backward profile if enabled
     if profile_enabled {
         let mut sorted: Vec<_> = op_times.into_iter().collect();
         sorted.sort_by_key(|entry| std::cmp::Reverse(entry.1.0));
@@ -157,9 +139,6 @@ pub fn backward(output: &Variable, grad_output: &Tensor<f32>) {
         }
     }
 
-    // Clear the computation graph after backward pass (equivalent to PyTorch's
-    // retain_graph=False default). This prevents the global graph HashMap from
-    // accumulating nodes across iterations, which causes unbounded memory growth.
     crate::graph::with_graph(|g| g.clear());
 }
 
@@ -172,12 +151,10 @@ fn build_topo_order(node: &GradFn, order: &mut Vec<GradFn>, visited: &mut HashSe
     }
     visited.insert(node_id);
 
-    // Visit all input nodes first
     for next in node.next_functions().iter().flatten() {
         build_topo_order(next, order, visited);
     }
 
-    // Add this node after its inputs
     order.push(node.clone());
 }
 
@@ -204,7 +181,6 @@ where
     let mut grad_data = vec![0.0f32; input_data.numel()];
 
     for i in 0..input_data.numel() {
-        // f(x + eps)
         let mut plus_data = input_data.to_vec();
         plus_data[i] += eps;
         let plus_input =
@@ -212,7 +188,6 @@ where
         let plus_output = func(&plus_input);
         let plus_val = plus_output.data().to_vec()[0];
 
-        // f(x - eps)
         let mut minus_data = input_data.to_vec();
         minus_data[i] -= eps;
         let minus_input =
@@ -220,7 +195,6 @@ where
         let minus_output = func(&minus_input);
         let minus_val = minus_output.data().to_vec()[0];
 
-        // Central difference
         grad_data[i] = (plus_val - minus_val) / (2.0 * eps);
     }
 
@@ -267,7 +241,6 @@ mod tests {
 
     #[test]
     fn test_simple_backward() {
-        // y = x^2, dy/dx = 2x
         let x = Variable::new(
             Tensor::from_vec(vec![3.0], &[1]).expect("tensor creation failed"),
             true,
@@ -276,14 +249,12 @@ mod tests {
 
         y.backward();
 
-        // dy/dx at x=3 should be 6
         let grad = x.grad().unwrap();
         assert!((grad.to_vec()[0] - 6.0).abs() < 1e-5);
     }
 
     #[test]
     fn test_chain_backward() {
-        // y = (x^2)^2 = x^4, dy/dx = 4x^3
         let x = Variable::new(
             Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
             true,
@@ -292,7 +263,6 @@ mod tests {
 
         y.backward();
 
-        // dy/dx at x=2 should be 4 * 8 = 32
         let grad = x.grad().unwrap();
         assert!((grad.to_vec()[0] - 32.0).abs() < 1e-4);
     }
@@ -312,7 +282,6 @@ mod tests {
 
         loss.backward();
 
-        // d(a+b)/da = 1, d(a+b)/db = 1
         assert!((a.grad().unwrap().to_vec()[0] - 1.0).abs() < 1e-5);
         assert!((b.grad().unwrap().to_vec()[0] - 1.0).abs() < 1e-5);
     }
@@ -332,7 +301,6 @@ mod tests {
 
         loss.backward();
 
-        // d(a*b)/da = b = 3, d(a*b)/db = a = 2
         assert!((a.grad().unwrap().to_vec()[0] - 3.0).abs() < 1e-5);
         assert!((b.grad().unwrap().to_vec()[0] - 2.0).abs() < 1e-5);
     }
@@ -346,8 +314,6 @@ mod tests {
 
         let numerical = numerical_gradient(|v| v.pow(2.0).sum(), &x, 1e-5);
 
-        // d(x^2)/dx = 2x, so [4.0, 6.0]
-        // Use 1e-2 tolerance due to floating point precision in f32 pow operations
         let expected = [4.0, 6.0];
         for (i, &n) in numerical.to_vec().iter().enumerate() {
             assert!(

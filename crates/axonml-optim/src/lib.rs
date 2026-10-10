@@ -28,7 +28,6 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
-// ML/tensor-specific allowances
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_precision_loss)]
@@ -114,6 +113,7 @@ pub use lr_scheduler::{
     StepLR, WarmupLR,
 };
 pub use optimizer::Optimizer;
+pub use optimizer::clip_grad_norm;
 pub use rmsprop::RMSprop;
 pub use sgd::SGD;
 
@@ -159,7 +159,6 @@ mod tests {
         let initial_loss = loss_fn.compute(&model.forward(&input), &target);
         let initial_loss_val = initial_loss.data().to_vec()[0];
 
-        // Run a few optimization steps
         for _ in 0..10 {
             optimizer.zero_grad();
             let output = model.forward(&input);
@@ -171,7 +170,6 @@ mod tests {
         let final_loss = loss_fn.compute(&model.forward(&input), &target);
         let final_loss_val = final_loss.data().to_vec()[0];
 
-        // Loss should decrease
         assert!(final_loss_val <= initial_loss_val);
     }
 
@@ -191,7 +189,6 @@ mod tests {
         );
         let target = Variable::new(Tensor::from_vec(vec![1.0, 2.0], &[2, 1]).unwrap(), false);
 
-        // Run optimization
         for _ in 0..20 {
             optimizer.zero_grad();
             let output = model.forward(&input);
@@ -200,7 +197,6 @@ mod tests {
             optimizer.step();
         }
 
-        // Just verify it runs without error
         let final_output = model.forward(&input);
         assert_eq!(final_output.shape(), vec![2, 1]);
     }

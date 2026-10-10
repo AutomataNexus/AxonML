@@ -24,7 +24,6 @@ use axonml_tensor::Tensor;
 
 use crate::optimizer::Optimizer;
 
-// Re-import Device for state initialization
 use axonml_core;
 
 // =============================================================================
@@ -230,12 +229,6 @@ impl Optimizer for RMSprop {
     fn step(&mut self) {
         self.ensure_state_initialized();
 
-        // ============================================================
-        // Tensor-op path: works on both CPU and GPU without to_vec()
-        // All ops (add, mul, mul_scalar, div, sqrt, add_scalar, sub)
-        // dispatch to CUDA when the tensors are GPU-resident.
-        // ============================================================
-
         for (i, param) in self.params.iter().enumerate() {
             if !param.requires_grad() {
                 continue;
@@ -249,14 +242,12 @@ impl Optimizer for RMSprop {
             let param_data = param.data();
             let state = &mut self.state[i];
 
-            // Apply weight decay: d = grad + weight_decay * param
             let d = if self.weight_decay == 0.0 {
                 grad.clone()
             } else {
                 grad.add(&param_data.mul_scalar(self.weight_decay)).unwrap()
             };
 
-            // Update square average: sq_avg = alpha * sq_avg + (1 - alpha) * d^2
             let d_sq = d.mul(&d).unwrap();
             state.square_avg = state
                 .square_avg
@@ -264,16 +255,13 @@ impl Optimizer for RMSprop {
                 .add(&d_sq.mul_scalar(1.0 - self.alpha))
                 .unwrap();
 
-            // Compute denominator
             let denom = if self.centered {
-                // Update gradient average: grad_avg = alpha * grad_avg + (1 - alpha) * d
                 let grad_avg = state.grad_avg.as_mut().unwrap();
                 *grad_avg = grad_avg
                     .mul_scalar(self.alpha)
                     .add(&d.mul_scalar(1.0 - self.alpha))
                     .unwrap();
 
-                // denom = sqrt(sq_avg - grad_avg^2) + eps
                 let ga_sq = grad_avg.mul(grad_avg).unwrap();
                 state
                     .square_avg
@@ -282,23 +270,18 @@ impl Optimizer for RMSprop {
                     .sqrt()
                     .add_scalar(self.eps)
             } else {
-                // denom = sqrt(sq_avg) + eps
                 state.square_avg.sqrt().add_scalar(self.eps)
             };
 
-            // Apply update with or without momentum
             let update = if self.momentum == 0.0 {
-                // update = d / denom
                 d.div(&denom).unwrap()
             } else {
-                // buf = momentum * buf + d / denom
                 let normalized = d.div(&denom).unwrap();
                 let buf = state.momentum_buffer.as_mut().unwrap();
                 *buf = buf.mul_scalar(self.momentum).add(&normalized).unwrap();
                 buf.clone()
             };
 
-            // param = param - lr * update
             let new_param = param_data.sub(&update.mul_scalar(self.lr)).unwrap();
             param.update_data(new_param);
         }
@@ -353,7 +336,6 @@ mod tests {
         );
         let param = Parameter::from_variable(var);
 
-        // Set gradient
         param
             .variable()
             .set_grad(Tensor::from_vec(vec![0.1, 0.2, 0.3], &[3]).expect("tensor creation failed"));
@@ -362,7 +344,6 @@ mod tests {
         optimizer.step();
 
         let new_data = param.data().to_vec();
-        // Parameters should have changed
         assert!((new_data[0] - 1.0).abs() > 1e-6);
     }
 

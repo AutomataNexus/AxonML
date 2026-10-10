@@ -73,7 +73,6 @@ pub fn contiguous_strides(shape: &[usize]) -> Strides {
     let mut strides = Strides::with_capacity(shape.len());
     let mut stride = 1isize;
 
-    // Compute strides from right to left
     for &dim in shape.iter().rev() {
         strides.push(stride);
         stride *= dim as isize;
@@ -161,7 +160,6 @@ pub fn broadcast_shape(shape1: &[usize], shape2: &[usize]) -> Result<Shape> {
     let max_ndim = shape1.len().max(shape2.len());
     let mut result = Shape::with_capacity(max_ndim);
 
-    // Iterate from right to left
     for i in 0..max_ndim {
         let d1 = if i < shape1.len() {
             shape1[shape1.len() - 1 - i]
@@ -209,7 +207,6 @@ pub fn broadcast_strides(shape: &[usize], strides: &[isize], target_shape: &[usi
 
     for (i, &target_dim) in target_shape.iter().enumerate() {
         if i < shape_offset {
-            // Dimension doesn't exist in original - broadcast
             result.push(0);
         } else {
             let orig_idx = i - shape_offset;
@@ -218,10 +215,8 @@ pub fn broadcast_strides(shape: &[usize], strides: &[isize], target_shape: &[usi
             if orig_dim == target_dim {
                 result.push(strides[orig_idx]);
             } else if orig_dim == 1 {
-                // Broadcast dimension
                 result.push(0);
             } else {
-                // Should not happen if broadcast_shape was computed correctly
                 result.push(strides[orig_idx]);
             }
         }
@@ -262,7 +257,7 @@ pub fn reshape(old_shape: &[usize], new_shape: &[isize]) -> Result<Shape> {
                 return Err(Error::invalid_operation("Can only have one -1 in reshape"));
             }
             infer_idx = Some(i);
-            result.push(0); // Will be inferred on line 269
+            result.push(0);
         } else if dim < 0 {
             return Err(Error::invalid_operation("Invalid dimension in reshape"));
         } else {
@@ -441,13 +436,11 @@ mod tests {
 
     #[test]
     fn test_broadcast_shape() {
-        // Same shapes
         assert_eq!(
             broadcast_shape(&[2, 3], &[2, 3]).unwrap().as_slice(),
             &[2, 3]
         );
 
-        // Broadcasting
         assert_eq!(broadcast_shape(&[2, 3], &[3]).unwrap().as_slice(), &[2, 3]);
 
         assert_eq!(
@@ -460,7 +453,6 @@ mod tests {
             &[5, 2, 3]
         );
 
-        // Incompatible
         assert!(broadcast_shape(&[2, 3], &[2, 4]).is_err());
     }
 
@@ -468,15 +460,12 @@ mod tests {
     fn test_reshape() {
         let old_shape = [2, 3, 4];
 
-        // Simple reshape
         let new = reshape(&old_shape, &[6, 4]).unwrap();
         assert_eq!(new.as_slice(), &[6, 4]);
 
-        // With -1 inference
         let new = reshape(&old_shape, &[-1, 4]).unwrap();
         assert_eq!(new.as_slice(), &[6, 4]);
 
-        // Invalid
         assert!(reshape(&old_shape, &[5, 5]).is_err());
     }
 
@@ -484,11 +473,9 @@ mod tests {
     fn test_squeeze() {
         let shape = [1, 2, 1, 3, 1];
 
-        // Squeeze all
         let squeezed = squeeze(&shape, None);
         assert_eq!(squeezed.as_slice(), &[2, 3]);
 
-        // Squeeze specific dimension
         let squeezed = squeeze(&shape, Some(0));
         assert_eq!(squeezed.as_slice(), &[2, 1, 3, 1]);
     }
@@ -519,7 +506,6 @@ mod tests {
 
     #[test]
     fn test_linear_index() {
-        // 2x3 matrix, row-major
         let strides: Strides = smallvec::smallvec![3, 1];
 
         assert_eq!(linear_index(&[0, 0], &strides), 0);

@@ -166,6 +166,10 @@ impl Module for TransformerEncoderLayer {
     fn name(&self) -> &'static str {
         "TransformerEncoderLayer"
     }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        vec![("self_attn".to_string(), &self.self_attn as &dyn Module)]
+    }
 }
 
 // =============================================================================
@@ -252,7 +256,6 @@ impl TransformerDecoderLayer {
         memory_mask: Option<&Variable>,
     ) -> Variable {
         if self.pre_norm {
-            // Pre-norm: norm before each sublayer, inside residual branch
             let normed = self.norm1.forward(tgt);
             let self_attn_out = self
                 .self_attn
@@ -270,7 +273,6 @@ impl TransformerDecoderLayer {
             let ff_out = self.linear2.forward(&ff_out);
             x.add_var(&ff_out)
         } else {
-            // Post-norm (original)
             let self_attn_out = self.self_attn.attention(tgt, tgt, tgt, tgt_mask);
             let x = tgt.add_var(&self_attn_out);
             let x = self.norm1.forward(&x);
@@ -294,14 +296,11 @@ impl TransformerDecoderLayer {
 
 impl Module for TransformerDecoderLayer {
     fn forward(&self, input: &Variable) -> Variable {
-        // Without memory, can only do self-attention pass.
-        // Use forward_with_memory() for full decoder behavior.
         if self.pre_norm {
             let normed = self.norm1.forward(input);
             let self_attn_out = self.self_attn.attention(&normed, &normed, &normed, None);
             let x = input.add_var(&self_attn_out);
 
-            // Skip cross-attention (no memory), go straight to FFN
             let normed = self.norm3.forward(&x);
             let ff_out = self.linear1.forward(&normed).relu();
             let ff_out = self.linear2.forward(&ff_out);
@@ -359,6 +358,13 @@ impl Module for TransformerDecoderLayer {
 
     fn name(&self) -> &'static str {
         "TransformerDecoderLayer"
+    }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        vec![
+            ("self_attn".to_string(), &self.self_attn as &dyn Module),
+            ("cross_attn".to_string(), &self.cross_attn as &dyn Module),
+        ]
     }
 }
 
@@ -475,6 +481,14 @@ impl Module for TransformerEncoder {
     fn name(&self) -> &'static str {
         "TransformerEncoder"
     }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        self.layers
+            .iter()
+            .enumerate()
+            .map(|(i, l)| (format!("layers.{i}"), l as &dyn Module))
+            .collect()
+    }
 }
 
 // =============================================================================
@@ -565,7 +579,6 @@ impl TransformerDecoder {
 
 impl Module for TransformerDecoder {
     fn forward(&self, input: &Variable) -> Variable {
-        // Without memory, runs self-attention only (for pretraining/testing)
         let mut x = input.clone();
         for layer in &self.layers {
             x = layer.forward(&x);
@@ -601,6 +614,14 @@ impl Module for TransformerDecoder {
 
     fn name(&self) -> &'static str {
         "TransformerDecoder"
+    }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        self.layers
+            .iter()
+            .enumerate()
+            .map(|(i, l)| (format!("layers.{i}"), l as &dyn Module))
+            .collect()
     }
 }
 
@@ -903,7 +924,6 @@ mod tests {
             false,
         );
 
-        // Encode once, decode multiple times (autoregressive inference)
         let memory = transformer.encode(&src, None);
         assert_eq!(memory.shape(), vec![2, 10, 64]);
 
@@ -915,16 +935,12 @@ mod tests {
     fn test_causal_mask() {
         let mask = Seq2SeqTransformer::generate_square_subsequent_mask(4);
         let mask_data = mask.data().to_vec();
-        // Row 0: [1, 0, 0, 0]
-        // Row 1: [1, 1, 0, 0]
-        // Row 2: [1, 1, 1, 0]
-        // Row 3: [1, 1, 1, 1]
-        assert_eq!(mask_data[0], 1.0); // (0,0) = visible
-        assert_eq!(mask_data[1], 0.0); // (0,1) = masked
-        assert_eq!(mask_data[4], 1.0); // (1,0) = visible
-        assert_eq!(mask_data[5], 1.0); // (1,1) = visible
-        assert_eq!(mask_data[6], 0.0); // (1,2) = masked
-        assert_eq!(mask_data[15], 1.0); // (3,3) = visible
+        assert_eq!(mask_data[0], 1.0);
+        assert_eq!(mask_data[1], 0.0);
+        assert_eq!(mask_data[4], 1.0);
+        assert_eq!(mask_data[5], 1.0);
+        assert_eq!(mask_data[6], 0.0);
+        assert_eq!(mask_data[15], 1.0);
     }
 
     #[test]
@@ -938,11 +954,6 @@ mod tests {
     fn test_parameter_count() {
         let layer = TransformerEncoderLayer::new(64, 4, 256);
         let params = layer.parameters();
-        // self_attn: 4 projections × (weight + bias) = 8
-        // linear1: weight + bias = 2
-        // linear2: weight + bias = 2
-        // norm1: weight + bias = 2
-        // norm2: weight + bias = 2
         assert_eq!(params.len(), 16);
     }
 
@@ -950,7 +961,6 @@ mod tests {
     fn test_decoder_parameter_count() {
         let layer = TransformerDecoderLayer::new(64, 4, 256);
         let params = layer.parameters();
-        // self_attn: 8, cross_attn: 8, linear1: 2, linear2: 2, norm1: 2, norm2: 2, norm3: 2
         assert_eq!(params.len(), 26);
     }
 
@@ -958,7 +968,6 @@ mod tests {
     fn test_named_parameters_hierarchy() {
         let transformer = Seq2SeqTransformer::new(64, 4, 1, 1, 256);
         let named = transformer.named_parameters();
-        // Verify hierarchical naming
         assert!(named.contains_key("encoder.layers.0.self_attn.q_proj.weight"));
         assert!(named.contains_key("decoder.layers.0.cross_attn.q_proj.weight"));
         assert!(named.contains_key("encoder.norm.weight"));

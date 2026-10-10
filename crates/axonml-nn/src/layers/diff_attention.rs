@@ -108,7 +108,6 @@ impl DifferentialAttention {
         let half_head_dim = head_dim / 2;
         let scale = (half_head_dim as f32).sqrt().recip();
 
-        // Lambda is a learnable scalar initialized to lambda_init
         let lambda_tensor =
             Tensor::from_vec(vec![lambda_init], &[1]).expect("tensor creation failed");
 
@@ -145,12 +144,10 @@ impl DifferentialAttention {
         let tgt_len = q_shape[1];
         let src_len = key.shape()[1];
 
-        // Project Q, K, V
         let q = self.q_proj.forward(query);
         let k = self.k_proj.forward(key);
         let v = self.v_proj.forward(value);
 
-        // Reshape to multi-head: [batch, seq, heads, head_dim] -> [batch, heads, seq, head_dim]
         let q = q
             .reshape(&[batch_size, tgt_len, self.num_heads, self.head_dim])
             .transpose(1, 2);
@@ -161,46 +158,33 @@ impl DifferentialAttention {
             .reshape(&[batch_size, src_len, self.num_heads, self.head_dim])
             .transpose(1, 2);
 
-        // Split Q into Q1, Q2 (each half_head_dim)
-        // [batch, heads, seq, head_dim] -> narrow on last dim
         let q1 = q.narrow(3, 0, self.half_head_dim);
         let q2 = q.narrow(3, self.half_head_dim, self.half_head_dim);
 
-        // Split K into K1, K2
         let k1 = k.narrow(3, 0, self.half_head_dim);
         let k2 = k.narrow(3, self.half_head_dim, self.half_head_dim);
 
-        // Compute attention scores for both paths
-        // scores1 = Q1 @ K1^T * scale
         let k1_t = k1.transpose(2, 3);
         let scores1 = q1.matmul(&k1_t).mul_scalar(self.scale);
         let attn1 = scores1.softmax(-1);
 
-        // scores2 = Q2 @ K2^T * scale
         let k2_t = k2.transpose(2, 3);
         let scores2 = q2.matmul(&k2_t).mul_scalar(self.scale);
         let attn2 = scores2.softmax(-1);
 
-        // Differential attention: A1 - lambda * A2
         let lambda_var = self.lambda.variable();
-        // Broadcast lambda (scalar [1]) across the attention map
-        // attn2_scaled = lambda * A2
         let attn2_scaled = self.broadcast_mul_scalar(&attn2, &lambda_var);
 
-        // diff_attn = A1 - attn2_scaled
         let neg_attn2 = attn2_scaled.mul_scalar(-1.0);
         let diff_attn = attn1.add_var(&neg_attn2);
 
-        // Apply to values: output = diff_attn @ V
         let attn_output = diff_attn.matmul(&v);
 
-        // Reshape back: [batch, heads, seq, head_dim] -> [batch, seq, embed_dim]
         let attn_output =
             attn_output
                 .transpose(1, 2)
                 .reshape(&[batch_size, tgt_len, self.embed_dim]);
 
-        // Output projection
         self.out_proj.forward(&attn_output)
     }
 
@@ -209,16 +193,7 @@ impl DifferentialAttention {
     /// lambda is [1], attn is [batch, heads, tgt_len, src_len].
     /// We expand lambda to match attn shape using autograd-tracked operations.
     fn broadcast_mul_scalar(&self, attn: &Variable, lambda: &Variable) -> Variable {
-        // Extract the scalar value and use mul_scalar for efficiency
-        // while keeping lambda in the computational graph
         let lambda_val = lambda.data().to_vec()[0];
-        // Use mul_var to keep lambda in the graph for gradient flow
-        // Strategy: reshape lambda to [1,1,1,1] and multiply element-wise
-        // But since Variable doesn't have broadcast_mul, we use the scalar path
-        // and separately track lambda's gradient contribution.
-        //
-        // For gradient flow to lambda: we compute attn * lambda_val
-        // and track it through mul_var by creating a ones-like tensor scaled by lambda
         let attn_shape = attn.shape();
         let total = attn_shape.iter().product::<usize>();
         let lambda_expanded =
@@ -245,7 +220,6 @@ impl DifferentialAttention {
 
 impl Module for DifferentialAttention {
     fn forward(&self, input: &Variable) -> Variable {
-        // Self-attention: query = key = value = input
         self.attention(input, input, input, None)
     }
 
@@ -279,6 +253,15 @@ impl Module for DifferentialAttention {
 
     fn name(&self) -> &'static str {
         "DifferentialAttention"
+    }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        vec![
+            ("q_proj".to_string(), &self.q_proj as &dyn Module),
+            ("k_proj".to_string(), &self.k_proj as &dyn Module),
+            ("v_proj".to_string(), &self.v_proj as &dyn Module),
+            ("out_proj".to_string(), &self.out_proj as &dyn Module),
+        ]
     }
 }
 
@@ -342,7 +325,6 @@ mod tests {
     fn test_diff_attention_parameters() {
         let attn = DifferentialAttention::new(64, 4);
         let params = attn.parameters();
-        // Q, K, V, Out projections (weight+bias each = 8) + lambda = 9
         assert_eq!(params.len(), 9);
     }
 

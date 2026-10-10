@@ -93,8 +93,6 @@ impl Default for MSELoss {
 
 impl Module for MSELoss {
     fn forward(&self, input: &Variable) -> Variable {
-        // For Module interface, we can't easily pass two inputs
-        // This is primarily used via compute() method
         input.clone()
     }
 
@@ -132,9 +130,7 @@ impl L1Loss {
     pub fn compute(&self, input: &Variable, target: &Variable) -> Variable {
         let input_data = input.data();
         let target_data = target.data();
-        // diff = input - target (Tensor op, auto-dispatches to GPU)
         let diff_tensor = input_data.sub(&target_data).expect("tensor sub failed");
-        // |diff| = relu(diff) + relu(-diff), using Tensor ops that auto-dispatch to GPU
         let relu_diff = axonml_tensor::ops::clamp_min(&diff_tensor, 0.0);
         let relu_neg_diff = axonml_tensor::ops::clamp_min(&diff_tensor.neg(), 0.0);
         let abs_tensor = relu_diff.add(&relu_neg_diff).expect("tensor add failed");
@@ -182,27 +178,21 @@ struct L1LossBackward {
 
 impl GradientFunction for L1LossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // sign(diff): +1 where diff > 0, -1 where diff < 0, 0 where diff == 0
-        // Compute as: diff / (|diff| + eps) which gives sign and handles GPU
         let eps_tensor = Tensor::full(self.diff_tensor.shape(), 1e-12);
         let eps_on_device = if self.diff_tensor.device().is_gpu() {
             eps_tensor.to_device(self.diff_tensor.device()).unwrap()
         } else {
             eps_tensor
         };
-        // |diff| approximated as sqrt(diff^2 + eps)  — but simpler: diff * diff then sqrt
         let diff_sq = self
             .diff_tensor
             .mul(&self.diff_tensor)
             .expect("tensor mul failed");
         let diff_sq_eps = diff_sq.add(&eps_on_device).expect("tensor add failed");
-        // sqrt via exp(0.5 * ln(x))
         let abs_diff = diff_sq_eps.ln().mul_scalar(0.5).exp();
         let sign_diff = self.diff_tensor.div(&abs_diff).unwrap();
 
-        // grad_input = sign(diff) * grad_output
         let gi = sign_diff.mul(grad_output).unwrap();
-        // grad_target = -grad_input
         let gt = gi.neg();
         vec![Some(gi), Some(gt)]
     }
@@ -243,21 +233,21 @@ struct CrossEntropyBackward {
 
 impl GradientFunction for CrossEntropyBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // GPU fast path when the forward stored softmax on device.
-        // Delegates to the genuine cross_entropy_bwd_cuda kernel (see
-        // autograd/functions/loss.rs and tensor/cuda_ops.rs). This was the
-        // "stale 600 MB round-trip" claim in older notes — the kernel itself
-        // has been GPU-resident for a while.
         #[cfg(feature = "cuda")]
         if self.softmax_probs.device().is_gpu() {
             let batch = self.batch_size;
             let grad_out_t = if grad_output.numel() == 1 {
-                // Scalar (mean reduction) -> per-sample scale
-                let scale = grad_output.to_vec()[0] / batch as f32;
-                Tensor::from_vec(vec![scale; batch], &[batch])
+                // ── stay on the device: a host read here is a full queue drain per loss chunk ──
+                let g = if grad_output.device().is_gpu() {
+                    grad_output.clone()
+                } else {
+                    grad_output.to_device(self.softmax_probs.device()).unwrap()
+                };
+                g.mul_scalar(1.0 / batch as f32)
+                    .reshape(&[1])
                     .unwrap()
-                    .to_device(self.softmax_probs.device())
-                    .unwrap()
+                    .broadcast_to(&[batch])
+                    .contiguous()
             } else {
                 grad_output.to_device(self.softmax_probs.device()).unwrap()
             };
@@ -268,7 +258,6 @@ impl GradientFunction for CrossEntropyBackward {
             return vec![Some(grad)];
         }
 
-        // CPU fallback (or no-cuda build)
         let softmax_vec = self.softmax_probs.to_vec();
         let target_vec = self.targets.to_vec();
         let grad_vec = grad_output.to_vec();
@@ -357,10 +346,8 @@ impl CrossEntropyLoss {
         let batch_size = shape[0];
         let num_classes = shape[1];
 
-        // GPU fast path: fused softmax + NLL loss kernel
         #[cfg(feature = "cuda")]
         if input_data.device().is_gpu() {
-            // Ensure targets are on GPU
             let targets_gpu = if target_data.device().is_gpu() {
                 target_data.clone()
             } else {
@@ -389,7 +376,6 @@ impl CrossEntropyLoss {
             };
         }
 
-        // CPU path
         let input_vec = input_data.to_vec();
         let target_vec = target_data.to_vec();
 
@@ -400,7 +386,6 @@ impl CrossEntropyLoss {
         for b in 0..batch_size {
             let offset = b * num_classes;
 
-            // Numerically stable log-softmax
             let max_val = (0..num_classes)
                 .map(|c| input_vec[offset + c])
                 .fold(f32::NEG_INFINITY, f32::max);
@@ -492,9 +477,8 @@ impl GradientFunction for KLDivBackward {
         let grad_vec = grad_output.to_vec();
         let mut grad_input = vec![0.0f32; self.batch_size * self.num_classes];
 
-        // grad_output can be per-sample [N] or scalar [1] (from mean reduction).
         let is_scalar_grad = grad_vec.len() == 1;
-        let scale = self.temperature; // the T·(Q-P) factor
+        let scale = self.temperature;
 
         for b in 0..self.batch_size {
             let grad_scale = if is_scalar_grad {
@@ -520,9 +504,6 @@ impl GradientFunction for KLDivBackward {
                 .unwrap();
         }
 
-        // Only the student (first arg to compute()) gets a gradient.
-        // Teacher's next_fn is None (it was passed as a Variable with
-        // requires_grad=false or wrapped outside a no_grad block).
         vec![Some(grad_tensor), None]
     }
 
@@ -629,12 +610,6 @@ impl KLDivLoss {
         let t = self.temperature;
         let t_sq = t * t;
 
-        // CPU path — the bulk of our training is small-vocab autoencoders
-        // / MLPs and moderate-vocab LLMs. For the 152k-vocab LLM-distill
-        // case this is the bandwidth-limited step, but it runs on pinned
-        // teacher logits + student logits on the same device, so it's still
-        // fast enough (batch × 152k × f32 reductions are a few ms at most).
-        // A GPU fused kernel is a future optimization.
         let s_host = s_data.clone().to_device(axonml_core::Device::Cpu).unwrap();
         let t_host = t_data.clone().to_device(axonml_core::Device::Cpu).unwrap();
         let s_vec = s_host.to_vec();
@@ -647,7 +622,6 @@ impl KLDivLoss {
         for b in 0..batch_size {
             let offset = b * num_classes;
 
-            // Teacher: numerically-stable log-softmax at temperature T.
             let mut max_t = f32::NEG_INFINITY;
             for c in 0..num_classes {
                 let v = t_vec[offset + c] / t;
@@ -666,7 +640,6 @@ impl KLDivLoss {
                 teacher_sm[offset + c] /= sum_exp_t;
             }
 
-            // Student: numerically-stable log-softmax at temperature T.
             let mut max_s = f32::NEG_INFINITY;
             for c in 0..num_classes {
                 let v = s_vec[offset + c] / t;
@@ -685,16 +658,12 @@ impl KLDivLoss {
                 student_sm[offset + c] /= sum_exp_s;
             }
 
-            // Per-sample KL = sum_c P[c] · (log P[c] - log Q[c])
-            //               = sum_c P[c] · ((t_c/T - log_sum_exp_t) - (s_c/T - log_sum_exp_s))
-            // Computed directly with renormalized P for stability.
             let mut kl = 0.0f32;
             for c in 0..num_classes {
                 let log_p = (t_vec[offset + c] / t) - log_sum_exp_t;
                 let log_q = (s_vec[offset + c] / t) - log_sum_exp_s;
                 kl += teacher_sm[offset + c] * (log_p - log_q);
             }
-            // Apply T² scaling per-sample (so post-reduction loss is also T² scaled).
             losses[b] = t_sq * kl;
         }
 
@@ -705,9 +674,6 @@ impl KLDivLoss {
         let teacher_sm_tensor = Tensor::from_vec(teacher_sm, &[batch_size, num_classes])
             .expect("teacher softmax tensor creation failed");
 
-        // Place stashed softmaxes on the same device as the student input
-        // so the backward's final `grad_input` lands where the upstream
-        // op expects it.
         let dev = s_data.device();
         let student_sm_tensor = student_sm_tensor.to_device(dev).unwrap();
         let teacher_sm_tensor = teacher_sm_tensor.to_device(dev).unwrap();
@@ -770,8 +736,6 @@ impl NLLLoss {
         let batch_size = shape[0];
         let num_classes = shape[1];
 
-        // NLL forward still needs per-sample gather (index into class dimension).
-        // We pull target indices to CPU for the gather but keep input on device.
         let target_vec = target_data.to_vec();
         let input_vec = input_data.to_vec();
 
@@ -900,21 +864,16 @@ impl BCELoss {
         let input_data = input.data();
         let target_data = target.data();
 
-        // Clamp predictions to [eps, 1-eps] using Tensor ops
         let eps = 1e-7f32;
         let p_clamped = axonml_tensor::ops::clamp(&input_data, eps, 1.0 - eps);
 
-        // loss = -(t * ln(p) + (1 - t) * ln(1 - p))
         let ln_p = p_clamped.ln();
         let one_minus_p = p_clamped.neg().add_scalar(1.0);
         let ln_one_minus_p = one_minus_p.ln();
         let one_minus_t = target_data.neg().add_scalar(1.0);
 
-        // t * ln(p)
         let term1 = target_data.mul(&ln_p).expect("tensor mul failed");
-        // (1-t) * ln(1-p)
         let term2 = one_minus_t.mul(&ln_one_minus_p).expect("tensor mul failed");
-        // -(term1 + term2)
         let loss_tensor = term1.add(&term2).expect("tensor add failed").neg();
 
         let requires_grad = input.requires_grad() && is_grad_enabled();
@@ -962,16 +921,12 @@ struct BCELossBackward {
 impl GradientFunction for BCELossBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         let eps = 1e-7f32;
-        // p_clamped = clamp(input, eps, 1-eps)
         let p_clamped = axonml_tensor::ops::clamp(&self.input_tensor, eps, 1.0 - eps);
-        // (p - y)
         let p_minus_y = p_clamped
             .sub(&self.target_tensor)
             .expect("tensor sub failed");
-        // p * (1 - p)
         let one_minus_p = p_clamped.neg().add_scalar(1.0);
         let denom = p_clamped.mul(&one_minus_p).expect("tensor mul failed");
-        // grad = grad_output * (p - y) / (p * (1 - p))
         let ratio = p_minus_y.div(&denom).unwrap();
         let grad_tensor = grad_output.mul(&ratio).expect("tensor mul failed");
         vec![Some(grad_tensor)]
@@ -1008,7 +963,6 @@ struct BCEWithLogitsBackward {
 
 impl GradientFunction for BCEWithLogitsBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // sigmoid(input) - target, all via Tensor ops (auto-dispatch to GPU)
         let sig = self.input_tensor.sigmoid();
         let sig_minus_t = sig.sub(&self.target_tensor).expect("tensor sub failed");
         let grad_tensor = grad_output.mul(&sig_minus_t).expect("tensor mul failed");
@@ -1058,20 +1012,13 @@ impl BCEWithLogitsLoss {
         let input_data = input.data();
         let target_data = target.data();
 
-        // Numerically stable: max(x, 0) - x*t + log(1 + exp(-|x|))
-        // max(x, 0) = relu(x) = clamp_min(x, 0)
         let relu_x = axonml_tensor::ops::clamp_min(&input_data, 0.0);
-        // x * t
         let x_times_t = input_data.mul(&target_data).expect("tensor mul failed");
-        // |x| via clamp trick: max(x, 0) + max(-x, 0) = relu(x) + relu(-x)
         let neg_x = input_data.neg();
         let relu_neg_x = axonml_tensor::ops::clamp_min(&neg_x, 0.0);
         let abs_x = relu_x.add(&relu_neg_x).expect("tensor add failed");
-        // exp(-|x|)
         let exp_neg_abs = abs_x.neg().exp();
-        // log(1 + exp(-|x|))
         let log_term = exp_neg_abs.add_scalar(1.0).ln();
-        // loss = relu(x) - x*t + log(1 + exp(-|x|))
         let loss_tensor = relu_x
             .sub(&x_times_t)
             .expect("tensor sub failed")
@@ -1123,7 +1070,6 @@ struct SmoothL1Backward {
 
 impl GradientFunction for SmoothL1Backward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // Compute |diff| = sqrt(diff^2 + eps) to stay differentiable and device-agnostic
         let eps = 1e-12f32;
         let diff_sq = self
             .diff_tensor
@@ -1132,24 +1078,11 @@ impl GradientFunction for SmoothL1Backward {
         let diff_sq_eps = diff_sq.add_scalar(eps);
         let abs_diff = diff_sq_eps.ln().mul_scalar(0.5).exp();
 
-        // sign(diff) = diff / |diff|
         let sign_diff = self.diff_tensor.div(&abs_diff).unwrap();
 
-        // For the L2 region (|diff| < beta): grad = diff / beta
-        // For the L1 region (|diff| >= beta): grad = sign(diff)
-        // Blend: mask = clamp(|diff| / beta, 0, 1), but we need a hard cutoff.
-        // Use a smooth approximation via where: if |diff| < beta -> diff/beta, else sign
-        // Since we need element-wise branching and don't have a GPU where_cond,
-        // we use: grad = (1 - mask) * (diff / beta) + mask * sign(diff)
-        // where mask = clamp((|diff| - beta) * large_value, 0, 1) approximates step function.
-        // Actually simpler: mask_l2 = clamp(1 - |diff|/beta, 0, 1) gives 1 in L2 region, 0 in L1
-        // BUT this gives a soft transition. For exact correctness, use CPU branching on the mask.
-        //
-        // Practical approach: compute both branches with Tensor ops, build mask on CPU, blend.
-        let grad_l2 = self.diff_tensor.mul_scalar(1.0 / self.beta); // diff / beta
-        let grad_l1 = sign_diff; // sign(diff)
+        let grad_l2 = self.diff_tensor.mul_scalar(1.0 / self.beta);
+        let grad_l1 = sign_diff;
 
-        // Build mask tensor: 1.0 where |d| < beta, 0.0 otherwise
         let abs_vec = abs_diff.to_vec();
         let beta = self.beta;
         let mask_vec: Vec<f32> = abs_vec
@@ -1162,14 +1095,12 @@ impl GradientFunction for SmoothL1Backward {
         }
         let inv_mask = mask.neg().add_scalar(1.0);
 
-        // grad_per_elem = mask * grad_l2 + (1 - mask) * grad_l1
         let blended = mask
             .mul(&grad_l2)
             .unwrap()
             .add(&inv_mask.mul(&grad_l1).expect("tensor add failed"))
             .unwrap();
 
-        // gi = blended * grad_output
         let gi = blended.mul(grad_output).unwrap();
         let gt = gi.neg();
         vec![Some(gi), Some(gt)]
@@ -1225,19 +1156,15 @@ impl SmoothL1Loss {
         let diff_tensor = input_data.sub(&target_data).expect("tensor sub failed");
         let shape = diff_tensor.shape().to_vec();
 
-        // Compute |diff| via relu(diff) + relu(-diff)
         let relu_diff = axonml_tensor::ops::clamp_min(&diff_tensor, 0.0);
         let relu_neg_diff = axonml_tensor::ops::clamp_min(&diff_tensor.neg(), 0.0);
         let abs_diff = relu_diff.add(&relu_neg_diff).expect("tensor add failed");
 
-        // L2 branch: 0.5 * diff^2 / beta
         let diff_sq = diff_tensor.mul(&diff_tensor).expect("tensor mul failed");
         let l2_loss = diff_sq.mul_scalar(0.5 / self.beta);
 
-        // L1 branch: |diff| - 0.5 * beta
         let l1_loss = abs_diff.add_scalar(-0.5 * self.beta);
 
-        // Build mask: 1.0 where |diff| < beta, 0.0 otherwise
         let abs_vec = abs_diff.to_vec();
         let beta = self.beta;
         let mask_vec: Vec<f32> = abs_vec
@@ -1250,7 +1177,6 @@ impl SmoothL1Loss {
         }
         let inv_mask = mask.neg().add_scalar(1.0);
 
-        // loss = mask * l2_loss + (1-mask) * l1_loss
         let loss_tensor = mask
             .mul(&l2_loss)
             .unwrap()
@@ -1318,7 +1244,6 @@ mod tests {
             false,
         );
         let loss = loss_fn.compute(&input, &target);
-        // Each diff is 1.0, squared is 1.0, mean is 1.0
         assert!((loss.data().to_vec()[0] - 1.0).abs() < 1e-6);
     }
 
@@ -1350,7 +1275,6 @@ mod tests {
             false,
         );
         let loss = loss_fn.compute(&input, &target);
-        // -[1*ln(0.5) + 0*ln(0.5)] - [0*ln(0.5) + 1*ln(0.5)] = -2*ln(0.5) / 2 = -ln(0.5) = 0.693
         assert!((loss.data().to_vec()[0] - 0.693).abs() < 0.01);
     }
 
@@ -1358,7 +1282,6 @@ mod tests {
     fn test_cross_entropy_gradient_flow() {
         use axonml_autograd::backward;
 
-        // Create input logits with requires_grad=true
         let input = Variable::new(
             Tensor::from_vec(vec![2.0, 1.0, 0.1, 0.5, 2.5, 0.3], &[2, 3])
                 .expect("tensor creation failed"),
@@ -1372,21 +1295,17 @@ mod tests {
         let loss_fn = CrossEntropyLoss::new();
         let loss = loss_fn.compute(&input, &target);
 
-        // Loss should be positive
         let loss_val = loss.data().to_vec()[0];
         assert!(loss_val > 0.0, "Loss should be positive, got {}", loss_val);
 
-        // Backward pass
         let ones = Tensor::from_vec(vec![1.0], &loss.shape()).unwrap();
         backward(&loss, &ones);
 
-        // Input should have gradient
         let grad = input
             .grad()
             .expect("Input should have gradient after backward");
         let grad_vec = grad.to_vec();
 
-        // Gradient should be non-zero
         let grad_norm: f32 = grad_vec.iter().map(|g| g * g).sum();
         assert!(
             grad_norm > 1e-10,
@@ -1394,22 +1313,17 @@ mod tests {
             grad_norm
         );
 
-        // Gradient shape should match input shape
         assert_eq!(grad.shape(), &[2, 3]);
 
-        // For the correct class, gradient should be negative (softmax - 1 < 0)
-        // Sample 0, class 0 (target): grad should be (softmax[0,0] - 1) / 2
         assert!(
             grad_vec[0] < 0.0,
             "Gradient for correct class should be negative"
         );
-        // Sample 1, class 1 (target): grad should be (softmax[1,1] - 1) / 2
         assert!(
             grad_vec[4] < 0.0,
             "Gradient for correct class should be negative"
         );
 
-        // For wrong classes, gradient should be positive (softmax > 0)
         assert!(
             grad_vec[1] > 0.0,
             "Gradient for wrong class should be positive"
@@ -1422,7 +1336,6 @@ mod tests {
 
     #[test]
     fn test_cross_entropy_perfect_prediction() {
-        // When logits strongly favor the correct class, loss should be near zero
         let loss_fn = CrossEntropyLoss::new();
         let input = Variable::new(
             Tensor::from_vec(vec![10.0, -10.0, -10.0], &[1, 3]).expect("tensor creation failed"),
@@ -1441,7 +1354,6 @@ mod tests {
 
     #[test]
     fn test_cross_entropy_uniform_prediction() {
-        // When logits are all equal, loss should be ln(num_classes)
         let loss_fn = CrossEntropyLoss::new();
         let num_classes = 16;
         let input = Variable::new(
@@ -1454,7 +1366,7 @@ mod tests {
             false,
         );
         let loss = loss_fn.compute(&input, &target);
-        let expected = (num_classes as f32).ln(); // ln(16) ≈ 2.77
+        let expected = (num_classes as f32).ln();
         let actual = loss.data().to_vec()[0];
         assert!(
             (actual - expected).abs() < 0.01,
@@ -1488,9 +1400,7 @@ mod tests {
         let grad_vec = grad.to_vec();
         assert_eq!(grad_vec.len(), 4);
 
-        // For target=1, grad = sigmoid(x) - 1 < 0
         assert!(grad_vec[0] < 0.0);
-        // For target=0, grad = sigmoid(x) > 0
         assert!(grad_vec[1] > 0.0);
     }
 
@@ -1517,7 +1427,6 @@ mod tests {
         let grad = input.grad().expect("Input should have gradient");
         let grad_vec = grad.to_vec();
         assert_eq!(grad_vec.len(), 3);
-        // Gradients should be non-zero
         let grad_norm: f32 = grad_vec.iter().map(|g| g * g).sum();
         assert!(grad_norm > 1e-10);
     }
@@ -1530,12 +1439,10 @@ mod tests {
     fn test_mse_loss_gradient_correctness() {
         use axonml_autograd::backward;
 
-        // MSE gradient = 2*(input - target) / N
         let input = Variable::new(Tensor::from_vec(vec![3.0, 1.0], &[2]).unwrap(), true);
         let target = Variable::new(Tensor::from_vec(vec![1.0, 1.0], &[2]).unwrap(), false);
 
         let loss = MSELoss::new().compute(&input, &target);
-        // loss = ((3-1)^2 + (1-1)^2) / 2 = 4/2 = 2.0
         assert!(
             (loss.data().to_vec()[0] - 2.0).abs() < 1e-5,
             "MSE should be 2.0"
@@ -1546,7 +1453,6 @@ mod tests {
 
         let grad = input.grad().expect("Should have gradient");
         let gv = grad.to_vec();
-        // dL/dx = 2*(x-t)/N = 2*(3-1)/2 = 2.0 for first, 0.0 for second
         assert!(
             (gv[0] - 2.0).abs() < 0.1,
             "Grad[0] should be ~2.0, got {}",
@@ -1560,7 +1466,6 @@ mod tests {
         let input = Variable::new(Tensor::from_vec(vec![2.0, 4.0], &[2]).unwrap(), false);
         let target = Variable::new(Tensor::from_vec(vec![1.0, 1.0], &[2]).unwrap(), false);
         let loss = MSELoss::with_reduction(Reduction::Sum).compute(&input, &target);
-        // sum = (2-1)^2 + (4-1)^2 = 1 + 9 = 10
         assert!((loss.data().to_vec()[0] - 10.0).abs() < 1e-5);
     }
 
@@ -1573,7 +1478,6 @@ mod tests {
         let input = Variable::new(Tensor::from_vec(vec![1.0, 5.0, 3.0], &[3]).unwrap(), false);
         let target = Variable::new(Tensor::from_vec(vec![1.0, 2.0, 4.0], &[3]).unwrap(), false);
         let loss = L1Loss::new().compute(&input, &target);
-        // mean(|0| + |3| + |-1|) = 4/3 ≈ 1.333
         assert!((loss.data().to_vec()[0] - 4.0 / 3.0).abs() < 1e-4);
     }
 
@@ -1595,7 +1499,6 @@ mod tests {
     #[test]
     fn test_bce_loss_perfect_prediction() {
         let loss_fn = BCELoss::new();
-        // Near-perfect predictions
         let input = Variable::new(Tensor::from_vec(vec![0.999, 0.001], &[2]).unwrap(), false);
         let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[2]).unwrap(), false);
         let loss = loss_fn.compute(&input, &target);
@@ -1608,11 +1511,9 @@ mod tests {
     #[test]
     fn test_bce_loss_worst_prediction() {
         let loss_fn = BCELoss::new();
-        // Worst predictions (inverted)
         let input = Variable::new(Tensor::from_vec(vec![0.001, 0.999], &[2]).unwrap(), false);
         let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[2]).unwrap(), false);
         let loss = loss_fn.compute(&input, &target);
-        // Should be high
         assert!(
             loss.data().to_vec()[0] > 3.0,
             "Worst prediction should have high loss"
@@ -1626,7 +1527,6 @@ mod tests {
     #[test]
     fn test_bce_with_logits_numerical_stability() {
         let loss_fn = BCEWithLogitsLoss::new();
-        // Very large logits should not produce NaN/Inf
         let input = Variable::new(
             Tensor::from_vec(vec![100.0, -100.0, 50.0, -50.0], &[4]).unwrap(),
             false,
@@ -1648,11 +1548,9 @@ mod tests {
     #[test]
     fn test_bce_with_logits_zero_logits() {
         let loss_fn = BCEWithLogitsLoss::new();
-        // Zero logits → sigmoid(0) = 0.5 → random prediction
         let input = Variable::new(Tensor::from_vec(vec![0.0, 0.0], &[2]).unwrap(), false);
         let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0], &[2]).unwrap(), false);
         let loss = loss_fn.compute(&input, &target);
-        // Should be ln(2) ≈ 0.693
         assert!((loss.data().to_vec()[0] - 0.693).abs() < 0.01);
     }
 
@@ -1662,7 +1560,6 @@ mod tests {
         let input = Variable::new(Tensor::from_vec(vec![0.0, 0.0, 0.0], &[3]).unwrap(), false);
         let target = Variable::new(Tensor::from_vec(vec![1.0, 0.0, 1.0], &[3]).unwrap(), false);
         let loss = loss_fn.compute(&input, &target);
-        // Should return per-element losses, not reduced
         assert_eq!(loss.shape().len(), 1);
         assert_eq!(loss.shape()[0], 3);
     }
@@ -1673,23 +1570,19 @@ mod tests {
 
     #[test]
     fn test_smooth_l1_small_error() {
-        // For |diff| < beta=1.0: loss = 0.5 * diff^2 / beta
         let loss_fn = SmoothL1Loss::new();
         let input = Variable::new(Tensor::from_vec(vec![1.0], &[1]).unwrap(), false);
         let target = Variable::new(Tensor::from_vec(vec![1.3], &[1]).unwrap(), false);
         let loss = loss_fn.compute(&input, &target);
-        // diff=0.3, |0.3| < 1.0, loss = 0.5 * 0.09 / 1.0 = 0.045
         assert!((loss.data().to_vec()[0] - 0.045).abs() < 0.01);
     }
 
     #[test]
     fn test_smooth_l1_large_error() {
-        // For |diff| >= beta=1.0: loss = |diff| - 0.5*beta
         let loss_fn = SmoothL1Loss::new();
         let input = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false);
         let target = Variable::new(Tensor::from_vec(vec![5.0], &[1]).unwrap(), false);
         let loss = loss_fn.compute(&input, &target);
-        // diff=5.0, |5| >= 1.0, loss = 5.0 - 0.5 = 4.5
         assert!((loss.data().to_vec()[0] - 4.5).abs() < 0.1);
     }
 
@@ -1701,7 +1594,6 @@ mod tests {
     fn test_cross_entropy_batch_independence() {
         let loss_fn = CrossEntropyLoss::new();
 
-        // Single sample
         let input1 = Variable::new(
             Tensor::from_vec(vec![2.0, 1.0, 0.1], &[1, 3]).unwrap(),
             false,
@@ -1709,7 +1601,6 @@ mod tests {
         let target1 = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), false);
         let loss1 = loss_fn.compute(&input1, &target1).data().to_vec()[0];
 
-        // Same sample duplicated in batch
         let input2 = Variable::new(
             Tensor::from_vec(vec![2.0, 1.0, 0.1, 2.0, 1.0, 0.1], &[2, 3]).unwrap(),
             false,
@@ -1717,7 +1608,6 @@ mod tests {
         let target2 = Variable::new(Tensor::from_vec(vec![0.0, 0.0], &[2]).unwrap(), false);
         let loss2 = loss_fn.compute(&input2, &target2).data().to_vec()[0];
 
-        // Mean reduction should give same result for duplicated batch
         assert!(
             (loss1 - loss2).abs() < 1e-5,
             "Duplicated batch should give same loss: {} vs {}",
@@ -1728,10 +1618,9 @@ mod tests {
 
     #[test]
     fn test_cross_entropy_high_class_count() {
-        // Test with many classes (like BirdCLEF 234 species)
         let n_classes = 100;
         let mut logits = vec![0.0f32; n_classes];
-        logits[42] = 5.0; // Correct class has high logit
+        logits[42] = 5.0;
 
         let loss_fn = CrossEntropyLoss::new();
         let input = Variable::new(Tensor::from_vec(logits, &[1, n_classes]).unwrap(), false);
@@ -1744,8 +1633,6 @@ mod tests {
 
     #[test]
     fn test_kl_div_zero_when_identical() {
-        // When student and teacher logits match exactly, KL(P || Q) = 0
-        // regardless of temperature.
         let student = Variable::new(
             Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[1, 4]).unwrap(),
             true,
@@ -1768,7 +1655,6 @@ mod tests {
 
     #[test]
     fn test_kl_div_positive_for_different() {
-        // KL is always >= 0, and > 0 when distributions differ.
         let student = Variable::new(
             Tensor::from_vec(vec![0.0, 0.0, 0.0, 0.0], &[1, 4]).unwrap(),
             true,
@@ -1789,12 +1675,6 @@ mod tests {
 
     #[test]
     fn test_kl_div_temperature_squared_scaling() {
-        // Doubling T should scale the loss by close to T² relative to a
-        // fixed reference — not exactly T² because the underlying KL
-        // shrinks at higher T (softer distributions), but the T² factor
-        // dominates for moderate logit spreads. We just verify T² > 0
-        // scaling produces monotone increase with T over the range where
-        // the underlying KL doesn't collapse too fast.
         let student = Variable::new(
             Tensor::from_vec(vec![0.0, 0.0, 0.0, 0.0], &[1, 4]).unwrap(),
             true,
@@ -1812,11 +1692,7 @@ mod tests {
             .data()
             .to_vec()[0];
         assert!(l_t1.is_finite() && l_t2.is_finite());
-        // Both positive.
         assert!(l_t1 > 0.0 && l_t2 > 0.0);
-        // With T²-scaling, T=2 loss should be meaningfully larger than T=1
-        // even accounting for softened distributions. Empirically ~3× for
-        // this logit spread.
         assert!(
             l_t2 > l_t1,
             "T=2 KL ({}) should exceed T=1 KL ({}) under T² scaling",
@@ -1827,7 +1703,6 @@ mod tests {
 
     #[test]
     fn test_kl_div_backward_gradient_shape() {
-        // Forward then backward; check grad_input shape matches student shape.
         use axonml_autograd::backward;
         let batch = 3;
         let classes = 5;
@@ -1848,7 +1723,6 @@ mod tests {
             &[batch, classes],
             "grad_student shape mismatch"
         );
-        // Gradient magnitudes should be finite and non-zero somewhere.
         let gvec = grad.to_vec();
         assert!(gvec.iter().all(|g| g.is_finite()));
         assert!(

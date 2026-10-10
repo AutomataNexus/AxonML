@@ -242,7 +242,7 @@ impl DeviceCapabilities {
     /// Returns true if the device supports f32.
     #[must_use]
     pub const fn supports_f32(&self) -> bool {
-        true // All devices support f32
+        true
     }
 }
 

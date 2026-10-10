@@ -43,8 +43,9 @@ use crate::functions::{
     TransposeBackward, UnsqueezeBackward, VarDimBackward,
 };
 use crate::grad_fn::{AccumulateGrad, GradAccumulator, GradFn};
-use crate::graph::{GraphNode, with_graph};
+use crate::graph::{GraphNode, NodeId, with_graph};
 use crate::no_grad::is_grad_enabled;
+use crate::trace_capture::{TraceKind, is_recording, record};
 
 // =============================================================================
 // Variable Struct
@@ -79,7 +80,6 @@ impl Variable {
     /// * `requires_grad` - Whether to track gradients for this variable
     #[must_use]
     pub fn new(data: Tensor<f32>, requires_grad: bool) -> Self {
-        // Create shared gradient accumulator
         let grad: GradAccumulator = Arc::new(RwLock::new(None));
 
         let node = if requires_grad {
@@ -88,7 +88,6 @@ impl Variable {
             None
         };
 
-        // Create AccumulateGrad with shared gradient storage
         let grad_fn = if requires_grad {
             Some(GradFn::new(AccumulateGrad::new(Arc::clone(&grad))))
         } else {
@@ -130,6 +129,42 @@ impl Variable {
             grad_fn: if requires_grad { Some(grad_fn) } else { None },
             node,
         }
+    }
+
+    /// The graph node id for this variable, if it is tracked (leaf or op result). Used by the
+    /// forward recorder to link ops into a chain without any second declaration.
+    #[must_use]
+    pub fn node_id(&self) -> Option<NodeId> {
+        self.node.as_ref().map(|n| n.id)
+    }
+
+    /// Build a unary/scalar op result and, when a capture is active, record it (kind + this input).
+    /// One call replaces the bare `Variable::from_operation` in each fusable elementwise op.
+    fn unary_traced(&self, data: Tensor<f32>, grad_fn: GradFn, kind: TraceKind) -> Variable {
+        let v = Variable::from_operation(data, grad_fn, true);
+        if is_recording() {
+            if let (Some(out), Some(inp)) = (v.node_id(), self.node_id()) {
+                record(out, kind, &[inp]);
+            }
+        }
+        v
+    }
+
+    /// Binary elementwise result recorder: records both tensor inputs (`self`, `other`).
+    fn binary_traced(
+        &self,
+        other: &Variable,
+        data: Tensor<f32>,
+        grad_fn: GradFn,
+        kind: TraceKind,
+    ) -> Variable {
+        let v = Variable::from_operation(data, grad_fn, true);
+        if is_recording() {
+            if let (Some(out), Some(a), Some(b)) = (v.node_id(), self.node_id(), other.node_id()) {
+                record(out, kind, &[a, b]);
+            }
+        }
+        v
     }
 
     /// Returns a clone of the underlying tensor data.
@@ -222,8 +257,12 @@ impl Variable {
     /// Accumulates gradient (adds to existing gradient).
     pub fn accumulate_grad(&self, grad: &Tensor<f32>) {
         let mut grad_lock = self.grad.write();
-        if let Some(ref existing) = *grad_lock {
-            *grad_lock = Some(existing.add(grad).unwrap());
+        if let Some(existing) = grad_lock.as_mut() {
+            if existing.shape() == grad.shape() {
+                existing.scaled_add_inplace_(grad, 1.0);
+            } else {
+                *grad_lock = Some(existing.add(grad).unwrap());
+            }
         } else {
             *grad_lock = Some(grad.clone());
         }
@@ -254,7 +293,6 @@ impl Variable {
     pub fn requires_grad_(mut self, requires_grad: bool) -> Self {
         self.requires_grad = requires_grad;
         if requires_grad && self.is_leaf {
-            // AccumulateGrad shares the gradient accumulator with this variable
             self.grad_fn = Some(GradFn::new(AccumulateGrad::new(Arc::clone(&self.grad))));
             self.node = Some(with_graph(|g| g.register_leaf(true)));
         }
@@ -276,7 +314,6 @@ impl Variable {
             "backward() can only be called on scalar tensors"
         );
 
-        // Start with gradient of 1.0 for the output, on the same device
         let mut grad_output = Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap();
         let device = self.data.read().device();
         if device.is_gpu() {
@@ -323,7 +360,7 @@ impl Variable {
                 self.shape(),
                 other.shape(),
             ));
-            Variable::from_operation(result, grad_fn, true)
+            self.binary_traced(other, result, grad_fn, TraceKind::AddTensor)
         } else {
             Variable::from_tensor(result)
         }
@@ -342,7 +379,7 @@ impl Variable {
                 self.shape(),
                 other.shape(),
             ));
-            Variable::from_operation(result, grad_fn, true)
+            self.binary_traced(other, result, grad_fn, TraceKind::SubTensor)
         } else {
             Variable::from_tensor(result)
         }
@@ -363,7 +400,7 @@ impl Variable {
                 self_data,
                 other_data,
             ));
-            Variable::from_operation(result, grad_fn, true)
+            self.binary_traced(other, result, grad_fn, TraceKind::MulTensor)
         } else {
             Variable::from_tensor(result)
         }
@@ -398,7 +435,7 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(NegBackward::new(self.grad_fn.clone()));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::Neg)
         } else {
             Variable::from_tensor(result)
         }
@@ -410,7 +447,6 @@ impl Variable {
         let self_data = self.data.read().clone();
         let other_data = other.data.read().clone();
 
-        // AMP: cast inputs to f16 precision for faster matmul, result stays f32
         let (compute_a, compute_b) = if crate::amp::is_autocast_enabled() {
             (self_data.to_f16_precision(), other_data.to_f16_precision())
         } else {
@@ -442,7 +478,7 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(PowBackward::new(self.grad_fn.clone(), self_data, exponent));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::Pow(exponent))
         } else {
             Variable::from_tensor(result)
         }
@@ -461,7 +497,7 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(ReluBackward::new(self.grad_fn.clone(), self_data));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::Relu)
         } else {
             Variable::from_tensor(result)
         }
@@ -527,7 +563,7 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(SigmoidBackward::new(self.grad_fn.clone(), result.clone()));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::Sigmoid)
         } else {
             Variable::from_tensor(result)
         }
@@ -541,7 +577,7 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(TanhBackward::new(self.grad_fn.clone(), result.clone()));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::Tanh)
         } else {
             Variable::from_tensor(result)
         }
@@ -556,7 +592,7 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(ExpBackward::new(self.grad_fn.clone(), result.clone()));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::Exp)
         } else {
             Variable::from_tensor(result)
         }
@@ -571,7 +607,7 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(LogBackward::new(self.grad_fn.clone(), self_data));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::Ln)
         } else {
             Variable::from_tensor(result)
         }
@@ -579,6 +615,19 @@ impl Variable {
 
     /// Element-wise clamp to [min_val, max_val].
     #[must_use]
+    /// Element-wise minimum of two tensors: `min(a, b) = a - relu(a - b)`.
+    /// Folded from the vendored AxonML core (autograd chains through `relu`).
+    pub fn minimum(&self, other: &Variable) -> Variable {
+        self.sub_var(&self.sub_var(other).relu())
+    }
+
+    /// Element-wise maximum of two tensors: `max(a, b) = a + relu(b - a)`.
+    #[must_use]
+    pub fn maximum(&self, other: &Variable) -> Variable {
+        self.add_var(&other.sub_var(self).relu())
+    }
+
+    /// Element-wise clamp to `[min_val, max_val]` (differentiable via the two bounds).
     pub fn clamp(&self, min_val: f32, max_val: f32) -> Variable {
         let self_data = self.data.read().clone();
         let device = self_data.device();
@@ -600,7 +649,7 @@ impl Variable {
                 min_val,
                 max_val,
             ));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::Clamp(min_val, max_val))
         } else {
             Variable::from_tensor(result)
         }
@@ -614,7 +663,7 @@ impl Variable {
     #[must_use]
     pub fn sum(&self) -> Variable {
         let self_data = self.data.read().clone();
-        let result = self_data.sum(); // Returns a scalar Tensor
+        let result = self_data.sum();
         let requires_grad = self.requires_grad && is_grad_enabled();
 
         if requires_grad {
@@ -644,7 +693,7 @@ impl Variable {
     #[must_use]
     pub fn mean(&self) -> Variable {
         let self_data = self.data.read().clone();
-        let result = self_data.mean().unwrap(); // Returns a scalar Tensor
+        let result = self_data.mean().unwrap();
         let requires_grad = self.requires_grad && is_grad_enabled();
 
         if requires_grad {
@@ -673,14 +722,11 @@ impl Variable {
         let eps = Variable::from_tensor(Tensor::scalar(1e-7));
         let one = Variable::from_tensor(Tensor::scalar(1.0));
 
-        // -[y * log(p + eps) + (1 - y) * log(1 - p + eps)]
         let log_p = self.add_var(&eps);
         let log_1_p = one.sub_var(self).add_var(&eps);
 
-        let term1 = target.mul_var(&Variable::from_tensor(log_p.data().ln()));
-        let term2 = one
-            .sub_var(target)
-            .mul_var(&Variable::from_tensor(log_1_p.data().ln()));
+        let term1 = target.mul_var(&log_p.log());
+        let term2 = one.sub_var(target).mul_var(&log_1_p.log());
 
         term1.add_var(&term2).neg_var().mean()
     }
@@ -872,7 +918,7 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(MulScalarBackward::new(self.grad_fn.clone(), scalar));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::MulScalar(scalar))
         } else {
             Variable::from_tensor(result)
         }
@@ -887,7 +933,7 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(AddScalarBackward::new(self.grad_fn.clone()));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::AddScalar(scalar))
         } else {
             Variable::from_tensor(result)
         }
@@ -948,7 +994,7 @@ impl Variable {
 
         if requires_grad {
             let grad_fn = GradFn::new(SqrtBackward::new(self.grad_fn.clone(), result.clone()));
-            Variable::from_operation(result, grad_fn, true)
+            self.unary_traced(result, grad_fn, TraceKind::Sqrt)
         } else {
             Variable::from_tensor(result)
         }
@@ -1035,7 +1081,6 @@ impl Variable {
 
         let requires_grad = (self.requires_grad || b.requires_grad) && is_grad_enabled();
         if requires_grad {
-            // Normalized output — RMSNorm-aware gradient path.
             let normed_fn = GradFn::new(AddRMSNormBackward::new(
                 self.grad_fn.clone(),
                 b.grad_fn.clone(),
@@ -1048,7 +1093,6 @@ impl Variable {
             ));
             let normed_var = Variable::from_operation(out, normed_fn, true);
 
-            // Sum output — vanilla add-style gradient, flows through.
             let sum_fn = GradFn::new(AddBackward::new(
                 self.grad_fn.clone(),
                 b.grad_fn.clone(),
@@ -1381,7 +1425,6 @@ mod tests {
 
         b.sum().backward();
         let grad = a.grad().unwrap().to_vec();
-        // d/dx(exp(x)) = exp(x)
         assert!((grad[0] - 1.0).abs() < 1e-5);
         assert!((grad[1] - std::f32::consts::E).abs() < 1e-4);
     }
@@ -1399,7 +1442,6 @@ mod tests {
 
         b.sum().backward();
         let grad = a.grad().unwrap().to_vec();
-        // d/dx(log(x)) = 1/x
         assert!((grad[0] - 1.0).abs() < 1e-5);
         assert!((grad[1] - 1.0 / std::f32::consts::E).abs() < 1e-5);
     }
@@ -1415,10 +1457,9 @@ mod tests {
 
         b.sum().backward();
         let grad = a.grad().unwrap().to_vec();
-        // Gradient passes through only where not clamped
-        assert_eq!(grad[0], 0.0); // clamped at min
-        assert_eq!(grad[1], 1.0); // not clamped
-        assert_eq!(grad[2], 0.0); // clamped at max
+        assert_eq!(grad[0], 0.0);
+        assert_eq!(grad[1], 1.0);
+        assert_eq!(grad[2], 0.0);
     }
 
     // =========================================================================
@@ -1432,7 +1473,6 @@ mod tests {
         let c = a.add_var(&b);
         c.sum().backward();
 
-        // d(a+b)/da = 1, d(a+b)/db = 1
         let ga = a.grad().expect("a should have grad");
         let gb = b.grad().expect("b should have grad");
         assert_eq!(ga.to_vec(), vec![1.0, 1.0]);
@@ -1448,7 +1488,6 @@ mod tests {
         assert_eq!(c.data().to_vec(), vec![3.0, 2.0]);
         c.sum().backward();
 
-        // d(a-b)/da = 1, d(a-b)/db = -1
         let ga = a.grad().unwrap().to_vec();
         let gb = b.grad().unwrap().to_vec();
         assert_eq!(ga, vec![1.0, 1.0]);
@@ -1464,7 +1503,6 @@ mod tests {
         assert_eq!(c.data().to_vec(), vec![8.0, 15.0]);
         c.sum().backward();
 
-        // d(a*b)/da = b, d(a*b)/db = a
         let ga = a.grad().unwrap().to_vec();
         let gb = b.grad().unwrap().to_vec();
         assert_eq!(ga, vec![4.0, 5.0]);
@@ -1480,7 +1518,6 @@ mod tests {
         assert_eq!(c.data().to_vec(), vec![3.0, 2.0]);
         c.sum().backward();
 
-        // d(a/b)/da = 1/b, d(a/b)/db = -a/b^2
         let ga = a.grad().unwrap().to_vec();
         let gb = b.grad().unwrap().to_vec();
         assert!((ga[0] - 0.5).abs() < 1e-5, "da = 1/b = 0.5, got {}", ga[0]);
@@ -1505,7 +1542,6 @@ mod tests {
         assert_eq!(c.data().to_vec(), vec![10.0, 15.0]);
         c.sum().backward();
 
-        // d(5*a)/da = 5
         let ga = a.grad().unwrap().to_vec();
         assert_eq!(ga, vec![5.0, 5.0]);
     }
@@ -1522,10 +1558,9 @@ mod tests {
         assert_eq!(b.data().to_vec(), vec![0.0, 0.0, 3.0]);
         b.sum().backward();
 
-        // d(relu(x))/dx = 0 if x<0, 1 if x>0
         let ga = a.grad().unwrap().to_vec();
-        assert_eq!(ga[0], 0.0); // negative → 0
-        assert_eq!(ga[2], 1.0); // positive → 1
+        assert_eq!(ga[0], 0.0);
+        assert_eq!(ga[2], 1.0);
     }
 
     #[test]
@@ -1533,11 +1568,9 @@ mod tests {
         let a = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), true);
         let b = a.sigmoid();
 
-        // sigmoid(0) = 0.5
         assert!((b.data().to_vec()[0] - 0.5).abs() < 1e-5);
         b.backward();
 
-        // d(sigmoid(x))/dx = sigmoid(x)*(1-sigmoid(x)) = 0.5*0.5 = 0.25
         let ga = a.grad().unwrap().to_vec();
         assert!(
             (ga[0] - 0.25).abs() < 1e-4,
@@ -1551,11 +1584,9 @@ mod tests {
         let a = Variable::new(Tensor::from_vec(vec![0.0], &[1]).unwrap(), true);
         let b = a.tanh();
 
-        // tanh(0) = 0
         assert!(b.data().to_vec()[0].abs() < 1e-5);
         b.backward();
 
-        // d(tanh(x))/dx = 1 - tanh(x)^2 = 1 - 0 = 1
         let ga = a.grad().unwrap().to_vec();
         assert!((ga[0] - 1.0).abs() < 1e-4, "tanh'(0) = 1.0, got {}", ga[0]);
     }
@@ -1566,7 +1597,6 @@ mod tests {
 
     #[test]
     fn test_chain_rule_mul_then_add() {
-        // f(a,b) = a*b + a → df/da = b+1, df/db = a
         let a = Variable::new(Tensor::from_vec(vec![3.0], &[1]).unwrap(), true);
         let b = Variable::new(Tensor::from_vec(vec![4.0], &[1]).unwrap(), true);
         let ab = a.mul_var(&b);
@@ -1581,16 +1611,14 @@ mod tests {
 
     #[test]
     fn test_chain_rule_nested_operations() {
-        // f(x) = relu(x^2 - 1) → df/dx = 2x if x^2 > 1, else 0
         let x = Variable::new(Tensor::from_vec(vec![2.0], &[1]).unwrap(), true);
-        let x_sq = x.mul_var(&x); // x^2 = 4
-        let shifted = x_sq.add_scalar(-1.0); // x^2 - 1 = 3
-        let out = shifted.relu(); // relu(3) = 3
+        let x_sq = x.mul_var(&x);
+        let shifted = x_sq.add_scalar(-1.0);
+        let out = shifted.relu();
 
         assert!((out.data().to_vec()[0] - 3.0).abs() < 1e-5);
         out.backward();
 
-        // df/dx = 2x * 1 (relu passes through since input > 0) = 4
         let gx = x.grad().unwrap().to_vec()[0];
         assert!((gx - 4.0).abs() < 1e-4, "df/dx = 2x = 4, got {}", gx);
     }
@@ -1606,7 +1634,6 @@ mod tests {
         assert!((s.data().to_vec()[0] - 10.0).abs() < 1e-5);
         s.backward();
 
-        // d(sum)/dx_i = 1 for all i
         let ga = a.grad().unwrap().to_vec();
         assert_eq!(ga, vec![1.0, 1.0, 1.0, 1.0]);
     }
@@ -1622,7 +1649,6 @@ mod tests {
         assert!((m.data().to_vec()[0] - 5.0).abs() < 1e-5);
         m.backward();
 
-        // d(mean)/dx_i = 1/N = 0.25
         let ga = a.grad().unwrap().to_vec();
         for g in &ga {
             assert!(
@@ -1639,7 +1665,6 @@ mod tests {
 
     #[test]
     fn test_matmul_backward() {
-        // C = A @ B where A=[2,3], B=[3,2]
         let a = Variable::new(
             Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]).unwrap(),
             true,
@@ -1648,18 +1673,16 @@ mod tests {
             Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2]).unwrap(),
             true,
         );
-        let c = a.matmul(&b); // [2, 2]
+        let c = a.matmul(&b);
         assert_eq!(c.shape(), vec![2, 2]);
 
         c.sum().backward();
 
-        // dL/dA = ones @ B^T, dL/dB = A^T @ ones
         let ga = a.grad().expect("A should have grad");
         let gb = b.grad().expect("B should have grad");
         assert_eq!(ga.shape(), &[2, 3]);
         assert_eq!(gb.shape(), &[3, 2]);
 
-        // All gradients should be finite and non-zero
         assert!(ga.to_vec().iter().all(|g| g.is_finite() && g.abs() > 0.0));
         assert!(gb.to_vec().iter().all(|g| g.is_finite() && g.abs() > 0.0));
     }
@@ -1672,26 +1695,22 @@ mod tests {
     fn test_no_grad_skips_backward() {
         let a = Variable::new(Tensor::from_vec(vec![1.0], &[1]).unwrap(), false);
         let b = a.mul_scalar(2.0);
-        // Should not panic even though requires_grad=false
         assert!((b.data().to_vec()[0] - 2.0).abs() < 1e-5);
         assert!(a.grad().is_none());
     }
 
     #[test]
     fn test_detach_stops_gradient() {
-        // detach() creates a new variable without gradient tracking
         let a = Variable::new(Tensor::from_vec(vec![3.0], &[1]).unwrap(), true);
         let b = a.mul_scalar(2.0);
         let c = b.detach();
 
-        // Detached variable should not require grad
         assert!(
             !c.requires_grad(),
             "Detached variable should not require grad"
         );
         assert!(c.is_leaf(), "Detached variable should be a leaf");
 
-        // Original chain should still work
         b.backward();
         let ga = a.grad().unwrap().to_vec()[0];
         assert!(
@@ -1708,12 +1727,10 @@ mod tests {
         b.backward();
         let g1 = a.grad().unwrap().to_vec()[0];
 
-        // Second backward should accumulate
         let c = a.mul_scalar(3.0);
         c.backward();
         let g2 = a.grad().unwrap().to_vec()[0];
 
-        // Gradient should have accumulated: 3 + 3 = 6
         assert!(
             (g2 - g1 * 2.0).abs() < 1e-4 || g2 >= g1,
             "Second backward should accumulate: g1={}, g2={}",

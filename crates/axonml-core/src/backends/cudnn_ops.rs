@@ -98,7 +98,6 @@ pub fn cudnn_conv2d_forward(
     let oh = out_h as i32;
     let ow = out_w as i32;
 
-    // Create descriptors
     let x_desc = cudnn
         .create_4d_tensor::<f32>(cudnnTensorFormat_t::CUDNN_TENSOR_NCHW, [n, c_in, h, w])
         .ok()?;
@@ -119,7 +118,7 @@ pub fn cudnn_conv2d_forward(
         .create_conv2d::<f32>(
             [pad_h as i32, pad_w as i32],
             [stride_h as i32, stride_w as i32],
-            [1, 1], // dilation
+            [1, 1],
             cudnnConvolutionMode_t::CUDNN_CROSS_CORRELATION,
         )
         .ok()?;
@@ -128,7 +127,6 @@ pub fn cudnn_conv2d_forward(
         conv_desc.set_group_count(groups as i32).ok()?;
     }
 
-    // Use Tensor Core math if available
     conv_desc
         .set_math_type(cudarc::cudnn::sys::cudnnMathType_t::CUDNN_DEFAULT_MATH)
         .ok()?;
@@ -140,18 +138,14 @@ pub fn cudnn_conv2d_forward(
         y: &y_desc,
     };
 
-    // Pick best algorithm
     let algo = op.pick_algorithm().ok()?;
 
-    // Get workspace size and allocate
     let workspace_size = op.get_workspace_size(algo).ok()?;
     let mut workspace = stream.alloc_zeros::<u8>(workspace_size.max(1)).ok()?;
 
-    // Allocate output
     let total_out = batch_size * out_channels * out_h * out_w;
     let mut output = stream.alloc_zeros::<f32>(total_out).ok()?;
 
-    // Launch conv forward
     unsafe {
         op.launch(
             algo,
@@ -164,7 +158,6 @@ pub fn cudnn_conv2d_forward(
         .ok()?;
     }
 
-    // Add bias if present using the existing CUDA kernel
     if let Some(bias_data) = bias {
         let spatial = out_h * out_w;
         cuda_backend

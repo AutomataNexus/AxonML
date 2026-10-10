@@ -78,13 +78,9 @@ struct AdamState {
     step: usize,
 }
 
-/// Maximum parameter size (in elements) that gets GPU-resident Adam state.
-/// Parameters larger than this (e.g. 152K×2048 embedding/LM-head) keep
-/// their momentum buffers on CPU and use the CPU Adam path. This prevents
-/// OOM from Adam state on large-vocab models while keeping GPU Adam fast
-/// for the transformer layers where it matters.
-const GPU_ADAM_STATE_MAX_ELEMENTS: usize = 64 * 1024 * 1024; // 64M elements = 256MB per buffer
-
+/// Adam moment state lives on the parameter's device: a GPU parameter gets
+/// GPU-resident `exp_avg`/`exp_avg_sq`, always. The GPU step migrates any
+/// host-resident state it meets instead of handing it to the CUDA kernel.
 impl AdamState {
     fn new(shape: &[usize], device: axonml_core::Device) -> Self {
         let size: usize = shape.iter().product();
@@ -92,7 +88,7 @@ impl AdamState {
             Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
         let mut exp_avg_sq =
             Tensor::from_vec(vec![0.0f32; size], shape).expect("tensor creation failed");
-        if device.is_gpu() && size <= GPU_ADAM_STATE_MAX_ELEMENTS {
+        if device.is_gpu() {
             exp_avg = exp_avg.to_device(device).expect("device transfer failed");
             exp_avg_sq = exp_avg_sq
                 .to_device(device)
@@ -107,7 +103,54 @@ impl AdamState {
     }
 }
 
+/// One parameter's exported Adam moments: `(shape, exp_avg, exp_avg_sq, step)`.
+pub type AdamMoments = (Vec<usize>, Vec<f32>, Vec<f32>, usize);
+
 impl Adam {
+    /// Optimizer moments for a lossless pause: per parameter (shape, exp_avg, exp_avg_sq, step).
+    /// Parameters without state yet (never stepped) are exported as empty vectors.
+    pub fn export_state(&self) -> Vec<AdamMoments> {
+        self.params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| match self.state.get(i) {
+                Some(st) => (
+                    p.shape().clone(),
+                    st.exp_avg.to_vec(),
+                    st.exp_avg_sq.to_vec(),
+                    st.step,
+                ),
+                None => (p.shape().clone(), Vec::new(), Vec::new(), 0),
+            })
+            .collect()
+    }
+
+    /// Restore moments exported by [`Adam::export_state`]; entries whose shape does not match are
+    /// left at zero. Returns the number of parameters restored.
+    pub fn import_state(&mut self, saved: &[AdamMoments]) -> usize {
+        self.ensure_state_initialized();
+        let mut n = 0usize;
+        for (i, (shape, m, v, step)) in saved.iter().enumerate() {
+            let Some(p) = self.params.get(i) else { break };
+            if p.shape() != shape.as_slice() || m.len() != p.numel() || v.len() != p.numel() {
+                continue;
+            }
+            let dev = p.data().device();
+            let mut em = Tensor::from_vec(m.clone(), shape).expect("adam m");
+            let mut ev = Tensor::from_vec(v.clone(), shape).expect("adam v");
+            if dev.is_gpu() {
+                em = em.to_device(dev).expect("adam m to device");
+                ev = ev.to_device(dev).expect("adam v to device");
+            }
+            let st = &mut self.state[i];
+            st.exp_avg = em;
+            st.exp_avg_sq = ev;
+            st.step = *step;
+            n += 1;
+        }
+        n
+    }
+
     /// Creates a new Adam optimizer with default hyperparameters.
     #[must_use]
     pub fn new(params: Vec<Parameter>, lr: f32) -> Self {
@@ -213,21 +256,32 @@ impl Optimizer for Adam {
 
             let param_data = param.data();
 
-            // GPU path: fused CUDA kernel — single launch per parameter, zero CPU copies
             #[cfg(feature = "cuda")]
             if param_data.device().is_gpu() {
-                // Auto-migrate gradient to GPU if backward produced CPU gradients
-                // (happens when backward functions use CPU fallback computation)
                 let grad = if !grad.device().is_gpu() {
                     grad.to_device(param_data.device())
                         .expect("Adam: failed to migrate CPU gradient to GPU")
                 } else {
                     grad
                 };
+                let grad = if grad.is_contiguous() {
+                    grad
+                } else {
+                    grad.contiguous()
+                };
+                if !state.exp_avg.device().is_gpu() {
+                    state.exp_avg = state
+                        .exp_avg
+                        .to_device(param_data.device())
+                        .expect("Adam: state to GPU");
+                    state.exp_avg_sq = state
+                        .exp_avg_sq
+                        .to_device(param_data.device())
+                        .expect("Adam: state to GPU");
+                }
                 let bias_correction1 = 1.0 - self.beta1.powi(state.step as i32);
                 let bias_correction2 = 1.0 - self.beta2.powi(state.step as i32);
 
-                // In-place fused Adam update on GPU
                 param_data.adam_step_inplace(
                     &grad,
                     &state.exp_avg,
@@ -240,11 +294,9 @@ impl Optimizer for Adam {
                     bias_correction1,
                     bias_correction2,
                 );
-                // No need for update_data — the kernel modified the GPU buffer in-place
                 continue;
             }
 
-            // CPU fallback — fused single-loop update for cache locality
             let grad_vec = grad.to_vec();
             let mut param_vec = param_data.to_vec();
             let mut exp_avg_vec = state.exp_avg.to_vec();
@@ -260,7 +312,6 @@ impl Optimizer for Adam {
             let eps = self.eps;
             let wd = self.weight_decay;
 
-            // AMSGrad: track max of all past exp_avg_sq values
             let mut max_sq_vec = if self.amsgrad {
                 state
                     .max_exp_avg_sq
@@ -270,10 +321,6 @@ impl Optimizer for Adam {
                 Vec::new()
             };
 
-            // Rayon-parallel fused per-element Adam update. The four mutable
-            // streams (param / exp_avg / exp_avg_sq / max_sq) are each
-            // disjoint; combining via `par_iter_mut().zip(...)` keeps every
-            // element on the same worker thread for cache locality.
             if self.amsgrad {
                 param_vec
                     .par_iter_mut()
@@ -393,7 +440,7 @@ impl AdamW {
             beta1: betas.0,
             beta2: betas.1,
             eps: 1e-8,
-            weight_decay: 0.01, // Default weight decay for AdamW
+            weight_decay: 0.01,
             amsgrad: false,
             state: Vec::new(),
         }
@@ -483,33 +530,31 @@ impl Optimizer for AdamW {
 
             let param_data = param.data();
 
-            // GPU path: decoupled weight decay + fused Adam step
             #[cfg(feature = "cuda")]
             if param_data.device().is_gpu() {
-                // Auto-migrate gradient to GPU if backward produced CPU gradients
                 let grad = if !grad.device().is_gpu() {
                     grad.to_device(param_data.device())
                         .expect("AdamW: failed to migrate CPU gradient to GPU")
                 } else {
                     grad
                 };
+                let grad = if grad.is_contiguous() {
+                    grad
+                } else {
+                    grad.contiguous()
+                };
 
-                // DECOUPLED weight decay: param *= (1 - lr * wd)
-                // This is the key difference from Adam's L2 regularization.
-                // Applied BEFORE the Adam update, directly to parameters.
                 if self.weight_decay > 0.0 {
                     let decay_factor = 1.0 - self.lr * self.weight_decay;
                     let decayed = param_data.mul_scalar(decay_factor);
                     param.update_data(decayed);
                 }
 
-                // Re-read param_data after potential decay update
                 let param_data = param.data();
 
                 let bias_correction1 = 1.0 - self.beta1.powi(state.step as i32);
                 let bias_correction2 = 1.0 - self.beta2.powi(state.step as i32);
 
-                // Adam step with wd=0 (decay already applied above)
                 param_data.adam_step_inplace(
                     &grad,
                     &state.exp_avg,
@@ -518,14 +563,13 @@ impl Optimizer for AdamW {
                     self.beta1,
                     self.beta2,
                     self.eps,
-                    0.0, // wd=0: decoupled decay already applied
+                    0.0,
                     bias_correction1,
                     bias_correction2,
                 );
                 continue;
             }
 
-            // CPU fallback — fused single-loop update for cache locality
             let grad_vec = grad.to_vec();
             let mut param_vec = param_data.to_vec();
             let mut exp_avg_vec = state.exp_avg.to_vec();
@@ -543,7 +587,6 @@ impl Optimizer for AdamW {
             let has_wd = self.weight_decay != 0.0;
 
             for i in 0..param_vec.len() {
-                // Decoupled weight decay: apply directly to param
                 if has_wd {
                     param_vec[i] *= wd_factor;
                 }
@@ -610,7 +653,6 @@ mod tests {
         );
         let param = Parameter::from_variable(var);
 
-        // Set gradient
         param
             .variable()
             .set_grad(Tensor::from_vec(vec![0.1, 0.2, 0.3], &[3]).expect("tensor creation failed"));
@@ -619,7 +661,6 @@ mod tests {
         optimizer.step();
 
         let new_data = param.data().to_vec();
-        // Parameters should have changed
         assert!((new_data[0] - 1.0).abs() > 1e-6);
     }
 
@@ -675,7 +716,6 @@ mod tests {
         opt.step();
         let after = param.data().to_vec();
 
-        // Both params should decrease (positive gradient → decrease)
         assert!(
             after[0] < before[0],
             "param[0] should decrease: {} -> {}",
@@ -689,7 +729,6 @@ mod tests {
             after[1]
         );
 
-        // After one Adam step with uniform gradient, both should change by the same amount
         let delta0 = before[0] - after[0];
         let delta1 = before[1] - after[1];
         assert!(
@@ -710,9 +749,8 @@ mod tests {
 
         for _ in 0..200 {
             opt.zero_grad();
-            // f(x) = x^2 → loss, compute gradient via autograd
             let x = param.variable();
-            let loss = x.mul_var(&x).sum(); // x^2
+            let loss = x.mul_var(&x).sum();
             loss.backward();
             opt.step();
         }
@@ -735,7 +773,6 @@ mod tests {
 
         let mut opt = Adam::new(vec![param.clone()], 0.01);
         opt.zero_grad();
-        // After zero_grad, gradient should be None or all zeros
         if let Some(g) = param.grad() {
             let gv = g.to_vec();
             assert!(
@@ -775,7 +812,6 @@ mod tests {
         let mut opt = Adam::new(vec![trainable.clone(), frozen.clone()], 0.1);
         opt.step();
 
-        // Trainable should change, frozen should not
         assert!((trainable.data().to_vec()[0] - 1.0).abs() > 1e-6);
         assert!((frozen.data().to_vec()[0] - 2.0).abs() < 1e-8);
     }
@@ -785,7 +821,6 @@ mod tests {
     fn test_adam_weight_decay() {
         let var = Variable::new(Tensor::from_vec(vec![10.0], &[1]).unwrap(), true);
         let param = Parameter::from_variable(var);
-        // Set zero gradient — only weight decay should modify params
         param.set_grad(Tensor::from_vec(vec![0.0], &[1]).unwrap());
 
         let mut opt = Adam::new(vec![param.clone()], 0.1).weight_decay(0.1);
@@ -793,8 +828,6 @@ mod tests {
         opt.step();
         let after = param.data().to_vec()[0];
 
-        // With weight_decay, even zero gradient should shrink params
-        // (grad_effective = grad + wd * param = 0 + 0.1 * 10.0 = 1.0)
         assert!(
             after < before,
             "Weight decay should shrink large params: {} -> {}",
@@ -814,13 +847,12 @@ mod tests {
         for _ in 0..50 {
             opt.zero_grad();
             let x = param.variable();
-            let loss = x.mul_var(&x).sum(); // ||x||^2
+            let loss = x.mul_var(&x).sum();
             losses.push(loss.data().to_vec()[0]);
             loss.backward();
             opt.step();
         }
 
-        // First loss should be much higher than last loss
         let first = losses[0];
         let last = *losses.last().unwrap();
         assert!(
@@ -847,7 +879,6 @@ mod tests {
         opt.step();
         let after = param.data().to_vec();
 
-        // Positive grad → decrease, negative grad → increase
         assert!(after[0] < before[0], "Positive grad should decrease param");
         assert!(after[1] > before[1], "Negative grad should increase param");
     }

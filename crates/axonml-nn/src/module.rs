@@ -30,6 +30,59 @@ use axonml_core::Device;
 use crate::parameter::Parameter;
 
 // =============================================================================
+// Graph description primitives
+// =============================================================================
+
+/// A typed attribute value attached to a graph node.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AttrVal {
+    /// Signed integer attribute.
+    Int(i64),
+    /// Floating-point attribute.
+    Float(f64),
+    /// List of signed integers.
+    Ints(Vec<i64>),
+    /// String attribute.
+    Str(String),
+    /// Boolean attribute.
+    Bool(bool),
+}
+
+/// A single node in a module's graph description: op name, attributes, and local parameter names.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeSpec {
+    /// Operation name (e.g. "Gemm", "Conv", "BatchNorm").
+    pub op: String,
+    /// Named attributes for this op.
+    pub attrs: Vec<(String, AttrVal)>,
+    /// Local parameter names this op consumes.
+    pub params: Vec<String>,
+}
+
+impl NodeSpec {
+    /// Creates a new node spec for the given op name.
+    pub fn new(op: &str) -> Self {
+        Self {
+            op: op.to_string(),
+            attrs: Vec::new(),
+            params: Vec::new(),
+        }
+    }
+
+    /// Adds an attribute and returns self for chaining.
+    pub fn attr(mut self, key: &str, val: AttrVal) -> Self {
+        self.attrs.push((key.to_string(), val));
+        self
+    }
+
+    /// Adds a parameter name and returns self for chaining.
+    pub fn param(mut self, name: &str) -> Self {
+        self.params.push(name.to_string());
+        self
+    }
+}
+
+// =============================================================================
 // Module Trait
 // =============================================================================
 
@@ -62,6 +115,29 @@ pub trait Module: Send + Sync {
         HashMap::new()
     }
 
+    /// Returns persistent non-parameter buffers (e.g. BatchNorm running mean/var).
+    fn named_buffers(&self) -> HashMap<String, axonml_tensor::Tensor<f32>> {
+        HashMap::new()
+    }
+
+    /// Sets a named buffer; returns true if the buffer exists on this module.
+    fn set_buffer(&self, _name: &str, _value: axonml_tensor::Tensor<f32>) -> bool {
+        false
+    }
+
+    /// Describes this module's forward op(s) for graph tracing.
+    ///
+    /// Leaves emit their op(s) + attrs + local param names; containers expose
+    /// ordered children (via `named_children`) so a tracer can compose the full graph.
+    fn describe(&self) -> Vec<NodeSpec> {
+        Vec::new()
+    }
+
+    /// Returns ordered (name, child) pairs for container modules.
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        Vec::new()
+    }
+
     /// Returns the number of trainable parameters.
     fn num_parameters(&self) -> usize {
         self.parameters()
@@ -86,10 +162,7 @@ pub trait Module: Send + Sync {
     ///
     /// Modules with training-dependent behavior (Dropout, BatchNorm) MUST
     /// override this AND `is_training()` to track the mode in an internal field.
-    fn set_training(&mut self, _training: bool) {
-        // Default: no-op. Stateless modules (Linear, Conv, activations)
-        // don't need training mode tracking.
-    }
+    fn set_training(&mut self, _training: bool) {}
 
     /// Returns whether the module is in training mode.
     ///
@@ -210,6 +283,37 @@ impl Module for ModuleList {
         params
     }
 
+    fn named_buffers(&self) -> HashMap<String, axonml_tensor::Tensor<f32>> {
+        let mut buffers = HashMap::new();
+        for (i, module) in self.modules.iter().enumerate() {
+            for (name, buf) in module.named_buffers() {
+                buffers.insert(format!("{i}.{name}"), buf);
+            }
+        }
+        buffers
+    }
+
+    fn set_buffer(&self, name: &str, value: axonml_tensor::Tensor<f32>) -> bool {
+        match name.split_once('.') {
+            Some((idx, rest)) => match idx.parse::<usize>() {
+                Ok(i) => self
+                    .modules
+                    .get(i)
+                    .is_some_and(|m| m.set_buffer(rest, value)),
+                Err(_) => false,
+            },
+            None => false,
+        }
+    }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        self.modules
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (i.to_string(), m.as_ref()))
+            .collect()
+    }
+
     fn set_training(&mut self, training: bool) {
         self.training = training;
         for module in &mut self.modules {
@@ -235,7 +339,6 @@ mod tests {
     use super::*;
     use axonml_tensor::Tensor;
 
-    // Simple test module
     struct Identity;
 
     impl Module for Identity {

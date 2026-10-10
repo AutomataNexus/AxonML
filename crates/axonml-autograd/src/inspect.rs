@@ -80,14 +80,13 @@ pub struct SnapshotNode {
 pub fn trace_backward(variable: &Variable) -> GraphSnapshot {
     let mut nodes: Vec<SnapshotNode> = Vec::new();
     let mut edges: Vec<(usize, usize)> = Vec::new();
-    let mut visited: HashMap<GradFnId, usize> = HashMap::new(); // id -> index in nodes
+    let mut visited: HashMap<GradFnId, usize> = HashMap::new();
 
     match variable.grad_fn() {
         Some(gf) => {
             trace_dfs(gf, &mut nodes, &mut edges, &mut visited);
         }
         None => {
-            // Leaf variable with no grad_fn chain — emit a single "Leaf" node
             nodes.push(SnapshotNode {
                 id: 0,
                 name: "Leaf".to_string(),
@@ -110,7 +109,6 @@ fn trace_dfs(
 ) -> usize {
     let fn_id = grad_fn.id();
 
-    // Already visited — return existing index
     if let Some(&idx) = visited.get(&fn_id) {
         return idx;
     }
@@ -123,12 +121,11 @@ fn trace_dfs(
         id: fn_id,
         name,
         is_leaf,
-        requires_grad: true, // anything in the grad_fn chain requires grad
-        shape: None,         // shape not directly available from GradFn
+        requires_grad: true,
+        shape: None,
     });
     visited.insert(fn_id, idx);
 
-    // Recurse into parents
     for next in grad_fn.next_functions().iter().flatten() {
         let child_idx = trace_dfs(next, nodes, edges, visited);
         edges.push((idx, child_idx));
@@ -191,7 +188,7 @@ pub fn node_count(variable: &Variable) -> usize {
             count_dfs(gf, &mut visited);
             visited.len()
         }
-        None => 1, // leaf node counts as 1
+        None => 1,
     }
 }
 
@@ -233,7 +230,6 @@ fn depth_dfs(grad_fn: &GradFn, visited: &mut HashSet<GradFnId>) -> usize {
         max_child_depth = max_child_depth.max(d);
     }
 
-    // Remove from visited so other paths can explore this node at different depths
     visited.remove(&fn_id);
 
     max_child_depth + 1
@@ -377,7 +373,6 @@ mod tests {
             true,
         );
         let snap = trace_backward(&x);
-        // A leaf with requires_grad has an AccumulateGrad grad_fn
         assert_eq!(snap.nodes.len(), 1);
         assert!(snap.nodes[0].is_leaf);
         assert_eq!(snap.nodes[0].name, "AccumulateGrad");
@@ -396,12 +391,9 @@ mod tests {
         let c = a.add_var(&b);
         let snap = trace_backward(&c);
 
-        // Should have 3 nodes: AddBackward + 2 AccumulateGrad
         assert_eq!(snap.nodes.len(), 3);
-        // Should have 2 edges: AddBackward -> AccumulateGrad(a), AddBackward -> AccumulateGrad(b)
         assert_eq!(snap.edges.len(), 2);
 
-        // Root should be AddBackward
         assert_eq!(snap.nodes[0].name, "AddBackward");
         assert!(!snap.nodes[0].is_leaf);
     }
@@ -416,7 +408,6 @@ mod tests {
         let c = b.sigmoid();
         let snap = trace_backward(&c);
 
-        // SigmoidBackward -> ReluBackward -> AccumulateGrad
         assert_eq!(snap.nodes.len(), 3);
         assert_eq!(snap.edges.len(), 2);
         assert_eq!(snap.nodes[0].name, "SigmoidBackward");
@@ -426,7 +417,6 @@ mod tests {
 
     #[test]
     fn test_trace_diamond_topology() {
-        // Diamond: a -> b, a -> c, b + c -> d
         let a = Variable::new(
             Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
             true,
@@ -436,9 +426,7 @@ mod tests {
         let d = b.add_var(&c);
         let snap = trace_backward(&d);
 
-        // AddBackward, ReluBackward, SigmoidBackward, AccumulateGrad(a) — shared leaf
         assert_eq!(snap.nodes.len(), 4);
-        // AddBackward->Relu, AddBackward->Sigmoid, Relu->Accum, Sigmoid->Accum
         assert_eq!(snap.edges.len(), 4);
     }
 
@@ -471,7 +459,6 @@ mod tests {
             Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
             true,
         );
-        // AccumulateGrad node
         assert_eq!(node_count(&x), 1);
     }
 
@@ -486,7 +473,6 @@ mod tests {
             true,
         );
         let c = a.add_var(&b);
-        // AddBackward + 2 AccumulateGrad
         assert_eq!(node_count(&c), 3);
     }
 
@@ -497,7 +483,6 @@ mod tests {
             true,
         );
         let b = a.relu().sigmoid().tanh();
-        // TanhBackward -> SigmoidBackward -> ReluBackward -> AccumulateGrad
         assert_eq!(node_count(&b), 4);
     }
 
@@ -510,7 +495,6 @@ mod tests {
         let b = a.relu();
         let c = a.sigmoid();
         let d = b.add_var(&c);
-        // AddBackward, ReluBackward, SigmoidBackward, AccumulateGrad (shared)
         assert_eq!(node_count(&d), 4);
     }
 
@@ -534,7 +518,6 @@ mod tests {
             true,
         );
         let b = a.relu();
-        // ReluBackward -> AccumulateGrad  =>  depth 2
         assert_eq!(depth(&b), 2);
     }
 
@@ -545,13 +528,11 @@ mod tests {
             true,
         );
         let b = a.relu().sigmoid().tanh();
-        // Tanh -> Sigmoid -> Relu -> Accum  =>  depth 4
         assert_eq!(depth(&b), 4);
     }
 
     #[test]
     fn test_depth_branching() {
-        // Two branches of different length merging
         let a = Variable::new(
             Tensor::from_vec(vec![1.0], &[1]).expect("tensor creation failed"),
             true,
@@ -560,10 +541,9 @@ mod tests {
             Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
             true,
         );
-        let left = a.relu().sigmoid(); // depth 3 from leaf
-        let right = b.relu(); // depth 2 from leaf
+        let left = a.relu().sigmoid();
+        let right = b.relu();
         let merged = left.add_var(&right);
-        // AddBackward at top, max path is left side: Add->Sig->Relu->Accum = 4
         assert_eq!(depth(&merged), 4);
     }
 
@@ -612,7 +592,6 @@ mod tests {
         let b = a.relu();
         let c = a.sigmoid();
         let d = b.add_var(&c);
-        // Only one leaf (a), even though it's used twice
         assert_eq!(leaf_count(&d), 1);
     }
 
@@ -646,7 +625,6 @@ mod tests {
             true,
         );
         let names = operation_names(&x);
-        // AccumulateGrad is excluded
         assert!(names.is_empty());
     }
 
@@ -672,7 +650,6 @@ mod tests {
         );
         let b = a.tanh().relu().sigmoid();
         let names = operation_names(&b);
-        // Should be alphabetically sorted
         let mut sorted = names.clone();
         sorted.sort();
         assert_eq!(names, sorted);
@@ -735,7 +712,6 @@ mod tests {
         let ab = a.add_var(&b);
         let abc = ab.add_var(&c);
         let summary = gradient_flow_summary(&abc);
-        // Two AddBackward nodes
         assert!(
             summary
                 .iter()
@@ -753,11 +729,9 @@ mod tests {
             Tensor::from_vec(vec![2.0], &[1]).expect("tensor creation failed"),
             true,
         );
-        // a.relu() + b => AddBackward(1), ReluBackward(1)
         let c = a.relu().add_var(&b);
         let summary = gradient_flow_summary(&c);
         assert_eq!(summary.len(), 2);
-        // Both have count 1, so sorted alphabetically
         assert_eq!(summary[0].0, "AddBackward");
         assert_eq!(summary[1].0, "ReluBackward");
     }
@@ -881,7 +855,7 @@ mod tests {
         );
         let b = a.sum();
         let snap = trace_backward(&b);
-        assert_eq!(snap.nodes.len(), 2); // SumBackward + AccumulateGrad
+        assert_eq!(snap.nodes.len(), 2);
         assert!(snap.nodes.iter().any(|n| n.name == "SumBackward"));
     }
 

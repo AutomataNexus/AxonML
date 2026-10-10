@@ -139,7 +139,6 @@ impl LRScheduler for MultiStepLR {
     fn step<O: Optimizer>(&mut self, optimizer: &mut O) {
         self.current_step += 1;
 
-        // Check if we've passed any milestones
         while self.milestone_idx < self.milestones.len()
             && self.current_step >= self.milestones[self.milestone_idx]
         {
@@ -333,13 +332,11 @@ impl ReduceLROnPlateau {
     fn step_metric_impl<O: Optimizer>(&mut self, optimizer: &mut O, metric: f32) {
         self.current_step += 1;
 
-        // Check if we're in cooldown
         if self.cooldown_counter > 0 {
             self.cooldown_counter -= 1;
             return;
         }
 
-        // Check if metric improved
         let improved = if self.mode == "min" {
             metric < self.best * (1.0 - self.threshold)
         } else {
@@ -353,7 +350,6 @@ impl ReduceLROnPlateau {
             self.num_bad_epochs += 1;
         }
 
-        // Reduce learning rate if patience exceeded
         if self.num_bad_epochs > self.patience {
             let current_lr = optimizer.get_lr();
             let new_lr = (current_lr * self.factor).max(self.min_lr);
@@ -367,7 +363,6 @@ impl ReduceLROnPlateau {
 
 impl LRScheduler for ReduceLROnPlateau {
     fn step<O: Optimizer>(&mut self, _optimizer: &mut O) {
-        // No-op: this scheduler requires a metric. Use step_with_metric().
         self.current_step += 1;
     }
 
@@ -438,11 +433,9 @@ impl LRScheduler for OneCycleLR {
         let min_lr = self.max_lr / self.final_div_factor;
 
         let new_lr = if step_ratio <= self.pct_start {
-            // Warmup phase: linear increase from initial_lr to max_lr
             let phase_ratio = step_ratio / self.pct_start;
             initial_lr + (self.max_lr - initial_lr) * phase_ratio
         } else {
-            // Annealing phase: cosine decrease from max_lr to min_lr
             let phase_ratio = (step_ratio - self.pct_start) / (1.0 - self.pct_start);
             min_lr
                 + (self.max_lr - min_lr) * (1.0 + (std::f32::consts::PI * phase_ratio).cos()) / 2.0
@@ -584,13 +577,11 @@ mod tests {
         let mut optimizer = create_test_optimizer();
         let mut scheduler = CosineAnnealingLR::new(&optimizer, 100);
 
-        // At step 50 (halfway), should be at eta_min + (initial - eta_min) * 0.5
         for _ in 0..50 {
             scheduler.step(&mut optimizer);
         }
         assert!((optimizer.get_lr() - 0.05).abs() < 0.01);
 
-        // At step 100 (end), should be at eta_min
         for _ in 0..50 {
             scheduler.step(&mut optimizer);
         }
@@ -610,7 +601,6 @@ mod tests {
         }
         assert!((optimizer.get_lr() - 0.1).abs() < 1e-6);
 
-        // After warmup, should stay at initial_lr
         scheduler.step(&mut optimizer);
         assert!((optimizer.get_lr() - 0.1).abs() < 1e-6);
     }
@@ -620,15 +610,12 @@ mod tests {
         let mut optimizer = create_test_optimizer();
         let mut scheduler = OneCycleLR::new(&optimizer, 0.1, 100);
 
-        // At start, should be at initial_lr = max_lr / div_factor
         assert!((scheduler.get_last_lr() - 0.004).abs() < 0.001);
 
-        // Step through warmup phase
         for _ in 0..30 {
             scheduler.step(&mut optimizer);
         }
 
-        // Should be at or near max_lr
         assert!(optimizer.get_lr() > 0.08);
     }
 
@@ -639,17 +626,14 @@ mod tests {
 
         let initial_lr = optimizer.get_lr();
 
-        // Simulate improving metric
         scheduler.step_with_metric(&mut optimizer, 1.0);
         scheduler.step_with_metric(&mut optimizer, 0.9);
         assert!((optimizer.get_lr() - initial_lr).abs() < 1e-6);
 
-        // Simulate plateau
         scheduler.step_with_metric(&mut optimizer, 0.91);
         scheduler.step_with_metric(&mut optimizer, 0.91);
         scheduler.step_with_metric(&mut optimizer, 0.91);
 
-        // LR should have been reduced
         assert!(optimizer.get_lr() < initial_lr);
     }
 
@@ -664,12 +648,10 @@ mod tests {
 
         let initial_lr = optimizer.get_lr();
 
-        // Improving metric (higher is better)
         scheduler.step_with_metric(&mut optimizer, 0.8);
         scheduler.step_with_metric(&mut optimizer, 0.9);
         assert!((optimizer.get_lr() - initial_lr).abs() < 1e-6);
 
-        // Plateau (metric not improving)
         scheduler.step_with_metric(&mut optimizer, 0.85);
         scheduler.step_with_metric(&mut optimizer, 0.85);
         scheduler.step_with_metric(&mut optimizer, 0.85);
@@ -686,9 +668,8 @@ mod tests {
         let mut scheduler =
             ReduceLROnPlateau::with_options(&optimizer, "min", 0.1, 0, 0.0, 0, 0.001);
 
-        // Force many reductions
         for _ in 0..50 {
-            scheduler.step_with_metric(&mut optimizer, 999.0); // never improves
+            scheduler.step_with_metric(&mut optimizer, 999.0);
         }
 
         assert!(
@@ -705,13 +686,11 @@ mod tests {
 
         let initial_lr = optimizer.get_lr();
 
-        // Trigger reduction
         scheduler.step_with_metric(&mut optimizer, 999.0);
         scheduler.step_with_metric(&mut optimizer, 999.0);
         let lr_after_first_reduce = optimizer.get_lr();
         assert!(lr_after_first_reduce < initial_lr);
 
-        // During cooldown (3 steps), LR should not change again
         scheduler.step_with_metric(&mut optimizer, 999.0);
         scheduler.step_with_metric(&mut optimizer, 999.0);
         scheduler.step_with_metric(&mut optimizer, 999.0);
@@ -736,7 +715,6 @@ mod tests {
             lrs.push(optimizer.get_lr());
         }
 
-        // Should start low, peak around 30%, end very low
         let max_lr = lrs.iter().copied().fold(f32::MIN, f32::max);
         let final_lr = *lrs.last().unwrap();
 
@@ -751,7 +729,6 @@ mod tests {
             final_lr
         );
 
-        // Peak should occur around 30% of total steps
         let peak_idx = lrs
             .iter()
             .enumerate()
@@ -776,7 +753,6 @@ mod tests {
             lrs.push(optimizer.get_lr());
         }
 
-        // Warmup phase (steps 1-30): should be monotonically increasing
         for i in 1..29 {
             assert!(
                 lrs[i] >= lrs[i - 1] - 1e-6,
@@ -788,7 +764,6 @@ mod tests {
             );
         }
 
-        // Annealing phase (steps 31-100): should be monotonically decreasing
         for i in 32..99 {
             assert!(
                 lrs[i] <= lrs[i - 1] + 1e-6,
@@ -814,7 +789,6 @@ mod tests {
             scheduler.step(&mut optimizer);
         }
 
-        // At end should be at eta_min
         assert!(
             (optimizer.get_lr() - 0.001).abs() < 0.002,
             "Should reach eta_min at end, got {}",
@@ -833,7 +807,6 @@ mod tests {
             lrs.push(optimizer.get_lr());
         }
 
-        // Cosine annealing should monotonically decrease
         for i in 1..lrs.len() {
             assert!(
                 lrs[i] <= lrs[i - 1] + 1e-6,
@@ -845,7 +818,6 @@ mod tests {
             );
         }
 
-        // All LRs should be non-negative
         assert!(
             lrs.iter().all(|lr| *lr >= 0.0),
             "LRs should be non-negative"
@@ -866,7 +838,6 @@ mod tests {
         }
         let target = optimizer.get_lr();
 
-        // Should stay constant for many more steps
         for _ in 0..100 {
             scheduler.step(&mut optimizer);
             assert!(

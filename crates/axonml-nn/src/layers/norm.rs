@@ -119,7 +119,6 @@ impl Module for BatchNorm1d {
         let batch_size = shape[0];
         let num_features = shape[1];
 
-        // Validate input matches expected features
         assert_eq!(
             num_features, self.num_features,
             "BatchNorm1d: expected {} features, got {}",
@@ -133,16 +132,11 @@ impl Module for BatchNorm1d {
             1
         };
 
-        // GPU fast path: use fused batchnorm kernels when input is on GPU.
-        // For [batch, features] layout, spatial=1. The kernel indexes as
-        // (idx / spatial) % C which with spatial=1 becomes idx % C — correct
-        // for [batch, features] since it's the same layout as [batch, features, 1].
         #[cfg(feature = "cuda")]
         if input_data.device().is_gpu() && is_training {
             let gamma_data = self.weight.data();
             let beta_data = self.bias.data();
 
-            // Auto-migrate weight/bias to GPU if needed
             let gamma_gpu = if !gamma_data.device().is_gpu() {
                 gamma_data
                     .to_device(input_data.device())
@@ -165,7 +159,6 @@ impl Module for BatchNorm1d {
                 num_features,
                 spatial_size,
             ) {
-                // Update running statistics
                 if self.track_running_stats {
                     let mut running_mean = self.running_mean.write();
                     let mut running_var = self.running_var.write();
@@ -218,7 +211,6 @@ impl Module for BatchNorm1d {
         let mut vars = vec![0.0f32; num_features];
 
         if is_training {
-            // Calculate batch statistics
             for c in 0..num_features {
                 let mut sum = 0.0f32;
                 for b in 0..batch_size {
@@ -240,7 +232,6 @@ impl Module for BatchNorm1d {
                 vars[c] = var_sum / (batch_size * spatial_size) as f32;
             }
 
-            // Update running statistics if tracking is enabled
             if self.track_running_stats {
                 let mut running_mean = self.running_mean.write();
                 let mut running_var = self.running_var.write();
@@ -264,12 +255,10 @@ impl Module for BatchNorm1d {
                     Tensor::from_vec(new_var, &[num_features]).expect("tensor creation failed");
             }
         } else {
-            // Use running statistics for inference
             means = self.running_mean.read().to_vec();
             vars = self.running_var.read().to_vec();
         }
 
-        // Normalize: y = (x - mean) / sqrt(var + eps) * weight + bias
         let mut output_vec = vec![0.0f32; input_vec.len()];
         for b in 0..batch_size {
             for c in 0..num_features {
@@ -317,6 +306,29 @@ impl Module for BatchNorm1d {
         params
     }
 
+    fn named_buffers(&self) -> HashMap<String, Tensor<f32>> {
+        let mut buffers = HashMap::new();
+        if self.track_running_stats {
+            buffers.insert("running_mean".to_string(), self.running_mean.read().clone());
+            buffers.insert("running_var".to_string(), self.running_var.read().clone());
+        }
+        buffers
+    }
+
+    fn set_buffer(&self, name: &str, value: Tensor<f32>) -> bool {
+        match name {
+            "running_mean" => {
+                *self.running_mean.write() = value;
+                true
+            }
+            "running_var" => {
+                *self.running_var.write() = value;
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn set_training(&mut self, training: bool) {
         self.training.store(training, Ordering::Relaxed);
     }
@@ -325,16 +337,26 @@ impl Module for BatchNorm1d {
         self.training.load(Ordering::Relaxed)
     }
 
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![
+            crate::NodeSpec::new("BatchNorm")
+                .attr("epsilon", crate::AttrVal::Float(self.eps as f64))
+                .attr("momentum", crate::AttrVal::Float(self.momentum as f64))
+                .param("weight")
+                .param("bias")
+                .param("running_mean")
+                .param("running_var"),
+        ]
+    }
+
     fn name(&self) -> &'static str {
         "BatchNorm1d"
     }
 
     fn to_device(&self, device: axonml_core::Device) {
-        // Move parameters
         for param in self.parameters() {
             param.to_device(device);
         }
-        // Move running statistics (non-parameter buffers)
         if self.track_running_stats {
             let mut rm = self.running_mean.write();
             if let Ok(moved) = rm.to_device(device) {
@@ -400,6 +422,28 @@ impl BatchNorm2d {
     pub fn num_features(&self) -> usize {
         self.num_features
     }
+
+    /// Returns a clone of the running mean tensor.
+    pub fn running_mean(&self) -> Tensor<f32> {
+        self.running_mean.read().clone()
+    }
+
+    /// Returns a clone of the running variance tensor.
+    pub fn running_var(&self) -> Tensor<f32> {
+        self.running_var.read().clone()
+    }
+
+    /// Overwrites the running mean/variance (e.g. loading inference stats).
+    pub fn set_running_stats(&self, mean: Tensor<f32>, var: Tensor<f32>) {
+        *self.running_mean.write() = mean;
+        *self.running_var.write() = var;
+    }
+
+    /// Sets training mode via interior mutability (usable behind `&self`).
+    pub fn set_training(&self, training: bool) {
+        self.training
+            .store(training, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 impl Module for BatchNorm2d {
@@ -412,7 +456,6 @@ impl Module for BatchNorm2d {
         let width = shape[3];
         let spatial_size = height * width;
 
-        // Validate input matches expected channels
         assert_eq!(
             channels, self.num_features,
             "BatchNorm2d: expected {} channels, got {}",
@@ -421,13 +464,11 @@ impl Module for BatchNorm2d {
 
         let is_training = self.training.load(Ordering::Relaxed);
 
-        // GPU fast path: use fused batchnorm kernels when input is on GPU
         #[cfg(feature = "cuda")]
         if input_data.device().is_gpu() && is_training {
             let gamma_data = self.weight.data();
             let beta_data = self.bias.data();
 
-            // Auto-migrate weight/bias to GPU if needed
             let gamma_gpu = if !gamma_data.device().is_gpu() {
                 gamma_data
                     .to_device(input_data.device())
@@ -446,7 +487,6 @@ impl Module for BatchNorm2d {
             if let Some((output_tensor, means, vars)) =
                 input_data.batchnorm_fused(&gamma_gpu, &beta_gpu, self.eps, channels, spatial_size)
             {
-                // Update running statistics
                 let mut running_mean = self.running_mean.write();
                 let mut running_var = self.running_var.write();
                 let running_mean_vec = running_mean.to_vec();
@@ -454,12 +494,24 @@ impl Module for BatchNorm2d {
                 let new_mean: Vec<f32> = running_mean_vec
                     .iter()
                     .zip(means.iter())
-                    .map(|(&rm, &m)| (1.0 - self.momentum) * rm + self.momentum * m)
+                    .map(|(&rm, &m)| {
+                        if m.is_finite() {
+                            (1.0 - self.momentum) * rm + self.momentum * m
+                        } else {
+                            rm
+                        }
+                    })
                     .collect();
                 let new_var: Vec<f32> = running_var_vec
                     .iter()
                     .zip(vars.iter())
-                    .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
+                    .map(|(&rv, &v)| {
+                        if v.is_finite() && v >= 0.0 {
+                            (1.0 - self.momentum) * rv + self.momentum * v
+                        } else {
+                            rv
+                        }
+                    })
                     .collect();
                 *running_mean =
                     Tensor::from_vec(new_mean, &[channels]).expect("tensor creation failed");
@@ -489,7 +541,6 @@ impl Module for BatchNorm2d {
             }
         }
 
-        // CPU path
         let input_vec = input_data.to_vec();
         let weight_vec = self.weight.data().to_vec();
         let bias_vec = self.bias.data().to_vec();
@@ -514,7 +565,6 @@ impl Module for BatchNorm2d {
                 vars[c] = sum_sq / n_per_channel - means[c] * means[c];
             }
 
-            // Update running statistics
             let mut running_mean = self.running_mean.write();
             let mut running_var = self.running_var.write();
             let running_mean_vec = running_mean.to_vec();
@@ -523,12 +573,24 @@ impl Module for BatchNorm2d {
             let new_mean: Vec<f32> = running_mean_vec
                 .iter()
                 .zip(means.iter())
-                .map(|(&rm, &m)| (1.0 - self.momentum) * rm + self.momentum * m)
+                .map(|(&rm, &m)| {
+                    if m.is_finite() {
+                        (1.0 - self.momentum) * rm + self.momentum * m
+                    } else {
+                        rm
+                    }
+                })
                 .collect();
             let new_var: Vec<f32> = running_var_vec
                 .iter()
                 .zip(vars.iter())
-                .map(|(&rv, &v)| (1.0 - self.momentum) * rv + self.momentum * v)
+                .map(|(&rv, &v)| {
+                    if v.is_finite() && v >= 0.0 {
+                        (1.0 - self.momentum) * rv + self.momentum * v
+                    } else {
+                        rv
+                    }
+                })
                 .collect();
 
             *running_mean =
@@ -539,11 +601,9 @@ impl Module for BatchNorm2d {
             vars = self.running_var.read().to_vec();
         }
 
-        // Normalize + affine transform (optimized single-pass)
         let total = input_vec.len();
         let mut output_vec = vec![0.0f32; total];
 
-        // Pre-compute inv_std per channel to avoid repeated sqrt
         let inv_stds: Vec<f32> = vars.iter().map(|v| 1.0 / (v + self.eps).sqrt()).collect();
 
         for i in 0..total {
@@ -587,12 +647,45 @@ impl Module for BatchNorm2d {
         params
     }
 
+    fn named_buffers(&self) -> HashMap<String, Tensor<f32>> {
+        let mut buffers = HashMap::new();
+        buffers.insert("running_mean".to_string(), self.running_mean.read().clone());
+        buffers.insert("running_var".to_string(), self.running_var.read().clone());
+        buffers
+    }
+
+    fn set_buffer(&self, name: &str, value: Tensor<f32>) -> bool {
+        match name {
+            "running_mean" => {
+                *self.running_mean.write() = value;
+                true
+            }
+            "running_var" => {
+                *self.running_var.write() = value;
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn set_training(&mut self, training: bool) {
         self.training.store(training, Ordering::Relaxed);
     }
 
     fn is_training(&self) -> bool {
         self.training.load(Ordering::Relaxed)
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![
+            crate::NodeSpec::new("BatchNorm")
+                .attr("epsilon", crate::AttrVal::Float(self.eps as f64))
+                .attr("momentum", crate::AttrVal::Float(self.momentum as f64))
+                .param("weight")
+                .param("bias")
+                .param("running_mean")
+                .param("running_var"),
+        ]
     }
 
     fn name(&self) -> &'static str {
@@ -603,7 +696,6 @@ impl Module for BatchNorm2d {
         for param in self.parameters() {
             param.to_device(device);
         }
-        // Move running statistics (non-parameter buffers)
         let mut rm = self.running_mean.write();
         if let Ok(moved) = rm.to_device(device) {
             *rm = moved;
@@ -666,10 +758,8 @@ impl Module for LayerNorm {
         let total_len = input_data.numel();
         let num_rows = total_len / norm_size;
 
-        // GPU fast path: run LayerNorm entirely on GPU via CUDA kernel
         #[cfg(feature = "cuda")]
         if input_data.device().is_gpu() {
-            // Ensure weight and bias are on GPU
             let weight_data = self.weight.data();
             let weight_gpu = if weight_data.device().is_gpu() {
                 weight_data.clone()
@@ -704,7 +794,6 @@ impl Module for LayerNorm {
             };
         }
 
-        // CPU path
         let input_vec = input_data.to_vec();
         let weight_vec = self.weight.data().to_vec();
         let bias_vec = self.bias.data().to_vec();
@@ -757,6 +846,15 @@ impl Module for LayerNorm {
 
     fn name(&self) -> &'static str {
         "LayerNorm"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![
+            crate::NodeSpec::new("LayerNorm")
+                .attr("epsilon", crate::AttrVal::Float(self.eps as f64))
+                .param("weight")
+                .param("bias"),
+        ]
     }
 }
 
@@ -838,7 +936,6 @@ impl Module for GroupNorm {
 
         for b in 0..batch_size {
             for g in 0..self.num_groups {
-                // Calculate mean and variance for this group
                 let mut sum = 0.0f32;
                 let group_size = channels_per_group * spatial_size;
 
@@ -862,7 +959,6 @@ impl Module for GroupNorm {
                 }
                 let var = var_sum / group_size as f32;
 
-                // Normalize
                 let std_inv = 1.0 / (var + self.eps).sqrt();
                 for c in 0..channels_per_group {
                     let channel_idx = g * channels_per_group + c;
@@ -926,6 +1022,16 @@ impl Module for GroupNorm {
 
     fn name(&self) -> &'static str {
         "GroupNorm"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        let mut node = crate::NodeSpec::new("GroupNorm")
+            .attr("num_groups", crate::AttrVal::Int(self.num_groups as i64))
+            .attr("epsilon", crate::AttrVal::Float(self.eps as f64));
+        if self.affine {
+            node = node.param("weight").param("bias");
+        }
+        vec![node]
     }
 }
 
@@ -1004,7 +1110,6 @@ impl Module for InstanceNorm2d {
 
         for b in 0..batch_size {
             for c in 0..channels {
-                // Calculate mean for this (batch, channel) pair
                 let mut sum = 0.0f32;
                 for s in 0..spatial_size {
                     let idx = b * channels * spatial_size + c * spatial_size + s;
@@ -1012,7 +1117,6 @@ impl Module for InstanceNorm2d {
                 }
                 let mean = sum / spatial_size as f32;
 
-                // Calculate variance
                 let mut var_sum = 0.0f32;
                 for s in 0..spatial_size {
                     let idx = b * channels * spatial_size + c * spatial_size + s;
@@ -1021,7 +1125,6 @@ impl Module for InstanceNorm2d {
                 }
                 let var = var_sum / spatial_size as f32;
 
-                // Normalize and apply affine
                 let std_inv = 1.0 / (var + self.eps).sqrt();
                 let weight = if self.affine {
                     self.weight.data().to_vec()[c]
@@ -1091,6 +1194,15 @@ impl Module for InstanceNorm2d {
     fn name(&self) -> &'static str {
         "InstanceNorm2d"
     }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        let mut node = crate::NodeSpec::new("InstanceNorm")
+            .attr("epsilon", crate::AttrVal::Float(self.eps as f64));
+        if self.affine {
+            node = node.param("weight").param("bias");
+        }
+        vec![node]
+    }
 }
 
 // =============================================================================
@@ -1124,6 +1236,91 @@ mod tests {
         assert_eq!(output.shape(), vec![2, 2, 2, 4]);
     }
 
+    fn stationary_nchw(n: usize, c: usize, h: usize, w: usize) -> Vec<f32> {
+        let total = n * c * h * w;
+        let mut data = vec![0.0f32; total];
+        for idx in 0..total {
+            let ci = (idx / (h * w)) % c;
+            let base = (ci as f32 + 1.0) * 10.0;
+            let jitter = ((idx % 7) as f32 - 3.0) * (ci as f32 + 1.0);
+            data[idx] = base + jitter;
+        }
+        data
+    }
+
+    #[test]
+    fn batchnorm2d_eval_matches_train_cpu() {
+        let (n, c, h, w) = (4usize, 3usize, 5usize, 5usize);
+        let data = stationary_nchw(n, c, h, w);
+        let bn = BatchNorm2d::with_options(c, 1e-5, 0.1);
+        let make = || {
+            Variable::new(
+                Tensor::from_vec(data.clone(), &[n, c, h, w]).expect("tensor"),
+                false,
+            )
+        };
+        bn.set_training(true);
+        let mut train_out = vec![];
+        for _ in 0..300 {
+            train_out = bn.forward(&make()).data().to_vec();
+        }
+        bn.set_training(false);
+        let eval_out = bn.forward(&make()).data().to_vec();
+        let maxdiff = train_out
+            .iter()
+            .zip(eval_out.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        println!(
+            "[CPU] running_mean={:?} running_var={:?} maxdiff={}",
+            bn.running_mean().to_vec(),
+            bn.running_var().to_vec(),
+            maxdiff
+        );
+        assert!(
+            maxdiff < 1e-2,
+            "CPU eval diverges from train: maxdiff={maxdiff}"
+        );
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn batchnorm2d_eval_matches_train_gpu() {
+        use axonml_core::Device;
+        let (n, c, h, w) = (4usize, 3usize, 5usize, 5usize);
+        let data = stationary_nchw(n, c, h, w);
+        let bn = BatchNorm2d::with_options(c, 1e-5, 0.1);
+        let make = || {
+            let t = Tensor::from_vec(data.clone(), &[n, c, h, w])
+                .expect("tensor")
+                .to_device(Device::Cuda(0))
+                .expect("to gpu");
+            Variable::new(t, false)
+        };
+        bn.set_training(true);
+        let mut train_out = vec![];
+        for _ in 0..300 {
+            train_out = bn.forward(&make()).data().to_vec();
+        }
+        bn.set_training(false);
+        let eval_out = bn.forward(&make()).data().to_vec();
+        let maxdiff = train_out
+            .iter()
+            .zip(eval_out.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        println!(
+            "[GPU] running_mean={:?} running_var={:?} maxdiff={}",
+            bn.running_mean().to_vec(),
+            bn.running_var().to_vec(),
+            maxdiff
+        );
+        assert!(
+            maxdiff < 1e-2,
+            "GPU eval diverges from train: maxdiff={maxdiff}"
+        );
+    }
+
     #[test]
     fn test_layernorm() {
         let ln = LayerNorm::single(4);
@@ -1140,12 +1337,12 @@ mod tests {
     fn test_batchnorm_parameters() {
         let bn = BatchNorm1d::new(10);
         assert_eq!(bn.parameters().len(), 2);
-        assert_eq!(bn.num_parameters(), 20); // weight + bias
+        assert_eq!(bn.num_parameters(), 20);
     }
 
     #[test]
     fn test_groupnorm() {
-        let gn = GroupNorm::new(2, 4); // 2 groups, 4 channels
+        let gn = GroupNorm::new(2, 4);
         let input = Variable::new(
             Tensor::from_vec(vec![1.0; 32], &[2, 4, 2, 2]).expect("tensor creation failed"),
             false,
@@ -1156,16 +1353,14 @@ mod tests {
 
     #[test]
     fn test_groupnorm_normalization() {
-        let gn = GroupNorm::with_options(2, 4, 1e-5, false); // No affine
+        let gn = GroupNorm::with_options(2, 4, 1e-5, false);
         let input = Variable::new(
             Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[1, 4, 1, 2])
                 .expect("tensor creation failed"),
             false,
         );
         let output = gn.forward(&input);
-        // After normalization within groups, should have zero mean
         let out_vec = output.data().to_vec();
-        // Group 1: channels 0,1 (vals 1,2,3,4) and Group 2: channels 2,3 (vals 5,6,7,8)
         let group1_mean: f32 = out_vec[0..4].iter().sum::<f32>() / 4.0;
         let group2_mean: f32 = out_vec[4..8].iter().sum::<f32>() / 4.0;
         assert!(group1_mean.abs() < 1e-5);
@@ -1201,7 +1396,6 @@ mod tests {
 
     #[test]
     fn test_layernorm_zero_mean_unit_var() {
-        // LayerNorm should produce approximately zero mean, unit variance per sample
         let ln = LayerNorm::with_eps(vec![4], 1e-5);
         let input = Variable::new(
             Tensor::from_vec(vec![1.0, 5.0, 3.0, 7.0], &[1, 4]).unwrap(),
@@ -1245,7 +1439,6 @@ mod tests {
             .expect("Should have gradient through LayerNorm");
         let gv = grad.to_vec();
         assert_eq!(gv.len(), 3);
-        // Gradients should be finite
         assert!(
             gv.iter().all(|g| g.is_finite()),
             "All gradients should be finite: {:?}",
@@ -1257,21 +1450,18 @@ mod tests {
     fn test_layernorm_batch_independence() {
         let ln = LayerNorm::with_eps(vec![3], 1e-5);
 
-        // Single sample
         let input1 = Variable::new(
             Tensor::from_vec(vec![10.0, 20.0, 30.0], &[1, 3]).unwrap(),
             false,
         );
         let out1 = ln.forward(&input1).data().to_vec();
 
-        // Same sample in batch with different other sample
         let input2 = Variable::new(
             Tensor::from_vec(vec![10.0, 20.0, 30.0, 1.0, 1.0, 1.0], &[2, 3]).unwrap(),
             false,
         );
         let out2 = ln.forward(&input2).data().to_vec();
 
-        // First sample should be identical regardless of batch neighbors
         for i in 0..3 {
             assert!(
                 (out1[i] - out2[i]).abs() < 1e-5,
@@ -1285,8 +1475,8 @@ mod tests {
     #[test]
     fn test_layernorm_parameters_count() {
         let ln = LayerNorm::single(64);
-        assert_eq!(ln.parameters().len(), 2); // weight + bias
-        assert_eq!(ln.num_parameters(), 128); // 64 + 64
+        assert_eq!(ln.parameters().len(), 2);
+        assert_eq!(ln.num_parameters(), 128);
     }
 
     // =========================================================================
@@ -1295,7 +1485,6 @@ mod tests {
 
     #[test]
     fn test_batchnorm1d_normalization() {
-        // BatchNorm should normalize across batch dimension
         let bn = BatchNorm1d::with_options(2, 1e-5, 0.1, false);
         let input = Variable::new(
             Tensor::from_vec(vec![1.0, 10.0, 3.0, 20.0, 5.0, 30.0], &[3, 2]).unwrap(),
@@ -1304,9 +1493,6 @@ mod tests {
         let output = bn.forward(&input);
         let out = output.data().to_vec();
 
-        // Channel 0: values [1, 3, 5], mean=3, std≈1.63 → normalized
-        // Channel 1: values [10, 20, 30], mean=20, std≈8.16 → normalized
-        // After normalization (no affine), each channel should have ~zero mean
         let ch0_mean = (out[0] + out[2] + out[4]) / 3.0;
         let ch1_mean = (out[1] + out[3] + out[5]) / 3.0;
         assert!(
@@ -1329,22 +1515,17 @@ mod tests {
             false,
         );
 
-        // Training mode output
         bn.train();
         let train_out = bn.forward(&input).data().to_vec();
 
-        // Eval mode output (uses running stats)
         bn.eval();
         let eval_out = bn.forward(&input).data().to_vec();
 
-        // They should be different since running stats aren't fully converged after 1 batch
         let diff: f32 = train_out
             .iter()
             .zip(eval_out.iter())
             .map(|(a, b)| (a - b).abs())
             .sum();
-        // After only one batch, running stats diverge from batch stats
-        // so eval output should differ
         assert!(diff > 0.0 || true, "Train vs eval can differ");
     }
 

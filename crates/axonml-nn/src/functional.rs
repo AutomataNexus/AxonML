@@ -102,13 +102,11 @@ pub fn layer_norm(
     bias: Option<&Variable>,
     eps: f32,
 ) -> Variable {
-    // Compute mean and variance over normalized dimensions
     use crate::layers::LayerNorm;
     use crate::module::Module;
     let ln = LayerNorm::with_eps(normalized_shape.to_vec(), eps);
     let normalized = ln.forward(input);
 
-    // Apply caller's weight and bias if provided (overriding LayerNorm's defaults)
     let result = if let Some(w) = weight {
         normalized.mul_var(w)
     } else {
@@ -132,7 +130,6 @@ pub fn dropout(input: &Variable, p: f32, training: bool) -> Variable {
         return input.clone();
     }
 
-    // Delegate to Dropout module which has proper backward pass
     use crate::layers::Dropout;
     use crate::module::Module;
     let d = Dropout::new(p);

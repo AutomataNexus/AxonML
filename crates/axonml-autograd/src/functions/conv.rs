@@ -74,14 +74,14 @@ fn gemm_acc(
             m,
             k,
             n,
-            1.0, // alpha
+            1.0,
             a.as_ptr(),
             rsa,
             csa,
             b.as_ptr(),
             rsb,
             csb,
-            1.0, // beta (accumulate into C)
+            1.0,
             c.as_mut_ptr(),
             n as isize,
             1,
@@ -150,7 +150,6 @@ impl Conv2dBackward {
 
 impl GradientFunction for Conv2dBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // GPU-resident fast path: do entire backward on GPU without CPU copies
         #[cfg(feature = "cuda")]
         if grad_output.device().is_gpu() && self.saved_input.device().is_gpu() {
             if let Some((grad_input, grad_weight, grad_bias)) = grad_output.conv2d_backward_cuda(
@@ -170,7 +169,6 @@ impl GradientFunction for Conv2dBackward {
                 }
                 return result;
             }
-            // Fall through to CPU path if GPU backward failed
         }
 
         let grad_out_shape = grad_output.shape();
@@ -190,18 +188,12 @@ impl GradientFunction for Conv2dBackward {
         let weight_vec = self.saved_weight.to_vec();
         let grad_out_vec = grad_output.to_vec();
 
-        // Use im2col + GEMM for efficient Conv2d backward (Rayon-parallelized across batch)
-        // grad_weight = sum_over_batch( grad_out_reshaped × im2col(input)^T )
-        // grad_input = col2im( weight^T × grad_out_reshaped )
-
         let in_per_batch = self.in_channels * in_h * in_w;
         let out_channels = self.out_channels;
 
-        // Parallel: each batch element computes its own grad_input slice + partial grad_weight
         let per_batch_results: Vec<(Vec<f32>, Vec<f32>)> = (0..batch_size)
             .into_par_iter()
             .map(|b| {
-                // Fused im2col for this batch element
                 let input_offset = b * in_per_batch;
                 let mut col = vec![0.0f32; col_rows * out_hw];
                 let kk = kh * kw;
@@ -254,7 +246,6 @@ impl GradientFunction for Conv2dBackward {
                 let go_offset = b * out_channels * out_hw;
                 let go_slice = &grad_out_vec[go_offset..go_offset + out_channels * out_hw];
 
-                // Thread-local grad_weight
                 let mut local_grad_weight = vec![0.0f32; out_channels * col_rows];
                 gemm_acc(
                     go_slice,
@@ -267,7 +258,6 @@ impl GradientFunction for Conv2dBackward {
                     true,
                 );
 
-                // grad_col = weight^T × grad_out
                 let mut grad_col = vec![0.0f32; col_rows * out_hw];
                 gemm_acc(
                     &weight_vec,
@@ -280,7 +270,6 @@ impl GradientFunction for Conv2dBackward {
                     false,
                 );
 
-                // Fused col2im → local grad_input for this batch element
                 let mut gi_batch = vec![0.0f32; in_per_batch];
                 for cr in 0..col_rows {
                     let c = cr / kk;
@@ -309,7 +298,6 @@ impl GradientFunction for Conv2dBackward {
             })
             .collect();
 
-        // Assemble grad_input (concatenate) and reduce grad_weight (sum)
         let mut grad_input = Vec::with_capacity(batch_size * in_per_batch);
         let mut grad_weight = vec![0.0f32; out_channels * col_rows];
         for (gi_batch, local_gw) in &per_batch_results {
@@ -424,6 +412,27 @@ impl GroupedConv2dBackward {
 
 impl GradientFunction for GroupedConv2dBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() && self.saved_input.device().is_gpu() {
+            if let Some((grad_input, grad_weight, grad_bias)) = grad_output.conv2d_backward_cuda(
+                &self.saved_input,
+                &self.saved_weight,
+                &self.input_shape,
+                self.in_channels,
+                self.out_channels,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.has_bias,
+            ) {
+                let mut result = vec![Some(grad_input), Some(grad_weight)];
+                if self.has_bias {
+                    result.push(grad_bias);
+                }
+                return result;
+            }
+        }
+
         let grad_out_vec = grad_output.to_vec();
         let grad_out_shape = grad_output.shape();
         let batch_size = grad_out_shape[0];
@@ -442,9 +451,8 @@ impl GradientFunction for GroupedConv2dBackward {
         let ic_per_group = self.in_channels / self.groups;
         let oc_per_group = self.out_channels / self.groups;
         let out_hw = out_h * out_w;
-        let col_rows_g = ic_per_group * kh * kw; // columns per group
+        let col_rows_g = ic_per_group * kh * kw;
 
-        // Use im2col + GEMM per group for efficient backward (Rayon-parallelized across batch)
         let in_per_batch = self.in_channels * in_h * in_w;
         let out_channels = self.out_channels;
         let groups = self.groups;
@@ -460,7 +468,6 @@ impl GradientFunction for GroupedConv2dBackward {
                     let ic_start = g * ic_per_group;
                     let oc_start = g * oc_per_group;
 
-                    // im2col for this group's input channels
                     let mut col = vec![0.0f32; col_rows_g * out_hw];
                     for c_local in 0..ic_per_group {
                         let c = ic_start + c_local;
@@ -490,7 +497,6 @@ impl GradientFunction for GroupedConv2dBackward {
                         }
                     }
 
-                    // grad_out slice for this group
                     let mut go_group = vec![0.0f32; oc_per_group * out_hw];
                     for oc_local in 0..oc_per_group {
                         let oc = oc_start + oc_local;
@@ -499,7 +505,6 @@ impl GradientFunction for GroupedConv2dBackward {
                             .copy_from_slice(&grad_out_vec[src_off..src_off + out_hw]);
                     }
 
-                    // grad_weight[group] += go_group × col^T
                     let w_offset = oc_start * ic_per_group * kh * kw;
                     gemm_acc(
                         &go_group,
@@ -512,7 +517,6 @@ impl GradientFunction for GroupedConv2dBackward {
                         true,
                     );
 
-                    // grad_col = weight[group]^T × go_group
                     let w_group = &weight_vec[w_offset..w_offset + oc_per_group * col_rows_g];
                     let mut grad_col = vec![0.0f32; col_rows_g * out_hw];
                     gemm_acc(
@@ -526,7 +530,6 @@ impl GradientFunction for GroupedConv2dBackward {
                         false,
                     );
 
-                    // col2im: scatter grad_col back
                     for c_local in 0..ic_per_group {
                         let c = ic_start + c_local;
                         for ki in 0..kh {
@@ -557,7 +560,6 @@ impl GradientFunction for GroupedConv2dBackward {
             })
             .collect();
 
-        // Assemble grad_input (concatenate) and reduce grad_weight (sum)
         let mut grad_input = Vec::with_capacity(batch_size * in_per_batch);
         let mut grad_weight = vec![0.0f32; weight_total];
         for (gi_batch, local_gw) in &per_batch_results {
@@ -567,11 +569,23 @@ impl GradientFunction for GroupedConv2dBackward {
             }
         }
 
-        let grad_input_tensor = Tensor::from_vec(grad_input, &self.input_shape)
-            .expect("backward: tensor creation failed");
-        let grad_weight_tensor =
+        let out_dev = grad_output.device();
+        let to_dev = |t: Tensor<f32>| -> Tensor<f32> {
+            if out_dev.is_gpu() {
+                t.to_device(out_dev).unwrap_or(t)
+            } else {
+                t
+            }
+        };
+
+        let grad_input_tensor = to_dev(
+            Tensor::from_vec(grad_input, &self.input_shape)
+                .expect("backward: tensor creation failed"),
+        );
+        let grad_weight_tensor = to_dev(
             Tensor::from_vec(grad_weight, &[self.out_channels, ic_per_group, kh, kw])
-                .expect("backward: tensor creation failed");
+                .expect("backward: tensor creation failed"),
+        );
 
         let mut result = vec![Some(grad_input_tensor), Some(grad_weight_tensor)];
 
@@ -585,10 +599,10 @@ impl GradientFunction for GroupedConv2dBackward {
                     grad_bias[oc] += grad_out_vec[start..start + out_hw].iter().sum::<f32>();
                 }
             }
-            result.push(Some(
+            result.push(Some(to_dev(
                 Tensor::from_vec(grad_bias, &[self.out_channels])
                     .expect("backward: tensor creation failed"),
-            ));
+            )));
         }
 
         result
@@ -656,6 +670,21 @@ impl BatchNorm2dBackward {
 
 impl GradientFunction for BatchNorm2dBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() && self.saved_input.device().is_gpu() {
+            if let Some((grad_input, grad_weight, grad_bias)) = grad_output
+                .batchnorm2d_backward_cuda(
+                    &self.saved_input,
+                    &self.saved_mean,
+                    &self.saved_var,
+                    &self.saved_weight,
+                    self.eps,
+                )
+            {
+                return vec![Some(grad_input), Some(grad_weight), Some(grad_bias)];
+            }
+        }
+
         let grad_vec = grad_output.to_vec();
         let shape = grad_output.shape();
         let batch = shape[0];
@@ -663,7 +692,7 @@ impl GradientFunction for BatchNorm2dBackward {
         let h = shape[2];
         let w = shape[3];
         let spatial = h * w;
-        let n = (batch * spatial) as f32; // number of elements per channel
+        let n = (batch * spatial) as f32;
 
         let input_vec = self.saved_input.to_vec();
 
@@ -677,9 +706,6 @@ impl GradientFunction for BatchNorm2dBackward {
             let std_inv = 1.0 / (var_c + self.eps).sqrt();
             let weight_c = self.saved_weight[c];
 
-            // Accumulate grad_bias = sum(grad), grad_weight = sum(grad * x_hat)
-            // Also compute sum_grad and sum_grad_xhat for d_input
-            // Cache x_hat to avoid recomputing in second pass
             let mut sum_grad = 0.0f32;
             let mut sum_grad_xhat = 0.0f32;
             let mut x_hat_cache = vec![0.0f32; batch * spatial];
@@ -699,7 +725,6 @@ impl GradientFunction for BatchNorm2dBackward {
                 }
             }
 
-            // d_input = weight * std_inv / N * (N * grad - sum_grad - x_hat * sum_grad_xhat)
             let scale = weight_c * std_inv / n;
             for b_idx in 0..batch {
                 for s in 0..spatial {
@@ -929,11 +954,8 @@ impl GradientFunction for Conv1dBackward {
         let in_length = self.input_shape[2];
         let ks = self.kernel_size;
 
-        // GPU fast path: reshape to Conv2d format and use conv2d_backward_cuda.
-        // [B,C,L] -> [B,C,L,1], kernel [Cout,Cin,K] -> [Cout,Cin,K,1]
         #[cfg(feature = "cuda")]
         if grad_output.device().is_gpu() && self.saved_input.device().is_gpu() {
-            // Reshape grad_output [B, Cout, Lout] -> [B, Cout, Lout, 1]
             let grad_out_4d = grad_output
                 .reshape(&[
                     batch_size as isize,
@@ -943,7 +965,6 @@ impl GradientFunction for Conv1dBackward {
                 ])
                 .unwrap();
 
-            // Reshape saved_input [B, Cin, L] -> [B, Cin, L, 1]
             let input_4d = self
                 .saved_input
                 .reshape(&[
@@ -954,7 +975,6 @@ impl GradientFunction for Conv1dBackward {
                 ])
                 .unwrap();
 
-            // Reshape saved_weight [Cout, Cin, K] -> [Cout, Cin, K, 1]
             let weight_4d = self
                 .saved_weight
                 .reshape(&[
@@ -980,7 +1000,6 @@ impl GradientFunction for Conv1dBackward {
                     self.has_bias,
                 )
             {
-                // Reshape back: [B,Cin,L,1] -> [B,Cin,L] and [Cout,Cin,K,1] -> [Cout,Cin,K]
                 let grad_input = grad_input_4d
                     .reshape(&[
                         batch_size as isize,
@@ -1004,16 +1023,10 @@ impl GradientFunction for Conv1dBackward {
             }
         }
         let grad_out_vec = grad_output.to_vec();
-        let col_rows = self.in_channels * ks; // im2col column height
+        let col_rows = self.in_channels * ks;
 
         let input_vec = self.saved_input.to_vec();
         let weight_vec = self.saved_weight.to_vec();
-
-        // Use im2col + GEMM approach (same pattern as Conv2d backward)
-        // im2col unfolds 1D patches: col[c*ks+k, ol] = input[c, ol*stride+k-padding]
-        // grad_weight = grad_out × col^T  (GEMM)
-        // grad_col = weight^T × grad_out  (GEMM)
-        // grad_input = col2im(grad_col)
 
         let in_per_batch = self.in_channels * in_length;
         let out_channels = self.out_channels;
@@ -1021,7 +1034,6 @@ impl GradientFunction for Conv1dBackward {
         let stride = self.stride;
         let padding = self.padding;
 
-        // Parallel: each batch element computes its own grad_input + partial grad_weight
         let per_batch_results: Vec<(Vec<f32>, Vec<f32>)> = (0..batch_size)
             .into_par_iter()
             .map(|b| {
@@ -1045,7 +1057,6 @@ impl GradientFunction for Conv1dBackward {
                 let go_offset = b * out_channels * out_length;
                 let go_slice = &grad_out_vec[go_offset..go_offset + out_channels * out_length];
 
-                // Thread-local grad_weight
                 let mut local_grad_weight = vec![0.0f32; out_channels * col_rows];
                 gemm_acc(
                     go_slice,
@@ -1058,7 +1069,6 @@ impl GradientFunction for Conv1dBackward {
                     true,
                 );
 
-                // grad_col = weight^T × grad_out
                 let mut grad_col = vec![0.0f32; col_rows * out_length];
                 gemm_acc(
                     &weight_vec,
@@ -1071,7 +1081,6 @@ impl GradientFunction for Conv1dBackward {
                     false,
                 );
 
-                // col2im → local grad_input
                 let mut gi_batch = vec![0.0f32; in_per_batch];
                 for c in 0..in_channels {
                     for k in 0..ks {
@@ -1090,7 +1099,6 @@ impl GradientFunction for Conv1dBackward {
             })
             .collect();
 
-        // Assemble grad_input (concatenate) and reduce grad_weight (sum)
         let mut grad_input = Vec::with_capacity(batch_size * in_per_batch);
         let mut grad_weight = vec![0.0f32; out_channels * col_rows];
         for (gi_batch, local_gw) in &per_batch_results {
@@ -1181,16 +1189,23 @@ impl MaxPool2dBackward {
 impl GradientFunction for MaxPool2dBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         let in_numel: usize = self.input_shape.iter().product();
+
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            if let Some(g) = grad_output.maxpool_scatter_cuda(&self.max_indices, in_numel) {
+                let shp: Vec<isize> = self.input_shape.iter().map(|&d| d as isize).collect();
+                let grad = g.reshape(&shp).expect("backward: reshape");
+                return vec![Some(grad)];
+            }
+        }
+
         let mut grad_input = vec![0.0f32; in_numel];
         let grad_out_vec = grad_output.to_vec();
-
-        // Scatter gradient to max positions
         for (out_idx, &in_idx) in self.max_indices.iter().enumerate() {
             if in_idx < in_numel {
                 grad_input[in_idx] += grad_out_vec[out_idx];
             }
         }
-
         let grad = Tensor::from_vec(grad_input, &self.input_shape)
             .expect("backward: tensor creation failed");
         vec![Some(grad)]
@@ -1239,15 +1254,22 @@ impl MaxPool1dBackward {
 impl GradientFunction for MaxPool1dBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         let in_numel: usize = self.input_shape.iter().product();
+
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            if let Some(g) = grad_output.maxpool_scatter_cuda(&self.max_indices, in_numel) {
+                let shp: Vec<isize> = self.input_shape.iter().map(|&d| d as isize).collect();
+                return vec![Some(g.reshape(&shp).expect("backward: reshape"))];
+            }
+        }
+
         let mut grad_input = vec![0.0f32; in_numel];
         let grad_out_vec = grad_output.to_vec();
-
         for (out_idx, &in_idx) in self.max_indices.iter().enumerate() {
             if in_idx < in_numel {
                 grad_input[in_idx] += grad_out_vec[out_idx];
             }
         }
-
         let grad = Tensor::from_vec(grad_input, &self.input_shape)
             .expect("backward: tensor creation failed");
         vec![Some(grad)]
@@ -1322,7 +1344,6 @@ impl GradientFunction for AvgPool2dBackward {
             for c in 0..channels {
                 for oh in 0..out_h {
                     for ow in 0..out_w {
-                        // Compute count analytically instead of iterating kernel twice
                         let ih_start = (oh * sh).max(ph) - ph;
                         let ih_end = ((oh * sh + kh).min(in_h + ph)) - ph;
                         let iw_start = (ow * sw).max(pw) - pw;
@@ -1342,7 +1363,6 @@ impl GradientFunction for AvgPool2dBackward {
                             0.0
                         };
 
-                        // Single pass to scatter gradients
                         for ki in 0..kh {
                             let ih = oh * sh + ki;
                             if ih >= ph && ih < in_h + ph {
@@ -1432,7 +1452,6 @@ impl GradientFunction for AvgPool1dBackward {
             for c in 0..channels {
                 for ol in 0..out_length {
                     let in_start = ol * self.stride;
-                    // Compute count analytically instead of iterating kernel twice
                     let il_begin = in_start.max(self.padding) - self.padding;
                     let il_end = ((in_start + self.kernel_size).min(in_length + self.padding))
                         - self.padding;
@@ -1446,7 +1465,6 @@ impl GradientFunction for AvgPool1dBackward {
                         0.0
                     };
 
-                    // Single pass to scatter gradients
                     for k in 0..self.kernel_size {
                         let il = in_start + k;
                         if il >= self.padding && il < in_length + self.padding {
@@ -1506,12 +1524,22 @@ impl AdaptiveAvgPool2dBackward {
 
 impl GradientFunction for AdaptiveAvgPool2dBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        let (out_h, out_w) = self.output_size;
+
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            if let Some(g) =
+                grad_output.adaptive_avgpool2d_bwd_cuda(&self.input_shape, out_h, out_w)
+            {
+                return vec![Some(g)];
+            }
+        }
+
         let grad_out_vec = grad_output.to_vec();
         let batch = self.input_shape[0];
         let channels = self.input_shape[1];
         let in_h = self.input_shape[2];
         let in_w = self.input_shape[3];
-        let (out_h, out_w) = self.output_size;
 
         let mut grad_input = vec![0.0f32; batch * channels * in_h * in_w];
 
@@ -1625,8 +1653,25 @@ impl ConvTranspose2dBackward {
 
 impl GradientFunction for ConvTranspose2dBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // ConvTranspose2d backward w.r.t. input is a standard Conv2d
-        // ConvTranspose2d backward w.r.t. weight uses the input and grad_output
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            if let Some((di, dw, db)) = grad_output.convtranspose2d_backward_cuda(
+                &self.saved_input,
+                &self.saved_weight,
+                self.in_channels,
+                self.out_channels,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.has_bias,
+            ) {
+                let mut r = vec![Some(di), Some(dw)];
+                if let Some(b) = db {
+                    r.push(Some(b));
+                }
+                return r;
+            }
+        }
         let grad_out_vec = grad_output.to_vec();
         let grad_out_shape = grad_output.shape();
         let batch_size = grad_out_shape[0];
@@ -1644,12 +1689,6 @@ impl GradientFunction for ConvTranspose2dBackward {
         let input_vec = self.saved_input.to_vec();
         let weight_vec = self.saved_weight.to_vec();
 
-        // d_input: standard conv2d of grad_output with weight
-        // weight shape: (in_channels, out_channels, kh, kw)
-        // grad_input[b, ic, ih, iw] = sum_{oc,ki,kj} weight[ic,oc,ki,kj] * grad_out[b,oc,oh,ow]
-        // where oh = ih*sh + ki - ph,  ow = iw*sw + kj - pw
-        //
-        // Cache-friendly: pre-compute base offsets, skip out-of-bounds early
         let mut grad_input = vec![0.0f32; batch_size * self.in_channels * in_hw];
 
         for b in 0..batch_size {
@@ -1695,12 +1734,6 @@ impl GradientFunction for ConvTranspose2dBackward {
             }
         }
 
-        // d_weight: accumulate over batch and spatial positions
-        // grad_weight[ic, oc, ki, kj] += input[b, ic, ih, iw] * grad_out[b, oc, oh, ow]
-        // where oh = ih*sh + ki - ph,  ow = iw*sw + kj - pw
-        //
-        // Loop order: batch -> ic -> spatial(ih,iw) -> kernel(ki,kj) -> oc
-        // This keeps input access sequential and skips zero inputs
         let mut grad_weight = vec![0.0f32; self.in_channels * self.out_channels * kh * kw];
 
         for b in 0..batch_size {
@@ -1717,7 +1750,7 @@ impl GradientFunction for ConvTranspose2dBackward {
                     for iw in 0..in_w {
                         let in_val = input_vec[in_ic + ih * in_w + iw];
                         if in_val == 0.0 {
-                            continue; // skip zero inputs (common with ReLU)
+                            continue;
                         }
 
                         let ow_base = (iw * sw) as isize - pw as isize;
@@ -1831,7 +1864,6 @@ impl GradientFunction for LayerNormBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
         let norm_size: usize = self.normalized_shape.iter().product();
 
-        // GPU fast path: use CUDA LayerNorm backward kernels
         #[cfg(feature = "cuda")]
         if self.saved_input.device().is_gpu() {
             let grad_gpu = if grad_output.device().is_gpu() {
@@ -1847,7 +1879,6 @@ impl GradientFunction for LayerNormBackward {
                     .unwrap()
             };
 
-            // d_input via CUDA kernel
             let d_input = grad_gpu.layer_norm_backward_dinput_cuda(
                 &self.saved_input,
                 &weight_gpu,
@@ -1855,7 +1886,6 @@ impl GradientFunction for LayerNormBackward {
                 self.eps,
             );
 
-            // d_weight, d_bias via CUDA kernel
             let (d_weight, d_bias) = grad_gpu.layer_norm_backward_dweight_dbias_cuda(
                 &self.saved_input,
                 norm_size,
@@ -1865,7 +1895,6 @@ impl GradientFunction for LayerNormBackward {
             return vec![Some(d_input), Some(d_weight), Some(d_bias)];
         }
 
-        // CPU path
         let input_vec = self.saved_input.to_vec();
         let weight_vec = self.saved_weight.to_vec();
         let grad_vec = grad_output.to_vec();
@@ -1972,6 +2001,17 @@ impl GroupNormBackward {
 
 impl GradientFunction for GroupNormBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            if let Some((di, dw, db)) = grad_output.groupnorm_backward_cuda(
+                &self.saved_input,
+                &self.saved_weight,
+                self.num_groups,
+                self.eps,
+            ) {
+                return vec![Some(di), Some(dw), Some(db)];
+            }
+        }
         let input_vec = self.saved_input.to_vec();
         let weight_vec = self.saved_weight.to_vec();
         let grad_vec = grad_output.to_vec();
@@ -1991,7 +2031,6 @@ impl GradientFunction for GroupNormBackward {
 
         for b in 0..batch_size {
             for g in 0..self.num_groups {
-                // Compute group mean and variance
                 let mut sum = 0.0f32;
                 for c in 0..channels_per_group {
                     let ch = g * channels_per_group + c;
@@ -2014,7 +2053,6 @@ impl GradientFunction for GroupNormBackward {
                 let var = var_sum / n;
                 let std_inv = 1.0 / (var + self.eps).sqrt();
 
-                // Accumulate d_weight, d_bias and compute intermediates
                 let mut sum_dy = 0.0f32;
                 let mut sum_dy_xhat = 0.0f32;
 
@@ -2032,7 +2070,6 @@ impl GradientFunction for GroupNormBackward {
                     }
                 }
 
-                // Compute d_input
                 for c in 0..channels_per_group {
                     let ch = g * channels_per_group + c;
                     for s in 0..spatial_size {
@@ -2113,6 +2150,25 @@ impl InstanceNorm2dBackward {
 
 impl GradientFunction for InstanceNorm2dBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
+        #[cfg(feature = "cuda")]
+        if grad_output.device().is_gpu() {
+            let channels = self.saved_input.shape()[1];
+            let ones;
+            let weight = if self.affine {
+                &self.saved_weight
+            } else {
+                ones = Tensor::from_vec(vec![1.0f32; channels], &[channels])
+                    .expect("iN: ones")
+                    .to_device(self.saved_input.device())
+                    .expect("iN: ones to device");
+                &ones
+            };
+            if let Some((di, dw, db)) =
+                grad_output.groupnorm_backward_cuda(&self.saved_input, weight, channels, self.eps)
+            {
+                return vec![Some(di), Some(dw), Some(db)];
+            }
+        }
         let input_vec = self.saved_input.to_vec();
         let weight_vec = self.saved_weight.to_vec();
         let grad_vec = grad_output.to_vec();
@@ -2131,7 +2187,6 @@ impl GradientFunction for InstanceNorm2dBackward {
             for c in 0..channels {
                 let base = b * channels * spatial_size + c * spatial_size;
 
-                // Compute mean and variance for this (b, c) pair
                 let mut sum = 0.0f32;
                 for s in 0..spatial_size {
                     sum += input_vec[base + s];
@@ -2208,8 +2263,6 @@ mod tests {
 
     #[test]
     fn test_conv2d_backward_shapes() {
-        // Input: (1, 1, 4, 4), Weight: (1, 1, 3, 3), no padding, stride 1
-        // Output: (1, 1, 2, 2)
         let input = Tensor::from_vec(vec![1.0; 16], &[1, 1, 4, 4])
             .expect("backward: tensor creation failed");
         let weight = Tensor::from_vec(vec![1.0; 9], &[1, 1, 3, 3])
@@ -2240,6 +2293,128 @@ mod tests {
     }
 
     #[test]
+    fn test_grouped_backward_grad_input_matches_reference() {
+        let (batch, c, h, w, k) = (2usize, 6usize, 5usize, 5usize, 3usize);
+        let mut s: u64 = 0x1234_5678;
+        let mut r = |n: usize| -> Vec<f32> {
+            (0..n)
+                .map(|_| {
+                    s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    ((s >> 33) as f32 / u32::MAX as f32) - 0.5
+                })
+                .collect()
+        };
+        let (inp, wt, go) = (r(batch * c * h * w), r(c * c * k * k), r(batch * c * h * w));
+        let grouped = GroupedConv2dBackward::new(
+            None,
+            None,
+            Some(None),
+            Tensor::from_vec(inp.clone(), &[batch, c, h, w]).unwrap(),
+            Tensor::from_vec(wt.clone(), &[c, c, k, k]).unwrap(),
+            vec![batch, c, h, w],
+            c,
+            c,
+            (k, k),
+            (1, 1),
+            (1, 1),
+            1,
+            true,
+        )
+        .apply(&Tensor::from_vec(go.clone(), &[batch, c, h, w]).unwrap());
+        let reference = Conv2dBackward::new(
+            None,
+            None,
+            Some(None),
+            Tensor::from_vec(inp, &[batch, c, h, w]).unwrap(),
+            Tensor::from_vec(wt, &[c, c, k, k]).unwrap(),
+            vec![batch, c, h, w],
+            c,
+            c,
+            (k, k),
+            (1, 1),
+            (1, 1),
+            true,
+        )
+        .apply(&Tensor::from_vec(go, &[batch, c, h, w]).unwrap());
+        let (gi, ri) = (
+            grouped[0].as_ref().unwrap().to_vec(),
+            reference[0].as_ref().unwrap().to_vec(),
+        );
+        let md = gi
+            .iter()
+            .zip(&ri)
+            .map(|(p, q)| (p - q).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            md < 1e-4,
+            "grouped-CPU grad_input diverges from Conv2dBackward: {md}"
+        );
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_conv_backward_gpu_grad_input_matches_cpu() {
+        use axonml_core::device::Device;
+        if Tensor::from_vec(vec![0.0f32; 1], &[1])
+            .unwrap()
+            .to_device(Device::Cuda(0))
+            .is_err()
+        {
+            return;
+        }
+        let (batch, c, h, w, k) = (2usize, 6usize, 5usize, 5usize, 3usize);
+        let mut s: u64 = 0x1234_5678;
+        let mut r = |n: usize| -> Vec<f32> {
+            (0..n)
+                .map(|_| {
+                    s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    ((s >> 33) as f32 / u32::MAX as f32) - 0.5
+                })
+                .collect()
+        };
+        let (inp, wt, go) = (r(batch * c * h * w), r(c * c * k * k), r(batch * c * h * w));
+        let run = |dev: Device| -> Vec<Vec<f32>> {
+            let to = |v: &Vec<f32>, sh: &[usize]| {
+                Tensor::from_vec(v.clone(), sh)
+                    .unwrap()
+                    .to_device(dev)
+                    .unwrap()
+            };
+            Conv2dBackward::new(
+                None,
+                None,
+                Some(None),
+                to(&inp, &[batch, c, h, w]),
+                to(&wt, &[c, c, k, k]),
+                vec![batch, c, h, w],
+                c,
+                c,
+                (k, k),
+                (1, 1),
+                (1, 1),
+                true,
+            )
+            .apply(&to(&go, &[batch, c, h, w]))
+            .into_iter()
+            .map(|g| g.unwrap().to_device(Device::Cpu).unwrap().to_vec())
+            .collect()
+        };
+        let (cpu, gpu) = (run(Device::Cpu), run(Device::Cuda(0)));
+        for (name, a, b) in [
+            ("grad_input", &cpu[0], &gpu[0]),
+            ("grad_weight", &cpu[1], &gpu[1]),
+            ("grad_bias", &cpu[2], &gpu[2]),
+        ] {
+            let md = a
+                .iter()
+                .zip(b)
+                .map(|(p, q)| (p - q).abs())
+                .fold(0.0f32, f32::max);
+            assert!(md < 1e-3, "GPU conv {name} diverges from CPU: {md}");
+        }
+    }
+
+    #[test]
     fn test_conv2d_backward_with_bias() {
         let input = Tensor::from_vec(vec![1.0; 16], &[1, 1, 4, 4])
             .expect("backward: tensor creation failed");
@@ -2266,17 +2441,13 @@ mod tests {
         let grads = backward.apply(&grad_output);
 
         assert_eq!(grads.len(), 3);
-        // bias grad shape: [out_channels]
         assert_eq!(grads[2].as_ref().unwrap().shape(), &[1]);
-        // bias grad = sum of grad_output = 4.0
         assert!((grads[2].as_ref().unwrap().to_vec()[0] - 4.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_maxpool2d_backward() {
-        // Input: (1,1,4,4), pool 2x2, output (1,1,2,2)
-        // Max indices should point to max positions
-        let max_indices = vec![5, 7, 13, 15]; // positions of max in each 2x2 block
+        let max_indices = vec![5, 7, 13, 15];
         let backward =
             MaxPool2dBackward::new(None, vec![1, 1, 4, 4], max_indices, (2, 2), (2, 2), (0, 0));
 
@@ -2287,12 +2458,10 @@ mod tests {
         let grad = grads[0].as_ref().unwrap();
         assert_eq!(grad.shape(), &[1, 1, 4, 4]);
         let grad_vec = grad.to_vec();
-        // Only max positions should have gradient
         assert_eq!(grad_vec[5], 1.0);
         assert_eq!(grad_vec[7], 2.0);
         assert_eq!(grad_vec[13], 3.0);
         assert_eq!(grad_vec[15], 4.0);
-        // Other positions should be zero
         assert_eq!(grad_vec[0], 0.0);
     }
 
@@ -2306,7 +2475,6 @@ mod tests {
 
         let grad = grads[0].as_ref().unwrap();
         assert_eq!(grad.shape(), &[1, 1, 4, 4]);
-        // Each element in 2x2 window gets 4.0 / 4 = 1.0
         for &v in &grad.to_vec() {
             assert!((v - 1.0).abs() < 1e-6);
         }
@@ -2322,7 +2490,6 @@ mod tests {
 
         let grad = grads[0].as_ref().unwrap();
         assert_eq!(grad.shape(), &[1, 1, 4, 4]);
-        // 16 elements averaged, grad = 16.0 / 16 = 1.0
         for &v in &grad.to_vec() {
             assert!((v - 1.0).abs() < 1e-6);
         }

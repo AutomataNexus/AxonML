@@ -55,7 +55,6 @@ pub mod metal;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_backend;
 
-// GPU testing infrastructure (prints reports; needs std)
 #[cfg(feature = "std")]
 pub mod gpu_tests;
 
@@ -217,7 +216,7 @@ impl GpuStream {
     /// which performs device-level synchronization.
     pub fn synchronize(&self) {
         match self.backend_type {
-            BackendType::Cpu => {} // No-op for CPU (synchronous)
+            BackendType::Cpu => {}
             #[cfg(feature = "cuda")]
             BackendType::Cuda => cuda::stream_synchronize(self.handle),
             #[cfg(feature = "vulkan")]
@@ -325,7 +324,6 @@ mod tests {
     #[test]
     fn test_gpu_stream_cpu_sync() {
         let stream = GpuStream::new(0, 0, BackendType::Cpu);
-        // CPU sync is a no-op — should not panic
         stream.synchronize();
     }
 
@@ -339,16 +337,12 @@ mod tests {
     #[test]
     fn test_best_available_backend() {
         let best = best_available_backend();
-        // Should always return something (at minimum CPU)
-        // Just verify it doesn't panic
         let _ = best;
     }
 
     #[test]
     fn test_gpu_count() {
         let count = gpu_count();
-        // On a machine with a GPU this should be >= 1
-        // On CI without GPU it's 0 — both are valid
         assert!(count < 1000, "Sanity check: unreasonable GPU count");
     }
 

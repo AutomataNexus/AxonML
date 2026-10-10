@@ -48,7 +48,6 @@ pub const ELEMENTWISE_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// add_f32 kernel: out[i] = a[i] + b[i]
 .visible .entry add_f32(
     .param .u64 a,
     .param .u64 b,
@@ -88,7 +87,6 @@ $L__add_exit:
     ret;
 }
 
-// sub_f32 kernel: out[i] = a[i] - b[i]
 .visible .entry sub_f32(
     .param .u64 a,
     .param .u64 b,
@@ -128,7 +126,6 @@ $L__sub_exit:
     ret;
 }
 
-// mul_f32 kernel: out[i] = a[i] * b[i]
 .visible .entry mul_f32(
     .param .u64 a,
     .param .u64 b,
@@ -168,7 +165,6 @@ $L__mul_exit:
     ret;
 }
 
-// div_f32 kernel: out[i] = a[i] / b[i]
 .visible .entry div_f32(
     .param .u64 a,
     .param .u64 b,
@@ -208,7 +204,6 @@ $L__div_exit:
     ret;
 }
 
-// scale_f32 kernel: data[i] *= alpha (in-place)
 .visible .entry scale_f32(
     .param .u64 data,
     .param .f32 alpha,
@@ -243,7 +238,6 @@ $L__scale_exit:
     ret;
 }
 
-// add_scalar_f32 kernel: out[i] = src[i] + scalar
 .visible .entry add_scalar_f32(
     .param .u64 src,
     .param .f32 scalar,
@@ -281,7 +275,6 @@ $L__addsc_exit:
     ret;
 }
 
-// neg_f32 kernel: out[i] = -src[i]
 .visible .entry neg_f32(
     .param .u64 src,
     .param .u64 out,
@@ -318,7 +311,6 @@ $L__neg_exit:
     ret;
 }
 
-// sqrt_f32 kernel: out[i] = sqrt(src[i])
 .visible .entry sqrt_f32(
     .param .u64 src,
     .param .u64 out,
@@ -355,7 +347,6 @@ $L__sqrt_exit:
     ret;
 }
 
-// pow_f32 kernel: out[i] = a[i] ^ b[i]  (using lg2/ex2)
 .visible .entry pow_f32(
     .param .u64 a,
     .param .u64 b,
@@ -388,7 +379,6 @@ $L__sqrt_exit:
 
     ld.global.f32 %f1, [%rd6];
     ld.global.f32 %f2, [%rd7];
-    // pow(a, b) = exp2(b * log2(a))
     abs.f32 %f3, %f1;
     lg2.approx.f32 %f3, %f3;
     mul.f32 %f3, %f2, %f3;
@@ -399,7 +389,6 @@ $L__pow_exit:
     ret;
 }
 
-// pow_scalar_f32 kernel: out[i] = src[i] ^ exp
 .visible .entry pow_scalar_f32(
     .param .u64 src,
     .param .f32 exp,
@@ -456,8 +445,6 @@ pub const BROADCAST_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// broadcast_add_f32: out[i] = a[i] + b[i % b_len]
-// a has n elements (the larger tensor), b has b_len elements (smaller, broadcast)
 .visible .entry broadcast_add_f32(
     .param .u64 a,
     .param .u64 b,
@@ -484,13 +471,11 @@ pub const BROADCAST_PTX: &str = r"
     setp.ge.u32 %p1, %r2, %r1;
     @%p1 bra $L__ba_exit;
 
-    // a index: i
     cvt.u64.u32 %rd4, %r2;
     shl.b64 %rd5, %rd4, 2;
     add.s64 %rd6, %rd1, %rd5;
     add.s64 %rd8, %rd3, %rd5;
 
-    // b index: i % b_len
     rem.u32 %r6, %r2, %r5;
     cvt.u64.u32 %rd7, %r6;
     shl.b64 %rd7, %rd7, 2;
@@ -505,7 +490,6 @@ $L__ba_exit:
     ret;
 }
 
-// broadcast_sub_f32: out[i] = a[i] - b[i % b_len]
 .visible .entry broadcast_sub_f32(
     .param .u64 a,
     .param .u64 b,
@@ -551,7 +535,6 @@ $L__bs_exit:
     ret;
 }
 
-// broadcast_mul_f32: out[i] = a[i] * b[i % b_len]
 .visible .entry broadcast_mul_f32(
     .param .u64 a,
     .param .u64 b,
@@ -597,7 +580,6 @@ $L__bm_exit:
     ret;
 }
 
-// broadcast_div_f32: out[i] = a[i] / b[i % b_len]
 .visible .entry broadcast_div_f32(
     .param .u64 a,
     .param .u64 b,
@@ -643,8 +625,6 @@ $L__bd_exit:
     ret;
 }
 
-// broadcast_add_rev_f32: out[i] = a[i % a_len] + b[i]
-// When a is the smaller tensor (e.g., [M,1] + [M,N])
 .visible .entry broadcast_add_rev_f32(
     .param .u64 a,
     .param .u64 b,
@@ -671,13 +651,11 @@ $L__bd_exit:
     setp.ge.u32 %p1, %r2, %r1;
     @%p1 bra $L__bar_exit;
 
-    // a index: i % a_len
     rem.u32 %r6, %r2, %r5;
     cvt.u64.u32 %rd4, %r6;
     shl.b64 %rd5, %rd4, 2;
     add.s64 %rd6, %rd1, %rd5;
 
-    // b index: i
     cvt.u64.u32 %rd4, %r2;
     shl.b64 %rd5, %rd4, 2;
     add.s64 %rd7, %rd2, %rd5;
@@ -692,7 +670,6 @@ $L__bar_exit:
     ret;
 }
 
-// broadcast_sub_rev_f32: out[i] = a[i % a_len] - b[i]
 .visible .entry broadcast_sub_rev_f32(
     .param .u64 a,
     .param .u64 b,
@@ -738,7 +715,6 @@ $L__bsr_exit:
     ret;
 }
 
-// broadcast_mul_rev_f32: out[i] = a[i % a_len] * b[i]
 .visible .entry broadcast_mul_rev_f32(
     .param .u64 a,
     .param .u64 b,
@@ -784,7 +760,6 @@ $L__bmr_exit:
     ret;
 }
 
-// broadcast_div_rev_f32: out[i] = a[i % a_len] / b[i]
 .visible .entry broadcast_div_rev_f32(
     .param .u64 a,
     .param .u64 b,
@@ -838,7 +813,6 @@ pub const ACTIVATIONS_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// relu_f32 kernel: out[i] = max(0, src[i])
 .visible .entry relu_f32(
     .param .u64 input,
     .param .u64 output,
@@ -875,7 +849,6 @@ $L__relu_exit:
     ret;
 }
 
-// relu_backward_f32: out[i] = grad[i] * (input[i] > 0 ? 1.0 : 0.0)
 .visible .entry relu_backward_f32(
     .param .u64 grad_output,
     .param .u64 input,
@@ -916,7 +889,6 @@ $L__relub_exit:
     ret;
 }
 
-// sigmoid_f32 kernel
 .visible .entry sigmoid_f32(
     .param .u64 input,
     .param .u64 output,
@@ -957,7 +929,6 @@ $L__sig_exit:
     ret;
 }
 
-// sigmoid_backward_f32: out[i] = grad[i] * output[i] * (1 - output[i])
 .visible .entry sigmoid_backward_f32(
     .param .u64 grad_output,
     .param .u64 sig_output,
@@ -990,7 +961,6 @@ $L__sig_exit:
 
     ld.global.f32 %f1, [%rd6];
     ld.global.f32 %f2, [%rd7];
-    // grad * sig * (1 - sig)
     mov.f32 %f3, 0f3F800000;
     sub.f32 %f3, %f3, %f2;
     mul.f32 %f4, %f2, %f3;
@@ -1001,7 +971,6 @@ $L__sigb_exit:
     ret;
 }
 
-// tanh_f32 kernel
 .visible .entry tanh_f32(
     .param .u64 input,
     .param .u64 output,
@@ -1043,7 +1012,6 @@ $L__tanh_exit:
     ret;
 }
 
-// tanh_backward_f32: out[i] = grad[i] * (1 - output[i]^2)
 .visible .entry tanh_backward_f32(
     .param .u64 grad_output,
     .param .u64 tanh_output,
@@ -1076,7 +1044,6 @@ $L__tanh_exit:
 
     ld.global.f32 %f1, [%rd6];
     ld.global.f32 %f2, [%rd7];
-    // grad * (1 - tanh^2)
     mul.f32 %f3, %f2, %f2;
     mov.f32 %f4, 0f3F800000;
     sub.f32 %f4, %f4, %f3;
@@ -1087,7 +1054,6 @@ $L__tanhb_exit:
     ret;
 }
 
-// exp_f32 kernel: out[i] = exp(src[i])
 .visible .entry exp_f32(
     .param .u64 src,
     .param .u64 out,
@@ -1115,7 +1081,6 @@ $L__tanhb_exit:
     add.s64 %rd5, %rd1, %rd4;
 
     ld.global.f32 %f1, [%rd5];
-    // exp(x) = exp2(x / ln(2)) = exp2(x * 1.4426950408889634)
     mul.f32 %f1, %f1, 0f3FB8AA3B;
     ex2.approx.f32 %f2, %f1;
 
@@ -1126,7 +1091,6 @@ $L__exp_exit:
     ret;
 }
 
-// log_f32 kernel: out[i] = ln(src[i])
 .visible .entry log_f32(
     .param .u64 src,
     .param .u64 out,
@@ -1154,7 +1118,6 @@ $L__exp_exit:
     add.s64 %rd5, %rd1, %rd4;
 
     ld.global.f32 %f1, [%rd5];
-    // ln(x) = log2(x) * ln(2) = log2(x) * 0.6931471805599453
     lg2.approx.f32 %f1, %f1;
     mul.f32 %f2, %f1, 0f3F317218;
 
@@ -1165,7 +1128,6 @@ $L__log_exit:
     ret;
 }
 
-// gelu_f32 kernel: out[i] = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
 .visible .entry gelu_f32(
     .param .u64 src,
     .param .u64 out,
@@ -1193,25 +1155,18 @@ $L__log_exit:
     add.s64 %rd5, %rd1, %rd4;
 
     ld.global.f32 %f1, [%rd5];
-    // x^3
     mul.f32 %f2, %f1, %f1;
     mul.f32 %f2, %f2, %f1;
-    // 0.044715 * x^3
     mul.f32 %f3, %f2, 0f3D372713;
-    // x + 0.044715 * x^3
     add.f32 %f4, %f1, %f3;
-    // sqrt(2/pi) = 0.7978845608
     mul.f32 %f5, %f4, 0f3F4C422A;
-    // tanh(f5) via (exp(2x)-1)/(exp(2x)+1)
     mul.f32 %f6, %f5, 0f40000000;
     mul.f32 %f6, %f6, 0f3FB8AA3B;
     ex2.approx.f32 %f7, %f6;
     add.f32 %f8, %f7, 0fBF800000;
     add.f32 %f9, %f7, 0f3F800000;
     div.approx.f32 %f10, %f8, %f9;
-    // 1 + tanh(...)
     add.f32 %f10, %f10, 0f3F800000;
-    // 0.5 * x * (1 + tanh(...))
     mul.f32 %f11, %f1, %f10;
     mul.f32 %f11, %f11, 0f3F000000;
 
@@ -1222,7 +1177,6 @@ $L__gelu_exit:
     ret;
 }
 
-// silu_f32 kernel: out[i] = x * sigmoid(x)
 .visible .entry silu_f32(
     .param .u64 src,
     .param .u64 out,
@@ -1250,13 +1204,11 @@ $L__gelu_exit:
     add.s64 %rd5, %rd1, %rd4;
 
     ld.global.f32 %f1, [%rd5];
-    // sigmoid(x)
     neg.f32 %f2, %f1;
     mul.f32 %f2, %f2, 0f3FB8AA3B;
     ex2.approx.f32 %f3, %f2;
     add.f32 %f4, %f3, 0f3F800000;
     rcp.approx.f32 %f5, %f4;
-    // x * sigmoid(x)
     mul.f32 %f5, %f1, %f5;
 
     add.s64 %rd5, %rd2, %rd4;
@@ -1266,8 +1218,6 @@ $L__silu_exit:
     ret;
 }
 
-// silu_backward_f32: grad_in[i] = grad_out[i] * sigmoid(x) * (1 + x * (1 - sigmoid(x)))
-// Fused replacement for the 7-op autograd chain (sigmoid, ones-H2D, sub, mul, add, mul, mul).
 .visible .entry silu_backward_f32(
     .param .u64 silu_backward_f32_param_0,
     .param .u64 silu_backward_f32_param_1,
@@ -1330,8 +1280,6 @@ pub const REDUCTION_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// softmax_row_f32: in-place softmax per row
-// params: data (in/out), num_rows, row_size
 .visible .entry softmax_row_f32(
     .param .u64 data,
     .param .u32 num_rows,
@@ -1342,33 +1290,28 @@ pub const REDUCTION_PTX: &str = r"
     .reg .b32 %r<16>;
     .reg .b64 %rd<8>;
 
-    // shared memory for reductions (256 floats)
     .shared .align 4 .f32 sdata[256];
 
     ld.param.u64 %rd1, [data];
     ld.param.u32 %r1, [num_rows];
     ld.param.u32 %r2, [row_size];
 
-    // row index = blockIdx.x
     mov.u32 %r3, %ctaid.x;
     setp.ge.u32 %p1, %r3, %r1;
     @%p1 bra $L__sm_exit;
 
-    // tid = threadIdx.x
     mov.u32 %r4, %tid.x;
     mov.u32 %r5, %ntid.x;
 
-    // row_base = data + row_idx * row_size * 4
     cvt.u64.u32 %rd2, %r3;
     cvt.u64.u32 %rd3, %r2;
     mul.lo.u64 %rd4, %rd2, %rd3;
     shl.b64 %rd4, %rd4, 2;
-    add.s64 %rd5, %rd1, %rd4;   // rd5 = &data[row_idx * row_size]
+    add.s64 %rd5, %rd1, %rd4;
 
     // === Phase 1: Find max value in row ===
-    // Each thread finds max of its elements
-    mov.f32 %f1, 0fFF800000;     // -inf
-    mov.u32 %r6, %r4;            // i = tid
+    mov.f32 %f1, 0fFF800000;
+    mov.u32 %r6, %r4;
 $L__sm_max_loop:
     setp.ge.u32 %p2, %r6, %r2;
     @%p2 bra $L__sm_max_done;
@@ -1377,11 +1320,10 @@ $L__sm_max_loop:
     add.s64 %rd7, %rd5, %rd6;
     ld.global.f32 %f2, [%rd7];
     max.f32 %f1, %f1, %f2;
-    add.u32 %r6, %r6, %r5;      // i += blockDim.x
+    add.u32 %r6, %r6, %r5;
     bra $L__sm_max_loop;
 $L__sm_max_done:
 
-    // Store to shared memory
     cvt.u64.u32 %rd6, %r4;
     shl.b64 %rd6, %rd6, 2;
     mov.u64 %rd7, sdata;
@@ -1389,14 +1331,12 @@ $L__sm_max_done:
     st.shared.f32 [%rd7], %f1;
     bar.sync 0;
 
-    // Reduction in shared memory (max)
     mov.u32 %r6, 128;
 $L__sm_max_red:
     setp.lt.u32 %p2, %r6, 1;
     @%p2 bra $L__sm_max_red_done;
     setp.ge.u32 %p3, %r4, %r6;
     @%p3 bra $L__sm_max_red_skip;
-    // sdata[tid] = max(sdata[tid], sdata[tid + stride])
     add.u32 %r7, %r4, %r6;
     cvt.u64.u32 %rd6, %r7;
     shl.b64 %rd6, %rd6, 2;
@@ -1415,14 +1355,13 @@ $L__sm_max_red_skip:
     bra $L__sm_max_red;
 $L__sm_max_red_done:
 
-    // Broadcast max value: f4 = sdata[0]
     mov.u64 %rd7, sdata;
-    ld.shared.f32 %f4, [%rd7];    // f4 = row max
+    ld.shared.f32 %f4, [%rd7];
     bar.sync 0;
 
     // === Phase 2: exp(x - max) and sum ===
-    mov.f32 %f1, 0f00000000;      // sum = 0
-    mov.u32 %r6, %r4;             // i = tid
+    mov.f32 %f1, 0f00000000;
+    mov.u32 %r6, %r4;
 $L__sm_exp_loop:
     setp.ge.u32 %p2, %r6, %r2;
     @%p2 bra $L__sm_exp_done;
@@ -1430,17 +1369,15 @@ $L__sm_exp_loop:
     shl.b64 %rd6, %rd6, 2;
     add.s64 %rd7, %rd5, %rd6;
     ld.global.f32 %f2, [%rd7];
-    sub.f32 %f2, %f2, %f4;       // x - max
-    // exp approximation using ex2 (2^(x * log2(e)))
-    mul.f32 %f2, %f2, 0f3FB8AA3B;  // x * log2(e) = x * 1.4426950408889634
+    sub.f32 %f2, %f2, %f4;
+    mul.f32 %f2, %f2, 0f3FB8AA3B;
     ex2.approx.f32 %f2, %f2;
-    st.global.f32 [%rd7], %f2;    // store exp(x-max) in-place
-    add.f32 %f1, %f1, %f2;       // sum += exp(x-max)
-    add.u32 %r6, %r6, %r5;       // i += blockDim.x
+    st.global.f32 [%rd7], %f2;
+    add.f32 %f1, %f1, %f2;
+    add.u32 %r6, %r6, %r5;
     bra $L__sm_exp_loop;
 $L__sm_exp_done:
 
-    // Store partial sum to shared
     cvt.u64.u32 %rd6, %r4;
     shl.b64 %rd6, %rd6, 2;
     mov.u64 %rd7, sdata;
@@ -1448,7 +1385,6 @@ $L__sm_exp_done:
     st.shared.f32 [%rd7], %f1;
     bar.sync 0;
 
-    // Reduction (sum)
     mov.u32 %r6, 128;
 $L__sm_sum_red:
     setp.lt.u32 %p2, %r6, 1;
@@ -1473,9 +1409,8 @@ $L__sm_sum_red_skip:
     bra $L__sm_sum_red;
 $L__sm_sum_red_done:
 
-    // Broadcast sum value: f5 = sdata[0]
     mov.u64 %rd7, sdata;
-    ld.shared.f32 %f5, [%rd7];    // f5 = sum
+    ld.shared.f32 %f5, [%rd7];
     bar.sync 0;
 
     // === Phase 3: Divide by sum ===
@@ -1497,9 +1432,6 @@ $L__sm_exit:
     ret;
 }
 
-// softmax_backward_row_f32: per-row softmax backward
-// For each row: dot = sum(s[i] * g[i]), result[i] = s[i] * (g[i] - dot)
-// params: softmax_output, grad_output, result, num_rows, row_size
 .visible .entry softmax_backward_row_f32(
     .param .u64 softmax_out,
     .param .u64 grad_out,
@@ -1512,7 +1444,6 @@ $L__sm_exit:
     .reg .b32 %r<16>;
     .reg .b64 %rd<12>;
 
-    // shared memory for reductions (256 floats)
     .shared .align 4 .f32 sdata[256];
 
     ld.param.u64 %rd1, [softmax_out];
@@ -1521,43 +1452,39 @@ $L__sm_exit:
     ld.param.u32 %r1, [num_rows];
     ld.param.u32 %r2, [row_size];
 
-    // row index = blockIdx.x
     mov.u32 %r3, %ctaid.x;
     setp.ge.u32 %p1, %r3, %r1;
     @%p1 bra $L__smb_exit;
 
-    // tid = threadIdx.x, blockDim = ntid.x
     mov.u32 %r4, %tid.x;
     mov.u32 %r5, %ntid.x;
 
-    // row_base offsets
     cvt.u64.u32 %rd4, %r3;
     cvt.u64.u32 %rd5, %r2;
     mul.lo.u64 %rd6, %rd4, %rd5;
     shl.b64 %rd6, %rd6, 2;
-    add.s64 %rd7, %rd1, %rd6;     // rd7 = &softmax_out[row * row_size]
-    add.s64 %rd8, %rd2, %rd6;     // rd8 = &grad_out[row * row_size]
-    add.s64 %rd9, %rd3, %rd6;     // rd9 = &result[row * row_size]
+    add.s64 %rd7, %rd1, %rd6;
+    add.s64 %rd8, %rd2, %rd6;
+    add.s64 %rd9, %rd3, %rd6;
 
     // === Phase 1: Compute dot = sum(s[i] * g[i]) ===
-    mov.f32 %f1, 0f00000000;      // partial_dot = 0
-    mov.u32 %r6, %r4;             // i = tid
+    mov.f32 %f1, 0f00000000;
+    mov.u32 %r6, %r4;
 $L__smb_dot_loop:
     setp.ge.u32 %p2, %r6, %r2;
     @%p2 bra $L__smb_dot_done;
     cvt.u64.u32 %rd10, %r6;
     shl.b64 %rd10, %rd10, 2;
     add.s64 %rd11, %rd7, %rd10;
-    ld.global.f32 %f2, [%rd11];   // s[i]
+    ld.global.f32 %f2, [%rd11];
     add.s64 %rd11, %rd8, %rd10;
-    ld.global.f32 %f3, [%rd11];   // g[i]
-    mul.f32 %f4, %f2, %f3;        // s[i] * g[i]
-    add.f32 %f1, %f1, %f4;        // partial_dot += s[i]*g[i]
-    add.u32 %r6, %r6, %r5;        // i += blockDim.x
+    ld.global.f32 %f3, [%rd11];
+    mul.f32 %f4, %f2, %f3;
+    add.f32 %f1, %f1, %f4;
+    add.u32 %r6, %r6, %r5;
     bra $L__smb_dot_loop;
 $L__smb_dot_done:
 
-    // Store partial dot to shared memory
     cvt.u64.u32 %rd10, %r4;
     shl.b64 %rd10, %rd10, 2;
     mov.u64 %rd11, sdata;
@@ -1565,7 +1492,6 @@ $L__smb_dot_done:
     st.shared.f32 [%rd11], %f1;
     bar.sync 0;
 
-    // Reduction in shared memory (sum for dot product)
     mov.u32 %r6, 128;
 $L__smb_dot_red:
     setp.lt.u32 %p2, %r6, 1;
@@ -1590,9 +1516,8 @@ $L__smb_dot_red_skip:
     bra $L__smb_dot_red;
 $L__smb_dot_red_done:
 
-    // Broadcast dot: f5 = sdata[0]
     mov.u64 %rd11, sdata;
-    ld.shared.f32 %f5, [%rd11];   // f5 = dot = sum(s*g)
+    ld.shared.f32 %f5, [%rd11];
     bar.sync 0;
 
     // === Phase 2: result[i] = s[i] * (g[i] - dot) ===
@@ -1603,11 +1528,11 @@ $L__smb_apply_loop:
     cvt.u64.u32 %rd10, %r6;
     shl.b64 %rd10, %rd10, 2;
     add.s64 %rd11, %rd7, %rd10;
-    ld.global.f32 %f2, [%rd11];   // s[i]
+    ld.global.f32 %f2, [%rd11];
     add.s64 %rd11, %rd8, %rd10;
-    ld.global.f32 %f3, [%rd11];   // g[i]
-    sub.f32 %f4, %f3, %f5;        // g[i] - dot
-    mul.f32 %f4, %f2, %f4;        // s[i] * (g[i] - dot)
+    ld.global.f32 %f3, [%rd11];
+    sub.f32 %f4, %f3, %f5;
+    mul.f32 %f4, %f2, %f4;
     add.s64 %rd11, %rd9, %rd10;
     st.global.f32 [%rd11], %f4;
     add.u32 %r6, %r6, %r5;
@@ -1618,8 +1543,6 @@ $L__smb_exit:
     ret;
 }
 
-// broadcast_copy_f32: out[i] = src[i % src_len]
-// Used for broadcast_to when a tensor needs to be expanded
 .visible .entry broadcast_copy_f32(
     .param .u64 src,
     .param .u64 out,
@@ -1644,7 +1567,6 @@ $L__smb_exit:
     setp.ge.u32 %p1, %r3, %r1;
     @%p1 bra $L__bcopy_exit;
 
-    // src_idx = i % src_len
     rem.u32 %r6, %r3, %r2;
 
     cvt.u64.u32 %rd3, %r6;
@@ -1661,10 +1583,6 @@ $L__bcopy_exit:
     ret;
 }
 
-// gather_contiguous_f32: out[i] = src[indices[i]]
-// Makes a non-contiguous GPU tensor contiguous by gathering elements
-// indices is computed on CPU and uploaded: for each output element i,
-// indices[i] = offset + linear_index(unravel(i, shape), strides)
 .visible .entry gather_contiguous_f32(
     .param .u64 src,
     .param .u64 indices,
@@ -1689,23 +1607,177 @@ $L__bcopy_exit:
     setp.ge.u32 %p1, %r2, %r1;
     @%p1 bra $L__gather_exit;
 
-    // Load index
     cvt.u64.u32 %rd4, %r2;
     shl.b64 %rd5, %rd4, 2;
     add.s64 %rd6, %rd2, %rd5;
     ld.global.u32 %r5, [%rd6];
 
-    // Load src[index]
     cvt.u64.u32 %rd7, %r5;
     shl.b64 %rd7, %rd7, 2;
     add.s64 %rd8, %rd1, %rd7;
     ld.global.f32 %f1, [%rd8];
 
-    // Store to out[i]
     add.s64 %rd9, %rd3, %rd5;
     st.global.f32 [%rd9], %f1;
 
 $L__gather_exit:
+    ret;
+}
+";
+
+/// Embedded PTX for argmax/argmin along a dimension (argdim).
+///
+/// argmax_dim_f32 / argmin_dim_f32: reduce a tensor along one dimension,
+/// returning the INDEX (cast to f32) of the extreme element. The tensor is
+/// viewed as [outer_size, dim_size, inner_size] exactly like sum_dim_f32.
+/// Each thread computes one output element:
+///   out[outer*inner_size + inner] = argextreme over d of
+///       input[outer*dim_size*inner_size + d*inner_size + inner]
+/// Ties resolve to the lowest index (strict gt/lt), matching NumPy and
+/// CpuBackend::argmax/argmin. Grid: ceil(outer_size*inner_size/256), Block: 256.
+#[cfg(feature = "cuda")]
+pub const ARGDIM_PTX: &str = r"
+.version 7.0
+.target sm_50
+.address_size 64
+
+.visible .entry argmax_dim_f32(
+    .param .u64 input,
+    .param .u64 output,
+    .param .u32 outer_size,
+    .param .u32 dim_size,
+    .param .u32 inner_size
+) {
+    .reg .pred %p<3>;
+    .reg .f32 %f<3>;
+    .reg .b32 %r<14>;
+    .reg .b64 %rd<6>;
+
+    ld.param.u64 %rd1, [input];
+    ld.param.u64 %rd2, [output];
+    ld.param.u32 %r1, [outer_size];
+    ld.param.u32 %r2, [dim_size];
+    ld.param.u32 %r3, [inner_size];
+
+    mov.u32 %r4, %ctaid.x;
+    mov.u32 %r5, %ntid.x;
+    mov.u32 %r6, %tid.x;
+    mad.lo.s32 %r4, %r4, %r5, %r6;
+
+    mul.lo.s32 %r7, %r1, %r3;
+    setp.ge.u32 %p1, %r4, %r7;
+    @%p1 bra $L__argmax_exit;
+
+    div.u32 %r8, %r4, %r3;
+    rem.u32 %r9, %r4, %r3;
+
+    mul.lo.s32 %r10, %r8, %r2;
+    mul.lo.s32 %r10, %r10, %r3;
+    add.s32 %r10, %r10, %r9;
+
+    cvt.u64.u32 %rd3, %r10;
+    shl.b64 %rd4, %rd3, 2;
+    add.s64 %rd5, %rd1, %rd4;
+    ld.global.f32 %f1, [%rd5];
+    mov.u32 %r12, 0;
+    mov.u32 %r11, 1;
+
+$L__argmax_loop:
+    setp.ge.u32 %p1, %r11, %r2;
+    @%p1 bra $L__argmax_done;
+
+    mul.lo.s32 %r13, %r11, %r3;
+    add.s32 %r13, %r13, %r10;
+    cvt.u64.u32 %rd3, %r13;
+    shl.b64 %rd4, %rd3, 2;
+    add.s64 %rd5, %rd1, %rd4;
+    ld.global.f32 %f2, [%rd5];
+
+    setp.gt.f32 %p2, %f2, %f1;
+    @%p2 mov.f32 %f1, %f2;
+    @%p2 mov.u32 %r12, %r11;
+
+    add.u32 %r11, %r11, 1;
+    bra $L__argmax_loop;
+
+$L__argmax_done:
+    cvt.rn.f32.u32 %f2, %r12;
+    cvt.u64.u32 %rd3, %r4;
+    shl.b64 %rd4, %rd3, 2;
+    add.s64 %rd5, %rd2, %rd4;
+    st.global.f32 [%rd5], %f2;
+
+$L__argmax_exit:
+    ret;
+}
+
+.visible .entry argmin_dim_f32(
+    .param .u64 input,
+    .param .u64 output,
+    .param .u32 outer_size,
+    .param .u32 dim_size,
+    .param .u32 inner_size
+) {
+    .reg .pred %p<3>;
+    .reg .f32 %f<3>;
+    .reg .b32 %r<14>;
+    .reg .b64 %rd<6>;
+
+    ld.param.u64 %rd1, [input];
+    ld.param.u64 %rd2, [output];
+    ld.param.u32 %r1, [outer_size];
+    ld.param.u32 %r2, [dim_size];
+    ld.param.u32 %r3, [inner_size];
+
+    mov.u32 %r4, %ctaid.x;
+    mov.u32 %r5, %ntid.x;
+    mov.u32 %r6, %tid.x;
+    mad.lo.s32 %r4, %r4, %r5, %r6;
+
+    mul.lo.s32 %r7, %r1, %r3;
+    setp.ge.u32 %p1, %r4, %r7;
+    @%p1 bra $L__argmin_exit;
+
+    div.u32 %r8, %r4, %r3;
+    rem.u32 %r9, %r4, %r3;
+
+    mul.lo.s32 %r10, %r8, %r2;
+    mul.lo.s32 %r10, %r10, %r3;
+    add.s32 %r10, %r10, %r9;
+
+    cvt.u64.u32 %rd3, %r10;
+    shl.b64 %rd4, %rd3, 2;
+    add.s64 %rd5, %rd1, %rd4;
+    ld.global.f32 %f1, [%rd5];
+    mov.u32 %r12, 0;
+    mov.u32 %r11, 1;
+
+$L__argmin_loop:
+    setp.ge.u32 %p1, %r11, %r2;
+    @%p1 bra $L__argmin_done;
+
+    mul.lo.s32 %r13, %r11, %r3;
+    add.s32 %r13, %r13, %r10;
+    cvt.u64.u32 %rd3, %r13;
+    shl.b64 %rd4, %rd3, 2;
+    add.s64 %rd5, %rd1, %rd4;
+    ld.global.f32 %f2, [%rd5];
+
+    setp.lt.f32 %p2, %f2, %f1;
+    @%p2 mov.f32 %f1, %f2;
+    @%p2 mov.u32 %r12, %r11;
+
+    add.u32 %r11, %r11, 1;
+    bra $L__argmin_loop;
+
+$L__argmin_done:
+    cvt.rn.f32.u32 %f2, %r12;
+    cvt.u64.u32 %rd3, %r4;
+    shl.b64 %rd4, %rd3, 2;
+    add.s64 %rd5, %rd2, %rd4;
+    st.global.f32 [%rd5], %f2;
+
+$L__argmin_exit:
     ret;
 }
 ";
@@ -1722,11 +1794,6 @@ pub const SUM_DIM_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// sum_dim_f32: out[i] = sum of input along the reduced dimension
-// Tensor is logically [outer_size, dim_size, inner_size]
-// Output has outer_size * inner_size elements
-// Each thread handles one (outer, inner) pair
-// params: input, output, outer_size, dim_size, inner_size
 .visible .entry sum_dim_f32(
     .param .u64 input,
     .param .u64 output,
@@ -1745,41 +1812,31 @@ pub const SUM_DIM_PTX: &str = r"
     ld.param.u32 %r2, [dim_size];
     ld.param.u32 %r3, [inner_size];
 
-    // Global thread index
     mov.u32 %r4, %ctaid.x;
     mov.u32 %r5, %ntid.x;
     mov.u32 %r6, %tid.x;
     mad.lo.s32 %r4, %r4, %r5, %r6;
 
-    // Total output elements = outer_size * inner_size
     mul.lo.s32 %r7, %r1, %r3;
     setp.ge.u32 %p1, %r4, %r7;
     @%p1 bra $L__sum_dim_exit;
 
-    // Decompose thread index into (outer, inner)
-    // outer = thread_idx / inner_size
-    // inner = thread_idx % inner_size
-    div.u32 %r8, %r4, %r3;      // outer
-    rem.u32 %r9, %r4, %r3;      // inner
+    div.u32 %r8, %r4, %r3;
+    rem.u32 %r9, %r4, %r3;
 
-    // Base index in input: outer * dim_size * inner_size + inner
-    mul.lo.s32 %r10, %r8, %r2;  // outer * dim_size
-    mul.lo.s32 %r10, %r10, %r3; // outer * dim_size * inner_size
-    add.s32 %r10, %r10, %r9;    // + inner = base_idx
+    mul.lo.s32 %r10, %r8, %r2;
+    mul.lo.s32 %r10, %r10, %r3;
+    add.s32 %r10, %r10, %r9;
 
-    // Stride between elements along dim: inner_size
-    // Accumulate sum using 4x unrolled loop for better ILP
-    mov.f32 %f1, 0f00000000;    // sum = 0.0
-    mov.u32 %r11, 0;            // d = 0
+    mov.f32 %f1, 0f00000000;
+    mov.u32 %r11, 0;
 
-    // Compute dim_size rounded down to multiple of 4
-    and.b32 %r7, %r2, 0xFFFFFFFC; // dim_size & ~3
+    and.b32 %r7, %r2, 0xFFFFFFFC;
 
 $L__sum_dim_loop4:
     setp.ge.u32 %p1, %r11, %r7;
     @%p1 bra $L__sum_dim_tail;
 
-    // Load 4 elements with stride inner_size
     mul.lo.s32 %r8, %r11, %r3;
     add.s32 %r8, %r8, %r10;
     cvt.u64.u32 %rd3, %r8;
@@ -1834,7 +1891,6 @@ $L__sum_dim_tail:
     bra $L__sum_dim_tail;
 
 $L__sum_dim_done:
-    // Store result
     cvt.u64.u32 %rd3, %r4;
     shl.b64 %rd4, %rd3, 2;
     add.s64 %rd5, %rd2, %rd4;
@@ -1858,8 +1914,6 @@ pub const LAYERNORM_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// layer_norm_f32: per-row layer normalization with affine transform
-// params: input, gamma, beta, output, norm_size, eps, num_rows
 .visible .entry layer_norm_f32(
     .param .u64 input,
     .param .u64 gamma,
@@ -1874,7 +1928,6 @@ pub const LAYERNORM_PTX: &str = r"
     .reg .b32 %r<16>;
     .reg .b64 %rd<12>;
 
-    // shared memory for reductions (256 floats)
     .shared .align 4 .f32 sdata[256];
 
     ld.param.u64 %rd1, [input];
@@ -1885,26 +1938,23 @@ pub const LAYERNORM_PTX: &str = r"
     ld.param.f32 %f1, [eps];
     ld.param.u32 %r2, [num_rows];
 
-    // row index = blockIdx.x
     mov.u32 %r3, %ctaid.x;
     setp.ge.u32 %p1, %r3, %r2;
     @%p1 bra $L__ln_exit;
 
-    // tid = threadIdx.x, blockDim = ntid.x
     mov.u32 %r4, %tid.x;
     mov.u32 %r5, %ntid.x;
 
-    // row_base = input + row_idx * norm_size * 4
     cvt.u64.u32 %rd5, %r3;
     cvt.u64.u32 %rd6, %r1;
     mul.lo.u64 %rd7, %rd5, %rd6;
     shl.b64 %rd7, %rd7, 2;
-    add.s64 %rd8, %rd1, %rd7;     // rd8 = &input[row * norm_size]
-    add.s64 %rd9, %rd4, %rd7;     // rd9 = &output[row * norm_size]
+    add.s64 %rd8, %rd1, %rd7;
+    add.s64 %rd9, %rd4, %rd7;
 
     // === Phase 1: Compute mean via parallel sum ===
-    mov.f32 %f2, 0f00000000;      // partial_sum = 0
-    mov.u32 %r6, %r4;             // i = tid
+    mov.f32 %f2, 0f00000000;
+    mov.u32 %r6, %r4;
 $L__ln_sum_loop:
     setp.ge.u32 %p2, %r6, %r1;
     @%p2 bra $L__ln_sum_done;
@@ -1913,11 +1963,10 @@ $L__ln_sum_loop:
     add.s64 %rd11, %rd8, %rd10;
     ld.global.f32 %f3, [%rd11];
     add.f32 %f2, %f2, %f3;
-    add.u32 %r6, %r6, %r5;        // i += blockDim.x
+    add.u32 %r6, %r6, %r5;
     bra $L__ln_sum_loop;
 $L__ln_sum_done:
 
-    // Store to shared memory
     cvt.u64.u32 %rd10, %r4;
     shl.b64 %rd10, %rd10, 2;
     mov.u64 %rd11, sdata;
@@ -1925,7 +1974,6 @@ $L__ln_sum_done:
     st.shared.f32 [%rd11], %f2;
     bar.sync 0;
 
-    // Reduction in shared memory (sum for mean)
     mov.u32 %r6, 128;
 $L__ln_mean_red:
     setp.lt.u32 %p2, %r6, 1;
@@ -1950,15 +1998,14 @@ $L__ln_mean_red_skip:
     bra $L__ln_mean_red;
 $L__ln_mean_red_done:
 
-    // Broadcast mean: f5 = sdata[0] / norm_size
     mov.u64 %rd11, sdata;
     ld.shared.f32 %f5, [%rd11];
     cvt.rn.f32.u32 %f6, %r1;
-    div.approx.f32 %f5, %f5, %f6;  // f5 = mean
+    div.approx.f32 %f5, %f5, %f6;
     bar.sync 0;
 
     // === Phase 2: Compute variance via parallel sum of (x - mean)^2 ===
-    mov.f32 %f2, 0f00000000;       // partial_var = 0
+    mov.f32 %f2, 0f00000000;
     mov.u32 %r6, %r4;
 $L__ln_var_loop:
     setp.ge.u32 %p2, %r6, %r1;
@@ -1967,14 +2014,13 @@ $L__ln_var_loop:
     shl.b64 %rd10, %rd10, 2;
     add.s64 %rd11, %rd8, %rd10;
     ld.global.f32 %f3, [%rd11];
-    sub.f32 %f4, %f3, %f5;         // x - mean
-    mul.f32 %f4, %f4, %f4;         // (x - mean)^2
+    sub.f32 %f4, %f3, %f5;
+    mul.f32 %f4, %f4, %f4;
     add.f32 %f2, %f2, %f4;
     add.u32 %r6, %r6, %r5;
     bra $L__ln_var_loop;
 $L__ln_var_done:
 
-    // Store to shared
     cvt.u64.u32 %rd10, %r4;
     shl.b64 %rd10, %rd10, 2;
     mov.u64 %rd11, sdata;
@@ -1982,7 +2028,6 @@ $L__ln_var_done:
     st.shared.f32 [%rd11], %f2;
     bar.sync 0;
 
-    // Reduction (sum for variance)
     mov.u32 %r6, 128;
 $L__ln_var_red:
     setp.lt.u32 %p2, %r6, 1;
@@ -2007,18 +2052,16 @@ $L__ln_var_red_skip:
     bra $L__ln_var_red;
 $L__ln_var_red_done:
 
-    // Broadcast variance: f7 = sdata[0] / norm_size
     mov.u64 %rd11, sdata;
     ld.shared.f32 %f7, [%rd11];
     cvt.rn.f32.u32 %f6, %r1;
-    div.approx.f32 %f7, %f7, %f6;  // f7 = variance
+    div.approx.f32 %f7, %f7, %f6;
     bar.sync 0;
 
     // === Phase 3: Normalize and apply affine ===
-    // inv_std = 1 / sqrt(var + eps)
-    add.f32 %f8, %f7, %f1;         // var + eps
-    sqrt.approx.f32 %f8, %f8;      // sqrt(var + eps)
-    rcp.approx.f32 %f8, %f8;       // f8 = 1 / sqrt(var + eps)
+    add.f32 %f8, %f7, %f1;
+    sqrt.approx.f32 %f8, %f8;
+    rcp.approx.f32 %f8, %f8;
 
     mov.u32 %r6, %r4;
 $L__ln_norm_loop:
@@ -2027,24 +2070,19 @@ $L__ln_norm_loop:
     cvt.u64.u32 %rd10, %r6;
     shl.b64 %rd10, %rd10, 2;
 
-    // Load input[row * norm_size + i]
     add.s64 %rd11, %rd8, %rd10;
     ld.global.f32 %f3, [%rd11];
 
-    // Load gamma[i] and beta[i]
     add.s64 %rd11, %rd2, %rd10;
-    ld.global.f32 %f4, [%rd11];    // gamma
+    ld.global.f32 %f4, [%rd11];
     add.s64 %rd11, %rd3, %rd10;
-    ld.global.f32 %f6, [%rd11];    // beta
+    ld.global.f32 %f6, [%rd11];
 
-    // normalized = (x - mean) * inv_std
     sub.f32 %f9, %f3, %f5;
     mul.f32 %f9, %f9, %f8;
-    // out = gamma * normalized + beta
     mul.f32 %f9, %f4, %f9;
     add.f32 %f9, %f9, %f6;
 
-    // Store output[row * norm_size + i]
     add.s64 %rd11, %rd9, %rd10;
     st.global.f32 [%rd11], %f9;
 
@@ -2056,19 +2094,6 @@ $L__ln_exit:
     ret;
 }
 
-// layer_norm_backward_dinput_f32: per-row d_input computation
-// For each row:
-//   mean = sum(x) / N
-//   var = sum((x-mean)^2) / N
-//   std_inv = 1/sqrt(var + eps)
-//   x_hat = (x - mean) * std_inv
-//   dy = grad_output * gamma
-//   sum_dy = sum(dy)
-//   sum_dy_xhat = sum(dy * x_hat)
-//   d_input[i] = std_inv * (dy[i] - sum_dy/N - x_hat[i] * sum_dy_xhat/N)
-//
-// params: grad_output, input, gamma, d_input, norm_size, eps, num_rows
-// Grid: (num_rows, 1, 1), Block: (256, 1, 1), Shared: 256*4*2 bytes
 .visible .entry layer_norm_backward_dinput_f32(
     .param .u64 grad_output,
     .param .u64 input,
@@ -2083,7 +2108,6 @@ $L__ln_exit:
     .reg .b32 %r<16>;
     .reg .b64 %rd<16>;
 
-    // Two shared memory arrays: sdata_a for first reduction, sdata_b for second
     .shared .align 4 .f32 sdata_a[256];
     .shared .align 4 .f32 sdata_b[256];
 
@@ -2102,14 +2126,13 @@ $L__ln_exit:
     mov.u32 %r4, %tid.x;
     mov.u32 %r5, %ntid.x;
 
-    // Row base pointers
     cvt.u64.u32 %rd5, %r3;
     cvt.u64.u32 %rd6, %r1;
     mul.lo.u64 %rd7, %rd5, %rd6;
     shl.b64 %rd7, %rd7, 2;
-    add.s64 %rd8, %rd2, %rd7;     // &input[row * norm_size]
-    add.s64 %rd9, %rd1, %rd7;     // &grad_output[row * norm_size]
-    add.s64 %rd10, %rd4, %rd7;    // &d_input[row * norm_size]
+    add.s64 %rd8, %rd2, %rd7;
+    add.s64 %rd9, %rd1, %rd7;
+    add.s64 %rd10, %rd4, %rd7;
 
     // === Phase 1: Compute mean ===
     mov.f32 %f2, 0f00000000;
@@ -2126,7 +2149,6 @@ $L__lnb_mean_loop:
     bra $L__lnb_mean_loop;
 $L__lnb_mean_done:
 
-    // Reduce mean in shared mem
     cvt.u64.u32 %rd11, %r4;
     shl.b64 %rd11, %rd11, 2;
     mov.u64 %rd12, sdata_a;
@@ -2161,7 +2183,7 @@ $L__lnb_mean_red_done:
     mov.u64 %rd12, sdata_a;
     ld.shared.f32 %f5, [%rd12];
     cvt.rn.f32.u32 %f6, %r1;
-    div.approx.f32 %f5, %f5, %f6;  // f5 = mean
+    div.approx.f32 %f5, %f5, %f6;
     bar.sync 0;
 
     // === Phase 2: Compute variance ===
@@ -2215,19 +2237,15 @@ $L__lnb_var_red_done:
     mov.u64 %rd12, sdata_a;
     ld.shared.f32 %f7, [%rd12];
     cvt.rn.f32.u32 %f6, %r1;
-    div.approx.f32 %f7, %f7, %f6;  // f7 = variance
-    add.f32 %f8, %f7, %f1;         // var + eps
+    div.approx.f32 %f7, %f7, %f6;
+    add.f32 %f8, %f7, %f1;
     sqrt.approx.f32 %f8, %f8;
-    rcp.approx.f32 %f8, %f8;       // f8 = std_inv = 1/sqrt(var+eps)
+    rcp.approx.f32 %f8, %f8;
     bar.sync 0;
 
     // === Phase 3: Compute sum_dy and sum_dy_xhat simultaneously ===
-    // dy[i] = grad_output[i] * gamma[i]
-    // x_hat[i] = (input[i] - mean) * std_inv
-    // sum_dy = sum(dy[i])
-    // sum_dy_xhat = sum(dy[i] * x_hat[i])
-    mov.f32 %f2, 0f00000000;      // partial sum_dy
-    mov.f32 %f3, 0f00000000;      // partial sum_dy_xhat
+    mov.f32 %f2, 0f00000000;
+    mov.f32 %f3, 0f00000000;
     mov.u32 %r6, %r4;
 $L__lnb_sumdyx_loop:
     setp.ge.u32 %p2, %r6, %r1;
@@ -2235,42 +2253,35 @@ $L__lnb_sumdyx_loop:
     cvt.u64.u32 %rd11, %r6;
     shl.b64 %rd11, %rd11, 2;
 
-    // Load grad_output[i]
     add.s64 %rd12, %rd9, %rd11;
     ld.global.f32 %f9, [%rd12];
-    // Load gamma[i]
     add.s64 %rd12, %rd3, %rd11;
     ld.global.f32 %f10, [%rd12];
-    // dy = grad_output * gamma
     mul.f32 %f11, %f9, %f10;
 
-    // Load input[i], compute x_hat
     add.s64 %rd12, %rd8, %rd11;
     ld.global.f32 %f12, [%rd12];
-    sub.f32 %f13, %f12, %f5;      // x - mean
-    mul.f32 %f13, %f13, %f8;      // x_hat = (x-mean)*std_inv
+    sub.f32 %f13, %f12, %f5;
+    mul.f32 %f13, %f13, %f8;
 
-    // Accumulate
-    add.f32 %f2, %f2, %f11;       // sum_dy += dy
-    mul.f32 %f14, %f11, %f13;     // dy * x_hat
-    add.f32 %f3, %f3, %f14;       // sum_dy_xhat += dy*x_hat
+    add.f32 %f2, %f2, %f11;
+    mul.f32 %f14, %f11, %f13;
+    add.f32 %f3, %f3, %f14;
 
     add.u32 %r6, %r6, %r5;
     bra $L__lnb_sumdyx_loop;
 $L__lnb_sumdyx_done:
 
-    // Store both partials to shared memory
     cvt.u64.u32 %rd11, %r4;
     shl.b64 %rd11, %rd11, 2;
     mov.u64 %rd12, sdata_a;
     add.s64 %rd13, %rd12, %rd11;
-    st.shared.f32 [%rd13], %f2;    // sdata_a[tid] = partial sum_dy
+    st.shared.f32 [%rd13], %f2;
     mov.u64 %rd12, sdata_b;
     add.s64 %rd13, %rd12, %rd11;
-    st.shared.f32 [%rd13], %f3;    // sdata_b[tid] = partial sum_dy_xhat
+    st.shared.f32 [%rd13], %f3;
     bar.sync 0;
 
-    // Reduce both simultaneously
     mov.u32 %r6, 128;
 $L__lnb_sumdyx_red:
     setp.lt.u32 %p2, %r6, 1;
@@ -2281,7 +2292,6 @@ $L__lnb_sumdyx_red:
     cvt.u64.u32 %rd11, %r7;
     shl.b64 %rd11, %rd11, 2;
 
-    // Reduce sdata_a (sum_dy)
     mov.u64 %rd12, sdata_a;
     add.s64 %rd13, %rd12, %rd11;
     ld.shared.f32 %f9, [%rd13];
@@ -2292,7 +2302,6 @@ $L__lnb_sumdyx_red:
     add.f32 %f10, %f10, %f9;
     st.shared.f32 [%rd13], %f10;
 
-    // Reduce sdata_b (sum_dy_xhat)
     mov.u64 %rd12, sdata_b;
     add.s64 %rd13, %rd12, %rd11;
     ld.shared.f32 %f9, [%rd13];
@@ -2307,17 +2316,15 @@ $L__lnb_sumdyx_red_skip:
     bra $L__lnb_sumdyx_red;
 $L__lnb_sumdyx_red_done:
 
-    // Broadcast: f9 = sum_dy, f10 = sum_dy_xhat
     mov.u64 %rd12, sdata_a;
-    ld.shared.f32 %f9, [%rd12];    // sum_dy
+    ld.shared.f32 %f9, [%rd12];
     mov.u64 %rd12, sdata_b;
-    ld.shared.f32 %f10, [%rd12];   // sum_dy_xhat
+    ld.shared.f32 %f10, [%rd12];
     bar.sync 0;
 
-    // Precompute: sum_dy / N and sum_dy_xhat / N
     cvt.rn.f32.u32 %f6, %r1;
-    div.approx.f32 %f11, %f9, %f6;   // f11 = sum_dy / N
-    div.approx.f32 %f12, %f10, %f6;  // f12 = sum_dy_xhat / N
+    div.approx.f32 %f11, %f9, %f6;
+    div.approx.f32 %f12, %f10, %f6;
 
     // === Phase 4: Compute d_input[i] = std_inv * (dy[i] - sum_dy/N - x_hat[i] * sum_dy_xhat/N) ===
     mov.u32 %r6, %r4;
@@ -2327,26 +2334,22 @@ $L__lnb_dinput_loop:
     cvt.u64.u32 %rd11, %r6;
     shl.b64 %rd11, %rd11, 2;
 
-    // dy = grad_output[i] * gamma[i]
     add.s64 %rd12, %rd9, %rd11;
-    ld.global.f32 %f2, [%rd12];    // grad_output[i]
+    ld.global.f32 %f2, [%rd12];
     add.s64 %rd12, %rd3, %rd11;
-    ld.global.f32 %f3, [%rd12];    // gamma[i]
-    mul.f32 %f4, %f2, %f3;        // dy = grad_output * gamma
+    ld.global.f32 %f3, [%rd12];
+    mul.f32 %f4, %f2, %f3;
 
-    // x_hat = (input[i] - mean) * std_inv
     add.s64 %rd12, %rd8, %rd11;
-    ld.global.f32 %f2, [%rd12];    // input[i]
-    sub.f32 %f3, %f2, %f5;        // x - mean
-    mul.f32 %f3, %f3, %f8;        // x_hat
+    ld.global.f32 %f2, [%rd12];
+    sub.f32 %f3, %f2, %f5;
+    mul.f32 %f3, %f3, %f8;
 
-    // d_input = std_inv * (dy - sum_dy/N - x_hat * sum_dy_xhat/N)
-    sub.f32 %f2, %f4, %f11;       // dy - sum_dy/N
-    mul.f32 %f14, %f3, %f12;      // x_hat * sum_dy_xhat/N
-    sub.f32 %f2, %f2, %f14;       // dy - sum_dy/N - x_hat*sum_dy_xhat/N
-    mul.f32 %f2, %f8, %f2;        // std_inv * (...)
+    sub.f32 %f2, %f4, %f11;
+    mul.f32 %f14, %f3, %f12;
+    sub.f32 %f2, %f2, %f14;
+    mul.f32 %f2, %f8, %f2;
 
-    // Store d_input[i]
     add.s64 %rd12, %rd10, %rd11;
     st.global.f32 [%rd12], %f2;
 
@@ -2358,16 +2361,6 @@ $L__lnb_exit:
     ret;
 }
 
-// layer_norm_backward_dweight_dbias_f32: accumulate d_weight and d_bias
-// For each element i in [0, norm_size):
-//   d_bias[i] = sum over rows of grad_output[row * norm_size + i]
-//   d_weight[i] = sum over rows of grad_output[row * norm_size + i] * x_hat[row, i]
-// x_hat is computed from input, mean, var (recomputed per row).
-// This kernel uses one thread per element (grid-stride loop over elements).
-// Each thread loops over all rows and accumulates.
-//
-// params: grad_output, input, d_weight, d_bias, norm_size, eps, num_rows
-// Grid: (ceil(norm_size/256), 1, 1), Block: (256, 1, 1)
 .visible .entry layer_norm_backward_dweight_dbias_f32(
     .param .u64 grad_output,
     .param .u64 input,
@@ -2390,35 +2383,29 @@ $L__lnb_exit:
     ld.param.f32 %f1, [eps];
     ld.param.u32 %r2, [num_rows];
 
-    // Global thread index = element index
     mov.u32 %r3, %ctaid.x;
     mov.u32 %r4, %ntid.x;
     mov.u32 %r5, %tid.x;
-    mad.lo.s32 %r3, %r3, %r4, %r5;  // elem_idx
+    mad.lo.s32 %r3, %r3, %r4, %r5;
 
     setp.ge.u32 %p1, %r3, %r1;
     @%p1 bra $L__lnbwb_exit;
 
-    // Loop over all rows, accumulate d_weight and d_bias for this element
-    mov.f32 %f2, 0f00000000;      // acc_d_bias = 0
-    mov.f32 %f3, 0f00000000;      // acc_d_weight = 0
-    mov.u32 %r6, 0;               // row = 0
+    mov.f32 %f2, 0f00000000;
+    mov.f32 %f3, 0f00000000;
+    mov.u32 %r6, 0;
 
 $L__lnbwb_row_loop:
     setp.ge.u32 %p2, %r6, %r2;
     @%p2 bra $L__lnbwb_row_done;
 
-    // Compute row base offset = row * norm_size * 4
     cvt.u64.u32 %rd5, %r6;
     cvt.u64.u32 %rd6, %r1;
     mul.lo.u64 %rd7, %rd5, %rd6;
     shl.b64 %rd7, %rd7, 2;
 
-    // Compute mean for this row
-    // For correctness we need mean/var per row. We compute inline.
-    // mean = sum(input[row*N .. row*N+N]) / N
-    add.s64 %rd8, %rd2, %rd7;     // &input[row * norm_size]
-    mov.f32 %f4, 0f00000000;      // sum for mean
+    add.s64 %rd8, %rd2, %rd7;
+    mov.f32 %f4, 0f00000000;
     mov.u32 %r7, 0;
 $L__lnbwb_mean_loop:
     setp.ge.u32 %p2, %r7, %r1;
@@ -2432,9 +2419,8 @@ $L__lnbwb_mean_loop:
     bra $L__lnbwb_mean_loop;
 $L__lnbwb_mean_done:
     cvt.rn.f32.u32 %f6, %r1;
-    div.approx.f32 %f4, %f4, %f6;  // f4 = mean
+    div.approx.f32 %f4, %f4, %f6;
 
-    // var = sum((x-mean)^2) / N
     mov.f32 %f5, 0f00000000;
     mov.u32 %r7, 0;
 $L__lnbwb_var_loop:
@@ -2450,40 +2436,36 @@ $L__lnbwb_var_loop:
     add.u32 %r7, %r7, 1;
     bra $L__lnbwb_var_loop;
 $L__lnbwb_var_done:
-    div.approx.f32 %f5, %f5, %f6;  // f5 = var
-    add.f32 %f7, %f5, %f1;         // var + eps
+    div.approx.f32 %f5, %f5, %f6;
+    add.f32 %f7, %f5, %f1;
     sqrt.approx.f32 %f7, %f7;
-    rcp.approx.f32 %f7, %f7;       // f7 = std_inv
+    rcp.approx.f32 %f7, %f7;
 
-    // x_hat = (input[row*N + elem_idx] - mean) * std_inv
     cvt.u64.u32 %rd9, %r3;
     shl.b64 %rd9, %rd9, 2;
     add.s64 %rd10, %rd8, %rd9;
-    ld.global.f32 %f8, [%rd10];    // input[row*N + elem]
+    ld.global.f32 %f8, [%rd10];
     sub.f32 %f8, %f8, %f4;
-    mul.f32 %f8, %f8, %f7;        // f8 = x_hat
+    mul.f32 %f8, %f8, %f7;
 
-    // grad_output[row*N + elem_idx]
     add.s64 %rd10, %rd1, %rd7;
     add.s64 %rd10, %rd10, %rd9;
-    ld.global.f32 %f9, [%rd10];    // grad_output value
+    ld.global.f32 %f9, [%rd10];
 
-    // Accumulate
-    add.f32 %f2, %f2, %f9;        // d_bias += grad_output
-    mul.f32 %f10, %f9, %f8;       // grad_output * x_hat
-    add.f32 %f3, %f3, %f10;       // d_weight += grad_output * x_hat
+    add.f32 %f2, %f2, %f9;
+    mul.f32 %f10, %f9, %f8;
+    add.f32 %f3, %f3, %f10;
 
     add.u32 %r6, %r6, 1;
     bra $L__lnbwb_row_loop;
 $L__lnbwb_row_done:
 
-    // Store results
     cvt.u64.u32 %rd9, %r3;
     shl.b64 %rd9, %rd9, 2;
     add.s64 %rd10, %rd3, %rd9;
-    st.global.f32 [%rd10], %f3;    // d_weight[elem_idx]
+    st.global.f32 [%rd10], %f3;
     add.s64 %rd10, %rd4, %rd9;
-    st.global.f32 [%rd10], %f2;    // d_bias[elem_idx]
+    st.global.f32 [%rd10], %f2;
 
 $L__lnbwb_exit:
     ret;
@@ -2499,13 +2481,6 @@ pub const CROSS_ENTROPY_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// cross_entropy_fwd_f32: One block per batch item. Each block does:
-//   1. Find max of logits[b, :] (shared mem reduction)
-//   2. Compute sum_exp = sum(exp(logits - max)) (shared mem reduction)
-//   3. softmax_out[b,c] = exp(logits[b,c] - max) / sum_exp
-//   4. losses[b] = -log(softmax_out[b, target[b]])
-// params: logits[N*C], targets[N] (as f32), losses[N], softmax_out[N*C], C
-// grid=(N,1,1), block=(256,1,1), shared_mem=256*4
 .visible .entry cross_entropy_fwd_f32(
     .param .u64 logits,
     .param .u64 targets,
@@ -2526,17 +2501,14 @@ pub const CROSS_ENTROPY_PTX: &str = r"
     ld.param.u64 %rd4, [softmax_out];
     ld.param.u32 %r1, [num_classes];
 
-    mov.u32 %r2, %ctaid.x;        // batch index b
-    mov.u32 %r3, %tid.x;          // thread id within block
-    mov.u32 %r4, %ntid.x;         // block size (256)
+    mov.u32 %r2, %ctaid.x;
+    mov.u32 %r3, %tid.x;
+    mov.u32 %r4, %ntid.x;
 
-    // Base offset for this batch item: b * C
-    mul.lo.s32 %r5, %r2, %r1;     // r5 = b * C
+    mul.lo.s32 %r5, %r2, %r1;
 
     // ===== Phase 1: Find max =====
-    // Initialize all shared memory slots to -inf so unused threads don't
-    // contribute garbage values during the reduction.
-    mov.f32 %f1, 0fFF800000;      // -inf
+    mov.f32 %f1, 0fFF800000;
     cvt.u64.u32 %rd5, %r3;
     shl.b64 %rd5, %rd5, 2;
     mov.u64 %rd9, sdata;
@@ -2544,21 +2516,20 @@ pub const CROSS_ENTROPY_PTX: &str = r"
     st.shared.f32 [%rd8], %f1;
     bar.sync 0;
 
-    mov.u32 %r6, %r3;             // c = tid
+    mov.u32 %r6, %r3;
 $L__ce_max_loop:
     setp.ge.u32 %p1, %r6, %r1;
     @%p1 bra $L__ce_max_done;
-    add.s32 %r7, %r5, %r6;        // idx = b*C + c
+    add.s32 %r7, %r5, %r6;
     cvt.u64.u32 %rd5, %r7;
     shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd1, %rd5;
     ld.global.f32 %f2, [%rd6];
     max.f32 %f1, %f1, %f2;
-    add.u32 %r6, %r6, %r4;        // c += blockDim
+    add.u32 %r6, %r6, %r4;
     bra $L__ce_max_loop;
 $L__ce_max_done:
 
-    // Store partial max in shared mem
     cvt.u64.u32 %rd5, %r3;
     shl.b64 %rd5, %rd5, 2;
     mov.u64 %rd7, sdata;
@@ -2566,7 +2537,6 @@ $L__ce_max_done:
     st.shared.f32 [%rd6], %f1;
     bar.sync 0;
 
-    // Reduction for max
     mov.u32 %r8, 128;
 $L__ce_max_reduce:
     setp.lt.u32 %p1, %r8, 1;
@@ -2590,12 +2560,11 @@ $L__ce_max_reduce_skip:
     bra $L__ce_max_reduce;
 $L__ce_max_reduce_done:
 
-    // Broadcast max to all threads
-    ld.shared.f32 %f4, [sdata];    // f4 = max_val
+    ld.shared.f32 %f4, [sdata];
     bar.sync 0;
 
     // ===== Phase 2: sum_exp = sum(exp(x - max)) =====
-    mov.f32 %f1, 0f00000000;      // sum = 0
+    mov.f32 %f1, 0f00000000;
     mov.u32 %r6, %r3;
 $L__ce_exp_loop:
     setp.ge.u32 %p1, %r6, %r1;
@@ -2606,18 +2575,15 @@ $L__ce_exp_loop:
     add.s64 %rd6, %rd1, %rd5;
     ld.global.f32 %f2, [%rd6];
     sub.f32 %f2, %f2, %f4;
-    // exp approx: use ex2 (base-2 exp) with log2(e) scaling
-    mul.f32 %f2, %f2, 0f3FB8AA3B;  // x * log2(e) = x * 1.4426950408889634
+    mul.f32 %f2, %f2, 0f3FB8AA3B;
     ex2.approx.f32 %f2, %f2;
     add.f32 %f1, %f1, %f2;
-    // Store exp value temporarily in softmax_out
     add.s64 %rd8, %rd4, %rd5;
     st.global.f32 [%rd8], %f2;
     add.u32 %r6, %r6, %r4;
     bra $L__ce_exp_loop;
 $L__ce_exp_done:
 
-    // Reduce sum_exp in shared mem
     cvt.u64.u32 %rd5, %r3;
     shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd7, %rd5;
@@ -2647,11 +2613,11 @@ $L__ce_sum_reduce_skip:
     bra $L__ce_sum_reduce;
 $L__ce_sum_reduce_done:
 
-    ld.shared.f32 %f5, [sdata];    // f5 = sum_exp
+    ld.shared.f32 %f5, [sdata];
     bar.sync 0;
 
     // ===== Phase 3: Normalize softmax_out /= sum_exp =====
-    rcp.approx.f32 %f6, %f5;      // f6 = 1/sum_exp
+    rcp.approx.f32 %f6, %f5;
     mov.u32 %r6, %r3;
 $L__ce_norm_loop:
     setp.ge.u32 %p1, %r6, %r1;
@@ -2661,7 +2627,7 @@ $L__ce_norm_loop:
     shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd4, %rd5;
     ld.global.f32 %f2, [%rd6];
-    mul.f32 %f2, %f2, %f6;        // softmax = exp_val / sum_exp
+    mul.f32 %f2, %f2, %f6;
     st.global.f32 [%rd6], %f2;
     add.u32 %r6, %r6, %r4;
     bra $L__ce_norm_loop;
@@ -2672,30 +2638,22 @@ $L__ce_norm_done:
     setp.ne.u32 %p1, %r3, 0;
     @%p1 bra $L__ce_exit;
 
-    // Load target class for this batch item
     cvt.u64.u32 %rd5, %r2;
     shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd2, %rd5;
-    ld.global.f32 %f2, [%rd6];     // target as f32
-    cvt.rzi.s32.f32 %r10, %f2;    // convert to int
+    ld.global.f32 %f2, [%rd6];
+    cvt.rzi.s32.f32 %r10, %f2;
 
-    // loss = log(sum_exp) + max - logits[b, target]
-    // = -log_softmax[b, target] = -(logits[b,target] - max - log(sum_exp))
-    // More directly: loss = -log(softmax[b, target])
-    // softmax[b, target] is already stored in softmax_out
-    add.s32 %r10, %r5, %r10;      // idx = b*C + target
+    add.s32 %r10, %r5, %r10;
     cvt.u64.u32 %rd5, %r10;
     shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd4, %rd5;
-    ld.global.f32 %f2, [%rd6];     // softmax[b, target]
+    ld.global.f32 %f2, [%rd6];
 
-    // loss = -log(softmax_prob)
-    // log via lg2 * ln(2): log2(x) * 0.693147 = ln(x)
     lg2.approx.f32 %f2, %f2;
-    mul.f32 %f2, %f2, 0f3F317218;  // * ln(2)
-    neg.f32 %f2, %f2;              // negate
+    mul.f32 %f2, %f2, 0f3F317218;
+    neg.f32 %f2, %f2;
 
-    // Store loss
     cvt.u64.u32 %rd5, %r2;
     shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd3, %rd5;
@@ -2705,9 +2663,6 @@ $L__ce_exit:
     ret;
 }
 
-// cross_entropy_bwd_f32: grad_input[b,c] = (softmax[b,c] - (c==target[b])) * grad_output[b]
-// Grid = ceil(N*C / 256), Block = 256
-// params: softmax_probs[N*C], targets[N](f32), grad_output[N], grad_input[N*C], N, C
 .visible .entry cross_entropy_bwd_f32(
     .param .u64 softmax_probs,
     .param .u64 targets,
@@ -2728,46 +2683,38 @@ $L__ce_exit:
     ld.param.u32 %r1, [batch_size];
     ld.param.u32 %r2, [num_classes];
 
-    // Global thread index
     mov.u32 %r3, %ctaid.x;
     mov.u32 %r4, %ntid.x;
     mov.u32 %r5, %tid.x;
     mad.lo.s32 %r3, %r3, %r4, %r5;
 
-    // Total elements = N * C
     mul.lo.s32 %r6, %r1, %r2;
     setp.ge.u32 %p1, %r3, %r6;
     @%p1 bra $L__cebwd_exit;
 
-    // b = idx / C, c = idx % C
-    div.u32 %r7, %r3, %r2;        // b
-    rem.u32 %r8, %r3, %r2;        // c
+    div.u32 %r7, %r3, %r2;
+    rem.u32 %r8, %r3, %r2;
 
-    // Load softmax[b, c]
     cvt.u64.u32 %rd5, %r3;
     shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd1, %rd5;
-    ld.global.f32 %f1, [%rd6];     // softmax_prob
+    ld.global.f32 %f1, [%rd6];
 
-    // Load target[b]
     cvt.u64.u32 %rd5, %r7;
     shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd2, %rd5;
     ld.global.f32 %f2, [%rd6];
-    cvt.rzi.s32.f32 %r9, %f2;     // target class as int
+    cvt.rzi.s32.f32 %r9, %f2;
 
-    // grad = softmax - (c == target ? 1 : 0)
     setp.eq.s32 %p2, %r8, %r9;
-    @%p2 sub.f32 %f1, %f1, 0f3F800000;  // subtract 1.0 if c == target
+    @%p2 sub.f32 %f1, %f1, 0f3F800000;
 
-    // Scale by grad_output[b]
     cvt.u64.u32 %rd5, %r7;
     shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd3, %rd5;
     ld.global.f32 %f3, [%rd6];
     mul.f32 %f1, %f1, %f3;
 
-    // Store grad_input[b, c]
     cvt.u64.u32 %rd5, %r3;
     shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd4, %rd5;
@@ -2788,9 +2735,6 @@ pub const EMBEDDING_SCATTER_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// embedding_scatter_add_f32: Scatter-add gradients for embedding backward
-// Thread i handles one element in grad_output (total = num_indices * emb_dim)
-// Params: grad_src, indices, weight_grad, num_indices, emb_dim
 .visible .entry embedding_scatter_add_f32(
     .param .u64 p_grad_src,
     .param .u64 p_indices,
@@ -2803,45 +2747,37 @@ pub const EMBEDDING_SCATTER_PTX: &str = r"
     .reg .b32 %r<10>;
     .reg .b64 %rd<12>;
 
-    // Global thread index
     mov.u32 %r1, %ctaid.x;
     mov.u32 %r2, %ntid.x;
     mov.u32 %r3, %tid.x;
     mad.lo.s32 %r1, %r1, %r2, %r3;
 
-    // Bounds check: r1 = thread_idx, must be < total_n
     ld.param.u32 %r4, [p_total_n];
     setp.ge.u32 %p1, %r1, %r4;
     @%p1 bra $L__scatter_exit;
 
-    // Compute token_index = thread_idx / emb_dim
-    // Compute dim_offset  = thread_idx % emb_dim
     ld.param.u32 %r5, [p_emb_dim];
-    div.u32 %r6, %r1, %r5;    // r6 = token_index
-    rem.u32 %r7, %r1, %r5;    // r7 = dim_offset
+    div.u32 %r6, %r1, %r5;
+    rem.u32 %r7, %r1, %r5;
 
-    // Load indices[token_index] -> r8 = embedding row index
     ld.param.u64 %rd1, [p_indices];
     cvt.u64.u32 %rd2, %r6;
-    shl.b64 %rd2, %rd2, 2;       // *4 bytes per u32
+    shl.b64 %rd2, %rd2, 2;
     add.s64 %rd3, %rd1, %rd2;
-    ld.global.u32 %r8, [%rd3];   // r8 = indices[token_index]
+    ld.global.u32 %r8, [%rd3];
 
-    // Load grad_src[thread_idx]
     ld.param.u64 %rd4, [p_grad_src];
     cvt.u64.u32 %rd5, %r1;
-    shl.b64 %rd5, %rd5, 2;       // *4 bytes per f32
+    shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd4, %rd5;
     ld.global.f32 %f1, [%rd6];
 
-    // Compute dest offset: r8 * emb_dim + dim_offset
     mad.lo.u32 %r9, %r8, %r5, %r7;
     ld.param.u64 %rd7, [p_weight_grad];
     cvt.u64.u32 %rd8, %r9;
-    shl.b64 %rd8, %rd8, 2;       // *4 bytes per f32
+    shl.b64 %rd8, %rd8, 2;
     add.s64 %rd9, %rd7, %rd8;
 
-    // Atomic add: weight_grad[r8*emb_dim + dim_offset] += grad_src[thread_idx]
     atom.global.add.f32 %f1, [%rd9], %f1;
 
 $L__scatter_exit:
@@ -2858,11 +2794,6 @@ pub const ADAM_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// adam_step_f32: Fused Adam parameter update
-// Thread i updates one element of param, exp_avg, exp_avg_sq
-// Params: param, grad, exp_avg, exp_avg_sq, n,
-//         lr, beta1, beta2, eps, weight_decay,
-//         bias_correction1, bias_correction2
 .visible .entry adam_step_f32(
     .param .u64 p_param,
     .param .u64 p_grad,
@@ -2882,38 +2813,32 @@ pub const ADAM_PTX: &str = r"
     .reg .b32 %r<5>;
     .reg .b64 %rd<12>;
 
-    // Global thread index
     mov.u32 %r1, %ctaid.x;
     mov.u32 %r2, %ntid.x;
     mov.u32 %r3, %tid.x;
     mad.lo.s32 %r1, %r1, %r2, %r3;
 
-    // Bounds check
     ld.param.u32 %r4, [p_n];
     setp.ge.u32 %p1, %r1, %r4;
     @%p1 bra $L__adam_exit;
 
-    // Compute byte offset for this element
     cvt.u64.u32 %rd1, %r1;
-    shl.b64 %rd1, %rd1, 2;    // *4 bytes
+    shl.b64 %rd1, %rd1, 2;
 
-    // Load all pointers
     ld.param.u64 %rd2, [p_param];
     ld.param.u64 %rd3, [p_grad];
     ld.param.u64 %rd4, [p_exp_avg];
     ld.param.u64 %rd5, [p_exp_avg_sq];
 
-    // Load values: param[i], grad[i], m[i], v[i]
     add.s64 %rd6, %rd2, %rd1;
-    ld.global.f32 %f1, [%rd6];      // f1 = param[i]
+    ld.global.f32 %f1, [%rd6];
     add.s64 %rd7, %rd3, %rd1;
-    ld.global.f32 %f2, [%rd7];      // f2 = grad[i]
+    ld.global.f32 %f2, [%rd7];
     add.s64 %rd8, %rd4, %rd1;
-    ld.global.f32 %f3, [%rd8];      // f3 = exp_avg[i]
+    ld.global.f32 %f3, [%rd8];
     add.s64 %rd9, %rd5, %rd1;
-    ld.global.f32 %f4, [%rd9];      // f4 = exp_avg_sq[i]
+    ld.global.f32 %f4, [%rd9];
 
-    // Load hyperparams
     ld.param.f32 %f5, [p_lr];
     ld.param.f32 %f6, [p_beta1];
     ld.param.f32 %f7, [p_beta2];
@@ -2922,51 +2847,40 @@ pub const ADAM_PTX: &str = r"
     ld.param.f32 %f10, [p_bias_correction1];
     ld.param.f32 %f11, [p_bias_correction2];
 
-    // Apply weight decay to grad: grad = grad + weight_decay * param
-    // f12 = weight_decay * param[i]
     mul.f32 %f12, %f9, %f1;
-    add.f32 %f2, %f2, %f12;         // f2 = grad + wd*param
+    add.f32 %f2, %f2, %f12;
 
-    // Update exp_avg: m = beta1 * m + (1-beta1) * grad
-    // f13 = 1.0 - beta1
-    mov.f32 %f13, 0f3F800000;       // 1.0
-    sub.f32 %f13, %f13, %f6;        // 1 - beta1
-    mul.f32 %f14, %f6, %f3;         // beta1 * m
-    mul.f32 %f15, %f13, %f2;        // (1-beta1) * grad
-    add.f32 %f3, %f14, %f15;        // new m
+    mov.f32 %f13, 0f3F800000;
+    sub.f32 %f13, %f13, %f6;
+    mul.f32 %f14, %f6, %f3;
+    mul.f32 %f15, %f13, %f2;
+    add.f32 %f3, %f14, %f15;
 
-    // Update exp_avg_sq: v = beta2 * v + (1-beta2) * grad^2
-    mov.f32 %f13, 0f3F800000;       // 1.0
-    sub.f32 %f13, %f13, %f7;        // 1 - beta2
-    mul.f32 %f14, %f7, %f4;         // beta2 * v
-    mul.f32 %f15, %f2, %f2;         // grad^2
-    mul.f32 %f15, %f13, %f15;       // (1-beta2) * grad^2
-    add.f32 %f4, %f14, %f15;        // new v
+    mov.f32 %f13, 0f3F800000;
+    sub.f32 %f13, %f13, %f7;
+    mul.f32 %f14, %f7, %f4;
+    mul.f32 %f15, %f2, %f2;
+    mul.f32 %f15, %f13, %f15;
+    add.f32 %f4, %f14, %f15;
 
-    // Bias-corrected step: step_size = lr / bias_correction1
-    div.approx.f32 %f16, %f5, %f10; // step_size
+    div.approx.f32 %f16, %f5, %f10;
 
-    // denom = sqrt(v / bias_correction2) + eps
-    div.approx.f32 %f17, %f4, %f11; // v / bc2
-    sqrt.approx.f32 %f17, %f17;     // sqrt(v/bc2)
-    add.f32 %f17, %f17, %f8;        // + eps
+    div.approx.f32 %f17, %f4, %f11;
+    sqrt.approx.f32 %f17, %f17;
+    add.f32 %f17, %f17, %f8;
 
-    // param = param - step_size * m / denom
-    div.approx.f32 %f18, %f3, %f17; // m / denom
-    mul.f32 %f18, %f16, %f18;       // step_size * m / denom
-    sub.f32 %f1, %f1, %f18;         // param -= update
+    div.approx.f32 %f18, %f3, %f17;
+    mul.f32 %f18, %f16, %f18;
+    sub.f32 %f1, %f1, %f18;
 
-    // Store updated values
-    st.global.f32 [%rd6], %f1;      // param[i]
-    st.global.f32 [%rd8], %f3;      // exp_avg[i]
-    st.global.f32 [%rd9], %f4;      // exp_avg_sq[i]
+    st.global.f32 [%rd6], %f1;
+    st.global.f32 [%rd8], %f3;
+    st.global.f32 [%rd9], %f4;
 
 $L__adam_exit:
     ret;
 }
 
-// grad_norm_sq_f32: Compute sum of squares of a vector (partial reduction)
-// Each block reduces its portion, atomically adds to output[0]
 .visible .entry grad_norm_sq_f32(
     .param .u64 p_data,
     .param .u64 p_output,
@@ -2978,17 +2892,15 @@ $L__adam_exit:
     .reg .b64 %rd<6>;
     .shared .f32 sdata[256];
 
-    // Global thread index
     mov.u32 %r1, %ctaid.x;
     mov.u32 %r2, %ntid.x;
     mov.u32 %r3, %tid.x;
-    mad.lo.s32 %r4, %r1, %r2, %r3;   // global_idx
+    mad.lo.s32 %r4, %r1, %r2, %r3;
 
     ld.param.u32 %r5, [p_n];
 
-    // Load and square, or zero if out of bounds
     setp.lt.u32 %p1, %r4, %r5;
-    mov.f32 %f1, 0f00000000;          // 0.0
+    mov.f32 %f1, 0f00000000;
     @!%p1 bra $L__norm_store;
 
     ld.param.u64 %rd1, [p_data];
@@ -2996,10 +2908,9 @@ $L__adam_exit:
     shl.b64 %rd2, %rd2, 2;
     add.s64 %rd3, %rd1, %rd2;
     ld.global.f32 %f2, [%rd3];
-    mul.f32 %f1, %f2, %f2;            // f1 = data[i]^2
+    mul.f32 %f1, %f2, %f2;
 
 $L__norm_store:
-    // Store to shared memory
     cvt.u64.u32 %rd4, %r3;
     shl.b64 %rd4, %rd4, 2;
     mov.u64 %rd5, sdata;
@@ -3007,13 +2918,11 @@ $L__norm_store:
     st.shared.f32 [%rd5], %f1;
     bar.sync 0;
 
-    // Tree reduction in shared memory
     mov.u32 %r6, 128;
 $L__norm_reduce:
     setp.lt.u32 %p1, %r3, %r6;
     @!%p1 bra $L__norm_reduce_done;
 
-    // Load sdata[tid] and sdata[tid + stride]
     mov.u64 %rd5, sdata;
     cvt.u64.u32 %rd4, %r3;
     shl.b64 %rd4, %rd4, 2;
@@ -3035,7 +2944,6 @@ $L__norm_reduce_done:
     setp.ge.u32 %p1, %r6, 1;
     @%p1 bra $L__norm_reduce;
 
-    // Thread 0 atomically adds block result to global output
     setp.eq.u32 %p1, %r3, 0;
     @!%p1 bra $L__norm_exit;
 
@@ -3048,8 +2956,6 @@ $L__norm_exit:
     ret;
 }
 
-// grad_scale_f32: Multiply all elements by a scalar
-// data[i] *= scale
 .visible .entry grad_scale_f32(
     .param .u64 p_data,
     .param .u32 p_n,
@@ -3092,17 +2998,6 @@ pub const STRIDED_COPY_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// strided_gather_f32: Copy elements from strided layout to contiguous output
-// src:     source data pointer (device)
-// dst:     destination data pointer (device, contiguous)
-// strides: [ndim] array of strides (device, i64)
-// shape:   [ndim] array of shape dims (device, u32)
-// ndim:    number of dimensions
-// offset:  storage offset
-// total_n: total number of elements to copy
-//
-// Each thread computes its multi-dim coordinate from its linear index,
-// then computes the source offset using strides.
 .visible .entry strided_gather_f32(
     .param .u64 p_src,
     .param .u64 p_dst,
@@ -3125,7 +3020,6 @@ pub const STRIDED_COPY_PTX: &str = r"
     ld.param.u32 %r2, [p_offset];
     ld.param.u32 %r3, [p_total_n];
 
-    // Global thread index
     mov.u32 %r4, %ctaid.x;
     mov.u32 %r5, %ntid.x;
     mov.u32 %r6, %tid.x;
@@ -3134,56 +3028,37 @@ pub const STRIDED_COPY_PTX: &str = r"
     setp.ge.u32 %p1, %r4, %r3;
     @%p1 bra $L__sg_exit;
 
-    // Compute multi-dim coordinate from linear index, then source offset
-    // remaining = idx
-    // src_offset = storage_offset
-    // For each dim d from 0 to ndim-1:
-    //   coord_d = remaining / product(shape[d+1..ndim])
-    //   remaining = remaining % product(shape[d+1..ndim])
-    //   src_offset += coord_d * strides[d]
-    //
-    // We precompute by iterating right-to-left (innermost dim first)
-    // using: coord_d = remaining % shape[d], remaining /= shape[d]
+    mov.u32 %r7, %r4;
+    mov.u32 %r8, %r2;
 
-    mov.u32 %r7, %r4;           // remaining = idx
-    mov.u32 %r8, %r2;           // src_offset = storage_offset (as i32 for now)
-
-    // Loop from dim = ndim-1 down to 0
-    mov.u32 %r9, %r1;           // d = ndim
+    mov.u32 %r9, %r1;
 $L__sg_loop:
     setp.eq.u32 %p1, %r9, 0;
     @%p1 bra $L__sg_done;
-    sub.u32 %r9, %r9, 1;        // d--
+    sub.u32 %r9, %r9, 1;
 
-    // Load shape[d]
     cvt.u64.u32 %rd5, %r9;
-    shl.b64 %rd5, %rd5, 2;      // * sizeof(u32)
+    shl.b64 %rd5, %rd5, 2;
     add.s64 %rd6, %rd4, %rd5;
-    ld.global.u32 %r10, [%rd6]; // shape[d]
+    ld.global.u32 %r10, [%rd6];
 
-    // Load strides[d] (stored as i64 / isize)
     cvt.u64.u32 %rd5, %r9;
-    shl.b64 %rd5, %rd5, 3;      // * sizeof(i64)
+    shl.b64 %rd5, %rd5, 3;
     add.s64 %rd7, %rd3, %rd5;
-    ld.global.s32 %r11, [%rd7]; // strides[d] (lower 32 bits, sufficient for most tensors)
+    ld.global.s32 %r11, [%rd7];
 
-    // coord = remaining % shape[d]
     rem.u32 %r12, %r7, %r10;
-    // remaining = remaining / shape[d]
     div.u32 %r7, %r7, %r10;
-    // src_offset += coord * stride[d]
     mad.lo.s32 %r8, %r12, %r11, %r8;
 
     bra $L__sg_loop;
 
 $L__sg_done:
-    // Load src[src_offset]
     cvt.s64.s32 %rd8, %r8;
-    shl.b64 %rd8, %rd8, 2;      // * sizeof(f32)
+    shl.b64 %rd8, %rd8, 2;
     add.s64 %rd9, %rd1, %rd8;
     ld.global.f32 %f1, [%rd9];
 
-    // Store to dst[idx]
     cvt.u64.u32 %rd10, %r4;
     shl.b64 %rd10, %rd10, 2;
     add.s64 %rd11, %rd2, %rd10;
@@ -3202,12 +3077,6 @@ pub const MASK_PTX: &str = r"
 .target sm_50
 .address_size 64
 
-// mask_expand_causal_f32: Expand [T, S] causal mask to [B, H, T, S] with 0 to -1e9
-// mask_in: [T * S] input mask (device pointer)
-// output:  [B * H * T * S] expanded mask (device pointer)
-// total_n: B * H * T * S
-// tgt_len: T
-// src_len: S
 .visible .entry mask_expand_causal_f32(
     .param .u64 p_mask_in,
     .param .u64 p_output,
@@ -3226,7 +3095,6 @@ pub const MASK_PTX: &str = r"
     ld.param.u32 %r2, [p_tgt_len];
     ld.param.u32 %r3, [p_src_len];
 
-    // Global thread index
     mov.u32 %r4, %ctaid.x;
     mov.u32 %r5, %ntid.x;
     mov.u32 %r6, %tid.x;
@@ -3235,26 +3103,21 @@ pub const MASK_PTX: &str = r"
     setp.ge.u32 %p1, %r4, %r1;
     @%p1 bra $L__mask_causal_exit;
 
-    // idx to j = idx % S, i = (idx / S) % T
-    rem.u32 %r7, %r4, %r3;          // j = idx % src_len
-    div.u32 %r8, %r4, %r3;          // tmp = idx / src_len
-    rem.u32 %r9, %r8, %r2;          // i = tmp % tgt_len
+    rem.u32 %r7, %r4, %r3;
+    div.u32 %r8, %r4, %r3;
+    rem.u32 %r9, %r8, %r2;
 
-    // mask_in index = i * S + j
     mad.lo.s32 %r10, %r9, %r3, %r7;
 
-    // Load mask_in[i * S + j]
     cvt.u64.u32 %rd3, %r10;
     shl.b64 %rd3, %rd3, 2;
     add.s64 %rd3, %rd1, %rd3;
     ld.global.f32 %f1, [%rd3];
 
-    // Convert: 0.0 to -1e9, nonzero to 0.0
-    mov.f32 %f2, 0fCEE6B280;        // -1e9 in IEEE 754
+    mov.f32 %f2, 0fCEE6B280;
     setp.eq.f32 %p2, %f1, 0f00000000;
     selp.f32 %f1, %f2, 0f00000000, %p2;
 
-    // Store to output[idx]
     cvt.u64.u32 %rd4, %r4;
     shl.b64 %rd4, %rd4, 2;
     add.s64 %rd4, %rd2, %rd4;
@@ -3264,13 +3127,6 @@ $L__mask_causal_exit:
     ret;
 }
 
-// mask_expand_padding_f32: Expand [B, S] padding mask to [B, H, T, S] with 0 to -1e9
-// mask_in: [B * S] input mask (device pointer)
-// output:  [B * H * T * S] expanded mask (device pointer)
-// total_n: B * H * T * S
-// num_heads: H
-// tgt_len: T
-// src_len: S
 .visible .entry mask_expand_padding_f32(
     .param .u64 p_mask_in,
     .param .u64 p_output,
@@ -3291,7 +3147,6 @@ $L__mask_causal_exit:
     ld.param.u32 %r3, [p_tgt_len];
     ld.param.u32 %r4, [p_src_len];
 
-    // Global thread index
     mov.u32 %r5, %ctaid.x;
     mov.u32 %r6, %ntid.x;
     mov.u32 %r7, %tid.x;
@@ -3300,29 +3155,23 @@ $L__mask_causal_exit:
     setp.ge.u32 %p1, %r5, %r1;
     @%p1 bra $L__mask_padding_exit;
 
-    // idx to j = idx % S, stride = H * T * S, b = idx / stride
-    rem.u32 %r8, %r5, %r4;          // j = idx % src_len
+    rem.u32 %r8, %r5, %r4;
 
-    // stride = num_heads * tgt_len * src_len
     mul.lo.s32 %r9, %r2, %r3;
-    mul.lo.s32 %r9, %r9, %r4;       // stride = H * T * S
-    div.u32 %r10, %r5, %r9;         // b = idx / stride
+    mul.lo.s32 %r9, %r9, %r4;
+    div.u32 %r10, %r5, %r9;
 
-    // mask_in index = b * S + j
     mad.lo.s32 %r11, %r10, %r4, %r8;
 
-    // Load mask_in[b * S + j]
     cvt.u64.u32 %rd3, %r11;
     shl.b64 %rd3, %rd3, 2;
     add.s64 %rd3, %rd1, %rd3;
     ld.global.f32 %f1, [%rd3];
 
-    // Convert: 0.0 to -1e9, nonzero to 0.0
-    mov.f32 %f2, 0fCEE6B280;        // -1e9 in IEEE 754
+    mov.f32 %f2, 0fCEE6B280;
     setp.eq.f32 %p2, %f1, 0f00000000;
     selp.f32 %f1, %f2, 0f00000000, %p2;
 
-    // Store to output[idx]
     cvt.u64.u32 %rd4, %r5;
     shl.b64 %rd4, %rd4, 2;
     add.s64 %rd4, %rd2, %rd4;
@@ -3333,28 +3182,24 @@ $L__mask_padding_exit:
 }
 ";
 
+/// PTX for the sign-correct elementwise pow kernels (the inline ELEMENTWISE PTX computes |x|^n).
+pub const POW_FIXED_PTX: &str = include_str!("pow_fixed.ptx");
+/// Multi-tensor training kernels (train_fused.cu): mt_sumsq/abssum/ternarize/scale, rms_inv_rows.
+pub const TRAIN_FUSED_PTX: &str = include_str!("train_fused.ptx");
+
+/// PTX for the DIRECT depthwise Conv2d kernels (forward / grad_input / grad_weight).
+pub const DEPTHWISE_PTX: &str = include_str!("depthwise.ptx");
+
+/// PTX for the BATCHED Conv2d kernels (whole-batch im2col/col2im + grad-weight batch reduction).
+/// Compiled from `conv_batched.cu` via NVRTC (the installed gcc/glibc headers break offline nvcc).
+pub const CONV_BATCHED_PTX: &str = include_str!("conv_batched.ptx");
+
 /// PTX assembly for Conv2d CUDA kernels (im2col, bias_add, col2im).
 pub const CONV_PTX: &str = r"
 .version 7.0
 .target sm_50
 .address_size 64
 
-// im2col_f32: Unfold input patches into column matrix on GPU
-// input:  [C_in, H, W] (one batch element, device pointer)
-// col:    [C_in*kH*kW, out_H*out_W] (output column matrix, device pointer)
-// params: u32[10] = {H, W, kH, kW, pH, pW, sH, sW, oH, oW}
-// n:      total elements = C_in * kH * kW * oH * oW
-//
-// Decomposition for thread idx:
-//   w_col  = idx % out_w
-//   h_col  = (idx / out_w) % out_h
-//   c_col  = idx / (out_w * out_h)     (0 .. C_in*kH*kW)
-//   kw_off = c_col % kW
-//   kh_off = (c_col / kW) % kH
-//   c_in   = c_col / (kW * kH)
-//   h_in   = h_col * stride_h + kh_off - pad_h   (signed)
-//   w_in   = w_col * stride_w + kw_off - pad_w   (signed)
-//
 .visible .entry im2col_f32(
     .param .u64 p_input,
     .param .u64 p_col,
@@ -3371,19 +3216,17 @@ pub const CONV_PTX: &str = r"
     ld.param.u64 %rd7, [p_params];
     ld.param.u32 %r20, [p_n];
 
-    // Load conv params from global memory buffer
-    ld.global.u32 %r10, [%rd7 + 0];   // height
-    ld.global.u32 %r11, [%rd7 + 4];   // width
-    ld.global.u32 %r12, [%rd7 + 8];   // kernel_h
-    ld.global.u32 %r13, [%rd7 + 12];  // kernel_w
-    ld.global.u32 %r14, [%rd7 + 16];  // pad_h
-    ld.global.u32 %r15, [%rd7 + 20];  // pad_w
-    ld.global.u32 %r16, [%rd7 + 24];  // stride_h
-    ld.global.u32 %r17, [%rd7 + 28];  // stride_w
-    ld.global.u32 %r18, [%rd7 + 32];  // out_h
-    ld.global.u32 %r19, [%rd7 + 36];  // out_w
+    ld.global.u32 %r10, [%rd7 + 0];
+    ld.global.u32 %r11, [%rd7 + 4];
+    ld.global.u32 %r12, [%rd7 + 8];
+    ld.global.u32 %r13, [%rd7 + 12];
+    ld.global.u32 %r14, [%rd7 + 16];
+    ld.global.u32 %r15, [%rd7 + 20];
+    ld.global.u32 %r16, [%rd7 + 24];
+    ld.global.u32 %r17, [%rd7 + 28];
+    ld.global.u32 %r18, [%rd7 + 32];
+    ld.global.u32 %r19, [%rd7 + 36];
 
-    // Global thread index
     mov.u32 %r1, %ctaid.x;
     mov.u32 %r2, %ntid.x;
     mov.u32 %r3, %tid.x;
@@ -3392,32 +3235,21 @@ pub const CONV_PTX: &str = r"
     setp.ge.u32 %p1, %r1, %r20;
     @%p1 bra $L__im2col_exit;
 
-    // w_col = idx % out_w
     rem.u32 %r4, %r1, %r19;
-    // tmp = idx / out_w
     div.u32 %r5, %r1, %r19;
-    // h_col = tmp % out_h
     rem.u32 %r6, %r5, %r18;
-    // c_col = tmp / out_h
     div.u32 %r7, %r5, %r18;
 
-    // kw_off = c_col % kW
     rem.u32 %r8, %r7, %r13;
-    // tmp2 = c_col / kW
     div.u32 %r9, %r7, %r13;
-    // kh_off = tmp2 % kH
     rem.u32 %r21, %r9, %r12;
-    // c_in = tmp2 / kH
     div.u32 %r22, %r9, %r12;
 
-    // h_in = h_col * stride_h + kh_off - pad_h  (signed)
     mad.lo.s32 %r23, %r6, %r16, %r21;
     sub.s32 %r23, %r23, %r14;
-    // w_in = w_col * stride_w + kw_off - pad_w  (signed)
     mad.lo.s32 %r24, %r4, %r17, %r8;
     sub.s32 %r24, %r24, %r15;
 
-    // Bounds: h_in in [0, height) and w_in in [0, width)
     setp.lt.s32 %p2, %r23, 0;
     @%p2 bra $L__im2col_zero;
     setp.ge.s32 %p2, %r23, %r10;
@@ -3427,7 +3259,6 @@ pub const CONV_PTX: &str = r"
     setp.ge.s32 %p3, %r24, %r11;
     @%p3 bra $L__im2col_zero;
 
-    // In bounds: input[c_in * H * W + h_in * W + w_in]
     mul.lo.s32 %r25, %r10, %r11;
     mul.lo.s32 %r26, %r22, %r25;
     mad.lo.s32 %r26, %r23, %r11, %r26;
@@ -3455,11 +3286,6 @@ $L__im2col_exit:
     ret;
 }
 
-// bias_add_channels_f32: data[i] += bias[i / spatial_size]
-// data:    [C_out * spatial] (in-place, device pointer)
-// bias:    [C_out] (device pointer)
-// spatial: out_h * out_w
-// n:       C_out * spatial (total elements)
 .visible .entry bias_add_channels_f32(
     .param .u64 p_data,
     .param .u64 p_bias,
@@ -3484,22 +3310,18 @@ $L__im2col_exit:
     setp.ge.u32 %p1, %r3, %r2;
     @%p1 bra $L__bias_exit;
 
-    // channel = i / spatial_size
     div.u32 %r6, %r3, %r1;
 
-    // Load bias[channel]
     cvt.u64.u32 %rd3, %r6;
     shl.b64 %rd3, %rd3, 2;
     add.s64 %rd3, %rd2, %rd3;
     ld.global.f32 %f1, [%rd3];
 
-    // Load data[i]
     cvt.u64.u32 %rd4, %r3;
     shl.b64 %rd4, %rd4, 2;
     add.s64 %rd5, %rd1, %rd4;
     ld.global.f32 %f2, [%rd5];
 
-    // data[i] += bias[channel]
     add.f32 %f2, %f2, %f1;
     st.global.f32 [%rd5], %f2;
 
@@ -3507,12 +3329,6 @@ $L__bias_exit:
     ret;
 }
 
-// col2im_f32: Scatter column matrix back to input spatial positions (reverse of im2col).
-// Iterates over each output position in col and atomicAdds to the corresponding input position.
-// col:     [C_in*kH*kW, out_H*out_W] (input column matrix, device pointer)
-// output:  [C_in, H, W] (output image, device pointer - MUST be zero-initialized)
-// params:  u32[10] = {H, W, kH, kW, pH, pW, sH, sW, oH, oW}
-// n:       total col elements = C_in * kH * kW * oH * oW
 .visible .entry col2im_f32(
     .param .u64 p_col,
     .param .u64 p_output,
@@ -3529,19 +3345,17 @@ $L__bias_exit:
     ld.param.u64 %rd7, [p_params];
     ld.param.u32 %r20, [p_n];
 
-    // Load conv params
-    ld.global.u32 %r10, [%rd7 + 0];   // height
-    ld.global.u32 %r11, [%rd7 + 4];   // width
-    ld.global.u32 %r12, [%rd7 + 8];   // kernel_h
-    ld.global.u32 %r13, [%rd7 + 12];  // kernel_w
-    ld.global.u32 %r14, [%rd7 + 16];  // pad_h
-    ld.global.u32 %r15, [%rd7 + 20];  // pad_w
-    ld.global.u32 %r16, [%rd7 + 24];  // stride_h
-    ld.global.u32 %r17, [%rd7 + 28];  // stride_w
-    ld.global.u32 %r18, [%rd7 + 32];  // out_h
-    ld.global.u32 %r19, [%rd7 + 36];  // out_w
+    ld.global.u32 %r10, [%rd7 + 0];
+    ld.global.u32 %r11, [%rd7 + 4];
+    ld.global.u32 %r12, [%rd7 + 8];
+    ld.global.u32 %r13, [%rd7 + 12];
+    ld.global.u32 %r14, [%rd7 + 16];
+    ld.global.u32 %r15, [%rd7 + 20];
+    ld.global.u32 %r16, [%rd7 + 24];
+    ld.global.u32 %r17, [%rd7 + 28];
+    ld.global.u32 %r18, [%rd7 + 32];
+    ld.global.u32 %r19, [%rd7 + 36];
 
-    // Global thread index
     mov.u32 %r1, %ctaid.x;
     mov.u32 %r2, %ntid.x;
     mov.u32 %r3, %tid.x;
@@ -3550,33 +3364,21 @@ $L__bias_exit:
     setp.ge.u32 %p1, %r1, %r20;
     @%p1 bra $L__col2im_exit;
 
-    // Same decomposition as im2col
-    // w_col = idx % out_w
     rem.u32 %r4, %r1, %r19;
-    // tmp = idx / out_w
     div.u32 %r5, %r1, %r19;
-    // h_col = tmp % out_h
     rem.u32 %r6, %r5, %r18;
-    // c_col = tmp / out_h
     div.u32 %r7, %r5, %r18;
 
-    // kw_off = c_col % kW
     rem.u32 %r8, %r7, %r13;
-    // tmp2 = c_col / kW
     div.u32 %r9, %r7, %r13;
-    // kh_off = tmp2 % kH
     rem.u32 %r21, %r9, %r12;
-    // c_in = tmp2 / kH
     div.u32 %r22, %r9, %r12;
 
-    // h_in = h_col * stride_h + kh_off - pad_h
     mad.lo.s32 %r23, %r6, %r16, %r21;
     sub.s32 %r23, %r23, %r14;
-    // w_in = w_col * stride_w + kw_off - pad_w
     mad.lo.s32 %r24, %r4, %r17, %r8;
     sub.s32 %r24, %r24, %r15;
 
-    // Bounds check
     setp.lt.s32 %p2, %r23, 0;
     @%p2 bra $L__col2im_exit;
     setp.ge.s32 %p2, %r23, %r10;
@@ -3586,13 +3388,11 @@ $L__bias_exit:
     setp.ge.s32 %p3, %r24, %r11;
     @%p3 bra $L__col2im_exit;
 
-    // Read col[idx]
     cvt.u64.u32 %rd3, %r1;
     shl.b64 %rd3, %rd3, 2;
     add.s64 %rd3, %rd1, %rd3;
     ld.global.f32 %f1, [%rd3];
 
-    // output[c_in * H * W + h_in * W + w_in] += col[idx]
     mul.lo.s32 %r25, %r10, %r11;
     mul.lo.s32 %r26, %r22, %r25;
     mad.lo.s32 %r26, %r23, %r11, %r26;
@@ -3728,6 +3528,10 @@ pub const Q6K_MATMUL_PTX: &str = include_str!("q6k_matmul.ptx");
 /// and `Tensor::relu2_gate`.
 pub const TRANSFORMER_OPS_PTX: &str = include_str!("transformer_ops.ptx");
 
+/// Per-output-channel LSQ fake-quant kernels (QAT). Folded from the vendored
+/// AxonML core so sub-bit models train on the canonical private framework.
+pub const FAKE_QUANT_PTX: &str = include_str!("fake_quant.ptx");
+
 /// CUDA Kernel registry for managing loaded kernels
 #[cfg(feature = "cuda")]
 pub struct CudaKernels {
@@ -3744,7 +3548,6 @@ impl CudaKernels {
             functions: HashMap::new(),
         };
 
-        // Load element-wise kernels
         kernels.load_module(
             "elementwise",
             ELEMENTWISE_PTX,
@@ -3762,7 +3565,12 @@ impl CudaKernels {
             ],
         )?;
 
-        // Load activation kernels
+        kernels.load_module(
+            "fake_quant",
+            FAKE_QUANT_PTX,
+            &["fake_quant_pc_fwd_f32", "fake_quant_pc_bwd_f32"],
+        )?;
+
         kernels.load_module(
             "activations",
             ACTIVATIONS_PTX,
@@ -3781,7 +3589,6 @@ impl CudaKernels {
             ],
         )?;
 
-        // Load broadcast element-wise kernels
         kernels.load_module(
             "broadcast",
             BROADCAST_PTX,
@@ -3797,7 +3604,6 @@ impl CudaKernels {
             ],
         )?;
 
-        // Load reduction kernels (softmax, etc.)
         kernels.load_module(
             "reduction",
             REDUCTION_PTX,
@@ -3809,10 +3615,9 @@ impl CudaKernels {
             ],
         )?;
 
-        // Load sum_dim reduction kernel
         kernels.load_module("sum_dim", SUM_DIM_PTX, &["sum_dim_f32"])?;
+        kernels.load_module("argdim", ARGDIM_PTX, &["argmax_dim_f32", "argmin_dim_f32"])?;
 
-        // Load LayerNorm kernels (forward + backward)
         kernels.load_module(
             "layernorm",
             LAYERNORM_PTX,
@@ -3823,45 +3628,90 @@ impl CudaKernels {
             ],
         )?;
 
-        // Load CrossEntropy kernels (forward + backward)
         kernels.load_module(
             "cross_entropy",
             CROSS_ENTROPY_PTX,
             &["cross_entropy_fwd_f32", "cross_entropy_bwd_f32"],
         )?;
 
-        // Load conv kernels (im2col + col2im + bias_add)
         kernels.load_module(
             "conv",
             CONV_PTX,
             &["im2col_f32", "col2im_f32", "bias_add_channels_f32"],
         )?;
 
-        // Load attention mask expansion kernels
+        kernels.load_module(
+            "pow_fixed",
+            POW_FIXED_PTX,
+            &["pow_f32_c99", "pow_scalar_f32_c99"],
+        )?;
+
+        kernels.load_module(
+            "train_fused",
+            TRAIN_FUSED_PTX,
+            &[
+                "mt_sumsq_f32",
+                "mt_abssum_f32",
+                "mt_ternarize_f32",
+                "mt_scale_f32",
+                "rms_inv_rows_f32",
+                "rms_norm_bwd_weight_partial_f32",
+            ],
+        )?;
+
+        kernels.load_module(
+            "depthwise",
+            DEPTHWISE_PTX,
+            &[
+                "depthwise_fwd_f32",
+                "depthwise_grad_input_f32",
+                "depthwise_grad_weight_f32",
+            ],
+        )?;
+
+        kernels.load_module(
+            "conv_batched",
+            CONV_BATCHED_PTX,
+            &[
+                "im2col_batched_f32",
+                "col2im_batched_f32",
+                "sum_batch_f32",
+                "bias_add_channels_batched_f32",
+                "im2col_group_batched_f32",
+                "col2im_group_batched_f32",
+                "sum_batch_at_f32",
+                "strided_block_copy_f32",
+                "scatter_add_u32_f32",
+                "adaptive_avgpool2d_bwd_f32",
+                "groupnorm_bwd_stats_f32",
+                "groupnorm_bwd_apply_f32",
+                "convtranspose2d_bwd_input_f32",
+                "convtranspose2d_bwd_weight_f32",
+                "mul_backward_f32",
+                "sum_bias_f32",
+            ],
+        )?;
+
         kernels.load_module(
             "mask",
             MASK_PTX,
             &["mask_expand_causal_f32", "mask_expand_padding_f32"],
         )?;
 
-        // Load strided gather kernel (for GPU-native contiguous())
         kernels.load_module("strided_copy", STRIDED_COPY_PTX, &["strided_gather_f32"])?;
 
-        // Load embedding scatter-add kernel (for GPU-native embedding backward)
         kernels.load_module(
             "embedding",
             EMBEDDING_SCATTER_PTX,
             &["embedding_scatter_add_f32"],
         )?;
 
-        // Load fused Adam optimizer + gradient utility kernels
         kernels.load_module(
             "adam",
             ADAM_PTX,
             &["adam_step_f32", "grad_norm_sq_f32", "grad_scale_f32"],
         )?;
 
-        // Load fused LSTM/GRU/BatchNorm kernels
         kernels.load_module(
             "lstm",
             LSTM_PTX,
@@ -3872,10 +3722,11 @@ impl CudaKernels {
                 "gru_gates_backward_f32",
                 "batchnorm_stats_f32",
                 "batchnorm_norm_f32",
+                "batchnorm_bwd_reduce_f32",
+                "batchnorm_bwd_input_f32",
             ],
         )?;
 
-        // Load pooling kernels (MaxPool2d + AvgPool2d forward/backward)
         kernels.load_module(
             "pooling",
             POOLING_PTX,
@@ -3887,7 +3738,6 @@ impl CudaKernels {
             ],
         )?;
 
-        // Load fused attention kernels (scaled dot-product attention forward + backward)
         kernels.load_module(
             "attention",
             ATTENTION_PTX,
@@ -3901,8 +3751,6 @@ impl CudaKernels {
             ],
         )?;
 
-        // Load Q4_K dequant-in-shader matmul (LLM inference on quantized weights).
-        // GEMV (m=1) for decode + GEMM (m>1) for prefill.
         kernels.load_module(
             "q4k_matmul",
             Q4K_MATMUL_PTX,
@@ -3913,20 +3761,11 @@ impl CudaKernels {
                 "q4k_gemv_fused_qkv_f32",
                 "q4k_gemv_fused_qkv_bias_f32",
                 "q4k_gemv_fused_gate_up_f32",
-                // Fused residual-add: x_out = x_in + matmul(a, w). Used
-                // by forward_one_gpu_resident for O-proj (post-attention
-                // residual) and down-proj (post-FFN residual).
                 "q4k_gemv_residual_f32",
-                // Fused gate/up + SwiGLU: writes ffn = silu(gate·a)*up·a
-                // directly, skipping the gate_c/up_c intermediates and
-                // the separate swiglu kernel launch.
                 "q4k_gemv_fused_gate_up_swiglu_f32",
             ],
         )?;
 
-        // Q5_K dequant-in-shader matmul — Phi-3's attn_qkv, Mistral
-        // Q5_K_M bodies, and any model that mixes Q5_K into otherwise
-        // Q4_K_M weights.
         kernels.load_module(
             "q5k_matmul",
             Q5K_MATMUL_PTX,
@@ -3938,7 +3777,6 @@ impl CudaKernels {
             ],
         )?;
 
-        // Q5_0 / Q5_1 dequant-in-shader matmul — legacy Falcon bodies.
         kernels.load_module(
             "q5_01_matmul",
             Q5_01_MATMUL_PTX,
@@ -3951,21 +3789,18 @@ impl CudaKernels {
             ],
         )?;
 
-        // Q8_0 dequant-in-shader matmul — Falcon-7B LM head.
         kernels.load_module(
             "q8_0_matmul",
             Q8_0_MATMUL_PTX,
             &["q8_0_gemv_f32", "q8_0_gemm_f32"],
         )?;
 
-        // BitNet I2_S ternary matmul — moves BitNet bodies off the CPU-only path.
         kernels.load_module(
             "i2s_matmul",
             I2S_MATMUL_PTX,
             &["i2s_gemv_f32", "i2s_gemm_f32"],
         )?;
 
-        // Raw-i8 ternary linear — low-bit ternary training fast path.
         kernels.load_module(
             "ternary_matmul",
             TERNARY_MATMUL_PTX,
@@ -3977,68 +3812,49 @@ impl CudaKernels {
             ],
         )?;
 
-        // GPU absmean quantizer for ternary linear shadow weights —
-        // eliminates the 4 GB GPU→CPU `to_vec` per step at 1B scale.
         kernels.load_module(
             "ternary_quantize",
             TERNARY_QUANTIZE_PTX,
             &["f32_abssum_reduce", "f32_quantize_ternary"],
         )?;
 
-        // PrismML Q1_0 (1-bit, 1.125 bpw) matmul — Bonsai-8B family.
         kernels.load_module(
             "q1_0_matmul",
             Q1_0_MATMUL_PTX,
             &["q1_0_gemv_f32", "q1_0_gemm_f32"],
         )?;
 
-        // Q1_0 DP4A path — online int8 act quant + dp4a-based matmul.
         kernels.load_module(
             "q1_0_matmul_dp4a",
             Q1_0_MATMUL_DP4A_PTX,
             &["q1_0_quantize_acts_q8", "q1_0_gemv_dp4a_f32"],
         )?;
 
-        // Q1_0 fused single-launch DP4A — smem-resident int8 acts.
         kernels.load_module(
             "q1_0_matmul_fused",
             Q1_0_MATMUL_FUSED_PTX,
             &["q1_0_gemv_fused_dp4a_f32"],
         )?;
 
-        // Q6_K dequant-in-shader matmul — LM head + higher-precision weights.
         kernels.load_module(
             "q6k_matmul",
             Q6K_MATMUL_PTX,
             &["q6k_gemv_f32", "q6k_gemm_f32", "q6k_gemm_matched_f32"],
         )?;
 
-        // Transformer per-layer ops — RMSNorm / RoPE / SwiGLU / ReLU² gate.
-        // Lets axonml-serve keep activations on GPU through the whole layer.
         kernels.load_module(
             "transformer_ops",
             TRANSFORMER_OPS_PTX,
             &[
                 "rms_norm_f32",
-                // Single-token LayerNorm (mean-subtracting, gamma+beta) —
-                // Falcon arch decode. Distinct from `layer_norm_f32` in the
-                // `layernorm` module which is the batched multi-row variant
-                // used by training.
                 "layer_norm_tokenwise_f32",
-                // tanh-approximation GELU — Falcon MLP activation.
                 "gelu_tanh_f32",
-                // Parallel residual `x = x + attn + ffn` — Falcon's
-                // parallel-attn+FFN block fuses two adds into one launch.
                 "parallel_residual_add_f32",
-                // `dst += src * scalar` — MoE expert-accumulate hot path.
                 "scaled_add_inplace_f32",
                 "rms_norm_heads_f32",
                 "rope_split_halves_f32",
                 "swiglu_f32",
                 "relu2_gate_f32",
-                // Batched (prefill, m>1) counterparts — used by
-                // forward_batch_gpu_resident. Same math as their m=1
-                // siblings; grid dims vary over tokens.
                 "rms_norm_batched_f32",
                 "rms_norm_bwd_batched_f32",
                 "rms_norm_heads_batched_f32",
@@ -4092,6 +3908,30 @@ impl CudaKernels {
     pub fn has(&self, name: &str) -> bool {
         self.functions.contains_key(name)
     }
+
+    /// Runtime-JIT a CUDA C source string, load `entry`, and cache it under `key`. Returns the
+    /// cached function on subsequent calls with the same key (no recompile). Used by the elementwise
+    /// chain fuser: each unique chain signature compiles once, then dispatches for free.
+    pub fn get_or_compile(
+        &mut self,
+        key: &str,
+        entry: &str,
+        src: &str,
+    ) -> Result<&CudaFunction, CudaError> {
+        if !self.functions.contains_key(key) {
+            let ptx = cudarc::nvrtc::compile_ptx(src)
+                .map_err(|e| CudaError::ModuleLoadFailed(format!("nvrtc: {e}")))?;
+            let module = self
+                .ctx
+                .load_module(ptx)
+                .map_err(|e| CudaError::ModuleLoadFailed(e.to_string()))?;
+            let func = module
+                .load_function(entry)
+                .map_err(|e| CudaError::KernelNotFound(format!("{entry}: {e}")))?;
+            self.functions.insert(key.to_string(), func);
+        }
+        Ok(self.functions.get(key).unwrap())
+    }
 }
 
 /// Compute optimal launch configuration for a given number of elements
@@ -4114,12 +3954,12 @@ mod tests {
     fn test_launch_config() {
         let cfg = launch_config(1000);
         assert_eq!(cfg.block_dim, (256, 1, 1));
-        assert_eq!(cfg.grid_dim, (4, 1, 1)); // ceil(1000/256) = 4
+        assert_eq!(cfg.grid_dim, (4, 1, 1));
     }
 
     #[test]
     fn test_launch_config_large() {
         let cfg = launch_config(1_000_000);
-        assert_eq!(cfg.grid_dim, (3907, 1, 1)); // ceil(1000000/256) = 3907
+        assert_eq!(cfg.grid_dim, (3907, 1, 1));
     }
 }

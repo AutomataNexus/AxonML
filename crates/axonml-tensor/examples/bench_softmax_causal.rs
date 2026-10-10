@@ -16,7 +16,6 @@ use axonml_core::backends::cuda::cuda_sync;
 use axonml_tensor::Tensor;
 
 fn main() {
-    // Qwen3-0.6B attention shape: [bs, heads, seq, seq]
     let bs = 4;
     let heads = 16;
     let seq = 512;
@@ -30,7 +29,6 @@ fn main() {
     // ---------- Correctness: forward ----------
     let fused = scores.softmax_causal_scaled(seq, seq, offset, scale);
 
-    // Reference path: scale → + mask → softmax
     let scaled = scores.mul_scalar(scale);
     let mask = build_causal_mask(seq, seq, offset, device);
     let masked = scaled.add(&mask).unwrap();
@@ -43,8 +41,6 @@ fn main() {
     // ---------- Correctness: backward ----------
     let fused_bwd = fused.softmax_causal_scaled_bwd(&grad_out, seq, scale);
 
-    // Reference backward: standard softmax bwd on `ref_out` gives d(scaled),
-    // then d(scores) = d(scaled) * scale.
     let ref_bwd = ref_softmax_bwd(&ref_out, &grad_out, seq).mul_scalar(scale);
     let max_bwd = max_abs_diff(&fused_bwd.to_vec(), &ref_bwd.to_vec());
     println!("backward max_abs_diff (fused vs ref) = {max_bwd:.4e}");
@@ -112,8 +108,6 @@ fn build_causal_mask(tq: usize, tk: usize, offset: usize, dev: Device) -> Tensor
         .unwrap()
 }
 
-// Standard softmax backward wrt softmax input, given saved softmax output p:
-//   grad_in[r, j] = p[r, j] * (grad_out[r, j] - Σ_k p[r, k] * grad_out[r, k])
 fn ref_softmax_bwd(p: &Tensor<f32>, grad_out: &Tensor<f32>, tk: usize) -> Tensor<f32> {
     let p_cpu = p.to_device(Device::Cpu).unwrap().to_vec();
     let g_cpu = grad_out.to_device(Device::Cpu).unwrap().to_vec();

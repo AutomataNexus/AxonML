@@ -21,7 +21,6 @@ fn main() {
     let device = Device::Cuda(0);
 
     // ---------- 3D × 3D batched matmul (the actual MatMulBackward path) ----------
-    //   [bs, seq, hidden] @ [bs, hidden, inter] → [bs, seq, inter]
     let lhs_3d = mkrand(&[bs, seq, hidden], 0.11, device);
     let rhs_3d = mkrand(&[bs, hidden, inter], 0.07, device);
     let lhs_cpu = lhs_3d.to_device(Device::Cpu).unwrap();
@@ -46,7 +45,6 @@ fn main() {
 
     // ---------- 3D × 3D batched matmul perf ----------
     let n_iter = 30;
-    // warm
     for _ in 0..3 {
         let _ = lhs_3d.matmul(&rhs_3d).unwrap();
     }
@@ -70,7 +68,6 @@ fn main() {
     let s = 512;
     let q_4d = mkrand(&[bs, heads, s, head_dim], 0.13, device);
     let k_4d = mkrand(&[bs, heads, s, head_dim], 0.09, device);
-    // Q @ K^T: [bs,heads,seq,hd] @ [bs,heads,hd,seq] (transpose last2)
     for _ in 0..3 {
         let kt = k_4d.transpose(2, 3).unwrap();
         let _ = q_4d.matmul(&kt).unwrap();
@@ -92,7 +89,6 @@ fn main() {
     );
 
     // ---------- 4D×4D attention backward shapes ----------
-    // grad_lhs = go[4,16,512,512] @ rhs_t[4,16,512,128] → [4,16,512,128]
     let go_attn = mkrand(&[bs, heads, s, s], 0.01, device);
     let rhs_attn = mkrand(&[bs, heads, s, head_dim], 0.12, device);
     for _ in 0..3 {
@@ -110,12 +106,9 @@ fn main() {
     );
 
     // ---------- 4D × non-contiguous 4D — the REAL attention backward shape ----------
-    // saved_lhs comes from softmax forward (contig). lhs_t = saved_lhs.transpose(2,3) is a VIEW.
-    // Then we do lt.matmul(&go) — non-contig 4D × contig 4D.
     let saved_lhs = mkrand(&[bs, heads, s, s], 0.1, device);
     let go2 = mkrand(&[bs, heads, s, head_dim], 0.01, device);
 
-    // Force everything to stream first
     let _ = saved_lhs.to_vec();
     let _ = go2.to_vec();
 
@@ -124,7 +117,6 @@ fn main() {
         let _ = lt.matmul(&go2).unwrap();
     }
 
-    // Single-call timing with explicit sync
     use axonml_core::backends::cuda::cuda_sync;
     cuda_sync();
     let t_single = Instant::now();

@@ -240,7 +240,6 @@ fn main() {
             "RNN",
             params,
             &|| {
-                // forward returns [batch, seq, hidden], take last step
                 let out = rnn.forward(&input);
                 let last = out.narrow(1, 9, 1).reshape(&[2, 16]);
                 fc.forward(&last)
@@ -307,7 +306,6 @@ fn main() {
             params,
             &|| {
                 let enc = encoder.forward(&input);
-                // Mean pool over sequence
                 let pooled = enc.mean_dim(1, false);
                 fc.forward(&pooled)
             },
@@ -401,8 +399,8 @@ fn main() {
             "Embedding",
             params,
             &|| {
-                let e = emb.forward(&input); // [2, 4, 16]
-                let pooled = e.mean_dim(1, false); // [2, 16] — mean over token dim
+                let e = emb.forward(&input);
+                let pooled = e.mean_dim(1, false);
                 fc.forward(&pooled)
             },
             &target,

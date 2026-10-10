@@ -44,6 +44,41 @@ pub struct FocalLoss {
 }
 
 impl FocalLoss {
+    /// Focal loss with the caller's normaliser (number of positive anchors).
+    pub fn compute_with_norm(
+        &self,
+        pred_logits: &Variable,
+        targets: &Variable,
+        norm: f32,
+    ) -> Variable {
+        let p = pred_logits.sigmoid();
+        let one = Variable::new(
+            Tensor::from_vec(vec![1.0; pred_logits.numel()], &pred_logits.shape()).unwrap(),
+            false,
+        );
+        let p_t = p
+            .mul_var(targets)
+            .add_var(&one.sub_var(&p).mul_var(&one.sub_var(targets)));
+        let alpha_t_data: Vec<f32> = targets
+            .data()
+            .to_vec()
+            .iter()
+            .map(|&t| self.alpha * t + (1.0 - self.alpha) * (1.0 - t))
+            .collect();
+        let alpha_t = Variable::new(
+            Tensor::from_vec(alpha_t_data, &targets.shape()).unwrap(),
+            false,
+        );
+        let focal_weight = one.sub_var(&p_t).pow(self.gamma);
+        let eps = Variable::new(
+            Tensor::from_vec(vec![1e-7; pred_logits.numel()], &pred_logits.shape()).unwrap(),
+            false,
+        );
+        let log_pt = p_t.add_var(&eps).log();
+        let loss = alpha_t.mul_var(&focal_weight).mul_var(&log_pt).neg_var();
+        loss.sum().div_scalar(norm.max(1.0))
+    }
+
     /// Create with default alpha=0.25, gamma=2.0.
     pub fn new() -> Self {
         Self {

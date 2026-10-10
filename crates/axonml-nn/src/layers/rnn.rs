@@ -87,28 +87,24 @@ impl RNNCell {
             "RNNCell: expected input size {}, got {}",
             self.input_size, input_features
         );
-        // x @ W_ih^T + b_ih
         let weight_ih = self.weight_ih.variable();
         let weight_ih_t = weight_ih.transpose(0, 1);
         let ih = input.matmul(&weight_ih_t);
         let bias_ih = self.bias_ih.variable();
         let ih = ih.add_var(&bias_ih);
 
-        // h @ W_hh^T + b_hh
         let weight_hh = self.weight_hh.variable();
         let weight_hh_t = weight_hh.transpose(0, 1);
         let hh = hidden.matmul(&weight_hh_t);
         let bias_hh = self.bias_hh.variable();
         let hh = hh.add_var(&bias_hh);
 
-        // tanh(ih + hh)
         ih.add_var(&hh).tanh()
     }
 }
 
 impl Module for RNNCell {
     fn forward(&self, input: &Variable) -> Variable {
-        // Initialize hidden state to zeros
         let batch_size = input.shape()[0];
         let hidden = Variable::new(
             zeros(&[batch_size, self.hidden_size]),
@@ -137,6 +133,10 @@ impl Module for RNNCell {
 
     fn name(&self) -> &'static str {
         "RNNCell"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Rnn")]
     }
 }
 
@@ -175,10 +175,8 @@ impl RNN {
     ) -> Self {
         let mut cells = Vec::with_capacity(num_layers);
 
-        // First layer takes input_size
         cells.push(RNNCell::new(input_size, hidden_size));
 
-        // Subsequent layers take hidden_size
         for _ in 1..num_layers {
             cells.push(RNNCell::new(hidden_size, hidden_size));
         }
@@ -202,7 +200,6 @@ impl Module for RNN {
             (shape[1], shape[0], shape[2])
         };
 
-        // Initialize hidden states
         let mut hiddens: Vec<Variable> = (0..self.num_layers)
             .map(|_| {
                 Variable::new(
@@ -212,26 +209,22 @@ impl Module for RNN {
             })
             .collect();
 
-        // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
         let cell0 = &self.cells[0];
         let input_2d = input.reshape(&[batch_size * seq_len, input_features]);
         let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
         let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
         let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, self.hidden_size]);
 
-        // Hoist weight transposes out of the per-timestep loop
         let w_hh_t_0 = cell0.weight_hh.variable().transpose(0, 1);
         let bias_hh_0 = cell0.bias_hh.variable();
 
         let mut outputs = Vec::with_capacity(seq_len);
 
         for t in 0..seq_len {
-            // Layer 0: use pre-computed ih projection + hoisted weight transpose
             let ih_t = ih_all_3d.select(1, t);
             let hh = hiddens[0].matmul(&w_hh_t_0).add_var(&bias_hh_0);
             hiddens[0] = ih_t.add_var(&hh).tanh();
 
-            // Subsequent layers
             for l in 1..self.num_layers {
                 let layer_input = hiddens[l - 1].clone();
                 hiddens[l] = self.cells[l].forward_step(&layer_input, &hiddens[l]);
@@ -240,7 +233,6 @@ impl Module for RNN {
             outputs.push(hiddens[self.num_layers - 1].clone());
         }
 
-        // Stack outputs using graph-tracked cat (unsqueeze + cat along time dim)
         let time_dim = usize::from(self.batch_first);
         let unsqueezed: Vec<Variable> = outputs.iter().map(|o| o.unsqueeze(time_dim)).collect();
         let refs: Vec<&Variable> = unsqueezed.iter().collect();
@@ -253,6 +245,14 @@ impl Module for RNN {
 
     fn name(&self) -> &'static str {
         "RNN"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![
+            crate::NodeSpec::new("Rnn")
+                .attr("hidden_size", crate::AttrVal::Int(self.hidden_size as i64))
+                .attr("num_layers", crate::AttrVal::Int(self.num_layers as i64)),
+        ]
     }
 }
 
@@ -279,7 +279,6 @@ pub struct LSTMCell {
 impl LSTMCell {
     /// Creates a new LSTMCell.
     pub fn new(input_size: usize, hidden_size: usize) -> Self {
-        // LSTM has 4 gates, so weight size is 4*hidden_size
         Self {
             weight_ih: Parameter::named(
                 "weight_ih",
@@ -323,7 +322,6 @@ impl LSTMCell {
 
         let (h, c) = hx;
 
-        // Compute all gates at once (x @ W^T + b)
         let weight_ih = self.weight_ih.variable();
         let weight_ih_t = weight_ih.transpose(0, 1);
         let ih = input.matmul(&weight_ih_t);
@@ -339,16 +337,13 @@ impl LSTMCell {
         let gates = ih.add_var(&hh);
         let hs = self.hidden_size;
 
-        // Split into 4 gates using narrow (preserves gradient flow)
         let i = gates.narrow(1, 0, hs).sigmoid();
         let f = gates.narrow(1, hs, hs).sigmoid();
         let g = gates.narrow(1, 2 * hs, hs).tanh();
         let o = gates.narrow(1, 3 * hs, hs).sigmoid();
 
-        // c' = f * c + i * g
         let c_new = f.mul_var(c).add_var(&i.mul_var(&g));
 
-        // h' = o * tanh(c')
         let h_new = o.mul_var(&c_new.tanh());
 
         (h_new, c_new)
@@ -390,6 +385,10 @@ impl Module for LSTMCell {
 
     fn name(&self) -> &'static str {
         "LSTMCell"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Lstm")]
     }
 }
 
@@ -487,43 +486,31 @@ impl Module for LSTM {
             })
             .collect();
 
-        // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
-        // input: [batch, seq, features] -> reshaped to [batch*seq, features]
-        // ih_all: [batch*seq, 4*hidden] = input_2d @ W_ih^T + bias_ih
-        // Note: matmul auto-dispatches to cuBLAS GEMM when tensors are on GPU
         let cell0 = &self.cells[0];
         let input_2d = input.reshape(&[batch_size * seq_len, input_features]);
         let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
         let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
-        // ih_all_3d: [batch, seq, 4*hidden]
         let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, 4 * self.hidden_size]);
 
-        // Hoist weight transpose + bias out of the per-timestep loop
         let w_hh_t_0 = cell0.weight_hh.variable().transpose(0, 1);
         let bias_hh_0 = cell0.bias_hh.variable();
 
         let mut outputs = Vec::with_capacity(seq_len);
 
-        // Check if we're on GPU for fused gate kernel path
         #[cfg(feature = "cuda")]
         let on_gpu = input.data().device().is_gpu();
         #[cfg(not(feature = "cuda"))]
         let on_gpu = false;
 
         for t in 0..seq_len {
-            // Layer 0: use pre-computed ih projection + hoisted weight transpose
             let ih_t = ih_all_3d.select(1, t);
             let (h, c) = &states[0];
 
-            // h @ W_hh^T + bias_hh (cuBLAS on GPU, matrixmultiply on CPU)
             let hh = h.matmul(&w_hh_t_0).add_var(&bias_hh_0);
 
-            // Combined gates = ih + hh
             let gates = ih_t.add_var(&hh);
 
             if on_gpu {
-                // GPU path: fused LSTM gate kernel (1 launch vs ~14 separate ops)
-                // gates [batch, 4*hidden], c [batch, hidden] → h_new, c_new [batch, hidden]
                 #[cfg(feature = "cuda")]
                 {
                     let hs = self.hidden_size;
@@ -531,12 +518,10 @@ impl Module for LSTM {
                     let c_data = c.data();
 
                     if let Some((h_tensor, c_tensor)) = gates_data.lstm_gates_fused(&c_data, hs) {
-                        // Save forward state for backward
                         let saved_gates = gates_data.clone();
                         let saved_c_prev = c_data.clone();
                         let saved_c_new = c_tensor.clone();
 
-                        // Create proper backward that calls LSTM backward kernel
                         let backward_fn = axonml_autograd::LstmGatesBackward::new(
                             gates.grad_fn().cloned(),
                             c.grad_fn().cloned(),
@@ -559,7 +544,6 @@ impl Module for LSTM {
                     }
                 }
             } else {
-                // CPU path: individual ops (each autograd-tracked)
                 let hs = self.hidden_size;
                 let i_gate = gates.narrow(1, 0, hs).sigmoid();
                 let f_gate = gates.narrow(1, hs, hs).sigmoid();
@@ -570,7 +554,6 @@ impl Module for LSTM {
                 states[0] = (h_new, c_new);
             }
 
-            // Subsequent layers use the regular cell forward_step
             for l in 1..self.num_layers {
                 let layer_input = states[l - 1].0.clone();
                 states[l] = self.cells[l].forward_step(&layer_input, &states[l]);
@@ -579,7 +562,6 @@ impl Module for LSTM {
             outputs.push(states[self.num_layers - 1].0.clone());
         }
 
-        // Stack outputs along the time dimension
         let time_dim = usize::from(self.batch_first);
         let unsqueezed: Vec<Variable> = outputs.iter().map(|o| o.unsqueeze(time_dim)).collect();
         let refs: Vec<&Variable> = unsqueezed.iter().collect();
@@ -593,7 +575,6 @@ impl Module for LSTM {
     fn named_parameters(&self) -> HashMap<String, Parameter> {
         let mut params = HashMap::new();
         if self.cells.len() == 1 {
-            // Single layer: expose directly without cell index prefix
             for (n, p) in self.cells[0].named_parameters() {
                 params.insert(n, p);
             }
@@ -609,6 +590,14 @@ impl Module for LSTM {
 
     fn name(&self) -> &'static str {
         "LSTM"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![
+            crate::NodeSpec::new("Lstm")
+                .attr("hidden_size", crate::AttrVal::Int(self.hidden_size as i64))
+                .attr("num_layers", crate::AttrVal::Int(self.num_layers as i64)),
+        ]
     }
 }
 
@@ -684,24 +673,17 @@ impl GRUCell {
         let _batch_size = input.shape()[0];
         let hidden_size = self.hidden_size;
 
-        // Get weight matrices
         let weight_ih = self.weight_ih.variable();
         let weight_hh = self.weight_hh.variable();
         let bias_ih = self.bias_ih.variable();
         let bias_hh = self.bias_hh.variable();
 
-        // Compute input transformation: x @ W_ih^T + b_ih
-        // Shape: [batch, 3*hidden_size]
         let weight_ih_t = weight_ih.transpose(0, 1);
         let ih = input.matmul(&weight_ih_t).add_var(&bias_ih);
 
-        // Compute hidden transformation: h @ W_hh^T + b_hh
-        // Shape: [batch, 3*hidden_size]
         let weight_hh_t = weight_hh.transpose(0, 1);
         let hh = hidden.matmul(&weight_hh_t).add_var(&bias_hh);
 
-        // Use narrow to split into gates (preserves gradient flow)
-        // Each gate slice: [batch, hidden_size]
         let ih_r = ih.narrow(1, 0, hidden_size);
         let ih_z = ih.narrow(1, hidden_size, hidden_size);
         let ih_n = ih.narrow(1, 2 * hidden_size, hidden_size);
@@ -710,18 +692,12 @@ impl GRUCell {
         let hh_z = hh.narrow(1, hidden_size, hidden_size);
         let hh_n = hh.narrow(1, 2 * hidden_size, hidden_size);
 
-        // Compute gates using Variable operations for gradient flow
-        // r = sigmoid(ih_r + hh_r)
         let r = ih_r.add_var(&hh_r).sigmoid();
 
-        // z = sigmoid(ih_z + hh_z)
         let z = ih_z.add_var(&hh_z).sigmoid();
 
-        // n = tanh(ih_n + r * hh_n)
         let n = ih_n.add_var(&r.mul_var(&hh_n)).tanh();
 
-        // h_new = (1 - z) * n + z * h_prev
-        // Rewritten as: n + z * (h_prev - n)  to avoid allocating a ones tensor
         let h_minus_n = hidden.sub_var(&n);
         n.add_var(&z.mul_var(&h_minus_n))
     }
@@ -731,7 +707,6 @@ impl Module for GRUCell {
     fn forward(&self, input: &Variable) -> Variable {
         let batch_size = input.shape()[0];
 
-        // Initialize hidden state to zeros
         let hidden = Variable::new(
             zeros(&[batch_size, self.hidden_size]),
             input.requires_grad(),
@@ -760,6 +735,10 @@ impl Module for GRUCell {
 
     fn name(&self) -> &'static str {
         "GRUCell"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Gru")]
     }
 }
 
@@ -811,7 +790,6 @@ impl Module for GRU {
             (shape[1], shape[0], shape[2])
         };
 
-        // Check if we're on GPU for fused gate kernel path
         #[cfg(feature = "cuda")]
         let on_gpu = input.data().device().is_gpu();
         #[cfg(not(feature = "cuda"))]
@@ -819,8 +797,6 @@ impl Module for GRU {
 
         let input_device = input.data().device();
 
-        // Initialize hidden states for all layers as Variables (with gradients)
-        // Move to the same device as input so GPU fused kernels receive GPU tensors.
         let mut hidden_states: Vec<Variable> = (0..self.num_layers)
             .map(|_| {
                 let h_cpu = zeros(&[batch_size, self.hidden_size]);
@@ -835,22 +811,18 @@ impl Module for GRU {
             })
             .collect();
 
-        // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
-        // One big matmul instead of seq_len small ones
         let cell0 = &self.cells[0];
         let input_2d = input.reshape(&[batch_size * seq_len, input_features]);
         let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
         let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
         let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, 3 * self.hidden_size]);
 
-        // Hoist weight transpose + bias out of the per-timestep loop
         let w_hh_t_0 = cell0.weight_hh.variable().transpose(0, 1);
         let bias_hh_0 = cell0.bias_hh.variable();
 
         let mut output_vars: Vec<Variable> = Vec::with_capacity(seq_len);
 
         for t in 0..seq_len {
-            // Layer 0: use pre-computed ih projection + hoisted weight transpose
             let ih_t = ih_all_3d.select(1, t);
             let hidden = &hidden_states[0];
             let hs = self.hidden_size;
@@ -858,8 +830,6 @@ impl Module for GRU {
             let hh = hidden.matmul(&w_hh_t_0).add_var(&bias_hh_0);
 
             if on_gpu {
-                // GPU path: fused GRU gate kernel (1 launch vs ~12 separate ops)
-                // ih_t [batch, 3*hidden], hh [batch, 3*hidden], hidden [batch, hidden] → h_new [batch, hidden]
                 #[cfg(feature = "cuda")]
                 {
                     let ih_data = ih_t.data();
@@ -867,12 +837,10 @@ impl Module for GRU {
                     let h_data = hidden.data();
 
                     if let Some(h_tensor) = ih_data.gru_gates_fused(&hh_data, &h_data, hs) {
-                        // Save forward state for backward
                         let saved_ih = ih_data.clone();
                         let saved_hh = hh_data.clone();
                         let saved_h_prev = h_data.clone();
 
-                        // Create proper backward that calls GRU backward kernel
                         let backward_fn = axonml_autograd::GruGatesBackward::new(
                             ih_t.grad_fn().cloned(),
                             hh.grad_fn().cloned(),
@@ -884,11 +852,6 @@ impl Module for GRU {
                         );
                         let grad_fn = axonml_autograd::GradFn::new(backward_fn);
 
-                        // Use requires_grad=true if ANY input to the fused op
-                        // requires grad — the GRU parameters (w_ih, w_hh, bias)
-                        // always require grad during training, so ih_t and hh
-                        // will have requires_grad=true even when the raw input
-                        // Variable does not.
                         let fused_requires_grad =
                             ih_t.requires_grad() || hh.requires_grad() || hidden.requires_grad();
                         let h_new =
@@ -897,7 +860,6 @@ impl Module for GRU {
                     }
                 }
             } else {
-                // CPU path: individual ops (each autograd-tracked)
                 let ih_r = ih_t.narrow(1, 0, hs);
                 let ih_z = ih_t.narrow(1, hs, hs);
                 let ih_n = ih_t.narrow(1, 2 * hs, hs);
@@ -913,7 +875,6 @@ impl Module for GRU {
                 hidden_states[0] = h_new;
             }
 
-            // Subsequent layers use the regular cell forward_step
             let mut layer_output = hidden_states[0].clone();
             for l in 1..self.num_layers {
                 let new_hidden = self.cells[l].forward_step(&layer_output, &hidden_states[l]);
@@ -924,7 +885,6 @@ impl Module for GRU {
             output_vars.push(layer_output);
         }
 
-        // Stack outputs along the time dimension
         self.stack_outputs(&output_vars, batch_size, seq_len)
     }
 
@@ -951,6 +911,14 @@ impl Module for GRU {
     fn name(&self) -> &'static str {
         "GRU"
     }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![
+            crate::NodeSpec::new("Gru")
+                .attr("hidden_size", crate::AttrVal::Int(self.hidden_size as i64))
+                .attr("num_layers", crate::AttrVal::Int(self.num_layers as i64)),
+        ]
+    }
 }
 
 impl GRU {
@@ -973,14 +941,12 @@ impl GRU {
             })
             .collect();
 
-        // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
         let cell0 = &self.cells[0];
         let input_2d = input.reshape(&[batch_size * seq_len, input_features]);
         let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
         let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
         let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, 3 * self.hidden_size]);
 
-        // Hoist weight transpose + bias out of per-timestep loop
         let w_hh_t_0 = cell0.weight_hh.variable().transpose(0, 1);
         let bias_hh_0 = cell0.bias_hh.variable();
 
@@ -988,7 +954,6 @@ impl GRU {
         let hs = self.hidden_size;
 
         for t in 0..seq_len {
-            // Layer 0: use pre-computed ih projection + hoisted weight transpose
             let ih_t = ih_all_3d.select(1, t);
             let hidden = &hidden_states[0];
             let hh = hidden.matmul(&w_hh_t_0).add_var(&bias_hh_0);
@@ -1007,7 +972,6 @@ impl GRU {
             let h_new = n.add_var(&z.mul_var(&h_minus_n));
             hidden_states[0] = h_new.clone();
 
-            // Subsequent layers
             let mut layer_output = h_new;
             for l in 1..self.num_layers {
                 let new_hidden = self.cells[l].forward_step(&layer_output, &hidden_states[l]);
@@ -1046,20 +1010,17 @@ impl GRU {
             })
             .collect();
 
-        // Pre-compute input-to-hidden projection for layer 0 across ALL timesteps
         let cell0 = &self.cells[0];
         let input_2d = input.reshape(&[batch_size * seq_len, input_features]);
         let w_ih_t = cell0.weight_ih.variable().transpose(0, 1);
         let ih_all = input_2d.matmul(&w_ih_t).add_var(&cell0.bias_ih.variable());
         let ih_all_3d = ih_all.reshape(&[batch_size, seq_len, 3 * self.hidden_size]);
 
-        // Hoist weight transpose + bias out of per-timestep loop
         let w_hh_t_0 = cell0.weight_hh.variable().transpose(0, 1);
         let bias_hh_0 = cell0.bias_hh.variable();
         let hs = self.hidden_size;
 
         for t in 0..seq_len {
-            // Layer 0: use pre-computed ih projection + hoisted weight transpose
             let ih_t = ih_all_3d.select(1, t);
             let hidden = &hidden_states[0];
             let hh = hidden.matmul(&w_hh_t_0).add_var(&bias_hh_0);
@@ -1078,7 +1039,6 @@ impl GRU {
             let h_new = n.add_var(&z.mul_var(&h_minus_n));
             hidden_states[0] = h_new.clone();
 
-            // Subsequent layers
             let mut layer_input = h_new;
 
             for (layer_idx, cell) in self.cells.iter().enumerate().skip(1) {
@@ -1088,7 +1048,6 @@ impl GRU {
             }
         }
 
-        // Return last hidden state from last layer
         hidden_states
             .pop()
             .unwrap_or_else(|| Variable::new(zeros(&[batch_size, self.hidden_size]), false))
@@ -1102,7 +1061,6 @@ impl GRU {
             return Variable::new(zeros(&[batch_size, 0, self.hidden_size]), false);
         }
 
-        // Unsqueeze each (batch, hidden) → (batch, 1, hidden), then cat along dim=1
         let unsqueezed: Vec<Variable> = outputs.iter().map(|o| o.unsqueeze(1)).collect();
         let refs: Vec<&Variable> = unsqueezed.iter().collect();
         Variable::cat(&refs, 1)
@@ -1170,7 +1128,6 @@ mod tests {
         );
         loss.backward();
 
-        // Check input gradient
         println!(
             "Input grad: {:?}",
             input
@@ -1238,7 +1195,7 @@ mod tests {
 
     #[test]
     fn test_lstm_multi_layer() {
-        let lstm = LSTM::new(8, 16, 3); // 3 layers
+        let lstm = LSTM::new(8, 16, 3);
         assert_eq!(lstm.num_layers(), 3);
         assert_eq!(lstm.hidden_size(), 16);
 
@@ -1257,14 +1214,11 @@ mod tests {
             Tensor::from_vec(vec![1.0; 2 * 10 * 8], &[2, 10, 8]).unwrap(),
             false,
         );
-        // forward_last should return only the last time step
-        // The LSTM module may not have forward_last, but forward returns [B, T, H]
         let output = lstm.forward(&input);
         assert_eq!(output.shape(), vec![2, 10, 16]);
 
-        // Last timestep extraction
         let out_vec = output.data().to_vec();
-        let last_t0 = &out_vec[9 * 16..10 * 16]; // batch 0, time 9
+        let last_t0 = &out_vec[9 * 16..10 * 16];
         assert!(
             last_t0.iter().all(|v| v.is_finite()),
             "Last output should be finite"
@@ -1291,7 +1245,6 @@ mod tests {
             "LSTM should propagate gradients to input"
         );
 
-        // Parameters should also have gradients
         let params = lstm.parameters();
         let grads_exist = params.iter().any(|p| {
             p.grad()
@@ -1304,7 +1257,6 @@ mod tests {
     fn test_lstm_different_sequence_lengths() {
         let lstm = LSTM::new(4, 8, 1);
 
-        // Short sequence
         let short = Variable::new(
             Tensor::from_vec(vec![1.0; 2 * 4], &[1, 2, 4]).unwrap(),
             false,
@@ -1312,7 +1264,6 @@ mod tests {
         let out_short = lstm.forward(&short);
         assert_eq!(out_short.shape(), vec![1, 2, 8]);
 
-        // Long sequence
         let long = Variable::new(
             Tensor::from_vec(vec![1.0; 20 * 4], &[1, 20, 4]).unwrap(),
             false,
@@ -1323,11 +1274,8 @@ mod tests {
 
     #[test]
     fn test_lstm_parameters_count() {
-        // LSTM has 4 gates (i, f, g, o), each with input and hidden weights + biases
-        // Per layer: 4 * (input_size * hidden_size + hidden_size * hidden_size + 2 * hidden_size)
         let lstm = LSTM::new(10, 20, 1);
         let n = lstm.parameters().iter().map(|p| p.numel()).sum::<usize>();
-        // Expected: 4 * (10*20 + 20*20 + 20 + 20) = 4 * (200 + 400 + 40) = 2560
         assert!(n > 0, "LSTM should have parameters");
     }
 
@@ -1372,7 +1320,6 @@ mod tests {
             false,
         );
         let mean_out = gru.forward_mean(&input);
-        // forward_mean averages over time: [B, T, H] → [B, H]
         assert_eq!(mean_out.shape(), vec![2, 8]);
     }
 
@@ -1384,7 +1331,6 @@ mod tests {
             false,
         );
         let last_out = gru.forward_last(&input);
-        // forward_last returns only last timestep: [B, T, H] → [B, H]
         assert_eq!(last_out.shape(), vec![2, 8]);
     }
 
@@ -1418,7 +1364,6 @@ mod tests {
         let output = gru.forward(&input);
         let out_vec = output.data().to_vec();
 
-        // Hidden states at different timesteps should differ
         let t0 = &out_vec[0..8];
         let t4 = &out_vec[4 * 8..5 * 8];
         let diff: f32 = t0.iter().zip(t4.iter()).map(|(a, b)| (a - b).abs()).sum();
@@ -1447,7 +1392,7 @@ mod tests {
 
     #[test]
     fn test_rnn_multi_layer() {
-        let rnn = RNN::with_options(8, 16, 3, true); // 3 layers, bias
+        let rnn = RNN::with_options(8, 16, 3, true);
         let input = Variable::new(
             Tensor::from_vec(vec![0.5; 2 * 5 * 8], &[2, 5, 8]).unwrap(),
             false,
@@ -1462,7 +1407,6 @@ mod tests {
 
     #[test]
     fn test_lstm_outputs_are_bounded() {
-        // LSTM should produce bounded outputs (tanh output gate)
         let lstm = LSTM::new(4, 8, 1);
         let input = Variable::new(
             Tensor::from_vec(vec![100.0; 10 * 4], &[1, 10, 4]).unwrap(),
@@ -1471,7 +1415,6 @@ mod tests {
         let output = lstm.forward(&input);
         let out_vec = output.data().to_vec();
 
-        // All outputs should be in [-1, 1] range (tanh bounded)
         for v in &out_vec {
             assert!(v.is_finite(), "LSTM output should be finite, got {}", v);
             assert!(

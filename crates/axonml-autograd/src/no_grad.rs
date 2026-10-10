@@ -252,7 +252,6 @@ mod tests {
                 assert!(!is_grad_enabled());
             }
 
-            // Still disabled — outer guard hasn't dropped yet
             assert!(!is_grad_enabled());
         }
 
@@ -283,17 +282,14 @@ mod tests {
                 assert!(is_grad_enabled());
             });
 
-            // Restored to disabled after EnableGradGuard drops
             assert!(!is_grad_enabled());
         });
 
-        // Restored to enabled after NoGradGuard drops
         assert!(is_grad_enabled());
     }
 
     #[test]
     fn test_nested_mixed_guards() {
-        // Verify complex nesting: enable { no_grad { enable_grad { } } }
         set_grad_enabled(true);
 
         no_grad(|| {
@@ -306,15 +302,12 @@ mod tests {
                     assert!(!is_grad_enabled());
                 });
 
-                // Back to enabled
                 assert!(is_grad_enabled());
             });
 
-            // Back to disabled
             assert!(!is_grad_enabled());
         });
 
-        // Back to enabled
         assert!(is_grad_enabled());
     }
 
@@ -327,10 +320,8 @@ mod tests {
             assert!(!is_grad_enabled());
         }
 
-        // Restored to false (was already disabled)
         assert!(!is_grad_enabled());
 
-        // Restore for other tests
         set_grad_enabled(true);
     }
 

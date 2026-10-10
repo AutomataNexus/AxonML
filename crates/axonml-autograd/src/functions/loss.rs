@@ -147,22 +147,11 @@ impl GradientFunction for CrossEntropyLossBackward {
         let batch_size = self.saved_target.numel();
         let num_classes = self.saved_softmax.numel() / batch_size;
 
-        // GPU fast path: use the CUDA cross_entropy_bwd kernel directly.
-        // This computes grad = (softmax - one_hot) * grad_output entirely
-        // on GPU with zero CPU round-trips. (Core part of making fw/bw FAF.)
         #[cfg(feature = "cuda")]
         if self.saved_softmax.device().is_gpu() {
-            // The CUDA kernel expects:
-            //   softmax [batch, classes] on GPU
-            //   targets [batch] on GPU (as f32 cast of class indices)
-            //   grad_output [batch] on GPU (per-sample gradient, or scalar broadcast)
-            //
-            // For reduction=Mean, grad_output is scalar 1/N. Build a per-batch
-            // grad_output tensor directly on GPU (no host vec round-trip).
             let grad_out_t = match self.reduction {
                 Reduction::Mean => {
                     let v = 1.0 / batch_size as f32;
-                    // Create scalar then broadcast via from_vec on device (tiny host scalar is fine).
                     Tensor::from_vec(vec![v; batch_size], &[batch_size])
                         .unwrap()
                         .to_device(self.saved_softmax.device())
@@ -175,7 +164,6 @@ impl GradientFunction for CrossEntropyLossBackward {
                 Reduction::None => grad_output.to_device(self.saved_softmax.device()).unwrap(),
             };
 
-            // Targets: cast i64 → f32 then move to GPU
             let target_f32_vec: Vec<f32> = self
                 .saved_target
                 .to_vec()
@@ -187,7 +175,6 @@ impl GradientFunction for CrossEntropyLossBackward {
                 .to_device(self.saved_softmax.device())
                 .unwrap();
 
-            // Reshape softmax to [batch, classes] if flat
             let softmax_2d = if self.saved_softmax.shape().len() == 1 {
                 self.saved_softmax
                     .reshape(&[batch_size as isize, num_classes as isize])
@@ -200,16 +187,11 @@ impl GradientFunction for CrossEntropyLossBackward {
             return vec![Some(grad)];
         }
 
-        // CPU fallback - parallelized with rayon over the (batch, class) elements.
-        // Routes the grad computation to parallel CPU path (part of FAF for CPU).
         let target_data = self.saved_target.to_vec();
         let scale = match self.reduction {
             Reduction::Mean => {
-                // Prefer scalar on device if grad_output is already tiny/GPU
                 if grad_output.device().is_gpu() {
-                    // For mean reduction the upstream grad is usually a scalar 1/N
-                    // We can keep a 1-element GPU tensor; the bwd kernel/ math will handle it.
-                    grad_output.to_vec()[0] / batch_size as f32 // still tiny, acceptable for scalar scale
+                    grad_output.to_vec()[0] / batch_size as f32
                 } else {
                     grad_output.to_vec()[0] / batch_size as f32
                 }
@@ -300,7 +282,6 @@ impl GradientFunction for NllLossBackward {
 
         let mut grad =
             Tensor::from_vec(grad_data, input_shape).expect("backward: tensor creation failed");
-        // Preserve device: input was on GPU, gradient should be too
         if self.saved_input.device().is_gpu() {
             grad = grad.to_device(self.saved_input.device()).unwrap();
         }
@@ -550,7 +531,6 @@ mod tests {
         let grad_output = Tensor::scalar(1.0);
         let grads = grad_fn.apply(&grad_output);
 
-        // Zero gradient when pred == target
         let grad = grads[0].as_ref().unwrap();
         for &v in &grad.to_vec() {
             assert!(v.abs() < 1e-6);
@@ -569,7 +549,6 @@ mod tests {
         let grads = grad_fn.apply(&grad_output);
 
         let grad = grads[0].as_ref().unwrap().to_vec();
-        // pred > target: +1/3, pred < target: -1/3, pred == target: 0
         assert!((grad[0] - 1.0 / 3.0).abs() < 1e-6);
         assert!((grad[1] + 1.0 / 3.0).abs() < 1e-6);
         assert!(grad[2].abs() < 1e-6);

@@ -83,10 +83,6 @@ fn run_tensor_api_capture() {
     let a0 = mkrand(&[n_elems], 0.11, device);
     let b = mkrand(&[n_elems], 0.07, device);
 
-    // Pre-warm the pool so every bucket the captured path touches is
-    // cached. `pool_alloc_uninit` then takes the Rust-only pool-hit path
-    // (`upgrade_device_ptr`) with no CUDA API calls at all — trivially
-    // graph-safe.
     for _ in 0..10 {
         let mut x = a0.clone();
         for _ in 0..chain_depth {
@@ -182,16 +178,12 @@ fn run_depth(chain_depth: usize) {
     );
 
     // ---------- Graph capture with pre-bound buffers ----------
-    // Skip the pool entirely — pre-allocate two ping-pong output tensors
-    // OUTSIDE capture, then during capture just launch add_f32 kernels
-    // into them. No cuMemAllocAsync happens on the captured stream.
     let cuda = get_cuda_backend().expect("CUDA backend required");
     let stream = cuda.stream();
 
     let buf0 = mkrand(&[n_elems], 0.0, device);
     let buf1 = mkrand(&[n_elems], 0.0, device);
 
-    // Seed buf0 from a0.
     cuda_sync();
     let t_warm = Instant::now();
     for _ in 0..5 {
@@ -252,7 +244,6 @@ fn eager_add_ping_pong(
 ) {
     let n = a0.numel();
 
-    // Step 0: buf0 = a0 + b — scope the guards so they release before the loop.
     {
         let a_slice = a0.as_cuda_slice_read();
         let b_slice = b.as_cuda_slice_read();
@@ -261,7 +252,6 @@ fn eager_add_ping_pong(
             .expect("add_f32 step 0");
     }
 
-    // Ping-pong: alternate reading from buf0/buf1 and writing the other.
     let mut src_is_buf0 = true;
     for _ in 1..depth {
         let b_slice = b.as_cuda_slice_read();

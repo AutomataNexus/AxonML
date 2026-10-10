@@ -16,7 +16,6 @@ use axonml_core::backends::cuda::cuda_sync;
 use axonml_tensor::Tensor;
 
 fn main() {
-    // Qwen3-0.6B: bs*seq=2048 tokens, hidden=1024
     let m = 4 * 512;
     let n = 1024;
     let eps = 1e-6;
@@ -78,7 +77,6 @@ fn main() {
         t.elapsed().as_micros() as f64 / n_iter as f64
     );
 
-    // CPU baseline — what the old RMSNormBackward::apply was doing.
     let t = Instant::now();
     let _ = x_cpu.rms_norm_bwd_batched(&w_cpu, &g_cpu, m, n, eps);
     let cpu_us = t.elapsed().as_micros();

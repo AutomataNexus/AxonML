@@ -27,9 +27,6 @@
 #[allow(unused_imports)]
 use crate::alloc_prelude::*;
 
-// Operations are implemented directly on Tensor in tensor.rs
-// This module provides additional standalone functions
-
 use axonml_core::dtype::{Float, Numeric, Scalar};
 use axonml_core::error::Result;
 
@@ -122,30 +119,51 @@ pub fn gt_mask<T: Numeric>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<f32>> 
 // =============================================================================
 
 /// Applies softmax along the specified dimension.
-pub fn softmax<T: Float>(x: &Tensor<T>, _dim: i64) -> Result<Tensor<T>> {
-    // For simplicity, this handles the last dimension case
+pub fn softmax<T: Float>(x: &Tensor<T>, dim: i64) -> Result<Tensor<T>> {
     let data = x.to_vec();
-    let shape = x.shape();
+    let shape = x.shape().to_vec();
 
     if shape.is_empty() {
         return Ok(Tensor::scalar(T::one()));
     }
 
-    // Find max for numerical stability
-    let max_val = data
-        .iter()
-        .fold(T::neg_infinity(), |a, &b| if b > a { b } else { a });
+    let ndim = shape.len();
+    let d = if dim < 0 {
+        (ndim as i64 + dim).max(0) as usize
+    } else {
+        dim as usize
+    };
+    let d = d.min(ndim - 1);
 
-    // Compute exp(x - max)
-    let exp_data: Vec<T> = data.iter().map(|&v| (v - max_val).exp_value()).collect();
+    let inner: usize = shape[d + 1..].iter().product();
+    let outer: usize = shape[..d].iter().product();
+    let n = shape[d];
+    let stride = inner;
 
-    // Compute sum
-    let sum: T = exp_data.iter().fold(T::zero(), |a, &b| a + b);
+    let mut result = vec![T::zero(); data.len()];
+    for o in 0..outer {
+        for i in 0..inner {
+            let base = o * n * inner + i;
+            let mut max_val = T::neg_infinity();
+            for k in 0..n {
+                let v = data[base + k * stride];
+                if v > max_val {
+                    max_val = v;
+                }
+            }
+            let mut sum = T::zero();
+            for k in 0..n {
+                let e = (data[base + k * stride] - max_val).exp_value();
+                result[base + k * stride] = e;
+                sum = sum + e;
+            }
+            for k in 0..n {
+                result[base + k * stride] = result[base + k * stride] / sum;
+            }
+        }
+    }
 
-    // Normalize
-    let result: Vec<T> = exp_data.iter().map(|&v| v / sum).collect();
-
-    Tensor::from_vec(result, shape)
+    Tensor::from_vec(result, &shape)
 }
 
 /// Applies log-softmax along the specified dimension.
@@ -359,7 +377,6 @@ pub fn topk<T: Numeric>(
 
     let data = x.to_vec();
 
-    // For simplicity, handle the 1D case specially
     if shape.len() == 1 {
         let mut indexed: Vec<(usize, T)> = data.into_iter().enumerate().collect();
         if largest {
@@ -381,7 +398,6 @@ pub fn topk<T: Numeric>(
         });
     }
 
-    // General n-dimensional case
     let outer_size: usize = shape[..dim].iter().product();
     let inner_size: usize = shape[dim + 1..].iter().product();
 
@@ -522,22 +538,18 @@ pub fn scatter<T: Scalar>(
     let idx_data = index.to_vec();
     let src_data = src.to_vec();
 
-    // Calculate strides for the destination
     let mut dst_strides = vec![1usize; dst_shape.len()];
     for i in (0..dst_shape.len() - 1).rev() {
         dst_strides[i] = dst_strides[i + 1] * dst_shape[i + 1];
     }
 
-    // Calculate strides for index/src
     let mut idx_strides = vec![1usize; idx_shape.len()];
     for i in (0..idx_shape.len() - 1).rev() {
         idx_strides[i] = idx_strides[i + 1] * idx_shape[i + 1];
     }
 
-    // Scatter values
     let total = index.numel();
     for linear_idx in 0..total {
-        // Convert linear index to n-dimensional index
         let mut nd_idx = vec![0usize; idx_shape.len()];
         let mut remaining = linear_idx;
         for d in 0..idx_shape.len() {
@@ -545,14 +557,11 @@ pub fn scatter<T: Scalar>(
             remaining %= idx_strides[d];
         }
 
-        // Get the scatter index
         let scatter_idx = idx_data[linear_idx] as usize;
 
-        // Build destination index
         let mut dst_nd_idx = nd_idx.clone();
         dst_nd_idx[dim] = scatter_idx;
 
-        // Convert to linear destination index
         let mut dst_linear = 0;
         for d in 0..dst_shape.len() {
             dst_linear += dst_nd_idx[d] * dst_strides[d];
@@ -580,10 +589,8 @@ pub fn nonzero<T: Numeric>(x: &Tensor<T>) -> Tensor<i64> {
     let shape = x.shape();
     let ndim = shape.len();
 
-    // Find all non-zero indices
     let mut indices: Vec<Vec<i64>> = Vec::new();
 
-    // Calculate strides for index conversion
     let mut strides = vec![1usize; ndim.max(1)];
     for i in (0..ndim.saturating_sub(1)).rev() {
         strides[i] = strides[i + 1] * shape[i + 1];
@@ -650,7 +657,6 @@ pub fn unique<T: Numeric>(
 ) -> UniqueResult<T> {
     let data = x.to_vec();
 
-    // Use a vec to preserve insertion order (for unsorted case)
     let mut seen: Vec<T> = Vec::new();
     let mut counts_map: Vec<i64> = Vec::new();
     let mut inverse: Vec<i64> = Vec::with_capacity(data.len());
@@ -667,11 +673,9 @@ pub fn unique<T: Numeric>(
     }
 
     let (unique_vals, final_inverse, final_counts) = if sorted {
-        // Sort unique values and update inverse indices
         let mut indexed: Vec<(usize, T)> = seen.into_iter().enumerate().collect();
         indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(core::cmp::Ordering::Equal));
 
-        // Create mapping from old index to new index
         let mut old_to_new = vec![0i64; indexed.len()];
         for (new_idx, (old_idx, _)) in indexed.iter().enumerate() {
             old_to_new[*old_idx] = new_idx as i64;
@@ -729,7 +733,6 @@ pub fn flip<T: Numeric>(x: &Tensor<T>, dims: &[usize]) -> Result<Tensor<T>> {
         return Ok(x.clone());
     }
 
-    // Calculate strides
     let mut strides = vec![1usize; ndim];
     for i in (0..ndim - 1).rev() {
         strides[i] = strides[i + 1] * shape[i + 1];
@@ -738,7 +741,6 @@ pub fn flip<T: Numeric>(x: &Tensor<T>, dims: &[usize]) -> Result<Tensor<T>> {
     let mut result = vec![T::zero(); data.len()];
 
     for src_linear in 0..data.len() {
-        // Convert to n-dimensional index
         let mut nd_idx = vec![0usize; ndim];
         let mut remaining = src_linear;
         for d in 0..ndim {
@@ -746,12 +748,10 @@ pub fn flip<T: Numeric>(x: &Tensor<T>, dims: &[usize]) -> Result<Tensor<T>> {
             remaining %= strides[d];
         }
 
-        // Flip specified dimensions
         for &flip_dim in dims {
             nd_idx[flip_dim] = shape[flip_dim] - 1 - nd_idx[flip_dim];
         }
 
-        // Convert back to linear index
         let mut dst_linear = 0;
         for d in 0..ndim {
             dst_linear += nd_idx[d] * strides[d];
@@ -792,7 +792,6 @@ pub fn roll<T: Numeric>(x: &Tensor<T>, shifts: &[i64], dims: &[usize]) -> Result
         return Ok(x.clone());
     }
 
-    // Calculate strides
     let mut strides = vec![1usize; ndim];
     for i in (0..ndim - 1).rev() {
         strides[i] = strides[i + 1] * shape[i + 1];
@@ -801,7 +800,6 @@ pub fn roll<T: Numeric>(x: &Tensor<T>, shifts: &[i64], dims: &[usize]) -> Result
     let mut result = vec![T::zero(); data.len()];
 
     for src_linear in 0..data.len() {
-        // Convert to n-dimensional index
         let mut nd_idx = vec![0usize; ndim];
         let mut remaining = src_linear;
         for d in 0..ndim {
@@ -809,14 +807,12 @@ pub fn roll<T: Numeric>(x: &Tensor<T>, shifts: &[i64], dims: &[usize]) -> Result
             remaining %= strides[d];
         }
 
-        // Apply shifts
         for (shift, &dim) in shifts.iter().zip(dims.iter()) {
             let dim_size = shape[dim] as i64;
             let new_idx = ((nd_idx[dim] as i64 + shift) % dim_size + dim_size) % dim_size;
             nd_idx[dim] = new_idx as usize;
         }
 
-        // Convert back to linear index
         let mut dst_linear = 0;
         for d in 0..ndim {
             dst_linear += nd_idx[d] * strides[d];
@@ -926,7 +922,6 @@ mod tests {
         let result = nonzero(&t);
 
         assert_eq!(result.shape(), &[2, 2]);
-        // (0,0) and (1,1) are non-zero
         assert_eq!(result.to_vec(), vec![0, 0, 1, 1]);
     }
 
@@ -948,7 +943,6 @@ mod tests {
         let t = Tensor::<f32>::from_vec(vec![3.0, 1.0, 3.0], &[3]).unwrap();
         let result = unique(&t, false, false, false);
 
-        // Preserves insertion order
         assert_eq!(result.values.to_vec(), vec![3.0, 1.0]);
     }
 
@@ -965,7 +959,6 @@ mod tests {
         let t = Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap();
         let flipped = flip(&t, &[0]).unwrap();
 
-        // Flip along dim 0: [[3,4], [1,2]]
         assert_eq!(flipped.to_vec(), vec![3.0, 4.0, 1.0, 2.0]);
     }
 

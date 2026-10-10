@@ -19,7 +19,6 @@ fn main() {
     // ---------- Correctness ----------
     let (fused_out, fused_sum) = a.add_rmsnorm_batched(&b, &w, m, n, eps);
 
-    // Reference: a + b → RMSNorm.
     let ref_sum = a.add(&b).unwrap();
     let ref_out = ref_sum.rms_norm_batched(&w, m, n, eps);
 

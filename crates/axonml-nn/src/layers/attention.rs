@@ -132,23 +132,19 @@ impl MultiHeadAttention {
             return mask.clone();
         }
 
-        // [T, S] → [1, 1, T, S] → expand to [B, H, T, S]
         if mask_shape.len() == 2 {
             let reshaped = mask.reshape(&[1, 1, tgt_len, src_len]);
             return reshaped.expand(&target);
         }
 
-        // [B, 1, T, S] → expand heads dim
         if mask_shape.len() == 4 && mask_shape[1] == 1 {
             return mask.expand(&target);
         }
 
-        // [1, 1, T, S] → expand both
         if mask_shape.len() == 4 && mask_shape[0] == 1 && mask_shape[1] == 1 {
             return mask.expand(&target);
         }
 
-        // Fallback: just clone
         mask.clone()
     }
 
@@ -172,13 +168,10 @@ impl MultiHeadAttention {
             key.shape()[0]
         };
 
-        // Project Q, K, V  (all tracked through autograd)
         let q = self.q_proj.forward(query);
         let k = self.k_proj.forward(key);
         let v = self.v_proj.forward(value);
 
-        // Reshape to multi-head: [batch, seq, embed] → [batch, seq, heads, head_dim]
-        // Then transpose to:     [batch, heads, seq, head_dim]
         let q = q
             .reshape(&[batch_size, tgt_len, self.num_heads, self.head_dim])
             .transpose(1, 2);
@@ -189,11 +182,6 @@ impl MultiHeadAttention {
             .reshape(&[batch_size, src_len, self.num_heads, self.head_dim])
             .transpose(1, 2);
 
-        // GPU fast path: fused attention kernel avoids materializing the N*N
-        // attention matrix. Works for both inference and training when no mask
-        // is provided. The kernel computes Q@K^T * scale -> softmax -> @V in
-        // one pass per row. In training mode, a FusedAttentionBackward autograd
-        // function is attached that uses the CUDA backward kernel (or CPU fallback).
         #[cfg(feature = "cuda")]
         if q.data().device().is_gpu() && attn_mask.is_none() {
             let is_training = axonml_autograd::no_grad::is_grad_enabled();
@@ -201,14 +189,12 @@ impl MultiHeadAttention {
             let k_tensor = k.data();
             let v_tensor = v.data();
 
-            if let Some(attn_out) = q_tensor.fused_attention_cuda(
-                &k_tensor, &v_tensor, self.scale,
-                false, // not causal by default; causal mask would be in attn_mask
-            ) {
+            if let Some(attn_out) =
+                q_tensor.fused_attention_cuda(&k_tensor, &v_tensor, self.scale, false)
+            {
                 let attn_output = if is_training
                     && (q.requires_grad() || k.requires_grad() || v.requires_grad())
                 {
-                    // Build autograd backward function for training
                     let backward = FusedAttentionBackward::new(
                         q.grad_fn().cloned(),
                         k.grad_fn().cloned(),
@@ -230,29 +216,19 @@ impl MultiHeadAttention {
                         .reshape(&[batch_size, tgt_len, self.embed_dim]);
                 return self.out_proj.forward(&attn_output);
             }
-            // Fall through to standard path if fused kernel fails
         }
 
-        // Scaled dot-product attention: scores = Q @ K^T * scale
-        // K^T: [batch, heads, head_dim, src_len]
         let k_t = k.transpose(2, 3);
-        // scores: [batch, heads, tgt_len, src_len]
         let scores = q.matmul(&k_t).mul_scalar(self.scale);
 
-        // Apply attention mask (0 → -1e9 additive mask)
-        // Mask shapes: [tgt_len, src_len] (causal) or [batch, src_len] (padding)
-        // Scores shape: [batch, heads, tgt_len, src_len]
         let scores = if let Some(mask) = attn_mask {
             let mask_shape = mask.shape();
             let mask_data = mask.data();
             let scores_shape = scores.shape();
             let total = scores_shape.iter().product::<usize>();
 
-            // GPU fast path: expand mask entirely on GPU via CUDA kernel
-            // Avoids GPU→CPU→GPU round-trip (9 mask expansions per forward pass)
             #[cfg(feature = "cuda")]
             if scores.data().device().is_gpu() {
-                // Ensure mask is on GPU (it's small, so upload is cheap if needed)
                 let mask_gpu = if mask_data.device().is_gpu() {
                     mask_data.clone()
                 } else {
@@ -274,10 +250,8 @@ impl MultiHeadAttention {
                         tgt_len,
                     );
                 }
-                // Fall through to CPU path on unsupported shape
             }
 
-            // CPU fallback: expand mask with nested loops
             let mask_vec = mask_data.to_vec();
             let additive: Vec<f32> = mask_vec
                 .iter()
@@ -287,7 +261,6 @@ impl MultiHeadAttention {
             let mut expanded = vec![0.0f32; total];
 
             if mask_shape.len() == 2 && mask_shape[0] == tgt_len && mask_shape[1] == src_len {
-                // Causal mask [tgt_len, src_len] → broadcast over batch & heads
                 for b in 0..batch_size {
                     for h in 0..self.num_heads {
                         for i in 0..tgt_len {
@@ -305,7 +278,6 @@ impl MultiHeadAttention {
                 && mask_shape[0] == batch_size
                 && mask_shape[1] == src_len
             {
-                // Padding mask [batch, src_len] → broadcast over heads & tgt positions
                 for b in 0..batch_size {
                     for h in 0..self.num_heads {
                         for i in 0..tgt_len {
@@ -320,7 +292,6 @@ impl MultiHeadAttention {
                     }
                 }
             } else {
-                // General: tile mask across scores using modular indexing
                 for (i, val) in expanded.iter_mut().enumerate() {
                     *val = additive[i % additive.len()];
                 }
@@ -364,7 +335,6 @@ impl MultiHeadAttention {
 
 impl Module for MultiHeadAttention {
     fn forward(&self, input: &Variable) -> Variable {
-        // Self-attention: query = key = value = input
         self.attention(input, input, input, None)
     }
 
@@ -396,6 +366,15 @@ impl Module for MultiHeadAttention {
 
     fn name(&self) -> &'static str {
         "MultiHeadAttention"
+    }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        vec![
+            ("q_proj".to_string(), &self.q_proj as &dyn Module),
+            ("k_proj".to_string(), &self.k_proj as &dyn Module),
+            ("v_proj".to_string(), &self.v_proj as &dyn Module),
+            ("out_proj".to_string(), &self.out_proj as &dyn Module),
+        ]
     }
 }
 
@@ -468,8 +447,6 @@ impl CrossAttention {
 
 impl Module for CrossAttention {
     fn forward(&self, input: &Variable) -> Variable {
-        // When called as Module (single input), acts as self-attention.
-        // Use cross_attention() for encoder-decoder attention.
         self.mha.forward(input)
     }
 
@@ -487,6 +464,10 @@ impl Module for CrossAttention {
 
     fn name(&self) -> &'static str {
         "CrossAttention"
+    }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        vec![("mha".to_string(), &self.mha as &dyn Module)]
     }
 }
 
@@ -529,7 +510,6 @@ pub fn scaled_dot_product_attention_fused(
     scale: f32,
     is_causal: bool,
 ) -> Tensor<f32> {
-    // Try GPU fused kernel
     #[cfg(feature = "cuda")]
     if q.device().is_gpu() {
         if let Some(result) = q.fused_attention_cuda(k, v, scale, is_causal) {
@@ -537,7 +517,6 @@ pub fn scaled_dot_product_attention_fused(
         }
     }
 
-    // CPU fallback: standard matmul-based attention
     let shape = q.shape();
     let batch_size = shape[0];
     let num_heads = shape[1];
@@ -554,7 +533,6 @@ pub fn scaled_dot_product_attention_fused(
     for b in 0..batch_size {
         for h in 0..num_heads {
             for i in 0..tgt_len {
-                // Compute attention scores for row i
                 let mut scores = vec![0.0f32; src_len];
                 let mut max_score = f32::NEG_INFINITY;
 
@@ -576,7 +554,6 @@ pub fn scaled_dot_product_attention_fused(
                     }
                 }
 
-                // Softmax
                 let mut sum_exp = 0.0f32;
                 for s in &mut scores {
                     if *s > f32::NEG_INFINITY {
@@ -588,7 +565,6 @@ pub fn scaled_dot_product_attention_fused(
                 }
                 let inv_sum = if sum_exp > 0.0 { 1.0 / sum_exp } else { 0.0 };
 
-                // Weighted sum of V
                 for d in 0..head_dim {
                     let mut val = 0.0f32;
                     for j in 0..src_len {
@@ -652,7 +628,6 @@ mod tests {
     fn test_multihead_attention_parameters() {
         let mha = MultiHeadAttention::new(64, 4);
         let params = mha.parameters();
-        // Q, K, V, Out projections each have weight + bias = 8 total
         assert_eq!(params.len(), 8);
     }
 
@@ -666,12 +641,10 @@ mod tests {
     #[test]
     fn test_cross_attention_forward() {
         let ca = CrossAttention::new(64, 4);
-        // Decoder query: (batch=2, tgt_len=5, embed=64)
         let query = Variable::new(
             Tensor::from_vec(vec![0.1; 2 * 5 * 64], &[2, 5, 64]).expect("tensor creation failed"),
             false,
         );
-        // Encoder memory: (batch=2, src_len=10, embed=64)
         let memory = Variable::new(
             Tensor::from_vec(vec![0.2; 2 * 10 * 64], &[2, 10, 64]).expect("tensor creation failed"),
             false,
@@ -687,7 +660,6 @@ mod tests {
             Tensor::from_vec(vec![1.0; 2 * 8 * 64], &[2, 8, 64]).expect("tensor creation failed"),
             false,
         );
-        // Module::forward does self-attention
         let output = ca.forward(&input);
         assert_eq!(output.shape(), vec![2, 8, 64]);
     }
@@ -696,7 +668,7 @@ mod tests {
     fn test_cross_attention_parameters() {
         let ca = CrossAttention::new(64, 4);
         let params = ca.parameters();
-        assert_eq!(params.len(), 8); // Q, K, V, Out × (weight + bias)
+        assert_eq!(params.len(), 8);
         let named = ca.named_parameters();
         assert!(named.contains_key("mha.q_proj.weight"));
         assert!(named.contains_key("mha.out_proj.bias"));
@@ -704,7 +676,6 @@ mod tests {
 
     #[test]
     fn test_fused_attention_cpu() {
-        // Test fused attention on CPU (fallback path)
         let batch = 2;
         let heads = 4;
         let seq = 8;
@@ -730,7 +701,6 @@ mod tests {
         let out = scaled_dot_product_attention_fused(&q, &k, &v, scale, false);
         assert_eq!(out.shape(), &[batch, heads, seq, dim]);
 
-        // With uniform V=0.5, output should be close to 0.5
         let out_vec = out.to_vec();
         for val in &out_vec {
             assert!((*val - 0.5).abs() < 0.01, "Expected ~0.5, got {}", val);
@@ -745,7 +715,6 @@ mod tests {
         let dim = 4;
         let scale = 1.0 / (dim as f32).sqrt();
 
-        // Q and K are identity-like so attention focuses on matching positions
         let q = Tensor::from_vec(
             vec![0.1; batch * heads * seq * dim],
             &[batch, heads, seq, dim],
@@ -767,7 +736,6 @@ mod tests {
         let out = scaled_dot_product_attention_fused(&q, &k, &v, scale, true);
         assert_eq!(out.shape(), &[batch, heads, seq, dim]);
 
-        // First position can only attend to position 0, so output = V[0] = [1,0,0,0]
         let out_vec = out.to_vec();
         assert!(
             (out_vec[0] - 1.0).abs() < 1e-5,
@@ -778,7 +746,6 @@ mod tests {
 
     #[test]
     fn test_multihead_attention_backward_cpu() {
-        // Test that gradients flow through MHA in training mode (CPU path)
         use axonml_autograd::backward;
 
         let mha = MultiHeadAttention::new(32, 4);
@@ -789,18 +756,15 @@ mod tests {
         let output = mha.forward(&input);
         assert_eq!(output.shape(), vec![2, 4, 32]);
 
-        // Sum the output and backward
         let loss = output.sum();
         let ones = Tensor::from_vec(vec![1.0f32], &[1]).expect("tensor creation failed");
         backward(&loss, &ones);
 
-        // Input should have gradients
         let grad = input.grad();
         assert!(grad.is_some(), "Input gradient should exist");
         let grad_data = grad.unwrap();
         assert_eq!(grad_data.shape(), &[2, 4, 32]);
 
-        // Gradients should be non-zero
         let grad_vec = grad_data.to_vec();
         let non_zero = grad_vec.iter().any(|&v| v.abs() > 1e-10);
         assert!(non_zero, "Gradients should be non-zero");
@@ -808,7 +772,6 @@ mod tests {
 
     #[test]
     fn test_fused_attention_backward_cpu() {
-        // Test the FusedAttentionBackward autograd function directly on CPU
         use axonml_autograd::functions::FusedAttentionBackward;
         use axonml_autograd::grad_fn::GradientFunction;
 
@@ -818,7 +781,6 @@ mod tests {
         let dim = 8;
         let scale = 1.0 / (dim as f32).sqrt();
 
-        // Create random-ish tensors
         let q_data: Vec<f32> = (0..batch * heads * seq * dim)
             .map(|i| ((i as f32) * 0.01).sin())
             .collect();
@@ -836,11 +798,9 @@ mod tests {
         let v =
             Tensor::from_vec(v_data, &[batch, heads, seq, dim]).expect("tensor creation failed");
 
-        // Compute forward output using the fused CPU path
         let output = scaled_dot_product_attention_fused(&q, &k, &v, scale, false);
         assert_eq!(output.shape(), &[batch, heads, seq, dim]);
 
-        // Create backward function
         let backward_fn = FusedAttentionBackward::new(
             None,
             None,
@@ -853,7 +813,6 @@ mod tests {
             false,
         );
 
-        // Use ones as grad_output
         let grad_output = Tensor::from_vec(
             vec![1.0f32; batch * heads * seq * dim],
             &[batch, heads, seq, dim],
@@ -871,7 +830,6 @@ mod tests {
         assert_eq!(gk.shape(), &[batch, heads, seq, dim]);
         assert_eq!(gv.shape(), &[batch, heads, seq, dim]);
 
-        // Gradients should be finite
         for val in gq
             .to_vec()
             .iter()
@@ -881,14 +839,12 @@ mod tests {
             assert!(val.is_finite(), "Gradient should be finite, got {}", val);
         }
 
-        // grad_V should be non-zero (it's P^T @ grad_output)
         let gv_nonzero = gv.to_vec().iter().any(|&v| v.abs() > 1e-10);
         assert!(gv_nonzero, "grad_V should be non-zero");
     }
 
     #[test]
     fn test_fused_attention_backward_causal_cpu() {
-        // Test the backward with causal masking
         use axonml_autograd::functions::FusedAttentionBackward;
         use axonml_autograd::grad_fn::GradientFunction;
 
@@ -941,7 +897,6 @@ mod tests {
         let gk = grads[1].as_ref().unwrap();
         let gv = grads[2].as_ref().unwrap();
 
-        // All grads should be finite
         for val in gq
             .to_vec()
             .iter()

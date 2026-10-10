@@ -33,7 +33,6 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
-// ML/tensor-specific allowances
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_precision_loss)]
@@ -106,11 +105,10 @@ pub mod sequential;
 // Re-exports
 // =============================================================================
 
-pub use module::{Module, ModuleList};
+pub use module::{AttrVal, Module, ModuleList, NodeSpec};
 pub use parameter::Parameter;
 pub use sequential::Sequential;
 
-// Layer re-exports
 pub use layers::{
     AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, BatchNorm1d, BatchNorm2d, Conv1d, Conv2d,
     ConvTranspose2d, CrossAttention, DifferentialAttention, Dropout, Embedding, Expert, FFT1d,
@@ -118,20 +116,18 @@ pub use layers::{
     LayerNorm, Linear, LotteryTicket, MaxPool1d, MaxPool2d, MoELayer, MoERouter,
     MultiHeadAttention, RNN, RNNCell, ResidualBlock, STFT, Seq2SeqTransformer, SparseLinear,
     TransformerDecoder, TransformerDecoderLayer, TransformerEncoder, TransformerEncoderLayer,
+    conv2d_functional,
 };
 
-// Activation re-exports
 pub use activation::{
     ELU, Flatten, GELU, Identity, LeakyReLU, LogSoftmax, ReLU, SiLU, Sigmoid, Softmax, Tanh,
 };
 
-// Loss re-exports
 pub use loss::{
     BCELoss, BCEWithLogitsLoss, CrossEntropyLoss, KLDivLoss, L1Loss, MSELoss, NLLLoss, Reduction,
     SmoothL1Loss,
 };
 
-// Init re-exports
 pub use init::{
     InitMode, constant, diag, eye, glorot_normal, glorot_uniform, he_normal, he_uniform,
     kaiming_normal, kaiming_uniform, normal, ones, orthogonal, randn, sparse, uniform,
@@ -145,56 +141,12 @@ pub use init::{
 /// Common imports for neural network development.
 pub mod prelude {
     pub use crate::{
-        AdaptiveAvgPool2d,
-        AvgPool1d,
-        AvgPool2d,
-        BCELoss,
-        BatchNorm1d,
-        BatchNorm2d,
-        Conv1d,
-        Conv2d,
-        CrossAttention,
-        CrossEntropyLoss,
-        Dropout,
-        ELU,
-        Embedding,
-        GELU,
-        GRU,
-        GroupNorm,
-        Identity,
-        InstanceNorm2d,
-        L1Loss,
-        LSTM,
-        LayerNorm,
-        LeakyReLU,
-        // Layers
-        Linear,
-        MSELoss,
-        MaxPool1d,
-        MaxPool2d,
-        // Core traits and types
-        Module,
-        ModuleList,
-        MultiHeadAttention,
-        NLLLoss,
-        Parameter,
-        RNN,
-        // Activations
-        ReLU,
-        // Loss functions
-        Reduction,
-        Seq2SeqTransformer,
-        Sequential,
-        SiLU,
-        Sigmoid,
-        Softmax,
-        Tanh,
-        TransformerDecoder,
-        TransformerDecoderLayer,
-        TransformerEncoder,
-        TransformerEncoderLayer,
-        // Functional
-        functional,
+        AdaptiveAvgPool2d, AvgPool1d, AvgPool2d, BCELoss, BatchNorm1d, BatchNorm2d, Conv1d, Conv2d,
+        CrossAttention, CrossEntropyLoss, Dropout, ELU, Embedding, GELU, GRU, GroupNorm, Identity,
+        InstanceNorm2d, L1Loss, LSTM, LayerNorm, LeakyReLU, Linear, MSELoss, MaxPool1d, MaxPool2d,
+        Module, ModuleList, MultiHeadAttention, NLLLoss, Parameter, RNN, ReLU, Reduction,
+        Seq2SeqTransformer, Sequential, SiLU, Sigmoid, Softmax, Tanh, TransformerDecoder,
+        TransformerDecoderLayer, TransformerEncoder, TransformerEncoderLayer, functional,
     };
 }
 
@@ -230,7 +182,6 @@ mod tests {
             .add(Linear::new(5, 2));
 
         let params = model.parameters();
-        // 2 Linear layers with weight + bias each = 4 parameters
         assert_eq!(params.len(), 4);
     }
 
@@ -246,7 +197,6 @@ mod tests {
             false,
         );
         let output = model.forward(&input);
-        // Conv2d: 28 -> 26, MaxPool2d: 26 -> 13
         assert_eq!(output.shape(), vec![1, 16, 13, 13]);
     }
 

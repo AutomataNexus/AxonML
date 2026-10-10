@@ -110,7 +110,6 @@ impl GradFn {
     /// the reference count).
     #[must_use]
     pub fn id(&self) -> GradFnId {
-        // For trait objects, we need to extract just the data pointer (not vtable)
         let ptr = Arc::as_ptr(&self.inner);
         ptr.cast::<()>() as GradFnId
     }
@@ -160,9 +159,7 @@ impl Debug for AccumulateGrad {
 
 impl GradientFunction for AccumulateGrad {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // Accumulate gradient directly into the shared storage
         self.accumulate(grad_output);
-        // No gradients to propagate further (leaf node)
         vec![]
     }
 
@@ -171,7 +168,6 @@ impl GradientFunction for AccumulateGrad {
     }
 
     fn next_functions(&self) -> &[Option<GradFn>] {
-        // Leaf node has no next functions
         &[]
     }
 
@@ -195,7 +191,6 @@ mod tests {
         assert_eq!(acc.name(), "AccumulateGrad");
         assert!(acc.next_functions().is_empty());
 
-        // Test accumulation
         let grad = Tensor::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap();
         acc.accumulate(&grad);
         assert!(grad_acc.read().is_some());
@@ -204,7 +199,6 @@ mod tests {
             vec![1.0, 2.0, 3.0]
         );
 
-        // Test accumulation again
         acc.accumulate(&grad);
         assert_eq!(
             grad_acc.read().as_ref().unwrap().to_vec(),

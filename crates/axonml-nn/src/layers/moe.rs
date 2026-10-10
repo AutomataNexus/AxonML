@@ -73,7 +73,6 @@ impl Expert {
 
 impl Module for Expert {
     fn forward(&self, input: &Variable) -> Variable {
-        // SwiGLU: down(SiLU(gate(x)) * up(x))
         let gate = self.gate_proj.forward(input).silu();
         let up = self.up_proj.forward(input);
         let hidden = gate.mul_var(&up);
@@ -104,6 +103,14 @@ impl Module for Expert {
 
     fn name(&self) -> &'static str {
         "Expert"
+    }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        vec![
+            ("up_proj".to_string(), &self.up_proj as &dyn Module),
+            ("gate_proj".to_string(), &self.gate_proj as &dyn Module),
+            ("down_proj".to_string(), &self.down_proj as &dyn Module),
+        ]
     }
 }
 
@@ -185,7 +192,6 @@ impl MoERouter {
             let offset = t * self.num_experts;
             let token_probs = &probs_vec[offset..offset + self.num_experts];
 
-            // Find top-k experts by probability
             let mut indexed: Vec<(usize, f32)> = token_probs
                 .iter()
                 .enumerate()
@@ -196,7 +202,6 @@ impl MoERouter {
             let top_indices: Vec<usize> = indexed[..self.top_k].iter().map(|(i, _)| *i).collect();
             let top_weights: Vec<f32> = indexed[..self.top_k].iter().map(|(_, w)| *w).collect();
 
-            // Normalize top-k weights to sum to 1
             let weight_sum: f32 = top_weights.iter().sum();
             let normalized: Vec<f32> = if weight_sum > 0.0 {
                 top_weights.iter().map(|w| w / weight_sum).collect()
@@ -328,13 +333,11 @@ impl MoELayer {
 
         let expert_counts = self.last_expert_counts.read().unwrap();
 
-        // f_i: fraction of tokens routed to expert i
         let token_fractions: Vec<f32> = expert_counts
             .iter()
             .map(|&c| c as f32 / num_tokens as f32)
             .collect();
 
-        // P_i: mean routing probability for expert i
         let mut mean_probs = vec![0.0f32; num_experts];
         for t in 0..num_tokens {
             for e in 0..num_experts {
@@ -345,7 +348,6 @@ impl MoELayer {
             *p /= num_tokens as f32;
         }
 
-        // L_bal = num_experts * sum(f_i * P_i)
         let mut loss_val = 0.0f32;
         for e in 0..num_experts {
             loss_val += token_fractions[e] * mean_probs[e];
@@ -384,13 +386,10 @@ impl Module for MoELayer {
         let d_model = shape[2];
         let num_tokens = batch_size * seq_len;
 
-        // Flatten to [num_tokens, d_model]
         let flat_input = input.reshape(&[num_tokens, d_model]);
 
-        // Route tokens to experts
         let (gate_probs, top_k_weights, top_k_indices) = self.router.route(&flat_input);
 
-        // Track expert utilization
         let mut expert_counts = vec![0usize; self.num_experts];
         for indices in &top_k_indices {
             for &idx in indices {
@@ -400,12 +399,9 @@ impl Module for MoELayer {
         *self.last_expert_counts.write().unwrap() = expert_counts;
         *self.last_gate_probs.write().unwrap() = Some(gate_probs);
 
-        // Initialize output as zeros
         let mut output_data = vec![0.0f32; num_tokens * d_model];
 
-        // Process each expert: gather tokens, forward, scatter back
         for expert_idx in 0..self.num_experts {
-            // Find which tokens go to this expert and their weights
             let mut token_indices = Vec::new();
             let mut token_weights = Vec::new();
 
@@ -425,7 +421,6 @@ impl Module for MoELayer {
                 continue;
             }
 
-            // Gather tokens for this expert
             let flat_data = flat_input.data();
             let flat_vec = flat_data.to_vec();
             let n = token_indices.len();
@@ -439,11 +434,9 @@ impl Module for MoELayer {
                 true,
             );
 
-            // Forward through expert
             let expert_output = self.experts[expert_idx].forward(&expert_input);
             let expert_out_vec = expert_output.data().to_vec();
 
-            // Scatter weighted outputs back
             for (local_idx, &global_idx) in token_indices.iter().enumerate() {
                 let weight = token_weights[local_idx];
                 let src_offset = local_idx * d_model;
@@ -458,7 +451,6 @@ impl Module for MoELayer {
             Tensor::from_vec(output_data, &[num_tokens, d_model]).expect("tensor creation failed");
         let output = Variable::new(output_tensor, true);
 
-        // Reshape back to [batch, seq_len, d_model]
         output.reshape(&[batch_size, seq_len, d_model])
     }
 
@@ -487,6 +479,14 @@ impl Module for MoELayer {
     fn name(&self) -> &'static str {
         "MoELayer"
     }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        self.experts
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (format!("experts.{i}"), e as &dyn Module))
+            .collect()
+    }
 }
 
 impl std::fmt::Debug for MoELayer {
@@ -512,7 +512,6 @@ mod tests {
     fn test_expert_creation() {
         let expert = Expert::new(64, 256);
         let params = expert.parameters();
-        // up_proj(w) + gate_proj(w) + down_proj(w) = 3 weights (no bias)
         assert_eq!(params.len(), 3);
     }
 
@@ -543,10 +542,10 @@ mod tests {
         );
         let (_gate_probs, weights, indices) = router.route(&input);
 
-        assert_eq!(weights.len(), 4); // 4 tokens
+        assert_eq!(weights.len(), 4);
         assert_eq!(indices.len(), 4);
         for w in &weights {
-            assert_eq!(w.len(), 2); // top-2
+            assert_eq!(w.len(), 2);
             let sum: f32 = w.iter().sum();
             assert!((sum - 1.0).abs() < 1e-5, "Weights should sum to 1");
         }
@@ -573,9 +572,6 @@ mod tests {
     fn test_moe_layer_parameters() {
         let moe = MoELayer::new(64, 256, 8, 2);
         let params = moe.parameters();
-        // Router: 1 weight (no bias)
-        // 8 experts * 3 weights each = 24
-        // Total = 25
         assert_eq!(params.len(), 25);
     }
 
@@ -590,7 +586,6 @@ mod tests {
 
         let lb_loss = moe.load_balancing_loss();
         let loss_val = lb_loss.data().to_vec()[0];
-        // Load balancing loss should be positive
         assert!(loss_val > 0.0, "Load balancing loss should be > 0");
     }
 
@@ -606,7 +601,6 @@ mod tests {
         let util = moe.expert_utilization();
         assert_eq!(util.len(), 4);
         let total: usize = util.iter().sum();
-        // Each of 10 tokens selects top-2 experts = 20 assignments total
         assert_eq!(total, 20);
     }
 

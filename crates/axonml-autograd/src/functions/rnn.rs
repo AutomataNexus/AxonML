@@ -88,21 +88,8 @@ impl GradientFunction for LstmGatesBackward {
         let hs = self.hidden_size;
         let total = batch_size * hs;
 
-        // grad_output is grad_h [batch, hidden].
-        // We also need grad_c_next. For the h_new output, the cell gradient
-        // from the loss comes through the next timestep's backward. For a
-        // single-output scenario (the LSTM forward returns h_new, not c_new),
-        // grad_c_next is zero unless accumulated from the c_new path.
-        //
-        // However, the way we wire this in LSTM::forward, grad_c_next is
-        // implicitly zero for the last timestep and accumulated via the
-        // LstmGatesBackward chain for earlier timesteps.
-        // We store grad_c_next as zeros here and let it accumulate.
-        // grad_c_next is zero for the h_new output path; in multi-timestep LSTM
-        // the cell gradient accumulates through the LstmGatesBackward chain.
         let grad_c_next: Tensor<f32> = Tensor::zeros(&[batch_size, hs]);
 
-        // GPU fast path
         #[cfg(feature = "cuda")]
         if self.saved_gates.device().is_gpu() {
             let grad_h_gpu = if grad_output.device().is_gpu() {
@@ -125,7 +112,6 @@ impl GradientFunction for LstmGatesBackward {
             }
         }
 
-        // CPU fallback
         let gates_data = self.saved_gates.to_vec();
         let c_prev_data = self.saved_c_prev.to_vec();
         let c_new_data = self.saved_c_new.to_vec();
@@ -190,13 +176,11 @@ impl GradientFunction for LstmGatesBackward {
                     let idx = b * hs + h;
                     let base = b * 4 * hs;
 
-                    // Load pre-activation gates
                     let i_pre = gates_data[base + h];
                     let f_pre = gates_data[base + hs + h];
                     let g_pre = gates_data[base + 2 * hs + h];
                     let o_pre = gates_data[base + 3 * hs + h];
 
-                    // Recompute activations
                     let i_act = 1.0 / (1.0 + (-i_pre).exp());
                     let f_act = 1.0 / (1.0 + (-f_pre).exp());
                     let g_act = g_pre.tanh();
@@ -205,10 +189,8 @@ impl GradientFunction for LstmGatesBackward {
                     let c = c_new_data[idx];
                     let tanh_c = c.tanh();
                     let dh = grad_h_data[idx];
-                    // dc = grad_c_next + grad_h * o * (1 - tanh(c)^2)
                     let dc = grad_c_next_data[idx] + dh * o_act * (1.0 - tanh_c * tanh_c);
 
-                    // Gate gradients
                     grad_gates_data[base + h] = dc * g_act * i_act * (1.0 - i_act);
                     grad_gates_data[base + hs + h] = dc * c_prev_data[idx] * f_act * (1.0 - f_act);
                     grad_gates_data[base + 2 * hs + h] = dc * i_act * (1.0 - g_act * g_act);
@@ -308,7 +290,6 @@ impl GradientFunction for GruGatesBackward {
         let batch_size = grad_output.shape()[0];
         let hs = self.hidden_size;
 
-        // GPU fast path
         #[cfg(feature = "cuda")]
         if self.saved_gates_ih.device().is_gpu() {
             let grad_gpu = if grad_output.device().is_gpu() {
@@ -325,7 +306,6 @@ impl GradientFunction for GruGatesBackward {
             }
         }
 
-        // CPU fallback
         let ih_data = self.saved_gates_ih.to_vec();
         let hh_data = self.saved_gates_hh.to_vec();
         let h_prev_data = self.saved_h_prev.to_vec();
@@ -419,7 +399,6 @@ impl GradientFunction for GruGatesBackward {
                     let z_hh = hh_data[base + hs + h];
                     let n_hh_val = hh_data[base + 2 * hs + h];
 
-                    // Recompute activations
                     let r = 1.0 / (1.0 + (-(r_ih + r_hh)).exp());
                     let z = 1.0 / (1.0 + (-(z_ih + z_hh)).exp());
                     let n = (n_ih + r * n_hh_val).tanh();
@@ -427,7 +406,6 @@ impl GradientFunction for GruGatesBackward {
                     let hp = h_prev_data[idx];
                     let dh = grad_data[idx];
 
-                    // h_new = (1 - z) * n + z * h_prev
                     let dz = dh * (hp - n);
                     let dn = dh * (1.0 - z);
                     grad_h_prev_data[idx] = dh * z;
@@ -437,12 +415,10 @@ impl GradientFunction for GruGatesBackward {
                     let dr = d_n_pre * n_hh_val;
                     let d_r_pre = dr * r * (1.0 - r);
 
-                    // ih gate gradients
                     grad_ih_data[base + h] = d_r_pre;
                     grad_ih_data[base + hs + h] = d_z_pre;
                     grad_ih_data[base + 2 * hs + h] = d_n_pre;
 
-                    // hh gate gradients
                     grad_hh_data[base + h] = d_r_pre;
                     grad_hh_data[base + hs + h] = d_z_pre;
                     grad_hh_data[base + 2 * hs + h] = d_n_pre * r;
@@ -592,7 +568,7 @@ mod tests {
         let grad_h = Tensor::from_vec(vec![1.0f32; batch * hidden], &[batch, hidden])
             .expect("backward: tensor creation failed");
         let grads = backward.apply(&grad_h);
-        assert_eq!(grads.len(), 3); // grad_ih, grad_hh, grad_h_prev
+        assert_eq!(grads.len(), 3);
         assert_eq!(grads[0].as_ref().unwrap().shape(), &[batch, 3 * hidden]);
         assert_eq!(grads[1].as_ref().unwrap().shape(), &[batch, 3 * hidden]);
         assert_eq!(grads[2].as_ref().unwrap().shape(), &[batch, hidden]);

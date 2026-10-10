@@ -42,7 +42,6 @@ pub enum LazyOp {
     /// Leaf: a materialized tensor, referenced by index into the tensor store.
     Tensor(usize),
 
-    // Unary ops
     /// Element-wise negation.
     Neg(Box<LazyOp>),
     /// ReLU activation: max(0, x).
@@ -58,7 +57,6 @@ pub enum LazyOp {
     /// Element-wise absolute value.
     Abs(Box<LazyOp>),
 
-    // Binary ops
     /// Element-wise addition.
     Add(Box<LazyOp>, Box<LazyOp>),
     /// Element-wise subtraction.
@@ -68,19 +66,16 @@ pub enum LazyOp {
     /// Element-wise division.
     Div(Box<LazyOp>, Box<LazyOp>),
 
-    // Reductions
     /// Sum of all elements (reduces to scalar).
     Sum(Box<LazyOp>),
     /// Mean of all elements (reduces to scalar).
     Mean(Box<LazyOp>),
 
-    // Shape ops
     /// Reshape to a new shape.
     Reshape(Box<LazyOp>, Vec<usize>),
     /// Transpose two dimensions.
     Transpose(Box<LazyOp>, usize, usize),
 
-    // Scalar ops
     /// Add a scalar to every element.
     AddScalar(Box<LazyOp>, f32),
     /// Multiply every element by a scalar.
@@ -432,7 +427,6 @@ impl LazyTensor {
         match op {
             LazyOp::Tensor(idx) => self.tensors[*idx].clone(),
 
-            // Unary
             LazyOp::Neg(a) => self.eval_op(a).neg(),
             LazyOp::Relu(a) => self.eval_op(a).relu(),
             LazyOp::Sigmoid(a) => self.eval_op(a).sigmoid(),
@@ -445,7 +439,6 @@ impl LazyTensor {
                 Tensor::from_vec(data, t.shape()).unwrap()
             }
 
-            // Binary
             LazyOp::Add(a, b) => {
                 let ta = self.eval_op(a);
                 let tb = self.eval_op(b);
@@ -467,11 +460,9 @@ impl LazyTensor {
                 ta.div(&tb).unwrap()
             }
 
-            // Reductions
             LazyOp::Sum(a) => self.eval_op(a).sum(),
             LazyOp::Mean(a) => self.eval_op(a).mean().unwrap(),
 
-            // Shape ops
             LazyOp::Reshape(a, shape) => {
                 let t = self.eval_op(a);
                 let isize_shape: Vec<isize> = shape.iter().map(|&s| s as isize).collect();
@@ -482,7 +473,6 @@ impl LazyTensor {
                 t.transpose(*d0 as i64, *d1 as i64).unwrap()
             }
 
-            // Scalar ops
             LazyOp::AddScalar(a, s) => self.eval_op(a).add_scalar(*s),
             LazyOp::MulScalar(a, s) => self.eval_op(a).mul_scalar(*s),
         }
@@ -509,9 +499,7 @@ impl LazyTensor {
     }
 
     fn optimize_op(op: &LazyOp) -> LazyOp {
-        // First, recursively optimize children
         let op = Self::optimize_children(op);
-        // Then apply local simplifications
         Self::simplify(&op)
     }
 
@@ -559,7 +547,6 @@ impl LazyTensor {
 
     fn simplify(op: &LazyOp) -> LazyOp {
         match op {
-            // neg(neg(x)) -> x
             LazyOp::Neg(inner) => {
                 if let LazyOp::Neg(x) = inner.as_ref() {
                     return *x.clone();
@@ -567,7 +554,6 @@ impl LazyTensor {
                 op.clone()
             }
 
-            // exp(log(x)) -> x
             LazyOp::Exp(inner) => {
                 if let LazyOp::Log(x) = inner.as_ref() {
                     return *x.clone();
@@ -575,7 +561,6 @@ impl LazyTensor {
                 op.clone()
             }
 
-            // log(exp(x)) -> x
             LazyOp::Log(inner) => {
                 if let LazyOp::Exp(x) = inner.as_ref() {
                     return *x.clone();
@@ -583,17 +568,10 @@ impl LazyTensor {
                 op.clone()
             }
 
-            // x + 0 -> x  (AddScalar with 0)
             LazyOp::AddScalar(a, s) if *s == 0.0 => *a.clone(),
 
-            // x * 1 -> x  (MulScalar with 1)
             LazyOp::MulScalar(a, s) if (*s - 1.0).abs() < f32::EPSILON => *a.clone(),
 
-            // x * 0 -> zeros (handled at materialize; here we keep MulScalar(x,0))
-            // We keep it as-is since we don't know the shape at this level easily.
-            // But we can still fold scalars:
-
-            // Scalar folding: (x + s1) + s2 -> x + (s1 + s2)
             LazyOp::AddScalar(inner, s2) => {
                 if let LazyOp::AddScalar(x, s1) = inner.as_ref() {
                     return LazyOp::AddScalar(x.clone(), s1 + s2);
@@ -601,7 +579,6 @@ impl LazyTensor {
                 op.clone()
             }
 
-            // Scalar folding: (x * s1) * s2 -> x * (s1 * s2)
             LazyOp::MulScalar(inner, s2) => {
                 if let LazyOp::MulScalar(x, s1) = inner.as_ref() {
                     return LazyOp::MulScalar(x.clone(), s1 * s2);
@@ -798,12 +775,10 @@ mod tests {
 
     #[test]
     fn test_chained_operations() {
-        // x.relu().add_scalar(1.0).mul_scalar(2.0)
         let x = LazyTensor::from_tensor(
             Tensor::<f32>::from_vec(vec![-1.0, 0.0, 1.0, 2.0], &[4]).unwrap(),
         );
         let result = x.relu().add_scalar(1.0).mul_scalar(2.0).materialize();
-        // relu: [0, 0, 1, 2] -> +1: [1, 1, 2, 3] -> *2: [2, 2, 4, 6]
         assert_eq!(result.to_vec(), vec![2.0, 2.0, 4.0, 6.0]);
     }
 
@@ -824,7 +799,6 @@ mod tests {
     fn test_op_count_binary() {
         let a = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap());
         let b = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![2.0], &[1]).unwrap());
-        // add(leaf, leaf) = 1 op
         assert_eq!(a.add(&b).op_count(), 1);
     }
 
@@ -833,9 +807,9 @@ mod tests {
         let x =
             LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
         let y = x.add_scalar(0.0);
-        assert_eq!(y.op_count(), 1); // AddScalar
+        assert_eq!(y.op_count(), 1);
         let opt = y.optimize();
-        assert_eq!(opt.op_count(), 0); // Eliminated
+        assert_eq!(opt.op_count(), 0);
         assert_eq!(opt.materialize().to_vec(), vec![1.0, 2.0, 3.0]);
     }
 
@@ -865,7 +839,6 @@ mod tests {
     fn test_optimize_scalar_folding_mul() {
         let x =
             LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
-        // x * 2 * 3 should fold to x * 6
         let y = x.mul_scalar(2.0).mul_scalar(3.0);
         assert_eq!(y.op_count(), 2);
         let opt = y.optimize();
@@ -876,7 +849,6 @@ mod tests {
     #[test]
     fn test_optimize_scalar_folding_add() {
         let x = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0], &[2]).unwrap());
-        // x + 3 + 7 should fold to x + 10
         let y = x.add_scalar(3.0).add_scalar(7.0);
         assert_eq!(y.op_count(), 2);
         let opt = y.optimize();
@@ -888,7 +860,6 @@ mod tests {
     fn test_optimize_exp_log() {
         let x =
             LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
-        // exp(log(x)) -> x
         let y = x.log().exp();
         assert_eq!(y.op_count(), 2);
         let opt = y.optimize();
@@ -900,7 +871,6 @@ mod tests {
     fn test_optimize_log_exp() {
         let x =
             LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0, 3.0], &[3]).unwrap());
-        // log(exp(x)) -> x
         let y = x.exp().log();
         assert_eq!(y.op_count(), 2);
         let opt = y.optimize();
@@ -913,10 +883,8 @@ mod tests {
         let data = vec![1.0, 2.0, 3.0, 4.0];
         let t = Tensor::<f32>::from_vec(data.clone(), &[2, 2]).unwrap();
 
-        // Eager: relu -> add_scalar(1) -> mul_scalar(2) -> sum
         let eager = t.relu().add_scalar(1.0).mul_scalar(2.0).sum();
 
-        // Lazy
         let lazy = LazyTensor::from_tensor(Tensor::<f32>::from_vec(data, &[2, 2]).unwrap());
         let lazy_result = lazy
             .relu()
@@ -931,7 +899,6 @@ mod tests {
     #[test]
     fn test_large_chain_optimization() {
         let x = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![5.0], &[1]).unwrap());
-        // x * 2 * 3 * 4 + 1 + 2 + 3
         let y = x
             .mul_scalar(2.0)
             .mul_scalar(3.0)
@@ -941,18 +908,14 @@ mod tests {
             .add_scalar(3.0);
         assert_eq!(y.op_count(), 6);
         let opt = y.optimize();
-        // mul chain: 3 -> 1 (folded), add chain: 3 -> 1 (folded) = 2 total
         assert_eq!(opt.op_count(), 2);
-        // 5 * 24 + 6 = 126
         approx_eq(&opt.materialize().to_vec(), &[126.0], 1e-6);
     }
 
     #[test]
     fn test_binary_ops_tensor_merging() {
-        // Two independent LazyTensors sharing no tensor stores
         let a = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0, 2.0], &[2]).unwrap());
         let b = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![3.0, 4.0], &[2]).unwrap());
-        // a has tensor[0], b has tensor[0] -> merged should have tensor[0], tensor[1]
         let c = a.add(&b);
         assert_eq!(c.tensors.len(), 2);
         let result = c.materialize();
@@ -961,7 +924,6 @@ mod tests {
 
     #[test]
     fn test_binary_ops_chain_merging() {
-        // (a + b) + c — should merge all three tensor stores
         let a = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![1.0], &[1]).unwrap());
         let b = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![2.0], &[1]).unwrap());
         let c = LazyTensor::from_tensor(Tensor::<f32>::from_vec(vec![3.0], &[1]).unwrap());

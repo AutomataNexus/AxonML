@@ -10,7 +10,6 @@ use axonml_core::backends::cuda::cuda_sync;
 use axonml_tensor::Tensor;
 
 fn main() {
-    // Qwen3-0.6B MLP intermediate: bs*seq × inter = 4*512 × 3072 = 6M.
     let m = 4 * 512;
     let inter = 3072;
     let shape = [m, inter];
@@ -23,7 +22,6 @@ fn main() {
     // ---------- Correctness ----------
     let (gg_fused, gu_fused) = gate.swiglu_bwd(&up, &grad);
 
-    // Reference CPU computation.
     let g_cpu = gate.to_device(Device::Cpu).unwrap().to_vec();
     let u_cpu = up.to_device(Device::Cpu).unwrap().to_vec();
     let go_cpu = grad.to_device(Device::Cpu).unwrap().to_vec();

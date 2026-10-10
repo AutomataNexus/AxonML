@@ -138,7 +138,6 @@ impl SparseCOO {
             return;
         }
 
-        // Create (indices, value) pairs and sort
         let mut entries: Vec<(Vec<usize>, f32)> = (0..self.nnz())
             .map(|i| {
                 let idx: Vec<usize> = self.indices.iter().map(|dim| dim[i]).collect();
@@ -148,7 +147,6 @@ impl SparseCOO {
 
         entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-        // Combine duplicates
         let mut new_indices: Vec<Vec<usize>> = vec![Vec::new(); self.shape.len()];
         let mut new_values = Vec::new();
 
@@ -156,12 +154,10 @@ impl SparseCOO {
 
         for (idx, val) in entries {
             if prev_idx.as_ref() == Some(&idx) {
-                // Duplicate: add to previous value
                 if let Some(last) = new_values.last_mut() {
                     *last += val;
                 }
             } else {
-                // New index
                 for (d, i) in idx.iter().enumerate() {
                     new_indices[d].push(*i);
                 }
@@ -207,17 +203,14 @@ impl SparseCOO {
         let mut col_indices = Vec::with_capacity(nnz);
         let mut values = Vec::with_capacity(nnz);
 
-        // Count entries per row
         for &row in &coo.indices[0] {
             row_ptr[row + 1] += 1;
         }
 
-        // Cumulative sum
         for i in 1..=nrows {
             row_ptr[i] += row_ptr[i - 1];
         }
 
-        // Sort by row, then column
         let mut entries: Vec<(usize, usize, f32)> = (0..nnz)
             .map(|i| (coo.indices[0][i], coo.indices[1][i], coo.values[i]))
             .collect();
@@ -585,9 +578,9 @@ mod tests {
         let dense = sparse.to_dense();
         let data = dense.to_vec();
 
-        assert_eq!(data[1], 1.0); // (0, 1)
-        assert_eq!(data[3], 2.0); // (1, 0)
-        assert_eq!(data[2 * 3 + 2], 3.0); // (2, 2)
+        assert_eq!(data[1], 1.0);
+        assert_eq!(data[3], 2.0);
+        assert_eq!(data[2 * 3 + 2], 3.0);
     }
 
     #[test]
@@ -598,9 +591,9 @@ mod tests {
 
         sparse.coalesce();
 
-        assert_eq!(sparse.nnz(), 2); // Duplicates combined
+        assert_eq!(sparse.nnz(), 2);
         let dense = sparse.to_dense();
-        assert_eq!(dense.to_vec()[0], 3.0); // 1.0 + 2.0
+        assert_eq!(dense.to_vec()[0], 3.0);
     }
 
     #[test]
@@ -617,7 +610,6 @@ mod tests {
 
     #[test]
     fn test_sparse_csr_matvec() {
-        // Matrix: [[1, 0], [0, 2]]
         let row_ptr = vec![0, 1, 2];
         let col_indices = vec![0, 1];
         let values = vec![1.0, 2.0];
@@ -679,7 +671,7 @@ mod tests {
         let values = vec![1.0, 2.0];
         let sparse = SparseTensor::from_coords(&coords, &values, &[4, 4]);
 
-        assert!((sparse.density() - 0.125).abs() < 1e-6); // 2/16
+        assert!((sparse.density() - 0.125).abs() < 1e-6);
     }
 
     #[test]
@@ -696,19 +688,16 @@ mod tests {
 
     #[test]
     fn test_sparse_matmul() {
-        // Sparse: [[1, 0], [0, 2]]
         let coords = vec![(0, 0), (1, 1)];
         let values = vec![1.0, 2.0];
         let sparse = SparseTensor::from_coords(&coords, &values, &[2, 2]);
 
-        // Dense: [[1, 2], [3, 4]]
         let dense =
             Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).expect("tensor creation failed");
 
         let result = sparse.matmul(&dense);
         let data = result.to_vec();
 
-        // [[1, 0], [0, 2]] @ [[1, 2], [3, 4]] = [[1, 2], [6, 8]]
         assert_eq!(data, vec![1.0, 2.0, 6.0, 8.0]);
     }
 }

@@ -27,7 +27,6 @@ fn main() {
     let numel = bs * seq * inter;
     let device = Device::Cuda(0);
 
-    // x = saved forward input (non-trivial values)
     let x_data: Vec<f32> = (0..numel)
         .map(|i| ((i % 1000) as f32 / 1000.0) - 0.5)
         .collect();
@@ -41,18 +40,15 @@ fn main() {
         .to_device(device.clone())
         .unwrap();
 
-    // Warm-up
     for _ in 0..5 {
         let _ = x.silu_backward(&grad_out);
     }
 
-    // Fused kernel timing
     for n in [50, 200, 500] {
         let t0 = Instant::now();
         for _ in 0..n {
             let _ = x.silu_backward(&grad_out);
         }
-        // Force stream drain via a dtoh on one cell
         let _ = x.silu_backward(&grad_out).to_vec();
         let dt = t0.elapsed();
         let per_call_us = dt.as_micros() as f64 / (n + 1) as f64;
@@ -66,14 +62,6 @@ fn main() {
 
     println!("\n--- simulating OLD 7-op chain (for comparison) ---");
 
-    // Reproduce the old chain exactly:
-    //   sig = x.sigmoid()
-    //   ones = Tensor::ones(x.shape()).to_device(x.device())   <- H2D each call
-    //   one_minus_sig = ones - sig
-    //   x_term = x * one_minus_sig
-    //   bracket = ones + x_term
-    //   deriv = sig * bracket
-    //   result = grad * deriv
     let old_chain = |x: &Tensor<f32>, g: &Tensor<f32>| -> Tensor<f32> {
         let sig = x.sigmoid();
         let ones = Tensor::ones(x.shape()).to_device(x.device()).unwrap();

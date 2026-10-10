@@ -82,19 +82,16 @@ impl FFT1d {
         let n = self.n_fft;
         let n_out = n / 2 + 1;
 
-        // Prepare complex input (zero-pad or truncate)
         let mut buffer: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); n];
         let copy_len = signal.len().min(n);
         for i in 0..copy_len {
             buffer[i] = Complex::new(signal[i], 0.0);
         }
 
-        // Compute FFT
         let mut planner = FftPlanner::new();
         let fft = planner.plan_fft_forward(n);
         fft.process(&mut buffer);
 
-        // Extract magnitude for positive frequencies
         let norm_factor = if self.normalized {
             1.0 / (n as f32).sqrt()
         } else {
@@ -119,7 +116,6 @@ impl Module for FFT1d {
 
         match shape.len() {
             2 => {
-                // (batch, time) → (batch, n_fft/2+1)
                 let batch = shape[0];
                 let time = shape[1];
                 let mut output = Vec::with_capacity(batch * n_out);
@@ -137,7 +133,6 @@ impl Module for FFT1d {
                 )
             }
             3 => {
-                // (batch, channels, time) → (batch, channels, n_fft/2+1)
                 let batch = shape[0];
                 let channels = shape[1];
                 let time = shape[2];
@@ -166,7 +161,7 @@ impl Module for FFT1d {
     }
 
     fn parameters(&self) -> Vec<Parameter> {
-        Vec::new() // FFT has no learnable parameters
+        Vec::new()
     }
 
     fn named_parameters(&self) -> HashMap<String, Parameter> {
@@ -175,6 +170,10 @@ impl Module for FFT1d {
 
     fn name(&self) -> &'static str {
         "FFT1d"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Fft")]
     }
 }
 
@@ -270,7 +269,6 @@ impl STFT {
         for frame in 0..n_frames {
             let start = frame * self.hop_length;
 
-            // Apply window and create complex buffer
             let mut buffer: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); n];
             for i in 0..n {
                 let idx = start + i;
@@ -298,7 +296,6 @@ impl Module for STFT {
 
         match shape.len() {
             2 => {
-                // (batch, time) → (batch, n_frames, n_fft/2+1)
                 let batch = shape[0];
                 let time = shape[1];
                 let n_frames = self.n_frames(time);
@@ -318,7 +315,6 @@ impl Module for STFT {
                 )
             }
             3 => {
-                // (batch, channels, time) → (batch, channels, n_frames, n_fft/2+1)
                 let batch = shape[0];
                 let channels = shape[1];
                 let time = shape[2];
@@ -358,6 +354,10 @@ impl Module for STFT {
     fn name(&self) -> &'static str {
         "STFT"
     }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Stft")]
+    }
 }
 
 // =============================================================================
@@ -390,7 +390,7 @@ mod tests {
             false,
         );
         let output = fft.forward(&input);
-        assert_eq!(output.shape(), vec![2, 33]); // n_fft/2+1 = 33
+        assert_eq!(output.shape(), vec![2, 33]);
     }
 
     #[test]
@@ -401,12 +401,11 @@ mod tests {
             false,
         );
         let output = fft.forward(&input);
-        assert_eq!(output.shape(), vec![2, 3, 65]); // n_fft/2+1 = 65
+        assert_eq!(output.shape(), vec![2, 3, 65]);
     }
 
     #[test]
     fn test_fft1d_known_sinusoid() {
-        // Create a pure 10 Hz sinusoid sampled at 64 Hz
         let n = 64;
         let freq = 10.0;
         let sample_rate = 64.0;
@@ -425,7 +424,6 @@ mod tests {
         let output = fft.forward(&input);
         let spectrum = output.data().to_vec();
 
-        // The peak should be at bin 10 (freq * n / sample_rate = 10)
         let peak_bin = spectrum
             .iter()
             .enumerate()
@@ -437,7 +435,6 @@ mod tests {
 
     #[test]
     fn test_fft1d_zero_padding() {
-        // Input shorter than n_fft gets zero-padded
         let fft = FFT1d::new(128);
         let input = Variable::new(
             Tensor::from_vec(vec![1.0; 32], &[1, 32]).expect("tensor creation failed"),
@@ -461,7 +458,6 @@ mod tests {
         let out_norm = fft_norm.forward(&input).data().to_vec();
         let out_raw = fft_raw.forward(&input).data().to_vec();
 
-        // Normalized should be raw / sqrt(64) = raw / 8
         let ratio = out_raw[0] / out_norm[0];
         assert!((ratio - 8.0).abs() < 0.01);
     }
@@ -475,7 +471,7 @@ mod tests {
         );
         let output = stft.forward(&input);
 
-        let n_frames = stft.n_frames(1024); // (1024 - 256) / 128 + 1 = 7
+        let n_frames = stft.n_frames(1024);
         assert_eq!(output.shape(), vec![2, n_frames, 129]);
         assert_eq!(n_frames, 7);
     }
@@ -489,7 +485,7 @@ mod tests {
         );
         let output = stft.forward(&input);
 
-        let n_frames = stft.n_frames(256); // (256 - 64) / 32 + 1 = 7
+        let n_frames = stft.n_frames(256);
         assert_eq!(output.shape(), vec![2, 3, n_frames, 33]);
     }
 
@@ -509,7 +505,6 @@ mod tests {
     #[test]
     fn test_hann_window() {
         let w = hann_window(4);
-        // Hann window for size 4: [0, 0.75, 0.75, 0]
         assert!((w[0]).abs() < 1e-6);
         assert!((w[1] - 0.75).abs() < 0.01);
         assert!((w[2] - 0.75).abs() < 0.01);

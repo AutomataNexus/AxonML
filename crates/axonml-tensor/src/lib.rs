@@ -26,12 +26,13 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-#![forbid(unsafe_code)]
+// Safe Rust everywhere except the CUDA backend, whose cudarc calls are unsafe by
+// construction (audited in 05ca73d); the ban is a hard forbid on every non-CUDA build.
+#![cfg_attr(not(feature = "cuda"), forbid(unsafe_code))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
-// ML/tensor-specific allowances
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_precision_loss)]
@@ -87,6 +88,17 @@
 #![allow(clippy::manual_assert)]
 #![allow(clippy::unnecessary_debug_formatting)]
 
+#[cfg(feature = "cuda")]
+pub use cuda_ops::ReplayGraph;
+/// The CUDA timing event handed out by [`Tensor::event_record`]; re-exported so
+/// profiling code downstream can name it without depending on cudarc itself.
+#[cfg(feature = "cuda")]
+pub use cudarc::driver::CudaEvent;
+/// An instantiated CUDA graph from [`Tensor::graph_end_capture`]: owns the graph
+/// and its exec, destroys both on drop, replays with [`Tensor::graph_launch`].
+#[cfg(feature = "cuda")]
+pub use cudarc::driver::CudaGraph;
+
 // =============================================================================
 // Modules
 // =============================================================================
@@ -108,8 +120,11 @@ pub(crate) mod alloc_prelude {
 pub mod creation;
 #[cfg(feature = "cuda")]
 pub mod cuda_ops;
+pub mod fused_chain;
 pub mod lazy;
 pub mod ops;
+#[cfg(feature = "std")]
+pub mod rng;
 pub mod shape;
 pub mod sparse;
 pub mod tensor;
@@ -119,6 +134,14 @@ pub mod view;
 // Re-exports
 // =============================================================================
 
+#[cfg(feature = "cuda")]
+pub use axonml_core::backends::cuda::{
+    HostKeep, capture_host_arena_begin, capture_host_arena_take,
+};
+#[cfg(feature = "cuda")]
+pub use axonml_core::backends::cuda_pool::{
+    CapturePen, set_pool_uncapped, with_capture_pen, with_driver_alloc, with_pool_uncapped,
+};
 pub use axonml_core::{DType, Device, Error, Result};
 pub use creation::*;
 pub use lazy::{LazyOp, LazyTensor};

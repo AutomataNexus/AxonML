@@ -21,14 +21,12 @@ fn main() {
     let b = mkrand(&[k, n], 0.2, device);
     let go = mkrand(&[m, n], 0.01, device);
 
-    // warm
     for _ in 0..5 {
         let _ = a.matmul(&b).unwrap();
     }
 
     let n_iter = 100;
 
-    // Forward: [m,k] @ [k,n]
     let t0 = Instant::now();
     for _ in 0..n_iter {
         let c = a.matmul(&b).unwrap();
@@ -40,7 +38,6 @@ fn main() {
         per_us(t0, n_iter + 1)
     );
 
-    // grad_lhs = go @ b.t()    — b is contiguous [k,n], b.t() is last2-transposed view
     let t1 = Instant::now();
     for _ in 0..n_iter {
         let bt = b.t().unwrap();
@@ -53,7 +50,6 @@ fn main() {
         per_us(t1, n_iter + 1)
     );
 
-    // grad_rhs = a.t() @ go    — a is contiguous [m,k], a.t() is last2-transposed view
     let t2 = Instant::now();
     for _ in 0..n_iter {
         let at = a.t().unwrap();
@@ -66,7 +62,6 @@ fn main() {
         per_us(t2, n_iter + 1)
     );
 
-    // Full MatMulBackward-shaped
     let t3 = Instant::now();
     for _ in 0..n_iter {
         let bt = b.t().unwrap();
@@ -82,8 +77,6 @@ fn main() {
     );
 
     // ---------- Stream-backlog test ----------
-    // Backward submits ~400 matmuls in sequence without any sync. Does the
-    // per-submit wall-clock drift upward as the stream fills?
     use axonml_core::backends::cuda::cuda_sync;
     println!("\n=== stream-backlog: 400 matmul submits, no sync ===");
     cuda_sync();

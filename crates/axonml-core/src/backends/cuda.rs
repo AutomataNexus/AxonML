@@ -32,8 +32,10 @@ use crate::alloc_prelude::*;
 
 #[cfg(feature = "cuda")]
 use cudarc::cublas::{CudaBlas, Gemm, GemmConfig, sys::cublasOperation_t};
+
 #[cfg(feature = "cudnn")]
 use cudarc::cudnn::Cudnn;
+
 #[cfg(feature = "cuda")]
 use cudarc::driver::{
     CudaContext, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PinnedHostSlice, PushKernelArg,
@@ -41,17 +43,157 @@ use cudarc::driver::{
 };
 
 use super::Backend;
+
 #[cfg(feature = "cuda")]
 use super::cuda_kernels::{self, BLOCK_SIZE, CudaKernels};
+
 use crate::device::DeviceCapabilities;
+
 #[cfg(feature = "cuda")]
 use std::sync::Arc;
+
 #[cfg(feature = "cuda")]
 use std::sync::OnceLock;
 
-// =============================================================================
-// Global CUDA Backend Singleton
-// =============================================================================
+#[cfg(feature = "std")]
+use core::sync::atomic::{AtomicU64, Ordering};
+
+/// Device-to-host copy count since process start (copy-storm profiling).
+#[cfg(feature = "std")]
+pub static PROF_D2H_N: AtomicU64 = AtomicU64::new(0);
+
+/// Device-to-host bytes since process start.
+#[cfg(feature = "std")]
+pub static PROF_D2H_B: AtomicU64 = AtomicU64::new(0);
+
+/// Host-to-device copy count since process start.
+#[cfg(feature = "std")]
+pub static PROF_H2D_N: AtomicU64 = AtomicU64::new(0);
+
+/// Host-to-device bytes since process start.
+#[cfg(feature = "std")]
+pub static PROF_H2D_B: AtomicU64 = AtomicU64::new(0);
+
+/// Shape/stride scratch-buffer upload count since process start. Counts ACTUAL uploads: a request
+/// whose contents already sit in the scratch buffer is served from cache and counted in
+/// `PROF_SCRATCH_HIT_N` instead.
+#[cfg(feature = "std")]
+pub static PROF_SCRATCH_N: AtomicU64 = AtomicU64::new(0);
+
+/// Shape/stride scratch requests served from the cache (memcpy elided) since process start.
+#[cfg(feature = "std")]
+pub static PROF_SCRATCH_HIT_N: AtomicU64 = AtomicU64::new(0);
+
+/// Scratch requests served from cache (memcpy elided) since process start.
+#[must_use]
+#[cfg(feature = "std")]
+pub fn prof_scratch_hits() -> u64 {
+    PROF_SCRATCH_HIT_N.load(Ordering::Relaxed)
+}
+
+/// Returns (d2h_n, d2h_bytes, h2d_n, h2d_bytes, scratch_n) since process start.
+/// Live vs reserved device memory of this process's default CUDA mempool (the
+/// stream-ordered allocator): `(used_now, reserved_now, used_high_water)` in bytes.
+/// `used` is what tensors hold right now; `reserved` is what the driver keeps; the
+/// gap is fragmentation. A `reserved` at the card's ceiling with `used` far below it
+/// is the WSL paging signature.
+#[cfg(feature = "cuda")]
+pub fn mempool_usage() -> Option<(u64, u64, u64)> {
+    use cudarc::driver::sys as cs;
+    let be = get_cuda_backend()?;
+    let dev = be.context().cu_device();
+    // SAFETY: read-only driver queries on the device this backend created its
+    // context for; every out-parameter is a local the driver fills, and each
+    // status is checked before the value is used.
+    unsafe {
+        let mut pool: cs::CUmemoryPool = std::ptr::null_mut();
+        if cs::cuDeviceGetDefaultMemPool(&raw mut pool, dev) != cs::CUresult::CUDA_SUCCESS {
+            return None;
+        }
+        let mut out = [0u64; 3];
+        for (i, attr) in [
+            cs::CUmemPool_attribute::CU_MEMPOOL_ATTR_USED_MEM_CURRENT,
+            cs::CUmemPool_attribute::CU_MEMPOOL_ATTR_RESERVED_MEM_CURRENT,
+            cs::CUmemPool_attribute::CU_MEMPOOL_ATTR_USED_MEM_HIGH,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut v: cs::cuuint64_t = 0;
+            if cs::cuMemPoolGetAttribute(pool, attr, (&raw mut v).cast::<std::ffi::c_void>())
+                != cs::CUresult::CUDA_SUCCESS
+            {
+                return None;
+            }
+            out[i] = v;
+        }
+        Some((out[0], out[1], out[2]))
+    }
+}
+
+/// Stub without the `cuda` feature: there is no device pool to query.
+#[cfg(not(feature = "cuda"))]
+pub fn mempool_usage() -> Option<(u64, u64, u64)> {
+    None
+}
+
+/// Copy-storm counters since process start: `(d2h_n, d2h_bytes, h2d_n, h2d_bytes, scratch_uploads)`.
+#[cfg(feature = "std")]
+pub fn prof_copy_snapshot() -> (u64, u64, u64, u64, u64) {
+    (
+        PROF_D2H_N.load(Ordering::Relaxed),
+        PROF_D2H_B.load(Ordering::Relaxed),
+        PROF_H2D_N.load(Ordering::Relaxed),
+        PROF_H2D_B.load(Ordering::Relaxed),
+        PROF_SCRATCH_N.load(Ordering::Relaxed),
+    )
+}
+
+/// Owned host boxes kept alive for a captured graph's lifetime: their addresses
+/// back the captured HtoD nodes, so freeing them mid-lifetime dangles replay.
+#[cfg(feature = "cuda")]
+pub enum HostKeep {
+    /// Boxed u32 upload kept alive for the arena.
+    U32(Box<[u32]>),
+    /// Boxed i64 upload kept alive for the arena.
+    I64(Box<[i64]>),
+    /// Boxed f32 upload kept alive for the arena.
+    F32(Box<[f32]>),
+}
+
+#[cfg(feature = "cuda")]
+thread_local! {
+    static CAPTURE_HOST_ARENA: std::cell::RefCell<Option<Vec<HostKeep>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Begin a capture-scoped host arena on the current thread — call immediately
+/// before `graph_begin_capture`; scratch HtoDs source from arena-owned boxes.
+#[cfg(feature = "cuda")]
+pub fn capture_host_arena_begin() {
+    CAPTURE_HOST_ARENA.with(|c| *c.borrow_mut() = Some(Vec::new()));
+}
+
+/// End the arena and return the kept host boxes; hold them alive while the exec
+/// graph may launch, then drop after `graph_destroy`.
+#[cfg(feature = "cuda")]
+pub fn capture_host_arena_take() -> Option<Vec<HostKeep>> {
+    CAPTURE_HOST_ARENA.with(|c| c.borrow_mut().take())
+}
+
+#[cfg(feature = "cuda")]
+fn capture_host_arena_active() -> bool {
+    CAPTURE_HOST_ARENA.with(|c| c.borrow().is_some())
+}
+
+#[cfg(feature = "cuda")]
+fn capture_host_arena_push(k: HostKeep) {
+    CAPTURE_HOST_ARENA.with(|c| {
+        if let Some(v) = c.borrow_mut().as_mut() {
+            v.push(k);
+        }
+    });
+}
 
 #[cfg(feature = "cuda")]
 static CUDA_BACKEND: OnceLock<Option<CudaBackend>> = OnceLock::new();
@@ -76,10 +218,6 @@ pub fn get_cuda_backend() -> Option<&'static CudaBackend> {
     None
 }
 
-// =============================================================================
-// CUDA Backend Struct
-// =============================================================================
-
 /// CUDA backend for tensor operations on NVIDIA GPUs.
 ///
 /// Note: CudaStream is not Send+Sync, so we don't store it in the struct.
@@ -91,6 +229,10 @@ pub struct CudaBackend {
     stream: Arc<CudaStream>,
     blas: CudaBlas,
     kernels: CudaKernels,
+    /// Runtime-JIT'd elementwise-chain kernels, keyed by chain signature. Interior mutability so
+    /// the fuser can compile-on-first-use behind the `&self` backend handle. Compiled once per
+    /// unique chain, then dispatched for free.
+    jit_cache: parking_lot::Mutex<std::collections::HashMap<String, cudarc::driver::CudaFunction>>,
     /// Pre-allocated scratch buffer for shape-metadata uploads (up to 16
     /// u32 dims). Using `stream.memcpy_htod` into this pre-existing slice
     /// replaces the capture-breaking `stream.clone_htod` in hot paths like
@@ -98,6 +240,11 @@ pub struct CudaBackend {
     /// parking_lot mutex makes that explicit for the borrow checker.
     shape_scratch: parking_lot::Mutex<CudaSlice<u32>>,
     strides_scratch: parking_lot::Mutex<CudaSlice<i64>>,
+    /// Last contents uploaded into each scratch buffer, so a repeat request elides the memcpy.
+    /// Safe: all work is enqueued on the single stream and the caller holds the guard across the
+    /// kernel launch, so a kernel reading the scratch is ordered before any later overwrite.
+    shape_last: parking_lot::Mutex<Vec<u32>>,
+    strides_last: parking_lot::Mutex<Vec<i64>>,
     #[cfg(feature = "cudnn")]
     cudnn_handle: Option<Arc<Cudnn>>,
 }
@@ -123,18 +270,6 @@ impl CudaBackend {
     #[cfg(feature = "cuda")]
     pub fn new(device_index: usize) -> Option<Self> {
         let ctx = CudaContext::new(device_index).ok()?;
-        // Disable cudarc's per-slice event tracking. Under capture it
-        // would insert `stream.wait(event)` calls referencing events
-        // recorded on cudarc's internal synchronization machinery, which
-        // the capture then refuses with STREAM_CAPTURE_ISOLATION. We run
-        // single-stream everywhere — no cross-stream hand-off to
-        // synchronize — so the tracking is pure overhead for our case.
-        //
-        // Safety (per cudarc docs): ensure no CudaSlice is freed before
-        // a use on another stream finishes, no inter-stream read-before-
-        // allocate, no concurrent multi-stream writes. All satisfied by
-        // AxonML's single-stream design.
-        //
         // SAFETY: cudarc's three obligations are all inter-stream hazards. This
         // backend creates exactly one stream (tools/check_launches.py enforces
         // that count), and CUDA orders a single stream's work in issue order,
@@ -143,14 +278,6 @@ impl CudaBackend {
             ctx.disable_event_tracking();
         }
 
-        // Set the device's default memory pool release threshold to
-        // "never free below this many bytes", i.e. UINT64_MAX. Without
-        // this, `cuMemAllocAsync` (which cudarc's `stream.alloc_*` calls)
-        // can free memory back to the driver between calls; under CUDA
-        // graph capture, subsequent allocations would re-enter the
-        // driver's memory-pool service stream and trigger
-        // STREAM_CAPTURE_ISOLATION. Keeping everything pool-resident
-        // makes the alloc path pool-hit-dominant and capture-friendly.
         let dev_idx = device_index as i32;
         // SAFETY: raw driver calls with no memory obligation on our side. `pool`
         // is an out-parameter the driver fills before we read it, and its
@@ -165,7 +292,12 @@ impl CudaBackend {
                 == cudarc::driver::sys::CUresult::CUDA_SUCCESS
                 && !pool.is_null()
             {
-                let threshold: u64 = u64::MAX;
+                // ── keep at most 80% of the card pooled: an unbounded threshold ratchets
+                // reserved memory to the ceiling under fragmentation and WSL then pages
+                // (measured: live 8.2 GB, reserved 11.5 GB, 0.85 s → 3 s/step drift) ──
+                let threshold: u64 = ctx
+                    .mem_get_info()
+                    .map_or(u64::MAX, |(_, total)| (total as u64 / 10) * 8);
                 let _ = cuMemPoolSetAttribute(
                     pool,
                     CUmemPool_attribute::CU_MEMPOOL_ATTR_RELEASE_THRESHOLD,
@@ -173,13 +305,21 @@ impl CudaBackend {
                 );
             }
         }
-        // Use a non-default (named) stream so downstream callers can do
-        // `stream.begin_capture(...)` for CUDA graph capture of hot-path
-        // work — the default (NULL) stream cannot be captured. Performance
-        // is identical for our single-stream workload; only the capture
-        // capability differs.
         let stream = ctx.new_stream().ok()?;
         let blas = CudaBlas::new(stream.clone()).ok()?;
+        // ── AXONML_TF32: run every cuBLAS GEMM on tf32 tensor cores (10-bit mantissa; ~1.7x fp32) ──
+        if std::env::var("AXONML_TF32").is_ok() {
+            // SAFETY: `blas.handle()` is the live cuBLAS handle created just
+            // above on this context; setting its math mode has no memory
+            // preconditions.
+            let st = unsafe {
+                cudarc::cublas::sys::cublasSetMathMode(
+                    *blas.handle(),
+                    cudarc::cublas::sys::cublasMath_t::CUBLAS_TF32_TENSOR_OP_MATH,
+                )
+            };
+            eprintln!("[AxonML CUDA] cuBLAS math mode: TF32 tensor cores ({st:?})");
+        }
         let kernels = match CudaKernels::load(ctx.clone()) {
             Ok(k) => k,
             Err(e) => {
@@ -203,10 +343,6 @@ impl CudaBackend {
             }
         };
 
-        // Scratch buffers for metadata uploads (shape + strides, up to 16
-        // dimensions each). Pre-allocated once, reused via async memcpy on
-        // every `contiguous_gpu` call — avoids clone_htod's per-call alloc
-        // that would otherwise invalidate CUDA graph capture.
         // SAFETY: cudarc marks alloc unsafe because the memory is uninitialised.
         // These are reachable only through upload_shape_scratch and
         // upload_strides_scratch, which memcpy_htod a prefix before handing the
@@ -221,8 +357,11 @@ impl CudaBackend {
             stream,
             blas,
             kernels,
+            jit_cache: parking_lot::Mutex::new(std::collections::HashMap::new()),
             shape_scratch: parking_lot::Mutex::new(shape_scratch),
             strides_scratch: parking_lot::Mutex::new(strides_scratch),
+            shape_last: parking_lot::Mutex::new(Vec::new()),
+            strides_last: parking_lot::Mutex::new(Vec::new()),
             #[cfg(feature = "cudnn")]
             cudnn_handle,
         })
@@ -244,6 +383,23 @@ impl CudaBackend {
             shape.len()
         );
         let mut guard = self.shape_scratch.lock();
+        let mut last = self.shape_last.lock();
+        if !capture_host_arena_active() && last.as_slice() == shape {
+            PROF_SCRATCH_HIT_N.fetch_add(1, Ordering::Relaxed);
+            return guard;
+        }
+        PROF_SCRATCH_N.fetch_add(1, Ordering::Relaxed);
+        last.clear();
+        last.extend_from_slice(shape);
+        if capture_host_arena_active() {
+            last.clear();
+            let boxed: Box<[u32]> = shape.to_vec().into_boxed_slice();
+            self.stream
+                .memcpy_htod(&boxed[..], &mut *guard)
+                .expect("memcpy_htod shape scratch (arena)");
+            capture_host_arena_push(HostKeep::U32(boxed));
+            return guard;
+        }
         self.stream
             .memcpy_htod(shape, &mut *guard)
             .expect("memcpy_htod shape scratch");
@@ -262,6 +418,23 @@ impl CudaBackend {
             strides.len()
         );
         let mut guard = self.strides_scratch.lock();
+        let mut last = self.strides_last.lock();
+        if !capture_host_arena_active() && last.as_slice() == strides {
+            PROF_SCRATCH_HIT_N.fetch_add(1, Ordering::Relaxed);
+            return guard;
+        }
+        PROF_SCRATCH_N.fetch_add(1, Ordering::Relaxed);
+        last.clear();
+        last.extend_from_slice(strides);
+        if capture_host_arena_active() {
+            last.clear();
+            let boxed: Box<[i64]> = strides.to_vec().into_boxed_slice();
+            self.stream
+                .memcpy_htod(&boxed[..], &mut *guard)
+                .expect("memcpy_htod strides scratch (arena)");
+            capture_host_arena_push(HostKeep::I64(boxed));
+            return guard;
+        }
         self.stream
             .memcpy_htod(strides, &mut *guard)
             .expect("memcpy_htod strides scratch");
@@ -272,7 +445,7 @@ impl CudaBackend {
     #[cfg(not(feature = "cuda"))]
     pub fn new(device_index: usize) -> Option<Self> {
         let _ = device_index;
-        None // CUDA not available without feature
+        None
     }
 
     /// Returns the device index.
@@ -324,15 +497,506 @@ impl CudaBackend {
         unsafe { self.stream.alloc(len).map_err(CudaError::from) }
     }
 
-    /// Copies data from host to device.
-    ///
-    /// Uses `clone_htod` which allocates + syncs a new device slice. NOT
-    /// capture-safe — the inner `cuMemAllocAsync` invalidates an in-flight
-    /// CUDA graph capture. Hot-path callers under capture should use
-    /// [`htod_into`] with a pre-pooled destination instead, or one of the
-    /// dedicated scratch-buffer helpers (`upload_shape_scratch` / etc).
+    /// JIT + launch a fused elementwise-chain kernel. `key` identifies the chain (cache key);
+    /// `expr` is a CUDA C expression over `x`, the input element. The entry
+    /// `fused_chain(const float* in, float* out, unsigned int n)` and its `i < n` guard are
+    /// emitted HERE, around `expr`, so the launch below matches the kernel by construction.
+    /// Loads each input element once, applies the whole chain in registers, writes once.
+    #[cfg(feature = "cuda")]
+    pub fn fused_chain_unary_f32(
+        &self,
+        key: &str,
+        expr: &str,
+        input: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        assert!(
+            input.len() >= n && output.len() >= n,
+            "fused_chain_unary_f32: n={n} exceeds input {} / output {}",
+            input.len(),
+            output.len()
+        );
+        let mut cache = self.jit_cache.lock();
+        if !cache.contains_key(key) {
+            let src = format!(
+                "extern \"C\" __global__ void fused_chain(const float* __restrict__ in, \
+                 float* __restrict__ out, unsigned int n) {{\n\
+                 \x20\x20unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;\n\
+                 \x20\x20if (i >= n) return;\n\
+                 \x20\x20float x = in[i];\n\
+                 \x20\x20out[i] = {expr};\n}}\n"
+            );
+            let ptx = cudarc::nvrtc::compile_ptx(src)
+                .map_err(|e| CudaError::ModuleLoadFailed(format!("nvrtc: {e}")))?;
+            let module = self
+                .ctx
+                .load_module(ptx)
+                .map_err(|e| CudaError::ModuleLoadFailed(e.to_string()))?;
+            let func = module
+                .load_function("fused_chain")
+                .map_err(|e| CudaError::KernelNotFound(format!("fused_chain: {e}")))?;
+            cache.insert(key.to_string(), func);
+        }
+        let func = cache.get(key).unwrap().clone();
+        drop(cache);
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: the kernel text is assembled in this function: entry
+        // `fused_chain(in, out, n)` guarded by `i < n`, three args in this
+        // order; `input`/`output` hold >= n elements (asserted above) and
+        // `output` is `&mut`. `expr` can only fail to compile, never change
+        // the entry's parameter list. Ordering: single stream (see `new`).
+        unsafe {
+            self.stream
+                .launch_builder(&func)
+                .arg(input)
+                .arg(output)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// JIT + launch a two-input fused elementwise chain. `expr` is a CUDA C expression over
+    /// `x` (= `a[i]`) and `b[i]`; the entry `fused_chain(a, b, out, n)` and its `i < n` guard
+    /// are emitted here around it.
+    #[cfg(feature = "cuda")]
+    pub fn fused_chain_binary_f32(
+        &self,
+        key: &str,
+        expr: &str,
+        a: &CudaSlice<f32>,
+        b: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        assert!(
+            a.len() >= n && b.len() >= n && output.len() >= n,
+            "fused_chain_binary_f32: n={n} exceeds a {} / b {} / output {}",
+            a.len(),
+            b.len(),
+            output.len()
+        );
+        let mut cache = self.jit_cache.lock();
+        if !cache.contains_key(key) {
+            let src = format!(
+                "extern \"C\" __global__ void fused_chain(\
+                 const float* __restrict__ a, const float* __restrict__ b, \
+                 float* __restrict__ out, unsigned int n) {{\n\
+                 \x20\x20unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;\n\
+                 \x20\x20if (i >= n) return;\n\
+                 \x20\x20float x = a[i];\n\
+                 \x20\x20out[i] = {expr};\n}}\n"
+            );
+            let ptx = cudarc::nvrtc::compile_ptx(src)
+                .map_err(|e| CudaError::ModuleLoadFailed(format!("nvrtc: {e}")))?;
+            let module = self
+                .ctx
+                .load_module(ptx)
+                .map_err(|e| CudaError::ModuleLoadFailed(e.to_string()))?;
+            let func = module
+                .load_function("fused_chain")
+                .map_err(|e| CudaError::KernelNotFound(format!("fused_chain: {e}")))?;
+            cache.insert(key.to_string(), func);
+        }
+        let func = cache.get(key).unwrap().clone();
+        drop(cache);
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: the kernel text is assembled in this function: entry
+        // `fused_chain(a, b, out, n)` guarded by `i < n`, four args in this
+        // order; all three slices hold >= n elements (asserted above) and
+        // `output` is `&mut`. `expr` can only fail to compile, never change
+        // the entry's parameter list. Ordering: single stream (see `new`).
+        unsafe {
+            self.stream
+                .launch_builder(&func)
+                .arg(a)
+                .arg(b)
+                .arg(output)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Synchronize the backend's stream.
+    #[cfg(feature = "cuda")]
+    pub fn sync(&self) {
+        let _ = self.stream.synchronize();
+    }
+
+    /// Synchronous D2H of `src[..n]` into `dst[..n]`.
+    #[cfg(feature = "cuda")]
+    pub fn dtoh_into_n(
+        &self,
+        src: &CudaSlice<f32>,
+        n: usize,
+        dst: &mut [f32],
+    ) -> Result<(), CudaError> {
+        use cudarc::driver::DevicePtr as _;
+        assert!(
+            src.len() >= n && dst.len() >= n,
+            "dtoh_into_n: n={n} exceeds src {} / dst {}",
+            src.len(),
+            dst.len()
+        );
+        let (src_ptr, _guard) = src.device_ptr(&self.stream);
+        // SAFETY: both sides hold >= n elements (asserted), `dst[..n]` is a
+        // live &mut for the whole synchronous copy, and `_guard` keeps the
+        // device slice's stream ordering for its duration.
+        unsafe {
+            cudarc::driver::result::memcpy_dtoh_sync(&mut dst[..n], src_ptr)
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Stream-ordered async D2H (no host sync) of `src[..n]` into the pinned
+    /// `dst` at `dst_offset` — queued on the compute stream after prior work.
+    /// The destination type guarantees pinned memory (a pageable slice would
+    /// make the driver copy synchronously anyway). Call `sync()` before
+    /// reading `dst`: event tracking is off on this context (see `new`).
+    #[cfg(feature = "cuda")]
+    pub fn dtoh_into_n_stream(
+        &self,
+        src: &CudaSlice<f32>,
+        n: usize,
+        dst: &mut PinnedBuffer,
+        dst_offset: usize,
+    ) -> Result<(), CudaError> {
+        assert!(
+            src.len() >= n && dst.len() >= dst_offset + n,
+            "dtoh_into_n_stream: n={n} at {dst_offset} exceeds src {} / dst {}",
+            src.len(),
+            dst.len()
+        );
+        use cudarc::driver::DevicePtr as _;
+        let inner = dst
+            .inner
+            .as_mut()
+            .ok_or_else(|| CudaError::DriverError("pinned buffer already released".into()))?;
+        let host = inner
+            .as_mut_ptr()
+            .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        let (src_ptr, _guard) = src.device_ptr(&self.stream);
+        // SAFETY: `host` is the page-locked allocation `PinnedHostSlice` owns
+        // (so the driver may DMA into it asynchronously), `dst_offset + n <=
+        // dst.len()` and `n <= src.len()` are asserted above, and the copy is
+        // queued on the backend's single stream behind the producers of
+        // `src`. The write lands after this call returns; reading `dst`
+        // before `sync()` is the documented contract, not a memory error,
+        // and the buffer outlives the copy because `PinnedBuffer`'s drop is
+        // itself stream-synchronised by cudarc.
+        unsafe {
+            let view = std::slice::from_raw_parts_mut(host.add(dst_offset), n);
+            cudarc::driver::result::memcpy_dtoh_async(view, src_ptr, self.stream.cu_stream())
+                .map_err(|e| CudaError::DriverError(e.to_string()))
+        }
+    }
+
+    /// Strided device-to-device copy of a `height` x `width_elems` rectangle
+    /// (element offsets and pitches), queued on the compute stream.
+    #[cfg(feature = "cuda")]
+    pub fn memcpy_2d_dtod_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        dst_offset_elems: usize,
+        dst_pitch_elems: usize,
+        src: &CudaSlice<f32>,
+        src_offset_elems: usize,
+        src_pitch_elems: usize,
+        width_elems: usize,
+        height: usize,
+    ) -> Result<(), CudaError> {
+        let extent = |off: usize, pitch: usize| -> Option<usize> {
+            if height == 0 || width_elems == 0 {
+                return Some(0);
+            }
+            pitch
+                .checked_mul(height - 1)?
+                .checked_add(width_elems)?
+                .checked_add(off)
+        };
+        let (need_s, need_d) = (
+            extent(src_offset_elems, src_pitch_elems),
+            extent(dst_offset_elems, dst_pitch_elems),
+        );
+        assert!(
+            src_pitch_elems >= width_elems
+                && dst_pitch_elems >= width_elems
+                && need_s.is_some_and(|x| x <= src.len())
+                && need_d.is_some_and(|x| x <= dst.len()),
+            "memcpy_2d_dtod_f32: {height} rows x {width_elems} at src {src_offset_elems}/{src_pitch_elems} (len {}) dst {dst_offset_elems}/{dst_pitch_elems} (len {}) out of bounds",
+            src.len(),
+            dst.len()
+        );
+        use cudarc::driver::DevicePtr as _;
+        use cudarc::driver::DevicePtrMut as _;
+        use cudarc::driver::sys;
+        let esz = std::mem::size_of::<f32>();
+        let (src_ptr, _gs) = src.device_ptr(&self.stream);
+        let (dst_ptr, _gd) = dst.device_ptr_mut(&self.stream);
+        let copy = sys::CUDA_MEMCPY2D_st {
+            srcXInBytes: 0,
+            srcY: 0,
+            srcMemoryType: sys::CUmemorytype::CU_MEMORYTYPE_DEVICE,
+            srcHost: std::ptr::null(),
+            srcDevice: src_ptr + (src_offset_elems * esz) as sys::CUdeviceptr,
+            srcArray: std::ptr::null_mut(),
+            srcPitch: src_pitch_elems * esz,
+            dstXInBytes: 0,
+            dstY: 0,
+            dstMemoryType: sys::CUmemorytype::CU_MEMORYTYPE_DEVICE,
+            dstHost: std::ptr::null_mut(),
+            dstDevice: dst_ptr + (dst_offset_elems * esz) as sys::CUdeviceptr,
+            dstArray: std::ptr::null_mut(),
+            dstPitch: dst_pitch_elems * esz,
+            WidthInBytes: width_elems * esz,
+            Height: height,
+        };
+        // SAFETY: the assert above bounds the last row's end (offset +
+        // pitch*(height-1) + width) inside both slices and pitch >= width, so
+        // the strided rectangle lies within memory the borrowed slices own;
+        // the copy is queued on the backend's single stream.
+        unsafe {
+            let rc = sys::cuMemcpy2DAsync_v2(&raw const copy, self.stream.cu_stream());
+            if rc != sys::CUresult::CUDA_SUCCESS {
+                return Err(CudaError::DriverError(format!(
+                    "cuMemcpy2DAsync_v2 -> {rc:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// cuBLAS SGEMM with element offsets into `a`, `b` and `c` (column-major
+    /// semantics as `gemm_f32`); bounds are checked past each offset.
+    #[cfg(feature = "cuda")]
+    pub fn gemm_f32_at(
+        &self,
+        transa: bool,
+        transb: bool,
+        m: usize,
+        n: usize,
+        k: usize,
+        alpha: f32,
+        a: &CudaSlice<f32>,
+        a_offset: usize,
+        lda: usize,
+        b: &CudaSlice<f32>,
+        b_offset: usize,
+        ldb: usize,
+        beta: f32,
+        c: &mut CudaSlice<f32>,
+        c_offset: usize,
+        ldc: usize,
+    ) -> Result<(), CudaError> {
+        use cudarc::cublas::result::sgemm;
+        use cudarc::driver::DevicePtr as _;
+        use cudarc::driver::DevicePtrMut as _;
+        if a_offset > a.len() || b_offset > b.len() || c_offset > c.len() {
+            return Err(CudaError::BlasError(format!(
+                "gemm_f32_at: offsets {a_offset}/{b_offset}/{c_offset} exceed slices {}/{}/{}",
+                a.len(),
+                b.len(),
+                c.len()
+            )));
+        }
+        Self::check_gemm_bounds(
+            transa,
+            transb,
+            m,
+            n,
+            k,
+            a.len() - a_offset,
+            lda,
+            0,
+            b.len() - b_offset,
+            ldb,
+            0,
+            c.len() - c_offset,
+            ldc,
+            0,
+            1,
+        )?;
+        let op_a = if transa {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+        let op_b = if transb {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+        let esz = std::mem::size_of::<f32>() as cudarc::driver::sys::CUdeviceptr;
+        let (a_ptr, _ga) = a.device_ptr(&self.stream);
+        let a_ptr = a_ptr + a_offset as cudarc::driver::sys::CUdeviceptr * esz;
+        let (b_ptr, _gb) = b.device_ptr(&self.stream);
+        let b_ptr = b_ptr + b_offset as cudarc::driver::sys::CUdeviceptr * esz;
+        let (c_ptr, _gc) = c.device_ptr_mut(&self.stream);
+        let c_ptr = c_ptr + c_offset as cudarc::driver::sys::CUdeviceptr * esz;
+        // SAFETY: check_gemm_bounds ran on the slices' lengths past each
+        // offset, so cuBLAS stays inside all three allocations; the slices are
+        // borrowed for the call and the handle's stream is the backend's one.
+        unsafe {
+            sgemm(
+                *self.blas.handle(),
+                op_a,
+                op_b,
+                m as i32,
+                n as i32,
+                k as i32,
+                &raw const alpha,
+                a_ptr as *const f32,
+                lda as i32,
+                b_ptr as *const f32,
+                ldb as i32,
+                &raw const beta,
+                c_ptr as *mut f32,
+                ldc as i32,
+            )
+            .map_err(CudaError::from)
+        }
+    }
+
+    /// Copies data from host to device via `clone_htod` (allocates + syncs a
+    /// new device slice; not capture-safe). Under capture, prefer `htod_into`.
+    #[cfg(feature = "cuda")]
+    /// Argmax along a dimension. Tensor viewed as [outer_size, dim_size, inner_size].
+    /// Writes the winning index (cast to f32) for each of the outer_size*inner_size outputs.
+    pub fn argmax_dim_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        outer_size: usize,
+        dim_size: usize,
+        inner_size: usize,
+    ) -> Result<(), CudaError> {
+        assert!(
+            src.len() >= outer_size * dim_size * inner_size && dst.len() >= outer_size * inner_size,
+            "argmax_dim_f32: src {} / dst {} too small for {outer_size}x{dim_size}x{inner_size}",
+            src.len(),
+            dst.len()
+        );
+        let func = self
+            .kernels
+            .get("argmax_dim_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("argmax_dim_f32".to_string()))?;
+        let out_len = outer_size * inner_size;
+        let cfg = cuda_kernels::launch_config(out_len);
+        // SAFETY: `argmax_dim_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len); the kernel guards its index (see .cu).
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(outer_size as u32))
+                .arg(&(dim_size as u32))
+                .arg(&(inner_size as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Argmin along a dimension. Same contract as argmax_dim_f32 but keeps the
+    /// minimum — this is the direct VQ nearest-code primitive.
+    #[cfg(feature = "cuda")]
+    pub fn argmin_dim_f32(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        src: &CudaSlice<f32>,
+        outer_size: usize,
+        dim_size: usize,
+        inner_size: usize,
+    ) -> Result<(), CudaError> {
+        assert!(
+            src.len() >= outer_size * dim_size * inner_size && dst.len() >= outer_size * inner_size,
+            "argmin_dim_f32: src {} / dst {} too small for {outer_size}x{dim_size}x{inner_size}",
+            src.len(),
+            dst.len()
+        );
+        let func = self
+            .kernels
+            .get("argmin_dim_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("argmin_dim_f32".to_string()))?;
+        let out_len = outer_size * inner_size;
+        let cfg = cuda_kernels::launch_config(out_len);
+        // SAFETY: `argmin_dim_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len); the kernel guards its index (see .cu).
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(outer_size as u32))
+                .arg(&(dim_size as u32))
+                .arg(&(inner_size as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Elapsed GPU milliseconds between two events recorded by `event_record`
+    /// (synchronizes on `stop` first).
+    #[cfg(feature = "cuda")]
+    pub fn event_elapsed_ms(
+        &self,
+        start: &cudarc::driver::CudaEvent,
+        stop: &cudarc::driver::CudaEvent,
+    ) -> f32 {
+        let _ = stop.synchronize();
+        start.elapsed_ms(stop).unwrap_or(0.0)
+    }
+
+    /// Record a timing event on this stream. It timestamps the point the
+    /// stream's GPU work reaches it — bracket a section with two of these and
+    /// `event_elapsed_ms` to get its REAL GPU time (no LAUNCH_BLOCKING). The
+    /// event is destroyed when dropped.
+    #[cfg(feature = "cuda")]
+    pub fn event_record(&self) -> Result<cudarc::driver::CudaEvent, CudaError> {
+        self.stream
+            .record_event(Some(cudarc::driver::sys::CUevent_flags::CU_EVENT_DEFAULT))
+            .map_err(|e| CudaError::DriverError(e.to_string()))
+    }
+
+    /// True only while the stream is in ACTIVE capture (false once an illegal op has
+    /// INVALIDATED it). Poll before end/instantiate so a corrupt capture is never used.
+    #[cfg(feature = "cuda")]
+    pub fn stream_is_capturing(&self) -> bool {
+        use cudarc::driver::sys;
+        // SAFETY: a status query on this backend's own stream; `status` is a
+        // local the driver fills and is read only on CUDA_SUCCESS.
+        unsafe {
+            let mut status = sys::CUstreamCaptureStatus::CU_STREAM_CAPTURE_STATUS_NONE;
+            let rc = sys::cuStreamIsCapturing(self.stream.cu_stream(), &raw mut status);
+            rc == sys::CUresult::CUDA_SUCCESS
+                && status == sys::CUstreamCaptureStatus::CU_STREAM_CAPTURE_STATUS_ACTIVE
+        }
+    }
+
+    /// Uploads `src` into a fresh device slice (allocates + synchronous copy).
     #[cfg(feature = "cuda")]
     pub fn htod_copy<T: DeviceRepr>(&self, src: &[T]) -> Result<CudaSlice<T>, CudaError> {
+        PROF_H2D_N.fetch_add(1, Ordering::Relaxed);
+        PROF_H2D_B.fetch_add(std::mem::size_of_val(src) as u64, Ordering::Relaxed);
         self.stream.clone_htod(src).map_err(CudaError::from)
     }
 
@@ -352,13 +1016,11 @@ impl CudaBackend {
     /// Copies data from device to host.
     #[cfg(feature = "cuda")]
     pub fn dtoh_copy<T: DeviceRepr>(&self, src: &CudaSlice<T>) -> Result<Vec<T>, CudaError> {
+        PROF_D2H_N.fetch_add(1, Ordering::Relaxed);
+        PROF_D2H_B.fetch_add(std::mem::size_of_val(src) as u64, Ordering::Relaxed);
         self.stream.clone_dtoh(src).map_err(CudaError::from)
     }
 }
-
-// =============================================================================
-// Backend Trait Implementation
-// =============================================================================
 
 #[cfg(feature = "cuda")]
 impl Backend for CudaBackend {
@@ -371,10 +1033,8 @@ impl Backend for CudaBackend {
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
-        // Query actual device properties
         let name = format!("CUDA Device {}", self.device_index);
 
-        // Get memory info via CUDA driver API
         let mem = cudarc::driver::result::mem_get_info().ok();
 
         DeviceCapabilities {
@@ -384,7 +1044,7 @@ impl Backend for CudaBackend {
             supports_f16: true,
             supports_f64: true,
             max_threads_per_block: 1024,
-            compute_capability: None, // Would need to query this
+            compute_capability: None,
         }
     }
 
@@ -435,10 +1095,6 @@ impl Backend for CudaBackend {
 
     fn synchronize(&self) {}
 }
-
-// =============================================================================
-// CUDA Error Type
-// =============================================================================
 
 /// CUDA-specific error type
 #[derive(Debug)]
@@ -491,10 +1147,6 @@ impl From<cudarc::cublas::result::CublasError> for CudaError {
         CudaError::BlasError(format!("{:?}", e))
     }
 }
-
-// =============================================================================
-// CUDA Runtime Functions
-// =============================================================================
 
 /// Returns whether CUDA is available on this system.
 pub fn is_available() -> bool {
@@ -562,24 +1214,11 @@ pub fn get_capabilities(index: usize) -> DeviceCapabilities {
 /// # Arguments
 /// * `_handle` - Stream handle (unused, kept for API compatibility)
 #[cfg(feature = "cuda")]
-pub fn stream_synchronize(_handle: usize) {
-    // AxonML uses CudaDevice's default stream for all operations.
-    // Stream-level synchronization requires a CudaDevice reference.
-    // Use CudaBackend::synchronize() for device-level synchronization.
-    //
-    // Without a global device registry, we cannot synchronize here.
-    // This is intentional: synchronization should be explicit via CudaBackend.
-}
+pub fn stream_synchronize(_handle: usize) {}
 
 /// Synchronize a CUDA stream (no-op without the `cuda` feature).
 #[cfg(not(feature = "cuda"))]
-pub fn stream_synchronize(_handle: usize) {
-    // No-op when CUDA is not available
-}
-
-// =============================================================================
-// cuBLAS Operations
-// =============================================================================
+pub fn stream_synchronize(_handle: usize) {}
 
 #[cfg(feature = "cuda")]
 impl CudaBackend {
@@ -801,6 +1440,121 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// `gemm_strided_batched_f32` with element offsets into `a`, `b` and `c`.
+    ///
+    /// Grouped conv needs a per-group base offset into the column buffer and the output while the
+    /// batch dimension keeps a uniform stride; the shared per-group weight is passed with
+    /// `stride_b = 0` and its own offset.
+    #[allow(clippy::too_many_arguments)]
+    pub fn gemm_strided_batched_f32_at(
+        &self,
+        transa: bool,
+        transb: bool,
+        m: usize,
+        n: usize,
+        k: usize,
+        alpha: f32,
+        a: &CudaSlice<f32>,
+        a_offset: usize,
+        lda: usize,
+        stride_a: i64,
+        b: &CudaSlice<f32>,
+        b_offset: usize,
+        ldb: usize,
+        stride_b: i64,
+        beta: f32,
+        c: &mut CudaSlice<f32>,
+        c_offset: usize,
+        ldc: usize,
+        stride_c: i64,
+        batch_count: usize,
+    ) -> Result<(), CudaError> {
+        use cudarc::cublas::result::sgemm_strided_batched;
+        use cudarc::driver::DevicePtr as _;
+        use cudarc::driver::DevicePtrMut as _;
+
+        let op_a = if transa {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+        let op_b = if transb {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+
+        if a_offset > a.len() || b_offset > b.len() || c_offset > c.len() {
+            return Err(CudaError::BlasError(format!(
+                "gemm_strided_batched_f32_at: offsets {a_offset}/{b_offset}/{c_offset} exceed slices {}/{}/{}",
+                a.len(),
+                b.len(),
+                c.len()
+            )));
+        }
+        // Negative strides never occur here; a negative one would walk below
+        // the offset, which the bounds helper cannot express, so it is refused.
+        let to_stride = |v: i64, what: &str| -> Result<usize, CudaError> {
+            usize::try_from(v).map_err(|_| {
+                CudaError::BlasError(format!(
+                    "gemm_strided_batched_f32_at: negative {what} stride {v}"
+                ))
+            })
+        };
+        Self::check_gemm_bounds(
+            transa,
+            transb,
+            m,
+            n,
+            k,
+            a.len() - a_offset,
+            lda,
+            to_stride(stride_a, "a")?,
+            b.len() - b_offset,
+            ldb,
+            to_stride(stride_b, "b")?,
+            c.len() - c_offset,
+            ldc,
+            to_stride(stride_c, "c")?,
+            batch_count,
+        )?;
+        let (a_devptr, _ga) = a.device_ptr(&self.stream);
+        let (b_devptr, _gb) = b.device_ptr(&self.stream);
+        let (c_devptr, _gc) = c.device_ptr_mut(&self.stream);
+        let esz = std::mem::size_of::<f32>();
+        let a_ptr = (a_devptr + (a_offset * esz) as cudarc::driver::sys::CUdeviceptr) as *const f32;
+        let b_ptr = (b_devptr + (b_offset * esz) as cudarc::driver::sys::CUdeviceptr) as *const f32;
+        let c_ptr = (c_devptr + (c_offset * esz) as cudarc::driver::sys::CUdeviceptr) as *mut f32;
+
+        // SAFETY: check_gemm_bounds ran on the slices' lengths past each
+        // offset with the batch strides, so every batch entry cuBLAS touches
+        // lies inside the three allocations; the slices are borrowed for the
+        // call and the handle's stream is the backend's one.
+        unsafe {
+            sgemm_strided_batched(
+                *self.blas.handle(),
+                op_a,
+                op_b,
+                m as i32,
+                n as i32,
+                k as i32,
+                &raw const alpha,
+                a_ptr,
+                lda as i32,
+                stride_a,
+                b_ptr,
+                ldb as i32,
+                stride_b,
+                &raw const beta,
+                c_ptr,
+                ldc as i32,
+                stride_c,
+                batch_count as i32,
+            )
+            .map_err(CudaError::from)
+        }
+    }
+
     /// Strided batched GEMM using cublasSgemmStridedBatched.
     /// All batch data in contiguous GPU memory with fixed strides between batches.
     /// C[i] = alpha * A[i] @ B[i] + beta * C[i] for i in 0..batch_count
@@ -924,6 +1678,428 @@ impl CudaBackend {
                 .arg(b)
                 .arg(dst)
                 .arg(&(len as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Per-output-channel LSQ fake-quant forward (GPU, QAT). Folded from vendored AxonML.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fake_quant_pc_fwd_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        scale: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        qn: f32,
+        qp: f32,
+        ch: u32,
+        stride: u32,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        assert!(
+            stride > 0 && scale.len() >= ch as usize && input.len() >= n && output.len() >= n,
+            "fake_quant_pc_fwd_f32: n={n} ch={ch} stride={stride} vs input {} / scale {} / output {}",
+            input.len(),
+            scale.len(),
+            output.len()
+        );
+        let func = self
+            .kernels
+            .get("fake_quant_pc_fwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("fake_quant_pc_fwd_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `fake_quant_pc_fwd_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len); the kernel guards its index (see .cu).
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(scale)
+                .arg(output)
+                .arg(&qn)
+                .arg(&qp)
+                .arg(&ch)
+                .arg(&stride)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Per-output-channel LSQ fake-quant backward (GPU): STE grad_x + per-element step-size contribution.
+    // ── multi-tensor training kernels: one launch over a pointer table (see train_fused.cu) ──
+    pub fn mt_reduce_f32(
+        &self,
+        name: &str,
+        ptrs: &CudaSlice<u64>,
+        lens: &CudaSlice<u32>,
+        bt: &CudaSlice<u32>,
+        bo: &CudaSlice<u32>,
+        out: &mut CudaSlice<f32>,
+        n_blocks: usize,
+    ) -> Result<(), CudaError> {
+        // The per-block tables come from `MtPlan::new` (cuda_ops), which builds
+        // them from the held tensors' own lengths and keeps those tensors alive.
+        assert!(
+            bt.len() >= n_blocks
+                && bo.len() >= n_blocks
+                && lens.len() == ptrs.len()
+                && out.len()
+                    >= if name == "mt_abssum_f32" {
+                        lens.len()
+                    } else {
+                        1
+                    },
+            "mt_reduce_f32({name}): tables bt {} bo {} ptrs {} lens {} out {} for {n_blocks} blocks",
+            bt.len(),
+            bo.len(),
+            ptrs.len(),
+            lens.len(),
+            out.len()
+        );
+        // Only the two reduce kernels share this 5-parameter shape; naming
+        // them here keeps the launch statically checkable.
+        let func = match name {
+            "mt_sumsq_f32" => self.kernels.get("mt_sumsq_f32"),
+            "mt_abssum_f32" => self.kernels.get("mt_abssum_f32"),
+            other => return Err(CudaError::KernelNotFound(other.to_string())),
+        }
+        .ok_or_else(|| CudaError::KernelNotFound(name.to_string()))?;
+        let cfg = LaunchConfig {
+            grid_dim: (n_blocks as u32, 1, 1),
+            block_dim: (cuda_kernels::BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: 4 * (cuda_kernels::BLOCK_SIZE / 32),
+        };
+        // SAFETY: `mt_abssum_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `out`; each arrives as &mut.
+        // `ptrs` is a read-only table of device pointers; the kernel
+        // writes through it to buffers the caller owns and passed by address, which
+        // are released only after this stream position (single stream).
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: (n_blocks as u32, 1, 1); one block per row/tensor, the kernel loops to the length
+        // argument it is given and never past it.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(ptrs)
+                .arg(lens)
+                .arg(bt)
+                .arg(bo)
+                .arg(out)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Multi-tensor ternary STE forward over an `MtPlan`: every projection in one launch.
+    pub fn mt_ternarize_f32(
+        &self,
+        src: &CudaSlice<u64>,
+        dst: &CudaSlice<u64>,
+        lens: &CudaSlice<u32>,
+        bt: &CudaSlice<u32>,
+        bo: &CudaSlice<u32>,
+        abssums: &CudaSlice<f32>,
+        n_blocks: usize,
+    ) -> Result<(), CudaError> {
+        // The per-block tables come from `MtPlan::new` (cuda_ops), which builds
+        // them from the held tensors' own lengths and keeps those tensors alive.
+        assert!(
+            bt.len() >= n_blocks
+                && bo.len() >= n_blocks
+                && src.len() == dst.len()
+                && lens.len() == src.len()
+                && abssums.len() >= lens.len(),
+            "mt_ternarize_f32: tables bt {} bo {} src {} dst {} lens {} abssums {} for {n_blocks} blocks",
+            bt.len(),
+            bo.len(),
+            src.len(),
+            dst.len(),
+            lens.len(),
+            abssums.len()
+        );
+        let func = self
+            .kernels
+            .get("mt_ternarize_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("mt_ternarize_f32".to_string()))?;
+        let cfg = LaunchConfig {
+            grid_dim: (n_blocks as u32, 1, 1),
+            block_dim: (cuda_kernels::BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        // SAFETY: `mt_ternarize_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // `src`, `dst` is a read-only table of device pointers; the kernel
+        // writes through it to buffers the caller owns and passed by address, which
+        // are released only after this stream position (single stream).
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: (n_blocks as u32, 1, 1); one block per row/tensor, the kernel loops to the length
+        // argument it is given and never past it.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(lens)
+                .arg(bt)
+                .arg(bo)
+                .arg(abssums)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Multi-tensor in-place scale (gradient clipping) over an `MtPlan`, one launch.
+    pub fn mt_scale_f32(
+        &self,
+        ptrs: &CudaSlice<u64>,
+        lens: &CudaSlice<u32>,
+        bt: &CudaSlice<u32>,
+        bo: &CudaSlice<u32>,
+        factor: &CudaSlice<f32>,
+        n_blocks: usize,
+    ) -> Result<(), CudaError> {
+        // The per-block tables come from `MtPlan::new` (cuda_ops), which builds
+        // them from the held tensors' own lengths and keeps those tensors alive.
+        assert!(
+            bt.len() >= n_blocks
+                && bo.len() >= n_blocks
+                && lens.len() == ptrs.len()
+                && !factor.is_empty(),
+            "mt_scale_f32: tables bt {} bo {} ptrs {} lens {} factor {} for {n_blocks} blocks",
+            bt.len(),
+            bo.len(),
+            ptrs.len(),
+            lens.len(),
+            factor.len()
+        );
+        let func = self
+            .kernels
+            .get("mt_scale_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("mt_scale_f32".to_string()))?;
+        let cfg = LaunchConfig {
+            grid_dim: (n_blocks as u32, 1, 1),
+            block_dim: (cuda_kernels::BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        // SAFETY: `mt_scale_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // `ptrs` is a read-only table of device pointers; the kernel
+        // writes through it to buffers the caller owns and passed by address, which
+        // are released only after this stream position (single stream).
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: (n_blocks as u32, 1, 1); one block per row/tensor, the kernel loops to the length
+        // argument it is given and never past it.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(ptrs)
+                .arg(lens)
+                .arg(bt)
+                .arg(bo)
+                .arg(factor)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    // ── trainable RMSNorm scale gradient (see train_fused.cu): per-row 1/rms, then column partials over row slices ──
+    /// Per-row `1/rms` of an `m` x `n` matrix, one block per row.
+    pub fn rms_inv_rows_f32(
+        &self,
+        inv_rms: &mut CudaSlice<f32>,
+        x: &CudaSlice<f32>,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> Result<(), CudaError> {
+        assert!(
+            x.len() >= m * n && inv_rms.len() >= m,
+            "rms_inv_rows_f32: x {} / inv_rms {} too small for {m}x{n}",
+            x.len(),
+            inv_rms.len()
+        );
+        let func = self
+            .kernels
+            .get("rms_inv_rows_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("rms_inv_rows_f32".to_string()))?;
+        let cfg = LaunchConfig {
+            grid_dim: (m as u32, 1, 1),
+            block_dim: (cuda_kernels::BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: 4 * (cuda_kernels::BLOCK_SIZE / 32),
+        };
+        // SAFETY: `rms_inv_rows_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `inv_rms`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: (m as u32, 1, 1); one block per row/tensor, the kernel loops to the length
+        // argument it is given and never past it.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(inv_rms)
+                .arg(x)
+                .arg(&(n as u32))
+                .arg(&eps)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Partial `dL/dw` sums for a trainable RMSNorm scale, `splits` row bands per column.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rms_norm_bwd_weight_partial_f32(
+        &self,
+        partial: &mut CudaSlice<f32>,
+        x: &CudaSlice<f32>,
+        grad_out: &CudaSlice<f32>,
+        inv_rms: &CudaSlice<f32>,
+        m: usize,
+        n: usize,
+        rows_per_split: usize,
+        splits: usize,
+    ) -> Result<(), CudaError> {
+        assert!(
+            x.len() >= m * n
+                && grad_out.len() >= m * n
+                && inv_rms.len() >= m
+                && partial.len() >= splits * n
+                && rows_per_split * splits >= m,
+            "rms_norm_bwd_weight_partial_f32: x {} grad_out {} inv_rms {} partial {} for m={m} n={n} splits={splits} rows_per_split={rows_per_split}",
+            x.len(),
+            grad_out.len(),
+            inv_rms.len(),
+            partial.len()
+        );
+        let func = self
+            .kernels
+            .get("rms_norm_bwd_weight_partial_f32")
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("rms_norm_bwd_weight_partial_f32".to_string())
+            })?;
+        let col_blocks = (n as u32).div_ceil(cuda_kernels::BLOCK_SIZE);
+        let cfg = LaunchConfig {
+            grid_dim: (col_blocks, splits as u32, 1),
+            block_dim: (cuda_kernels::BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        // SAFETY: `rms_norm_bwd_weight_partial_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `partial`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: (col_blocks, splits as u32, 1); one block per row/tensor, the kernel loops to the length
+        // argument it is given and never past it.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(partial)
+                .arg(x)
+                .arg(grad_out)
+                .arg(inv_rms)
+                .arg(&(m as u32))
+                .arg(&(n as u32))
+                .arg(&(rows_per_split as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Upload a host table for the multi-tensor kernels.
+    pub fn upload_u64(&self, v: &[u64]) -> Result<CudaSlice<u64>, CudaError> {
+        self.stream
+            .clone_htod(v)
+            .map_err(|e| CudaError::DriverError(e.to_string()))
+    }
+
+    /// Uploads a `u32` table (multi-tensor plan metadata).
+    pub fn upload_u32(&self, v: &[u32]) -> Result<CudaSlice<u32>, CudaError> {
+        self.stream
+            .clone_htod(v)
+            .map_err(|e| CudaError::DriverError(e.to_string()))
+    }
+
+    /// Per-output-channel LSQ fake-quant backward (grad_x and the per-element scale contribution).
+    #[allow(clippy::too_many_arguments)]
+    pub fn fake_quant_pc_bwd_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        scale: &CudaSlice<f32>,
+        grad_output: &CudaSlice<f32>,
+        grad_x: &mut CudaSlice<f32>,
+        gs_contrib: &mut CudaSlice<f32>,
+        qn: f32,
+        qp: f32,
+        ch: u32,
+        stride: u32,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        assert!(
+            stride > 0
+                && scale.len() >= ch as usize
+                && input.len() >= n
+                && grad_output.len() >= n
+                && grad_x.len() >= n
+                && gs_contrib.len() >= n,
+            "fake_quant_pc_bwd_f32: n={n} ch={ch} stride={stride} vs input {} / scale {} / grad_output {} / grad_x {} / gs_contrib {}",
+            input.len(),
+            scale.len(),
+            grad_output.len(),
+            grad_x.len(),
+            gs_contrib.len()
+        );
+        let func = self
+            .kernels
+            .get("fake_quant_pc_bwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("fake_quant_pc_bwd_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `fake_quant_pc_bwd_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len); the kernel guards its index (see .cu).
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(scale)
+                .arg(grad_output)
+                .arg(grad_x)
+                .arg(gs_contrib)
+                .arg(&qn)
+                .arg(&qp)
+                .arg(&ch)
+                .arg(&stride)
+                .arg(&(n as u32))
                 .launch(cfg)
                 .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
@@ -2510,7 +3686,7 @@ impl CudaBackend {
     /// Raw-i8 ternary GEMV (m=1 decode/training-decode).
     pub fn ternary_gemv_f32(
         &self,
-        w: &CudaSlice<u8>, // i8 weights, reinterpreted on kernel side
+        w: &CudaSlice<u8>,
         a: &CudaSlice<f32>,
         c: &mut CudaSlice<f32>,
         scale: f32,
@@ -2938,10 +4114,6 @@ impl CudaBackend {
         Ok(())
     }
 
-    // =========================================================================
-    // Broadcast Element-wise Operations
-    // =========================================================================
-
     /// Broadcast addition: out[i] = a[i] + b[i % b_len]
     /// `a` is the larger tensor (n elements), `b` is broadcast (b_len elements).
     pub fn broadcast_add_f32(
@@ -3275,15 +4447,15 @@ impl CudaBackend {
     ) -> Result<(), CudaError> {
         let func = self
             .kernels
-            .get("pow_f32")
-            .ok_or_else(|| CudaError::KernelNotFound("pow_f32".to_string()))?;
+            .get("pow_f32_c99")
+            .ok_or_else(|| CudaError::KernelNotFound("pow_f32_c99".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
-        // SAFETY: `pow_f32`. Argument count and pointer-vs-scalar width are
+        // SAFETY: `pow_f32_c99`. Argument count and pointer-vs-scalar width are
         // verified against the PTX, and write-vs-&mut against the .cu source, by
         // tools/check_launches.py on every CI run.
-        // The kernel writes `output`; each arrives as &mut. Event
-        // tracking is disabled on this context (see `new`), so ordering comes from
-        // the backend's single stream: every launch is serialised behind the last.
+        // The kernel writes `dst`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
         // Grid: launch_config(len) covers exactly `len` elements and the kernel
         // guards the thread index against it (confirmed in the .cu source), so no
         // thread touches past the slices' length. check_launches.py enforces this.
@@ -3311,15 +4483,15 @@ impl CudaBackend {
     ) -> Result<(), CudaError> {
         let func = self
             .kernels
-            .get("pow_scalar_f32")
-            .ok_or_else(|| CudaError::KernelNotFound("pow_scalar_f32".to_string()))?;
+            .get("pow_scalar_f32_c99")
+            .ok_or_else(|| CudaError::KernelNotFound("pow_scalar_f32_c99".to_string()))?;
         let cfg = cuda_kernels::launch_config(len);
-        // SAFETY: `pow_scalar_f32`. Argument count and pointer-vs-scalar width are
+        // SAFETY: `pow_scalar_f32_c99`. Argument count and pointer-vs-scalar width are
         // verified against the PTX, and write-vs-&mut against the .cu source, by
         // tools/check_launches.py on every CI run.
-        // The kernel writes `output`; each arrives as &mut. Event
-        // tracking is disabled on this context (see `new`), so ordering comes from
-        // the backend's single stream: every launch is serialised behind the last.
+        // The kernel writes `dst`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
         // Grid: launch_config(len) covers exactly `len` elements and the kernel
         // guards the thread index against it (confirmed in the .cu source), so no
         // thread touches past the slices' length. check_launches.py enforces this.
@@ -3892,6 +5064,17 @@ impl CudaBackend {
         eps: f32,
         num_rows: usize,
     ) -> Result<(), CudaError> {
+        assert!(
+            d_input.len() >= num_rows * norm_size
+                && grad_output.len() >= num_rows * norm_size
+                && input.len() >= num_rows * norm_size
+                && gamma.len() >= norm_size,
+            "layer_norm_backward_dinput_f32: d_input {} grad_output {} input {} gamma {} for {num_rows}x{norm_size}",
+            d_input.len(),
+            grad_output.len(),
+            input.len(),
+            gamma.len()
+        );
         let func = self
             .kernels
             .get("layer_norm_backward_dinput_f32")
@@ -3901,12 +5084,15 @@ impl CudaBackend {
         let cfg = LaunchConfig {
             grid_dim: (num_rows as u32, 1, 1),
             block_dim: (BLOCK_SIZE, 1, 1),
-            shared_mem_bytes: BLOCK_SIZE * 4 * 2, // two shared arrays
+            shared_mem_bytes: BLOCK_SIZE * 4 * 2,
         };
         // SAFETY: `layer_norm_backward_dinput_f32`. Argument count and pointer-vs-scalar width are
-        // verified against the PTX by tools/check_launches.py on every CI run. This
-        // kernel is inline PTX with no .cu, so which arguments it writes is read
-        // from the PTX body, not from a const qualifier.
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: (num_rows as u32, 1, 1); one block per row/tensor, the kernel loops to the length
+        // argument it is given and never past it.
         unsafe {
             self.stream
                 .launch_builder(func)
@@ -4280,14 +5466,50 @@ impl CudaBackend {
         }
         Ok(())
     }
-}
 
-// =============================================================================
-// Attention Mask Expansion GPU Operations
-// =============================================================================
+    /// Stream-ordered device-to-device copy on `self.stream` (async), unlike `memcpy_dtod_f32` which
+    /// runs `memcpy_dtod_sync` on the NULL stream. Use this when the source is written by a compute-stream
+    /// kernel (e.g. a gemm) and the copy must be ordered AFTER it — the null-stream sync copy does NOT wait
+    /// for a non-blocking compute stream, so it reads STALE data once the pool is dirtied.
+    pub fn memcpy_dtod_f32_stream(
+        &self,
+        dst: &mut CudaSlice<f32>,
+        dst_offset: usize,
+        src: &CudaSlice<f32>,
+        src_offset: usize,
+        count: usize,
+    ) -> Result<(), CudaError> {
+        use cudarc::driver::DevicePtr as _;
+        use cudarc::driver::DevicePtrMut as _;
+        let fits = |off: usize, len: usize| off.checked_add(count).is_some_and(|e| e <= len);
+        assert!(
+            fits(src_offset, src.len()) && fits(dst_offset, dst.len()),
+            "memcpy_dtod_f32_stream: {count} at src {src_offset} (len {}) / dst {dst_offset} (len {}) out of bounds",
+            src.len(),
+            dst.len()
+        );
+        let (src_ptr, _guard_s) = src.device_ptr(&self.stream);
+        let src_ptr =
+            src_ptr + (src_offset * std::mem::size_of::<f32>()) as cudarc::driver::sys::CUdeviceptr;
+        let (dst_ptr, _guard_d) = dst.device_ptr_mut(&self.stream);
+        let dst_ptr =
+            dst_ptr + (dst_offset * std::mem::size_of::<f32>()) as cudarc::driver::sys::CUdeviceptr;
+        let size = count * std::mem::size_of::<f32>();
+        // SAFETY: `offset + count` fits in both slices (asserted), the
+        // borrows outlive the call, and the copy is queued on the backend's
+        // single stream behind everything before it.
+        unsafe {
+            cudarc::driver::result::memcpy_dtod_async(
+                dst_ptr,
+                src_ptr,
+                size,
+                self.stream.cu_stream(),
+            )
+            .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
 
-#[cfg(feature = "cuda")]
-impl CudaBackend {
     /// Expand causal mask [T, S] → [B, H, T, S] with 0→-1e9 conversion, entirely on GPU.
     pub fn mask_expand_causal_f32(
         &self,
@@ -4361,14 +5583,7 @@ impl CudaBackend {
         }
         Ok(())
     }
-}
 
-// =============================================================================
-// Strided Gather (GPU-native contiguous)
-// =============================================================================
-
-#[cfg(feature = "cuda")]
-impl CudaBackend {
     /// Gather elements from a strided tensor layout into contiguous output on GPU.
     /// Replaces the CPU index computation in contiguous_gpu().
     pub fn strided_gather_f32(
@@ -4410,10 +5625,6 @@ impl CudaBackend {
         }
         Ok(())
     }
-
-    // =========================================================================
-    // Fused LSTM Gate Kernel
-    // =========================================================================
 
     /// Fused LSTM gate computation on GPU.
     ///
@@ -4463,10 +5674,6 @@ impl CudaBackend {
         }
         Ok(())
     }
-
-    // =========================================================================
-    // Fused LSTM Gate Backward Kernel
-    // =========================================================================
 
     /// Fused LSTM gate backward computation on GPU.
     ///
@@ -4525,10 +5732,6 @@ impl CudaBackend {
         Ok(())
     }
 
-    // =========================================================================
-    // Fused GRU Gate Kernel
-    // =========================================================================
-
     /// Fused GRU gate computation on GPU.
     ///
     /// - `gates_ih`: [batch, 3*hidden] = x@W_ih^T + b_ih
@@ -4573,10 +5776,6 @@ impl CudaBackend {
         }
         Ok(())
     }
-
-    // =========================================================================
-    // Fused GRU Gate Backward Kernel
-    // =========================================================================
 
     /// Fused GRU gate backward computation on GPU.
     ///
@@ -4634,10 +5833,6 @@ impl CudaBackend {
         }
         Ok(())
     }
-
-    // =========================================================================
-    // Fused BatchNorm Forward Kernels
-    // =========================================================================
 
     /// BatchNorm pass 1: compute per-channel sum and sum_sq via atomics.
     pub fn batchnorm_stats_f32(
@@ -4727,14 +5922,128 @@ impl CudaBackend {
         }
         Ok(())
     }
-}
 
-// =============================================================================
-// Fused Scaled Dot-Product Attention
-// =============================================================================
+    /// BatchNorm2d backward pass 1: per-channel `sum_grad` / `sum_grad_xhat`.
+    /// `sum_grad` and `sum_grad_xhat` MUST be zero-initialized before calling.
+    pub fn batchnorm_bwd_reduce_f32(
+        &self,
+        grad: &CudaSlice<f32>,
+        x: &CudaSlice<f32>,
+        mean: &CudaSlice<f32>,
+        var: &CudaSlice<f32>,
+        sum_grad: &mut CudaSlice<f32>,
+        sum_grad_xhat: &mut CudaSlice<f32>,
+        eps: f32,
+        n: usize,
+        c: usize,
+        spatial: usize,
+    ) -> Result<(), CudaError> {
+        assert!(
+            grad.len() >= n * c * spatial
+                && x.len() >= n * c * spatial
+                && mean.len() >= c
+                && var.len() >= c
+                && sum_grad.len() >= c
+                && sum_grad_xhat.len() >= c,
+            "batchnorm_bwd_reduce_f32: grad {} x {} mean {} var {} sum_grad {} sum_grad_xhat {} for {n}x{c}x{spatial}",
+            grad.len(),
+            x.len(),
+            mean.len(),
+            var.len(),
+            sum_grad.len(),
+            sum_grad_xhat.len()
+        );
+        let func = self
+            .kernels
+            .get("batchnorm_bwd_reduce_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("batchnorm_bwd_reduce_f32".to_string()))?;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (c as u32, 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        // SAFETY: `batchnorm_bwd_reduce_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `sum_grad`, `sum_grad_xhat`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: (c as u32, 1, 1); one block per row/tensor, the kernel loops to the length
+        // argument it is given and never past it.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad)
+                .arg(x)
+                .arg(mean)
+                .arg(var)
+                .arg(sum_grad)
+                .arg(sum_grad_xhat)
+                .arg(&eps)
+                .arg(&(n as u32))
+                .arg(&(c as u32))
+                .arg(&(spatial as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
 
-#[cfg(feature = "cuda")]
-impl CudaBackend {
+    /// BatchNorm2d backward pass 2: elementwise `grad_input`.
+    pub fn batchnorm_bwd_input_f32(
+        &self,
+        grad: &CudaSlice<f32>,
+        x: &CudaSlice<f32>,
+        mean: &CudaSlice<f32>,
+        var: &CudaSlice<f32>,
+        gamma: &CudaSlice<f32>,
+        sum_grad: &CudaSlice<f32>,
+        sum_grad_xhat: &CudaSlice<f32>,
+        grad_input: &mut CudaSlice<f32>,
+        eps: f32,
+        n: usize,
+        c: usize,
+        spatial: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("batchnorm_bwd_input_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("batchnorm_bwd_input_f32".to_string()))?;
+        let total = n * c * spatial;
+        let cfg = cuda_kernels::launch_config(total);
+        // SAFETY: `batchnorm_bwd_input_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `grad_input`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad)
+                .arg(x)
+                .arg(mean)
+                .arg(var)
+                .arg(gamma)
+                .arg(sum_grad)
+                .arg(sum_grad_xhat)
+                .arg(grad_input)
+                .arg(&eps)
+                .arg(&(n as u32))
+                .arg(&(c as u32))
+                .arg(&(spatial as u32))
+                .arg(&(total as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Fused attention forward: Q @ K^T * scale -> softmax -> @ V
     /// without materializing the full N*N attention matrix.
     ///
@@ -5047,18 +6356,7 @@ impl CudaBackend {
         }
         Ok(())
     }
-}
 
-// =============================================================================
-// Transformer Per-Layer Ops (rms_norm, RoPE, SwiGLU, ReLU² gate)
-//
-// Decode-step launchers for the kernels in `transformer_ops.cu`. Used by
-// `Tensor::rms_norm` / `apply_rope_split_halves` / `swiglu` / `relu2_gate`
-// to keep activations on GPU through the whole layer in axonml-serve.
-// =============================================================================
-
-#[cfg(feature = "cuda")]
-impl CudaBackend {
     /// RMSNorm with a per-element weight scale.
     /// `out[i] = x[i] * weight[i] / sqrt(mean(x²) + eps)`.
     ///
@@ -5081,7 +6379,7 @@ impl CudaBackend {
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (1, 1, 1),
             block_dim: (block, 1, 1),
-            shared_mem_bytes: n_warps * 4, // one f32 per warp
+            shared_mem_bytes: n_warps * 4,
         };
         // SAFETY: `rms_norm_f32`. Argument count and pointer-vs-scalar width are
         // verified against the PTX, and write-vs-&mut against the .cu source, by
@@ -5129,7 +6427,7 @@ impl CudaBackend {
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (1, 1, 1),
             block_dim: (block, 1, 1),
-            shared_mem_bytes: n_warps * 4 * 2, // mean + var
+            shared_mem_bytes: n_warps * 4 * 2,
         };
         // SAFETY: `layer_norm_tokenwise_f32`. Argument count and pointer-vs-scalar width are
         // verified against the PTX, and write-vs-&mut against the .cu source, by
@@ -5327,7 +6625,7 @@ impl CudaBackend {
             .get("rope_split_halves_f32")
             .ok_or_else(|| CudaError::KernelNotFound("rope_split_halves_f32".to_string()))?;
         let half = (head_dim / 2) as u32;
-        let block: u32 = half.min(128); // small enough to fit; pairs are independent
+        let block: u32 = half.min(128);
         let grid_y = half.div_ceil(block);
         let cfg = cudarc::driver::LaunchConfig {
             grid_dim: (n_heads as u32, grid_y, 1),
@@ -5992,14 +7290,7 @@ impl CudaBackend {
                 .map_err(|e| CudaError::DriverError(e.to_string()))
         }
     }
-}
 
-// =============================================================================
-// Fused Attention Backward (recomputation-based, memory-efficient)
-// =============================================================================
-
-#[cfg(feature = "cuda")]
-impl CudaBackend {
     /// Fused attention backward: recomputes attention weights from Q, K, O
     /// and computes grad_Q, grad_K, grad_V without materializing the N*N matrix.
     ///
@@ -6065,14 +7356,7 @@ impl CudaBackend {
         }
         Ok(())
     }
-}
 
-// =============================================================================
-// Conv2d GPU Operations (im2col + GEMM)
-// =============================================================================
-
-#[cfg(feature = "cuda")]
-impl CudaBackend {
     /// Launch the GPU im2col kernel.
     ///
     /// Unfolds one batch element's input patches into a column matrix.
@@ -6106,6 +7390,787 @@ impl CudaBackend {
                 .arg(col)
                 .arg(params)
                 .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Batched im2col — whole batch in ONE launch.
+    ///
+    /// `input` is `[batch, C_in, H, W]`, `col` is `[batch, C_in*kH*kW, oH*oW]` (per-batch blocks are
+    /// contiguous with stride `col_n`, identical to the single-image layout, so a strided-batched
+    /// GEMM addresses them directly). `params` is `u32[11]` = the single-image `u32[10]` plus `C_in`.
+    /// `n` = `batch * C_in*kH*kW*oH*oW`.
+    pub fn im2col_batched_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        col: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("im2col_batched_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("im2col_batched_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `im2col_batched_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `col`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(col)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Direct depthwise conv forward (groups == C_in == C_out). `params` is `u32[12]` =
+    /// `{H, W, kH, kW, pH, pW, sH, sW, oH, oW, C, batch}`. Bias is applied separately.
+    /// `n` = `batch * C * oH * oW`.
+    pub fn depthwise_fwd_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        weight: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("depthwise_fwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("depthwise_fwd_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `depthwise_fwd_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `output`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(weight)
+                .arg(output)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Direct depthwise grad_input. Gathers, so `grad_in` needs no pre-zeroing.
+    /// `n` = `batch * C * H * W`.
+    pub fn depthwise_grad_input_f32(
+        &self,
+        grad_out: &CudaSlice<f32>,
+        weight: &CudaSlice<f32>,
+        grad_in: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("depthwise_grad_input_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("depthwise_grad_input_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `depthwise_grad_input_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `grad_in`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_out)
+                .arg(weight)
+                .arg(grad_in)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Direct depthwise grad_weight, ACCUMULATING into `grad_w`. `n` = `C * kH * kW`.
+    pub fn depthwise_grad_weight_f32(
+        &self,
+        grad_out: &CudaSlice<f32>,
+        input: &CudaSlice<f32>,
+        grad_w: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("depthwise_grad_weight_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("depthwise_grad_weight_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `depthwise_grad_weight_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `grad_w`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_out)
+                .arg(input)
+                .arg(grad_w)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Grouped/depthwise im2col for the whole batch AND all groups in ONE launch.
+    /// `col` is laid out group-major: `[groups][batch][icg*kH*kW][oH*oW]`.
+    /// `params` is `u32[13]` = the single-image `u32[10]` plus `icg`, `C_in_total`, `batch`.
+    pub fn im2col_group_batched_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        col: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("im2col_group_batched_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("im2col_group_batched_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `im2col_group_batched_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `col`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(col)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Fused elementwise-mul backward: grad_lhs = grad_out*rhs, grad_rhs = grad_out*lhs, one launch.
+    pub fn mul_backward_f32(
+        &self,
+        grad_out: &CudaSlice<f32>,
+        lhs: &CudaSlice<f32>,
+        rhs: &CudaSlice<f32>,
+        grad_lhs: &mut CudaSlice<f32>,
+        grad_rhs: &mut CudaSlice<f32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("mul_backward_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("mul_backward_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `mul_backward_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `grad_lhs`, `grad_rhs`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_out)
+                .arg(lhs)
+                .arg(rhs)
+                .arg(grad_lhs)
+                .arg(grad_rhs)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// ConvTranspose2d backward wrt input (thread per input element). params = u32[13].
+    pub fn convtranspose2d_bwd_input_f32(
+        &self,
+        grad_out: &CudaSlice<f32>,
+        weight: &CudaSlice<f32>,
+        grad_in: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("convtranspose2d_bwd_input_f32")
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("convtranspose2d_bwd_input_f32".to_string())
+            })?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `convtranspose2d_bwd_input_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `grad_in`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_out)
+                .arg(weight)
+                .arg(grad_in)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// ConvTranspose2d backward wrt weight (thread per weight element). params = u32[13].
+    pub fn convtranspose2d_bwd_weight_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        grad_out: &CudaSlice<f32>,
+        grad_w: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("convtranspose2d_bwd_weight_f32")
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("convtranspose2d_bwd_weight_f32".to_string())
+            })?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `convtranspose2d_bwd_weight_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `grad_w`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(grad_out)
+                .arg(grad_w)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// GroupNorm backward pass 1: one block per (batch, group) -> stats[batch*groups][4]
+    /// {mean, std_inv, sum_dy, sum_dy_xhat}.
+    #[allow(clippy::too_many_arguments)]
+    pub fn groupnorm_bwd_stats_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        grad_out: &CudaSlice<f32>,
+        weight: &CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        dims: (usize, usize, usize, usize),
+        eps: f32,
+        stats: &mut CudaSlice<f32>,
+        num_bg: usize,
+    ) -> Result<(), CudaError> {
+        // `dims` = (batch, channels, spatial, groups) is what `params` holds on
+        // the device; the caller uploads both from the same values, and this
+        // bounds every slice by them on the host.
+        let (batch, channels, spatial, groups) = dims;
+        assert!(
+            groups > 0
+                && channels % groups == 0
+                && num_bg == batch * groups
+                && params.len() >= 4
+                && input.len() >= batch * channels * spatial
+                && grad_out.len() >= batch * channels * spatial
+                && weight.len() >= channels
+                && stats.len() >= num_bg * 4,
+            "groupnorm_bwd_stats_f32: input {} grad_out {} weight {} params {} stats {} for dims {dims:?}, num_bg {num_bg}",
+            input.len(),
+            grad_out.len(),
+            weight.len(),
+            params.len(),
+            stats.len()
+        );
+        let func = self
+            .kernels
+            .get("groupnorm_bwd_stats_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("groupnorm_bwd_stats_f32".to_string()))?;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (num_bg as u32, 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        // SAFETY: `groupnorm_bwd_stats_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `stats`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: (num_bg as u32, 1, 1); one block per row/tensor, the kernel loops to the length
+        // argument it is given and never past it.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(grad_out)
+                .arg(weight)
+                .arg(params)
+                .arg(&eps)
+                .arg(stats)
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// GroupNorm backward pass 2: one thread per element -> d_input, atomicAdd d_weight/d_bias.
+    /// d_weight and d_bias MUST be pre-zeroed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn groupnorm_bwd_apply_f32(
+        &self,
+        input: &CudaSlice<f32>,
+        grad_out: &CudaSlice<f32>,
+        weight: &CudaSlice<f32>,
+        stats: &CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        d_input: &mut CudaSlice<f32>,
+        d_weight: &mut CudaSlice<f32>,
+        d_bias: &mut CudaSlice<f32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("groupnorm_bwd_apply_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("groupnorm_bwd_apply_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `groupnorm_bwd_apply_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `d_input`, `d_weight`, `d_bias`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(input)
+                .arg(grad_out)
+                .arg(weight)
+                .arg(stats)
+                .arg(params)
+                .arg(d_input)
+                .arg(d_weight)
+                .arg(d_bias)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// AdaptiveAvgPool2d backward: one thread per input element gathers `grad_out/count` from its
+    /// owning window. `params` = u32[6] {batch, channels, in_h, in_w, out_h, out_w}, `n` = input numel.
+    pub fn adaptive_avgpool2d_bwd_f32(
+        &self,
+        grad_out: &CudaSlice<f32>,
+        grad_in: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("adaptive_avgpool2d_bwd_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("adaptive_avgpool2d_bwd_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `adaptive_avgpool2d_bwd_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `grad_in`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_out)
+                .arg(grad_in)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// `grad_in[idx[o]] += grad_out[o]` for all outputs, in one launch. `grad_in` must be pre-zeroed.
+    /// Backs index-scatter gradients (pooling backward). `n` = number of outputs.
+    pub fn scatter_add_u32_f32(
+        &self,
+        grad_out: &CudaSlice<f32>,
+        idx: &CudaSlice<u32>,
+        grad_in: &mut CudaSlice<f32>,
+        in_numel: usize,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("scatter_add_u32_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("scatter_add_u32_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `scatter_add_u32_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `grad_in`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_out)
+                .arg(idx)
+                .arg(grad_in)
+                .arg(&(in_numel as u32))
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// `dst[o*block_dst + dst_offset + i] = src[o*block_src + i]` in ONE launch.
+    /// Replaces a per-outer-block `memcpy_dtod` loop (see `narrow_backward_cuda`).
+    /// `n` = `outer * block_src`.
+    pub fn strided_block_copy_f32(
+        &self,
+        src: &CudaSlice<f32>,
+        dst: &mut CudaSlice<f32>,
+        block_src: usize,
+        block_dst: usize,
+        dst_offset: usize,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("strided_block_copy_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("strided_block_copy_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `strided_block_copy_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `dst`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(src)
+                .arg(dst)
+                .arg(&(block_src as u32))
+                .arg(&(block_dst as u32))
+                .arg(&(dst_offset as u32))
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Grouped/depthwise col2im for the whole batch AND all groups in ONE launch.
+    /// `output` MUST be zero-initialised. Layout mirrors `im2col_group_batched_f32`.
+    pub fn col2im_group_batched_f32(
+        &self,
+        col: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("col2im_group_batched_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("col2im_group_batched_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `col2im_group_batched_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `output`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(col)
+                .arg(output)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// `sum_batch_f32` writing at an element offset in `out` — grouped grad_weight folds each
+    /// group's per-batch partials into that group's slice of the full weight gradient.
+    pub fn sum_batch_at_f32(
+        &self,
+        partial: &CudaSlice<f32>,
+        out: &mut CudaSlice<f32>,
+        out_offset: usize,
+        len: usize,
+        batch: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("sum_batch_at_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("sum_batch_at_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        // SAFETY: `sum_batch_at_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `out`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(partial)
+                .arg(out)
+                .arg(&(out_offset as u32))
+                .arg(&(len as u32))
+                .arg(&(batch as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Batched col2im — whole batch in ONE launch. `output` MUST be zero-initialised.
+    pub fn col2im_batched_f32(
+        &self,
+        col: &CudaSlice<f32>,
+        output: &mut CudaSlice<f32>,
+        params: &CudaSlice<u32>,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("col2im_batched_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("col2im_batched_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `col2im_batched_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `output`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(col)
+                .arg(output)
+                .arg(params)
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Reduce per-batch partials into an accumulator: `out[i] += sum_b partial[b*len + i]`.
+    /// A strided-batched GEMM must write disjoint `C` blocks, so grad_weight emits per-batch
+    /// partials and folds them here — preserving the original `beta = 1.0` accumulate semantics.
+    pub fn sum_batch_f32(
+        &self,
+        partial: &CudaSlice<f32>,
+        out: &mut CudaSlice<f32>,
+        len: usize,
+        batch: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("sum_batch_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("sum_batch_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(len);
+        // SAFETY: `sum_batch_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `out`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(partial)
+                .arg(out)
+                .arg(&(len as u32))
+                .arg(&(batch as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Batched per-channel bias add over `[batch, C_out, spatial]`.
+    /// `bias_add_channels_f32` computes `channel = i / spatial` with NO wrap, so it cannot be fed a
+    /// whole batch — it would index `bias` past `C_out`. This wraps per batch element.
+    pub fn bias_add_channels_batched_f32(
+        &self,
+        data: &mut CudaSlice<f32>,
+        bias: &CudaSlice<f32>,
+        spatial: usize,
+        out_channels: usize,
+        n: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("bias_add_channels_batched_f32")
+            .ok_or_else(|| {
+                CudaError::KernelNotFound("bias_add_channels_batched_f32".to_string())
+            })?;
+        let cfg = cuda_kernels::launch_config(n);
+        // SAFETY: `bias_add_channels_batched_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `data`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(data)
+                .arg(bias)
+                .arg(&(spatial as u32))
+                .arg(&(out_channels as u32))
+                .arg(&(n as u32))
+                .launch(cfg)
+                .map(|_| ())
+                .map_err(|e| CudaError::DriverError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Reduce `grad_out [batch, C_out, spatial]` into `grad_bias [C_out]` (accumulating) on-stream.
+    /// Replaces a host-side sum fed by an unsynchronised `grad_out.to_vec()`, which could read the
+    /// tensor before the producing kernel had landed — intermittently wrong bias gradients.
+    pub fn sum_bias_f32(
+        &self,
+        grad_out: &CudaSlice<f32>,
+        grad_bias: &mut CudaSlice<f32>,
+        spatial: usize,
+        out_channels: usize,
+        batch: usize,
+    ) -> Result<(), CudaError> {
+        let func = self
+            .kernels
+            .get("sum_bias_f32")
+            .ok_or_else(|| CudaError::KernelNotFound("sum_bias_f32".to_string()))?;
+        let cfg = cuda_kernels::launch_config(out_channels);
+        // SAFETY: `sum_bias_f32`. Argument count and pointer-vs-scalar width are
+        // verified against the PTX, and write-vs-&mut against the .cu source, by
+        // tools/check_launches.py on every CI run.
+        // The kernel writes `grad_bias`; each arrives as &mut.
+        // Event tracking is disabled on this context (see `new`), so ordering comes
+        // from the backend's single stream: every launch is serialised behind the last.
+        // Grid: launch_config(len) covers exactly `len` elements and the kernel
+        // guards the thread index against it (confirmed in the .cu source), so no
+        // thread touches past the slices' length. check_launches.py enforces this.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(grad_out)
+                .arg(grad_bias)
+                .arg(&(spatial as u32))
+                .arg(&(out_channels as u32))
+                .arg(&(batch as u32))
                 .launch(cfg)
                 .map(|_| ())
                 .map_err(|e| CudaError::DriverError(e.to_string()))?;
@@ -6296,75 +8361,7 @@ impl CudaBackend {
 
         Some(output)
     }
-}
 
-/// Public GPU conv2d forward — callable from other crates.
-///
-/// Returns Some(output_vec) on success, None if CUDA unavailable or operation fails.
-/// Only handles groups=1. Caller should fall back to CPU for grouped convolution.
-#[cfg(feature = "cuda")]
-pub fn cuda_conv2d_forward(
-    input: &[f32],
-    weight: &[f32],
-    bias: Option<&[f32]>,
-    batch_size: usize,
-    in_channels: usize,
-    in_height: usize,
-    in_width: usize,
-    out_channels: usize,
-    kernel_h: usize,
-    kernel_w: usize,
-    stride_h: usize,
-    stride_w: usize,
-    pad_h: usize,
-    pad_w: usize,
-) -> Option<Vec<f32>> {
-    let cuda = get_cuda_backend()?;
-    cuda.conv2d_forward(
-        input,
-        weight,
-        bias,
-        batch_size,
-        in_channels,
-        in_height,
-        in_width,
-        out_channels,
-        kernel_h,
-        kernel_w,
-        stride_h,
-        stride_w,
-        pad_h,
-        pad_w,
-    )
-}
-
-/// Stub when CUDA feature is disabled.
-#[cfg(not(feature = "cuda"))]
-pub fn cuda_conv2d_forward(
-    _input: &[f32],
-    _weight: &[f32],
-    _bias: Option<&[f32]>,
-    _batch_size: usize,
-    _in_channels: usize,
-    _in_height: usize,
-    _in_width: usize,
-    _out_channels: usize,
-    _kernel_h: usize,
-    _kernel_w: usize,
-    _stride_h: usize,
-    _stride_w: usize,
-    _pad_h: usize,
-    _pad_w: usize,
-) -> Option<Vec<f32>> {
-    None
-}
-
-// =============================================================================
-// Pooling GPU Operations (MaxPool2d + AvgPool2d)
-// =============================================================================
-
-#[cfg(feature = "cuda")]
-impl CudaBackend {
     /// Launch MaxPool2d forward kernel on GPU (device-resident).
     ///
     /// - `input`: GPU slice [N*C*H*W]
@@ -6546,9 +8543,66 @@ impl CudaBackend {
     }
 }
 
-// =============================================================================
-// Pinned (Page-Locked) Host Memory
-// =============================================================================
+/// Public GPU conv2d forward — callable from other crates.
+///
+/// Returns Some(output_vec) on success, None if CUDA unavailable or operation fails.
+/// Only handles groups=1. Caller should fall back to CPU for grouped convolution.
+#[cfg(feature = "cuda")]
+pub fn cuda_conv2d_forward(
+    input: &[f32],
+    weight: &[f32],
+    bias: Option<&[f32]>,
+    batch_size: usize,
+    in_channels: usize,
+    in_height: usize,
+    in_width: usize,
+    out_channels: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: usize,
+    pad_w: usize,
+) -> Option<Vec<f32>> {
+    let cuda = get_cuda_backend()?;
+    cuda.conv2d_forward(
+        input,
+        weight,
+        bias,
+        batch_size,
+        in_channels,
+        in_height,
+        in_width,
+        out_channels,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        pad_h,
+        pad_w,
+    )
+}
+
+/// Stub when CUDA feature is disabled.
+#[cfg(not(feature = "cuda"))]
+pub fn cuda_conv2d_forward(
+    _input: &[f32],
+    _weight: &[f32],
+    _bias: Option<&[f32]>,
+    _batch_size: usize,
+    _in_channels: usize,
+    _in_height: usize,
+    _in_width: usize,
+    _out_channels: usize,
+    _kernel_h: usize,
+    _kernel_w: usize,
+    _stride_h: usize,
+    _stride_w: usize,
+    _pad_h: usize,
+    _pad_w: usize,
+) -> Option<Vec<f32>> {
+    None
+}
 
 /// A page-locked (pinned) host memory buffer for fast CPU-to-GPU transfers.
 ///
@@ -6572,6 +8626,7 @@ impl CudaBackend {
 /// let on_gpu = pinned.to_gpu().expect("copy failed");
 /// ```
 #[cfg(feature = "cuda")]
+#[derive(Debug)]
 pub struct PinnedBuffer {
     inner: Option<PinnedHostSlice<f32>>,
 }
@@ -6695,10 +8750,6 @@ pub fn pin_memory(_data: &[f32]) -> Result<(), CudaError> {
     Err(CudaError::DeviceNotFound)
 }
 
-// =============================================================================
-// Tests
-// =============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6734,11 +8785,9 @@ mod tests {
 
         let backend = CudaBackend::new(0).unwrap();
 
-        // Test allocation
         let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
         let gpu_data = backend.htod_copy(&data).unwrap();
 
-        // Test copy back
         let result = backend.dtoh_copy(&gpu_data).unwrap();
         assert_eq!(data, result);
     }
@@ -6752,52 +8801,21 @@ mod tests {
 
         let backend = CudaBackend::new(0).unwrap();
 
-        // cuBLAS uses column-major order
-        // To compute C = A @ B where:
-        //   A is 2x3 (m=2, k=3) and B is 3x2 (k=3, n=2), C is 2x2 (m=2, n=2)
-        // In column-major: lda >= m, ldb >= k, ldc >= m
-        //
-        // A in column-major (2x3):
-        // | a00 a01 a02 |    stored as: [a00, a10, a01, a11, a02, a12]
-        // | a10 a11 a12 |
-        let a: Vec<f32> = vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]; // column-major 2x3
-        // B in column-major (3x2):
-        // | b00 b01 |    stored as: [b00, b10, b20, b01, b11, b21]
-        // | b10 b11 |
-        // | b20 b21 |
-        let b: Vec<f32> = vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]; // column-major 3x2
-        let c: Vec<f32> = vec![0.0; 4]; // 2x2
+        let a: Vec<f32> = vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0];
+        let b: Vec<f32> = vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0];
+        let c: Vec<f32> = vec![0.0; 4];
 
         let a_gpu = backend.htod_copy(&a).unwrap();
         let b_gpu = backend.htod_copy(&b).unwrap();
         let mut c_gpu = backend.htod_copy(&c).unwrap();
 
-        // C = A @ B
-        // m=2 (rows of A, rows of C)
-        // n=2 (cols of B, cols of C)
-        // k=3 (cols of A, rows of B)
-        // lda=2 (leading dimension of A, >= m)
-        // ldb=3 (leading dimension of B, >= k)
-        // ldc=2 (leading dimension of C, >= m)
         backend
             .gemm_f32(
-                false, false, 2, 2, 3,   // m, n, k
-                1.0, // alpha
-                &a_gpu, 2, // A, lda
-                &b_gpu, 3,   // B, ldb
-                0.0, // beta
-                &mut c_gpu, 2, // C, ldc
+                false, false, 2, 2, 3, 1.0, &a_gpu, 2, &b_gpu, 3, 0.0, &mut c_gpu, 2,
             )
             .unwrap();
 
         let result = backend.dtoh_copy(&c_gpu).unwrap();
-        // C = A @ B (in matrix form, row-major interpretation):
-        // A = [[1,2,3],[4,5,6]], B = [[1,2],[3,4],[5,6]]
-        // C[0,0] = 1*1 + 2*3 + 3*5 = 1 + 6 + 15 = 22
-        // C[1,0] = 4*1 + 5*3 + 6*5 = 4 + 15 + 30 = 49
-        // C[0,1] = 1*2 + 2*4 + 3*6 = 2 + 8 + 18 = 28
-        // C[1,1] = 4*2 + 5*4 + 6*6 = 8 + 20 + 36 = 64
-        // Column-major result: [22, 49, 28, 64]
         assert!((result[0] - 22.0).abs() < 1e-5, "result[0] = {}", result[0]);
         assert!((result[1] - 49.0).abs() < 1e-5, "result[1] = {}", result[1]);
         assert!((result[2] - 28.0).abs() < 1e-5, "result[2] = {}", result[2]);
@@ -6914,11 +8932,8 @@ mod tests {
         backend.sigmoid_f32(&mut output_gpu, &input_gpu, 3).unwrap();
 
         let result = backend.dtoh_copy(&output_gpu).unwrap();
-        // sigmoid(0) = 0.5
         assert!((result[0] - 0.5).abs() < 1e-4);
-        // sigmoid(1) ≈ 0.7311
         assert!((result[1] - 0.7311).abs() < 1e-3);
-        // sigmoid(-1) ≈ 0.2689
         assert!((result[2] - 0.2689).abs() < 1e-3);
     }
 
@@ -6938,11 +8953,8 @@ mod tests {
         backend.tanh_f32(&mut output_gpu, &input_gpu, 3).unwrap();
 
         let result = backend.dtoh_copy(&output_gpu).unwrap();
-        // tanh(0) = 0
         assert!((result[0] - 0.0).abs() < 1e-5);
-        // tanh(1) ≈ 0.7616
         assert!((result[1] - 0.7616).abs() < 1e-3);
-        // tanh(-1) ≈ -0.7616
         assert!((result[2] - (-0.7616)).abs() < 1e-3);
     }
 
@@ -6955,7 +8967,6 @@ mod tests {
 
         let backend = CudaBackend::new(0).unwrap();
 
-        // Test with a large tensor (1M elements)
         let n = 1_000_000;
         let a: Vec<f32> = (0..n).map(|i| i as f32).collect();
         let b: Vec<f32> = (0..n).map(|i| (n - i) as f32).collect();
@@ -6968,7 +8979,6 @@ mod tests {
 
         let result = backend.dtoh_copy(&c_gpu).unwrap();
 
-        // Each element should equal n (i + (n-i) = n)
         assert!((result[0] - n as f32).abs() < 1e-3);
         assert!((result[n / 2] - n as f32).abs() < 1e-3);
         assert!((result[n - 1] - n as f32).abs() < 1e-3);
@@ -6981,10 +8991,8 @@ mod tests {
             return;
         }
 
-        // 1x1 conv: 3 in_channels → 2 out_channels, input 4x4
-        let input = vec![1.0f32; 1 * 3 * 4 * 4]; // all ones
+        let input = vec![1.0f32; 1 * 3 * 4 * 4];
         let mut weight = vec![0.0f32; 2 * 3 * 1 * 1];
-        // out_ch0 = in_ch0 (weight[0]=1), out_ch1 = in_ch1 (weight[4]=1)
         weight[0] = 1.0;
         weight[4] = 1.0;
         let bias = vec![0.5f32; 2];
@@ -7008,22 +9016,19 @@ mod tests {
 
         let out = result.expect("CUDA conv2d should succeed");
         assert_eq!(out.len(), 2 * 4 * 4);
-        // out_ch0 = 1.0*1 + 0.5 = 1.5
         assert!(
             (out[0] - 1.5).abs() < 0.01,
             "1x1 conv ch0: expected 1.5, got {}",
             out[0]
         );
-        // out_ch1 = 1.0*1 + 0.5 = 1.5
         assert!(
             (out[16] - 1.5).abs() < 0.01,
             "1x1 conv ch1: expected 1.5, got {}",
             out[16]
         );
 
-        // 3x3 conv with padding=1: all-ones input, all-ones weight
         let input2 = vec![1.0f32; 1 * 3 * 8 * 8];
-        let weight2 = vec![1.0f32; 2 * 3 * 3 * 3]; // all 1s → each output = sum of 27 inputs
+        let weight2 = vec![1.0f32; 2 * 3 * 3 * 3];
         let bias2 = vec![0.0f32; 2];
 
         let result2 = cuda_conv2d_forward(
@@ -7045,14 +9050,12 @@ mod tests {
 
         let out2 = result2.expect("CUDA 3x3 conv should succeed");
         assert_eq!(out2.len(), 2 * 8 * 8);
-        // Center pixel (row 4, col 4) = 3 channels * 9 kernel positions * 1.0 = 27.0
         let center = 4 * 8 + 4;
         assert!(
             (out2[center] - 27.0).abs() < 0.1,
             "3x3 conv center: expected 27.0, got {}",
             out2[center]
         );
-        // Corner pixel (0,0) with pad=1: only 2x2x3 = 12 valid positions
         assert!(
             (out2[0] - 12.0).abs() < 0.1,
             "3x3 conv corner: expected 12.0, got {}",
@@ -7060,8 +9063,6 @@ mod tests {
         );
     }
 }
-
-// ── pinned host memory ──
 
 #[cfg(all(test, feature = "cuda"))]
 mod pinned_buffer_tests {

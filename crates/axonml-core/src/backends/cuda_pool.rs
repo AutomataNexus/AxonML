@@ -4,8 +4,10 @@
 //! above 256, linear 64-byte increments for smaller). `pool_alloc(len)` checks the
 //! free list first, falls back to `stream.alloc_zeros(bucket)` on miss.
 //! `pool_free(slice)` parks the `CudaSlice` itself in the bucket (typed, so
-//! no raw device pointers ever leave cudarc's ownership), capped at 64 blocks
-//! per bucket to prevent unbounded growth. `clear_pool()`
+//! no raw device pointers ever leave cudarc's ownership) behind a completion
+//! event recorded at release, capped at 64 blocks per bucket unless
+//! `with_pool_uncapped`. `AXONML_POOL_SAFE` (default on) bypasses the cache
+//! for cudarc's stream-ordered allocator. `clear_pool()`
 //! actually cudaFrees everything. `print_pool_stats()` reports hits/misses/
 //! returns/pooled bytes. Global singleton via `OnceLock`.
 //!
@@ -42,12 +44,29 @@ use std::sync::OnceLock;
 // Memory Pool
 // =============================================================================
 
+/// A parked block plus the stream position at which its last consumer was
+/// done with it. The pool only hands a block out once that event has fired,
+/// which is what makes reuse safe without `CUDA_LAUNCH_BLOCKING=1`.
+#[cfg(feature = "cuda")]
+struct Parked<T> {
+    slice: CudaSlice<T>,
+    ready: Option<cudarc::driver::CudaEvent>,
+}
+
+#[cfg(feature = "cuda")]
+impl<T> Parked<T> {
+    fn is_ready(&self) -> bool {
+        self.ready.as_ref().is_none_or(|e| e.is_complete())
+    }
+}
+
 #[cfg(feature = "cuda")]
 struct MemoryPoolInner {
     /// Free lists bucketed by rounded-up element capacity, one per element
     /// type so a block is only ever handed back as the type it was made as.
-    free_f32: HashMap<usize, Vec<CudaSlice<f32>>>,
-    free_u32: HashMap<usize, Vec<CudaSlice<u32>>>,
+    free_f32: HashMap<usize, Vec<Parked<f32>>>,
+    free_u32: HashMap<usize, Vec<Parked<u32>>>,
+    free_i32: HashMap<usize, Vec<Parked<i32>>>,
     /// Total bytes currently in pool (not actively used)
     pooled_bytes: usize,
     /// Statistics
@@ -58,20 +77,29 @@ struct MemoryPoolInner {
 
 /// Element types the pool caches. Each picks its own free list.
 #[cfg(feature = "cuda")]
-trait PoolElem: Sized + Send + Sync + 'static {
-    fn free_lists(inner: &mut MemoryPoolInner) -> &mut HashMap<usize, Vec<CudaSlice<Self>>>;
+trait PoolElem:
+    Sized + cudarc::driver::DeviceRepr + cudarc::driver::ValidAsZeroBits + Send + Sync + 'static
+{
+    fn free_lists(inner: &mut MemoryPoolInner) -> &mut HashMap<usize, Vec<Parked<Self>>>;
+}
+
+#[cfg(feature = "cuda")]
+impl PoolElem for i32 {
+    fn free_lists(inner: &mut MemoryPoolInner) -> &mut HashMap<usize, Vec<Parked<Self>>> {
+        &mut inner.free_i32
+    }
 }
 
 #[cfg(feature = "cuda")]
 impl PoolElem for f32 {
-    fn free_lists(inner: &mut MemoryPoolInner) -> &mut HashMap<usize, Vec<CudaSlice<Self>>> {
+    fn free_lists(inner: &mut MemoryPoolInner) -> &mut HashMap<usize, Vec<Parked<Self>>> {
         &mut inner.free_f32
     }
 }
 
 #[cfg(feature = "cuda")]
 impl PoolElem for u32 {
-    fn free_lists(inner: &mut MemoryPoolInner) -> &mut HashMap<usize, Vec<CudaSlice<Self>>> {
+    fn free_lists(inner: &mut MemoryPoolInner) -> &mut HashMap<usize, Vec<Parked<Self>>> {
         &mut inner.free_u32
     }
 }
@@ -97,6 +125,7 @@ impl CudaMemoryPool {
             inner: Mutex::new(MemoryPoolInner {
                 free_f32: HashMap::new(),
                 free_u32: HashMap::new(),
+                free_i32: HashMap::new(),
                 pooled_bytes: 0,
                 hits: 0,
                 misses: 0,
@@ -117,34 +146,55 @@ impl CudaMemoryPool {
         }
     }
 
-    /// Take a cached block whose capacity covers `requested_elements`.
+    /// Take a cached block whose capacity covers `requested_elements` and
+    /// whose completion fence has fired. Scans from the front (oldest release
+    /// = most likely complete).
+    ///
+    /// During CUDA-graph capture `cuEventQuery` (inside `is_ready`) is a
+    /// capture-unsafe call in THREAD_LOCAL mode and would invalidate the
+    /// capture on the first pooled allocation; the capture path always
+    /// `device_sync()`s before `graph_begin_capture`, so every parked block is
+    /// provably ready then and the query is skipped.
     fn try_acquire<T: PoolElem>(&self, requested_elements: usize) -> Option<CudaSlice<T>> {
         let bucket = Self::bucket_size(requested_elements);
+        let capturing = super::cuda::get_cuda_backend()
+            .is_some_and(super::cuda::CudaBackend::stream_is_capturing);
         let mut inner = self.inner.lock().unwrap();
 
-        if let Some(slice) = T::free_lists(&mut inner)
-            .get_mut(&bucket)
-            .and_then(Vec::pop)
-        {
-            inner.pooled_bytes -= slice.len() * std::mem::size_of::<T>();
-            inner.hits += 1;
-            return Some(slice);
+        if let Some(blocks) = T::free_lists(&mut inner).get_mut(&bucket) {
+            if let Some(idx) = blocks
+                .iter()
+                .position(|b| (capturing || b.is_ready()) && b.slice.len() >= requested_elements)
+            {
+                let block = blocks.remove(idx);
+                inner.pooled_bytes -= block.slice.len() * std::mem::size_of::<T>();
+                inner.hits += 1;
+                return Some(block.slice);
+            }
         }
         inner.misses += 1;
         None
     }
 
-    /// Park a block for later reuse; a full bucket drops it (cudaFree).
+    /// Park a block for later reuse behind an event recorded at the current
+    /// stream position; a full bucket drops it (cudaFree) unless uncapped.
     fn release<T: PoolElem>(&self, slice: CudaSlice<T>) {
+        let ready = super::cuda::get_cuda_backend().and_then(|be| {
+            be.stream()
+                .record_event(Some(
+                    cudarc::driver::sys::CUevent_flags::CU_EVENT_DISABLE_TIMING,
+                ))
+                .ok()
+        });
         let capacity = slice.len();
         let bucket = Self::bucket_size(capacity);
+        let uncapped = POOL_UNCAPPED.with(|c| c.get());
         let mut inner = self.inner.lock().unwrap();
         inner.returns += 1;
 
         let blocks = T::free_lists(&mut inner).entry(bucket).or_default();
-        // Limit per-bucket free list to prevent unbounded growth
-        if blocks.len() < 64 {
-            blocks.push(slice);
+        if uncapped || blocks.len() < 64 {
+            blocks.push(Parked { slice, ready });
             inner.pooled_bytes += capacity * std::mem::size_of::<T>();
         } else {
             drop(slice);
@@ -162,6 +212,7 @@ impl CudaMemoryPool {
         let mut inner = self.inner.lock().unwrap();
         inner.free_f32.clear();
         inner.free_u32.clear();
+        inner.free_i32.clear();
         inner.pooled_bytes = 0;
     }
 }
@@ -184,7 +235,12 @@ pub fn pool_alloc(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> 
     let pool = get_memory_pool();
 
     // Try to get from pool (pool stores bucket-sized allocations)
-    if let Some(mut slice) = pool.try_acquire::<f32>(len) {
+    let cached = if pool_safe_mode() {
+        None
+    } else {
+        pool.try_acquire::<f32>(len)
+    };
+    if let Some(mut slice) = cached {
         let backend =
             super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
         backend
@@ -232,7 +288,12 @@ pub fn pool_alloc(len: usize) -> Result<CudaSlice<f32>, super::cuda::CudaError> 
 pub fn pool_alloc_uninit_u32(len: usize) -> Result<CudaSlice<u32>, super::cuda::CudaError> {
     let pool = get_memory_pool();
 
-    if let Some(slice) = pool.try_acquire::<u32>(len) {
+    let cached = if pool_force_driver_alloc() || pool_safe_mode() {
+        None
+    } else {
+        pool.try_acquire::<u32>(len)
+    };
+    if let Some(slice) = cached {
         Ok(slice)
     } else {
         let bucket = CudaMemoryPool::bucket_size(len);
@@ -254,6 +315,47 @@ pub fn pool_free_u32(slice: CudaSlice<u32>) {
         CAPTURE_PEN_U32.with(|pen| pen.borrow_mut().push(slice));
         return;
     }
+    if pool_force_driver_alloc() || pool_safe_mode() {
+        drop(slice);
+        return;
+    }
+    get_memory_pool().release(slice);
+}
+
+/// i32 twin of [`pool_alloc_uninit_u32`] (argmax/argmin index outputs).
+#[cfg(feature = "cuda")]
+pub fn pool_alloc_uninit_i32(len: usize) -> Result<CudaSlice<i32>, super::cuda::CudaError> {
+    let pool = get_memory_pool();
+
+    let cached = if pool_force_driver_alloc() || pool_safe_mode() {
+        None
+    } else {
+        pool.try_acquire::<i32>(len)
+    };
+    if let Some(slice) = cached {
+        Ok(slice)
+    } else {
+        let bucket = CudaMemoryPool::bucket_size(len);
+        let backend =
+            super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
+        backend
+            .stream()
+            .alloc_zeros::<i32>(bucket)
+            .map_err(super::cuda::CudaError::from)
+    }
+}
+
+/// `pool_free`-equivalent for i32 slices.
+#[cfg(feature = "cuda")]
+pub fn pool_free_i32(slice: CudaSlice<i32>) {
+    if CAPTURE_PEN_ACTIVE.with(|c| c.get()) {
+        CAPTURE_PEN_I32.with(|pen| pen.borrow_mut().push(slice));
+        return;
+    }
+    if pool_force_driver_alloc() || pool_safe_mode() {
+        drop(slice);
+        return;
+    }
     get_memory_pool().release(slice);
 }
 
@@ -267,7 +369,7 @@ pub fn pool_alloc_uninit(len: usize) -> Result<CudaSlice<f32>, super::cuda::Cuda
     // a replay would reference an address that has since been reused
     // (CUDA_ERROR_ILLEGAL_ADDRESS). Going through cuMemAllocAsync records
     // an alloc node in the graph so replay gets fresh addresses each launch.
-    if pool_force_driver_alloc() {
+    if pool_force_driver_alloc() || pool_safe_mode() {
         let bucket = CudaMemoryPool::bucket_size(len);
         let backend =
             super::cuda::get_cuda_backend().ok_or(super::cuda::CudaError::DeviceNotFound)?;
@@ -304,9 +406,37 @@ pub fn pool_force_driver_alloc() -> bool {
     POOL_FORCE_DRIVER_ALLOC.with(|f| f.get())
 }
 
+/// Process-wide safe-allocator mode (env `AXONML_POOL_SAFE`, default ON).
+/// When on, every pool alloc/free goes through cudarc's stream-ordered
+/// `cuMemAllocAsync`/`cuMemFreeAsync` instead of the Rust-side bucket cache.
+#[cfg(feature = "cuda")]
+pub fn pool_safe_mode() -> bool {
+    static POOL_SAFE: OnceLock<bool> = OnceLock::new();
+    *POOL_SAFE.get_or_init(|| std::env::var("AXONML_POOL_SAFE").map_or(true, |v| v != "0"))
+}
+
 #[cfg(feature = "cuda")]
 thread_local! {
     static POOL_FORCE_DRIVER_ALLOC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static POOL_UNCAPPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Scoped: lift the per-bucket free-list cap so the pool holds the full
+/// per-capture working set (no block dropped to the driver → no fresh-alloc
+/// miss that would invalidate a CUDA-graph capture). Restores the prior flag.
+#[cfg(feature = "cuda")]
+pub fn with_pool_uncapped<R>(f: impl FnOnce() -> R) -> R {
+    let prev = POOL_UNCAPPED.with(|c| c.replace(true));
+    let r = f();
+    POOL_UNCAPPED.with(|c| c.set(prev));
+    r
+}
+
+/// Persistently set the uncapped flag (returns the previous value) — held
+/// across a whole GraphStep warmup+capture window. See [`with_pool_uncapped`].
+#[cfg(feature = "cuda")]
+pub fn set_pool_uncapped(v: bool) -> bool {
+    POOL_UNCAPPED.with(|c| c.replace(v))
 }
 
 /// Runs `f` with pool allocations routed through `cuMemAllocAsync` instead
@@ -336,6 +466,10 @@ pub fn pool_free(slice: CudaSlice<f32>) {
         CAPTURE_PEN.with(|pen| pen.borrow_mut().push(slice));
         return;
     }
+    if pool_safe_mode() {
+        drop(slice);
+        return;
+    }
     get_memory_pool().release(slice);
 }
 
@@ -346,6 +480,8 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
     static CAPTURE_PEN_U32: std::cell::RefCell<Vec<CudaSlice<u32>>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    static CAPTURE_PEN_I32: std::cell::RefCell<Vec<CudaSlice<i32>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Collection of CudaSlices retained by the capture pen across types.
@@ -355,6 +491,7 @@ thread_local! {
 pub struct CapturePen {
     f32_slices: Vec<CudaSlice<f32>>,
     u32_slices: Vec<CudaSlice<u32>>,
+    i32_slices: Vec<CudaSlice<i32>>,
 }
 
 #[cfg(feature = "cuda")]
@@ -369,7 +506,7 @@ impl CapturePen {
     }
     /// Total retained.
     pub fn total(&self) -> usize {
-        self.f32_slices.len() + self.u32_slices.len()
+        self.f32_slices.len() + self.u32_slices.len() + self.i32_slices.len()
     }
 
     /// Return all retained slices to the Rust pool. Safe to call only
@@ -380,6 +517,9 @@ impl CapturePen {
             pool.release(slice);
         }
         for slice in self.u32_slices {
+            pool.release(slice);
+        }
+        for slice in self.i32_slices {
             pool.release(slice);
         }
     }
@@ -398,11 +538,13 @@ pub fn with_capture_pen<R>(f: impl FnOnce() -> R) -> (R, CapturePen) {
     CAPTURE_PEN_ACTIVE.with(|c| c.set(false));
     let f32_slices = CAPTURE_PEN.with(|pen| std::mem::take(&mut *pen.borrow_mut()));
     let u32_slices = CAPTURE_PEN_U32.with(|pen| std::mem::take(&mut *pen.borrow_mut()));
+    let i32_slices = CAPTURE_PEN_I32.with(|pen| std::mem::take(&mut *pen.borrow_mut()));
     (
         r,
         CapturePen {
             f32_slices,
             u32_slices,
+            i32_slices,
         },
     )
 }
@@ -455,6 +597,10 @@ mod tests {
     #[test]
     #[cfg(feature = "cuda")]
     fn test_pool_u32_round_trip() {
+        if pool_safe_mode() {
+            eprintln!("AXONML_POOL_SAFE is on (the default): cache bypassed, nothing to test here");
+            return;
+        }
         let Some(backend) = super::super::cuda::get_cuda_backend() else {
             eprintln!("no CUDA device; skipping");
             return;
@@ -469,6 +615,7 @@ mod tests {
             .unwrap();
         pool_free_u32(a);
 
+        backend.sync();
         let b = pool_alloc_uninit_u32(n).unwrap();
         let host = backend.dtoh_copy(&b).unwrap();
         assert!(
@@ -519,6 +666,10 @@ mod tests {
     #[test]
     #[cfg(feature = "cuda")]
     fn test_pool_alloc_and_free() {
+        if pool_safe_mode() {
+            eprintln!("AXONML_POOL_SAFE is on (the default): cache bypassed, nothing to test here");
+            return;
+        }
         // This test requires a CUDA GPU
         if super::super::cuda::get_cuda_backend().is_none() {
             return;
@@ -532,6 +683,7 @@ mod tests {
 
         // Allocate again — should be a pool hit
         let pool = get_memory_pool();
+        super::super::cuda::get_cuda_backend().unwrap().sync();
         let (hits_before, _, _, _) = pool.stats();
         let slice2 = pool_alloc(1024).expect("second pool_alloc failed");
         let (hits_after, _, _, _) = pool.stats();
@@ -580,6 +732,10 @@ mod tests {
     #[test]
     #[cfg(feature = "cuda")]
     fn test_pool_different_sizes() {
+        if pool_safe_mode() {
+            eprintln!("AXONML_POOL_SAFE is on (the default): cache bypassed, nothing to test here");
+            return;
+        }
         if super::super::cuda::get_cuda_backend().is_none() {
             return;
         }
@@ -595,6 +751,7 @@ mod tests {
 
         // Allocating 100 again should hit the 128-bucket (or 64-bucket)
         let pool = get_memory_pool();
+        super::super::cuda::get_cuda_backend().unwrap().sync();
         let (hits_before, _, _, _) = pool.stats();
         let s4 = pool_alloc(100).expect("re-alloc 100 failed");
         let (hits_after, _, _, _) = pool.stats();
@@ -605,6 +762,10 @@ mod tests {
     #[test]
     #[cfg(feature = "cuda")]
     fn test_pool_zeroed_on_reuse() {
+        if pool_safe_mode() {
+            eprintln!("AXONML_POOL_SAFE is on (the default): cache bypassed, nothing to test here");
+            return;
+        }
         if super::super::cuda::get_cuda_backend().is_none() {
             return;
         }

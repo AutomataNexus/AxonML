@@ -47,6 +47,10 @@ impl Module for ReLU {
         input.relu()
     }
 
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Relu")]
+    }
+
     fn name(&self) -> &'static str {
         "ReLU"
     }
@@ -89,6 +93,13 @@ impl Module for LeakyReLU {
         input.leaky_relu(self.negative_slope)
     }
 
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![
+            crate::NodeSpec::new("LeakyRelu")
+                .attr("alpha", crate::AttrVal::Float(self.negative_slope as f64)),
+        ]
+    }
+
     fn name(&self) -> &'static str {
         "LeakyReLU"
     }
@@ -116,6 +127,10 @@ impl Module for Sigmoid {
         input.sigmoid()
     }
 
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Sigmoid")]
+    }
+
     fn name(&self) -> &'static str {
         "Sigmoid"
     }
@@ -141,6 +156,10 @@ impl Tanh {
 impl Module for Tanh {
     fn forward(&self, input: &Variable) -> Variable {
         input.tanh()
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Tanh")]
     }
 
     fn name(&self) -> &'static str {
@@ -178,6 +197,10 @@ impl Module for Softmax {
         input.softmax(self.dim as i32)
     }
 
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Softmax").attr("axis", crate::AttrVal::Int(self.dim))]
+    }
+
     fn name(&self) -> &'static str {
         "Softmax"
     }
@@ -211,6 +234,10 @@ impl Module for LogSoftmax {
         input.log_softmax(self.dim as i32)
     }
 
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("LogSoftmax").attr("axis", crate::AttrVal::Int(self.dim))]
+    }
+
     fn name(&self) -> &'static str {
         "LogSoftmax"
     }
@@ -236,6 +263,10 @@ impl GELU {
 impl Module for GELU {
     fn forward(&self, input: &Variable) -> Variable {
         input.gelu()
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Gelu")]
     }
 
     fn name(&self) -> &'static str {
@@ -264,6 +295,10 @@ impl Module for SiLU {
     fn forward(&self, input: &Variable) -> Variable {
         let sigmoid = input.sigmoid();
         input.mul_var(&sigmoid)
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("SiLU")]
     }
 
     fn name(&self) -> &'static str {
@@ -306,6 +341,10 @@ impl Module for ELU {
         input.elu(self.alpha)
     }
 
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Elu").attr("alpha", crate::AttrVal::Float(self.alpha as f64))]
+    }
+
     fn name(&self) -> &'static str {
         "ELU"
     }
@@ -329,6 +368,10 @@ impl Identity {
 impl Module for Identity {
     fn forward(&self, input: &Variable) -> Variable {
         input.clone()
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![crate::NodeSpec::new("Identity")]
     }
 
     fn name(&self) -> &'static str {
@@ -379,6 +422,13 @@ impl Module for Flatten {
 
     fn parameters(&self) -> Vec<crate::Parameter> {
         Vec::new()
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        vec![
+            crate::NodeSpec::new("Flatten")
+                .attr("axis", crate::AttrVal::Int(self.start_dim as i64)),
+        ]
     }
 
     fn name(&self) -> &'static str {

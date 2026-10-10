@@ -34,11 +34,9 @@ fn main() {
     println!("AxonML GPU Backend Test Suite");
     println!("==============================\n");
 
-    // Print GPU detection info
     print_gpu_info();
     println!();
 
-    // Create test configuration
     let config = GpuTestConfig {
         atol: 1e-5,
         rtol: 1e-4,
@@ -48,13 +46,15 @@ fn main() {
         bench_iters: 50,
     };
 
+    #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
     let mut reports: Vec<GpuTestReport> = Vec::new();
+    #[cfg(not(feature = "cuda"))]
+    let _ = &config;
 
     // -------------------------------------------------------------------------
     // CUDA Tests (feature-gated)
     // -------------------------------------------------------------------------
 
-    // Run CUDA tests if available
     #[cfg(feature = "cuda")]
     {
         println!("\nRunning CUDA tests...");

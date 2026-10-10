@@ -342,6 +342,14 @@ pub fn interpolate(
     let shape = input.shape();
     assert!(shape.len() == 4, "interpolate expects [N, C, H, W]");
     let (n, c, h, w) = (shape[0], shape[1], shape[2], shape[3]);
+
+    #[cfg(feature = "cuda")]
+    if matches!(mode, InterpolateMode::Nearest) && input.device().is_gpu() {
+        if let Some(out) = input.interpolate_nearest_cuda(out_h, out_w) {
+            return out;
+        }
+    }
+
     let data = input.to_vec();
     let mut output = vec![0.0f32; n * c * out_h * out_w];
 
@@ -489,6 +497,13 @@ impl GradientFunction for InterpolateBackward {
         let out_shape = grad_output.shape();
         let (n, c, out_h, out_w) = (out_shape[0], out_shape[1], out_shape[2], out_shape[3]);
         let (h, w) = (self.input_shape[2], self.input_shape[3]);
+
+        #[cfg(feature = "cuda")]
+        if matches!(self.mode, InterpolateMode::Nearest) && grad_output.device().is_gpu() {
+            if let Some(gi) = grad_output.interpolate_nearest_backward_cuda(&self.input_shape) {
+                return vec![Some(gi)];
+            }
+        }
 
         let g_vec = grad_output.to_vec();
         let mut grad_input = vec![0.0f32; n * c * h * w];
@@ -954,5 +969,56 @@ mod tests {
         let upsample = Upsample::new(2);
         let output = upsample.forward(&input);
         assert_eq!(output.shape(), vec![1, 1, 4, 4]);
+    }
+}
+
+// ── gpu parity ──
+
+#[cfg(all(test, feature = "cuda"))]
+mod interpolate_cuda_tests {
+    use super::*;
+    use axonml_core::Device;
+
+    fn nearest_parity(n: usize, c: usize, h: usize, w: usize, oh: usize, ow: usize) {
+        let cpu = Tensor::<f32>::randn(&[n, c, h, w]);
+        let gpu = match cpu.to_device(Device::cuda(0)) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+        let a = interpolate(&cpu, oh, ow, InterpolateMode::Nearest).to_vec();
+        let b = interpolate(&gpu, oh, ow, InterpolateMode::Nearest).to_vec();
+        assert_eq!(a.len(), b.len(), "shape {n}x{c}x{h}x{w} -> {oh}x{ow}");
+        for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+            assert!((x - y).abs() == 0.0, "fwd idx {i}: cpu {x} gpu {y}");
+        }
+    }
+
+    #[test]
+    fn interpolate_nearest_gpu_matches_cpu() {
+        nearest_parity(2, 3, 5, 7, 10, 14);
+        nearest_parity(8, 64, 20, 20, 40, 40);
+        nearest_parity(1, 1, 3, 3, 9, 6);
+        nearest_parity(4, 16, 10, 10, 5, 5);
+    }
+
+    #[test]
+    fn interpolate_nearest_backward_gpu_matches_cpu() {
+        let (n, c, h, w, oh, ow) = (2usize, 8usize, 6usize, 6usize, 12usize, 12usize);
+        let go_cpu = Tensor::<f32>::randn(&[n, c, oh, ow]);
+        let go_gpu = match go_cpu.to_device(Device::cuda(0)) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+        let bw = InterpolateBackward {
+            next_fns: vec![None],
+            input_shape: vec![n, c, h, w],
+            mode: InterpolateMode::Nearest,
+        };
+        let a = bw.apply(&go_cpu)[0].as_ref().expect("cpu grad").to_vec();
+        let b = bw.apply(&go_gpu)[0].as_ref().expect("gpu grad").to_vec();
+        assert_eq!(a.len(), b.len());
+        for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+            assert!((x - y).abs() <= 1e-5, "bwd idx {i}: cpu {x} gpu {y}");
+        }
     }
 }

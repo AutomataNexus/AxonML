@@ -180,7 +180,6 @@ impl Module for MaxPool2d {
         let out_h = (height + 2 * ph - kh) / sh + 1;
         let out_w = (width + 2 * pw - kw) / sw + 1;
 
-        // Try GPU path
         #[cfg(feature = "cuda")]
         {
             if let Some((gpu_output, gpu_indices)) =
@@ -207,7 +206,6 @@ impl Module for MaxPool2d {
             }
         }
 
-        // CPU path
         let input_vec = input.data().to_vec();
         let mut output_data = vec![f32::NEG_INFINITY; batch * channels * out_h * out_w];
         let mut max_indices = vec![0usize; batch * channels * out_h * out_w];
@@ -269,6 +267,25 @@ impl Module for MaxPool2d {
 
     fn name(&self) -> &'static str {
         "MaxPool2d"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        let (kh, kw) = self.kernel_size;
+        let (sh, sw) = self.stride;
+        let (ph, pw) = self.padding;
+        vec![
+            crate::NodeSpec::new("MaxPool")
+                .attr(
+                    "kernel_shape",
+                    crate::AttrVal::Ints(vec![kh as i64, kw as i64]),
+                )
+                .attr("strides", crate::AttrVal::Ints(vec![sh as i64, sw as i64]))
+                .attr(
+                    "pads",
+                    crate::AttrVal::Ints(vec![ph as i64, pw as i64, ph as i64, pw as i64]),
+                )
+                .attr("ceil_mode", crate::AttrVal::Bool(false)),
+        ]
     }
 }
 
@@ -411,15 +428,13 @@ impl Module for AvgPool2d {
         let out_h = (height + 2 * ph - kh) / sh + 1;
         let out_w = (width + 2 * pw - kw) / sw + 1;
 
-        // Try GPU path
         #[cfg(feature = "cuda")]
         {
-            if let Some(gpu_output) = input.data().avgpool2d_cuda(
-                self.kernel_size,
-                self.stride,
-                self.padding,
-                false, // count_include_pad=false matches CPU behavior
-            ) {
+            if let Some(gpu_output) =
+                input
+                    .data()
+                    .avgpool2d_cuda(self.kernel_size, self.stride, self.padding, false)
+            {
                 let requires_grad = input.requires_grad() && is_grad_enabled();
                 if requires_grad {
                     let grad_fn = GradFn::new(AvgPool2dBackward::new(
@@ -436,7 +451,6 @@ impl Module for AvgPool2d {
             }
         }
 
-        // CPU path
         let input_vec = input.data().to_vec();
         let mut output_data = vec![0.0f32; batch * channels * out_h * out_w];
 
@@ -493,6 +507,25 @@ impl Module for AvgPool2d {
 
     fn name(&self) -> &'static str {
         "AvgPool2d"
+    }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        let (kh, kw) = self.kernel_size;
+        let (sh, sw) = self.stride;
+        let (ph, pw) = self.padding;
+        vec![
+            crate::NodeSpec::new("AvgPool")
+                .attr(
+                    "kernel_shape",
+                    crate::AttrVal::Ints(vec![kh as i64, kw as i64]),
+                )
+                .attr("strides", crate::AttrVal::Ints(vec![sh as i64, sw as i64]))
+                .attr(
+                    "pads",
+                    crate::AttrVal::Ints(vec![ph as i64, pw as i64, ph as i64, pw as i64]),
+                )
+                .attr("ceil_mode", crate::AttrVal::Bool(false)),
+        ]
     }
 }
 
@@ -579,6 +612,17 @@ impl Module for AdaptiveAvgPool2d {
     fn name(&self) -> &'static str {
         "AdaptiveAvgPool2d"
     }
+
+    fn describe(&self) -> Vec<crate::NodeSpec> {
+        if self.output_size == (1, 1) {
+            vec![crate::NodeSpec::new("GlobalAvgPool")]
+        } else {
+            vec![crate::NodeSpec::new("AdaptiveAvgPool").attr(
+                "output_size",
+                crate::AttrVal::Ints(vec![self.output_size.0 as i64, self.output_size.1 as i64]),
+            )]
+        }
+    }
 }
 
 // =============================================================================
@@ -630,7 +674,6 @@ mod tests {
         let grad = input.grad().unwrap();
         assert_eq!(grad.shape(), &[1, 1, 4, 4]);
         let grad_vec = grad.to_vec();
-        // Only max positions (6,8,14,16) at indices [5,7,13,15] should have gradient
         assert_eq!(grad_vec[5], 1.0);
         assert_eq!(grad_vec[7], 1.0);
         assert_eq!(grad_vec[13], 1.0);
@@ -670,7 +713,6 @@ mod tests {
 
         assert!(input.grad().is_some(), "AvgPool2d: gradient should flow");
         let grad = input.grad().unwrap();
-        // Each input element contributes to exactly one pool window, gets 1/4 of the gradient
         for &v in &grad.to_vec() {
             assert!((v - 0.25).abs() < 1e-6);
         }

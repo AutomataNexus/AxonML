@@ -32,9 +32,6 @@ use std::any::Any;
 use std::cell::Cell;
 use std::sync::Arc;
 
-// Thread-local deterministic RNG seed for checkpoint recomputation.
-// When set (non-zero), dropout and other stochastic ops should use this
-// seed instead of thread_rng() to ensure reproducible recomputation.
 thread_local! {
     static CHECKPOINT_RNG_SEED: Cell<u64> = const { Cell::new(0) };
 }
@@ -82,23 +79,16 @@ impl std::fmt::Debug for CheckpointBackward {
 
 impl GradientFunction for CheckpointBackward {
     fn apply(&self, grad_output: &Tensor<f32>) -> Vec<Option<Tensor<f32>>> {
-        // Set the checkpoint RNG seed so stochastic ops (dropout) use a
-        // deterministic RNG during recomputation, producing identical results
-        // to the original forward pass.
         CHECKPOINT_RNG_SEED.with(|s| s.set(self.rng_seed));
 
-        // Re-run the forward pass with gradients enabled
         let input_for_recompute = Variable::new(self.saved_input.data(), true);
 
         let recomputed_output = enable_grad(|| (self.func)(&input_for_recompute));
 
-        // Clear the checkpoint seed
         CHECKPOINT_RNG_SEED.with(|s| s.set(0));
 
-        // Now run backward on the recomputed output to get gradients
         recomputed_output.backward_with_grad(grad_output);
 
-        // Extract the gradient that flowed to our recomputed input
         let input_grad = input_for_recompute.grad();
 
         vec![input_grad]
@@ -142,9 +132,6 @@ pub fn checkpoint<F>(func: F, input: &Variable) -> Variable
 where
     F: Fn(&Variable) -> Variable + Send + Sync + 'static,
 {
-    // Capture a deterministic RNG seed before the forward pass.
-    // This seed will be used during backward recomputation so stochastic
-    // ops (dropout) produce identical results.
     let rng_seed = {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -157,32 +144,49 @@ where
         hasher.finish()
     };
 
-    // Set the seed for the forward pass too, so dropout uses the same seed
     CHECKPOINT_RNG_SEED.with(|s| s.set(rng_seed));
 
-    // Run forward pass without gradient tracking to avoid storing activations
     let output = no_grad(|| func(input));
 
-    // Clear the seed after forward
     CHECKPOINT_RNG_SEED.with(|s| s.set(0));
 
-    // If input doesn't require gradients, just return the output
     if !input.requires_grad() {
         return output;
     }
 
-    // Save input data (detached) and the function for recomputation
     let func_arc: Arc<dyn Fn(&Variable) -> Variable + Send + Sync> = Arc::new(func);
 
     let next_fns = vec![input.grad_fn().cloned()];
 
     let grad_fn = GradFn::new(CheckpointBackward {
         func: func_arc,
-        saved_input: Variable::new(input.data(), false), // detached copy
+        saved_input: Variable::new(input.data(), false),
         next_fns,
         rng_seed,
     });
 
+    Variable::from_operation(output.data(), grad_fn, true)
+}
+
+/// Like [`checkpoint`], but records the recompute node whenever grad mode is enabled, even if
+/// `input` itself carries no gradient — so parameters used inside `func` (a transformer layer fed
+/// by a frozen embedding) still receive gradients from the recomputed backward.
+pub fn checkpoint_with_params<F>(func: F, input: &Variable) -> Variable
+where
+    F: Fn(&Variable) -> Variable + Send + Sync + 'static,
+{
+    if !crate::no_grad::is_grad_enabled() {
+        return func(input);
+    }
+    let output = no_grad(|| func(input));
+    let func_arc: Arc<dyn Fn(&Variable) -> Variable + Send + Sync> = Arc::new(func);
+    let next_fns = vec![input.grad_fn().cloned()];
+    let grad_fn = GradFn::new(CheckpointBackward {
+        func: func_arc,
+        saved_input: Variable::new(input.data(), false),
+        next_fns,
+        rng_seed: 0,
+    });
     Variable::from_operation(output.data(), grad_fn, true)
 }
 
@@ -283,19 +287,15 @@ pub fn suggest_segments(
     let total_activation_memory = num_layers as f32 * activation_size_mb;
 
     if total_activation_memory <= available_memory_mb {
-        // No checkpointing needed
         return 0;
     }
 
-    // How many activations can we store?
     let storable_layers = (available_memory_mb / activation_size_mb).floor() as usize;
 
     if storable_layers == 0 {
-        // Need to checkpoint every layer
         return num_layers;
     }
 
-    // Number of segments = ceil(num_layers / storable_layers)
     num_layers.div_ceil(storable_layers)
 }
 
@@ -315,13 +315,7 @@ mod tests {
             true,
         );
 
-        let output = checkpoint(
-            |x| {
-                // Simple operation for testing
-                x.clone()
-            },
-            &input,
-        );
+        let output = checkpoint(|x| x.clone(), &input);
 
         assert_eq!(output.shape(), vec![2, 2]);
     }
@@ -330,7 +324,7 @@ mod tests {
     fn test_checkpoint_without_grad() {
         let input = Variable::new(
             Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap(),
-            false, // No gradient required
+            false,
         );
 
         let output = checkpoint(|x| x.clone(), &input);
@@ -340,13 +334,11 @@ mod tests {
 
     #[test]
     fn test_checkpoint_gradient_flow() {
-        // Test that gradients actually flow through checkpointed computation
         let input = Variable::new(
             Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], &[2, 2]).unwrap(),
             true,
         );
 
-        // Checkpoint a simple multiply-by-2 operation
         let output = checkpoint(
             |x| {
                 let two = Variable::new(
@@ -358,7 +350,6 @@ mod tests {
             &input,
         );
 
-        // output = input * 2, so d(output)/d(input) = 2
         let grad = Tensor::from_vec(vec![1.0, 1.0, 1.0, 1.0], &[2, 2]).unwrap();
         output.backward_with_grad(&grad);
 
@@ -380,10 +371,7 @@ mod tests {
             true,
         );
 
-        let output = checkpoint_sequential(4, 2, &input, |_layer_idx, x| {
-            // Identity for testing
-            x.clone()
-        });
+        let output = checkpoint_sequential(4, 2, &input, |_layer_idx, x| x.clone());
 
         assert_eq!(output.shape(), vec![2, 2]);
     }
@@ -403,7 +391,6 @@ mod tests {
 
         let output = checkpoint_sequential(3, 0, &input, |_layer_idx, x| x.clone());
 
-        // Should return input unchanged
         assert_eq!(output.shape(), vec![2]);
     }
 
@@ -423,15 +410,12 @@ mod tests {
 
     #[test]
     fn test_suggest_segments_moderate() {
-        // 12 layers * 100MB = 1200MB needed, 400MB available
-        // Can store 4 layers, so need 3 segments
         let segments = suggest_segments(12, 100.0, 400.0);
         assert_eq!(segments, 3);
     }
 
     #[test]
     fn test_suggest_segments_extreme() {
-        // Very limited memory
         let segments = suggest_segments(12, 100.0, 50.0);
         assert_eq!(segments, 12);
     }

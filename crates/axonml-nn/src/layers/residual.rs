@@ -161,6 +161,18 @@ impl Module for ResidualBlock {
     fn name(&self) -> &'static str {
         "ResidualBlock"
     }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        let mut c: Vec<(String, &dyn Module)> =
+            vec![("main_path".to_string(), &self.main_path as &dyn Module)];
+        if let Some(d) = &self.downsample {
+            c.push(("downsample".to_string(), d as &dyn Module));
+        }
+        if let Some(a) = &self.activation {
+            c.push(("activation".to_string(), a.as_ref()));
+        }
+        c
+    }
 }
 
 // =============================================================================
@@ -176,7 +188,6 @@ mod tests {
 
     #[test]
     fn test_residual_block_identity_skip() {
-        // Main path that preserves dimensions
         let main = Sequential::new()
             .add(Linear::new(32, 32))
             .add(ReLU)
@@ -190,19 +201,16 @@ mod tests {
         );
         let output = block.forward(&input);
 
-        // Output shape should match input
         assert_eq!(output.shape(), vec![2, 32]);
     }
 
     #[test]
     fn test_residual_block_with_downsample() {
-        // Main path changes dimensions: 32 -> 64
         let main = Sequential::new()
             .add(Linear::new(32, 64))
             .add(ReLU)
             .add(Linear::new(64, 64));
 
-        // Downsample projects input: 32 -> 64
         let downsample = Sequential::new().add(Linear::new(32, 64));
 
         let block = ResidualBlock::new(main).with_downsample(downsample);
@@ -246,12 +254,12 @@ mod tests {
     #[test]
     fn test_residual_block_parameters() {
         let main = Sequential::new()
-            .add(Linear::new(32, 32)) // weight(32x32) + bias(32) = 1056
-            .add(Linear::new(32, 32)); // weight(32x32) + bias(32) = 1056
+            .add(Linear::new(32, 32))
+            .add(Linear::new(32, 32));
 
         let block = ResidualBlock::new(main);
         let params = block.parameters();
-        assert_eq!(params.len(), 4); // 2 weights + 2 biases
+        assert_eq!(params.len(), 4);
     }
 
     #[test]
@@ -288,8 +296,6 @@ mod tests {
 
     #[test]
     fn test_residual_block_conv1d_with_downsample() {
-        // Real use case: Conv1d residual block with downsample to match dimensions
-        // Main path: 2 Conv1d(k=3) reduces time by 4 (20 -> 18 -> 16)
         let main = Sequential::new()
             .add(Conv1d::new(64, 64, 3))
             .add(BatchNorm1d::new(64))
@@ -297,15 +303,12 @@ mod tests {
             .add(Conv1d::new(64, 64, 3))
             .add(BatchNorm1d::new(64));
 
-        // Downsample matches skip connection to main path output shape
-        // Conv1d with kernel=5 reduces 20 -> 16
         let downsample = Sequential::new()
             .add(Conv1d::new(64, 64, 5))
             .add(BatchNorm1d::new(64));
 
         let block = ResidualBlock::new(main).with_downsample(downsample);
 
-        // Input: (batch=2, channels=64, time=20)
         let input = Variable::new(
             Tensor::from_vec(vec![1.0; 2 * 64 * 20], &[2, 64, 20]).expect("tensor creation failed"),
             false,
@@ -329,11 +332,9 @@ mod tests {
         );
         let output = block.forward(&input);
 
-        // Sum to scalar for backward
         let sum = output.sum();
         sum.backward();
 
-        // Gradient should flow through both main path and skip connection
         let params = block.parameters();
         assert!(!params.is_empty());
     }

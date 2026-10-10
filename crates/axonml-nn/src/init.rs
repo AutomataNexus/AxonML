@@ -30,6 +30,14 @@ use rand::Rng;
 // Basic Initializers
 // =============================================================================
 
+/// Deterministic-RNG controls. Every initialiser here ultimately draws through
+/// `axonml_tensor::rng`, so seeding that makes weight initialisation reproducible:
+/// ```ignore
+/// axonml_nn::init::with_seed(1234, || MyModel::new());
+/// ```
+/// Seeding is opt-in and thread-local — un-seeded threads keep using `thread_rng()`.
+pub use axonml_tensor::rng::{clear_seed, is_seeded, set_seed, with_seed};
+
 /// Creates a tensor filled with zeros.
 pub fn zeros(shape: &[usize]) -> Tensor<f32> {
     axonml_tensor::zeros(shape)
@@ -56,9 +64,9 @@ pub fn uniform(shape: &[usize]) -> Tensor<f32> {
 
 /// Creates a tensor with uniform random values in [low, high).
 pub fn uniform_range(shape: &[usize], low: f32, high: f32) -> Tensor<f32> {
-    let mut rng = rand::thread_rng();
     let numel: usize = shape.iter().product();
-    let data: Vec<f32> = (0..numel).map(|_| rng.gen_range(low..high)).collect();
+    let data: Vec<f32> =
+        axonml_tensor::rng::with_rng(|rng| (0..numel).map(|_| rng.gen_range(low..high)).collect());
     Tensor::from_vec(data, shape).unwrap()
 }
 
@@ -167,24 +175,19 @@ pub fn he_normal(fan_out: usize, fan_in: usize) -> Tensor<f32> {
 /// * `cols` - Number of columns
 /// * `gain` - Multiplicative factor (default 1.0)
 pub fn orthogonal(rows: usize, cols: usize, gain: f32) -> Tensor<f32> {
-    // Simple implementation: start with random matrix and use Gram-Schmidt
-    // For a full implementation, we'd use QR decomposition
     let mut data = vec![0.0f32; rows * cols];
-    let mut rng = rand::thread_rng();
 
-    // Generate random matrix
-    for val in data.iter_mut() {
-        *val = rng.gen_range(-1.0..1.0);
-    }
+    axonml_tensor::rng::with_rng(|rng| {
+        for val in data.iter_mut() {
+            *val = rng.gen_range(-1.0..1.0);
+        }
+    });
 
-    // Simple normalization (not true orthogonal, but approximation)
-    // A proper implementation would use QR decomposition
     for i in 0..rows.min(cols) {
         let start = i * cols;
         let end = start + cols;
         let row = &mut data[start..end];
 
-        // Normalize the row
         let norm: f32 = row.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 1e-8 {
             for val in row.iter_mut() {
@@ -207,24 +210,23 @@ pub fn orthogonal(rows: usize, cols: usize, gain: f32) -> Tensor<f32> {
 /// * `std` - Standard deviation of non-zero elements
 pub fn sparse(rows: usize, cols: usize, sparsity: f32, std: f32) -> Tensor<f32> {
     let mut data = vec![0.0f32; rows * cols];
-    let mut rng = rand::thread_rng();
 
     let num_nonzero = (rows as f32 * sparsity).ceil() as usize;
 
-    for col in 0..cols {
-        // Randomly select which rows will be non-zero
-        let mut indices: Vec<usize> = (0..rows).collect();
-        for i in 0..num_nonzero.min(rows) {
-            let j = rng.gen_range(i..rows);
-            indices.swap(i, j);
-        }
+    axonml_tensor::rng::with_rng(|rng| {
+        for col in 0..cols {
+            let mut indices: Vec<usize> = (0..rows).collect();
+            for i in 0..num_nonzero.min(rows) {
+                let j = rng.gen_range(i..rows);
+                indices.swap(i, j);
+            }
 
-        // Set non-zero values
-        for &row in indices.iter().take(num_nonzero) {
-            let val: f32 = rng.r#gen::<f32>() * 2.0 - 1.0; // Approximate normal
-            data[row * cols + col] = val * std;
+            for &row in indices.iter().take(num_nonzero) {
+                let val: f32 = rng.r#gen::<f32>() * 2.0 - 1.0;
+                data[row * cols + col] = val * std;
+            }
         }
-    }
+    });
 
     Tensor::from_vec(data, &[rows, cols]).unwrap()
 }
@@ -266,7 +268,7 @@ pub enum InitMode {
     /// Uniform random in range.
     UniformRange(f32, f32),
     /// Normal distribution.
-    Normal(f32, f32), // mean, std
+    Normal(f32, f32),
     /// Xavier/Glorot uniform.
     XavierUniform,
     /// Xavier/Glorot normal.
@@ -276,7 +278,7 @@ pub enum InitMode {
     /// Kaiming/He normal.
     KaimingNormal,
     /// Orthogonal.
-    Orthogonal(f32), // gain
+    Orthogonal(f32),
 }
 
 impl InitMode {
@@ -333,7 +335,7 @@ mod tests {
         assert_eq!(t.shape(), &[100, 100]);
         let bound = (6.0 / 200.0_f32).sqrt();
         let data = t.to_vec();
-        assert!(data.iter().all(|&x| x.abs() <= bound * 1.1)); // Small margin
+        assert!(data.iter().all(|&x| x.abs() <= bound * 1.1));
     }
 
     #[test]

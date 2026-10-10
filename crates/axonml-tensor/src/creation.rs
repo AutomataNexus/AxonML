@@ -137,7 +137,7 @@ where
 }
 
 /// Creates a tensor with uniformly distributed random values in [0, 1),
-/// using the thread-local RNG.
+/// using the process RNG (seedable through `crate::rng`).
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
@@ -147,7 +147,7 @@ pub fn rand<T: Float>(shape: &[usize]) -> Tensor<T>
 where
     Standard: Distribution<T>,
 {
-    rand_with_rng(&mut rand::thread_rng(), shape)
+    crate::rng::with_rng(|rng| rand_with_rng(rng, shape))
 }
 
 /// Creates a tensor with normally distributed random values (mean=0, std=1),
@@ -162,7 +162,7 @@ where
 }
 
 /// Creates a tensor with normally distributed random values (mean=0, std=1),
-/// using the thread-local RNG.
+/// using the process RNG (seedable through `crate::rng`).
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
@@ -172,7 +172,7 @@ pub fn randn<T: Float>(shape: &[usize]) -> Tensor<T>
 where
     StandardNormal: Distribution<T>,
 {
-    randn_with_rng(&mut rand::thread_rng(), shape)
+    crate::rng::with_rng(|rng| randn_with_rng(rng, shape))
 }
 
 /// Creates a tensor with uniformly distributed random values in [low, high),
@@ -193,7 +193,7 @@ where
 }
 
 /// Creates a tensor with uniformly distributed random values in [low, high),
-/// using the thread-local RNG.
+/// using the process RNG (seedable through `crate::rng`).
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
@@ -204,7 +204,7 @@ pub fn uniform<T: Float>(shape: &[usize], low: T, high: T) -> Tensor<T>
 where
     T: rand::distributions::uniform::SampleUniform,
 {
-    uniform_with_rng(&mut rand::thread_rng(), shape, low, high)
+    crate::rng::with_rng(|rng| uniform_with_rng(rng, shape, low, high))
 }
 
 /// Creates a tensor with normally distributed random values, drawn from `rng`.
@@ -226,7 +226,7 @@ where
 }
 
 /// Creates a tensor with normally distributed random values, using the
-/// thread-local RNG.
+/// process RNG (seedable through `crate::rng`).
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
@@ -238,7 +238,7 @@ where
     T: rand::distributions::uniform::SampleUniform,
     StandardNormal: Distribution<T>,
 {
-    normal_with_rng(&mut rand::thread_rng(), shape, mean, std)
+    crate::rng::with_rng(|rng| normal_with_rng(rng, shape, mean, std))
 }
 
 /// Creates a tensor with random integers in [low, high), drawn from `rng`.
@@ -260,8 +260,8 @@ where
     Tensor::from_vec(data, shape).expect("tensor creation failed")
 }
 
-/// Creates a tensor with random integers in [low, high), using the
-/// thread-local RNG.
+/// Creates a tensor with random integers in [low, high), using the process
+/// RNG (seedable through `crate::rng`).
 ///
 /// # Arguments
 /// * `shape` - Shape of the tensor
@@ -273,7 +273,7 @@ pub fn randint<T: Numeric>(shape: &[usize], low: i64, high: i64) -> Tensor<T>
 where
     T: num_traits::NumCast,
 {
-    randint_with_rng(&mut rand::thread_rng(), shape, low, high)
+    crate::rng::with_rng(|rng| randint_with_rng(rng, shape, low, high))
 }
 
 // =============================================================================

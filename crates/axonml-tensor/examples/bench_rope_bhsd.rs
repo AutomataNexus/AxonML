@@ -15,14 +15,12 @@ fn main() {
     let x_gpu = mkrand(&[bs, n_heads, seq, head_dim], 0.1, device);
     let x_cpu = x_gpu.to_device(Device::Cpu).unwrap();
 
-    // Forward GPU vs CPU.
     let fwd_gpu = x_gpu.apply_rope_split_halves_bhsd(bs, n_heads, seq, head_dim, theta, pos_start);
     let fwd_cpu = x_cpu.apply_rope_split_halves_bhsd(bs, n_heads, seq, head_dim, theta, pos_start);
     let max_fwd = max_abs_diff(&fwd_gpu.to_vec(), &fwd_cpu.to_vec());
     println!("RoPE forward  max_abs_diff = {max_fwd:.4e}");
     assert!(max_fwd < 1e-4, "RoPE fwd correctness fail");
 
-    // Backward GPU vs CPU.
     let go_gpu = mkrand(&[bs, n_heads, seq, head_dim], 0.01, device);
     let go_cpu = go_gpu.to_device(Device::Cpu).unwrap();
     let bwd_gpu = go_gpu.rope_split_halves_bhsd_bwd(bs, n_heads, seq, head_dim, theta, pos_start);
@@ -31,7 +29,6 @@ fn main() {
     println!("RoPE backward max_abs_diff = {max_bwd:.4e}");
     assert!(max_bwd < 1e-4, "RoPE bwd correctness fail");
 
-    // repeat_kv correctness (bs=2, 8 kv-heads, n_rep=2).
     let kv_heads = 8;
     let n_rep = 2;
     let kv_gpu = mkrand(&[bs, kv_heads, seq, head_dim], 0.3, device);

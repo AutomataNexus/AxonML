@@ -263,12 +263,10 @@ pub fn assert_close(expected: &[f32], actual: &[f32], atol: f32, rtol: f32) -> R
 
 /// Generate random test data.
 pub fn random_vec(len: usize, seed: u64) -> Vec<f32> {
-    // Simple LCG for reproducibility
     let mut state = seed;
     (0..len)
         .map(|_| {
             state = state.wrapping_mul(1103515245).wrapping_add(12345);
-            // Map to [-1, 1]
             ((state >> 16) & 0x7FFF) as f32 / 16384.0 - 1.0
         })
         .collect()
@@ -359,24 +357,20 @@ pub mod cuda_tests {
 
         report = report.with_capabilities(backend.capabilities());
 
-        // Memory operations
         report.add_result(test_memory_roundtrip(&backend, config));
 
-        // Element-wise operations
         for &size in &config.test_sizes {
             report.add_result(test_add(&backend, size, config));
             report.add_result(test_mul(&backend, size, config));
             report.add_result(test_scale(&backend, size, config));
         }
 
-        // Activation functions
         for &size in &config.test_sizes {
             report.add_result(test_relu(&backend, size, config));
             report.add_result(test_sigmoid(&backend, size, config));
             report.add_result(test_tanh(&backend, size, config));
         }
 
-        // Matrix multiplication
         report.add_result(test_gemm_square(&backend, 64, config));
         report.add_result(test_gemm_square(&backend, 256, config));
         report.add_result(test_gemm_rectangular(&backend, 128, 64, 96, config));
@@ -546,7 +540,6 @@ pub mod cuda_tests {
 
         backend.synchronize();
 
-        // Sigmoid uses fast approximations, so allow higher tolerance
         let sigmoid_atol = 1e-3;
         let sigmoid_rtol = 1e-2;
 
@@ -579,7 +572,6 @@ pub mod cuda_tests {
 
         backend.synchronize();
 
-        // Tanh uses fast approximations
         let tanh_atol = 1e-3;
         let tanh_rtol = 1e-2;
 
@@ -605,12 +597,10 @@ pub mod cuda_tests {
     ) -> GpuTestResult {
         let name = format!("gemm_f32_{}x{}x{}", m, n, k);
 
-        // Generate test data
         let a = random_vec(m * k, 42);
         let b = random_vec(k * n, 123);
         let expected = cpu_gemm(&a, &b, m, n, k);
 
-        // Convert to column-major for cuBLAS
         let a_col = row_to_col_major(&a, m, k);
         let b_col = row_to_col_major(&b, k, n);
 
@@ -627,14 +617,8 @@ pub mod cuda_tests {
             Err(e) => return GpuTestResult::fail(&name, &format!("alloc: {}", e)),
         };
 
-        // cuBLAS GEMM: C = alpha * A @ B + beta * C
         if let Err(e) = backend.gemm_f32(
-            false, false, // no transpose
-            m, n, k, 1.0, // alpha
-            &gpu_a, m, // A, lda
-            &gpu_b, k,   // B, ldb
-            0.0, // beta
-            &mut gpu_c, m, // C, ldc
+            false, false, m, n, k, 1.0, &gpu_a, m, &gpu_b, k, 0.0, &mut gpu_c, m,
         ) {
             return GpuTestResult::fail(&name, &format!("gemm_f32: {}", e));
         }
@@ -643,10 +627,8 @@ pub mod cuda_tests {
 
         match backend.dtoh_copy(&gpu_c) {
             Ok(result_col) => {
-                // Convert back from column-major
                 let result = col_to_row_major(&result_col, m, n);
 
-                // GEMM can have larger numerical errors
                 let gemm_atol = 1e-3;
                 let gemm_rtol = 1e-2;
 
@@ -659,7 +641,6 @@ pub mod cuda_tests {
         }
     }
 
-    // Helper: row-major to column-major conversion
     fn row_to_col_major(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         let mut result = vec![0.0; rows * cols];
         for i in 0..rows {
@@ -670,7 +651,6 @@ pub mod cuda_tests {
         result
     }
 
-    // Helper: column-major to row-major conversion
     fn col_to_row_major(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         let mut result = vec![0.0; rows * cols];
         for i in 0..rows {
@@ -795,13 +775,9 @@ mod tests {
 
     #[test]
     fn test_cpu_gemm() {
-        // 2x3 @ 3x2 = 2x2
         let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let b = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let c = cpu_gemm(&a, &b, 2, 2, 3);
-        // Expected:
-        // [1*1+2*3+3*5, 1*2+2*4+3*6] = [22, 28]
-        // [4*1+5*3+6*5, 4*2+5*4+6*6] = [49, 64]
         assert_eq!(c, vec![22.0, 28.0, 49.0, 64.0]);
     }
 
@@ -843,7 +819,6 @@ mod tests {
         let report = cuda_tests::run_all_tests(&config);
         report.print_summary();
 
-        // If CUDA is available, all tests should pass
         if crate::backends::cuda::is_available() {
             assert_eq!(report.failed_count(), 0, "Some CUDA tests failed");
         }

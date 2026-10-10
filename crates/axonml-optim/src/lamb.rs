@@ -208,12 +208,6 @@ impl Optimizer for LAMB {
     fn step(&mut self) {
         self.ensure_state_initialized();
 
-        // ============================================================
-        // Tensor-op path: works on both CPU and GPU without to_vec()
-        // All ops (add, mul, mul_scalar, div, sqrt, add_scalar, sub)
-        // dispatch to CUDA when the tensors are GPU-resident.
-        // ============================================================
-
         for (i, param) in self.params.iter().enumerate() {
             if !param.requires_grad() {
                 continue;
@@ -229,14 +223,12 @@ impl Optimizer for LAMB {
 
             let param_data = param.data();
 
-            // Update biased first moment: m = beta1 * m + (1 - beta1) * grad
             state.exp_avg = state
                 .exp_avg
                 .mul_scalar(self.beta1)
                 .add(&grad.mul_scalar(1.0 - self.beta1))
                 .unwrap();
 
-            // Update biased second moment: v = beta2 * v + (1 - beta2) * grad^2
             let grad_sq = grad.mul(&grad).unwrap();
             state.exp_avg_sq = state
                 .exp_avg_sq
@@ -244,7 +236,6 @@ impl Optimizer for LAMB {
                 .add(&grad_sq.mul_scalar(1.0 - self.beta2))
                 .unwrap();
 
-            // Compute bias-corrected moments
             let (bias_correction1, bias_correction2) = if self.bias_correction {
                 (
                     1.0 - self.beta1.powi(state.step as i32),
@@ -254,14 +245,11 @@ impl Optimizer for LAMB {
                 (1.0, 1.0)
             };
 
-            // m_hat = m / bc1, v_hat = v / bc2
             let m_hat = state.exp_avg.mul_scalar(1.0 / bias_correction1);
             let v_hat = state.exp_avg_sq.mul_scalar(1.0 / bias_correction2);
 
-            // adam_update = m_hat / (sqrt(v_hat) + eps)
             let adam_update = m_hat.div(&v_hat.sqrt().add_scalar(self.eps)).unwrap();
 
-            // update = adam_update + weight_decay * param (decoupled weight decay)
             let update = if self.weight_decay > 0.0 {
                 adam_update
                     .add(&param_data.mul_scalar(self.weight_decay))
@@ -270,12 +258,9 @@ impl Optimizer for LAMB {
                 adam_update
             };
 
-            // Compute trust ratio: ||param|| / ||update||
-            // norm = sqrt(sum(x^2))  using Tensor ops
             let weight_norm_sq = param_data.mul(&param_data).unwrap().sum();
             let update_norm_sq = update.mul(&update).unwrap().sum();
 
-            // Extract scalar norms (single element tensors)
             let weight_norm = weight_norm_sq.to_vec()[0].sqrt();
             let update_norm = update_norm_sq.to_vec()[0].sqrt();
 
@@ -285,7 +270,6 @@ impl Optimizer for LAMB {
                 1.0
             };
 
-            // param = param - lr * trust_ratio * update
             let effective_lr = self.lr * trust_ratio;
             let new_param = param_data.sub(&update.mul_scalar(effective_lr)).unwrap();
             param.update_data(new_param);
@@ -342,7 +326,6 @@ mod tests {
         );
         let param = Parameter::from_variable(var);
 
-        // Set gradient
         param
             .variable()
             .set_grad(Tensor::from_vec(vec![0.1, 0.2, 0.3], &[3]).expect("tensor creation failed"));
@@ -351,7 +334,6 @@ mod tests {
         optimizer.step();
 
         let new_data = param.data().to_vec();
-        // Parameters should have changed
         assert!((new_data[0] - 1.0).abs() > 1e-6);
     }
 
@@ -395,26 +377,22 @@ mod tests {
 
     #[test]
     fn test_lamb_trust_ratio() {
-        // Test that trust ratio is computed correctly
         let var = Variable::new(
             Tensor::from_vec(vec![3.0, 4.0], &[2]).expect("tensor creation failed"),
             true,
         );
         let param = Parameter::from_variable(var);
 
-        // Weight norm = sqrt(9 + 16) = 5
         param
             .variable()
             .set_grad(Tensor::from_vec(vec![1.0, 1.0], &[2]).expect("tensor creation failed"));
 
         let mut optimizer = LAMB::new(vec![param.clone()], 0.1);
 
-        // After one step, parameters should change based on trust ratio
         let old_data = param.data().to_vec();
         optimizer.step();
         let new_data = param.data().to_vec();
 
-        // Verify parameters changed
         assert!((new_data[0] - old_data[0]).abs() > 1e-6);
         assert!((new_data[1] - old_data[1]).abs() > 1e-6);
     }
@@ -435,7 +413,6 @@ mod tests {
         assert!(param.grad().is_some());
 
         optimizer.zero_grad();
-        // Grad might be zeroed or None depending on implementation
     }
 
     #[test]

@@ -167,7 +167,6 @@ impl MetalBackend {
     /// Creates a GPU buffer with the specified size.
     #[cfg(all(target_os = "macos", feature = "metal"))]
     pub fn create_buffer(&self, size: u64) -> u64 {
-        // Use shared storage mode for unified memory (Apple Silicon)
         let buffer = self
             .device
             .new_buffer(size, MTLResourceOptions::StorageModeShared);
@@ -225,7 +224,6 @@ impl MetalBackend {
     pub fn destroy_buffer(&self, buffer_id: u64) {
         let mut tracker = self.buffer_tracker.lock().unwrap();
         tracker.remove(buffer_id);
-        // Buffer is automatically released when dropped
     }
 
     /// Creates or retrieves a cached compute pipeline from Metal shader code.
@@ -241,7 +239,6 @@ impl MetalBackend {
             return Some(pipeline.clone());
         }
 
-        // Compile shader
         let options = CompileOptions::new();
         let library = match self.device.new_library_with_source(metal_source, &options) {
             Ok(lib) => lib,
@@ -338,16 +335,16 @@ impl Backend for MetalBackend {
     }
 
     fn is_available(&self) -> bool {
-        true // If we created successfully, we're available
+        true
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
         DeviceCapabilities {
             name: self.device.name().to_string(),
             total_memory: Some(self.device.recommended_max_working_set_size() as usize),
-            available_memory: None, // Metal doesn't provide this directly
-            supports_f16: true,     // All Metal 2+ GPUs support f16
-            supports_f64: false,    // Metal doesn't support f64 in shaders
+            available_memory: None,
+            supports_f16: true,
+            supports_f64: false,
             max_threads_per_block: self.device.max_threads_per_threadgroup().width as usize,
             compute_capability: None,
         }
@@ -683,12 +680,10 @@ mod tests {
             None => return,
         };
 
-        // Create a buffer with data
         let data: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
         let bytes: &[u8] = bytemuck::cast_slice(&data);
         let buffer_id = backend.create_buffer_init(bytes);
 
-        // Read it back
         if let Some(read_data) = backend.read_buffer(buffer_id) {
             let floats: &[f32] = bytemuck::cast_slice(&read_data);
             assert_eq!(floats.len(), 4);

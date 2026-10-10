@@ -227,14 +227,12 @@ impl TrainingMonitor {
         self.step_count += 1;
         let step = self.step_count;
 
-        // Append to histories, respecting max_history
         self.push_bounded(&mut self.loss_history.clone(), loss);
         self.loss_history.push(loss);
         if self.loss_history.len() > self.config.max_history {
             self.loss_history.remove(0);
         }
 
-        // Compute max gradient norm across all parameters
         let max_grad_norm = grad_norms.iter().map(|(_, n)| *n).fold(0.0_f32, f32::max);
 
         self.grad_norm_history.push(max_grad_norm);
@@ -405,14 +403,12 @@ impl TrainingMonitor {
 
         let current_loss = self.loss_history.last().copied().unwrap_or(f32::NAN);
 
-        // Count dead neurons
         let dead_neurons = self
             .zero_grad_counts
             .values()
             .filter(|c| **c >= self.config.dead_neuron_threshold)
             .count();
 
-        // Determine overall health
         let has_critical = self
             .alerts
             .iter()
@@ -422,7 +418,6 @@ impl TrainingMonitor {
             && !current_loss.is_nan()
             && !current_loss.is_infinite();
 
-        // Collect recent alerts (last window_size steps)
         let min_step = self.step_count.saturating_sub(self.config.window_size);
         let active_alerts: Vec<TrainingAlert> = self
             .alerts
@@ -489,7 +484,6 @@ impl TrainingMonitor {
 
         let ratio = recent_avg / prev_avg;
 
-        // Check for oscillation: high variance in recent window
         let recent_mean = recent_avg;
         let recent_var = recent_finite
             .iter()
@@ -521,7 +515,6 @@ impl TrainingMonitor {
         let current_lr = self.lr_history.last().copied()?;
         let trend = self.loss_trend();
 
-        // Check for gradient explosion
         let (_, _, max_gn) = self.grad_norm_stats();
         if max_gn > self.config.grad_norm_threshold && max_gn.is_finite() {
             return Some(current_lr * 0.1);
@@ -530,12 +523,11 @@ impl TrainingMonitor {
         match trend {
             LossTrend::Oscillating => Some(current_lr * 0.5),
             LossTrend::Stable => {
-                // Check if truly converged or just stagnating
                 let conv = self.convergence_score();
                 if conv > 0.99 {
-                    None // Converged, no adjustment needed
+                    None
                 } else {
-                    Some(current_lr * 2.0) // Stagnating, try higher LR
+                    Some(current_lr * 2.0)
                 }
             }
             LossTrend::Increasing => Some(current_lr * 0.1),
@@ -591,18 +583,14 @@ impl TrainingMonitor {
 
         let mean = finite.iter().sum::<f32>() / finite.len() as f32;
         if mean.abs() < 1e-12 {
-            // If mean is essentially zero, check absolute range
             if range < self.config.convergence_threshold {
                 return 1.0;
             }
             return 0.0;
         }
 
-        // Relative range (normalized by mean)
         let relative_range = range / mean.abs();
 
-        // Map relative_range to [0, 1] score: 0 range -> 1.0, large range -> 0.0
-        // Use exponential decay for smooth mapping
         let score = (-relative_range * 100.0).exp();
         score.clamp(0.0, 1.0)
     }
@@ -660,10 +648,7 @@ impl TrainingMonitor {
     // Private helpers
     // =========================================================================
 
-    fn push_bounded(&self, _history: &mut Vec<f32>, _value: f32) {
-        // Intentionally left as no-op: actual push + trim is done inline
-        // in record_step for each history vector individually.
-    }
+    fn push_bounded(&self, _history: &mut Vec<f32>, _value: f32) {}
 
     fn emit_alert(
         &mut self,
@@ -822,7 +807,6 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // Record 10 steps with near-zero gradients to trigger vanishing alert
         for _ in 0..10 {
             monitor.record_step(0.5, &[("w1", 1e-10)], 0.001);
         }
@@ -839,11 +823,9 @@ mod tests {
     fn test_gradient_vanishing_resets_on_normal_grad() {
         let mut monitor = TrainingMonitor::new();
 
-        // 5 vanishing steps
         for _ in 0..5 {
             monitor.record_step(0.5, &[("w1", 1e-10)], 0.001);
         }
-        // Normal gradient resets the streak
         monitor.record_step(0.5, &[("w1", 1.0)], 0.001);
         assert_eq!(monitor.vanishing_streak, 0);
     }
@@ -861,12 +843,10 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // Build up a history of stable loss
         for _ in 0..10 {
             monitor.record_step(1.0, &[("w1", 0.5)], 0.001);
         }
 
-        // Spike the loss to trigger divergence
         monitor.record_step(100.0, &[("w1", 0.5)], 0.001);
 
         let divergence_alerts: Vec<_> = monitor
@@ -910,11 +890,9 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // 5 steps with zero grad
         for _ in 0..5 {
             monitor.record_step(0.5, &[("layer", 0.0)], 0.001);
         }
-        // One step with nonzero grad resets the counter
         monitor.record_step(0.5, &[("layer", 1.0)], 0.001);
 
         assert_eq!(*monitor.zero_grad_counts.get("layer").unwrap(), 0);
@@ -933,7 +911,6 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // Record identical losses
         for _ in 0..10 {
             monitor.record_step(0.001, &[("w1", 0.1)], 0.001);
         }
@@ -958,11 +935,9 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // First window: higher losses
         for i in 0..5 {
             monitor.record_step(2.0 - i as f32 * 0.01, &[("w1", 0.5)], 0.001);
         }
-        // Second window: much lower losses
         for i in 0..5 {
             monitor.record_step(1.0 - i as f32 * 0.01, &[("w1", 0.5)], 0.001);
         }
@@ -978,11 +953,9 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // First window: lower losses
         for i in 0..5 {
             monitor.record_step(1.0 + i as f32 * 0.01, &[("w1", 0.5)], 0.001);
         }
-        // Second window: much higher losses
         for i in 0..5 {
             monitor.record_step(2.0 + i as f32 * 0.01, &[("w1", 0.5)], 0.001);
         }
@@ -998,11 +971,9 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // First window: stable
         for _ in 0..10 {
             monitor.record_step(1.0, &[("w1", 0.5)], 0.001);
         }
-        // Second window: oscillating around same mean but with high variance
         for i in 0..10 {
             let loss = if i % 2 == 0 { 1.3 } else { 0.7 };
             monitor.record_step(loss, &[("w1", 0.5)], 0.001);
@@ -1019,7 +990,6 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // Two windows with nearly identical means and low variance
         for _ in 0..10 {
             monitor.record_step(1.0, &[("w1", 0.5)], 0.001);
         }
@@ -1084,14 +1054,13 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // Record steps with exploding gradients
         for _ in 0..5 {
             monitor.record_step(1.0, &[("w1", 50.0)], 0.01);
         }
 
         let suggested = monitor.suggest_lr();
         assert!(suggested.is_some());
-        assert!((suggested.unwrap() - 0.001).abs() < 1e-6); // 0.01 * 0.1
+        assert!((suggested.unwrap() - 0.001).abs() < 1e-6);
     }
 
     #[test]
@@ -1102,11 +1071,9 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // First window stable
         for _ in 0..10 {
             monitor.record_step(1.0, &[("w1", 0.5)], 0.01);
         }
-        // Second window oscillating
         for i in 0..10 {
             let loss = if i % 2 == 0 { 1.3 } else { 0.7 };
             monitor.record_step(loss, &[("w1", 0.5)], 0.01);
@@ -1114,7 +1081,7 @@ mod tests {
 
         let suggested = monitor.suggest_lr();
         assert!(suggested.is_some());
-        assert!((suggested.unwrap() - 0.005).abs() < 1e-6); // 0.01 * 0.5
+        assert!((suggested.unwrap() - 0.005).abs() < 1e-6);
     }
 
     #[test]
@@ -1126,12 +1093,10 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // Two windows of identical loss (converged + stable)
         for _ in 0..10 {
             monitor.record_step(0.001, &[("w1", 0.01)], 0.001);
         }
 
-        // Stable trend with high convergence score -> should return None
         let trend = monitor.loss_trend();
         let conv = monitor.convergence_score();
         assert_eq!(trend, LossTrend::Stable);
@@ -1254,7 +1219,6 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // Record known gradient norms: 1, 2, 3, 4
         monitor.record_step(1.0, &[("w1", 1.0)], 0.001);
         monitor.record_step(1.0, &[("w1", 2.0)], 0.001);
         monitor.record_step(1.0, &[("w1", 3.0)], 0.001);
@@ -1267,7 +1231,6 @@ mod tests {
             mean
         );
         assert!((max - 4.0).abs() < 1e-4, "Expected max 4.0, got {}", max);
-        // std of [1,2,3,4] = sqrt(1.25) ~= 1.118
         assert!(
             (std - 1.118).abs() < 0.01,
             "Expected std ~1.118, got {}",
@@ -1296,9 +1259,8 @@ mod tests {
         };
         let mut monitor = TrainingMonitor::with_config(config);
 
-        // Simulate 100 steps of steadily improving loss
         for i in 0..100 {
-            let loss = 2.0 * (-0.03 * i as f32).exp(); // Exponential decay
+            let loss = 2.0 * (-0.03 * i as f32).exp();
             let grad_norm = 1.0 * (-0.01 * i as f32).exp();
             let lr = 0.001;
             monitor.record_step(
@@ -1317,14 +1279,12 @@ mod tests {
         let report = monitor.check_health();
         assert!(report.is_healthy);
         assert_eq!(report.step, 100);
-        assert!(report.current_loss < 0.2); // Should have decayed significantly
+        assert!(report.current_loss < 0.2);
         assert_eq!(report.dead_neurons, 0);
 
-        // Should detect decreasing trend
         let trend = monitor.loss_trend();
         assert_eq!(trend, LossTrend::Decreasing);
 
-        // No critical alerts should exist
         let critical_count = monitor
             .alerts
             .iter()
@@ -1332,7 +1292,6 @@ mod tests {
             .count();
         assert_eq!(critical_count, 0);
 
-        // Summary should be valid
         let summary = monitor.summary();
         assert!(summary.contains("HEALTHY"));
         assert!(summary.contains("step 100"));
@@ -1363,7 +1322,6 @@ mod tests {
     fn test_multiple_parameters_grad_norms() {
         let mut monitor = TrainingMonitor::new();
 
-        // The max grad norm should be tracked (not mean)
         monitor.record_step(1.0, &[("w1", 5.0), ("w2", 10.0), ("w3", 3.0)], 0.001);
 
         assert_eq!(monitor.grad_norm_history.len(), 1);

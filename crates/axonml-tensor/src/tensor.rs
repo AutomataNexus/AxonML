@@ -28,8 +28,6 @@
 //! kind, express or implied. The author and AutomataNexus shall not be held
 //! liable for any damages arising from the use of this software.
 
-// f32/f64 transcendental methods (exp, sqrt, powf, sin_cos, tanh) come from
-// libm via num_traits::Float when there is no std to provide them inherently.
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use num_traits::Float as _;
@@ -39,20 +37,23 @@ use num_traits::Float as _;
 use crate::alloc_prelude::*;
 
 use core::fmt;
+
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
 use axonml_core::Device;
+
 use axonml_core::backends::CpuBackend;
+
 #[cfg(feature = "cuda")]
 use axonml_core::backends::CudaBackend;
-use axonml_core::dtype::{Float, Numeric, Scalar};
-use axonml_core::error::{Error, Result};
-use axonml_core::storage::Storage;
-use num_traits::NumCast;
 
-// =============================================================================
-// CUDA Acceleration
-// =============================================================================
+use axonml_core::dtype::{Float, Numeric, Scalar};
+
+use axonml_core::error::{Error, Result};
+
+use axonml_core::storage::Storage;
+
+use num_traits::NumCast;
 
 #[cfg(feature = "cuda")]
 mod cuda_accel {
@@ -89,14 +90,6 @@ use crate::shape::{
     linear_index, normalize_dim, numel, reshape, squeeze, transpose_shape, transpose_strides,
     unsqueeze,
 };
-
-// =============================================================================
-// GPU Dispatch Helpers
-// =============================================================================
-//
-// These let generic Tensor<T> code reach the f32-only kernels. They are
-// `Any` downcasts, so a non-f32 T is a panic with a dtype message rather
-// than a reinterpretation of memory.
 
 fn gpu_ref<T: Scalar>(t: &Tensor<T>) -> &Tensor<f32> {
     (t as &dyn core::any::Any)
@@ -153,10 +146,6 @@ fn is_f32<T: 'static>() -> bool {
     core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>()
 }
 
-// =============================================================================
-// Tensor Struct
-// =============================================================================
-
 /// An N-dimensional array of numeric values.
 ///
 /// Tensors are the core data structure for all computations in Axonml.
@@ -174,11 +163,10 @@ pub struct Tensor<T: Scalar> {
     pub(crate) offset: usize,
 }
 
-impl<T: Scalar> Tensor<T> {
-    // =========================================================================
-    // Constructors
-    // =========================================================================
+#[cfg(feature = "cuda")]
+static NORM_GRAD_COMPOSED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
+impl<T: Scalar> Tensor<T> {
     /// Creates a new tensor from storage with the given shape.
     ///
     /// # Arguments
@@ -309,10 +297,6 @@ impl<T: Scalar> Tensor<T> {
         crate::creation::rand(shape)
     }
 
-    // =========================================================================
-    // Properties
-    // =========================================================================
-
     /// Returns the shape of the tensor.
     #[must_use]
     pub fn shape(&self) -> &[usize] {
@@ -369,10 +353,6 @@ impl<T: Scalar> Tensor<T> {
     pub fn is_scalar(&self) -> bool {
         self.shape.is_empty()
     }
-
-    // =========================================================================
-    // Data Access
-    // =========================================================================
 
     /// Returns the element at the given indices.
     ///
@@ -482,10 +462,6 @@ impl<T: Scalar> Tensor<T> {
             dst.push(storage[offset]);
         }
     }
-
-    // =========================================================================
-    // Shape Operations
-    // =========================================================================
 
     /// Returns a new tensor with the specified shape.
     ///
@@ -678,10 +654,6 @@ impl<T: Scalar> Tensor<T> {
         Self::from_vec(data, &self.shape).expect("Contiguous should never fail")
     }
 
-    // =========================================================================
-    // Functional Map Operations (zero-copy for CPU tensors)
-    // =========================================================================
-
     /// Apply a function element-wise, producing a new tensor with the same shape.
     ///
     /// Avoids the to_vec() → map → from_vec() pattern by operating directly
@@ -765,10 +737,6 @@ impl<T: Scalar> Tensor<T> {
         Self::from_vec(result, &self.shape).unwrap()
     }
 
-    // =========================================================================
-    // Device Operations
-    // =========================================================================
-
     /// Transfers the tensor to a different device.
     ///
     /// # Arguments
@@ -809,10 +777,6 @@ impl<T: Scalar> Tensor<T> {
         self.to_device(Device::Cpu)
     }
 
-    // =========================================================================
-    // Deep Copy
-    // =========================================================================
-
     /// Creates a deep copy of this tensor with its own storage.
     #[must_use]
     pub fn clone_deep(&self) -> Self {
@@ -825,10 +789,6 @@ impl<T: Scalar> Tensor<T> {
         cpu
     }
 }
-
-// =============================================================================
-// Numeric Operations
-// =============================================================================
 
 impl<T: Numeric> Tensor<T> {
     /// Fills the tensor with a value.
@@ -849,10 +809,6 @@ impl<T: Numeric> Tensor<T> {
     pub fn zero_(&self) {
         self.fill_(T::zero());
     }
-
-    // =========================================================================
-    // Reduction Operations
-    // =========================================================================
 
     /// Returns the sum of all elements as a scalar tensor.
     ///
@@ -1009,19 +965,31 @@ impl<T: Numeric> Tensor<T> {
         let outer_size: usize = out_shape[..dim].iter().product();
         let inner_size: usize = out_shape[dim + 1..].iter().product();
         let total_numel: usize = out_shape.iter().product();
+
+        #[cfg(feature = "cuda")]
+        if is_f32::<T>() && tensors.iter().all(|t| t.device().is_gpu()) {
+            let f32_tensors: Vec<&Tensor<f32>> = tensors.iter().map(|t| gpu_ref(t)).collect();
+            if let Some(out) = Tensor::<f32>::cat_cuda(&f32_tensors, dim, &out_shape) {
+                return Ok(gpu_into(out));
+            }
+        }
+
         let mut result = vec![T::zero(); total_numel];
 
         let mut dim_offset = 0;
         for t in tensors {
-            let ts = t.storage.as_slice();
-            let tf = t.is_contiguous() && t.offset == 0;
-            let tslice: &[T] = if tf { &ts[..t.numel()] } else { &[] };
+            let tf = t.is_contiguous() && t.offset == 0 && !t.device().is_gpu();
             let to: Option<Vec<T>> = if tf {
                 None
             } else {
                 Some(t.contiguous().to_vec())
             };
-            let t_data: &[T] = to.as_deref().unwrap_or(tslice);
+            let guard = if tf { Some(t.storage.as_slice()) } else { None };
+            let t_data: &[T] = match (&to, &guard) {
+                (Some(v), _) => v.as_slice(),
+                (None, Some(g)) => &g[..t.numel()],
+                _ => unreachable!(),
+            };
             let t_dim_size = t.shape[dim];
             let work = outer_size * t_dim_size;
             if work >= 4096 {
@@ -1060,1713 +1028,7 @@ impl<T: Numeric> Tensor<T> {
         }
         Ok(out)
     }
-}
 
-// =============================================================================
-// Float Operations
-// =============================================================================
-
-impl<T: Float> Tensor<T> {
-    /// Returns the mean of all elements.
-    /// Returns the mean of all elements.
-    ///
-    /// On GPU, uses native CUDA sum reduction then divides by numel.
-    pub fn mean(&self) -> Result<Self> {
-        if self.is_empty() {
-            return Err(Error::EmptyTensor);
-        }
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            let s = self.sum(); // uses CUDA sum_dim chain
-            let n = self.numel() as f32;
-            // mul_scalar stays on GPU
-            return Ok(s.mul_scalar(T::from(1.0 / n as f64).unwrap_or(T::zero())));
-        }
-
-        let storage = self.storage.as_slice();
-        let fast = self.is_contiguous() && self.offset == 0;
-        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
-        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
-        let data: &[T] = owned.as_deref().unwrap_or(slice);
-        let result = CpuBackend::mean(data).expect("mean on non-empty tensor");
-        Ok(Self::scalar(result))
-    }
-
-    // =========================================================================
-    // Activation Functions
-    // =========================================================================
-
-    /// Applies `ReLU` activation: max(0, x).
-    #[must_use]
-    pub fn relu(&self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).relu_cuda());
-        }
-        // Fast path for CPU contiguous (common in inference): avoid to_vec copy, feed storage slice directly to parallel CpuBackend.
-        let storage = self.storage.as_slice();
-        let fast = self.is_contiguous() && self.offset == 0;
-        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
-        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
-        let data: &[T] = owned.as_deref().unwrap_or(slice);
-        let mut result = vec![T::zero(); data.len()];
-        CpuBackend::relu(&mut result, data);
-        Self::from_vec(result, &self.shape).unwrap()
-    }
-
-    /// Applies sigmoid activation: 1 / (1 + exp(-x)).
-    #[must_use]
-    pub fn sigmoid(&self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).sigmoid_cuda());
-        }
-        let storage = self.storage.as_slice();
-        let fast = self.is_contiguous() && self.offset == 0;
-        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
-        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
-        let data: &[T] = owned.as_deref().unwrap_or(slice);
-        let mut result = vec![T::zero(); data.len()];
-        CpuBackend::sigmoid(&mut result, data);
-        Self::from_vec(result, &self.shape).unwrap()
-    }
-
-    /// Applies tanh activation.
-    #[must_use]
-    pub fn tanh(&self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).tanh_cuda());
-        }
-        let storage = self.storage.as_slice();
-        let fast = self.is_contiguous() && self.offset == 0;
-        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
-        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
-        let data: &[T] = owned.as_deref().unwrap_or(slice);
-        let mut result = vec![T::zero(); data.len()];
-        CpuBackend::tanh(&mut result, data);
-        Self::from_vec(result, &self.shape).unwrap()
-    }
-
-    /// Applies exponential function.
-    #[must_use]
-    pub fn exp(&self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).exp_cuda());
-        }
-        let storage = self.storage.as_slice();
-        let fast = self.is_contiguous() && self.offset == 0;
-        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
-        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
-        let data: &[T] = owned.as_deref().unwrap_or(slice);
-        let mut result = vec![T::zero(); data.len()];
-        CpuBackend::exp(&mut result, data);
-        Self::from_vec(result, &self.shape).unwrap()
-    }
-
-    /// Applies natural logarithm.
-    #[must_use]
-    pub fn ln(&self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).ln_cuda());
-        }
-        let storage = self.storage.as_slice();
-        let fast = self.is_contiguous() && self.offset == 0;
-        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
-        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
-        let data: &[T] = owned.as_deref().unwrap_or(slice);
-        let mut result = vec![T::zero(); data.len()];
-        CpuBackend::ln(&mut result, data);
-        Self::from_vec(result, &self.shape).unwrap()
-    }
-
-    /// Applies square root.
-    #[must_use]
-    pub fn sqrt(&self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).sqrt_cuda());
-        }
-        let storage = self.storage.as_slice();
-        let fast = self.is_contiguous() && self.offset == 0;
-        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
-        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
-        let data: &[T] = owned.as_deref().unwrap_or(slice);
-        let mut result = vec![T::zero(); data.len()];
-        CpuBackend::sqrt(&mut result, data);
-        Self::from_vec(result, &self.shape).unwrap()
-    }
-
-    /// Computes element-wise power.
-    #[must_use]
-    pub fn pow(&self, exp: T) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            let exp_f32 = scalar_as_f32(exp);
-            return gpu_into(gpu_ref(self).pow_cuda(exp_f32));
-        }
-        let storage = self.storage.as_slice();
-        let fast = self.is_contiguous() && self.offset == 0;
-        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
-        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
-        let data: &[T] = owned.as_deref().unwrap_or(slice);
-        let result: Vec<T> = data.iter().map(|&x| x.pow_value(exp)).collect();
-        Self::from_vec(result, &self.shape).unwrap()
-    }
-
-    /// GELU activation function (Gaussian Error Linear Unit).
-    #[must_use]
-    pub fn gelu(&self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).gelu_cuda());
-        }
-        crate::ops::gelu(self)
-    }
-
-    /// SiLU/Swish activation function.
-    #[must_use]
-    pub fn silu(&self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).silu_cuda());
-        }
-        crate::ops::silu(self)
-    }
-
-    /// Fused SiLU backward: `grad_input = grad_output * σ(x) * (1 + x*(1-σ(x)))`
-    /// on GPU in a single kernel launch. `self` is the saved forward input `x`.
-    /// For CPU tensors callers fall back to the per-element f32 path in
-    /// `Tensor<f32>::silu_backward_cpu`.
-    #[must_use]
-    pub fn silu_backward(&self, grad_output: &Self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            let go = gpu_ref(grad_output);
-            return gpu_into(gpu_ref(self).silu_backward_cuda(go));
-        }
-        // CPU fallback: only defined for f32 (matches original SiluBackward).
-        let x_f32 = gpu_ref(self);
-        let g_f32 = gpu_ref(grad_output);
-        let result_f32 = x_f32.zip_map(g_f32, |x, g| {
-            let sig = 1.0f32 / (1.0f32 + (-x).exp());
-            g * (sig + x * sig * (1.0f32 - sig))
-        });
-        gpu_into(result_f32)
-    }
-
-    /// RMSNorm with a per-element weight scale: `out = x * w / sqrt(mean(x²) + eps)`.
-    ///
-    /// Decode-step kernel — one CTA, suitable for single-token activations of
-    /// any hidden size up to ~16K. CPU fallback uses a serial reduction.
-    #[must_use]
-    /// Single-token LayerNorm (mean-subtracting, affine). Falcon arch.
-    /// `out[i] = (x[i] - mean) / sqrt(var + eps) * gamma[i] + beta[i]`.
-    pub fn layer_norm_tokenwise(&self, gamma: &Self, beta: &Self, eps: f32) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).layer_norm_tokenwise_cuda(
-                gpu_ref(gamma),
-                gpu_ref(beta),
-                eps,
-            ));
-        }
-        // CPU fallback. Fastpath + parallel for large n.
-        let xs = self.storage.as_slice();
-        let xf = self.is_contiguous() && self.offset == 0;
-        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
-        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
-        let x: &[T] = xo.as_deref().unwrap_or(xslice);
-
-        let gs = gamma.storage.as_slice();
-        let gf = gamma.is_contiguous() && gamma.offset == 0;
-        let gslice: &[T] = if gf { &gs[..gamma.numel()] } else { &[] };
-        let go: Option<Vec<T>> = if gf { None } else { Some(gamma.to_vec()) };
-        let g: &[T] = go.as_deref().unwrap_or(gslice);
-
-        let bs = beta.storage.as_slice();
-        let bf = beta.is_contiguous() && beta.offset == 0;
-        let bslice: &[T] = if bf { &bs[..beta.numel()] } else { &[] };
-        let bo: Option<Vec<T>> = if bf { None } else { Some(beta.to_vec()) };
-        let b: &[T] = bo.as_deref().unwrap_or(bslice);
-
-        let n = x.len();
-        let n_f = n as f32;
-        // For small n serial ok; for large use parallel sum (though typically small head_dim).
-        let mean: f32 = if n >= 4096 {
-            use axonml_core::par::prelude::*;
-            let sum: f32 = x.par_iter().map(|v| v.to_f32().unwrap_or(0.0)).sum();
-            sum / n_f
-        } else {
-            x.iter().map(|v| v.to_f32().unwrap_or(0.0)).sum::<f32>() / n_f
-        };
-        let var: f32 = if n >= 4096 {
-            use axonml_core::par::prelude::*;
-            let sum: f32 = x
-                .par_iter()
-                .map(|v| {
-                    let d = v.to_f32().unwrap_or(0.0) - mean;
-                    d * d
-                })
-                .sum();
-            sum / n_f
-        } else {
-            x.iter()
-                .map(|v| {
-                    let d = v.to_f32().unwrap_or(0.0) - mean;
-                    d * d
-                })
-                .sum::<f32>()
-                / n_f
-        };
-        let inv = (var + eps).sqrt().recip();
-        let mut out: Vec<T> = vec![T::zero(); n];
-        if n >= 4096 {
-            use axonml_core::par::prelude::*;
-            // par_iter_mut hands each thread a disjoint &mut T, so the borrow
-            // checker proves what the raw-pointer version only assumed: no two
-            // threads write the same element.
-            out.par_iter_mut()
-                .zip(x.par_iter())
-                .zip(g.par_iter())
-                .zip(b.par_iter())
-                .for_each(|(((o, xi), gi), bi)| {
-                    let xi = xi.to_f32().unwrap_or(0.0);
-                    let gi = gi.to_f32().unwrap_or(0.0);
-                    let bi = bi.to_f32().unwrap_or(0.0);
-                    let v = (xi - mean) * inv * gi + bi;
-                    *o = num_traits::cast(v).unwrap_or_else(T::zero);
-                });
-        } else {
-            for i in 0..n {
-                let xi = x[i].to_f32().unwrap_or(0.0);
-                let gi = g[i].to_f32().unwrap_or(0.0);
-                let bi = b[i].to_f32().unwrap_or(0.0);
-                let v = (xi - mean) * inv * gi + bi;
-                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
-            }
-        }
-        Self::from_vec(out, &self.shape).expect("layer_norm_tokenwise: build output")
-    }
-
-    /// Element-wise tanh-approximation GELU. Falcon MLP activation.
-    pub fn gelu_tanh(&self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).gelu_tanh_cuda());
-        }
-        // Fastpath + par for large.
-        let xs = self.storage.as_slice();
-        let xf = self.is_contiguous() && self.offset == 0;
-        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
-        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
-        let x: &[T] = xo.as_deref().unwrap_or(xslice);
-        const K: f32 = 0.797_884_6;
-        let n = x.len();
-        let mut out: Vec<T> = vec![T::zero(); n];
-        if n >= 4096 {
-            use axonml_core::par::prelude::*;
-            out.par_iter_mut().zip(x.par_iter()).for_each(|(o, xi)| {
-                let v = xi.to_f32().unwrap_or(0.0);
-                let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
-                *o = num_traits::cast(y).unwrap_or_else(T::zero);
-            });
-        } else {
-            for i in 0..n {
-                let v = x[i].to_f32().unwrap_or(0.0);
-                let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
-                out[i] = num_traits::cast(y).unwrap_or_else(T::zero);
-            }
-        }
-        Self::from_vec(out, &self.shape).expect("gelu_tanh: build output")
-    }
-
-    /// In-place scaled accumulate: `self += other * scalar`. One kernel
-    /// launch on GPU (instead of `mul_scalar` + `add` = two launches).
-    /// MoE expert-accumulate hot path.
-    pub fn scaled_add_inplace_(&mut self, other: &Self, scalar: f32) {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            gpu_ref_mut(self).scaled_add_inplace_cuda_(gpu_ref(other), scalar);
-            return;
-        }
-        // Fast contiguous + par for CPU MoE hot path.
-        let shape = self.shape.clone();
-        let o = if other.is_contiguous() && other.offset == 0 {
-            let s = other.storage.as_slice();
-            s[..other.numel()].to_vec()
-        } else {
-            other.to_vec()
-        };
-
-        let x = if self.is_contiguous() && self.offset == 0 {
-            let s = self.storage.as_slice();
-            s[..self.numel()].to_vec()
-        } else {
-            self.to_vec()
-        };
-
-        let n = x.len();
-        let mut out: Vec<T> = vec![T::zero(); n];
-        if n >= 4096 {
-            use axonml_core::par::prelude::*;
-            out.par_iter_mut().enumerate().for_each(|(i, outi)| {
-                let xv = x[i].to_f32().unwrap_or(0.0);
-                let ov = o[i].to_f32().unwrap_or(0.0);
-                let v = xv + ov * scalar;
-                *outi = num_traits::cast(v).unwrap_or_else(T::zero);
-            });
-        } else {
-            for i in 0..n {
-                let xv = x[i].to_f32().unwrap_or(0.0);
-                let ov = o[i].to_f32().unwrap_or(0.0);
-                let v = xv + ov * scalar;
-                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
-            }
-        }
-        *self = Self::from_vec(out, &shape).expect("scaled_add_inplace_: build output");
-    }
-
-    /// In-place parallel-residual add: `self += attn + ffn`. Falcon arch.
-    pub fn parallel_residual_add_(&mut self, attn: &Self, ffn: &Self) {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            gpu_ref_mut(self).parallel_residual_add_cuda_(gpu_ref(attn), gpu_ref(ffn));
-            return;
-        }
-        // Fast contiguous + par for CPU Falcon arch.
-        let shape = self.shape.clone();
-        let a = if attn.is_contiguous() && attn.offset == 0 {
-            let s = attn.storage.as_slice();
-            s[..attn.numel()].to_vec()
-        } else {
-            attn.to_vec()
-        };
-        let f = if ffn.is_contiguous() && ffn.offset == 0 {
-            let s = ffn.storage.as_slice();
-            s[..ffn.numel()].to_vec()
-        } else {
-            ffn.to_vec()
-        };
-        let x = if self.is_contiguous() && self.offset == 0 {
-            let s = self.storage.as_slice();
-            s[..self.numel()].to_vec()
-        } else {
-            self.to_vec()
-        };
-        let n = x.len();
-        let mut out: Vec<T> = vec![T::zero(); n];
-        if n >= 4096 {
-            use axonml_core::par::prelude::*;
-            out.par_iter_mut().enumerate().for_each(|(i, outi)| {
-                let xv = x[i].to_f32().unwrap_or(0.0);
-                let av = a[i].to_f32().unwrap_or(0.0);
-                let fv = f[i].to_f32().unwrap_or(0.0);
-                let v = xv + av + fv;
-                *outi = num_traits::cast(v).unwrap_or_else(T::zero);
-            });
-        } else {
-            for i in 0..n {
-                let xv = x[i].to_f32().unwrap_or(0.0);
-                let av = a[i].to_f32().unwrap_or(0.0);
-                let fv = f[i].to_f32().unwrap_or(0.0);
-                let v = xv + av + fv;
-                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
-            }
-        }
-        *self = Self::from_vec(out, &shape).expect("parallel_residual_add_: build output");
-    }
-
-    /// RMSNorm with a per-element weight scale. GPU-accelerated when enabled;
-    /// CPU fallback is correct but decode-only paths should stay on GPU.
-    pub fn rms_norm(&self, weight: &Self, eps: f32) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).rms_norm_cuda(gpu_ref(weight), eps));
-        }
-        // CPU fallback — parallelized for serious pure-CPU / Hailo-host performance.
-        // (decode on big GPU should still prefer the CUDA path)
-        let x = self.to_vec();
-        let w = weight.to_vec();
-        assert_eq!(x.len(), w.len(), "rms_norm: weight length must match input");
-        let n = x.len();
-
-        // Parallel sum of squares (f64 for numerical stability on large hidden dims)
-        let sum_sq = if n >= 4096 {
-            use axonml_core::par::prelude::*;
-            x.par_iter()
-                .map(|v| {
-                    let f: f64 = v.to_f32().unwrap_or(0.0).into();
-                    f * f
-                })
-                .reduce(|| 0.0, |a, b| a + b)
-        } else {
-            let mut s = 0.0f64;
-            for v in &x {
-                let f: f64 = v.to_f32().unwrap_or(0.0).into();
-                s += f * f;
-            }
-            s
-        };
-
-        let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-
-        let mut out: Vec<T> = vec![T::zero(); n];
-        if n >= 4096 {
-            use axonml_core::par::prelude::*;
-            out.par_iter_mut()
-                .zip(x.par_iter().zip(w.par_iter()))
-                .for_each(|(o, (xi, wi))| {
-                    let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
-                    *o = num_traits::cast(v).unwrap_or_else(T::zero);
-                });
-        } else {
-            for i in 0..n {
-                let v = x[i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
-                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
-            }
-        }
-        Self::from_vec(out, &self.shape).expect("rms_norm: build output tensor")
-    }
-
-    /// Qwen3 QK-norm: per-head RMS_norm over the last `head_dim` axis.
-    /// `self` is `[n_heads * head_dim]` (all heads flattened); `weight`
-    /// is `[head_dim]` broadcast across every head. Returns a new tensor
-    /// with the per-head norm applied; original is unchanged.
-    #[must_use]
-    pub fn rms_norm_heads(&self, weight: &Self, n_heads: usize, head_dim: usize, eps: f32) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).rms_norm_heads_cuda(
-                gpu_ref(weight),
-                n_heads,
-                head_dim,
-                eps,
-            ));
-        }
-        // CPU fallback — per-head rms_norm. Parallel over heads (independent).
-        let x = self.to_vec();
-        let w = weight.to_vec();
-        assert_eq!(x.len(), n_heads * head_dim);
-        assert_eq!(w.len(), head_dim);
-        let mut out: Vec<T> = vec![T::zero(); x.len()];
-        if n_heads > 1 {
-            use axonml_core::par::prelude::*;
-            out.par_chunks_mut(head_dim)
-                .zip(x.par_chunks(head_dim))
-                .for_each(|(o_row, x_row)| {
-                    let mut sum_sq = 0.0f64;
-                    for xi in x_row {
-                        let f: f64 = xi.to_f32().unwrap_or(0.0).into();
-                        sum_sq += f * f;
-                    }
-                    let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
-                    for ((o, xi), wi) in o_row.iter_mut().zip(x_row).zip(&w) {
-                        let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
-                        *o = num_traits::cast(v).unwrap_or_else(T::zero);
-                    }
-                });
-        } else {
-            for h in 0..n_heads {
-                let base = h * head_dim;
-                let mut sum_sq = 0.0f64;
-                for i in 0..head_dim {
-                    let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
-                    sum_sq += f * f;
-                }
-                let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
-                for i in 0..head_dim {
-                    let v =
-                        x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
-                    out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
-                }
-            }
-        }
-        Self::from_vec(out, &self.shape).expect("rms_norm_heads: build output tensor")
-    }
-
-    /// Rotary position embedding in the LLaMA / Qwen / Mistral split-halves
-    /// layout. Returns a new tensor with the rotation applied; original is
-    /// unchanged. Input is `[n_heads * head_dim]` (single-token, all heads
-    /// flattened).
-    #[must_use]
-    pub fn apply_rope_split_halves(
-        &self,
-        n_heads: usize,
-        head_dim: usize,
-        theta: f32,
-        pos: usize,
-    ) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).rope_split_halves_cuda(n_heads, head_dim, theta, pos));
-        }
-        // CPU fallback - delegates to CpuBackend (will be parallelized for large cases;
-        // currently efficient sequential over heads). Important for pure CPU use and
-        // as reference forward when AxonML models target Hailo via the Hailo NPU compiler.
-        let mut x = self.to_vec();
-        if is_f32::<T>() {
-            CpuBackend::apply_rope_split_halves_f32(
-                vec_as_f32_mut(&mut x),
-                n_heads,
-                head_dim,
-                theta,
-                pos,
-            );
-        } else {
-            let half = head_dim / 2;
-            for h in 0..n_heads {
-                for d in 0..half {
-                    let base = h * head_dim + d;
-                    let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                    let angle = pos as f32 * theta.powf(exponent);
-                    let (s, c) = angle.sin_cos();
-                    let a = x[base].to_f32().unwrap_or(0.0);
-                    let b = x[base + half].to_f32().unwrap_or(0.0);
-                    x[base] = num_traits::cast(c * a - s * b).unwrap_or_else(T::zero);
-                    x[base + half] = num_traits::cast(s * a + c * b).unwrap_or_else(T::zero);
-                }
-            }
-        }
-        Self::from_vec(x, &self.shape).expect("apply_rope: build output tensor")
-    }
-
-    /// Fused residual-add + batched RMSNorm: returns `(RMSNorm(self + b), self + b)`.
-    /// The raw sum is saved for the backward pass so it doesn't need to rerun
-    /// the add. `self` and `b` are `[m, n]`; `weight` is `[n]`.
-    ///
-    /// Replaces the per-layer `residual.add(x).rms_norm(weight)` pair with one
-    /// kernel — eliminates a broadcast_add + alloc + RMSNorm kernel launch per
-    /// residual path (2 × per Qwen3 layer).
-    #[must_use]
-    pub fn add_rmsnorm_batched(
-        &self,
-        b: &Self,
-        weight: &Self,
-        m: usize,
-        n: usize,
-        eps: f32,
-    ) -> (Self, Self) {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            let (out, sum) =
-                gpu_ref(self).add_rmsnorm_batched_cuda(gpu_ref(b), gpu_ref(weight), m, n, eps);
-            return (gpu_into(out), gpu_into(sum));
-        }
-        assert!(
-            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
-            "add_rmsnorm_batched CPU path requires f32",
-        );
-        let av = self.to_vec();
-        let bv = b.to_vec();
-        let w = weight.to_vec();
-        assert_eq!(av.len(), m * n);
-        assert_eq!(bv.len(), m * n);
-        assert_eq!(w.len(), n);
-        let mut sum_out: Vec<T> = Vec::with_capacity(m * n);
-        let mut out: Vec<T> = Vec::with_capacity(m * n);
-        for t in 0..m {
-            let base = t * n;
-            let mut sum_sq = 0.0f64;
-            for i in 0..n {
-                let ai = av[base + i].to_f32().unwrap_or(0.0);
-                let bi = bv[base + i].to_f32().unwrap_or(0.0);
-                let s = ai + bi;
-                sum_out.push(num_traits::cast(s).unwrap_or_else(T::zero));
-                sum_sq += (s as f64) * (s as f64);
-            }
-            let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-            for i in 0..n {
-                let s = sum_out[base + i].to_f32().unwrap_or(0.0);
-                let wi = w[i].to_f32().unwrap_or(0.0);
-                out.push(num_traits::cast(s * scale * wi).unwrap_or_else(T::zero));
-            }
-        }
-        let out_t = Self::from_vec(out, &[m, n]).expect("add_rmsnorm_batched: build output");
-        let sum_t = Self::from_vec(sum_out, &[m, n]).expect("add_rmsnorm_batched: build sum");
-        (out_t, sum_t)
-    }
-
-    /// Fused causal-scaled softmax. `self` is the raw attention scores
-    /// `[..., Tq, Tk]`; applies `softmax(scale * scores + causal_mask)`
-    /// over the last dim. `offset` is the KV-cache position offset (0
-    /// during training). Masked positions (j > offset + i) are exactly 0.
-    ///
-    /// Replaces the `mul_scalar(scale) + add(mask) + softmax(-1)` chain —
-    /// 3 kernels + a CPU mask alloc per call collapse to 1 kernel launch.
-    #[must_use]
-    pub fn softmax_causal_scaled(&self, tq: usize, tk: usize, offset: usize, scale: f32) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).softmax_causal_scaled_cuda(tq, tk, offset, scale));
-        }
-        // CPU fallback: same math, row by row.
-        assert!(
-            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
-            "softmax_causal_scaled CPU path requires f32",
-        );
-        let total = self.numel();
-        assert!(total % tk == 0 && (total / tk) % tq == 0);
-        let num_rows = total / tk;
-        let src = self.to_vec();
-        let mut out: Vec<T> = Vec::with_capacity(total);
-        for r in 0..num_rows {
-            let q_pos = r % tq;
-            let max_k = offset + q_pos;
-            let base = r * tk;
-            let mut row_max = f32::NEG_INFINITY;
-            for j in 0..tk {
-                let v = if j > max_k {
-                    f32::NEG_INFINITY
-                } else {
-                    src[base + j].to_f32().unwrap_or(0.0) * scale
-                };
-                if v > row_max {
-                    row_max = v;
-                }
-            }
-            let mut sum = 0.0f32;
-            for j in 0..tk {
-                if j > max_k {
-                    continue;
-                }
-                let v = src[base + j].to_f32().unwrap_or(0.0) * scale;
-                sum += (v - row_max).exp();
-            }
-            let inv = if sum > 0.0 { 1.0 / sum } else { 0.0 };
-            for j in 0..tk {
-                let v = if j > max_k {
-                    0.0
-                } else {
-                    let s = src[base + j].to_f32().unwrap_or(0.0) * scale;
-                    (s - row_max).exp() * inv
-                };
-                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
-            }
-        }
-        Self::from_vec(out, self.shape()).expect("softmax_causal_scaled: build output")
-    }
-
-    /// Fused causal-scaled softmax backward wrt raw scores. `self` is the
-    /// saved forward output `p` (masked positions are 0); `grad_output`
-    /// is `dL/dp`. Returns `grad_scores = scale * p * (grad_out - Σ(p·grad_out))`
-    /// per row; masked positions naturally zero because `p = 0`.
-    #[must_use]
-    pub fn softmax_causal_scaled_bwd(&self, grad_output: &Self, tk: usize, scale: f32) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).softmax_causal_scaled_bwd_cuda(
-                gpu_ref(grad_output),
-                tk,
-                scale,
-            ));
-        }
-        assert!(
-            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
-            "softmax_causal_scaled_bwd CPU path requires f32",
-        );
-        let total = self.numel();
-        assert_eq!(total, grad_output.numel());
-        assert!(total % tk == 0);
-        let num_rows = total / tk;
-        let p = self.to_vec();
-        let g = grad_output.to_vec();
-        let mut out: Vec<T> = Vec::with_capacity(total);
-        for r in 0..num_rows {
-            let base = r * tk;
-            let mut dot = 0.0f32;
-            for j in 0..tk {
-                let pj = p[base + j].to_f32().unwrap_or(0.0);
-                let gj = g[base + j].to_f32().unwrap_or(0.0);
-                dot += pj * gj;
-            }
-            for j in 0..tk {
-                let pj = p[base + j].to_f32().unwrap_or(0.0);
-                let gj = g[base + j].to_f32().unwrap_or(0.0);
-                let v = scale * pj * (gj - dot);
-                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
-            }
-        }
-        Self::from_vec(out, self.shape()).expect("softmax_causal_scaled_bwd: build output")
-    }
-
-    /// Batched RMSNorm backward (grad_input only). `self` is the saved
-    /// forward input `[m, n]`, `weight` is `[n]`, `grad_output` is `[m, n]`.
-    /// Returns `[m, n]` grad_input matching the CPU-only reference math in
-    /// `axonml-llm::RMSNormBackward` (weight-gradient path not required
-    /// because the existing autograd path doesn't route grads to the weight).
-    #[must_use]
-    pub fn rms_norm_bwd_batched(
-        &self,
-        weight: &Self,
-        grad_output: &Self,
-        m: usize,
-        n: usize,
-        eps: f32,
-    ) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).rms_norm_bwd_batched_cuda(
-                gpu_ref(weight),
-                gpu_ref(grad_output),
-                m,
-                n,
-                eps,
-            ));
-        }
-        // CPU fallback: same math as axonml-llm's RMSNormBackward::apply.
-        // Fast contiguous + parallel over m tokens for training bwd (CPU fallback).
-        assert!(
-            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
-            "rms_norm_bwd_batched CPU path requires f32",
-        );
-        let xs = self.storage.as_slice();
-        let xf = self.is_contiguous() && self.offset == 0;
-        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
-        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
-        let x: &[T] = xo.as_deref().unwrap_or(xslice);
-
-        let ws = weight.storage.as_slice();
-        let wf = weight.is_contiguous() && weight.offset == 0;
-        let wslice: &[T] = if wf { &ws[..weight.numel()] } else { &[] };
-        let wo: Option<Vec<T>> = if wf { None } else { Some(weight.to_vec()) };
-        let w: &[T] = wo.as_deref().unwrap_or(wslice);
-
-        let gs = grad_output.storage.as_slice();
-        let gf = grad_output.is_contiguous() && grad_output.offset == 0;
-        let gslice: &[T] = if gf { &gs[..grad_output.numel()] } else { &[] };
-        let go: Option<Vec<T>> = if gf { None } else { Some(grad_output.to_vec()) };
-        let g: &[T] = go.as_deref().unwrap_or(gslice);
-
-        assert_eq!(x.len(), m * n);
-        assert_eq!(w.len(), n);
-        assert_eq!(g.len(), m * n);
-        let mut out: Vec<T> = vec![T::zero(); m * n];
-        let d = n as f32;
-        let work = m * n;
-        if work >= 4096 {
-            use axonml_core::par::prelude::*;
-            out.par_chunks_mut(n)
-                .zip(x.par_chunks(n))
-                .zip(g.par_chunks(n))
-                .for_each(|((o_row, x_row), g_row)| {
-                    let mut sum_sq = 0.0f64;
-                    let mut dot = 0.0f64;
-                    for ((xi, wi), gi) in x_row.iter().zip(w).zip(g_row) {
-                        let xi = xi.to_f32().unwrap_or(0.0);
-                        let wi = wi.to_f32().unwrap_or(0.0);
-                        let gi = gi.to_f32().unwrap_or(0.0);
-                        sum_sq += (xi as f64) * (xi as f64);
-                        dot += (xi as f64) * (wi as f64) * (gi as f64);
-                    }
-                    let rms_inv = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-                    let rms3_inv = rms_inv * rms_inv * rms_inv;
-                    let dot_scaled = (dot as f32) * rms3_inv / d;
-                    for (((o, xi), wi), gi) in o_row.iter_mut().zip(x_row).zip(w).zip(g_row) {
-                        let xi = xi.to_f32().unwrap_or(0.0);
-                        let wi = wi.to_f32().unwrap_or(0.0);
-                        let gi = gi.to_f32().unwrap_or(0.0);
-                        let term1 = wi * gi * rms_inv;
-                        let term2 = xi * dot_scaled;
-                        *o = num_traits::cast(term1 - term2).unwrap_or_else(T::zero);
-                    }
-                });
-        } else {
-            for t in 0..m {
-                let base = t * n;
-                let mut sum_sq = 0.0f64;
-                let mut dot = 0.0f64;
-                for i in 0..n {
-                    let xi = x[base + i].to_f32().unwrap_or(0.0);
-                    let wi = w[i].to_f32().unwrap_or(0.0);
-                    let gi = g[base + i].to_f32().unwrap_or(0.0);
-                    sum_sq += (xi as f64) * (xi as f64);
-                    dot += (xi as f64) * (wi as f64) * (gi as f64);
-                }
-                let rms_inv = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-                let rms3_inv = rms_inv * rms_inv * rms_inv;
-                let dot_scaled = (dot as f32) * rms3_inv / d;
-                for i in 0..n {
-                    let xi = x[base + i].to_f32().unwrap_or(0.0);
-                    let wi = w[i].to_f32().unwrap_or(0.0);
-                    let gi = g[base + i].to_f32().unwrap_or(0.0);
-                    let term1 = wi * gi * rms_inv;
-                    let term2 = xi * dot_scaled;
-                    out[base + i] = num_traits::cast(term1 - term2).unwrap_or_else(T::zero);
-                }
-            }
-        }
-        Self::from_vec(out, &[m, n]).expect("rms_norm_bwd_batched: build output")
-    }
-
-    /// Batched RMSNorm over `m` tokens. `self` is `[m, n]`; `weight` is `[n]`.
-    #[must_use]
-    pub fn rms_norm_batched(&self, weight: &Self, m: usize, n: usize, eps: f32) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).rms_norm_batched_cuda(gpu_ref(weight), m, n, eps));
-        }
-        // CPU fallback: independent rms_norm over each of m rows. Fast + par over t.
-        let xs = self.storage.as_slice();
-        let xf = self.is_contiguous() && self.offset == 0;
-        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
-        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
-        let x: &[T] = xo.as_deref().unwrap_or(xslice);
-
-        let ws = weight.storage.as_slice();
-        let wf = weight.is_contiguous() && weight.offset == 0;
-        let wslice: &[T] = if wf { &ws[..weight.numel()] } else { &[] };
-        let wo: Option<Vec<T>> = if wf { None } else { Some(weight.to_vec()) };
-        let w: &[T] = wo.as_deref().unwrap_or(wslice);
-
-        assert_eq!(x.len(), m * n, "rms_norm_batched: expected m*n");
-        assert_eq!(w.len(), n, "rms_norm_batched: weight len mismatch");
-        let mut out: Vec<T> = vec![T::zero(); m * n];
-        if m >= 2 || (m * n) >= 4096 {
-            use axonml_core::par::prelude::*;
-            out.par_chunks_mut(n)
-                .zip(x.par_chunks(n))
-                .for_each(|(o_row, x_row)| {
-                    let mut sum_sq = 0.0f64;
-                    for xi in x_row {
-                        let f: f64 = xi.to_f32().unwrap_or(0.0).into();
-                        sum_sq += f * f;
-                    }
-                    let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-                    for ((o, xi), wi) in o_row.iter_mut().zip(x_row).zip(w) {
-                        let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
-                        *o = num_traits::cast(v).unwrap_or_else(T::zero);
-                    }
-                });
-        } else {
-            for t in 0..m {
-                let base = t * n;
-                let mut sum_sq = 0.0f64;
-                for i in 0..n {
-                    let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
-                    sum_sq += f * f;
-                }
-                let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
-                for i in 0..n {
-                    let v =
-                        x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
-                    out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
-                }
-            }
-        }
-        Self::from_vec(out, &[m, n]).expect("rms_norm_batched: build output")
-    }
-
-    /// Batched Qwen3 QK-norm over `m` tokens. `self` is `[m, n_heads * head_dim]`;
-    /// `weight` is `[head_dim]` broadcast across every (token, head).
-    #[must_use]
-    pub fn rms_norm_heads_batched(
-        &self,
-        weight: &Self,
-        m: usize,
-        n_heads: usize,
-        head_dim: usize,
-        eps: f32,
-    ) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).rms_norm_heads_batched_cuda(
-                gpu_ref(weight),
-                m,
-                n_heads,
-                head_dim,
-                eps,
-            ));
-        }
-        // CPU fallback: m × rms_norm_heads. Fast + par over (t,h) or m for training bwd.
-        let xs = self.storage.as_slice();
-        let xf = self.is_contiguous() && self.offset == 0;
-        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
-        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
-        let x: &[T] = xo.as_deref().unwrap_or(xslice);
-
-        let ws = weight.storage.as_slice();
-        let wf = weight.is_contiguous() && weight.offset == 0;
-        let wslice: &[T] = if wf { &ws[..weight.numel()] } else { &[] };
-        let wo: Option<Vec<T>> = if wf { None } else { Some(weight.to_vec()) };
-        let w: &[T] = wo.as_deref().unwrap_or(wslice);
-
-        let total = m * n_heads * head_dim;
-        assert_eq!(x.len(), total);
-        assert_eq!(w.len(), head_dim);
-        let mut out: Vec<T> = vec![T::zero(); total];
-        let work = m * n_heads;
-        if work >= 2 || total >= 4096 {
-            use axonml_core::par::prelude::*;
-            // One chunk per head across every token: the same disjoint rows the
-            // raw-pointer loop assumed, now proven by par_chunks_mut.
-            out.par_chunks_mut(head_dim)
-                .zip(x.par_chunks(head_dim))
-                .for_each(|(o_row, x_row)| {
-                    let mut sum_sq = 0.0f64;
-                    for xi in x_row {
-                        let f: f64 = xi.to_f32().unwrap_or(0.0).into();
-                        sum_sq += f * f;
-                    }
-                    let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
-                    for ((o, xi), wi) in o_row.iter_mut().zip(x_row).zip(w) {
-                        let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
-                        *o = num_traits::cast(v).unwrap_or_else(T::zero);
-                    }
-                });
-        } else {
-            for t in 0..m {
-                for h in 0..n_heads {
-                    let base = t * n_heads * head_dim + h * head_dim;
-                    let mut sum_sq = 0.0f64;
-                    for i in 0..head_dim {
-                        let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
-                        sum_sq += f * f;
-                    }
-                    let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
-                    for i in 0..head_dim {
-                        let v = x[base + i].to_f32().unwrap_or(0.0)
-                            * scale
-                            * w[i].to_f32().unwrap_or(0.0);
-                        out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
-                    }
-                }
-            }
-        }
-        Self::from_vec(out, &self.shape).expect("rms_norm_heads_batched: build output")
-    }
-
-    /// Batched split-halves RoPE over `m` tokens at positions
-    /// `[pos_start, pos_start + m)`. `self` is `[m, n_heads * head_dim]`.
-    #[must_use]
-    pub fn apply_rope_split_halves_batched(
-        &self,
-        m: usize,
-        n_heads: usize,
-        head_dim: usize,
-        theta: f32,
-        pos_start: usize,
-    ) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(
-                gpu_ref(self)
-                    .apply_rope_split_halves_batched_cuda(m, n_heads, head_dim, theta, pos_start),
-            );
-        }
-        // CPU fallback - parallel over m tokens using rayon (flat per-row work).
-        // Serious optimization for CPU prefill and Hailo ref paths.
-        let mut x = self.to_vec();
-        let half = head_dim / 2;
-        let row_stride = n_heads * head_dim;
-        if x.len() >= 4096 && core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>() {
-            use axonml_core::par::prelude::*;
-            // Sequential for now (complex strided); outer batch parallel possible in caller for large m.
-            // Reductions/rms/swiglu have full parallel.
-            vec_as_f32_mut(&mut x)
-                .par_chunks_mut(row_stride)
-                .enumerate()
-                .for_each(|(t, chunk)| {
-                    let pos = pos_start + t;
-                    for h in 0..n_heads {
-                        for d in 0..half {
-                            let base = h * head_dim + d;
-                            let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                            let angle = pos as f32 * theta.powf(exponent);
-                            let (s, c) = angle.sin_cos();
-                            let a = chunk[base];
-                            let b_val = chunk[base + half];
-                            chunk[base] = c * a - s * b_val;
-                            chunk[base + half] = s * a + c * b_val;
-                        }
-                    }
-                });
-        } else {
-            for t in 0..m {
-                let pos = pos_start + t;
-                for h in 0..n_heads {
-                    for d in 0..half {
-                        let base = t * row_stride + h * head_dim + d;
-                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                        let angle = pos as f32 * theta.powf(exponent);
-                        let (s, c) = angle.sin_cos();
-                        let a = x[base].to_f32().unwrap_or(0.0);
-                        let b = x[base + half].to_f32().unwrap_or(0.0);
-                        x[base] = num_traits::cast(c * a - s * b).unwrap_or_else(T::zero);
-                        x[base + half] = num_traits::cast(s * a + c * b).unwrap_or_else(T::zero);
-                    }
-                }
-            }
-        }
-        Self::from_vec(x, &self.shape).expect("rope_batched: build output")
-    }
-
-    /// Head-major split-halves RoPE backward (inverse rotation) for
-    /// `[bs, n_heads, seq, head_dim]`. `self` is `grad_output`.
-    #[must_use]
-    pub fn rope_split_halves_bhsd_bwd(
-        &self,
-        bs: usize,
-        n_heads: usize,
-        seq: usize,
-        head_dim: usize,
-        theta: f32,
-        pos_start: usize,
-    ) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(
-                gpu_ref(self)
-                    .rope_split_halves_bhsd_bwd_cuda(bs, n_heads, seq, head_dim, theta, pos_start),
-            );
-        }
-        assert!(
-            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
-            "rope_split_halves_bhsd_bwd CPU path requires f32",
-        );
-        let g = self.to_vec();
-        // CPU fallback - parallel via rayon over bs/heads/seq.
-        let mut out: Vec<T> = g.clone();
-        let half = head_dim / 2;
-        if out.len() >= 4096 && core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>() {
-            use axonml_core::par::prelude::*;
-            // Parallel over tokens using par_chunks_mut.
-            vec_as_f32_mut(&mut out)
-                .par_chunks_mut(head_dim)
-                .enumerate()
-                .for_each(|(tok, chunk)| {
-                    let t = tok % seq;
-                    let pos = pos_start + t;
-                    for d in 0..half {
-                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                        let angle = pos as f32 * theta.powf(exponent);
-                        let (s, c) = angle.sin_cos();
-                        let dy1 = chunk[d];
-                        let dy2 = chunk[d + half];
-                        chunk[d] = c * dy1 + s * dy2;
-                        chunk[d + half] = -s * dy1 + c * dy2;
-                    }
-                });
-        } else {
-            for b in 0..bs {
-                for h in 0..n_heads {
-                    for t in 0..seq {
-                        let pos = pos_start + t;
-                        let base = ((b * n_heads + h) * seq + t) * head_dim;
-                        for d in 0..half {
-                            let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                            let angle = pos as f32 * theta.powf(exponent);
-                            let (s, c) = angle.sin_cos();
-                            let dy1 = g[base + d].to_f32().unwrap_or(0.0);
-                            let dy2 = g[base + d + half].to_f32().unwrap_or(0.0);
-                            out[base + d] =
-                                num_traits::cast(c * dy1 + s * dy2).unwrap_or_else(T::zero);
-                            out[base + d + half] =
-                                num_traits::cast(-s * dy1 + c * dy2).unwrap_or_else(T::zero);
-                        }
-                    }
-                }
-            }
-        }
-        Self::from_vec(out, &self.shape).expect("rope_bhsd_bwd: build output")
-    }
-
-    /// GQA `repeat_kv`: duplicate each KV head `n_rep` times consecutively.
-    /// `self` shape is `[bs, kv_heads, seq, head_dim]`, output is
-    /// `[bs, kv_heads * n_rep, seq, head_dim]`.
-    #[must_use]
-    pub fn repeat_kv(
-        &self,
-        bs: usize,
-        kv_heads: usize,
-        n_rep: usize,
-        seq: usize,
-        head_dim: usize,
-    ) -> Self {
-        if n_rep == 1 {
-            return self.clone();
-        }
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).repeat_kv_cuda(bs, kv_heads, n_rep, seq, head_dim));
-        }
-        // CPU fallback.
-        assert!(
-            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
-            "repeat_kv CPU path requires f32",
-        );
-        let src = self.to_vec();
-        let mut out: Vec<T> = Vec::with_capacity(bs * kv_heads * n_rep * seq * head_dim);
-        for b in 0..bs {
-            for h in 0..kv_heads {
-                for _ in 0..n_rep {
-                    for t in 0..seq {
-                        let base = ((b * kv_heads + h) * seq + t) * head_dim;
-                        for d in 0..head_dim {
-                            out.push(src[base + d]);
-                        }
-                    }
-                }
-            }
-        }
-        let shape = [bs, kv_heads * n_rep, seq, head_dim];
-        Self::from_vec(out, &shape).expect("repeat_kv: build output")
-    }
-
-    /// Head-major split-halves RoPE for Qwen3 / LLaMA training forward.
-    /// `self` is `[bs, n_heads, seq, head_dim]` contiguous. Rotates each
-    /// (b, h, t) token at position `pos_start + t`.
-    #[must_use]
-    pub fn apply_rope_split_halves_bhsd(
-        &self,
-        bs: usize,
-        n_heads: usize,
-        seq: usize,
-        head_dim: usize,
-        theta: f32,
-        pos_start: usize,
-    ) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(
-                gpu_ref(self).apply_rope_split_halves_bhsd_cuda(
-                    bs, n_heads, seq, head_dim, theta, pos_start,
-                ),
-            );
-        }
-        // CPU fallback - parallel over bs*heads*seq using rayon.
-        // Win for CPU and Hailo ref.
-        let mut x = self.to_vec();
-        let half = head_dim / 2;
-        if x.len() >= 4096 && core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>() {
-            use axonml_core::par::prelude::*;
-            // Parallel over tokens (b*h*t) using par_chunks_mut on head_dim chunks.
-            vec_as_f32_mut(&mut x)
-                .par_chunks_mut(head_dim)
-                .enumerate()
-                .for_each(|(tok, chunk)| {
-                    let t = tok % seq;
-                    let pos = pos_start + t;
-                    for d in 0..half {
-                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                        let angle = pos as f32 * theta.powf(exponent);
-                        let (s, c) = angle.sin_cos();
-                        let a = chunk[d];
-                        let bv = chunk[d + half];
-                        chunk[d] = c * a - s * bv;
-                        chunk[d + half] = s * a + c * bv;
-                    }
-                });
-        } else {
-            let half = head_dim / 2;
-            for b in 0..bs {
-                for h in 0..n_heads {
-                    for t in 0..seq {
-                        let pos = pos_start + t;
-                        let base = ((b * n_heads + h) * seq + t) * head_dim;
-                        for d in 0..half {
-                            let exponent = -(2.0f32 * d as f32) / head_dim as f32;
-                            let angle = pos as f32 * theta.powf(exponent);
-                            let (s, c) = angle.sin_cos();
-                            let a = x[base + d].to_f32().unwrap_or(0.0);
-                            let bv = x[base + d + half].to_f32().unwrap_or(0.0);
-                            x[base + d] = num_traits::cast(c * a - s * bv).unwrap_or_else(T::zero);
-                            x[base + d + half] =
-                                num_traits::cast(s * a + c * bv).unwrap_or_else(T::zero);
-                        }
-                    }
-                }
-            }
-        }
-        Self::from_vec(x, &self.shape).expect("rope_bhsd: build output")
-    }
-
-    /// Broadcast per-column bias add across `m` rows: `out[t, c] = self[t, c] + bias[c]`.
-    #[must_use]
-    pub fn add_bias_batched(&self, bias: &Self, m: usize, n: usize) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).add_bias_batched_cuda(gpu_ref(bias), m, n));
-        }
-        // CPU fallback.
-        let x = self.to_vec();
-        let b = bias.to_vec();
-        assert_eq!(x.len(), m * n);
-        assert_eq!(b.len(), n);
-        let mut out: Vec<T> = Vec::with_capacity(m * n);
-        for t in 0..m {
-            for c in 0..n {
-                let v = x[t * n + c].to_f32().unwrap_or(0.0) + b[c].to_f32().unwrap_or(0.0);
-                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
-            }
-        }
-        Self::from_vec(out, &[m, n]).expect("add_bias_batched: build output")
-    }
-
-    /// Fused SwiGLU backward. `self` is the saved forward gate, `up` is the
-    /// saved forward up, `grad_output` is `dL/dy`. Returns `(grad_gate, grad_up)`.
-    /// Replaces the `SiluBackward + MulBackward` kernel pair on the MLP path
-    /// with a single kernel producing both gradients.
-    #[must_use]
-    pub fn swiglu_bwd(&self, up: &Self, grad_output: &Self) -> (Self, Self) {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            let (gg, gu) = gpu_ref(self).swiglu_bwd_cuda(gpu_ref(up), gpu_ref(grad_output));
-            return (gpu_into(gg), gpu_into(gu));
-        }
-        assert!(
-            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
-            "swiglu_bwd CPU path requires f32",
-        );
-        let g = self.to_vec();
-        let u = up.to_vec();
-        let go = grad_output.to_vec();
-        let n = g.len();
-        assert_eq!(u.len(), n);
-        assert_eq!(go.len(), n);
-        let mut grad_gate: Vec<T> = vec![T::zero(); n];
-        let mut grad_up: Vec<T> = vec![T::zero(); n];
-
-        if n >= 4096 {
-            use axonml_core::par::prelude::*;
-            grad_gate
-                .par_iter_mut()
-                .zip(grad_up.par_iter_mut())
-                .zip(g.par_iter())
-                .zip(u.par_iter())
-                .zip(go.par_iter())
-                .for_each(|((((gg, gu), gi), ui), goi)| {
-                    let gi = gi.to_f32().unwrap_or(0.0);
-                    let ui = ui.to_f32().unwrap_or(0.0);
-                    let goi = goi.to_f32().unwrap_or(0.0);
-                    let sig = 1.0f32 / (1.0f32 + (-gi).exp());
-                    let silu_g = gi * sig;
-                    let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
-                    *gg = num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero);
-                    *gu = num_traits::cast(goi * silu_g).unwrap_or_else(T::zero);
-                });
-        } else {
-            for i in 0..n {
-                let gi = g[i].to_f32().unwrap_or(0.0);
-                let ui = u[i].to_f32().unwrap_or(0.0);
-                let goi = go[i].to_f32().unwrap_or(0.0);
-                let sig = 1.0f32 / (1.0f32 + (-gi).exp());
-                let silu_g = gi * sig;
-                let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
-                grad_gate[i] = num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero);
-                grad_up[i] = num_traits::cast(goi * silu_g).unwrap_or_else(T::zero);
-            }
-        }
-
-        let gg_t = Self::from_vec(grad_gate, &self.shape).expect("swiglu_bwd: grad_gate");
-        let gu_t = Self::from_vec(grad_up, &self.shape).expect("swiglu_bwd: grad_up");
-        (gg_t, gu_t)
-    }
-
-    /// Fused SwiGLU: `out = SiLU(self) * up`. `self` is the gate.
-    #[must_use]
-    pub fn swiglu(&self, up: &Self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).swiglu_cuda(gpu_ref(up)));
-        }
-        // CPU fallback: silu(gate) * up. Parallelized for serious CPU performance.
-        let g = self.to_vec();
-        let u = up.to_vec();
-        let mut out: Vec<T> = vec![T::zero(); g.len()];
-
-        if g.len() >= 4096 {
-            use axonml_core::par::prelude::*;
-            out.par_iter_mut()
-                .zip(g.par_iter().zip(u.par_iter()))
-                .for_each(|(o, (gi, ui))| {
-                    let g32 = gi.to_f32().unwrap_or(0.0);
-                    let silu = g32 / (1.0 + (-g32).exp());
-                    *o =
-                        num_traits::cast(silu * ui.to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero);
-                });
-        } else {
-            for i in 0..g.len() {
-                let gi = g[i].to_f32().unwrap_or(0.0);
-                let silu = gi / (1.0 + (-gi).exp());
-                out[i] =
-                    num_traits::cast(silu * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero);
-            }
-        }
-        Self::from_vec(out, &self.shape).expect("swiglu: build output tensor")
-    }
-
-    /// Read-only access to the underlying GPU storage as a `CudaSlice<f32>`.
-    /// Panics if the tensor is on CPU. Used by downstream crates (e.g.
-    /// axonml-serve) that need to pass the GPU buffer directly into a kernel
-    /// without going through `.to_vec()` + re-upload.
-    ///
-    /// Only valid for `Tensor<f32>` — the underlying storage is always f32
-    /// on GPU regardless of the Tensor's generic type. The guard holds a
-    /// read lock on the storage for its lifetime.
-    #[cfg(feature = "cuda")]
-    pub fn as_cuda_slice_read(&self) -> axonml_core::storage::CudaSliceReadGuard<'_> {
-        assert!(
-            self.device().is_gpu(),
-            "as_cuda_slice_read: tensor must be on GPU"
-        );
-        assert!(is_f32::<T>(), "as_cuda_slice_read: GPU storage is f32-only");
-        let self_f32 = gpu_ref(self);
-        self_f32.storage.as_cuda_slice()
-    }
-
-    /// Write-guarded access to the underlying GPU storage as a mutable
-    /// `CudaSlice<f32>`. Same contract as `as_cuda_slice_read` but takes the
-    /// storage's write lock — used for in-place kernels and for the pre-
-    /// bound workspace-tensor path under CUDA graph capture.
-    ///
-    /// Panics if the tensor is on CPU or is not `Tensor<f32>`.
-    #[cfg(feature = "cuda")]
-    pub fn as_cuda_slice_write(&self) -> axonml_core::storage::CudaSliceWriteGuard<'_> {
-        assert!(
-            self.device().is_gpu(),
-            "as_cuda_slice_write: tensor must be on GPU"
-        );
-        assert!(
-            is_f32::<T>(),
-            "as_cuda_slice_write: GPU storage is f32-only"
-        );
-        let self_f32 = gpu_ref(self);
-        self_f32.storage.as_cuda_slice_mut()
-    }
-
-    /// BitNet b1.58 fused gate: `out = ReLU(self)² * up`. `self` is the gate.
-    #[must_use]
-    pub fn relu2_gate(&self, up: &Self) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            return gpu_into(gpu_ref(self).relu2_gate_cuda(gpu_ref(up)));
-        }
-        // CPU fallback.
-        let g = self.to_vec();
-        let u = up.to_vec();
-        let mut out: Vec<T> = Vec::with_capacity(g.len());
-        for i in 0..g.len() {
-            let gi = g[i].to_f32().unwrap_or(0.0).max(0.0);
-            out.push(
-                num_traits::cast(gi * gi * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero),
-            );
-        }
-        Self::from_vec(out, &self.shape).expect("relu2_gate: build output tensor")
-    }
-
-    /// Softmax along specified dimension.
-    #[must_use]
-    pub fn softmax(&self, dim: i32) -> Self {
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            let self_f32 = gpu_ref(self);
-            return gpu_into(self_f32.softmax_cuda(dim).expect("CUDA softmax failed"));
-        }
-        crate::ops::softmax(self, dim as i64).unwrap_or_else(|_| self.clone())
-    }
-
-    /// Log softmax along specified dimension.
-    #[must_use]
-    pub fn log_softmax(&self, dim: i32) -> Self {
-        let softmax_result = self.softmax(dim);
-        softmax_result.ln()
-    }
-
-    /// Mean along a dimension.
-    #[must_use]
-    pub fn mean_dim(&self, dim: i32, keepdim: bool) -> Self {
-        let ndim = self.ndim();
-        let dim = if dim < 0 {
-            (ndim as i32 + dim) as usize
-        } else {
-            dim as usize
-        };
-
-        if dim >= ndim {
-            return self.clone();
-        }
-
-        // GPU fast path: sum_dim then divide by dim_size (all on GPU)
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            let self_f32 = gpu_ref(self);
-            let summed = if keepdim {
-                self_f32.sum_dim_keepdim_cuda(dim)
-            } else {
-                self_f32.sum_dim_cuda(dim)
-            };
-            let dim_size = self.shape[dim];
-            let result = summed.mul_scalar_cuda(1.0 / dim_size as f32);
-            return gpu_into(result);
-        }
-
-        let dim_size = self.shape[dim];
-        let data = self.to_vec();
-        let mut new_shape = self.shape.clone();
-
-        if keepdim {
-            new_shape[dim] = 1;
-        } else {
-            new_shape.remove(dim);
-        }
-
-        if new_shape.is_empty() {
-            new_shape = smallvec::smallvec![1];
-        }
-
-        let new_numel: usize = new_shape.iter().product();
-        let mut result = vec![T::zero(); new_numel];
-
-        let outer_size: usize = self.shape[..dim].iter().product();
-        let inner_size: usize = self.shape[dim + 1..].iter().product();
-
-        for outer in 0..outer_size {
-            for inner in 0..inner_size {
-                let mut sum = T::zero();
-                for d in 0..dim_size {
-                    let idx = outer * dim_size * inner_size + d * inner_size + inner;
-                    sum = sum + data[idx];
-                }
-                let mean = sum / NumCast::from(dim_size).unwrap();
-                let result_idx = outer * inner_size + inner;
-                result[result_idx] = mean;
-            }
-        }
-
-        Self::from_vec(result, &new_shape).unwrap()
-    }
-
-    /// Sum along a dimension.
-    #[must_use]
-    pub fn sum_dim(&self, dim: i32, keepdim: bool) -> Self {
-        let ndim = self.ndim();
-        let dim = if dim < 0 {
-            (ndim as i32 + dim) as usize
-        } else {
-            dim as usize
-        };
-
-        if dim >= ndim {
-            return self.clone();
-        }
-
-        // GPU fast path: use CUDA sum_dim kernel (no CPU copies)
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            let self_f32 = gpu_ref(self);
-            let result = if keepdim {
-                self_f32.sum_dim_keepdim_cuda(dim)
-            } else {
-                self_f32.sum_dim_cuda(dim)
-            };
-            return gpu_into(result);
-        }
-
-        let dim_size = self.shape[dim];
-        let data = self.to_vec();
-        let mut new_shape = self.shape.clone();
-
-        if keepdim {
-            new_shape[dim] = 1;
-        } else {
-            new_shape.remove(dim);
-        }
-
-        if new_shape.is_empty() {
-            new_shape = smallvec::smallvec![1];
-        }
-
-        let new_numel: usize = new_shape.iter().product();
-        let mut result = vec![T::zero(); new_numel];
-
-        let outer_size: usize = self.shape[..dim].iter().product();
-        let inner_size: usize = self.shape[dim + 1..].iter().product();
-
-        for outer in 0..outer_size {
-            for inner in 0..inner_size {
-                let mut sum = T::zero();
-                for d in 0..dim_size {
-                    let idx = outer * dim_size * inner_size + d * inner_size + inner;
-                    sum = sum + data[idx];
-                }
-                let result_idx = outer * inner_size + inner;
-                result[result_idx] = sum;
-            }
-        }
-
-        Self::from_vec(result, &new_shape).unwrap()
-    }
-
-    /// Variance along a dimension.
-    #[must_use]
-    pub fn var_dim(&self, dim: i32, keepdim: bool) -> Self {
-        // variance = E[x²] - E[x]²  (saves one full-size intermediate allocation)
-        let mean = self.mean_dim(dim, true);
-        let sq = self.mul(self).unwrap_or_else(|_| self.clone());
-        let mean_sq = sq.mean_dim(dim, keepdim);
-        let mean_keepdim = if keepdim {
-            mean.clone()
-        } else {
-            self.mean_dim(dim, keepdim)
-        };
-        let mean_squared = mean_keepdim
-            .mul(&mean_keepdim)
-            .unwrap_or_else(|_| mean_keepdim.clone());
-        mean_sq
-            .sub(&mean_squared)
-            .unwrap_or_else(|_| mean_sq.clone())
-    }
-
-    /// Broadcasts tensor to a new shape.
-    #[must_use]
-    pub fn broadcast_to(&self, shape: &[usize]) -> Self {
-        if self.shape.as_slice() == shape {
-            return self.clone();
-        }
-
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
-            let self_f32 = gpu_ref(self);
-            return gpu_into(
-                self_f32
-                    .broadcast_to_cuda(shape)
-                    .expect("CUDA broadcast_to failed"),
-            );
-        }
-
-        let result_shape = broadcast_shape(&self.shape, shape).unwrap_or_else(|_| shape.into());
-        let self_strides = broadcast_strides(&self.shape, &self.strides, &result_shape);
-
-        let total = numel(&result_shape);
-        let mut result_data = vec![T::zero(); total];
-        let self_data = self.storage.as_slice();
-
-        for i in 0..total {
-            let indices = crate::shape::unravel_index(i, &result_shape);
-            let self_idx = self.offset + linear_index(&indices, &self_strides);
-            result_data[i] = self_data[self_idx];
-        }
-
-        Self::from_vec(result_data, &result_shape).unwrap()
-    }
-
-    /// Slices the tensor using ranges for each dimension.
-    #[must_use]
-    pub fn slice(&self, ranges: &[core::ops::Range<usize>]) -> Self {
-        let mut new_shape = Vec::with_capacity(self.ndim());
-        for (i, range) in ranges.iter().enumerate() {
-            if i < self.ndim() {
-                new_shape.push(range.end - range.start);
-            }
-        }
-        // Keep remaining dimensions unchanged
-        for i in ranges.len()..self.ndim() {
-            new_shape.push(self.shape[i]);
-        }
-
-        let new_numel: usize = new_shape.iter().product();
-        let mut result_data = vec![T::zero(); new_numel];
-        let self_data = self.to_vec();
-
-        // Copy data with proper indexing
-        let mut result_idx = 0;
-        Self::slice_recursive(
-            &self_data,
-            &self.shape,
-            ranges,
-            0,
-            0,
-            &mut result_data,
-            &mut result_idx,
-        );
-
-        let out = Self::from_vec(result_data, &new_shape).unwrap();
-        #[cfg(feature = "cuda")]
-        if self.device().is_gpu() {
-            return out.to_device(self.device()).unwrap();
-        }
-        out
-    }
-
-    fn slice_recursive(
-        data: &[T],
-        shape: &[usize],
-        ranges: &[core::ops::Range<usize>],
-        dim: usize,
-        offset: usize,
-        result: &mut [T],
-        result_idx: &mut usize,
-    ) {
-        if dim == shape.len() {
-            result[*result_idx] = data[offset];
-            *result_idx += 1;
-            return;
-        }
-
-        let stride: usize = shape[dim + 1..].iter().product();
-        let (start, end) = if dim < ranges.len() {
-            (ranges[dim].start, ranges[dim].end)
-        } else {
-            (0, shape[dim])
-        };
-
-        for i in start..end {
-            Self::slice_recursive(
-                data,
-                shape,
-                ranges,
-                dim + 1,
-                offset + i * stride,
-                result,
-                result_idx,
-            );
-        }
-    }
-}
-
-// =============================================================================
-// Arithmetic Operator Implementations
-// =============================================================================
-
-impl<T: Numeric> Tensor<T> {
     /// Element-wise addition with broadcasting.
     pub fn add(&self, other: &Self) -> Result<Self> {
         #[cfg(feature = "cuda")]
@@ -3373,9 +1635,1798 @@ impl<T: Numeric> Tensor<T> {
     }
 }
 
-// =============================================================================
-// Operator Trait Implementations
-// =============================================================================
+impl<T: Float> Tensor<T> {
+    /// Index of the maximum element along a dimension.
+    ///
+    /// Indices are returned as the tensor's scalar type (f32 on GPU; exact for
+    /// indices < 2^24). Ties resolve to the lowest index, matching NumPy
+    /// `argmax`, `CpuBackend::argmax`, and the GPU kernel.
+    #[must_use]
+    pub fn argmax_dim(&self, dim: i32, keepdim: bool) -> Self {
+        let ndim = self.ndim();
+        let dim = if dim < 0 {
+            (ndim as i32 + dim) as usize
+        } else {
+            dim as usize
+        };
+
+        if dim >= ndim {
+            return self.clone();
+        }
+
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = gpu_ref(self);
+            let result = self_f32.argmax_dim_cuda(dim, keepdim);
+            return gpu_into(result);
+        }
+
+        let dim_size = self.shape[dim];
+        let data = self.to_vec();
+        let mut new_shape = self.shape.clone();
+
+        if keepdim {
+            new_shape[dim] = 1;
+        } else {
+            new_shape.remove(dim);
+        }
+
+        if new_shape.is_empty() {
+            new_shape = smallvec::smallvec![1];
+        }
+
+        let new_numel: usize = new_shape.iter().product();
+        let mut result = vec![T::zero(); new_numel];
+
+        let outer_size: usize = self.shape[..dim].iter().product();
+        let inner_size: usize = self.shape[dim + 1..].iter().product();
+
+        for outer in 0..outer_size {
+            for inner in 0..inner_size {
+                let base = outer * dim_size * inner_size + inner;
+                let mut best_val = data[base];
+                let mut best_idx = 0usize;
+                for d in 1..dim_size {
+                    let v = data[base + d * inner_size];
+                    if v > best_val {
+                        best_val = v;
+                        best_idx = d;
+                    }
+                }
+                let result_idx = outer * inner_size + inner;
+                result[result_idx] = NumCast::from(best_idx).unwrap();
+            }
+        }
+
+        Self::from_vec(result, &new_shape).unwrap()
+    }
+
+    /// Returns the mean of all elements.
+    /// Returns the mean of all elements.
+    ///
+    /// On GPU, uses native CUDA sum reduction then divides by numel.
+    pub fn mean(&self) -> Result<Self> {
+        if self.is_empty() {
+            return Err(Error::EmptyTensor);
+        }
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            let s = self.sum();
+            let n = self.numel() as f32;
+            return Ok(s.mul_scalar(T::from(1.0 / n as f64).unwrap_or(T::zero())));
+        }
+
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let result = CpuBackend::mean(data).expect("mean on non-empty tensor");
+        Ok(Self::scalar(result))
+    }
+
+    /// Applies `ReLU` activation: max(0, x).
+    #[must_use]
+    pub fn relu(&self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).relu_cuda());
+        }
+        // Fast path for CPU contiguous (common in inference): avoid to_vec copy, feed storage slice directly to parallel CpuBackend.
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let mut result = vec![T::zero(); data.len()];
+        CpuBackend::relu(&mut result, data);
+        Self::from_vec(result, &self.shape).unwrap()
+    }
+
+    /// Applies sigmoid activation: 1 / (1 + exp(-x)).
+    #[must_use]
+    pub fn sigmoid(&self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).sigmoid_cuda());
+        }
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let mut result = vec![T::zero(); data.len()];
+        CpuBackend::sigmoid(&mut result, data);
+        Self::from_vec(result, &self.shape).unwrap()
+    }
+
+    /// Applies tanh activation.
+    #[must_use]
+    pub fn tanh(&self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).tanh_cuda());
+        }
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let mut result = vec![T::zero(); data.len()];
+        CpuBackend::tanh(&mut result, data);
+        Self::from_vec(result, &self.shape).unwrap()
+    }
+
+    /// Applies exponential function.
+    #[must_use]
+    pub fn exp(&self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).exp_cuda());
+        }
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let mut result = vec![T::zero(); data.len()];
+        CpuBackend::exp(&mut result, data);
+        Self::from_vec(result, &self.shape).unwrap()
+    }
+
+    /// Applies natural logarithm.
+    #[must_use]
+    pub fn ln(&self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).ln_cuda());
+        }
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let mut result = vec![T::zero(); data.len()];
+        CpuBackend::ln(&mut result, data);
+        Self::from_vec(result, &self.shape).unwrap()
+    }
+
+    /// Applies square root.
+    #[must_use]
+    pub fn sqrt(&self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).sqrt_cuda());
+        }
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let mut result = vec![T::zero(); data.len()];
+        CpuBackend::sqrt(&mut result, data);
+        Self::from_vec(result, &self.shape).unwrap()
+    }
+
+    /// Computes element-wise power.
+    #[must_use]
+    pub fn pow(&self, exp: T) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let exp_f32 = scalar_as_f32(exp);
+            return gpu_into(gpu_ref(self).pow_cuda(exp_f32));
+        }
+        let storage = self.storage.as_slice();
+        let fast = self.is_contiguous() && self.offset == 0;
+        let slice: &[T] = if fast { &storage[..self.numel()] } else { &[] };
+        let owned: Option<Vec<T>> = if fast { None } else { Some(self.to_vec()) };
+        let data: &[T] = owned.as_deref().unwrap_or(slice);
+        let result: Vec<T> = data.iter().map(|&x| x.pow_value(exp)).collect();
+        Self::from_vec(result, &self.shape).unwrap()
+    }
+
+    /// GELU activation function (Gaussian Error Linear Unit).
+    #[must_use]
+    pub fn gelu(&self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).gelu_cuda());
+        }
+        crate::ops::gelu(self)
+    }
+
+    /// SiLU/Swish activation function.
+    #[must_use]
+    pub fn silu(&self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).silu_cuda());
+        }
+        crate::ops::silu(self)
+    }
+
+    /// Fused SiLU backward: `grad_input = grad_output * σ(x) * (1 + x*(1-σ(x)))`
+    /// on GPU in a single kernel launch. `self` is the saved forward input `x`.
+    /// For CPU tensors callers fall back to the per-element f32 path in
+    /// `Tensor<f32>::silu_backward_cpu`.
+    #[must_use]
+    pub fn silu_backward(&self, grad_output: &Self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let go = gpu_ref(grad_output);
+            return gpu_into(gpu_ref(self).silu_backward_cuda(go));
+        }
+        // CPU fallback: only defined for f32 (matches original SiluBackward).
+        let x_f32 = gpu_ref(self);
+        let g_f32 = gpu_ref(grad_output);
+        let result_f32 = x_f32.zip_map(g_f32, |x, g| {
+            let sig = 1.0f32 / (1.0f32 + (-x).exp());
+            g * (sig + x * sig * (1.0f32 - sig))
+        });
+        gpu_into(result_f32)
+    }
+
+    /// RMSNorm with a per-element weight scale: `out = x * w / sqrt(mean(x²) + eps)`.
+    ///
+    /// Decode-step kernel — one CTA, suitable for single-token activations of
+    /// any hidden size up to ~16K. CPU fallback uses a serial reduction.
+    #[must_use]
+    /// Single-token LayerNorm (mean-subtracting, affine). Falcon arch.
+    /// `out[i] = (x[i] - mean) / sqrt(var + eps) * gamma[i] + beta[i]`.
+    pub fn layer_norm_tokenwise(&self, gamma: &Self, beta: &Self, eps: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).layer_norm_tokenwise_cuda(
+                gpu_ref(gamma),
+                gpu_ref(beta),
+                eps,
+            ));
+        }
+        // CPU fallback. Fastpath + parallel for large n.
+        let xs = self.storage.as_slice();
+        let xf = self.is_contiguous() && self.offset == 0;
+        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
+        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
+        let x: &[T] = xo.as_deref().unwrap_or(xslice);
+
+        let gs = gamma.storage.as_slice();
+        let gf = gamma.is_contiguous() && gamma.offset == 0;
+        let gslice: &[T] = if gf { &gs[..gamma.numel()] } else { &[] };
+        let go: Option<Vec<T>> = if gf { None } else { Some(gamma.to_vec()) };
+        let g: &[T] = go.as_deref().unwrap_or(gslice);
+
+        let bs = beta.storage.as_slice();
+        let bf = beta.is_contiguous() && beta.offset == 0;
+        let bslice: &[T] = if bf { &bs[..beta.numel()] } else { &[] };
+        let bo: Option<Vec<T>> = if bf { None } else { Some(beta.to_vec()) };
+        let b: &[T] = bo.as_deref().unwrap_or(bslice);
+
+        let n = x.len();
+        let n_f = n as f32;
+        // For small n serial ok; for large use parallel sum (though typically small head_dim).
+        let mean: f32 = if n >= 4096 {
+            use axonml_core::par::prelude::*;
+            let sum: f32 = x.par_iter().map(|v| v.to_f32().unwrap_or(0.0)).sum();
+            sum / n_f
+        } else {
+            x.iter().map(|v| v.to_f32().unwrap_or(0.0)).sum::<f32>() / n_f
+        };
+        let var: f32 = if n >= 4096 {
+            use axonml_core::par::prelude::*;
+            let sum: f32 = x
+                .par_iter()
+                .map(|v| {
+                    let d = v.to_f32().unwrap_or(0.0) - mean;
+                    d * d
+                })
+                .sum();
+            sum / n_f
+        } else {
+            x.iter()
+                .map(|v| {
+                    let d = v.to_f32().unwrap_or(0.0) - mean;
+                    d * d
+                })
+                .sum::<f32>()
+                / n_f
+        };
+        let inv = (var + eps).sqrt().recip();
+        let mut out: Vec<T> = vec![T::zero(); n];
+        if n >= 4096 {
+            use axonml_core::par::prelude::*;
+            // par_iter_mut hands each thread a disjoint &mut T, so the borrow
+            // checker proves what the raw-pointer version only assumed: no two
+            // threads write the same element.
+            out.par_iter_mut()
+                .zip(x.par_iter())
+                .zip(g.par_iter())
+                .zip(b.par_iter())
+                .for_each(|(((o, xi), gi), bi)| {
+                    let xi = xi.to_f32().unwrap_or(0.0);
+                    let gi = gi.to_f32().unwrap_or(0.0);
+                    let bi = bi.to_f32().unwrap_or(0.0);
+                    let v = (xi - mean) * inv * gi + bi;
+                    *o = num_traits::cast(v).unwrap_or_else(T::zero);
+                });
+        } else {
+            for i in 0..n {
+                let xi = x[i].to_f32().unwrap_or(0.0);
+                let gi = g[i].to_f32().unwrap_or(0.0);
+                let bi = b[i].to_f32().unwrap_or(0.0);
+                let v = (xi - mean) * inv * gi + bi;
+                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
+            }
+        }
+        Self::from_vec(out, &self.shape).expect("layer_norm_tokenwise: build output")
+    }
+
+    /// Element-wise tanh-approximation GELU. Falcon MLP activation.
+    pub fn gelu_tanh(&self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).gelu_tanh_cuda());
+        }
+        // Fastpath + par for large.
+        let xs = self.storage.as_slice();
+        let xf = self.is_contiguous() && self.offset == 0;
+        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
+        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
+        let x: &[T] = xo.as_deref().unwrap_or(xslice);
+        const K: f32 = 0.797_884_6;
+        let n = x.len();
+        let mut out: Vec<T> = vec![T::zero(); n];
+        if n >= 4096 {
+            use axonml_core::par::prelude::*;
+            out.par_iter_mut().zip(x.par_iter()).for_each(|(o, xi)| {
+                let v = xi.to_f32().unwrap_or(0.0);
+                let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
+                *o = num_traits::cast(y).unwrap_or_else(T::zero);
+            });
+        } else {
+            for i in 0..n {
+                let v = x[i].to_f32().unwrap_or(0.0);
+                let y = 0.5 * v * (1.0 + (K * (v + 0.044715 * v * v * v)).tanh());
+                out[i] = num_traits::cast(y).unwrap_or_else(T::zero);
+            }
+        }
+        Self::from_vec(out, &self.shape).expect("gelu_tanh: build output")
+    }
+
+    /// In-place scaled accumulate: `self += other * scalar`. One kernel
+    /// launch on GPU (instead of `mul_scalar` + `add` = two launches).
+    /// MoE expert-accumulate hot path.
+    pub fn scaled_add_inplace_(&mut self, other: &Self, scalar: f32) {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            gpu_ref_mut(self).scaled_add_inplace_cuda_(gpu_ref(other), scalar);
+            return;
+        }
+        // Fast contiguous + par for CPU MoE hot path.
+        let shape = self.shape.clone();
+        let o = if other.is_contiguous() && other.offset == 0 {
+            let s = other.storage.as_slice();
+            s[..other.numel()].to_vec()
+        } else {
+            other.to_vec()
+        };
+
+        let x = if self.is_contiguous() && self.offset == 0 {
+            let s = self.storage.as_slice();
+            s[..self.numel()].to_vec()
+        } else {
+            self.to_vec()
+        };
+
+        let n = x.len();
+        let mut out: Vec<T> = vec![T::zero(); n];
+        if n >= 4096 {
+            use axonml_core::par::prelude::*;
+            out.par_iter_mut().enumerate().for_each(|(i, outi)| {
+                let xv = x[i].to_f32().unwrap_or(0.0);
+                let ov = o[i].to_f32().unwrap_or(0.0);
+                let v = xv + ov * scalar;
+                *outi = num_traits::cast(v).unwrap_or_else(T::zero);
+            });
+        } else {
+            for i in 0..n {
+                let xv = x[i].to_f32().unwrap_or(0.0);
+                let ov = o[i].to_f32().unwrap_or(0.0);
+                let v = xv + ov * scalar;
+                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
+            }
+        }
+        *self = Self::from_vec(out, &shape).expect("scaled_add_inplace_: build output");
+    }
+
+    /// In-place parallel-residual add: `self += attn + ffn`. Falcon arch.
+    pub fn parallel_residual_add_(&mut self, attn: &Self, ffn: &Self) {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            gpu_ref_mut(self).parallel_residual_add_cuda_(gpu_ref(attn), gpu_ref(ffn));
+            return;
+        }
+        // Fast contiguous + par for CPU Falcon arch.
+        let shape = self.shape.clone();
+        let a = if attn.is_contiguous() && attn.offset == 0 {
+            let s = attn.storage.as_slice();
+            s[..attn.numel()].to_vec()
+        } else {
+            attn.to_vec()
+        };
+        let f = if ffn.is_contiguous() && ffn.offset == 0 {
+            let s = ffn.storage.as_slice();
+            s[..ffn.numel()].to_vec()
+        } else {
+            ffn.to_vec()
+        };
+        let x = if self.is_contiguous() && self.offset == 0 {
+            let s = self.storage.as_slice();
+            s[..self.numel()].to_vec()
+        } else {
+            self.to_vec()
+        };
+        let n = x.len();
+        let mut out: Vec<T> = vec![T::zero(); n];
+        if n >= 4096 {
+            use axonml_core::par::prelude::*;
+            out.par_iter_mut().enumerate().for_each(|(i, outi)| {
+                let xv = x[i].to_f32().unwrap_or(0.0);
+                let av = a[i].to_f32().unwrap_or(0.0);
+                let fv = f[i].to_f32().unwrap_or(0.0);
+                let v = xv + av + fv;
+                *outi = num_traits::cast(v).unwrap_or_else(T::zero);
+            });
+        } else {
+            for i in 0..n {
+                let xv = x[i].to_f32().unwrap_or(0.0);
+                let av = a[i].to_f32().unwrap_or(0.0);
+                let fv = f[i].to_f32().unwrap_or(0.0);
+                let v = xv + av + fv;
+                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
+            }
+        }
+        *self = Self::from_vec(out, &shape).expect("parallel_residual_add_: build output");
+    }
+
+    /// RMSNorm with a per-element weight scale. GPU-accelerated when enabled;
+    /// CPU fallback is correct but decode-only paths should stay on GPU.
+    pub fn rms_norm(&self, weight: &Self, eps: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).rms_norm_cuda(gpu_ref(weight), eps));
+        }
+        // CPU fallback — parallelized for serious pure-CPU / NPU-host performance.
+        // (decode on big GPU should still prefer the CUDA path)
+        let x = self.to_vec();
+        let w = weight.to_vec();
+        assert_eq!(x.len(), w.len(), "rms_norm: weight length must match input");
+        let n = x.len();
+
+        // Parallel sum of squares (f64 for numerical stability on large hidden dims)
+        let sum_sq = if n >= 4096 {
+            use axonml_core::par::prelude::*;
+            x.par_iter()
+                .map(|v| {
+                    let f: f64 = v.to_f32().unwrap_or(0.0).into();
+                    f * f
+                })
+                .reduce(|| 0.0, |a, b| a + b)
+        } else {
+            let mut s = 0.0f64;
+            for v in &x {
+                let f: f64 = v.to_f32().unwrap_or(0.0).into();
+                s += f * f;
+            }
+            s
+        };
+
+        let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+
+        let mut out: Vec<T> = vec![T::zero(); n];
+        if n >= 4096 {
+            use axonml_core::par::prelude::*;
+            out.par_iter_mut()
+                .zip(x.par_iter().zip(w.par_iter()))
+                .for_each(|(o, (xi, wi))| {
+                    let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
+                    *o = num_traits::cast(v).unwrap_or_else(T::zero);
+                });
+        } else {
+            for i in 0..n {
+                let v = x[i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                out[i] = num_traits::cast(v).unwrap_or_else(T::zero);
+            }
+        }
+        Self::from_vec(out, &self.shape).expect("rms_norm: build output tensor")
+    }
+
+    /// Qwen3 QK-norm: per-head RMS_norm over the last `head_dim` axis.
+    /// `self` is `[n_heads * head_dim]` (all heads flattened); `weight`
+    /// is `[head_dim]` broadcast across every head. Returns a new tensor
+    /// with the per-head norm applied; original is unchanged.
+    #[must_use]
+    pub fn rms_norm_heads(&self, weight: &Self, n_heads: usize, head_dim: usize, eps: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).rms_norm_heads_cuda(
+                gpu_ref(weight),
+                n_heads,
+                head_dim,
+                eps,
+            ));
+        }
+        // CPU fallback — per-head rms_norm. Parallel over heads (independent).
+        let x = self.to_vec();
+        let w = weight.to_vec();
+        assert_eq!(x.len(), n_heads * head_dim);
+        assert_eq!(w.len(), head_dim);
+        let mut out: Vec<T> = vec![T::zero(); x.len()];
+        if n_heads > 1 {
+            use axonml_core::par::prelude::*;
+            out.par_chunks_mut(head_dim)
+                .zip(x.par_chunks(head_dim))
+                .for_each(|(o_row, x_row)| {
+                    let mut sum_sq = 0.0f64;
+                    for xi in x_row {
+                        let f: f64 = xi.to_f32().unwrap_or(0.0).into();
+                        sum_sq += f * f;
+                    }
+                    let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+                    for ((o, xi), wi) in o_row.iter_mut().zip(x_row).zip(&w) {
+                        let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
+                        *o = num_traits::cast(v).unwrap_or_else(T::zero);
+                    }
+                });
+        } else {
+            for h in 0..n_heads {
+                let base = h * head_dim;
+                let mut sum_sq = 0.0f64;
+                for i in 0..head_dim {
+                    let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
+                    sum_sq += f * f;
+                }
+                let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+                for i in 0..head_dim {
+                    let v =
+                        x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                    out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
+                }
+            }
+        }
+        Self::from_vec(out, &self.shape).expect("rms_norm_heads: build output tensor")
+    }
+
+    /// Rotary position embedding in the LLaMA / Qwen / Mistral split-halves
+    /// layout. Returns a new tensor with the rotation applied; original is
+    /// unchanged. Input is `[n_heads * head_dim]` (single-token, all heads
+    /// flattened).
+    #[must_use]
+    pub fn apply_rope_split_halves(
+        &self,
+        n_heads: usize,
+        head_dim: usize,
+        theta: f32,
+        pos: usize,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).rope_split_halves_cuda(n_heads, head_dim, theta, pos));
+        }
+        // CPU fallback - delegates to CpuBackend (will be parallelized for large cases;
+        // currently efficient sequential over heads). Important for pure CPU use and
+        // as reference forward when AxonML models target an edge NPU compiler.
+        let mut x = self.to_vec();
+        if is_f32::<T>() {
+            CpuBackend::apply_rope_split_halves_f32(
+                vec_as_f32_mut(&mut x),
+                n_heads,
+                head_dim,
+                theta,
+                pos,
+            );
+        } else {
+            let half = head_dim / 2;
+            for h in 0..n_heads {
+                for d in 0..half {
+                    let base = h * head_dim + d;
+                    let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                    let angle = pos as f32 * theta.powf(exponent);
+                    let (s, c) = angle.sin_cos();
+                    let a = x[base].to_f32().unwrap_or(0.0);
+                    let b = x[base + half].to_f32().unwrap_or(0.0);
+                    x[base] = num_traits::cast(c * a - s * b).unwrap_or_else(T::zero);
+                    x[base + half] = num_traits::cast(s * a + c * b).unwrap_or_else(T::zero);
+                }
+            }
+        }
+        Self::from_vec(x, &self.shape).expect("apply_rope: build output tensor")
+    }
+
+    /// Fused residual-add + batched RMSNorm: returns `(RMSNorm(self + b), self + b)`.
+    /// The raw sum is saved for the backward pass so it doesn't need to rerun
+    /// the add. `self` and `b` are `[m, n]`; `weight` is `[n]`.
+    ///
+    /// Replaces the per-layer `residual.add(x).rms_norm(weight)` pair with one
+    /// kernel — eliminates a broadcast_add + alloc + RMSNorm kernel launch per
+    /// residual path (2 × per Qwen3 layer).
+    #[must_use]
+    pub fn add_rmsnorm_batched(
+        &self,
+        b: &Self,
+        weight: &Self,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> (Self, Self) {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let (out, sum) =
+                gpu_ref(self).add_rmsnorm_batched_cuda(gpu_ref(b), gpu_ref(weight), m, n, eps);
+            return (gpu_into(out), gpu_into(sum));
+        }
+        assert!(
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
+            "add_rmsnorm_batched CPU path requires f32",
+        );
+        let av = self.to_vec();
+        let bv = b.to_vec();
+        let w = weight.to_vec();
+        assert_eq!(av.len(), m * n);
+        assert_eq!(bv.len(), m * n);
+        assert_eq!(w.len(), n);
+        let mut sum_out: Vec<T> = Vec::with_capacity(m * n);
+        let mut out: Vec<T> = Vec::with_capacity(m * n);
+        for t in 0..m {
+            let base = t * n;
+            let mut sum_sq = 0.0f64;
+            for i in 0..n {
+                let ai = av[base + i].to_f32().unwrap_or(0.0);
+                let bi = bv[base + i].to_f32().unwrap_or(0.0);
+                let s = ai + bi;
+                sum_out.push(num_traits::cast(s).unwrap_or_else(T::zero));
+                sum_sq += (s as f64) * (s as f64);
+            }
+            let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+            for i in 0..n {
+                let s = sum_out[base + i].to_f32().unwrap_or(0.0);
+                let wi = w[i].to_f32().unwrap_or(0.0);
+                out.push(num_traits::cast(s * scale * wi).unwrap_or_else(T::zero));
+            }
+        }
+        let out_t = Self::from_vec(out, &[m, n]).expect("add_rmsnorm_batched: build output");
+        let sum_t = Self::from_vec(sum_out, &[m, n]).expect("add_rmsnorm_batched: build sum");
+        (out_t, sum_t)
+    }
+
+    /// Fused causal-scaled softmax. `self` is the raw attention scores
+    /// `[..., Tq, Tk]`; applies `softmax(scale * scores + causal_mask)`
+    /// over the last dim. `offset` is the KV-cache position offset (0
+    /// during training). Masked positions (j > offset + i) are exactly 0.
+    ///
+    /// Replaces the `mul_scalar(scale) + add(mask) + softmax(-1)` chain —
+    /// 3 kernels + a CPU mask alloc per call collapse to 1 kernel launch.
+    #[must_use]
+    pub fn softmax_causal_scaled(&self, tq: usize, tk: usize, offset: usize, scale: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).softmax_causal_scaled_cuda(tq, tk, offset, scale));
+        }
+        // CPU fallback: same math, row by row.
+        assert!(
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
+            "softmax_causal_scaled CPU path requires f32",
+        );
+        let total = self.numel();
+        assert!(total % tk == 0 && (total / tk) % tq == 0);
+        let num_rows = total / tk;
+        let src = self.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(total);
+        for r in 0..num_rows {
+            let q_pos = r % tq;
+            let max_k = offset + q_pos;
+            let base = r * tk;
+            let mut row_max = f32::NEG_INFINITY;
+            for j in 0..tk {
+                let v = if j > max_k {
+                    f32::NEG_INFINITY
+                } else {
+                    src[base + j].to_f32().unwrap_or(0.0) * scale
+                };
+                if v > row_max {
+                    row_max = v;
+                }
+            }
+            let mut sum = 0.0f32;
+            for j in 0..tk {
+                if j > max_k {
+                    continue;
+                }
+                let v = src[base + j].to_f32().unwrap_or(0.0) * scale;
+                sum += (v - row_max).exp();
+            }
+            let inv = if sum > 0.0 { 1.0 / sum } else { 0.0 };
+            for j in 0..tk {
+                let v = if j > max_k {
+                    0.0
+                } else {
+                    let s = src[base + j].to_f32().unwrap_or(0.0) * scale;
+                    (s - row_max).exp() * inv
+                };
+                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+            }
+        }
+        Self::from_vec(out, self.shape()).expect("softmax_causal_scaled: build output")
+    }
+
+    /// Fused causal-scaled softmax backward wrt raw scores. `self` is the
+    /// saved forward output `p` (masked positions are 0); `grad_output`
+    /// is `dL/dp`. Returns `grad_scores = scale * p * (grad_out - Σ(p·grad_out))`
+    /// per row; masked positions naturally zero because `p = 0`.
+    #[must_use]
+    pub fn softmax_causal_scaled_bwd(&self, grad_output: &Self, tk: usize, scale: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).softmax_causal_scaled_bwd_cuda(
+                gpu_ref(grad_output),
+                tk,
+                scale,
+            ));
+        }
+        assert!(
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
+            "softmax_causal_scaled_bwd CPU path requires f32",
+        );
+        let total = self.numel();
+        assert_eq!(total, grad_output.numel());
+        assert!(total % tk == 0);
+        let num_rows = total / tk;
+        let p = self.to_vec();
+        let g = grad_output.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(total);
+        for r in 0..num_rows {
+            let base = r * tk;
+            let mut dot = 0.0f32;
+            for j in 0..tk {
+                let pj = p[base + j].to_f32().unwrap_or(0.0);
+                let gj = g[base + j].to_f32().unwrap_or(0.0);
+                dot += pj * gj;
+            }
+            for j in 0..tk {
+                let pj = p[base + j].to_f32().unwrap_or(0.0);
+                let gj = g[base + j].to_f32().unwrap_or(0.0);
+                let v = scale * pj * (gj - dot);
+                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+            }
+        }
+        Self::from_vec(out, self.shape()).expect("softmax_causal_scaled_bwd: build output")
+    }
+
+    /// Batched RMSNorm backward (grad_input only). `self` is the saved
+    /// forward input `[m, n]`, `weight` is `[n]`, `grad_output` is `[m, n]`.
+    /// Returns `[m, n]` grad_input matching the CPU-only reference math in
+    /// `axonml-llm::RMSNormBackward` (weight-gradient path not required
+    /// because the existing autograd path doesn't route grads to the weight).
+    /// Gradient of a batched RMSNorm w.r.t. its scale (`AXONML_NORM_GRAD=composed` selects the unfused path on GPU for A/B): `grad_w[j] = Σ_i grad_output[i, j] · x̂[i, j]`
+    /// where `x̂` is `self` (`[m, n]`) normalised without the scale. GPU: two kernels + a
+    /// `[splits, n]` reduce; CPU: the forward kernel with a unit scale, times the gradient, summed.
+    #[must_use]
+    pub fn rms_norm_bwd_weight(&self, grad_output: &Self, m: usize, n: usize, eps: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu()
+            && !*NORM_GRAD_COMPOSED
+                .get_or_init(|| std::env::var("AXONML_NORM_GRAD").is_ok_and(|v| v == "composed"))
+        {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let partial = {
+                gpu_into(gpu_ref(self).rms_norm_bwd_weight_partial_cuda(
+                    gpu_ref(grad_output),
+                    m,
+                    n,
+                    eps,
+                ))
+            };
+            return partial.sum_dim(0, false);
+        }
+        let ones = Self::ones(&[n])
+            .to_device(self.device())
+            .expect("rms_norm_bwd_weight: unit scale to device");
+        let normed = self.rms_norm_batched(&ones, m, n, eps);
+        normed
+            .mul(grad_output)
+            .expect("rms_norm_bwd_weight: grad_output * x_hat")
+            .sum_dim(0, false)
+    }
+
+    /// Batched RMSNorm backward (grad_input only). `self` is the saved
+    /// forward input `[m, n]`, `weight` is `[n]`, `grad_output` is `[m, n]`.
+    /// Returns `[m, n]` grad_input matching the CPU-only reference math in
+    /// `axonml-llm::RMSNormBackward` (weight-gradient path not required
+    /// because the existing autograd path doesn't route grads to the weight).
+    #[must_use]
+    pub fn rms_norm_bwd_batched(
+        &self,
+        weight: &Self,
+        grad_output: &Self,
+        m: usize,
+        n: usize,
+        eps: f32,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).rms_norm_bwd_batched_cuda(
+                gpu_ref(weight),
+                gpu_ref(grad_output),
+                m,
+                n,
+                eps,
+            ));
+        }
+        // CPU fallback: same math as axonml-llm's RMSNormBackward::apply.
+        // Fast contiguous + parallel over m tokens for training bwd (CPU fallback).
+        assert!(
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
+            "rms_norm_bwd_batched CPU path requires f32",
+        );
+        let xs = self.storage.as_slice();
+        let xf = self.is_contiguous() && self.offset == 0;
+        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
+        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
+        let x: &[T] = xo.as_deref().unwrap_or(xslice);
+
+        let ws = weight.storage.as_slice();
+        let wf = weight.is_contiguous() && weight.offset == 0;
+        let wslice: &[T] = if wf { &ws[..weight.numel()] } else { &[] };
+        let wo: Option<Vec<T>> = if wf { None } else { Some(weight.to_vec()) };
+        let w: &[T] = wo.as_deref().unwrap_or(wslice);
+
+        let gs = grad_output.storage.as_slice();
+        let gf = grad_output.is_contiguous() && grad_output.offset == 0;
+        let gslice: &[T] = if gf { &gs[..grad_output.numel()] } else { &[] };
+        let go: Option<Vec<T>> = if gf { None } else { Some(grad_output.to_vec()) };
+        let g: &[T] = go.as_deref().unwrap_or(gslice);
+
+        assert_eq!(x.len(), m * n);
+        assert_eq!(w.len(), n);
+        assert_eq!(g.len(), m * n);
+        let mut out: Vec<T> = vec![T::zero(); m * n];
+        let d = n as f32;
+        let work = m * n;
+        if work >= 4096 {
+            use axonml_core::par::prelude::*;
+            out.par_chunks_mut(n)
+                .zip(x.par_chunks(n))
+                .zip(g.par_chunks(n))
+                .for_each(|((o_row, x_row), g_row)| {
+                    let mut sum_sq = 0.0f64;
+                    let mut dot = 0.0f64;
+                    for ((xi, wi), gi) in x_row.iter().zip(w).zip(g_row) {
+                        let xi = xi.to_f32().unwrap_or(0.0);
+                        let wi = wi.to_f32().unwrap_or(0.0);
+                        let gi = gi.to_f32().unwrap_or(0.0);
+                        sum_sq += (xi as f64) * (xi as f64);
+                        dot += (xi as f64) * (wi as f64) * (gi as f64);
+                    }
+                    let rms_inv = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+                    let rms3_inv = rms_inv * rms_inv * rms_inv;
+                    let dot_scaled = (dot as f32) * rms3_inv / d;
+                    for (((o, xi), wi), gi) in o_row.iter_mut().zip(x_row).zip(w).zip(g_row) {
+                        let xi = xi.to_f32().unwrap_or(0.0);
+                        let wi = wi.to_f32().unwrap_or(0.0);
+                        let gi = gi.to_f32().unwrap_or(0.0);
+                        let term1 = wi * gi * rms_inv;
+                        let term2 = xi * dot_scaled;
+                        *o = num_traits::cast(term1 - term2).unwrap_or_else(T::zero);
+                    }
+                });
+        } else {
+            for t in 0..m {
+                let base = t * n;
+                let mut sum_sq = 0.0f64;
+                let mut dot = 0.0f64;
+                for i in 0..n {
+                    let xi = x[base + i].to_f32().unwrap_or(0.0);
+                    let wi = w[i].to_f32().unwrap_or(0.0);
+                    let gi = g[base + i].to_f32().unwrap_or(0.0);
+                    sum_sq += (xi as f64) * (xi as f64);
+                    dot += (xi as f64) * (wi as f64) * (gi as f64);
+                }
+                let rms_inv = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+                let rms3_inv = rms_inv * rms_inv * rms_inv;
+                let dot_scaled = (dot as f32) * rms3_inv / d;
+                for i in 0..n {
+                    let xi = x[base + i].to_f32().unwrap_or(0.0);
+                    let wi = w[i].to_f32().unwrap_or(0.0);
+                    let gi = g[base + i].to_f32().unwrap_or(0.0);
+                    let term1 = wi * gi * rms_inv;
+                    let term2 = xi * dot_scaled;
+                    out[base + i] = num_traits::cast(term1 - term2).unwrap_or_else(T::zero);
+                }
+            }
+        }
+        Self::from_vec(out, &[m, n]).expect("rms_norm_bwd_batched: build output")
+    }
+
+    /// Batched RMSNorm over `m` tokens. `self` is `[m, n]`; `weight` is `[n]`.
+    #[must_use]
+    pub fn rms_norm_batched(&self, weight: &Self, m: usize, n: usize, eps: f32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).rms_norm_batched_cuda(gpu_ref(weight), m, n, eps));
+        }
+        // CPU fallback: independent rms_norm over each of m rows. Fast + par over t.
+        let xs = self.storage.as_slice();
+        let xf = self.is_contiguous() && self.offset == 0;
+        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
+        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
+        let x: &[T] = xo.as_deref().unwrap_or(xslice);
+
+        let ws = weight.storage.as_slice();
+        let wf = weight.is_contiguous() && weight.offset == 0;
+        let wslice: &[T] = if wf { &ws[..weight.numel()] } else { &[] };
+        let wo: Option<Vec<T>> = if wf { None } else { Some(weight.to_vec()) };
+        let w: &[T] = wo.as_deref().unwrap_or(wslice);
+
+        assert_eq!(x.len(), m * n, "rms_norm_batched: expected m*n");
+        assert_eq!(w.len(), n, "rms_norm_batched: weight len mismatch");
+        let mut out: Vec<T> = vec![T::zero(); m * n];
+        if m >= 2 || (m * n) >= 4096 {
+            use axonml_core::par::prelude::*;
+            out.par_chunks_mut(n)
+                .zip(x.par_chunks(n))
+                .for_each(|(o_row, x_row)| {
+                    let mut sum_sq = 0.0f64;
+                    for xi in x_row {
+                        let f: f64 = xi.to_f32().unwrap_or(0.0).into();
+                        sum_sq += f * f;
+                    }
+                    let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+                    for ((o, xi), wi) in o_row.iter_mut().zip(x_row).zip(w) {
+                        let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
+                        *o = num_traits::cast(v).unwrap_or_else(T::zero);
+                    }
+                });
+        } else {
+            for t in 0..m {
+                let base = t * n;
+                let mut sum_sq = 0.0f64;
+                for i in 0..n {
+                    let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
+                    sum_sq += f * f;
+                }
+                let scale = ((sum_sq / n as f64) + eps as f64).sqrt().recip() as f32;
+                for i in 0..n {
+                    let v =
+                        x[base + i].to_f32().unwrap_or(0.0) * scale * w[i].to_f32().unwrap_or(0.0);
+                    out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
+                }
+            }
+        }
+        Self::from_vec(out, &[m, n]).expect("rms_norm_batched: build output")
+    }
+
+    /// Batched Qwen3 QK-norm over `m` tokens. `self` is `[m, n_heads * head_dim]`;
+    /// `weight` is `[head_dim]` broadcast across every (token, head).
+    #[must_use]
+    pub fn rms_norm_heads_batched(
+        &self,
+        weight: &Self,
+        m: usize,
+        n_heads: usize,
+        head_dim: usize,
+        eps: f32,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).rms_norm_heads_batched_cuda(
+                gpu_ref(weight),
+                m,
+                n_heads,
+                head_dim,
+                eps,
+            ));
+        }
+        // CPU fallback: m × rms_norm_heads. Fast + par over (t,h) or m for training bwd.
+        let xs = self.storage.as_slice();
+        let xf = self.is_contiguous() && self.offset == 0;
+        let xslice: &[T] = if xf { &xs[..self.numel()] } else { &[] };
+        let xo: Option<Vec<T>> = if xf { None } else { Some(self.to_vec()) };
+        let x: &[T] = xo.as_deref().unwrap_or(xslice);
+
+        let ws = weight.storage.as_slice();
+        let wf = weight.is_contiguous() && weight.offset == 0;
+        let wslice: &[T] = if wf { &ws[..weight.numel()] } else { &[] };
+        let wo: Option<Vec<T>> = if wf { None } else { Some(weight.to_vec()) };
+        let w: &[T] = wo.as_deref().unwrap_or(wslice);
+
+        let total = m * n_heads * head_dim;
+        assert_eq!(x.len(), total);
+        assert_eq!(w.len(), head_dim);
+        let mut out: Vec<T> = vec![T::zero(); total];
+        let work = m * n_heads;
+        if work >= 2 || total >= 4096 {
+            use axonml_core::par::prelude::*;
+            // One chunk per head across every token: the same disjoint rows the
+            // raw-pointer loop assumed, now proven by par_chunks_mut.
+            out.par_chunks_mut(head_dim)
+                .zip(x.par_chunks(head_dim))
+                .for_each(|(o_row, x_row)| {
+                    let mut sum_sq = 0.0f64;
+                    for xi in x_row {
+                        let f: f64 = xi.to_f32().unwrap_or(0.0).into();
+                        sum_sq += f * f;
+                    }
+                    let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+                    for ((o, xi), wi) in o_row.iter_mut().zip(x_row).zip(w) {
+                        let v = xi.to_f32().unwrap_or(0.0) * scale * wi.to_f32().unwrap_or(0.0);
+                        *o = num_traits::cast(v).unwrap_or_else(T::zero);
+                    }
+                });
+        } else {
+            for t in 0..m {
+                for h in 0..n_heads {
+                    let base = t * n_heads * head_dim + h * head_dim;
+                    let mut sum_sq = 0.0f64;
+                    for i in 0..head_dim {
+                        let f: f64 = x[base + i].to_f32().unwrap_or(0.0).into();
+                        sum_sq += f * f;
+                    }
+                    let scale = ((sum_sq / head_dim as f64) + eps as f64).sqrt().recip() as f32;
+                    for i in 0..head_dim {
+                        let v = x[base + i].to_f32().unwrap_or(0.0)
+                            * scale
+                            * w[i].to_f32().unwrap_or(0.0);
+                        out[base + i] = num_traits::cast(v).unwrap_or_else(T::zero);
+                    }
+                }
+            }
+        }
+        Self::from_vec(out, &self.shape).expect("rms_norm_heads_batched: build output")
+    }
+
+    /// Batched split-halves RoPE over `m` tokens at positions
+    /// `[pos_start, pos_start + m)`. `self` is `[m, n_heads * head_dim]`.
+    #[must_use]
+    pub fn apply_rope_split_halves_batched(
+        &self,
+        m: usize,
+        n_heads: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(
+                gpu_ref(self)
+                    .apply_rope_split_halves_batched_cuda(m, n_heads, head_dim, theta, pos_start),
+            );
+        }
+        // CPU fallback - parallel over m tokens using rayon (flat per-row work).
+        // Serious optimization for CPU prefill and NPU reference paths.
+        let mut x = self.to_vec();
+        let half = head_dim / 2;
+        let row_stride = n_heads * head_dim;
+        if x.len() >= 4096 && core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>() {
+            use axonml_core::par::prelude::*;
+            // Sequential for now (complex strided); outer batch parallel possible in caller for large m.
+            // Reductions/rms/swiglu have full parallel.
+            vec_as_f32_mut(&mut x)
+                .par_chunks_mut(row_stride)
+                .enumerate()
+                .for_each(|(t, chunk)| {
+                    let pos = pos_start + t;
+                    for h in 0..n_heads {
+                        for d in 0..half {
+                            let base = h * head_dim + d;
+                            let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                            let angle = pos as f32 * theta.powf(exponent);
+                            let (s, c) = angle.sin_cos();
+                            let a = chunk[base];
+                            let b_val = chunk[base + half];
+                            chunk[base] = c * a - s * b_val;
+                            chunk[base + half] = s * a + c * b_val;
+                        }
+                    }
+                });
+        } else {
+            for t in 0..m {
+                let pos = pos_start + t;
+                for h in 0..n_heads {
+                    for d in 0..half {
+                        let base = t * row_stride + h * head_dim + d;
+                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                        let angle = pos as f32 * theta.powf(exponent);
+                        let (s, c) = angle.sin_cos();
+                        let a = x[base].to_f32().unwrap_or(0.0);
+                        let b = x[base + half].to_f32().unwrap_or(0.0);
+                        x[base] = num_traits::cast(c * a - s * b).unwrap_or_else(T::zero);
+                        x[base + half] = num_traits::cast(s * a + c * b).unwrap_or_else(T::zero);
+                    }
+                }
+            }
+        }
+        Self::from_vec(x, &self.shape).expect("rope_batched: build output")
+    }
+
+    /// Head-major split-halves RoPE backward (inverse rotation) for
+    /// `[bs, n_heads, seq, head_dim]`. `self` is `grad_output`.
+    #[must_use]
+    pub fn rope_split_halves_bhsd_bwd(
+        &self,
+        bs: usize,
+        n_heads: usize,
+        seq: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(
+                gpu_ref(self)
+                    .rope_split_halves_bhsd_bwd_cuda(bs, n_heads, seq, head_dim, theta, pos_start),
+            );
+        }
+        assert!(
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
+            "rope_split_halves_bhsd_bwd CPU path requires f32",
+        );
+        let g = self.to_vec();
+        // CPU fallback - parallel via rayon over bs/heads/seq.
+        let mut out: Vec<T> = g.clone();
+        let half = head_dim / 2;
+        if out.len() >= 4096 && core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>() {
+            use axonml_core::par::prelude::*;
+            // Parallel over tokens using par_chunks_mut.
+            vec_as_f32_mut(&mut out)
+                .par_chunks_mut(head_dim)
+                .enumerate()
+                .for_each(|(tok, chunk)| {
+                    let t = tok % seq;
+                    let pos = pos_start + t;
+                    for d in 0..half {
+                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                        let angle = pos as f32 * theta.powf(exponent);
+                        let (s, c) = angle.sin_cos();
+                        let dy1 = chunk[d];
+                        let dy2 = chunk[d + half];
+                        chunk[d] = c * dy1 + s * dy2;
+                        chunk[d + half] = -s * dy1 + c * dy2;
+                    }
+                });
+        } else {
+            for b in 0..bs {
+                for h in 0..n_heads {
+                    for t in 0..seq {
+                        let pos = pos_start + t;
+                        let base = ((b * n_heads + h) * seq + t) * head_dim;
+                        for d in 0..half {
+                            let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                            let angle = pos as f32 * theta.powf(exponent);
+                            let (s, c) = angle.sin_cos();
+                            let dy1 = g[base + d].to_f32().unwrap_or(0.0);
+                            let dy2 = g[base + d + half].to_f32().unwrap_or(0.0);
+                            out[base + d] =
+                                num_traits::cast(c * dy1 + s * dy2).unwrap_or_else(T::zero);
+                            out[base + d + half] =
+                                num_traits::cast(-s * dy1 + c * dy2).unwrap_or_else(T::zero);
+                        }
+                    }
+                }
+            }
+        }
+        Self::from_vec(out, &self.shape).expect("rope_bhsd_bwd: build output")
+    }
+
+    /// GQA `repeat_kv`: duplicate each KV head `n_rep` times consecutively.
+    /// `self` shape is `[bs, kv_heads, seq, head_dim]`, output is
+    /// `[bs, kv_heads * n_rep, seq, head_dim]`.
+    #[must_use]
+    pub fn repeat_kv(
+        &self,
+        bs: usize,
+        kv_heads: usize,
+        n_rep: usize,
+        seq: usize,
+        head_dim: usize,
+    ) -> Self {
+        if n_rep == 1 {
+            return self.clone();
+        }
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).repeat_kv_cuda(bs, kv_heads, n_rep, seq, head_dim));
+        }
+        // CPU fallback.
+        assert!(
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
+            "repeat_kv CPU path requires f32",
+        );
+        let src = self.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(bs * kv_heads * n_rep * seq * head_dim);
+        for b in 0..bs {
+            for h in 0..kv_heads {
+                for _ in 0..n_rep {
+                    for t in 0..seq {
+                        let base = ((b * kv_heads + h) * seq + t) * head_dim;
+                        for d in 0..head_dim {
+                            out.push(src[base + d]);
+                        }
+                    }
+                }
+            }
+        }
+        let shape = [bs, kv_heads * n_rep, seq, head_dim];
+        Self::from_vec(out, &shape).expect("repeat_kv: build output")
+    }
+
+    /// Head-major split-halves RoPE for Qwen3 / LLaMA training forward.
+    /// `self` is `[bs, n_heads, seq, head_dim]` contiguous. Rotates each
+    /// (b, h, t) token at position `pos_start + t`.
+    #[must_use]
+    pub fn apply_rope_split_halves_bhsd(
+        &self,
+        bs: usize,
+        n_heads: usize,
+        seq: usize,
+        head_dim: usize,
+        theta: f32,
+        pos_start: usize,
+    ) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(
+                gpu_ref(self).apply_rope_split_halves_bhsd_cuda(
+                    bs, n_heads, seq, head_dim, theta, pos_start,
+                ),
+            );
+        }
+        // CPU fallback - parallel over bs*heads*seq using rayon.
+        // Win for CPU and NPU reference paths.
+        let mut x = self.to_vec();
+        let half = head_dim / 2;
+        if x.len() >= 4096 && core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>() {
+            use axonml_core::par::prelude::*;
+            // Parallel over tokens (b*h*t) using par_chunks_mut on head_dim chunks.
+            vec_as_f32_mut(&mut x)
+                .par_chunks_mut(head_dim)
+                .enumerate()
+                .for_each(|(tok, chunk)| {
+                    let t = tok % seq;
+                    let pos = pos_start + t;
+                    for d in 0..half {
+                        let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                        let angle = pos as f32 * theta.powf(exponent);
+                        let (s, c) = angle.sin_cos();
+                        let a = chunk[d];
+                        let bv = chunk[d + half];
+                        chunk[d] = c * a - s * bv;
+                        chunk[d + half] = s * a + c * bv;
+                    }
+                });
+        } else {
+            let half = head_dim / 2;
+            for b in 0..bs {
+                for h in 0..n_heads {
+                    for t in 0..seq {
+                        let pos = pos_start + t;
+                        let base = ((b * n_heads + h) * seq + t) * head_dim;
+                        for d in 0..half {
+                            let exponent = -(2.0f32 * d as f32) / head_dim as f32;
+                            let angle = pos as f32 * theta.powf(exponent);
+                            let (s, c) = angle.sin_cos();
+                            let a = x[base + d].to_f32().unwrap_or(0.0);
+                            let bv = x[base + d + half].to_f32().unwrap_or(0.0);
+                            x[base + d] = num_traits::cast(c * a - s * bv).unwrap_or_else(T::zero);
+                            x[base + d + half] =
+                                num_traits::cast(s * a + c * bv).unwrap_or_else(T::zero);
+                        }
+                    }
+                }
+            }
+        }
+        Self::from_vec(x, &self.shape).expect("rope_bhsd: build output")
+    }
+
+    /// Broadcast per-column bias add across `m` rows: `out[t, c] = self[t, c] + bias[c]`.
+    #[must_use]
+    pub fn add_bias_batched(&self, bias: &Self, m: usize, n: usize) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).add_bias_batched_cuda(gpu_ref(bias), m, n));
+        }
+        // CPU fallback.
+        let x = self.to_vec();
+        let b = bias.to_vec();
+        assert_eq!(x.len(), m * n);
+        assert_eq!(b.len(), n);
+        let mut out: Vec<T> = Vec::with_capacity(m * n);
+        for t in 0..m {
+            for c in 0..n {
+                let v = x[t * n + c].to_f32().unwrap_or(0.0) + b[c].to_f32().unwrap_or(0.0);
+                out.push(num_traits::cast(v).unwrap_or_else(T::zero));
+            }
+        }
+        Self::from_vec(out, &[m, n]).expect("add_bias_batched: build output")
+    }
+
+    /// Fused SwiGLU backward. `self` is the saved forward gate, `up` is the
+    /// saved forward up, `grad_output` is `dL/dy`. Returns `(grad_gate, grad_up)`.
+    /// Replaces the `SiluBackward + MulBackward` kernel pair on the MLP path
+    /// with a single kernel producing both gradients.
+    #[must_use]
+    pub fn swiglu_bwd(&self, up: &Self, grad_output: &Self) -> (Self, Self) {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let (gg, gu) = gpu_ref(self).swiglu_bwd_cuda(gpu_ref(up), gpu_ref(grad_output));
+            return (gpu_into(gg), gpu_into(gu));
+        }
+        assert!(
+            core::any::TypeId::of::<T>() == core::any::TypeId::of::<f32>(),
+            "swiglu_bwd CPU path requires f32",
+        );
+        let g = self.to_vec();
+        let u = up.to_vec();
+        let go = grad_output.to_vec();
+        let n = g.len();
+        assert_eq!(u.len(), n);
+        assert_eq!(go.len(), n);
+        let mut grad_gate: Vec<T> = vec![T::zero(); n];
+        let mut grad_up: Vec<T> = vec![T::zero(); n];
+
+        if n >= 4096 {
+            use axonml_core::par::prelude::*;
+            grad_gate
+                .par_iter_mut()
+                .zip(grad_up.par_iter_mut())
+                .zip(g.par_iter())
+                .zip(u.par_iter())
+                .zip(go.par_iter())
+                .for_each(|((((gg, gu), gi), ui), goi)| {
+                    let gi = gi.to_f32().unwrap_or(0.0);
+                    let ui = ui.to_f32().unwrap_or(0.0);
+                    let goi = goi.to_f32().unwrap_or(0.0);
+                    let sig = 1.0f32 / (1.0f32 + (-gi).exp());
+                    let silu_g = gi * sig;
+                    let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
+                    *gg = num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero);
+                    *gu = num_traits::cast(goi * silu_g).unwrap_or_else(T::zero);
+                });
+        } else {
+            for i in 0..n {
+                let gi = g[i].to_f32().unwrap_or(0.0);
+                let ui = u[i].to_f32().unwrap_or(0.0);
+                let goi = go[i].to_f32().unwrap_or(0.0);
+                let sig = 1.0f32 / (1.0f32 + (-gi).exp());
+                let silu_g = gi * sig;
+                let silu_deriv = sig * (1.0f32 + gi * (1.0f32 - sig));
+                grad_gate[i] = num_traits::cast(goi * ui * silu_deriv).unwrap_or_else(T::zero);
+                grad_up[i] = num_traits::cast(goi * silu_g).unwrap_or_else(T::zero);
+            }
+        }
+
+        let gg_t = Self::from_vec(grad_gate, &self.shape).expect("swiglu_bwd: grad_gate");
+        let gu_t = Self::from_vec(grad_up, &self.shape).expect("swiglu_bwd: grad_up");
+        (gg_t, gu_t)
+    }
+
+    /// Fused SwiGLU: `out = SiLU(self) * up`. `self` is the gate.
+    #[must_use]
+    pub fn swiglu(&self, up: &Self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).swiglu_cuda(gpu_ref(up)));
+        }
+        // CPU fallback: silu(gate) * up. Parallelized for serious CPU performance.
+        let g = self.to_vec();
+        let u = up.to_vec();
+        let mut out: Vec<T> = vec![T::zero(); g.len()];
+
+        if g.len() >= 4096 {
+            use axonml_core::par::prelude::*;
+            out.par_iter_mut()
+                .zip(g.par_iter().zip(u.par_iter()))
+                .for_each(|(o, (gi, ui))| {
+                    let g32 = gi.to_f32().unwrap_or(0.0);
+                    let silu = g32 / (1.0 + (-g32).exp());
+                    *o =
+                        num_traits::cast(silu * ui.to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero);
+                });
+        } else {
+            for i in 0..g.len() {
+                let gi = g[i].to_f32().unwrap_or(0.0);
+                let silu = gi / (1.0 + (-gi).exp());
+                out[i] =
+                    num_traits::cast(silu * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero);
+            }
+        }
+        Self::from_vec(out, &self.shape).expect("swiglu: build output tensor")
+    }
+
+    /// Read-only access to the underlying GPU storage as a `CudaSlice<f32>`.
+    /// Panics if the tensor is on CPU. Used by downstream crates (e.g.
+    /// axonml-serve) that need to pass the GPU buffer directly into a kernel
+    /// without going through `.to_vec()` + re-upload.
+    ///
+    /// Only valid for `Tensor<f32>` — the underlying storage is always f32
+    /// on GPU regardless of the Tensor's generic type. The guard holds a
+    /// read lock on the storage for its lifetime.
+    #[cfg(feature = "cuda")]
+    pub fn as_cuda_slice_read(&self) -> axonml_core::storage::CudaSliceReadGuard<'_> {
+        assert!(
+            self.device().is_gpu(),
+            "as_cuda_slice_read: tensor must be on GPU"
+        );
+        assert!(is_f32::<T>(), "as_cuda_slice_read: GPU storage is f32-only");
+        let self_f32 = gpu_ref(self);
+        self_f32.storage.as_cuda_slice()
+    }
+
+    /// Write-guarded access to the underlying GPU storage as a mutable
+    /// `CudaSlice<f32>`. Same contract as `as_cuda_slice_read` but takes the
+    /// storage's write lock — used for in-place kernels and for the pre-
+    /// bound workspace-tensor path under CUDA graph capture.
+    ///
+    /// Panics if the tensor is on CPU or is not `Tensor<f32>`.
+    #[cfg(feature = "cuda")]
+    pub fn as_cuda_slice_write(&self) -> axonml_core::storage::CudaSliceWriteGuard<'_> {
+        assert!(
+            self.device().is_gpu(),
+            "as_cuda_slice_write: tensor must be on GPU"
+        );
+        assert!(
+            is_f32::<T>(),
+            "as_cuda_slice_write: GPU storage is f32-only"
+        );
+        let self_f32 = gpu_ref(self);
+        self_f32.storage.as_cuda_slice_mut()
+    }
+
+    /// BitNet b1.58 fused gate: `out = ReLU(self)² * up`. `self` is the gate.
+    #[must_use]
+    pub fn relu2_gate(&self, up: &Self) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            return gpu_into(gpu_ref(self).relu2_gate_cuda(gpu_ref(up)));
+        }
+        // CPU fallback.
+        let g = self.to_vec();
+        let u = up.to_vec();
+        let mut out: Vec<T> = Vec::with_capacity(g.len());
+        for i in 0..g.len() {
+            let gi = g[i].to_f32().unwrap_or(0.0).max(0.0);
+            out.push(
+                num_traits::cast(gi * gi * u[i].to_f32().unwrap_or(0.0)).unwrap_or_else(T::zero),
+            );
+        }
+        Self::from_vec(out, &self.shape).expect("relu2_gate: build output tensor")
+    }
+
+    /// Softmax along specified dimension.
+    #[must_use]
+    pub fn softmax(&self, dim: i32) -> Self {
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = gpu_ref(self);
+            return gpu_into(self_f32.softmax_cuda(dim).expect("CUDA softmax failed"));
+        }
+        crate::ops::softmax(self, dim as i64).unwrap_or_else(|_| self.clone())
+    }
+
+    /// Log softmax along specified dimension.
+    #[must_use]
+    pub fn log_softmax(&self, dim: i32) -> Self {
+        let softmax_result = self.softmax(dim);
+        softmax_result.ln()
+    }
+
+    /// Mean along a dimension.
+    #[must_use]
+    pub fn mean_dim(&self, dim: i32, keepdim: bool) -> Self {
+        let ndim = self.ndim();
+        let dim = if dim < 0 {
+            (ndim as i32 + dim) as usize
+        } else {
+            dim as usize
+        };
+
+        if dim >= ndim {
+            return self.clone();
+        }
+
+        // GPU fast path: sum_dim then divide by dim_size (all on GPU)
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = gpu_ref(self);
+            let summed = if keepdim {
+                self_f32.sum_dim_keepdim_cuda(dim)
+            } else {
+                self_f32.sum_dim_cuda(dim)
+            };
+            let dim_size = self.shape[dim];
+            let result = summed.mul_scalar_cuda(1.0 / dim_size as f32);
+            return gpu_into(result);
+        }
+
+        let dim_size = self.shape[dim];
+        let data = self.to_vec();
+        let mut new_shape = self.shape.clone();
+
+        if keepdim {
+            new_shape[dim] = 1;
+        } else {
+            new_shape.remove(dim);
+        }
+
+        if new_shape.is_empty() {
+            new_shape = smallvec::smallvec![1];
+        }
+
+        let new_numel: usize = new_shape.iter().product();
+        let mut result = vec![T::zero(); new_numel];
+
+        let outer_size: usize = self.shape[..dim].iter().product();
+        let inner_size: usize = self.shape[dim + 1..].iter().product();
+
+        for outer in 0..outer_size {
+            for inner in 0..inner_size {
+                let mut sum = T::zero();
+                for d in 0..dim_size {
+                    let idx = outer * dim_size * inner_size + d * inner_size + inner;
+                    sum = sum + data[idx];
+                }
+                let mean = sum / NumCast::from(dim_size).unwrap();
+                let result_idx = outer * inner_size + inner;
+                result[result_idx] = mean;
+            }
+        }
+
+        Self::from_vec(result, &new_shape).unwrap()
+    }
+
+    /// Sum along a dimension.
+    #[must_use]
+    pub fn sum_dim(&self, dim: i32, keepdim: bool) -> Self {
+        let ndim = self.ndim();
+        let dim = if dim < 0 {
+            (ndim as i32 + dim) as usize
+        } else {
+            dim as usize
+        };
+
+        if dim >= ndim {
+            return self.clone();
+        }
+
+        // GPU fast path: use CUDA sum_dim kernel (no CPU copies)
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = gpu_ref(self);
+            let result = if keepdim {
+                self_f32.sum_dim_keepdim_cuda(dim)
+            } else {
+                self_f32.sum_dim_cuda(dim)
+            };
+            return gpu_into(result);
+        }
+
+        let dim_size = self.shape[dim];
+        let data = self.to_vec();
+        let mut new_shape = self.shape.clone();
+
+        if keepdim {
+            new_shape[dim] = 1;
+        } else {
+            new_shape.remove(dim);
+        }
+
+        if new_shape.is_empty() {
+            new_shape = smallvec::smallvec![1];
+        }
+
+        let new_numel: usize = new_shape.iter().product();
+        let mut result = vec![T::zero(); new_numel];
+
+        let outer_size: usize = self.shape[..dim].iter().product();
+        let inner_size: usize = self.shape[dim + 1..].iter().product();
+
+        for outer in 0..outer_size {
+            for inner in 0..inner_size {
+                let mut sum = T::zero();
+                for d in 0..dim_size {
+                    let idx = outer * dim_size * inner_size + d * inner_size + inner;
+                    sum = sum + data[idx];
+                }
+                let result_idx = outer * inner_size + inner;
+                result[result_idx] = sum;
+            }
+        }
+
+        Self::from_vec(result, &new_shape).unwrap()
+    }
+
+    /// Variance along a dimension.
+    #[must_use]
+    pub fn var_dim(&self, dim: i32, keepdim: bool) -> Self {
+        // variance = E[x²] - E[x]²  (saves one full-size intermediate allocation)
+        let mean = self.mean_dim(dim, true);
+        let sq = self.mul(self).unwrap_or_else(|_| self.clone());
+        let mean_sq = sq.mean_dim(dim, keepdim);
+        let mean_keepdim = if keepdim {
+            mean.clone()
+        } else {
+            self.mean_dim(dim, keepdim)
+        };
+        let mean_squared = mean_keepdim
+            .mul(&mean_keepdim)
+            .unwrap_or_else(|_| mean_keepdim.clone());
+        mean_sq
+            .sub(&mean_squared)
+            .unwrap_or_else(|_| mean_sq.clone())
+    }
+
+    /// Broadcasts tensor to a new shape.
+    #[must_use]
+    pub fn broadcast_to(&self, shape: &[usize]) -> Self {
+        if self.shape.as_slice() == shape {
+            return self.clone();
+        }
+
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            assert!(is_f32::<T>(), "GPU tensors are only supported for f32");
+            let self_f32 = gpu_ref(self);
+            return gpu_into(
+                self_f32
+                    .broadcast_to_cuda(shape)
+                    .expect("CUDA broadcast_to failed"),
+            );
+        }
+
+        let result_shape = broadcast_shape(&self.shape, shape).unwrap_or_else(|_| shape.into());
+        let self_strides = broadcast_strides(&self.shape, &self.strides, &result_shape);
+
+        let total = numel(&result_shape);
+        let mut result_data = vec![T::zero(); total];
+        let self_data = self.storage.as_slice();
+
+        for i in 0..total {
+            let indices = crate::shape::unravel_index(i, &result_shape);
+            let self_idx = self.offset + linear_index(&indices, &self_strides);
+            result_data[i] = self_data[self_idx];
+        }
+
+        Self::from_vec(result_data, &result_shape).unwrap()
+    }
+
+    /// Slices the tensor using ranges for each dimension.
+    #[must_use]
+    pub fn slice(&self, ranges: &[core::ops::Range<usize>]) -> Self {
+        let mut new_shape = Vec::with_capacity(self.ndim());
+        for (i, range) in ranges.iter().enumerate() {
+            if i < self.ndim() {
+                new_shape.push(range.end - range.start);
+            }
+        }
+        // Keep remaining dimensions unchanged
+        for i in ranges.len()..self.ndim() {
+            new_shape.push(self.shape[i]);
+        }
+
+        let new_numel: usize = new_shape.iter().product();
+        let mut result_data = vec![T::zero(); new_numel];
+        let self_data = self.to_vec();
+
+        // Copy data with proper indexing
+        let mut result_idx = 0;
+        Self::slice_recursive(
+            &self_data,
+            &self.shape,
+            ranges,
+            0,
+            0,
+            &mut result_data,
+            &mut result_idx,
+        );
+
+        let out = Self::from_vec(result_data, &new_shape).unwrap();
+        #[cfg(feature = "cuda")]
+        if self.device().is_gpu() {
+            return out.to_device(self.device()).unwrap();
+        }
+        out
+    }
+
+    fn slice_recursive(
+        data: &[T],
+        shape: &[usize],
+        ranges: &[core::ops::Range<usize>],
+        dim: usize,
+        offset: usize,
+        result: &mut [T],
+        result_idx: &mut usize,
+    ) {
+        if dim == shape.len() {
+            result[*result_idx] = data[offset];
+            *result_idx += 1;
+            return;
+        }
+
+        let stride: usize = shape[dim + 1..].iter().product();
+        let (start, end) = if dim < ranges.len() {
+            (ranges[dim].start, ranges[dim].end)
+        } else {
+            (0, shape[dim])
+        };
+
+        for i in start..end {
+            Self::slice_recursive(
+                data,
+                shape,
+                ranges,
+                dim + 1,
+                offset + i * stride,
+                result,
+                result_idx,
+            );
+        }
+    }
+}
 
 impl<T: Numeric> Add for &Tensor<T> {
     type Output = Tensor<T>;
@@ -3434,10 +3485,6 @@ impl<T: Numeric> Mul<T> for &Tensor<T> {
     }
 }
 
-// =============================================================================
-// Display Implementation
-// =============================================================================
-
 impl<T: Scalar + fmt::Display> fmt::Debug for Tensor<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -3472,10 +3519,6 @@ impl<T: Scalar + fmt::Display> fmt::Display for Tensor<T> {
         }
     }
 }
-
-// =============================================================================
-// f32 ↔ f16 Casting for AMP (Automatic Mixed Precision)
-// =============================================================================
 
 impl Tensor<f32> {
     /// Cast this f32 tensor to f16 values stored as f32.
@@ -3519,10 +3562,6 @@ impl Tensor<f32> {
         })
     }
 }
-
-// =============================================================================
-// Tests
-// =============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -3638,8 +3677,6 @@ mod tests {
         );
     }
 }
-
-// ── parallel CPU paths ──
 
 #[cfg(test)]
 mod parallel_cpu_path_tests {
