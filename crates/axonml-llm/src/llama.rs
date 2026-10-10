@@ -152,19 +152,24 @@ pub struct RMSNorm {
     /// at a stable address across captures and replays.
     #[allow(clippy::type_complexity)]
     weight_gpu_cache: parking_lot::Mutex<Option<Tensor<f32>>>,
+    /// Opt-in trainable scale. `None` (the default) keeps the historical behaviour exactly:
+    /// the scale is a constant and `RMSNormBackward` returns only the input gradient. When set
+    /// via `make_trainable()`, the forward reads the weight from this Parameter (so optimizer
+    /// updates take effect and the GPU cache is bypassed) and registers it in the autograd graph.
+    weight_param: Option<Parameter>,
 }
 
-// Manual Clone — `weight_gpu_cache` (parking_lot::Mutex) is not Clone.
-// Cloning resets the cache; the new instance will re-populate it on first
-// GPU forward, which is the same behavior as a freshly-constructed RMSNorm.
-// Cheap because Tensor::clone is Arc-shared.
+// Manual Clone — `weight_gpu_cache` (parking_lot::Mutex) is not Clone. The clone shares the
+// cached device tensor (Arc), so a per-step layer clone (activation checkpointing) neither
+// re-uploads the scale nor moves its device address. Cheap because Tensor::clone is Arc-shared.
 impl Clone for RMSNorm {
     fn clone(&self) -> Self {
         Self {
             weight: self.weight.clone(),
             eps: self.eps,
             hidden_size: self.hidden_size,
-            weight_gpu_cache: parking_lot::Mutex::new(None),
+            weight_gpu_cache: parking_lot::Mutex::new(self.weight_gpu_cache.lock().clone()),
+            weight_param: self.weight_param.clone(),
         }
     }
 }
@@ -177,7 +182,23 @@ impl RMSNorm {
             eps,
             hidden_size,
             weight_gpu_cache: parking_lot::Mutex::new(None),
+            weight_param: None,
         }
+    }
+
+    /// Make the scale trainable: the weight moves into a `Parameter` that the forward reads and
+    /// the graph accumulates into. Off by default — every existing model keeps a constant scale,
+    /// which is what this stack has always trained with.
+    pub fn make_trainable(&mut self) -> Parameter {
+        let p = Parameter::new(self.weight.clone(), true);
+        self.weight_param = Some(p.clone());
+        *self.weight_gpu_cache.lock() = None;
+        p
+    }
+
+    /// The trainable scale, if this norm has one.
+    pub fn weight_parameter(&self) -> Option<&Parameter> {
+        self.weight_param.as_ref()
     }
 
     /// Forward pass. GPU-accelerated via `rms_norm_batched` when input is
@@ -209,6 +230,15 @@ impl RMSNorm {
                         *cache = Some(moved.clone());
                         moved
                     }
+                } else if let Some(p) = &self.weight_param {
+                    // trainable: never cache — the optimizer replaces this tensor every step
+                    let w = p.data();
+                    if w.device() == x_data.device() {
+                        w
+                    } else {
+                        w.to_device(x_data.device())
+                            .expect("RMSNorm: trainable weight to device")
+                    }
                 } else if self.weight.device().is_gpu() {
                     *cache = Some(self.weight.clone());
                     self.weight.clone()
@@ -233,7 +263,10 @@ impl RMSNorm {
             // CPU fallback: original per-row rms computation.
             let x_vec = x_data.to_vec();
             let mut output = vec![0.0f32; x_vec.len()];
-            let weight_vec = self.weight.to_vec();
+            let weight_vec = match &self.weight_param {
+                Some(p) => p.data().to_vec(),
+                None => self.weight.to_vec(),
+            };
             for b in 0..batch_elements {
                 let offset = b * last_dim;
                 let mut sum_sq = 0.0f32;
@@ -255,7 +288,15 @@ impl RMSNorm {
             // the cache yields a stable Arc-shared GPU tensor that the
             // backward kernel can use without another host→device upload
             // (critical for CUDA-graph-captured steps).
-            let saved_weight = if x_data.device().is_gpu() {
+            let saved_weight = if let Some(p) = &self.weight_param {
+                let w = p.data();
+                if w.device() == x_data.device() {
+                    w
+                } else {
+                    w.to_device(x_data.device())
+                        .expect("RMSNorm: saved trainable weight to device")
+                }
+            } else if x_data.device().is_gpu() {
                 self.weight_gpu_cache
                     .lock()
                     .as_ref()
@@ -264,8 +305,17 @@ impl RMSNorm {
             } else {
                 self.weight.clone()
             };
+            // ── with a trainable scale the weight becomes a second graph input, so the engine routes dL/dw into its accumulator ──
+            let (next_fns, trainable_weight) = match &self.weight_param {
+                Some(p) if p.variable().requires_grad() => (
+                    vec![x.grad_fn().cloned(), p.variable().grad_fn().cloned()],
+                    true,
+                ),
+                _ => (vec![x.grad_fn().cloned()], false),
+            };
             let grad_fn = GradFn::new(RMSNormBackward {
-                next_fns: vec![x.grad_fn().cloned()],
+                next_fns,
+                trainable_weight,
                 saved_input: x_data.clone(),
                 weight: saved_weight,
                 last_dim,
@@ -298,6 +348,8 @@ impl RMSNorm {
 /// dy/dx = w/rms - x * (x . (w * dy)) / (rms^3 * D)
 #[derive(Debug)]
 struct RMSNormBackward {
+    /// True when the scale participates in autograd (an opt-in trainable RMSNorm).
+    trainable_weight: bool,
     next_fns: Vec<Option<GradFn>>,
     saved_input: Tensor<f32>,
     weight: Tensor<f32>,
@@ -346,7 +398,12 @@ impl GradientFunction for RMSNormBackward {
         let grad_input = grad_input_2d
             .reshape(&shape_isize)
             .expect("RMSNormBackward: reshape output to saved shape");
-        vec![Some(grad_input)]
+        if !self.trainable_weight {
+            return vec![Some(grad_input)];
+        }
+        // ── dL/dw_j = Σ_i g[i,j] · x̂[i,j], x̂ normalised WITHOUT the scale (fused on GPU: rms_inv_rows + column partials) ──
+        let grad_weight = saved_2d.rms_norm_bwd_weight(&grad_2d, m, d, self.eps);
+        vec![Some(grad_input), Some(grad_weight)]
     }
 
     fn name(&self) -> &'static str {
@@ -659,8 +716,10 @@ impl GradientFunction for RepeatKVBackward {
             }
         }
 
-        let gi =
-            Tensor::from_vec(grad_input, &[batch, self.num_kv_heads, seq_len, head_dim]).unwrap();
+        let gi = Tensor::from_vec(grad_input, &[batch, self.num_kv_heads, seq_len, head_dim])
+            .unwrap()
+            .to_device(grad_output.device())
+            .unwrap();
         vec![Some(gi)]
     }
 
@@ -682,28 +741,28 @@ impl GradientFunction for RepeatKVBackward {
 // =============================================================================
 
 /// LLaMA attention with RoPE and optional grouped-query attention (GQA).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LLaMAAttention {
     /// Query projection
-    q_proj: Linear,
+    pub q_proj: Linear,
     /// Key projection
-    k_proj: Linear,
+    pub k_proj: Linear,
     /// Value projection
-    v_proj: Linear,
+    pub v_proj: Linear,
     /// Output projection
-    o_proj: Linear,
+    pub o_proj: Linear,
     /// Rotary embedding
-    rotary_emb: RotaryEmbedding,
+    pub rotary_emb: RotaryEmbedding,
     /// Number of attention heads
-    num_heads: usize,
+    pub num_heads: usize,
     /// Number of key-value heads
-    num_kv_heads: usize,
+    pub num_kv_heads: usize,
     /// Head dimension
-    head_dim: usize,
+    pub head_dim: usize,
     /// Hidden size
-    hidden_size: usize,
+    pub hidden_size: usize,
     /// Attention dropout
-    attn_dropout: Dropout,
+    pub attn_dropout: Dropout,
 }
 
 impl LLaMAAttention {
@@ -783,14 +842,13 @@ impl LLaMAAttention {
 
         // Scaled dot-product attention
         let scale = 1.0 / (self.head_dim as f32).sqrt();
-        let attn_weights = q.matmul(&k.transpose(2, 3)).mul_scalar(scale);
-
-        // Apply causal mask
-        let mask = self.create_causal_mask(seq_len, total_seq_len, position_offset);
-        let attn_weights = attn_weights.add(&Variable::new(mask, false));
-
-        // Softmax and dropout
-        let attn_weights = attn_weights.softmax(-1);
+        // ── fused scale + causal mask + softmax: one kernel, one saved [B,H,Tq,Tk] tensor instead of four ──
+        let attn_weights = q.matmul(&k.transpose(2, 3)).softmax_causal_scaled(
+            seq_len,
+            total_seq_len,
+            position_offset,
+            scale,
+        );
         let attn_weights = self.attn_dropout.forward(&attn_weights);
 
         // Compute output
@@ -804,6 +862,25 @@ impl LLaMAAttention {
     }
 
     fn repeat_kv(&self, x: &Variable, n_rep: usize) -> Variable {
+        if n_rep > 1 && x.data().device().is_gpu() {
+            // ── GPU: one-hot head-expansion matmul; autograd supplies the backward, nothing leaves the device ──
+            let shape = x.data().shape().to_vec();
+            let (b, nkv, s, hd) = (shape[0], shape[1], shape[2], shape[3]);
+            let nh = nkv * n_rep;
+            let mut e = vec![0f32; nh * nkv];
+            for h in 0..nh {
+                e[h * nkv + h / n_rep] = 1.0;
+            }
+            let e = Variable::new(
+                Tensor::from_vec(e, &[nh, nkv])
+                    .unwrap()
+                    .to_device(x.data().device())
+                    .unwrap(),
+                false,
+            );
+            let xt = x.transpose(0, 1).reshape(&[nkv, b * s * hd]);
+            return e.matmul(&xt).reshape(&[nh, b, s, hd]).transpose(0, 1);
+        }
         if n_rep == 1 {
             return x.clone();
         }
@@ -830,7 +907,10 @@ impl LLaMAAttention {
         }
 
         let output_tensor =
-            Tensor::from_vec(output, &[batch, num_kv_heads * n_rep, seq_len, head_dim]).unwrap();
+            Tensor::from_vec(output, &[batch, num_kv_heads * n_rep, seq_len, head_dim])
+                .unwrap()
+                .to_device(data.device())
+                .unwrap();
 
         if x.requires_grad() && is_grad_enabled() {
             let grad_fn = GradFn::new(RepeatKVBackward {
@@ -842,21 +922,6 @@ impl LLaMAAttention {
         } else {
             Variable::new(output_tensor, false)
         }
-    }
-
-    fn create_causal_mask(&self, q_len: usize, kv_len: usize, offset: usize) -> Tensor<f32> {
-        let mut mask_data = vec![0.0f32; q_len * kv_len];
-
-        for i in 0..q_len {
-            let pos = offset + i;
-            for j in 0..kv_len {
-                if j > pos {
-                    mask_data[i * kv_len + j] = f32::NEG_INFINITY;
-                }
-            }
-        }
-
-        Tensor::from_vec(mask_data, &[1, 1, q_len, kv_len]).unwrap()
     }
 
     /// Get parameters.
@@ -903,14 +968,14 @@ impl LLaMAAttention {
 // =============================================================================
 
 /// LLaMA MLP with SwiGLU activation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LLaMAMLP {
     /// Gate projection
-    gate_proj: Linear,
+    pub gate_proj: Linear,
     /// Up projection
-    up_proj: Linear,
+    pub up_proj: Linear,
     /// Down projection
-    down_proj: Linear,
+    pub down_proj: Linear,
 }
 
 impl LLaMAMLP {
@@ -969,17 +1034,24 @@ impl LLaMAMLP {
 // LLaMA Decoder Layer
 // =============================================================================
 
+static CKPT_LAYERS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// `AXONML_CKPT_LAYERS=1` — activation checkpointing per decoder layer in the no-cache (training) forward.
+pub fn checkpoint_layers() -> bool {
+    *CKPT_LAYERS.get_or_init(|| std::env::var("AXONML_CKPT_LAYERS").is_ok_and(|v| v == "1"))
+}
+
 /// Single LLaMA transformer decoder layer.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LLaMADecoderLayer {
     /// Self attention
-    self_attn: LLaMAAttention,
+    pub self_attn: LLaMAAttention,
     /// MLP
-    mlp: LLaMAMLP,
+    pub mlp: LLaMAMLP,
     /// Input layer norm
-    input_layernorm: RMSNorm,
+    pub input_layernorm: RMSNorm,
     /// Post-attention layer norm
-    post_attention_layernorm: RMSNorm,
+    pub post_attention_layernorm: RMSNorm,
 }
 
 impl LLaMADecoderLayer {
@@ -1063,13 +1135,13 @@ impl LLaMADecoderLayer {
 #[derive(Debug)]
 pub struct LLaMA {
     /// Token embeddings
-    embed_tokens: Embedding,
+    pub embed_tokens: Embedding,
     /// Decoder layers
-    layers: Vec<LLaMADecoderLayer>,
+    pub layers: Vec<LLaMADecoderLayer>,
     /// Final layer norm
-    norm: RMSNorm,
+    pub norm: RMSNorm,
     /// Configuration
-    config: LLaMAConfig,
+    pub config: LLaMAConfig,
 }
 
 impl LLaMA {
@@ -1113,6 +1185,16 @@ impl LLaMA {
                 let layer_cache = cache.get_mut(i);
                 hidden_states =
                     layer.forward_with_cache(&hidden_states, layer_cache, position_offset);
+            }
+        } else if checkpoint_layers() {
+            // ── AXONML_CKPT_LAYERS=1: recompute each layer's activations in backward instead of holding all of
+            //    them — peak memory O(1 layer) instead of O(layers), one extra forward per layer ──
+            for layer in &self.layers {
+                let l = layer.clone();
+                hidden_states = axonml_autograd::checkpoint_with_params(
+                    move |h| l.forward_with_cache(h, None, position_offset),
+                    &hidden_states,
+                );
             }
         } else {
             for layer in &self.layers {
@@ -1212,9 +1294,9 @@ impl Module for LLaMA {
 #[derive(Debug)]
 pub struct LLaMAForCausalLM {
     /// Base LLaMA model
-    model: LLaMA,
+    pub model: LLaMA,
     /// Language modeling head (tied to embeddings)
-    lm_head: Linear,
+    pub lm_head: Linear,
 }
 
 impl LLaMAForCausalLM {
@@ -1245,6 +1327,67 @@ impl LLaMAForCausalLM {
     /// Create KV-cache.
     pub fn create_kv_cache(&self, batch_size: usize) -> LayerKVCache {
         self.model.create_kv_cache(batch_size)
+    }
+
+    // ── per-domain modules: a rank-r adapter on every projection, trained alone against a frozen base ──
+
+    /// Attach an adapter to all seven projections in every decoder layer and return its parameters.
+    /// Attaching is an exact identity (each `b` is zero), so the model is unchanged until training.
+    pub fn attach_lora(&mut self, rank: usize, alpha: f32) -> Vec<Parameter> {
+        let mut ps = Vec::new();
+        for l in &mut self.model.layers {
+            for lin in [
+                &mut l.self_attn.q_proj,
+                &mut l.self_attn.k_proj,
+                &mut l.self_attn.v_proj,
+                &mut l.self_attn.o_proj,
+                &mut l.mlp.gate_proj,
+                &mut l.mlp.up_proj,
+                &mut l.mlp.down_proj,
+            ] {
+                ps.extend(lin.attach_lora(rank, alpha));
+            }
+        }
+        ps
+    }
+
+    /// Freeze every projection's base weight so only the adapters train.
+    pub fn freeze_lora_base(&mut self) {
+        for l in &mut self.model.layers {
+            for lin in [
+                &mut l.self_attn.q_proj,
+                &mut l.self_attn.k_proj,
+                &mut l.self_attn.v_proj,
+                &mut l.self_attn.o_proj,
+                &mut l.mlp.gate_proj,
+                &mut l.mlp.up_proj,
+                &mut l.mlp.down_proj,
+            ] {
+                lin.freeze_base();
+            }
+        }
+    }
+
+    /// Adapter parameters keyed by tensor name, for saving or loading one module on its own.
+    pub fn lora_named_parameters(&self) -> Vec<(String, Parameter)> {
+        let mut out = Vec::new();
+        for (i, l) in self.model.layers.iter().enumerate() {
+            for (tag, lin) in [
+                ("self_attn.q_proj", &l.self_attn.q_proj),
+                ("self_attn.k_proj", &l.self_attn.k_proj),
+                ("self_attn.v_proj", &l.self_attn.v_proj),
+                ("self_attn.o_proj", &l.self_attn.o_proj),
+                ("mlp.gate_proj", &l.mlp.gate_proj),
+                ("mlp.up_proj", &l.mlp.up_proj),
+                ("mlp.down_proj", &l.mlp.down_proj),
+            ] {
+                if let Some(a) = &lin.lora {
+                    out.push((format!("model.layers.{i}.{tag}.lora_a"), a.a.clone()));
+                    out.push((format!("model.layers.{i}.{tag}.lora_b"), a.b.clone()));
+                }
+            }
+        }
+        out
     }
 
     /// Get the config.

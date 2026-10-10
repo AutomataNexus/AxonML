@@ -192,7 +192,7 @@ fn count_parameters(state_dict: &StateDict) -> u64 {
 // hyperparameters + flat weights) and emits standard ONNX protobuf via
 // `torch.onnx.export()`. The older path that built an identity-only graph
 // from a bare StateDict produced ONNX files that had weights but no computation,
-// which silently failed downstream (ONNX Runtime / Hailo DFC / TensorRT).
+// which silently failed downstream (ONNX Runtime / TensorRT / NPU compilers).
 fn export_to_onnx(
     model_path: &PathBuf,
     output_path: &str,

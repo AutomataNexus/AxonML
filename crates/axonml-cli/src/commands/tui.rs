@@ -32,6 +32,7 @@ pub fn execute(args: TuiArgs) -> CliResult<()> {
     // Convert paths
     let model_path = args.model.map(PathBuf::from);
     let data_path = args.data.map(PathBuf::from);
+    let log_path = args.log.map(PathBuf::from);
 
     // Validate paths if provided
     if let Some(ref path) = model_path {
@@ -60,7 +61,7 @@ pub fn execute(args: TuiArgs) -> CliResult<()> {
     println!();
 
     // Run the TUI application
-    axonml_tui::run(model_path, data_path)
+    axonml_tui::run(model_path, data_path, log_path)
         .map_err(|e| crate::error::CliError::Other(format!("TUI error: {}", e)))?;
 
     println!();

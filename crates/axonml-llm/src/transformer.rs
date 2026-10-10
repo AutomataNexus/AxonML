@@ -501,6 +501,10 @@ impl Module for TransformerDecoder {
 
 /// Generic transformer block type selection.
 #[derive(Debug)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "built once per layer and never moved on a hot path"
+)]
 pub enum TransformerBlock {
     /// Encoder block (bidirectional attention)
     Encoder(TransformerEncoderBlock),

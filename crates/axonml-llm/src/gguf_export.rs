@@ -68,6 +68,9 @@ const VTYPE_U64: u32 = 10;
 // GGML tensor type codes.
 const GGML_F32: u32 = 0;
 const GGML_F16: u32 = 1;
+const GGML_Q8_0: u32 = 8;
+const Q8_0_BLOCK: usize = 32;
+const Q8_0_BLOCK_BYTES: usize = 2 + Q8_0_BLOCK;
 
 // =============================================================================
 // HF → llama.cpp name translator (inverse of gguf_loader::ggml_to_hf_name)
@@ -215,27 +218,36 @@ struct TensorEntry<'a> {
     shape: Vec<usize>,
     /// The trained parameter data (borrowed from the model via `.data()`).
     tensor: Tensor<f32>,
-    /// `true` → store as F16; `false` → store as F32. Norms stay F32 to
-    /// preserve their near-1.0 magnitudes across the f16 round-trip.
-    half_precision: bool,
+    /// How the body is stored. Norms stay F32 to preserve their near-1.0 magnitudes.
+    store: Store,
     _marker: std::marker::PhantomData<&'a ()>,
+}
+
+// ── storage format: Q8_0 is what unlocks a runtime's GPU-resident decode path, which requires every
+//    matmul weight to be a block quant. An F16 export falls back to per-matmul host->device uploads. ──
+#[derive(Clone, Copy, PartialEq)]
+enum Store {
+    F32,
+    F16,
+    Q8_0,
 }
 
 impl<'a> TensorEntry<'a> {
     fn dtype_code(&self) -> u32 {
-        if self.half_precision {
-            GGML_F16
-        } else {
-            GGML_F32
+        match self.store {
+            Store::F32 => GGML_F32,
+            Store::F16 => GGML_F16,
+            Store::Q8_0 => GGML_Q8_0,
         }
     }
 
-    fn type_size(&self) -> usize {
-        if self.half_precision { 2 } else { 4 }
-    }
-
     fn byte_len(&self) -> usize {
-        self.shape.iter().product::<usize>() * self.type_size()
+        let n: usize = self.shape.iter().product();
+        match self.store {
+            Store::F32 => n * 4,
+            Store::F16 => n * 2,
+            Store::Q8_0 => n / Q8_0_BLOCK * Q8_0_BLOCK_BYTES,
+        }
     }
 
     /// GGUF dim convention: `[n_cols, n_rows, …]` — for a weight matrix
@@ -276,6 +288,12 @@ pub fn export_qwen3_to_gguf(
     model_name: &str,
     tokenizer_source: Option<&Path>,
 ) -> io::Result<()> {
+    // ── AXONML_GGUF_QUANT=q8_0 stores every 2-D body weight as Q8_0 instead of F16. A
+    //    GPU-resident decoder requires a block quant on every matmul; F16 falls back to per-matmul
+    //    host->device uploads, which is 7 tok/s on a 1.7B instead of hundreds. ──
+    let quant_q8 = std::env::var("AXONML_GGUF_QUANT").is_ok_and(|v| v.eq_ignore_ascii_case("q8_0"));
+    let file_type: u32 = if quant_q8 { 7 } else { 1 };
+
     // ---- Build the tensor manifest from the model's parameters. ----
     let params = model.parameters();
     let mut manifest: Vec<TensorEntry<'_>> = Vec::new();
@@ -320,12 +338,18 @@ pub fn export_qwen3_to_gguf(
             Some(n) => n,
             None => continue, // unexpected, skip
         };
-        let half_precision = !is_norm_name(&ggml_name);
+        let store = if is_norm_name(&ggml_name) {
+            Store::F32
+        } else if quant_q8 && shape.len() == 2 && shape[1] % Q8_0_BLOCK == 0 {
+            Store::Q8_0
+        } else {
+            Store::F16
+        };
         manifest.push(TensorEntry {
             ggml_name,
             shape,
             tensor: data,
-            half_precision,
+            store,
             _marker: std::marker::PhantomData,
         });
     }
@@ -340,7 +364,7 @@ pub fn export_qwen3_to_gguf(
         move |w| {
             write_meta_string(w, "general.architecture", "qwen3")
                 .and_then(|_| write_meta_string(w, "general.name", &name))
-                .and_then(|_| write_meta_u32(w, "general.file_type", 1 /* f16 */))
+                .and_then(|_| write_meta_u32(w, "general.file_type", file_type))
         }
     }));
 
@@ -412,7 +436,7 @@ pub fn export_qwen3_to_gguf(
         let before = meta_buf.len();
         write_meta_string(&mut meta_buf, "general.architecture", "qwen3")?;
         write_meta_string(&mut meta_buf, "general.name", model_name)?;
-        write_meta_u32(&mut meta_buf, "general.file_type", 1)?;
+        write_meta_u32(&mut meta_buf, "general.file_type", file_type)?;
         write_meta_u32(&mut meta_buf, "general.alignment", DATA_ALIGNMENT as u32)?;
         meta_count += 4;
 
@@ -493,18 +517,35 @@ pub fn export_qwen3_to_gguf(
     // ---- Tensor data. ----
     for entry in &manifest {
         let data_f32 = entry.tensor.to_vec();
-        if entry.half_precision {
-            let mut buf: Vec<u8> = Vec::with_capacity(data_f32.len() * 2);
-            for &v in &data_f32 {
-                buf.write_u16::<LittleEndian>(f32_to_f16(v))?;
+        match entry.store {
+            Store::F16 => {
+                let mut buf: Vec<u8> = Vec::with_capacity(data_f32.len() * 2);
+                for &v in &data_f32 {
+                    buf.write_u16::<LittleEndian>(f32_to_f16(v))?;
+                }
+                file.write_all(&buf)?;
             }
-            file.write_all(&buf)?;
-        } else {
-            let mut buf: Vec<u8> = Vec::with_capacity(data_f32.len() * 4);
-            for &v in &data_f32 {
-                buf.write_f32::<LittleEndian>(v)?;
+            Store::F32 => {
+                let mut buf: Vec<u8> = Vec::with_capacity(data_f32.len() * 4);
+                for &v in &data_f32 {
+                    buf.write_f32::<LittleEndian>(v)?;
+                }
+                file.write_all(&buf)?;
             }
-            file.write_all(&buf)?;
+            Store::Q8_0 => {
+                let mut buf: Vec<u8> =
+                    Vec::with_capacity(data_f32.len() / Q8_0_BLOCK * Q8_0_BLOCK_BYTES);
+                for block in data_f32.chunks_exact(Q8_0_BLOCK) {
+                    let amax = block.iter().fold(0f32, |m, &v| m.max(v.abs()));
+                    let d = amax / 127.0;
+                    let inv = if d > 0.0 { 1.0 / d } else { 0.0 };
+                    buf.write_u16::<LittleEndian>(f32_to_f16(d))?;
+                    for &v in block {
+                        buf.push((v * inv).round().clamp(-127.0, 127.0) as i8 as u8);
+                    }
+                }
+                file.write_all(&buf)?;
+            }
         }
         // Pad to alignment.
         let pos = file.stream_position()?;

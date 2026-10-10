@@ -89,7 +89,11 @@ use ratatui::prelude::*;
 ///
 /// # Errors
 /// Returns an error if terminal initialization fails
-pub fn run(model_path: Option<PathBuf>, data_path: Option<PathBuf>) -> io::Result<()> {
+pub fn run(
+    model_path: Option<PathBuf>,
+    data_path: Option<PathBuf>,
+    log_path: Option<PathBuf>,
+) -> io::Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -108,6 +112,10 @@ pub fn run(model_path: Option<PathBuf>, data_path: Option<PathBuf>) -> io::Resul
     // Load dataset if provided
     if let Some(path) = data_path {
         app.load_dataset(path);
+    }
+
+    if let Some(path) = log_path {
+        app.watch_training_log(&path);
     }
 
     // Main loop

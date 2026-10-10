@@ -213,9 +213,25 @@ pub struct TrainArgs {
     #[arg(short, long)]
     pub data: String,
 
-    /// Dataset format (mnist, fashion-mnist, cifar10). Auto-detected if not specified.
+    /// Dataset format (mnist, fashion-mnist, cifar10, imagefolder). Auto-detected if not specified.
     #[arg(long)]
     pub format: Option<String>,
+
+    /// Second dataset for multi-modal fusion (paired by sample index with --data)
+    #[arg(long)]
+    pub data_b: Option<String>,
+
+    /// Format of the second (fusion) dataset. Auto-detected if not specified.
+    #[arg(long)]
+    pub format_b: Option<String>,
+
+    /// Additional ensemble branch datasets (comma-separated paths, paired by index)
+    #[arg(long)]
+    pub branches: Option<String>,
+
+    /// Ensemble fusion strategy: concat | gated | moe | late-ensemble
+    #[arg(long, default_value = "gated")]
+    pub strategy: String,
 
     /// Number of epochs to train
     #[arg(short, long)]
@@ -1410,6 +1426,10 @@ pub struct TuiArgs {
     /// Path to a dataset directory to load on startup
     #[arg(short, long)]
     pub data: Option<String>,
+
+    /// Training metrics log (JSONL: epoch/train_loss/val_loss/learning_rate) to watch live
+    #[arg(short = 'l', long)]
+    pub log: Option<String>,
 }
 
 // =============================================================================

@@ -47,7 +47,7 @@ axonml-optim = { workspace = true }
 axonml-data = { workspace = true }
 axonml-vision = { workspace = true }
 axonml-serialize = { workspace = true }
-axonml-onnx = { path = "../axonml-onnx", version = "0.6.1" }
+axonml-onnx = { path = "../axonml-onnx", version = "0.7.0" }
 axonml-quant = { workspace = true }
 axonml-tui.workspace = true
 
@@ -102,6 +102,14 @@ predicates = "3.1"
 
 [features]
 default = ["wandb", "kaggle", "dataset-api", "hub-download", "server-sync"]
+cuda = [
+    "axonml-core/cuda",
+    "axonml-tensor/cuda",
+    "axonml-autograd/cuda",
+    "axonml-nn/cuda",
+    "axonml-vision/cuda",
+    "axonml-optim/cuda",
+]
 serve = ["tokio", "axum"]
 wandb = ["reqwest", "chrono", "uuid"]
 kaggle = ["reqwest"]

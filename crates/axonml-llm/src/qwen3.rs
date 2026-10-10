@@ -169,7 +169,7 @@ impl Qwen3Config {
 /// RoPE. The norm weight is `[head_dim]` and is broadcast across every
 /// head (same weight for Q across all n_heads, same weight for K across
 /// all n_kv_heads). This matches Qwen3's published architecture.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Qwen3Attention {
     q_proj: Linear,
     k_proj: Linear,
@@ -210,6 +210,31 @@ impl Qwen3Attention {
             head_dim: config.head_dim,
             attn_dropout: Dropout::new(config.attention_dropout),
         }
+    }
+
+    /// Projection / per-head-norm accessors (read-only) — for a sub-bit converter.
+    pub fn q_proj(&self) -> &Linear {
+        &self.q_proj
+    }
+    /// The key projection.
+    pub fn k_proj(&self) -> &Linear {
+        &self.k_proj
+    }
+    /// The value projection.
+    pub fn v_proj(&self) -> &Linear {
+        &self.v_proj
+    }
+    /// The output projection.
+    pub fn o_proj(&self) -> &Linear {
+        &self.o_proj
+    }
+    /// The per-head query RMSNorm.
+    pub fn q_norm(&self) -> &RMSNorm {
+        &self.q_norm
+    }
+    /// The per-head key RMSNorm.
+    pub fn k_norm(&self) -> &RMSNorm {
+        &self.k_norm
     }
 
     /// Forward pass with optional KV-cache.
@@ -407,7 +432,7 @@ fn create_causal_mask(q_len: usize, kv_len: usize, offset: usize) -> Tensor<f32>
 /// Qwen3 MLP: SwiGLU with bias-free projections. Structurally identical
 /// to `LLaMAMLP` but uses `Linear::with_bias(..., false)` everywhere so
 /// the parameter count and tensor names line up 1:1 with Qwen3 GGUFs.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Qwen3MLP {
     gate_proj: Linear,
     up_proj: Linear,
@@ -422,6 +447,19 @@ impl Qwen3MLP {
             up_proj: Linear::with_bias(cfg.hidden_size, cfg.intermediate_size, false),
             down_proj: Linear::with_bias(cfg.intermediate_size, cfg.hidden_size, false),
         }
+    }
+
+    /// Projection accessors (read-only) — for a sub-bit converter.
+    pub fn gate_proj(&self) -> &Linear {
+        &self.gate_proj
+    }
+    /// The up projection.
+    pub fn up_proj(&self) -> &Linear {
+        &self.up_proj
+    }
+    /// The down projection.
+    pub fn down_proj(&self) -> &Linear {
+        &self.down_proj
     }
 
     /// Forward pass: `down(silu(gate(x)) * up(x))`. Uses the fused SwiGLU op
@@ -472,7 +510,7 @@ impl Qwen3MLP {
 // =============================================================================
 
 /// Single Qwen3 transformer decoder layer: pre-norm attention + pre-norm MLP.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Qwen3DecoderLayer {
     self_attn: Qwen3Attention,
     mlp: Qwen3MLP,
@@ -489,6 +527,26 @@ impl Qwen3DecoderLayer {
             input_layernorm: RMSNorm::new(config.hidden_size, config.rms_norm_eps),
             post_attention_layernorm: RMSNorm::new(config.hidden_size, config.rms_norm_eps),
         }
+    }
+
+    /// Self-attention block (read-only) — for a sub-bit converter.
+    pub fn self_attn(&self) -> &Qwen3Attention {
+        &self.self_attn
+    }
+
+    /// MLP block (read-only).
+    pub fn mlp(&self) -> &Qwen3MLP {
+        &self.mlp
+    }
+
+    /// Input RMSNorm (read-only).
+    pub fn input_layernorm(&self) -> &RMSNorm {
+        &self.input_layernorm
+    }
+
+    /// Post-attention RMSNorm (read-only).
+    pub fn post_attention_layernorm(&self) -> &RMSNorm {
+        &self.post_attention_layernorm
     }
 
     /// Forward pass with optional KV-cache.
@@ -622,6 +680,16 @@ impl Qwen3 {
                 hidden_states =
                     layer.forward_with_cache(&hidden_states, layer_cache, position_offset);
             }
+        } else if crate::llama::checkpoint_layers() {
+            // ── AXONML_CKPT_LAYERS=1: recompute each layer's activations in backward instead of holding all of
+            //    them — peak memory O(1 layer) instead of O(layers), one extra forward per layer ──
+            for layer in &self.layers {
+                let l = layer.clone();
+                hidden_states = axonml_autograd::checkpoint_with_params(
+                    move |h| l.forward_with_cache(h, None, position_offset),
+                    &hidden_states,
+                );
+            }
         } else {
             for layer in &self.layers {
                 hidden_states = layer.forward_with_cache(&hidden_states, None, position_offset);
@@ -646,6 +714,58 @@ impl Qwen3 {
     /// Get config.
     pub fn config(&self) -> &Qwen3Config {
         &self.config
+    }
+
+    /// Token embedding (read-only).
+    pub fn embed_tokens(&self) -> &Embedding {
+        &self.embed_tokens
+    }
+
+    /// Decoder layers (read-only) — for a sub-bit converter to VQ-quantize projections.
+    pub fn layers(&self) -> &[Qwen3DecoderLayer] {
+        &self.layers
+    }
+
+    /// Final norm (read-only).
+    pub fn norm(&self) -> &RMSNorm {
+        &self.norm
+    }
+
+    /// Capture the per-layer INPUT hidden states of a full fp forward.
+    ///
+    /// Returns `[H_0, H_1, …, H_L]` (`num_hidden_layers + 1` tensors), where
+    /// `H_0` is the token-embedding output (the input to layer 0), `H_i` is the
+    /// input to layer `i`, and `H_L` is the output of the last decoder layer
+    /// (the input to the final RMSNorm). This is exactly the teacher trace that
+    /// a cascade-distillation trainer consumes (`[H0..H_depth]`,
+    /// `depth = num_hidden_layers`): each sub-bit student layer `i` is distilled
+    /// to reproduce `H_{i+1}` from its own realized input. Runs under `no_grad`
+    /// with no KV cache (`position_offset = 0`), so `input_ids` is a single
+    /// prompt `[1, T]` (or `[B, T]`).
+    pub fn layer_input_hiddens(&self, input_ids: &Tensor<u32>) -> Vec<Tensor<f32>> {
+        axonml_autograd::no_grad(|| {
+            let ids_f32: Vec<f32> = input_ids.to_vec().iter().map(|&x| x as f32).collect();
+            let mut ids_tensor = Tensor::from_vec(ids_f32, input_ids.shape()).unwrap();
+            let model_device = self
+                .embed_tokens
+                .parameters()
+                .first()
+                .map(|p| p.data().device())
+                .unwrap_or(axonml_core::Device::Cpu);
+            if !matches!(model_device, axonml_core::Device::Cpu) {
+                ids_tensor = ids_tensor.to_device(model_device).unwrap();
+            }
+            let ids_var = Variable::new(ids_tensor, false);
+            let mut hidden_states = self.embed_tokens.forward(&ids_var);
+
+            let mut hiddens = Vec::with_capacity(self.layers.len() + 1);
+            hiddens.push(hidden_states.data());
+            for layer in &self.layers {
+                hidden_states = layer.forward_with_cache(&hidden_states, None, 0);
+                hiddens.push(hidden_states.data());
+            }
+            hiddens
+        })
     }
 
     /// Get parameters.
@@ -726,6 +846,12 @@ impl Qwen3ForCausalLM {
         self.lm_head.forward(&hidden)
     }
 
+    /// Teacher hidden trace for cascade distillation
+    /// (see [`Qwen3::layer_input_hiddens`]).
+    pub fn layer_input_hiddens(&self, input_ids: &Tensor<u32>) -> Vec<Tensor<f32>> {
+        self.model.layer_input_hiddens(input_ids)
+    }
+
     /// Forward with KV-cache returning logits.
     pub fn forward_with_cache(
         &self,
@@ -746,6 +872,17 @@ impl Qwen3ForCausalLM {
         self.model.config()
     }
 
+    /// Base model (read-only) — exposes layers/projections/norms for a sub-bit
+    /// converter that VQ-quantizes the projections while reusing the fp math.
+    pub fn model(&self) -> &Qwen3 {
+        &self.model
+    }
+
+    /// LM head (read-only).
+    pub fn lm_head(&self) -> &Linear {
+        &self.lm_head
+    }
+
     /// Get parameters (combined base model + LM head).
     ///
     /// Always includes the LM-head weight, even when `tie_word_embeddings` is
@@ -759,6 +896,125 @@ impl Qwen3ForCausalLM {
         let mut params = self.model.parameters();
         params.extend(self.lm_head.parameters());
         params
+    }
+
+    // ── per-domain modules: a rank-r adapter on every projection, trained alone against a frozen base ──
+
+    /// Share the embedding Parameter with the LM head instead of holding a second copy. `load_weights`
+    /// copies the embedding tensor into a separate LM-head Parameter, so a tied model costs
+    /// `vocab x hidden` twice on the device — 2.5 GB of a 12 GB card at Qwen3-1.7B.
+    pub fn tie_lm_head(&mut self) {
+        self.lm_head.weight = self.model.embed_tokens.weight.clone();
+    }
+
+    /// Attach an adapter to all seven projections in every decoder layer and return its parameters.
+    /// Attaching is an exact identity (each `b` is zero), so the model is unchanged until training.
+    pub fn attach_lora(&mut self, rank: usize, alpha: f32) -> Vec<Parameter> {
+        let mut ps = Vec::new();
+        for l in &mut self.model.layers {
+            for lin in [
+                &mut l.self_attn.q_proj,
+                &mut l.self_attn.k_proj,
+                &mut l.self_attn.v_proj,
+                &mut l.self_attn.o_proj,
+                &mut l.mlp.gate_proj,
+                &mut l.mlp.up_proj,
+                &mut l.mlp.down_proj,
+            ] {
+                ps.extend(lin.attach_lora(rank, alpha));
+            }
+        }
+        ps
+    }
+
+    /// Attach LoRA to layers `from..` only. Lower layers keep no trainable
+    /// tensor at all, so when the embedding and every other input is frozen the
+    /// backward pass stops at the lowest adapted layer instead of walking the
+    /// whole stack. Additive: `attach_lora` is unchanged.
+    pub fn attach_lora_from(&mut self, rank: usize, alpha: f32, from: usize) -> Vec<Parameter> {
+        let mut ps = Vec::new();
+        for l in self.model.layers.iter_mut().skip(from) {
+            for lin in [
+                &mut l.self_attn.q_proj,
+                &mut l.self_attn.k_proj,
+                &mut l.self_attn.v_proj,
+                &mut l.self_attn.o_proj,
+                &mut l.mlp.gate_proj,
+                &mut l.mlp.up_proj,
+                &mut l.mlp.down_proj,
+            ] {
+                ps.extend(lin.attach_lora(rank, alpha));
+            }
+        }
+        ps
+    }
+
+    /// Freeze every base tensor — projections, embedding and LM head — so only the adapters train.
+    /// The embedding and head matter here in a way they do not for a 250M model: at Qwen3-1.7B their
+    /// gradients alone are 2.5 GB.
+    pub fn freeze_lora_base(&mut self) {
+        for l in &mut self.model.layers {
+            for lin in [
+                &mut l.self_attn.q_proj,
+                &mut l.self_attn.k_proj,
+                &mut l.self_attn.v_proj,
+                &mut l.self_attn.o_proj,
+                &mut l.mlp.gate_proj,
+                &mut l.mlp.up_proj,
+                &mut l.mlp.down_proj,
+            ] {
+                lin.freeze_base();
+            }
+        }
+        let e = self.model.embed_tokens.weight.data();
+        self.model.embed_tokens.weight = Parameter::from_variable(Variable::new(e, false));
+        let h = self.lm_head.weight.data();
+        self.lm_head.weight = Parameter::from_variable(Variable::new(h, false));
+    }
+
+    /// Adapter parameters keyed by tensor name, for saving or loading one module on its own.
+    pub fn lora_named_parameters(&self) -> Vec<(String, Parameter)> {
+        let mut out = Vec::new();
+        for (i, l) in self.model.layers.iter().enumerate() {
+            for (tag, lin) in [
+                ("self_attn.q_proj", &l.self_attn.q_proj),
+                ("self_attn.k_proj", &l.self_attn.k_proj),
+                ("self_attn.v_proj", &l.self_attn.v_proj),
+                ("self_attn.o_proj", &l.self_attn.o_proj),
+                ("mlp.gate_proj", &l.mlp.gate_proj),
+                ("mlp.up_proj", &l.mlp.up_proj),
+                ("mlp.down_proj", &l.mlp.down_proj),
+            ] {
+                for (k, p) in lin.lora_parameters().into_iter().enumerate() {
+                    out.push((
+                        format!(
+                            "model.layers.{i}.{tag}.lora_{}",
+                            if k == 0 { "a" } else { "b" }
+                        ),
+                        p,
+                    ));
+                }
+            }
+        }
+        out
+    }
+
+    /// Fold every adapter into its base weight and drop it. Required before an export that walks
+    /// `parameters()` positionally — an attached adapter adds two tensors per projection.
+    pub fn merge_lora(&mut self) {
+        for l in &mut self.model.layers {
+            for lin in [
+                &mut l.self_attn.q_proj,
+                &mut l.self_attn.k_proj,
+                &mut l.self_attn.v_proj,
+                &mut l.self_attn.o_proj,
+                &mut l.mlp.gate_proj,
+                &mut l.mlp.up_proj,
+                &mut l.mlp.down_proj,
+            ] {
+                lin.merge_lora();
+            }
+        }
     }
 
     /// Load weights from state dict. Honors `tie_word_embeddings` by

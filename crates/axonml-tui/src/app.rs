@@ -228,6 +228,13 @@ impl App {
     }
 
     /// Load a dataset directory
+    /// Watch a training metrics log (JSONL) and open the training view on it.
+    pub fn watch_training_log(&mut self, path: &std::path::Path) {
+        let _ = self.training_view.watch_log(path);
+        self.active_tab = Tab::Training;
+    }
+
+    /// Loads a dataset into the data view and reports the outcome in the status bar.
     pub fn load_dataset(&mut self, path: PathBuf) {
         match self.data_view.load_dataset(&path) {
             Ok(()) => {
