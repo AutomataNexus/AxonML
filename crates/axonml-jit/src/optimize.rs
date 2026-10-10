@@ -235,12 +235,128 @@ fn dead_code_elimination(graph: Graph) -> Graph {
 // Elementwise Fusion
 // -----------------------------------------------------------------------------
 
-/// Elementwise fusion: combine consecutive elementwise ops into kernels.
+/// Elementwise fusion: collapse maximal chains of SINGLE-USE unary elementwise ops into one
+/// `FusedChain` node (one memory pass instead of one per op). A node is a chain link iff it is a
+/// unary elementwise op whose input is produced by another node used ONLY by this node (so fusing
+/// cannot change any other consumer's result). Binary/reduction/matmul ops break a chain.
 fn elementwise_fusion(graph: Graph) -> Graph {
-    // For now, just return the graph unchanged
-    // Full implementation would identify fusible sequences
-    // and create FusedElementwise nodes
-    graph
+    use crate::ir::FusedStep;
+
+    // Classify a node's op as a fusible unary step (with its scalar), or None.
+    fn as_step(op: &Op) -> Option<(FusedStep, f64)> {
+        Some(match op {
+            Op::Neg { .. } => (FusedStep::Neg, 0.0),
+            Op::Abs { .. } => (FusedStep::Abs, 0.0),
+            Op::Sqrt { .. } => (FusedStep::Sqrt, 0.0),
+            Op::Exp { .. } => (FusedStep::Exp, 0.0),
+            Op::Log { .. } => (FusedStep::Log, 0.0),
+            Op::Sin { .. } => (FusedStep::Sin, 0.0),
+            Op::Cos { .. } => (FusedStep::Cos, 0.0),
+            Op::Tanh { .. } => (FusedStep::Tanh, 0.0),
+            Op::Relu { .. } => (FusedStep::Relu, 0.0),
+            Op::Sigmoid { .. } => (FusedStep::Sigmoid, 0.0),
+            Op::Gelu { .. } => (FusedStep::Gelu, 0.0),
+            Op::Silu { .. } => (FusedStep::Silu, 0.0),
+            Op::AddScalar { scalar, .. } => (FusedStep::AddScalar, *scalar),
+            Op::MulScalar { scalar, .. } => (FusedStep::MulScalar, *scalar),
+            _ => return None,
+        })
+    }
+    fn step_input(op: &Op) -> Option<NodeId> {
+        match op {
+            Op::Neg { input }
+            | Op::Abs { input }
+            | Op::Sqrt { input }
+            | Op::Exp { input }
+            | Op::Log { input }
+            | Op::Sin { input }
+            | Op::Cos { input }
+            | Op::Tanh { input }
+            | Op::Relu { input }
+            | Op::Sigmoid { input }
+            | Op::Gelu { input }
+            | Op::Silu { input }
+            | Op::AddScalar { input, .. }
+            | Op::MulScalar { input, .. } => Some(*input),
+            _ => None,
+        }
+    }
+
+    // use-count over the whole graph (a node feeding an Output counts as a use too).
+    let mut uses: FxHashMap<NodeId, usize> = FxHashMap::default();
+    for node in graph.nodes() {
+        for inp in node.op.inputs() {
+            *uses.entry(inp).or_insert(0) += 1;
+        }
+    }
+
+    // Rebuild the graph; when a fusible node's chain of single-use unary parents can be extended,
+    // emit one FusedChain instead. Process in original order (topological by construction).
+    let mut ng = Graph::new();
+    let mut map: FxHashMap<NodeId, NodeId> = FxHashMap::default();
+
+    for node in graph.nodes() {
+        // Walk back through single-use unary parents to find the chain root + steps.
+        if let Some((_, _)) = as_step(&node.op) {
+            let mut steps_rev: Vec<(FusedStep, f64)> = Vec::new();
+            let mut cur = node.id;
+            let mut root_input: Option<NodeId> = None;
+            loop {
+                let op = &graph.node(cur).op;
+                match as_step(op) {
+                    Some(st) => {
+                        steps_rev.push(st);
+                        let inp = step_input(op).unwrap();
+                        // extend only if the parent is used solely by `cur`
+                        if uses.get(&inp).copied().unwrap_or(0) == 1
+                            && as_step(&graph.node(inp).op).is_some()
+                        {
+                            cur = inp;
+                        } else {
+                            root_input = Some(inp);
+                            break;
+                        }
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
+            if let Some(rin) = root_input {
+                if steps_rev.len() >= 2 {
+                    steps_rev.reverse();
+                    let rin_new = map.get(&rin).copied().unwrap_or(rin);
+                    let nid = ng.add_node(
+                        Op::FusedChain {
+                            input: rin_new,
+                            steps: steps_rev,
+                        },
+                        node.dtype,
+                        node.shape.clone(),
+                    );
+                    map.insert(node.id, nid);
+                    continue;
+                }
+            }
+        }
+        // Not a chain tail (or chain too short): copy, remapping inputs. Skip nodes already
+        // subsumed into a FusedChain (they have no map entry and are not referenced downstream).
+        let remapped = remap_op(&node.op, &map);
+        let nid = ng.add_node(remapped, node.dtype, node.shape.clone());
+        map.insert(node.id, nid);
+    }
+
+    for (name, id) in graph.inputs() {
+        if let Some(&n) = map.get(id) {
+            ng.register_input(name, n);
+        }
+    }
+    for (name, id) in graph.outputs() {
+        if let Some(&n) = map.get(id) {
+            ng.register_output(name, n);
+        }
+    }
+    dead_code_elimination(ng)
 }
 
 // -----------------------------------------------------------------------------
@@ -396,6 +512,10 @@ fn remap_op(op: &Op, node_map: &FxHashMap<NodeId, NodeId>) -> Op {
     let remap = |id: &NodeId| node_map.get(id).copied().unwrap_or(*id);
 
     match op {
+        Op::FusedChain { input, steps } => Op::FusedChain {
+            input: remap(input),
+            steps: steps.clone(),
+        },
         Op::Input { name } => Op::Input { name: name.clone() },
         Op::Output { name, input } => Op::Output {
             name: name.clone(),
@@ -639,5 +759,77 @@ mod tests {
             .iter()
             .any(|n| matches!(n.op, Op::Constant { .. }));
         assert!(has_constant);
+    }
+
+    #[test]
+    fn fuses_unary_chain_and_computes_same() {
+        use crate::ir::{DataType, Shape};
+        // out = sqrt(relu(x*2 + 1)) -> 4 single-use unary steps over one input.
+        let mut g = Graph::new();
+        let x = g.add_node(
+            Op::Input { name: "x".into() },
+            DataType::F32,
+            Shape(vec![8]),
+        );
+        g.register_input("x", x);
+        let a = g.add_node(
+            Op::MulScalar {
+                input: x,
+                scalar: 2.0,
+            },
+            DataType::F32,
+            Shape(vec![8]),
+        );
+        let b = g.add_node(
+            Op::AddScalar {
+                input: a,
+                scalar: 1.0,
+            },
+            DataType::F32,
+            Shape(vec![8]),
+        );
+        let c = g.add_node(Op::Relu { input: b }, DataType::F32, Shape(vec![8]));
+        let d = g.add_node(Op::Sqrt { input: c }, DataType::F32, Shape(vec![8]));
+        let o = g.add_node(
+            Op::Output {
+                name: "out".into(),
+                input: d,
+            },
+            DataType::F32,
+            Shape(vec![8]),
+        );
+        g.register_output("out", o);
+
+        let fused = elementwise_fusion(g.clone());
+        let n_fused = fused
+            .nodes()
+            .iter()
+            .filter(|n| matches!(n.op, Op::FusedChain { .. }))
+            .count();
+        assert!(
+            n_fused >= 1,
+            "expected a FusedChain node, got graph: {:?}",
+            fused.nodes().iter().map(|n| &n.op).collect::<Vec<_>>()
+        );
+
+        let run = |graph: &Graph| -> Vec<f32> {
+            crate::codegen::CompiledFunction::from_graph_for_test(graph.clone())
+                .run(&[("x", &[-1.0, 0.5, 2.0, -3.0, 4.0, 0.1, -0.2, 9.0])])
+                .unwrap()
+        };
+        // fusion + DCE must REDUCE node count (4 unary ops + I/O -> 1 FusedChain + I/O).
+        assert!(
+            fused.nodes().len() < g.nodes().len(),
+            "fusion should shrink the graph: {} -> {}",
+            g.nodes().len(),
+            fused.nodes().len()
+        );
+        let (ra, rb) = (run(&g), run(&fused));
+        let md = ra
+            .iter()
+            .zip(&rb)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max);
+        assert!(md < 1e-6, "fused graph diverges: {md} ({ra:?} vs {rb:?})");
     }
 }

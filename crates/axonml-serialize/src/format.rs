@@ -100,7 +100,7 @@ pub fn detect_format<P: AsRef<Path>>(path: P) -> Format {
         Some("json") => Format::Json,
         Some("safetensors") => Format::SafeTensors,
         Some("st") => Format::SafeTensors,
-        _ => Format::Axonml, // default
+        _ => Format::Axonml,
     }
 }
 
@@ -111,14 +111,10 @@ pub fn detect_format_from_bytes(bytes: &[u8]) -> Option<Format> {
         return None;
     }
 
-    // Check for JSON (starts with '{' or '[')
     if bytes[0] == b'{' || bytes[0] == b'[' {
         return Some(Format::Json);
     }
 
-    // SafeTensors has a specific header format
-    // First 8 bytes are the header size as u64 little-endian
-    // Then the header is JSON
     if bytes.len() >= 16 {
         let header_size = u64::from_le_bytes(bytes[0..8].try_into().ok()?);
         if header_size < 10_000_000 && bytes.get(8) == Some(&b'{') {
@@ -126,7 +122,6 @@ pub fn detect_format_from_bytes(bytes: &[u8]) -> Option<Format> {
         }
     }
 
-    // Default to Axonml binary format
     Some(Format::Axonml)
 }
 
@@ -160,13 +155,11 @@ mod tests {
 
     #[test]
     fn test_detect_format_from_bytes() {
-        // JSON
         assert_eq!(
             detect_format_from_bytes(b"{\"key\": \"value\"}"),
             Some(Format::Json)
         );
 
-        // Binary (default to Axonml)
         assert_eq!(
             detect_format_from_bytes(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]),
             Some(Format::Axonml)

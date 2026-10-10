@@ -105,6 +105,15 @@ impl CompiledFunction {
         &self.graph
     }
 
+    /// Wrap a graph as an interpreted CompiledFunction (tests).
+    #[doc(hidden)]
+    pub fn from_graph_for_test(graph: Graph) -> Self {
+        Self {
+            graph: Arc::new(graph),
+            kind: CompiledKind::Interpreted,
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Execution Dispatch
     // -------------------------------------------------------------------------
@@ -287,6 +296,39 @@ impl CompiledFunction {
             Op::Relu { input } => {
                 let a = get(*input)?;
                 Ok(a.iter().map(|x| x.max(0.0)).collect())
+            }
+
+            Op::FusedChain { input, steps } => {
+                use crate::ir::FusedStep::*;
+                let a = get(*input)?;
+                Ok(a.iter()
+                    .map(|&x0| {
+                        let mut x = x0;
+                        for (st, sc) in steps {
+                            let s = *sc as f32;
+                            x = match st {
+                                Neg => -x,
+                                Abs => x.abs(),
+                                Sqrt => x.sqrt(),
+                                Exp => x.exp(),
+                                Log => x.ln(),
+                                Sin => x.sin(),
+                                Cos => x.cos(),
+                                Tanh => x.tanh(),
+                                Relu => x.max(0.0),
+                                Sigmoid => 1.0 / (1.0 + (-x).exp()),
+                                Gelu => {
+                                    const K: f32 = 0.797_884_6;
+                                    0.5 * x * (1.0 + (K * (x + 0.044715 * x.powi(3))).tanh())
+                                }
+                                Silu => x / (1.0 + (-x).exp()),
+                                AddScalar => x + s,
+                                MulScalar => x * s,
+                            };
+                        }
+                        x
+                    })
+                    .collect())
             }
 
             Op::Sigmoid { input } => {

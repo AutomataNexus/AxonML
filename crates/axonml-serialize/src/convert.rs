@@ -33,7 +33,6 @@ use std::collections::HashMap;
 pub fn from_pytorch_key(key: &str) -> String {
     let mut result = key.to_string();
 
-    // Remove common prefixes
     if result.starts_with("module.") {
         result = result.strip_prefix("module.").unwrap().to_string();
     }
@@ -62,20 +61,16 @@ pub fn to_pytorch_key(key: &str) -> String {
 pub fn pytorch_layer_mapping() -> HashMap<&'static str, &'static str> {
     let mut map = HashMap::new();
 
-    // Linear layers
     map.insert("fc", "linear");
     map.insert("dense", "linear");
 
-    // Convolutions
     map.insert("conv", "conv");
 
-    // Normalization
     map.insert("bn", "batch_norm");
     map.insert("batch_norm", "batch_norm");
     map.insert("layer_norm", "layer_norm");
     map.insert("ln", "layer_norm");
 
-    // Attention
     map.insert("self_attn", "attention");
     map.insert("multihead_attn", "attention");
 
@@ -90,7 +85,6 @@ pub fn pytorch_layer_mapping() -> HashMap<&'static str, &'static str> {
 #[must_use]
 pub fn to_onnx_shape(shape: &[usize], include_batch: bool) -> Vec<i64> {
     if include_batch {
-        // ONNX uses -1 for dynamic batch size
         std::iter::once(-1i64)
             .chain(shape.iter().map(|&d| d as i64))
             .collect()

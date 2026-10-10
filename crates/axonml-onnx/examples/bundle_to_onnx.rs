@@ -6,9 +6,8 @@
 //!
 //! Walks the bundle's `BundleGraph` (per-node IrOp-named topology +
 //! initializer tensors with explicit shapes) and emits an ONNX model via
-//! axonml-onnx's `OnnxExporter`. The resulting ONNX is ingestible by Hailo's
-//! Dataflow Compiler — feed it into `nexusfoundry compile <out.onnx>
-//! --use-dfc --target hailo8|hailo10h --output X.hef`.
+//! axonml-onnx's `OnnxExporter`. The resulting ONNX is ingestible by ONNX Runtime and
+//! downstream NPU compilers.
 //!
 //! Op-name mapping (BundleGraph node `op` field → ONNX op_type):
 //!   Conv2d        → Conv
@@ -90,6 +89,40 @@ fn main() {
 
     // 4. Compute nodes
     for (i, n) in graph.nodes.iter().enumerate() {
+        // Slice: opset-13 takes starts/ends/axes/steps as int64 INPUT tensors, not attrs.
+        if n.op == "Slice" {
+            let get = |k: &str| -> Vec<i64> {
+                n.attrs
+                    .get(k)
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|x| x.as_i64()).collect())
+                    .unwrap_or_default()
+            };
+            let starts = get("starts");
+            let ends = get("ends");
+            let mut axes = get("axes");
+            let mut steps = get("steps");
+            if axes.is_empty() {
+                axes = (0..starts.len() as i64).collect();
+            }
+            if steps.is_empty() {
+                steps = vec![1i64; starts.len()];
+            }
+            let (sn, en, an, stn) = (
+                format!("{}_starts", n.name),
+                format!("{}_ends", n.name),
+                format!("{}_axes", n.name),
+                format!("{}_steps", n.name),
+            );
+            exporter.add_initializer_int64(&sn, &[starts.len() as i64], &starts);
+            exporter.add_initializer_int64(&en, &[ends.len() as i64], &ends);
+            exporter.add_initializer_int64(&an, &[axes.len() as i64], &axes);
+            exporter.add_initializer_int64(&stn, &[steps.len() as i64], &steps);
+            let in_refs: Vec<&str> = vec![n.inputs[0].as_str(), &sn, &en, &an, &stn];
+            let out_refs: Vec<&str> = n.outputs.iter().map(|s| s.as_str()).collect();
+            exporter.add_node("Slice", &in_refs, &out_refs, HashMap::new());
+            continue;
+        }
         let (op_type, attrs) = map_node_to_onnx(n).unwrap_or_else(|e| {
             panic!("node[{i}] `{}`: {}", n.name, e);
         });
@@ -115,7 +148,6 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
     };
     let as_i64 = |v: &Value| v.as_i64();
     let as_f32 = |v: &Value| v.as_f64().map(|x| x as f32);
-    let as_bool = |v: &Value| v.as_bool();
 
     let onnx_op = match n.op.as_str() {
         "Conv" | "Conv2d" => {
@@ -239,14 +271,14 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
                 "beta".into(),
                 AttributeValue::Float(as_f32(&n.attrs["beta"]).unwrap_or(1.0)),
             );
-            attrs.insert(
-                "transA".into(),
-                AttributeValue::Int(as_bool(&n.attrs["trans_a"]).unwrap_or(false) as i64),
-            );
-            attrs.insert(
-                "transB".into(),
-                AttributeValue::Int(as_bool(&n.attrs["trans_b"]).unwrap_or(false) as i64),
-            );
+            let ta = n.attrs.get("transA").or_else(|| n.attrs.get("trans_a"));
+            let tb = n.attrs.get("transB").or_else(|| n.attrs.get("trans_b"));
+            let flag = |v: Option<&Value>| -> i64 {
+                v.map(|x| x.as_bool().unwrap_or_else(|| x.as_i64().unwrap_or(0) != 0))
+                    .unwrap_or(false) as i64
+            };
+            attrs.insert("transA".into(), AttributeValue::Int(flag(ta)));
+            attrs.insert("transB".into(), AttributeValue::Int(flag(tb)));
             "Gemm"
         }
         "Softmax" => {
@@ -271,20 +303,23 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
             "Transpose"
         }
         "Squeeze" => {
-            // Opset 13+: axes is a second input tensor, not an attribute.
-            // Emit a Constant node for axes and wire it as input[1].
+            // Axes travel as an attribute; the exporter handles opset compatibility.
             if let Some(axes) = n.attrs.get("axes") {
-                let axes_vec = as_i64_vec(axes);
-                let axes_name = format!("{}_axes_const", n.name);
-                // Add constant node inline — exporter will handle it
-                let axes_f32: Vec<f32> = axes_vec.iter().map(|&x| x as f32).collect();
-                // We need to add axes as an initializer with int64 type.
-                // Since our initializer API uses f32, we'll add axes as an attribute
-                // and let the exporter handle opset compatibility.
-                // For DFC compatibility, just pass axes as attribute (DFC accepts both).
-                attrs.insert("axes".into(), AttributeValue::Ints(axes_vec));
+                attrs.insert("axes".into(), AttributeValue::Ints(as_i64_vec(axes)));
             }
             "Squeeze"
+        }
+        "Slice" => {
+            if let Some(v) = n.attrs.get("starts") {
+                attrs.insert("starts".into(), AttributeValue::Ints(as_i64_vec(v)));
+            }
+            if let Some(v) = n.attrs.get("ends") {
+                attrs.insert("ends".into(), AttributeValue::Ints(as_i64_vec(v)));
+            }
+            if let Some(v) = n.attrs.get("axes") {
+                attrs.insert("axes".into(), AttributeValue::Ints(as_i64_vec(v)));
+            }
+            "Slice"
         }
         "GRU" => {
             attrs.insert(
@@ -329,15 +364,6 @@ fn map_node_to_onnx(n: &GraphNode) -> Result<(String, HashMap<String, AttributeV
                 AttributeValue::Int(as_i64(&n.attrs["axis"]).unwrap_or(0)),
             );
             "Gather"
-        }
-        "Transpose" => {
-            if let Some(perm) = n.attrs.get("perm") {
-                if let Some(arr) = perm.as_array() {
-                    let perm_ints: Vec<i64> = arr.iter().filter_map(|v| v.as_i64()).collect();
-                    attrs.insert("perm".into(), AttributeValue::Ints(perm_ints));
-                }
-            }
-            "Transpose"
         }
         "Resize" => {
             attrs.insert(

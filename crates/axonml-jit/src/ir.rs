@@ -183,6 +183,39 @@ impl From<Vec<usize>> for Shape {
 // Op
 // =============================================================================
 
+/// Unary step kinds a `FusedChain` can hold (scalar in the tuple used only where meaningful).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FusedStep {
+    /// `-x`.
+    Neg,
+    /// `|x|`.
+    Abs,
+    /// `sqrt(x)`.
+    Sqrt,
+    /// `exp(x)`.
+    Exp,
+    /// `ln(x)`.
+    Log,
+    /// `sin(x)`.
+    Sin,
+    /// `cos(x)`.
+    Cos,
+    /// `tanh(x)`.
+    Tanh,
+    /// `max(x, 0)`.
+    Relu,
+    /// `1 / (1 + exp(-x))`.
+    Sigmoid,
+    /// `gelu(x)`.
+    Gelu,
+    /// `x * sigmoid(x)`.
+    Silu,
+    /// `x + c`.
+    AddScalar,
+    /// `x * c`.
+    MulScalar,
+}
+
 /// Operations supported by the JIT compiler.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(missing_docs)]
@@ -310,11 +343,21 @@ pub enum Op {
     Cast { input: NodeId, dtype: DataType },
     /// Contiguous (copy to contiguous memory).
     Contiguous { input: NodeId },
+    /// A fused maximal chain of single-use UNARY elementwise ops over one input, produced by the
+    /// `ElementwiseFusion` pass. `steps` runs in order; each is (op-tag, optional-scalar). Executed
+    /// as one pass (one read, one write) instead of one op per step.
+    FusedChain {
+        input: NodeId,
+        steps: Vec<(FusedStep, f64)>,
+    },
 }
 
 impl Op {
     /// Returns the input node IDs for this operation.
     pub fn inputs(&self) -> Vec<NodeId> {
+        if let Self::FusedChain { input, .. } = self {
+            return vec![*input];
+        }
         match self {
             Self::Input { .. } | Self::Constant { .. } => vec![],
             Self::Output { input, .. }
@@ -344,6 +387,7 @@ impl Op {
             | Self::Broadcast { input, .. }
             | Self::Cast { input, .. }
             | Self::Contiguous { input } => vec![*input],
+            Self::FusedChain { input, .. } => vec![*input],
             Self::Add { lhs, rhs }
             | Self::Sub { lhs, rhs }
             | Self::Mul { lhs, rhs }
@@ -391,6 +435,7 @@ impl Op {
                 | Self::Lt { .. }
                 | Self::Eq { .. }
                 | Self::Where { .. }
+                | Self::FusedChain { .. }
         )
     }
 

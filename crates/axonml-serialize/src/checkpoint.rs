@@ -282,21 +282,18 @@ impl Default for CheckpointBuilder {
 // =============================================================================
 
 fn chrono_timestamp() -> String {
-    // ISO 8601-ish timestamp without chrono dependency
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
-    // Convert unix timestamp to UTC date-time string
     let days = secs / 86400;
     let time_secs = secs % 86400;
     let hours = time_secs / 3600;
     let minutes = (time_secs % 3600) / 60;
     let seconds = time_secs % 60;
 
-    // Days since 1970-01-01
     let mut y = 1970i64;
     let mut remaining_days = days as i64;
     loop {
@@ -381,13 +378,11 @@ mod tests {
     fn test_training_state_best_metric() {
         let mut state = TrainingState::new();
 
-        // Lower is better (like loss)
         assert!(state.update_best("loss", 1.0, false));
         assert!(!state.update_best("loss", 1.5, false));
         assert!(state.update_best("loss", 0.5, false));
         assert_eq!(state.best_metric, Some(0.5));
 
-        // Higher is better (like accuracy)
         let mut state2 = TrainingState::new();
         assert!(state2.update_best("accuracy", 0.8, true));
         assert!(!state2.update_best("accuracy", 0.7, true));
@@ -422,11 +417,9 @@ mod tests {
     fn test_checkpoint_serialization() {
         let checkpoint = Checkpoint::builder().epoch(10).global_step(5000).build();
 
-        // Serialize
         let bytes = bincode::serialize(&checkpoint).unwrap();
         assert!(!bytes.is_empty());
 
-        // Deserialize
         let restored: Checkpoint = bincode::deserialize(&bytes).unwrap();
         assert_eq!(restored.epoch(), 10);
         assert_eq!(restored.global_step(), 5000);

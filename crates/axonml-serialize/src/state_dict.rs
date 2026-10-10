@@ -128,11 +128,6 @@ impl StateDict {
 
         let named = module.named_parameters();
         if named.is_empty() {
-            // Fallback for modules that don't implement named_parameters.
-            // Use indexed keys (param_0, param_1, ...) to avoid HashMap collisions
-            // on duplicate leaf names ("weight"/"bias" across submodules).
-            // Load side (load_model) sorts by numeric suffix before zipping so
-            // restore order matches the parameters() traversal used here.
             for (i, param) in module.parameters().iter().enumerate() {
                 let name = format!("param_{i}");
                 let tensor_data = TensorData::from_tensor(&param.data());
@@ -145,6 +140,12 @@ impl StateDict {
                 let entry = StateDictEntry::new(tensor_data, param.requires_grad());
                 state_dict.entries.insert(name, entry);
             }
+        }
+
+        for (name, buf) in module.named_buffers() {
+            let tensor_data = TensorData::from_tensor(&buf);
+            let entry = StateDictEntry::new(tensor_data, false);
+            state_dict.entries.insert(format!("buffer.{name}"), entry);
         }
 
         state_dict

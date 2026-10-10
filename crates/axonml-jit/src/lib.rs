@@ -36,10 +36,13 @@
 // =============================================================================
 
 pub mod cache;
+pub mod capture;
 pub mod codegen;
 pub mod compile;
 pub mod error;
+pub mod gpu_exec;
 pub mod ir;
+pub mod lower;
 pub mod optimize;
 pub mod trace;
 

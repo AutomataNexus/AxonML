@@ -38,8 +38,8 @@
 //! April 27, 2026 — added optional `graph` field to `ModelBundle` carrying full
 //! compute-graph topology (nodes, inputs/outputs, initializers as named tensors).
 //! Backwards compatible: legacy bundles without `graph` still load via
-//! `#[serde(default)]`. The graph field is what the Hailo NPU compiler's AxonML frontend
-//! reads to compile to HEF without needing a Python rebuilder.
+//! `#[serde(default)]`. The graph field is what a downstream compiler frontend
+//! reads to compile the model without needing a Python rebuilder.
 //!
 //! # Disclaimer
 //! Use at own risk. This software is provided "as is", without warranty of any
@@ -138,7 +138,7 @@ pub struct BundleHeader {
 }
 
 // =============================================================================
-// Graph payload (optional — for Hailo NPU compiler direct-compile path)
+// Graph payload (optional — for downstream direct-compile paths)
 // =============================================================================
 
 /// A named tensor with explicit shape + dtype. Used for graph initializers
@@ -173,7 +173,7 @@ pub struct GraphIo {
     pub dtype: String,
 }
 
-/// A single compute node. `op` matches the Hailo NPU compiler's `IrOp` variant name
+/// A single compute node. `op` is a PascalCase op kind
 /// (e.g. `"Conv2d"`, `"BatchNorm"`, `"Relu"`, `"MaxPool"`, `"GlobalAvgPool"`,
 /// `"Gemm"`). `attrs` is op-specific JSON; consumers parse based on `op`.
 ///
@@ -184,7 +184,7 @@ pub struct GraphIo {
 pub struct GraphNode {
     /// Unique node name.
     pub name: String,
-    /// Op kind, matching the Hailo NPU compiler's `IrOp` variant name verbatim.
+    /// Op kind (PascalCase), consumed verbatim by downstream compilers.
     pub op: String,
     /// Op-specific attribute bag (kernel_shape / strides / padding / etc).
     #[serde(default)]
@@ -198,8 +198,8 @@ pub struct GraphNode {
 /// Full compute graph topology: I/O declarations + topologically-ordered
 /// compute nodes + named weight tensors.
 ///
-/// This is what the Hailo NPU compiler's AxonML frontend consumes to build a populated
-/// FoundryIR. Without `graph`, the AxonML file is weights-only and the parser
+/// This is what a downstream compiler frontend consumes to build a populated
+/// IR. Without `graph`, the AxonML file is weights-only and the parser
 /// can only return raw tensors (which the rest of the compile pipeline drops
 /// because there are zero compute nodes).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,7 +217,7 @@ pub struct BundleGraph {
 impl BundleGraph {
     /// Create an empty graph (no I/O, no nodes, no initializers).
     /// Pre-allocates for typical model sizes to reduce CPU reallocs during
-    /// graph construction for large Hailo-targeted exports (via the Hailo NPU compiler).
+    /// graph construction for large NPU-targeted exports.
     pub fn new() -> Self {
         Self {
             inputs: Vec::with_capacity(4),
@@ -590,8 +590,7 @@ mod tests {
     fn rejects_truncated_header() {
         let mut bytes = AXONML_MAGIC.to_vec();
         bytes.push(AXONML_BUNDLE_VERSION);
-        bytes.extend_from_slice(&500u32.to_le_bytes()); // claims 500-byte header
-        // but only 4 more bytes of "header" provided:
+        bytes.extend_from_slice(&500u32.to_le_bytes());
         bytes.extend_from_slice(&[0, 0, 0, 0]);
         let err = load_bundle_from_bytes(&bytes).unwrap_err();
         assert!(matches!(err, BundleError::Truncated(_)));
@@ -609,8 +608,6 @@ mod tests {
 
     #[test]
     fn round_trip_bundle_with_graph() {
-        // Conv2d -> BatchNorm -> Relu -> GlobalAvgPool -> Gemm — the same skeleton
-        // the Hailo NPU compiler e2e_pipeline test uses for its synthetic IR.
         let mut graph = BundleGraph::new();
 
         graph.add_input("input", vec![-1, 3, 32, 32]);
@@ -680,7 +677,7 @@ mod tests {
             vec!["logits"],
         );
 
-        let bundle = ModelBundle::new("conv2d", 3, Vec::new()) // weights vec empty when graph is present
+        let bundle = ModelBundle::new("conv2d", 3, Vec::new())
             .with_hyperparam("input_h", 32)
             .with_hyperparam("input_w", 32)
             .with_hyperparam("num_classes", 10)
@@ -699,14 +696,12 @@ mod tests {
         assert_eq!(g.nodes.len(), 5);
         assert_eq!(g.initializers.len(), 8);
 
-        // Spot-check ops appear in the right order
         assert_eq!(g.nodes[0].op, "Conv2d");
         assert_eq!(g.nodes[1].op, "BatchNorm");
         assert_eq!(g.nodes[2].op, "Relu");
         assert_eq!(g.nodes[3].op, "GlobalAvgPool");
         assert_eq!(g.nodes[4].op, "Gemm");
 
-        // Initializer data round-trips exactly
         let conv_w = g.initializers.get("conv.weight").unwrap();
         assert_eq!(conv_w.shape, vec![16, 3, 3, 3]);
         assert_eq!(conv_w.data.len(), 16 * 3 * 3 * 3);
@@ -715,7 +710,6 @@ mod tests {
 
     #[test]
     fn legacy_bundle_without_graph_loads_with_graph_none() {
-        // A pre-2026-04-27 bundle (no graph field). Must still load.
         let bundle = ModelBundle::new("classifier", 11, vec![1.0, 2.0, 3.0]);
         let tmp = NamedTempFile::new().unwrap();
         save_bundle(&bundle, tmp.path()).unwrap();

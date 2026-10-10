@@ -26,7 +26,6 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
-// ML/tensor-specific allowances
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_precision_loss)]
@@ -91,6 +90,7 @@ mod bundle;
 mod checkpoint;
 mod convert;
 mod format;
+mod graph_trace;
 mod state_dict;
 
 // =============================================================================
@@ -108,6 +108,7 @@ pub use convert::{
     to_onnx_shape, to_pytorch_key, transpose_linear_weights,
 };
 pub use format::{Format, detect_format, detect_format_from_bytes};
+pub use graph_trace::{save_model_with_graph, trace_graph};
 pub use state_dict::{StateDict, StateDictEntry, TensorData};
 
 // =============================================================================
@@ -162,11 +163,6 @@ pub fn load_model<M: Module, P: AsRef<Path>>(model: &M, path: P) -> Result<usize
         }
     }
 
-    // If named_parameters returned empty (model doesn't implement it),
-    // fall back to positional parameter matching.
-    // Sort any "param_N" keys by numeric index so the zip order matches the
-    // deterministic order of parameters() at save time (HashMap iteration is
-    // not insertion-order stable across all Rust versions / hash seeds).
     if named_params.is_empty() {
         let params = model.parameters();
         let mut entries: Vec<_> = state_dict.entries().collect();
@@ -181,6 +177,17 @@ pub fn load_model<M: Module, P: AsRef<Path>>(model: &M, path: P) -> Result<usize
             if let Ok(tensor) = entry.data.to_tensor() {
                 if tensor.shape() == param.data().shape() {
                     param.update_data(tensor);
+                    loaded += 1;
+                }
+            }
+        }
+    }
+
+    // ── restore persistent buffers (BatchNorm running stats) by name ──
+    for name in model.named_buffers().keys() {
+        if let Some(entry) = state_dict.get(&format!("buffer.{name}")) {
+            if let Ok(tensor) = entry.data.to_tensor() {
+                if model.set_buffer(name, tensor) {
                     loaded += 1;
                 }
             }
@@ -304,7 +311,6 @@ fn save_safetensors<P: AsRef<Path>>(state_dict: &StateDict, path: P) -> Result<(
     use safetensors::tensor::{Dtype, TensorView};
     use std::collections::HashMap;
 
-    // Build TensorView data for each parameter
     let mut tensor_data: HashMap<String, Vec<u8>> = HashMap::new();
     let mut tensor_shapes: HashMap<String, Vec<usize>> = HashMap::new();
 
@@ -319,7 +325,6 @@ fn save_safetensors<P: AsRef<Path>>(state_dict: &StateDict, path: P) -> Result<(
         tensor_shapes.insert(name.clone(), entry.data.shape.clone());
     }
 
-    // Create TensorViews referencing the data
     let views: Vec<(String, TensorView<'_>)> = tensor_data
         .iter()
         .map(|(name, data)| {
@@ -363,7 +368,6 @@ fn load_safetensors<P: AsRef<Path>>(path: P) -> Result<StateDict> {
         let data = tensor.data();
         let shape: Vec<usize> = tensor.shape().to_vec();
 
-        // Convert bytes to f32 based on dtype
         let dtype = tensor.dtype();
         let values: Vec<f32> = match dtype {
             safetensors::Dtype::F32 => data
@@ -420,7 +424,7 @@ mod tests {
         assert_eq!(detect_format("model.axonml"), Format::Axonml);
         assert_eq!(detect_format("model.json"), Format::Json);
         assert_eq!(detect_format("model.safetensors"), Format::SafeTensors);
-        assert_eq!(detect_format("model.bin"), Format::Axonml); // default
+        assert_eq!(detect_format("model.bin"), Format::Axonml);
     }
 
     #[test]
@@ -538,7 +542,7 @@ mod tests {
         assert_eq!(loaded.global_step(), 5000);
         assert_eq!(loaded.best_metric(), Some(0.3));
         assert!(loaded.config.contains_key("lr"));
-        assert!(loaded.timestamp.contains('T')); // ISO 8601 format
+        assert!(loaded.timestamp.contains('T'));
 
         std::fs::remove_file(&path).ok();
     }
@@ -558,15 +562,12 @@ mod tests {
             .flat_map(|p| p.data().to_vec())
             .collect();
 
-        // Save
         let path = std::env::temp_dir().join("axonml_test_model_rt.axonml");
         save_model(&model, &path).expect("save_model failed");
 
-        // Load into new model
         let model2 = Linear::new(4, 3);
         let state_dict = load_state_dict(&path).expect("load failed");
 
-        // Apply loaded weights
         let params2 = model2.named_parameters();
         for (name, param) in &params2 {
             if let Some(entry) = state_dict.get(name) {
@@ -582,7 +583,6 @@ mod tests {
             .flat_map(|p| p.data().to_vec())
             .collect();
 
-        // Weights should match exactly
         assert_eq!(original_data.len(), loaded_data.len());
         for (a, b) in original_data.iter().zip(loaded_data.iter()) {
             assert!(
@@ -597,20 +597,87 @@ mod tests {
     }
 
     #[test]
+    fn test_batchnorm_running_stats_survive_save_load() {
+        use axonml_autograd::Variable;
+        use axonml_nn::{BatchNorm2d, Module};
+        use axonml_tensor::Tensor;
+
+        let (n, c, h, w) = (4usize, 3usize, 5usize, 5usize);
+        let total = n * c * h * w;
+        let data: Vec<f32> = (0..total)
+            .map(|idx| {
+                let ci = (idx / (h * w)) % c;
+                (ci as f32 + 1.0) * 10.0 + ((idx % 7) as f32 - 3.0) * (ci as f32 + 1.0)
+            })
+            .collect();
+        let make = || {
+            Variable::new(
+                Tensor::from_vec(data.clone(), &[n, c, h, w]).expect("tensor"),
+                false,
+            )
+        };
+
+        let bn = BatchNorm2d::with_options(c, 1e-5, 0.1);
+        bn.set_training(true);
+        for _ in 0..50 {
+            let _ = bn.forward(&make());
+        }
+        let rm_src = bn.running_mean().to_vec();
+        let rv_src = bn.running_var().to_vec();
+        assert!(
+            rv_src.iter().any(|&v| (v - 1.0).abs() > 0.1),
+            "running_var must have moved off init before the test is meaningful"
+        );
+
+        let path = std::env::temp_dir().join("axonml_bn_buffers_rt.axonml");
+        save_model(&bn, &path).expect("save_model failed");
+
+        let bn2 = BatchNorm2d::with_options(c, 1e-5, 0.1);
+        let loaded = load_model(&bn2, &path).expect("load_model failed");
+        assert!(
+            loaded >= 4,
+            "expected weight+bias+running_mean+running_var, loaded {loaded}"
+        );
+
+        let rm_dst = bn2.running_mean().to_vec();
+        let rv_dst = bn2.running_var().to_vec();
+        for (a, b) in rm_src.iter().zip(rm_dst.iter()) {
+            assert!((a - b).abs() < 1e-6, "running_mean lost: {a} vs {b}");
+        }
+        for (a, b) in rv_src.iter().zip(rv_dst.iter()) {
+            assert!((a - b).abs() < 1e-6, "running_var lost: {a} vs {b}");
+        }
+
+        bn.set_training(false);
+        bn2.set_training(false);
+        let out_src = bn.forward(&make()).data().to_vec();
+        let out_dst = bn2.forward(&make()).data().to_vec();
+        let maxdiff = out_src
+            .iter()
+            .zip(out_dst.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            maxdiff < 1e-5,
+            "eval output diverges after reload: maxdiff={maxdiff}"
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
     fn test_state_dict_from_module() {
         use axonml_nn::Linear;
 
         let model = Linear::new(5, 3);
         let sd = StateDict::from_module(&model);
 
-        // Linear has weight and bias
         assert!(
             sd.len() >= 2,
             "Linear should have at least 2 params, got {}",
             sd.len()
         );
 
-        // Check that tensor data is correct
         for (name, entry) in sd.entries() {
             let tensor = entry.data.to_tensor().expect("Should reconstruct tensor");
             assert!(
@@ -650,7 +717,6 @@ mod tests {
 
         let loaded = load_checkpoint(&path).expect("load failed");
 
-        // Verify all fields survived
         assert_eq!(loaded.epoch(), 5);
         assert_eq!(loaded.global_step(), 1000);
         assert_eq!(loaded.best_metric(), Some(0.92));
@@ -659,7 +725,6 @@ mod tests {
         assert_eq!(loaded.config.get("model"), Some(&"linear_3_2".to_string()));
         assert_eq!(loaded.config.get("optimizer"), Some(&"adam".to_string()));
 
-        // Verify model state
         assert!(loaded.model_state.len() >= 2);
 
         std::fs::remove_file(&path).ok();
@@ -676,7 +741,7 @@ mod tests {
         assert_eq!(state.custom_metrics.get("f1").unwrap().len(), 1);
 
         assert!(state.update_best("auc", 0.90, true));
-        assert!(!state.update_best("auc", 0.85, true)); // worse
+        assert!(!state.update_best("auc", 0.85, true));
         assert!(state.update_best("auc", 0.95, true));
         assert_eq!(state.best_metric, Some(0.95));
     }
