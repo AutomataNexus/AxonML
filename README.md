@@ -20,63 +20,49 @@ Axonml (named after axons - the nerve fibers that transmit signals between neuro
 
 ## PyTorch Parity: ~92-95% (and beyond)
 
-AxonML provides comprehensive PyTorch-equivalent functionality with **2,350+ passing tests**. Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
+AxonML provides comprehensive PyTorch-equivalent functionality across 24 crates with **1,700+ tests** (1,773 test functions; the workspace suite passes on CPU and on CUDA). Several features go **beyond PyTorch** with novel capabilities not available in any other framework.
 
-## Features
+## What's new in 0.7.0
 
-### Training Perf (Unreleased)
+The full audit trail is in [CHANGELOG.md](CHANGELOG.md). Highlights:
 
-- **Fused CUDA kernels on the LLM training hot path** — `rms_norm_batched`
-  (fwd + new paired bwd), `softmax_causal_scaled` (mul_scalar + mask +
-  softmax collapsed into one launch, bwd too), `swiglu_bwd` (single-pass
-  grad_gate + grad_up), `add_rmsnorm` (residual-add + RMSNorm in one CTA
-  pass, returns both outputs so pre-norm residual architectures work),
-  `silu_backward` (replaces the 7-op autograd chain), `rope_split_halves_bhsd`
-  (head-major RoPE for training's `[bs, heads, seq, head_dim]` layout,
-  fwd + bwd), `repeat_kv` (GQA fan-out). All benched against CPU /
-  previous-kernel-pair reference with machine-precision diffs.
-- **3D/4D batched matmul** now on-device via `cublasSgemmStridedBatched`
-  (~137× vs the prior CPU-round-trip workaround that was the 313 ms/call
-  bottleneck on Qwen3-0.6B MatMulBackward).
-- **pool_alloc_uninit** on ~19 elementwise hot-path sites skips a
-  `cuMemsetD8Async` per pool hit (-13 % step time on Qwen3-0.6B).
-- **Named CUDA stream** (not default NULL) so downstream code can capture
-  into CUDA graphs — prerequisite for the next round of launch-reduction.
-- `profile_train_step` binary + sync-honest phase timing + per-GradFn
-  breakdown (`AXONML_PROFILE_BACKWARD=1`) for reproducing the measurements.
+- **A GPU training engine you can trust.** A series of silent GPU-only bugs, each found by checking the GPU against the CPU as an oracle, are fixed:
+  - `Adam`/`AdamW` applied strided gradients as if they were contiguous, which scrambled every dense-layer update.
+  - CUDA `pow` computed `|x|^n`.
+  - `conv2d` forward/backward raced the compute stream once the memory pool was dirty.
+  - `RMSNorm`'s scale never trained.
+  - BCE detached its gradient.
 
-**Device-native CPU parallelism (v0.6.5 + unreleased).** The execution
-model is now device-native end to end: the GPU path stays resident
-on-device, and the **CPU backend is seriously multi-threaded with rayon**
-so single-node CPU inference and training (and NPU reference/calibration
-forwards) actually use every core instead of pegging one.
+  Grouped/depthwise conv, pooling, GroupNorm/InstanceNorm, ConvTranspose2d and interpolate now have GPU backward passes. Batched conv is one im2col plus one strided-batched GEMM. Shape uploads are cached, cutting host-to-device copies per training step from 762 to 18.
+- **JIT that captures your real model.** `JitFn::trace_forward` records a model's actual `forward`, with no tracer DSL to re-declare. Elementwise chains fuse and compile at runtime through NVRTC, and dispatch on-device.
+- **Graph-carrying model files.** `.axonml` bundles store the model's exact compute graph, skip connections included. `Adam::export_state` / `import_state` give lossless pause and resume.
+- **LLM fine-tuning.**
+  - LoRA on `Linear`, LLaMA and Qwen3: attach, freeze base, merge.
+  - Per-layer activation checkpointing (`AXONML_CKPT_LAYERS`).
+  - A tied Qwen3 LM head.
+  - Q8_0 GGUF export (`AXONML_GGUF_QUANT=q8_0`).
+- **`axonml-subbit` (new crate): sub-bit vector-quantized GPU primitives.**
+  - Fused VQ matmul runs projections straight off packed codebook indices.
+  - Grouped MoE experts with device-side router top-k.
+  - Offload tiles for training a block wider than VRAM.
+  - Batched multi-sequence decode for Mamba2 + MoE hybrids.
+  - An NVFP4 training path for Blackwell (sm_120a).
 
-- **CPU matmul threaded** across every layout — `matmul_f32` (m>1
-  prefill/training), `matmul_f32_bt` (the dominant GGUF `[out,in]`
-  inference layout, zero-copy), `f64`, the generic tiled fallback, and
-  3D/4D batched matmul (multi-head attention / batched prefill). Decode
-  GEMV (m=1) was already parallel. All threshold-gated so tiny ops stay
-  serial with identical semantics.
-- **Full GradFn backward family parallelized on CPU** — `MatMulBackward`,
-  `SwigluBackward`, `Softmax`/`LogSoftmaxBackward`, `NarrowBackward`,
-  `SumDimBackward`, `VarDimBackward`/`MeanDimBackward` (RMS/LayerNorm),
-  `CrossEntropyLossBackward`, `FusedAttentionBackward` (over batch×head),
-  `reduce_grad_for_broadcast` (bias/elementwise grads), plus LSTM/GRU/Conv2d
-  fallbacks.
-- **Contiguous fast-paths in the tensor layer** — activations (relu,
-  sigmoid, tanh, exp, ln, neg, gelu), reductions (sum/mean/prod/max/min/
-  argmax/argmin), `zip_map`/`map`, `cat`, `layer_norm`, `rms_norm` (+heads,
-  batched, and their bwds), and residual adds now operate on direct storage
-  slices for contiguous/offset-0 tensors, skipping the `to_vec` copy before
-  the parallel backend.
-- Repeatable single-node CPU LLM-step benchmark at
-  `crates/axonml/examples/cpu_bench_llm_step.rs` (pure-CPU, `STEPS=` env)
-  exercises the exact hot paths for regression tracking.
+  Measured on a 12 GB laptop GPU:
+  - a 30B-A3B Mamba2-MoE hybrid packs to **3.85 GiB at ~1 bit per weight** (119.9 GiB in fp32) and serves **16 concurrent streams at 170+ tok/s**;
+  - a d=16384 block wider than VRAM trains through the offload path in under 10 GB.
+- **`no_std` core.** `axonml-core` and `axonml-tensor` build for `no_std` + `alloc`, checked in CI on `thumbv7em-none-eabihf`. The default `std` build is unchanged.
+- **Soundness.**
+  - Zero undocumented `unsafe`, enforced in CI.
+  - Every CUDA launcher asserts its host-side preconditions, and the device copies are bounds-checked.
+  - `tools/check_launches.py` verifies all 198 kernel launches, 153 in core and 45 in subbit.
+- **wgpu 29** WebGPU backend, gated in CI.
+- **Device-native CPU parallelism.** Every matmul layout and the full GradFn backward family are rayon-threaded, threshold-gated so small ops stay serial with identical results.
+- **CLI / TUI.**
+  - `axonml train` multi-modal fusion and ensembles (`--data-b`, `--branches`, `--strategy concat|gated|moe|late-ensemble`).
+  - `axonml tui --log metrics.jsonl` opens the training view on a live log.
 
-See `CHANGELOG.md` for the full audit trail. The GPU happy path is
-untouched; distributed training is currently deprioritized.
-
-### Core (v0.6.5)
+### Core
 
 - **Tensor Operations** (`axonml-tensor`)
   - N-dimensional tensors with arbitrary shapes
@@ -160,6 +146,8 @@ untouched; distributed training is currently deprioritized.
   - Checkpoint management for training
   - StateDict (PyTorch-compatible concept)
   - SafeTensors format support
+  - `.axonml` bundles carry the model's exact compute graph (DAG forward tracer, skip connections included)
+  - Optimizer state export/import (`Adam::export_state` / `import_state`) for lossless pause and resume
 
 - **ONNX Import/Export** (`axonml-onnx`)
   - Load ONNX models for inference
@@ -445,11 +433,21 @@ axon logs -f
   - CLI: `axonml dataset list/info/search/download/sources`
 
 - **JIT Compilation** (`axonml-jit`)
+  - Automatic forward capture (`JitFn::trace_forward`): records a model's real `forward`, no tracer DSL
+  - Elementwise fusion pass, with fused chains (including two-input chains) compiled at runtime through NVRTC and dispatched on-device
   - Intermediate representation for computation graphs
-  - Operation tracing and graph building
   - Graph optimization (constant folding, DCE, CSE)
   - Function caching for compiled graphs
   - Cranelift foundation for native codegen
+
+- **Sub-bit GPU Primitives** (`axonml-subbit`, `cuda` feature)
+  - Fused VQ matmul straight off packed codebook indices (dim-2/4/8 codes, f16 or f32 codebooks), with row- and column-blocked GEMV for decode
+  - Grouped MoE experts (`VqGroupedExperts`) with device-side router top-k (`RouterSel`) and combine
+  - Resident per-tile index/scale assignment (`ResidentAssign`) and offload tiles for training a block wider than VRAM
+  - Batched multi-sequence decode for Mamba2 + MoE hybrids with per-slot recurrent state
+  - NVFP4 training path for Blackwell (sm_120a)
+  - Built only on the core crates' public APIs (`SubbitTensorExt`, `SubbitBackendExt`, `SubbitEmbeddingExt`); loads its own PTX
+  - Switches: `AXONML_TF32`, `AXONML_FP4`, `AXONML_FP4_BWD`, `AXONML_VQ_WARP_ROWS`
 
 - **Profiling Tools** (`axonml-profile`)
   - Core Profiler with ProfileGuard and ProfileReport
@@ -465,16 +463,19 @@ axon logs -f
   - **Mistral** (7B, Mixtral 8×7B configs) with sliding-window attention
   - **Phi** (1/2/3-mini configs); full-RoPE workaround for partial-RoPE framework bug documented in `train_phi`
   - **SSM / Mamba** + `SSMForCausalLM` wrapper
-  - **Qwen3** (trainable) with QK-norm; teacher/student + distillation
+  - **Qwen3** (trainable) with QK-norm, tied LM head (`tie_lm_head`); teacher/student + distillation
+  - **Fine-tuning:** LoRA (`attach_lora` / `freeze_lora_base` / `merge_lora`, upper-layer-only `attach_lora_from`) and per-layer activation checkpointing (`AXONML_CKPT_LAYERS`) for LLaMA and Qwen3
+  - **GGUF export:** F16 by default, or Q8_0 body weights with `AXONML_GGUF_QUANT=q8_0`
   - Shared infra: `FlashAttention`, `KVCache` / `LayerKVCache`, HuggingFace loader, state-dict mapping, `HFTokenizer`
   - Text generation with top-k, top-p, temperature sampling
 
 - **GPU Backends** (`axonml-core`)
-  - **CUDA** - Full NVIDIA GPU support with cuBLAS, PTX kernels
-  - **Vulkan** - Cross-platform GPU compute
-  - **Metal** - Apple Silicon optimization
-  - **WebGPU** - Browser-based GPU acceleration
-  - **GPU Test Suite** - Comprehensive correctness testing with CPU reference
+  - **CUDA**: full NVIDIA GPU support with cuBLAS and PTX kernels. Opt-in TF32 tensor cores (`AXONML_TF32`), a stream-ordered memory pool with completion fences, and CUDA-graph capture/replay (`ReplayGraph`)
+  - **Vulkan**: cross-platform GPU compute
+  - **Metal**: Apple Silicon optimization
+  - **WebGPU** (wgpu 29): browser-based GPU acceleration
+  - **GPU test suite**: correctness testing against a CPU reference
+  - **`no_std`**: `axonml-core` and `axonml-tensor` build for `no_std` + `alloc` (bare-metal targets)
 
 - **Model Hub & Benchmarking** (`axonml`)
   - **Unified Model Hub** - Combined vision/LLM model registry
@@ -492,7 +493,14 @@ Add Axonml to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-axonml = "0.6"
+axonml = "0.7"
+```
+
+If 0.7 has not reached crates.io yet, use the repository directly:
+
+```toml
+[dependencies]
+axonml = { git = "https://github.com/AutomataNexus/AxonML", tag = "v0.7.0" }
 ```
 
 ### Basic Usage
@@ -634,8 +642,8 @@ Each daemon runs pure-tensor inference (no autograd overhead), polls the local e
 +--------------------------------+-----------------------------------+
 |         axonml-onnx            |         axonml-quant             |
 +--------------------------------+-----------------------------------+
-|                          axonml-fusion                            |
-+--------------------------------------------------------------------+
+|          axonml-fusion         |          axonml-subbit           |
++--------------------------------+-----------------------------------+
 |                           axonml-data                             |
 +--------------------------------------------------------------------+
 |          axonml-optim          |           axonml-nn              |
@@ -663,14 +671,10 @@ Each daemon runs pure-tensor inference (no autograd overhead), polls the local e
 |  Axum REST API: Auth, Training Runs, Model Registry, Metrics       |
 +--------------------------------------------------------------------+
 
-+----------------+--------------------------------------------------+
-|  llm-training  |             AxonML inference server               |
-|                |                                                  |
-|  LM training   |  Pure-Rust LLM inference server                  |
-|  binaries      |  (GGUF + CUDA Q4_K/Q6_K + Anthropic SSE)         |
-|  + lifecycle   |                                                  |
-|  (pause/resume)|                                                  |
-+----------------+--------------------------------------------------+
++--------------------------------------------------------------------+
+|                           llm-training                             |
+|     LM training binaries + lifecycle control (pause/resume/stop)   |
++--------------------------------------------------------------------+
 ```
 
 ## Building from Source
@@ -773,7 +777,6 @@ Axonml/
 ├── CONTRIBUTING.md         # Contribution guidelines
 ├── CHANGELOG.md            # Version history
 ├── COMMERCIAL.md           # Commercial licensing info
-├── Axonml_Architecture.md # Architecture documentation
 ├── crates/
 │   ├── axonml-core/       # Device, storage, dtypes, GPU backends (CPU/CUDA/Vulkan/Metal/WebGPU)
 │   ├── axonml-tensor/     # Tensor ops (+ lazy tensor, sparse COO, CUDA ops)
@@ -789,7 +792,8 @@ Axonml/
 │   ├── axonml-onnx/       # ONNX import/export
 │   ├── axonml-quant/      # Model quantization (+ BitNet I2_S 1.58-bit)
 │   ├── axonml-fusion/     # Kernel fusion optimization
-│   ├── axonml-jit/        # JIT compilation (Cranelift)
+│   ├── axonml-subbit/     # Sub-bit VQ GPU primitives (fused VQ matmul, MoE experts, offload tiles, NVFP4)
+│   ├── axonml-jit/        # JIT compilation (forward capture, NVRTC fusion, Cranelift)
 │   ├── axonml-profile/    # Profiling tools
 │   ├── axonml-llm/        # 7 LLM architectures (BERT, GPT-2, LLaMA, Mistral, Phi, SSM, Qwen3)
 │   ├── axonml-train/      # Training glue (Trainer, callbacks, benchmarks)
@@ -799,7 +803,7 @@ Axonml/
 │   ├── axonml-server/     # Axum API server
 │   └── axonml/            # Main umbrella crate
 ├── llm-training/          # LM training binaries + train_ctl + TrainingLifecycle (pause/resume/stop)
-├── axonml-serve/          # Pure-Rust LLM inference server (GGUF, CUDA Q4_K/Q6_K, Anthropic SSE)
+├── tools/                 # check_launches.py (CUDA launch audit), ONNX model converter
 ├── docs/                  # Per-module documentation (Jekyll-rendered)
 └── crates/axonml/examples/# Working examples
     ├── simple_training.rs # XOR with MLP
@@ -809,11 +813,10 @@ Axonml/
 
 ## Documentation
 
-- [Architecture Guide](Axonml_Architecture.md)
-- [API Documentation](docs/) - Per-module documentation
-- [Object Detection Training](docs/detection.md) - Detection training guide (RetinaFace, BlazeFace, COCO, WIDER FACE)
-- [Examples](examples/) - Working code examples
-- [Changelog](CHANGELOG.md) - Version history
+- [API Documentation](docs/): per-module documentation
+- [Object Detection Training](docs/detection.md): detection training guide (RetinaFace, BlazeFace, COCO, WIDER FACE)
+- [Examples](crates/axonml/examples/): working code examples
+- [Changelog](CHANGELOG.md): version history
 
 ## Contributing
 
@@ -821,35 +824,40 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ### Test Suite
 
-The framework includes **2,350+ tests** across all crates:
+The framework includes **1,773 test functions** across all crates:
 
 ```bash
-cargo test --workspace
+cargo test --workspace                                  # CPU
+cargo test --workspace --features axonml-core/cuda,axonml-tensor/cuda   # CUDA
+python3 tools/check_launches.py                         # audit every CUDA kernel launch
 ```
 
-| Crate | Tests |
+| Crate | Test functions |
 |-------|-------|
-| axonml-core | 91 |
-| axonml-tensor | 112 |
-| axonml-autograd | 132 |
-| axonml-nn | 253 |
-| axonml-optim | 96 |
+| axonml-nn | 243 |
+| axonml-vision | 224 |
+| axonml-server | 152 |
+| axonml-autograd | 151 |
+| axonml-tensor | 122 |
+| axonml-cli | 114 |
+| axonml-optim | 100 |
+| axonml-core | 97 |
+| axonml-llm | 97 |
+| axonml-distributed | 90 |
 | axonml-data | 63 |
-| axonml-vision | 741 |
-| axonml-audio | 28 |
+| axonml-serialize | 44 |
+| axonml-quant | 43 |
 | axonml-text | 39 |
-| axonml-distributed | 82 |
-| axonml-serialize | 40 |
-| axonml-onnx | 23 |
-| axonml-quant | 24 |
+| axonml-jit | 35 |
 | axonml-fusion | 30 |
-| axonml-jit | 31 |
+| axonml-audio | 28 |
 | axonml-profile | 27 |
-| axonml-llm | 127 |
-| axonml-server | 49 |
-| axonml-cli | 112 |
+| axonml-train | 25 |
+| axonml-onnx | 23 |
+| axonml (umbrella) | 17 |
 | axonml-tui | 9 |
-| axonml (umbrella) | 103 |
+
+Test-function counts per crate (`#[test]`), as of 0.7.0. Parameterised and doc tests add to the runtime total.
 
 ## License
 
@@ -870,4 +878,4 @@ at your option.
 
 **Axonml** - Forging the future of ML in Rust.
 
-_Last updated: 2026-06-06 (v0.6.5)_
+_Last updated: 2026-10-10 (v0.7.0)_
